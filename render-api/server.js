@@ -160,6 +160,25 @@ function shouldForceSplitAgents(message, minLen) {
   return false;
 }
 
+// 判定消息是否完全无需多 agent：短消息、纯情绪/指令词
+// 即使有历史上下文，对这种新消息也直接简短回答，不走多 agent
+function isTrivialNewMessage(message) {
+  if (!message) return true;
+  var m = String(message).trim();
+  if (!m) return true;
+  // 太短（≤6 字）一律 trivial
+  if (m.length <= 6) return true;
+  // 去掉 [图片:...] / [文件:...] 标记后的纯文本
+  var cleaned = m.replace(/\[(图片|文件)[^\]]*\]/g, '').trim();
+  if (cleaned.length <= 6) return true;
+  // 常见的极简情绪/指令词（即使在历史后也无需多 agent）
+  var trivialPatterns = /^(停|滚|哈哈+|呵呵+|呵呵呵+|嗯+|哦+|啊+|哇+|耶+|好+|行+|可以+|不对+|是的+|没错+|666+|233+|哈哈哈+|嘿嘿+|嘻嘻+|ok|OK|no |no$|yes|yes$|yep|yeah|nope|草|艹|牛逼|nb|牛|强|赞|溜|服|呕|吐|笑死|笑哭|笑)|[\.\!\?\。，！？]{1,5}$/;
+  if (trivialPatterns.test(cleaned)) return true;
+  // 单字/双字回复
+  if (/^[\u4e00-\u9fa5]{1,3}$/.test(cleaned)) return true;
+  return false;
+}
+
 function buildDefaultAgents(message) {
   var m = String(message || '');
   // 智能截断：优先在句号/问号/换行处断开，保证搜索关键词完整
@@ -2848,6 +2867,31 @@ async function runMultiAgentFlow(opts) {
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
 
+  // ★ 极简新消息直接简短回答：跳过 Planner + Workers + Synthesizer
+  // 适用于"停"、"滚"、"666"、单字回复等，无需多 agent
+  if (isTrivialNewMessage(message)) {
+    sseSend({ type: 'deep_think_init', message: '极简问题，直接回答...', agent_count: 0 });
+    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '极简问题，直接回答...' });
+    try {
+      var corePrompt = buildAiCorePrompt(config);
+      var directPrompt = corePrompt + '\n\n用户新消息: ' + message + '\n\n' + (historyContext || '') + '\n\n这是极简消息（短/情绪/指令词），不要做任何深度分析或研究，直接给一个简短自然的回答（1-2 句话）。不要搜索。';
+      var directResult = await callDeepSeek(
+        [{ role: 'system', content: directPrompt }],
+        { thinking_mode: deepThinkThinkingMode, max_tokens: 1024,
+          onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+        }
+      );
+      var fakePlannerTrivial = { complexity: 'low', reasoning: '极简消息，直接回答', agent_count: 0, agents: [] };
+      return {
+        cancelled: false, finalContent: directResult.content || '', planner: fakePlannerTrivial, worker_results: [],
+        thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
+        search_count: 0, search_results: [], search_query: '', sources: [], queries: []
+      };
+    } catch (e) {
+      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: DEEPSEEK_MODEL_REASONER, search_count: 0, search_results: [], sources: [], queries: [] };
+    }
+  }
+
   // 从 config 覆盖 DEEP_THINK_CONFIG (管理员可在后台自定义)
   var dtCfg = (config && config.deep_think) || {};
   var effectiveMaxWorkers = Math.min(parseInt(dtCfg.max_workers) || DEEP_THINK_CONFIG.MAX_WORKERS, 10);
@@ -3344,16 +3388,16 @@ async function runDeepThinkWorker(opts) {
     (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
-    '执行规则:\n' +
-    '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次, 每次关键词要不同角度)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
-    '2. 产出 200-800 字的本方面分析 (按问题需要, 别硬撑字数)\n' +
-    '3. 输出结构建议: 【结论】→【关键依据】→【不确定点/注意事项】\n' +
-    '4. ' + (needSearch ? '输出搜索到的关键信息，确保准确' : '不需要搜索，直接基于知识回答') + '\n' +
-    '5. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
-    '6. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
-    '7. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
-    '8. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜\n' +
-    '9. ★ 别写成研究报告, 保持自然简洁';
+    '执行规则 (务必精炼, 不要废话):\n' +
+    '1. ' + (needSearch ? '最多搜 2 次, 关键词要不同角度, 别反复搜同样的' : '**不调用** search_web, 直接基于知识回答') + '\n' +
+    '2. 产出 150-500 字的本方面分析 (按问题需要, **别硬撑字数**, 简单问题 1-2 句话即可)\n' +
+    '3. 输出结构: 【结论】→【关键依据】→【不确定点】(简单问题可省略依据/不确定点)\n' +
+    '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
+    '5. 不要做最终总结, Synthesizer 会整合\n' +
+    '6. 严禁以下废话开头: "考虑历史"/"根据系统提示"/"作为 AI"/"我们需要"/"根据规则"\n' +
+    '7. 直接开始分析本方面, 不要先复述用户问题或解释你在做什么\n' +
+    '8. ★ 看到 [历史对话上下文] 时, 只用它理解语境, 不要把历史当新问题去搜\n' +
+    '9. ★ 别写成研究报告, 像专家简短回答一样';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },
