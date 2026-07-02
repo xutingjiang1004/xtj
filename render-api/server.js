@@ -144,24 +144,39 @@ function shouldForceSplitAgents(message) {
 
 function buildDefaultAgents(message) {
   var m = String(message || '');
+  // 智能截断：优先在句号/问号/换行处断开，保证搜索关键词完整
+  function smartTruncate(text, maxLen) {
+    if (text.length <= maxLen) return text;
+    var cut = text.slice(0, maxLen);
+    var lastPunct = Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('？'), cut.lastIndexOf('！'), cut.lastIndexOf('，'), cut.lastIndexOf('；'), cut.lastIndexOf('\n'));
+    if (lastPunct > maxLen * 0.5) return text.slice(0, lastPunct + 1);
+    var lastSpace = cut.lastIndexOf(' ');
+    if (lastSpace > maxLen * 0.5) return text.slice(0, lastSpace);
+    return cut;
+  }
+
   var agents = [];
-  // 代码/技术
-  if (/[\{\}\(\)\[\];<>\/\\=]/.test(m) || /(代码|编程|程序|bug|报错|算法|api|框架|库|组件)/i.test(m)) {
-    agents.push({ role: '代码诊断', task_description: '检查代码语法、报错原因、边界条件', need_search: true, search_queries: [m.slice(0, 30) + ' 报错', m.slice(0, 30) + ' 解决方案'] });
-    agents.push({ role: '架构建议', task_description: '评估实现方案、最佳实践、可维护性', need_search: true, search_queries: [m.slice(0, 30) + ' best practice'] });
+  // 代码/技术: 要求至少出现 2 个不同的代码特征字符，避免误触
+  var codeSpecials = m.match(/[\{\}\(\)\[\];<>\/\\=]/g) || [];
+  var uniqueSpecials = {};
+  codeSpecials.forEach(function(c) { uniqueSpecials[c] = true; });
+  var codeSpecialCount = Object.keys(uniqueSpecials).length;
+  if ((codeSpecialCount >= 2 || /[\{\}<>]/.test(m)) && /(代码|编程|程序|bug|报错|算法|api|框架|库|组件|函数|class|import|export|def|function)/i.test(m)) {
+    agents.push({ role: '代码诊断', task_description: '检查代码语法、报错原因、边界条件', need_search: true, search_queries: [smartTruncate(m, 40) + ' 报错', smartTruncate(m, 40) + ' 解决方案'] });
+    agents.push({ role: '架构建议', task_description: '评估实现方案、最佳实践、可维护性', need_search: true, search_queries: [smartTruncate(m, 40) + ' best practice'] });
     agents.push({ role: '安全审查', task_description: '检查潜在安全风险和性能隐患', need_search: false, search_queries: [] });
     return agents;
   }
   // 决策/购买
   if (/(对比|比较|区别|优劣|哪个|选择|推荐|建议|值得|买|选)/.test(m)) {
-    agents.push({ role: '方案梳理', task_description: '整理可选方案/产品/选项', need_search: true, search_queries: [m.slice(0, 30)] });
-    agents.push({ role: '优劣分析', task_description: '对比各方案优缺点、适用场景', need_search: true, search_queries: [m.slice(0, 30) + ' 评测'] });
+    agents.push({ role: '方案梳理', task_description: '整理可选方案/产品/选项', need_search: true, search_queries: [smartTruncate(m, 40)] });
+    agents.push({ role: '优劣分析', task_description: '对比各方案优缺点、适用场景', need_search: true, search_queries: [smartTruncate(m, 40) + ' 评测'] });
     agents.push({ role: '决策建议', task_description: '结合需求给出推荐和注意事项', need_search: false, search_queries: [] });
     return agents;
   }
   // 通用分析
-  agents.push({ role: '背景梳理', task_description: '梳理问题背景、核心概念和已知事实', need_search: true, search_queries: [m.slice(0, 40)] });
-  agents.push({ role: '深度分析', task_description: '分析原因、机制、影响因素', need_search: true, search_queries: [m.slice(0, 40) + ' 分析'] });
+  agents.push({ role: '背景梳理', task_description: '梳理问题背景、核心概念和已知事实', need_search: true, search_queries: [smartTruncate(m, 48)] });
+  agents.push({ role: '深度分析', task_description: '分析原因、机制、影响因素', need_search: true, search_queries: [smartTruncate(m, 48) + ' 分析'] });
   agents.push({ role: '结论建议', task_description: '总结要点并给出 actionable 建议', need_search: false, search_queries: [] });
   return agents;
 }
@@ -9523,11 +9538,11 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
 });
 
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
-// older_than_days: 默认 90 天
+// older_than_days: 默认 30 天
 app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
   try {
     var olderThanDays = parseInt(req.body && req.body.older_than_days, 10);
-    if (isNaN(olderThanDays) || olderThanDays < 7) olderThanDays = 90;
+    if (isNaN(olderThanDays) || olderThanDays < 7) olderThanDays = 30;
     if (olderThanDays > 365) olderThanDays = 365;
     var cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
 
@@ -9568,13 +9583,13 @@ setInterval(function() {
   cleanupOldLogs('error').catch(function() {});
 }, 24 * 60 * 60 * 1000);
 
-// 自动清理 90 天前的 AI 聊天记录 (每天一次)
+// 自动清理 30 天前的 AI 聊天记录 (每天一次)
 var _aiCleanupLock = false;
 async function autoCleanupAiMessages() {
   if (_aiCleanupLock) return;
   _aiCleanupLock = true;
   try {
-    var cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+    var cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
     var { count, error: countErr } = await supabase.from('posts')
       .select('id', { count: 'exact', head: true })
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
@@ -9587,7 +9602,7 @@ async function autoCleanupAiMessages() {
       deleted += 500;
       await new Promise(function(r) { setTimeout(r, 300); });
     }
-    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 90 天前的 AI 消息');
+    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 30 天前的 AI 消息');
   } catch (e) { /* 静默失败, 不影响主流程 */ }
   _aiCleanupLock = false;
 }
