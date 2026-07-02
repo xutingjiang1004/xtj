@@ -1607,39 +1607,43 @@
   text-decoration: none;
 }
 
-/* ===================== M: 深度思考模式 — Toggle 按钮 ===================== */
-/* ===================== 深度思考切换按钮 ===================== */
+/* ===================== M: 深度思考模式 — 可爱高级风格 ===================== */
+
+/* 深度思考切换按钮 */
 .ai-deep-think-toggle {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 5px 12px;
   margin-right: 4px;
-  border: 1px solid rgba(140, 196, 158, 0.2);
+  border: 1px solid rgba(140, 196, 158, 0.22);
   border-radius: 20px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.55);
   font-size: 12px;
   font-weight: 500;
-  color: rgba(108, 118, 122, 0.85);
+  color: rgba(100, 120, 112, 0.88);
   cursor: pointer;
   user-select: none;
-  transition: border-color .2s, background .2s, color .2s, box-shadow .2s, transform .12s;
+  box-shadow: 0 2px 8px rgba(82, 138, 120, 0.06);
+  transition: border-color .25s, background .25s, color .25s, box-shadow .25s, transform .15s;
   -webkit-tap-highlight-color: transparent;
 }
 .ai-deep-think-toggle:hover {
-  border-color: rgba(66, 155, 122, 0.45);
-  background: rgba(66, 155, 122, 0.04);
+  border-color: rgba(66, 155, 122, 0.42);
+  background: rgba(255, 255, 255, 0.85);
   color: rgba(58, 142, 112, 0.95);
+  box-shadow: 0 4px 14px rgba(82, 138, 120, 0.1);
+  transform: translateY(-1px);
 }
-.ai-deep-think-toggle:active { transform: scale(.95); }
+.ai-deep-think-toggle:active { transform: scale(.96) translateY(0); }
 .ai-deep-think-toggle.on {
-  border-color: rgba(66, 155, 122, 0.55);
-  background: linear-gradient(135deg, rgba(66, 155, 122, .1), rgba(82, 182, 160, .05));
+  border-color: rgba(66, 155, 122, 0.45);
+  background: linear-gradient(135deg, rgba(232, 250, 241, 0.92), rgba(235, 249, 255, 0.82));
   color: rgb(48, 138, 106);
-  box-shadow: 0 0 0 2px rgba(66, 155, 122, .06), 0 4px 12px rgba(66, 155, 122, .08);
+  box-shadow: 0 0 0 3px rgba(66, 155, 122, .08), 0 6px 18px rgba(66, 155, 122, .12);
 }
 .ai-deep-think-toggle.on .ai-deep-think-icon {
-  animation: dt-pulse 2s ease-in-out infinite;
+  animation: dt-sparkle-wiggle 2.4s ease-in-out infinite;
 }
 .ai-deep-think-toggle.disabled {
   opacity: .55;
@@ -1647,6 +1651,7 @@
   color: rgba(108, 118, 122, .55);
   background: rgba(0, 0, 0, .02);
   cursor: not-allowed;
+  box-shadow: none;
 }
 .ai-deep-think-toggle.disabled .ai-deep-think-icon {
   animation: none;
@@ -1654,35 +1659,50 @@
 }
 .ai-deep-think-icon { font-size: 13px; line-height: 1; display: inline-flex; align-items: center; }
 .ai-deep-think-label { font-weight: inherit; }
-@keyframes dt-pulse {
-  0%, 100% { opacity: .7; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.1); }
-}
 
-/* ===================== 深度思考进度卡 (极简) ===================== */
+/* 深度思考进度卡 */
 .ai-progress-card {
   position: relative;
-  margin: 10px 0;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, .65);
-  border: 1px solid rgba(140, 196, 158, .15);
-  border-radius: 14px;
+  margin: 12px 0;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(250, 252, 250, .68));
+  border: 1px solid rgba(140, 196, 158, .18);
+  border-radius: 20px;
   font-size: 13px;
-  color: rgba(40, 50, 50, .92);
-  box-shadow: 0 2px 12px rgba(82, 138, 120, .04);
-  transition: opacity .3s, border-color .2s;
-  animation: dt-card-in .35s cubic-bezier(.22, 1, .36, 1) both;
+  color: rgba(60, 75, 70, .92);
+  box-shadow:
+    0 4px 16px rgba(82, 138, 120, .06),
+    0 1px 0 rgba(255, 255, 255, .5) inset;
+  transition: opacity .3s, border-color .2s, transform .2s;
+  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
   overflow: hidden;
 }
+.ai-progress-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 20px rgba(82, 138, 120, .1),
+    0 1px 0 rgba(255, 255, 255, .5) inset;
+}
 .ai-progress-card.ai-progress-card-cancelled,
-.ai-progress-card.ai-progress-card-error { opacity: .55; }
+.ai-progress-card.ai-progress-card-error { opacity: .5; }
+.ai-progress-card.ai-progress-card-done {
+  animation: dt-soft-settle .4s ease both;
+}
+.ai-progress-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, rgba(140,196,158,.25), rgba(160,210,180,.45), rgba(140,196,158,.25));
+  border-radius: 20px 20px 0 0;
+  opacity: .7;
+}
 .ai-progress-card::after {
   content: '';
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .08), transparent);
   transform: translateX(-100%);
-  animation: progress-shimmer 2.2s ease-in-out infinite;
+  animation: progress-shimmer 2.6s ease-in-out infinite;
   pointer-events: none;
 }
 .ai-progress-card.ai-progress-card-done::after {
@@ -1693,142 +1713,171 @@
 .ai-progress-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  color: rgb(48, 138, 106);
+  gap: 10px;
+  font-weight: 600;
+  color: rgb(58, 142, 112);
   font-size: 13px;
 }
 .ai-progress-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px; height: 18px;
+  width: 22px; height: 22px;
   flex-shrink: 0;
-  animation: dt-icon-pulse 2s ease-in-out infinite;
+  color: rgb(66, 155, 122);
+  animation: dt-soft-float 3s ease-in-out infinite;
 }
 .ai-progress-icon svg { width: 100%; height: 100%; }
 .ai-progress-title { flex: 1; }
 .ai-progress-elapsed {
   font-size: 11px;
-  font-weight: 500;
-  color: rgba(120, 132, 130, .7);
+  font-weight: 600;
+  color: rgba(120, 145, 138, .7);
   font-family: ui-monospace, monospace;
+  background: rgba(140, 196, 158, .1);
+  padding: 2px 7px;
+  border-radius: 10px;
 }
 
 /* 思考过程实时日志 */
 .ai-progress-thinking-log {
   max-height: 200px;
   overflow-y: auto;
-  margin: 8px 0 4px 16px;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, .02);
-  border: 1px solid rgba(0, 0, 0, .04);
-  border-radius: 8px;
+  margin: 10px 0 6px 2px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, .45);
+  border: 1px solid rgba(140, 196, 158, .1);
+  border-radius: 14px;
   font-size: 11px;
   line-height: 1.6;
-  color: var(--text-secondary, #6b7280);
+  color: rgba(95, 110, 105, .9);
 }
 .ai-progress-thinking-log:empty { display: none; }
-.ai-progress-thinking-log::-webkit-scrollbar { width: 4px; }
-.ai-progress-thinking-log::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
+.ai-progress-thinking-log::-webkit-scrollbar { width: 5px; }
+.ai-progress-thinking-log::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 .ai-progress-thinking-log .ai-thought-entry {
-  padding: 3px 0;
-  border-bottom: 1px dashed rgba(0,0,0,.03);
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(140, 196, 158, .15);
+  animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .ai-progress-thinking-log .ai-thought-entry:last-child { border-bottom: none; }
 .ai-progress-thinking-log .ai-thought-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-weight: 600;
-  color: rgb(48, 138, 106);
+  color: rgb(66, 155, 122);
   font-size: 10px;
-  margin-bottom: 1px;
+  margin-bottom: 3px;
+  padding: 2px 7px;
+  background: rgba(140, 196, 158, .12);
+  border-radius: 10px;
+  width: fit-content;
+}
+.ai-progress-thinking-log .ai-thought-role::before {
+  content: '';
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgb(66, 155, 122);
+  animation: dt-dot-breathe 2s ease-in-out infinite;
 }
 .ai-progress-thinking-log .ai-thought-chunk {
   font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-secondary, #6b7280);
+  line-height: 1.65;
+  color: rgba(80, 95, 90, .88);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 /* 停止按钮 */
 .ai-progress-stop {
-  display: block;
-  margin: 8px 0 2px 16px;
-  padding: 3px 12px;
-  border: 1px solid rgba(210, 88, 88, .25);
-  border-radius: 8px;
-  background: transparent;
-  color: rgb(220, 38, 38);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 2px 2px;
+  padding: 5px 14px;
+  border: 1px solid rgba(220, 120, 120, .28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .55);
+  color: rgb(200, 80, 80);
   cursor: pointer;
   font-size: 11px;
-  transition: background .15s, border-color .15s;
+  font-weight: 500;
+  transition: background .2s, border-color .2s, transform .15s, box-shadow .2s;
   -webkit-tap-highlight-color: transparent;
 }
 .ai-progress-stop:hover {
-  background: rgba(220, 60, 60, .05);
-  border-color: rgba(239, 68, 68, .5);
+  background: rgba(255, 240, 240, .72);
+  border-color: rgba(220, 100, 100, .45);
+  box-shadow: 0 2px 8px rgba(220, 100, 100, .08);
 }
-.ai-progress-stop:active { transform: scale(.97); }
-
-@keyframes dt-icon-pulse {
-  0%, 100% { opacity: .6; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.08); }
+.ai-progress-stop:active { transform: scale(.96); }
+.ai-progress-stop::before {
+  content: '✕';
+  font-size: 10px;
 }
 
-/* ===================== V2: 深度思考 think-card (高级简洁干净) ===================== */
+/* ===================== V3: 深度思考 think-card (可爱高级) ===================== */
 .ai-think-card {
-  margin: 10px 0;
-  border: 1px solid rgba(0, 0, 0, .08);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .5);
+  margin: 12px 0;
+  border: 1px solid rgba(140, 196, 158, .16);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(250, 252, 251, .58));
   font-size: 14px;
-  color: rgba(40, 50, 50, .92);
+  color: rgba(55, 70, 65, .92);
   overflow: hidden;
-  transition: border-color .2s, box-shadow .2s, background .2s;
-  animation: dt-card-in .4s cubic-bezier(.22, 1, .36, 1) both;
+  transition: border-color .25s, box-shadow .25s, background .25s, transform .2s;
+  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
+  box-shadow:
+    0 4px 18px rgba(82, 138, 120, .05),
+    0 1px 0 rgba(255, 255, 255, .5) inset;
 }
 .ai-think-card:hover {
-  border-color: rgba(0, 0, 0, .14);
-  background: rgba(255, 255, 255, .65);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .03);
+  border-color: rgba(140, 196, 158, .28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .8), rgba(250, 252, 251, .68));
+  box-shadow:
+    0 6px 24px rgba(82, 138, 120, .09),
+    0 1px 0 rgba(255, 255, 255, .5) inset;
+  transform: translateY(-1px);
 }
 .ai-think-card.collapsed {
-  border-color: rgba(0, 0, 0, .06);
-  background: rgba(250, 250, 250, .45);
+  border-color: rgba(140, 196, 158, .12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(250, 252, 251, .45));
 }
 .ai-think-card.expanded {
-  background: rgba(255, 255, 255, .55);
-  border-color: rgba(0, 0, 0, .1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(250, 252, 251, .6));
+  border-color: rgba(140, 196, 158, .22);
 }
 
 .ai-think-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 10px 14px;
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  transition: background .15s;
-  min-height: 34px;
+  transition: background .2s;
+  min-height: 40px;
 }
-.ai-think-header:hover { background: rgba(0, 0, 0, .025); }
-.ai-think-header:active { background: rgba(0, 0, 0, .05); }
+.ai-think-header:hover { background: rgba(140, 196, 158, .06); }
+.ai-think-header:active { background: rgba(140, 196, 158, .1); }
 
 .ai-think-icon {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px; height: 16px;
-  color: rgba(120, 120, 130, .9);
+  width: 22px; height: 22px;
+  color: rgb(66, 155, 122);
 }
 .ai-think-icon svg { width: 100%; height: 100%; }
 .ai-think-title {
   flex: 1;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-primary, #1f2937);
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(55, 85, 75);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -1837,331 +1886,399 @@
 }
 .ai-think-meta {
   font-size: 10.5px;
-  color: rgba(140, 150, 160, .85);
+  color: rgba(120, 145, 138, .8);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  background: rgba(140, 196, 158, .1);
+  padding: 2px 7px;
+  border-radius: 10px;
 }
 .ai-think-chevron {
-  font-size: 9px;
-  color: rgba(140, 150, 160, .7);
+  font-size: 10px;
+  color: rgba(120, 145, 138, .7);
   flex-shrink: 0;
   margin-left: 2px;
-  transition: transform .24s cubic-bezier(.34, 1.56, .64, 1);
-  width: 12px;
+  transition: transform .28s cubic-bezier(.34, 1.56, .64, 1);
+  width: 14px;
   text-align: center;
+}
+.ai-think-card.expanded .ai-think-chevron {
+  transform: rotate(180deg);
 }
 
 .ai-think-body {
   max-height: 0; opacity: 0; overflow: hidden;
-  padding: 0 14px;
-  border-top: 0 solid rgba(0,0,0,.04);
-  transition: max-height .3s cubic-bezier(.22,1,.36,1), opacity .24s, padding .22s, border-top-width .22s;
+  padding: 0 16px;
+  border-top: 0 solid rgba(140, 196, 158, .1);
+  transition: max-height .35s cubic-bezier(.22,1,.36,1), opacity .28s, padding .26s, border-top-width .26s;
   box-sizing: border-box;
 }
 .ai-think-card.expanded .ai-think-body {
   max-height: 3000px; opacity: 1;
-  padding: 6px 14px 10px;
+  padding: 10px 16px 14px;
   border-top-width: 1px;
-  border-top-color: rgba(0, 0, 0, .04);
 }
 
 /* 思考过程 details */
-.ai-think-thinking { margin: 4px 0 0; font-size: 12px; }
-.ai-think-thinking summary {
-  cursor: pointer; user-select: none; list-style: none;
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 0;
-  color: rgba(140, 150, 160, .9);
-  font-size: 11.5px;
-  border-radius: 4px;
-  transition: color .12s;
+.ai-think-thinking {
+  margin: 4px 0 0;
+  font-size: 12px;
+  background: rgba(140, 196, 158, .06);
+  border-radius: 14px;
+  padding: 6px 10px;
 }
-.ai-think-thinking summary:hover { color: rgba(80, 80, 80, .95); }
+.ai-think-thinking summary {
+  position: relative;
+  cursor: pointer; user-select: none; list-style: none;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 0 4px 22px;
+  color: rgba(80, 110, 100, .85);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 10px;
+  transition: color .15s;
+}
+.ai-think-thinking summary:hover { color: rgb(48, 138, 106); }
 .ai-think-thinking summary::-webkit-details-marker { display: none; }
 .ai-think-thinking summary::marker { display: none; }
 .ai-think-thinking summary::before {
-  content: '▸';
+  content: '';
   display: inline-block;
-  font-size: 9px;
-  transition: transform .2s;
-  color: rgba(140, 150, 160, .7);
-  width: 10px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: rgba(140, 196, 158, .18);
+  transition: background .2s, transform .2s;
+  flex-shrink: 0;
 }
-.ai-think-thinking[open] summary::before { transform: rotate(90deg); }
+.ai-think-thinking summary::after {
+  content: '▾';
+  position: absolute;
+  left: 16px;
+  font-size: 9px;
+  color: rgb(66, 155, 122);
+  transition: transform .2s;
+}
+.ai-think-thinking[open] summary::before { background: rgba(140, 196, 158, .3); }
+.ai-think-thinking[open] summary::after { transform: rotate(180deg); }
 .ai-think-thinking-body {
-  max-height: 240px; overflow-y: auto;
-  padding: 4px 4px 4px 16px;
-  margin-top: 2px;
+  max-height: 260px; overflow-y: auto;
+  padding: 6px 6px 6px 14px;
+  margin-top: 4px;
   font-size: 12px;
   line-height: 1.7;
-  color: rgba(100, 110, 120, .9);
+  color: rgba(80, 95, 90, .9);
 }
-.ai-think-thinking-body::-webkit-scrollbar { width: 3px; }
-.ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
+.ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
+.ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 
 /* 思考日志条目 */
-.ai-thought-entry { padding: 3px 0; border-bottom: 1px dashed rgba(0,0,0,.04); animation: dt-thought-in .25s ease both; }
+.ai-thought-entry {
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(140, 196, 158, .18);
+  animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
+}
 .ai-thought-entry:last-child { border-bottom: none; }
 .ai-thought-role {
-  font-weight: 500;
-  color: rgba(100, 110, 120, .85);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: rgb(66, 155, 122);
   font-size: 10px;
-  margin-bottom: 2px;
-  letter-spacing: .02em;
+  margin-bottom: 3px;
+  padding: 2px 8px;
+  background: rgba(140, 196, 158, .12);
+  border-radius: 10px;
+}
+.ai-thought-role::before {
+  content: '';
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgb(66, 155, 122);
+  animation: dt-dot-breathe 2s ease-in-out infinite;
 }
 .ai-thought-chunk {
-  font-size: 11.5px; line-height: 1.7;
-  color: rgba(70, 80, 90, .88);
+  font-size: 12px; line-height: 1.7;
+  color: rgba(70, 85, 80, .88);
   white-space: pre-wrap; word-break: break-word;
-  max-height: 180px; overflow-y: auto;
+  max-height: 200px; overflow-y: auto;
 }
 
 /* 答案区 */
 .ai-think-answer {
-  margin: 8px 0 2px;
-  font-size: 14px; line-height: 1.75;
-  color: var(--text-primary, #1f2937);
+  margin: 10px 0 4px;
+  font-size: 14.5px; line-height: 1.8;
+  color: rgba(45, 60, 55, .92);
   word-break: break-word;
-  letter-spacing: .005em;
+  letter-spacing: .01em;
 }
-.ai-think-answer p { margin: .55em 0; }
+.ai-think-answer p { margin: .6em 0; }
 .ai-think-answer p:first-child { margin-top: 0; }
 .ai-think-answer p:last-child { margin-bottom: 0; }
 .ai-think-answer h1, .ai-think-answer h2, .ai-think-answer h3,
 .ai-think-answer h4, .ai-think-answer h5, .ai-think-answer h6 {
-  margin: .8em 0 .4em; font-weight: 600; line-height: 1.4;
+  margin: .9em 0 .45em; font-weight: 600; line-height: 1.35;
+  color: rgb(45, 75, 65);
 }
-.ai-think-answer ul, .ai-think-answer ol { padding-left: 1.5em; }
-.ai-think-answer li { margin: .2em 0; }
+.ai-think-answer ul, .ai-think-answer ol { padding-left: 1.6em; }
+.ai-think-answer li { margin: .25em 0; }
 .ai-think-answer pre {
-  background: rgba(0,0,0,.04); border-radius: 6px;
-  padding: 10px 12px; overflow-x: auto;
-  font-size: 13px; margin: .6em 0;
+  background: rgba(140, 196, 158, .08); border-radius: 12px;
+  padding: 12px 14px; overflow-x: auto;
+  font-size: 13px; margin: .7em 0;
 }
 .ai-think-answer code {
-  background: rgba(0,0,0,.04); border-radius: 3px;
-  padding: 1px 4px; font-size: .9em;
+  background: rgba(140, 196, 158, .12); border-radius: 5px;
+  padding: 1px 5px; font-size: .9em;
+  color: rgb(48, 120, 95);
 }
-.ai-think-answer pre code { background: transparent; padding: 0; }
+.ai-think-answer pre code { background: transparent; padding: 0; color: inherit; }
 .ai-think-answer blockquote {
-  border-left: 2px solid rgba(0,0,0,.12);
-  margin: .6em 0; padding: .2em .8em;
-  color: rgba(100, 110, 120, .9);
+  border-left: 3px solid rgba(140, 196, 158, .45);
+  margin: .7em 0; padding: .3em 1em;
+  color: rgba(80, 100, 95, .9);
+  background: rgba(140, 196, 158, .05);
+  border-radius: 0 10px 10px 0;
 }
-.ai-think-answer table { border-collapse: collapse; margin: .6em 0; font-size: 13px; }
+.ai-think-answer table { border-collapse: collapse; margin: .7em 0; font-size: 13px; }
 .ai-think-answer th, .ai-think-answer td {
-  border: 1px solid rgba(0,0,0,.1); padding: 4px 8px;
+  border: 1px solid rgba(140, 196, 158, .25); padding: 5px 10px;
+}
+.ai-think-answer th {
+  background: rgba(140, 196, 158, .1);
 }
 .ai-think-answer a.ai-source-link {
   display: inline-block;
-  background: rgba(0,0,0,.04);
-  color: rgba(70, 80, 100, .9);
-  padding: 0 4px; border-radius: 3px;
+  background: rgba(140, 196, 158, .12);
+  color: rgb(48, 120, 95);
+  padding: 1px 7px; border-radius: 8px;
   font-size: .85em; text-decoration: none;
-  margin: 0 1px; font-weight: 500;
+  margin: 0 2px; font-weight: 500;
+  transition: background .15s, transform .1s;
 }
-.ai-think-answer a.ai-source-link:hover { background: rgba(0,0,0,.08); }
+.ai-think-answer a.ai-source-link:hover {
+  background: rgba(140, 196, 158, .22);
+  transform: translateY(-1px);
+}
 
 /* 分隔线 */
 .ai-think-divider {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0,0,0,.05), transparent);
-  margin: 6px 0 2px;
-}
-
-/* typewriter 光标 */
-@keyframes ai-cursor-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
-}
-.ai-typewriter-cursor::after {
-  content: '▌';
-  display: inline-block;
-  margin-left: 1px;
-  color: rgba(100, 110, 120, .85);
-  animation: ai-cursor-blink 1s steps(2, start) infinite;
-  font-weight: 500;
-}
-.ai-typewriter-cursor { display: inline; }
-
-/* V3: 克制流式光标 (不要闪光光点, 保持简洁) */
-@keyframes ai-stream-cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .35; }
-}
-
-.ai-stream-cursor {
-  display: inline-block;
-  width: 2px; height: 1.1em;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: rgba(120, 130, 140, .55);
-  border-radius: 1px;
-  animation: ai-stream-cursor-blink 1.1s ease-in-out infinite;
-}
-/* 思考过程与答案区统一字体, 不单独改流式字体 */
-.ai-think-thinking-body,
-.ai-think-thinking-body .ai-thought-chunk {
-  font-size: 11.5px;
-  line-height: 1.7;
-  color: rgba(70, 80, 90, .88);
+  background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .2), transparent);
+  margin: 10px 0 6px;
 }
 
 /* footer */
 .ai-think-card .ai-msg-footer {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  margin-top: 8px; padding-top: 6px;
-  font-size: 10.5px; color: rgba(140, 150, 160, .85);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 8px;
+  font-size: 11px; color: rgba(120, 145, 138, .85);
 }
-.ai-think-card .ai-msg-time { font-size: 10.5px; }
+.ai-think-card .ai-msg-time { font-size: 11px; }
 .ai-think-card .ai-msg-thinking-badge {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 1px 6px;
-  background: rgba(0, 0, 0, .04);
-  color: rgba(100, 110, 120, .9);
-  border-radius: 3px;
-  font-size: 10.5px; font-weight: 500;
-  letter-spacing: .02em;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px;
+  background: rgba(140, 196, 158, .12);
+  color: rgb(48, 120, 95);
+  border-radius: 10px;
+  font-size: 11px; font-weight: 600;
 }
 .ai-think-card .ai-msg-agent-badge {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 1px 6px;
-  background: rgba(0,0,0,.04);
-  color: rgba(100, 110, 120, .9);
-  border-radius: 3px;
-  font-size: 10.5px;
-  letter-spacing: .02em;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px;
+  background: rgba(140, 196, 158, .08);
+  color: rgba(80, 110, 100, .9);
+  border-radius: 10px;
+  font-size: 11px;
 }
-.ai-think-card .ai-msg-usage { font-size: 10.5px; }
+.ai-think-card .ai-msg-usage { font-size: 11px; }
 
 /* 搜索来源 */
 .ai-search-supplement {
-  margin: 6px 0;
-  padding: 6px 10px;
-  background: rgba(0, 0, 0, .025);
-  border: 1px solid rgba(0, 0, 0, .06);
-  border-radius: 6px;
-  font-size: 11px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: rgba(140, 196, 158, .06);
+  border: 1px solid rgba(140, 196, 158, .14);
+  border-radius: 12px;
+  font-size: 11.5px;
   line-height: 1.6;
-  color: var(--text-secondary, #6b7280);
+  color: rgba(80, 105, 98, .9);
 }
 .ai-search-supplement a.ai-search-detail-title {
-  color: rgba(80, 90, 110, .95);
+  color: rgb(48, 120, 95);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
 }
 .ai-search-supplement a.ai-search-detail-title:hover { text-decoration: underline; }
 
-/* 进度卡内的思考过程日志 (实时, 进度卡本身仍保留 box 风格) */
+/* 进度卡内的思考过程日志 */
 .ai-progress-thinking-log {
   max-height: 220px;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 8px 0;
+  background: rgba(255, 255, 255, .45);
+  border: 1px solid rgba(140, 196, 158, .12);
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin: 10px 0;
   font-size: 11px;
   line-height: 1.6;
-  color: var(--text-secondary, #6b7280);
+  color: rgba(95, 110, 105, .9);
 }
-.ai-progress-thinking-log::-webkit-scrollbar { width: 6px; }
+.ai-progress-thinking-log::-webkit-scrollbar { width: 5px; }
 .ai-progress-thinking-log::-webkit-scrollbar-track { background: transparent; }
-.ai-progress-thinking-log::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 3px; }
+.ai-progress-thinking-log::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 .ai-progress-thinking-log:empty { display: none; }
-.ai-progress-thinking-log .ai-thought-entry {
-  padding: 4px 0;
-  border-bottom: 1px dashed rgba(0, 0, 0, 0.04);
-}
-.ai-progress-thinking-log .ai-thought-entry:last-child { border-bottom: none; }
-.ai-progress-thinking-log .ai-thought-role {
-  font-weight: 600;
-  color: rgb(48, 138, 106);
-  font-size: 10px;
-  margin-bottom: 2px;
-}
-.ai-progress-thinking-log .ai-thought-chunk {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-secondary, #6b7280);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 
 /* 暗色模式 — 与项目主题系统保持一致，使用 data-theme="dark" */
 [data-theme="dark"] .ai-deep-think-toggle {
-  border-color: rgba(180, 180, 180, .25);
-  color: var(--text-secondary, #9ca3af);
+  border-color: rgba(127, 187, 172, .22);
+  color: rgba(194, 208, 205, .82);
+  background: rgba(27, 34, 38, .55);
 }
 [data-theme="dark"] .ai-deep-think-toggle:hover {
-  border-color: rgba(66, 155, 122, .45);
-  background: rgba(66, 155, 122, .08);
+  border-color: rgba(66, 155, 122, .5);
+  background: rgba(34, 77, 65, .28);
   color: rgb(130, 210, 175);
 }
 [data-theme="dark"] .ai-deep-think-toggle.on {
-  border-color: rgba(66, 155, 122, .45);
-  background: linear-gradient(135deg, rgba(66, 155, 122, .15), rgba(82, 182, 160, .08));
+  border-color: rgba(66, 155, 122, .5);
+  background: linear-gradient(135deg, rgba(34, 77, 65, .45), rgba(37, 65, 86, .32));
   color: rgb(130, 210, 175);
+  box-shadow: 0 0 0 3px rgba(66, 155, 122, .1), 0 6px 18px rgba(0, 0, 0, .18);
 }
 [data-theme="dark"] .ai-deep-think-toggle.disabled {
   border-color: rgba(255, 255, 255, .08);
-  color: rgba(156, 163, 175, .5);
+  color: rgba(156, 163, 175, .45);
   background: rgba(255, 255, 255, .03);
-  cursor: not-allowed;
 }
 [data-theme="dark"] .ai-progress-card {
-  background: rgba(20, 32, 38, .85);
-  border-color: rgba(140, 196, 158, .12);
+  background: linear-gradient(180deg, rgba(28, 40, 44, .9), rgba(22, 32, 36, .82));
+  border-color: rgba(127, 187, 172, .16);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, .16),
+    0 1px 0 rgba(255, 255, 255, .04) inset;
+}
+[data-theme="dark"] .ai-progress-card::before {
+  background: linear-gradient(90deg, rgba(127,187,172,.2), rgba(150,200,170,.35), rgba(127,187,172,.2));
 }
 [data-theme="dark"] .ai-progress-card::after {
-  background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .12), transparent);
+  background: linear-gradient(90deg, transparent, rgba(127, 187, 172, .1), transparent);
+}
+[data-theme="dark"] .ai-progress-header { color: rgb(130, 210, 175); }
+[data-theme="dark"] .ai-progress-icon { color: rgb(130, 210, 175); }
+[data-theme="dark"] .ai-progress-elapsed {
+  color: rgba(162, 176, 178, .75);
+  background: rgba(127, 187, 172, .12);
 }
 [data-theme="dark"] .ai-progress-thinking-log {
-  background: rgba(255,255,255,.03);
-  border-color: rgba(255,255,255,.06);
+  background: rgba(20, 28, 32, .55);
+  border-color: rgba(127, 187, 172, .1);
 }
 [data-theme="dark"] .ai-progress-thinking-log .ai-thought-role {
   color: rgb(130, 210, 175);
+  background: rgba(127, 187, 172, .12);
+}
+[data-theme="dark"] .ai-progress-thinking-log .ai-thought-role::before {
+  background: rgb(130, 210, 175);
+}
+[data-theme="dark"] .ai-progress-thinking-log .ai-thought-chunk {
+  color: rgba(194, 208, 205, .78);
+}
+[data-theme="dark"] .ai-progress-stop {
+  background: rgba(40, 28, 28, .5);
+  border-color: rgba(220, 120, 120, .3);
+  color: rgb(250, 140, 140);
+}
+[data-theme="dark"] .ai-progress-stop:hover {
+  background: rgba(60, 30, 30, .6);
+  border-color: rgba(250, 140, 140, .45);
 }
 [data-theme="dark"] .ai-think-card {
-  background: rgba(30, 42, 48, .85);
-  border-color: rgba(255,255,255,.06);
+  background: linear-gradient(180deg, rgba(34, 44, 48, .9), rgba(26, 36, 40, .82));
+  border-color: rgba(127, 187, 172, .12);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, .16),
+    0 1px 0 rgba(255, 255, 255, .04) inset;
 }
-[data-theme="dark"] .ai-think-card:hover { background: rgba(30, 42, 48, .92); }
-[data-theme="dark"] .ai-think-header:hover { background: rgba(255, 255, 255, .03); }
+[data-theme="dark"] .ai-think-card:hover {
+  background: linear-gradient(180deg, rgba(38, 48, 52, .95), rgba(28, 38, 42, .88));
+  border-color: rgba(127, 187, 172, .2);
+}
+[data-theme="dark"] .ai-think-header:hover { background: rgba(127, 187, 172, .08); }
+[data-theme="dark"] .ai-think-icon { color: rgb(130, 210, 175); }
 [data-theme="dark"] .ai-think-title { color: #f3f4f6; }
-[data-theme="dark"] .ai-think-body { border-top-color: rgba(255,255,255,.05); }
+[data-theme="dark"] .ai-think-meta {
+  color: rgba(162, 176, 178, .75);
+  background: rgba(127, 187, 172, .1);
+}
+[data-theme="dark"] .ai-think-chevron { color: rgba(162, 176, 178, .65); }
+[data-theme="dark"] .ai-think-body { border-top-color: rgba(127, 187, 172, .1); }
 [data-theme="dark"] .ai-think-answer { color: #e5e7eb; }
-[data-theme="dark"] .ai-think-thinking-body { color: #9ca3af; }
-[data-theme="dark"] .ai-thought-entry { border-bottom-color: rgba(255, 255, 255, .06); }
-[data-theme="dark"] .ai-thought-chunk { color: #9ca3af; }
-[data-theme="dark"] .ai-think-thinking summary { color: rgba(156, 163, 175, .85); }
-[data-theme="dark"] .ai-think-thinking summary:hover { color: #e5e7eb; }
-[data-theme="dark"] .ai-think-answer pre { background: rgba(255,255,255,.05); }
-[data-theme="dark"] .ai-think-answer code { background: rgba(255,255,255,.06); }
-[data-theme="dark"] .ai-think-answer th, [data-theme="dark"] .ai-think-answer td { border-color: rgba(255,255,255,.1); }
+[data-theme="dark"] .ai-think-answer h1,
+[data-theme="dark"] .ai-think-answer h2,
+[data-theme="dark"] .ai-think-answer h3,
+[data-theme="dark"] .ai-think-answer h4,
+[data-theme="dark"] .ai-think-answer h5,
+[data-theme="dark"] .ai-think-answer h6 { color: #f3f4f6; }
+[data-theme="dark"] .ai-think-thinking {
+  background: rgba(127, 187, 172, .06);
+}
+[data-theme="dark"] .ai-think-thinking summary { color: rgba(194, 208, 205, .8); }
+[data-theme="dark"] .ai-think-thinking summary:hover { color: rgb(130, 210, 175); }
+[data-theme="dark"] .ai-think-thinking summary::before { background: rgba(127, 187, 172, .2); }
+[data-theme="dark"] .ai-think-thinking summary::after { color: rgb(130, 210, 175); }
+[data-theme="dark"] .ai-think-thinking-body { color: rgba(194, 208, 205, .78); }
+[data-theme="dark"] .ai-thought-entry { border-bottom-color: rgba(127, 187, 172, .1); }
+[data-theme="dark"] .ai-thought-role {
+  color: rgb(130, 210, 175);
+  background: rgba(127, 187, 172, .12);
+}
+[data-theme="dark"] .ai-thought-role::before { background: rgb(130, 210, 175); }
+[data-theme="dark"] .ai-thought-chunk { color: rgba(194, 208, 205, .78); }
+[data-theme="dark"] .ai-think-answer pre {
+  background: rgba(127, 187, 172, .08);
+}
+[data-theme="dark"] .ai-think-answer code {
+  background: rgba(127, 187, 172, .12);
+  color: rgb(160, 230, 200);
+}
+[data-theme="dark"] .ai-think-answer th, [data-theme="dark"] .ai-think-answer td {
+  border-color: rgba(127, 187, 172, .18);
+}
+[data-theme="dark"] .ai-think-answer th {
+  background: rgba(127, 187, 172, .1);
+}
+[data-theme="dark"] .ai-think-answer blockquote {
+  border-left-color: rgba(127, 187, 172, .4);
+  color: rgba(194, 208, 205, .8);
+  background: rgba(127, 187, 172, .05);
+}
 [data-theme="dark"] .ai-think-card .ai-msg-thinking-badge {
-  background: rgba(255, 255, 255, .06);
-  color: #9ca3af;
+  background: rgba(127, 187, 172, .12);
+  color: rgb(160, 230, 200);
 }
 [data-theme="dark"] .ai-think-card .ai-msg-agent-badge {
-  background: rgba(255,255,255,.04);
-  color: #9ca3af;
+  background: rgba(127, 187, 172, .08);
+  color: rgba(194, 208, 205, .8);
 }
 [data-theme="dark"] .ai-think-divider {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  background: linear-gradient(90deg, transparent, rgba(127, 187, 172, .15), transparent);
 }
 [data-theme="dark"] .ai-think-answer a.ai-source-link {
-  background: rgba(255, 255, 255, .06);
-  color: #cbd5e1;
+  background: rgba(127, 187, 172, .12);
+  color: rgb(160, 230, 200);
+}
+[data-theme="dark"] .ai-think-answer a.ai-source-link:hover {
+  background: rgba(127, 187, 172, .2);
 }
 [data-theme="dark"] .ai-search-supplement {
-  background: rgba(255, 255, 255, .03);
-  border-color: rgba(255, 255, 255, .06);
-  color: rgba(156, 163, 175, .9);
+  background: rgba(127, 187, 172, .05);
+  border-color: rgba(127, 187, 172, .12);
+  color: rgba(194, 208, 205, .8);
 }
 [data-theme="dark"] .ai-search-supplement a.ai-search-detail-title {
-  color: #93c5fd;
+  color: rgb(160, 230, 200);
 }
 .ai-msg-bubble h1, .ai-msg-bubble h2, .ai-msg-bubble h3,
 .ai-msg-bubble h4, .ai-msg-bubble h5, .ai-msg-bubble h6 {
@@ -2241,12 +2358,37 @@
   100% { transform: translateX(100%); }
 }
 
-@keyframes dt-card-in {
-  0% { opacity: 0; transform: translateY(8px) scale(.98); }
+@keyframes dt-bounce-in {
+  0% { opacity: 0; transform: translateY(14px) scale(.92); }
+  60% { opacity: 1; transform: translateY(-3px) scale(1.02); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes dt-thought-in {
-  0% { opacity: 0; transform: translateX(-6px); }
-  100% { opacity: 1; transform: translateX(0); }
+@keyframes dt-soft-settle {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.01); }
+  100% { transform: scale(1); }
+}
+
+@keyframes dt-soft-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes dt-sparkle-wiggle {
+  0%, 100% { transform: rotate(-6deg) scale(1); }
+  25% { transform: rotate(6deg) scale(1.08); }
+  50% { transform: rotate(-4deg) scale(1.04); }
+  75% { transform: rotate(4deg) scale(1.08); }
+}
+
+@keyframes dt-thought-pop {
+  0% { opacity: 0; transform: translateY(6px) scale(.96); }
+  70% { opacity: 1; transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dt-dot-breathe {
+  0%, 100% { opacity: .55; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1.1); }
 }
