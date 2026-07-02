@@ -1062,6 +1062,7 @@
       badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + (msg.search_count || 0) }));
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
         if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -1848,6 +1849,7 @@
           footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: finalThinkingMode + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModelRef.value) {
             var ul = buildUsageLine(Object.assign({}, usage || {}, { model: finalModelRef.value, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
             if (ul) footer.appendChild(el('span', { class: 'ai-msg-usage', text: ul }));
@@ -2259,8 +2261,8 @@
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
           // V2: 简洁模式标签, 去掉重复 sparkle
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
-          // V2: 合并 agent 数, 避免与 header meta 重复
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -2714,6 +2716,7 @@
           footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
