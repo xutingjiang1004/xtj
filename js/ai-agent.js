@@ -1891,7 +1891,10 @@
       var readResult;
       try { readResult = await reader.read(); } catch (e) { break; }
       if (readResult.done) break;
-      if (!isDtPage && !S.active) { reader.cancel().catch(function(){}); break; }
+      if (isDtPage) {
+        var _dtP = document.getElementById('panelDeepThink');
+        if (!_dtP || _dtP.classList.contains('hidden')) { reader.cancel().catch(function(){}); break; }
+      } else if (!S.active) { reader.cancel().catch(function(){}); break; }
 
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
@@ -2785,220 +2788,46 @@
         body: fetchBody,
         signal: controller.signal
       });
-
       if (!resp.ok) {
-        try {
-          var errJson = await resp.json().catch(function() { return {}; });
-          if (S._currentReqId !== reqId) return;
-          safeRemoveProgressCard();
-          notify(String(errJson.error || ('AI 失败 (' + resp.status + ')')));
-        } catch (e) {}
-        resetSendingIfCurrent();
-        return;
+        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
+        resetSendingIfCurrent(); return;
       }
-
-      if (!resp.body) {
-        safeRemoveProgressCard();
-        notify('AI 没有响应');
-        resetSendingIfCurrent();
-        return;
-      }
+      if (!resp.body) { safeRemoveProgressCard(); notify('AI 没有响应'); resetSendingIfCurrent(); return; }
 
       var reader = resp.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-
-      while (true) {
-        if (S._currentReqId !== reqId || controller.signal.aborted) {
-          aborted = true;
-          if (reader) try { reader.cancel(); } catch (e) {}
-          break;
-        }
-        var readResult;
-        try { readResult = await reader.read(); } catch (e) { break; }
-        if (readResult.done) break;
-        // 二级页面不依赖 S.active，改为检测面板是否仍显示
-        var dtPanel = document.getElementById('panelDeepThink');
-        if (!dtPanel || dtPanel.classList.contains('hidden')) { reader.cancel().catch(function(){}); break; }
-
-        buffer += decoder.decode(readResult.value, { stream: true });
-        var lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (var li = 0; li < lines.length; li++) {
-          var line = lines[li].trim();
-          if (!line || !line.startsWith('data: ')) continue;
-          var eventStr = line.slice(6);
-          var evt;
-          try { evt = JSON.parse(eventStr); } catch (e) { continue; }
-          if (!evt) continue;
-
-          if (S._currentReqId !== reqId) { aborted = true; break; }
-
-          if (evt.type === 'meta') {
-            streamConvId = evt.conversation_id;
-            if (streamConvId) { S.dtConversationId = streamConvId; saveDtConvId(); }
-            continue;
-          }
-          if (evt.type === 'heartbeat') {
-            updateDeepThinkProgressCard(progressCard, evt);
-            continue;
-          }
-          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
-            updateDeepThinkProgressCard(progressCard, evt);
-            continue;
-          }
-          if (evt.type === 'thinking_chunk') {
-            if (!aiNode) ensureThinkCardNode();
-            if (evt.chunk) {
-              var thinkBody = aiNode.querySelector('.ai-think-thinking-body');
-              var detailsEl = aiNode.querySelector('.ai-think-thinking');
-              if (thinkBody) {
-                var roleLabel = evt.agent_role || 'AI 智能体';
-                var lastEntry = thinkBody.lastElementChild;
-                var chunkText = String(evt.chunk).slice(0, 4000);
-                if (lastEntry && lastEntry._role === roleLabel) {
-                  var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
-                  if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + chunkText);
-                } else {
-                  var entry = document.createElement('div');
-                  entry.className = 'ai-thought-entry';
-                  entry._role = roleLabel;
-                  entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
-                  entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
-                  thinkBody.appendChild(entry);
-                }
-                // 二级页面：思考过程区域内部自动滚动
-                try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
-                while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
-              }
-              var titleEl = aiNode.querySelector('.ai-think-title');
-              if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
-            }
-            scrollToBottom(dtMessagesEl, true);
-            continue;
-          }
-          if (evt.type === 'answer_chunk') {
-            if (!evt.chunk) continue;
-            if (!aiNode) ensureThinkCardNode();
-            if (!answerStarted) {
-              answerStarted = true;
-              var tTitle = aiNode.querySelector('.ai-think-title');
-              if (tTitle) tTitle.innerHTML = AI_THINK_ICON + ' 回答中…';
-            }
-            var aEl = aiNode.querySelector('.ai-think-answer');
-            if (aEl && !answerRenderer) {
-              aEl.innerHTML = '';
-              answerRenderer = createSmoothTextRenderer(aEl, {
-                minChunk: 1, maxChunk: 3, plainStream: true
-              });
-            }
-            aiContent += String(evt.chunk);
-            if (answerRenderer) answerRenderer.append(evt.chunk);
-            scrollToBottom(dtMessagesEl, true);
-            continue;
-          }
-          if (evt.type === 'content') {
-            aiContent += evt.text || '';
-            ensureThinkCardNode();
-            continue;
-          }
-          if (evt.type === 'error') {
-            safeRemoveProgressCard();
-            var errMsg = evt.error || 'AI 调用失败';
-            if (aiContent) {
-              ensureThinkCardNode();
-              var errNote = el('div', { class: 'ai-error-note' }, errMsg);
-              try { aiNode.appendChild(errNote); } catch (e) {}
-              finishThinkCard(aiNode, aiContent, evt);
-            } else {
-              notify(errMsg);
-              removeLastDtUserMessage();
-              restoreInputText();
-            }
-            resetSendingIfCurrent();
-            if (reader) try { reader.cancel(); } catch (e) {}
-            aborted = true;
-            break;
-          }
-          if (evt.type === 'done') {
-            safeRemoveProgressCard();
-            S.sending = false;
-            S.paused = false;
-            S.activeRenderers = [];
-            S.abortController = null;
-            S.deepThinkJob = null;
-            S.deepThinkProgressCard = null;
-            if (progressCard) { try { progressCard._done = true; } catch (e) {} }
-            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
-            try {
-              finalModel = evt.model || 'deepseek-v4-flash';
-              finalThinkingMode = evt.thinking_mode || S.deepThinkEffort || 'max';
-              if (evt.sanitized_content) aiContent = evt.sanitized_content;
-              else if (evt.content) aiContent = evt.content;
-              finalMeta = evt;
-            } catch (e) {}
-            if (!aiNode) ensureThinkCardNode();
-            if (!aiContent || !String(aiContent).trim()) {
-              aiContent = '（AI 只返回了思考过程，没有生成正文回复）';
-            }
-            finishThinkCard(aiNode, aiContent, evt);
-            doneReceived = true;
-            evtHandled = true;
-            break;
-          }
-        }
-        if (doneReceived || aborted) break;
+      var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
+      var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
+      var sc = { value: null }, ab = { value: false };
+      var sseResult = await processDeepThinkSSE({
+        reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
+        aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
+        answerRendererRef: ar, contentRendererRef: cr, answerStartedRef: as, doneReceivedRef: dr, evtHandledRef: eh,
+        streamConvIdRef: sc, abortedRef: ab, messagesEl: dtMessagesEl, isDtPage: true, scrollEl: dtMessagesEl,
+        defaultThinkingMode: S.deepThinkEffort || 'max',
+        onErrorNoContent: function() { removeLastDtUserMessage(); restoreInputText(); },
+        onResetSending: resetSendingIfCurrent
+      });
+      if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
+      if (S._currentReqId !== reqId || ab.value) {
+        safeRemoveProgressCard(); if (ar.value) try { ar.value.cancel(); } catch(e){}
+        if (r.value) try { r.value.remove(); } catch(e){} resetSendingIfCurrent(); return;
       }
-
-      if (S._currentReqId !== reqId || aborted) {
-        safeRemoveProgressCard();
-        if (answerRenderer) { try { answerRenderer.cancel(); } catch (e) {} answerRenderer = null; }
-        if (contentRenderer) { try { contentRenderer.cancel(); } catch (e) {} contentRenderer = null; }
-        answerStarted = false;
-        if (aiNode) try { aiNode.remove(); } catch (e) {}
-        resetSendingIfCurrent();
-        return;
-      }
-
       safeRemoveProgressCard();
-      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
-      if (evtHandled) {
-        // already handled in done
-      } else if (aiNode && aiContent) {
-        finishThinkCard(aiNode, aiContent, finalMeta);
-      } else if (!doneReceived) {
-        if (aiContent) {
-          if (!aiNode) ensureThinkCardNode();
-          finishThinkCard(aiNode, aiContent, finalMeta);
-        } else {
-          removeLastDtUserMessage();
-          restoreInputText();
-          notify('AI 暂时没有回应, 请稍后再试');
-        }
+      if (progressCard) try { progressCard._done = true; } catch(e){}
+      if (!eh.value) {
+        if (r.value && c.value) { finishThinkCard(r.value, c.value, fm.value); }
+        else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        else if (!dr.value) { removeLastDtUserMessage(); restoreInputText(); notify('AI 暂时没有回应'); }
       }
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) return;
-      safeRemoveProgressCard();
-      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
+      safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
       if (fetchErr && fetchErr.name !== 'AbortError') {
-        if (aiContent) {
-          ensureThinkCardNode();
-          var connNote = el('div', { class: 'ai-error-note' }, '连接中断, 已保留部分回复');
-          try { aiNode.appendChild(connNote); } catch (e) {}
-          finishThinkCard(aiNode, aiContent, finalMeta);
-        } else {
-          removeLastDtUserMessage();
-          restoreInputText();
-          notify('网络异常, 请检查连接后重试');
-        }
+        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
+        else { removeLastDtUserMessage(); restoreInputText(); notify('网络异常'); }
       } else {
-        if (aiContent) {
-          if (!aiNode) ensureThinkCardNode();
-          finishThinkCard(aiNode, aiContent, finalMeta);
-        } else {
-          removeLastDtUserMessage();
-        }
+        if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        else { removeLastDtUserMessage(); }
       }
     }
     resetSendingIfCurrent();
