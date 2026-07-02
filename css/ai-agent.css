@@ -1937,18 +1937,24 @@
   font-size: 10px;
   padding: 1px 6px;
 }
-#panelDeepThink .ai-think-body {
-  max-height: none;
-  opacity: 1;
-  overflow: visible;
+#panelDeepThink .ai-think-body,
+#panelDeepThink .ai-think-card.expanded .ai-think-body,
+#panelDeepThink .ai-think-card.generating .ai-think-body,
+#panelDeepThink .ai-think-card.collapsed .ai-think-body {
+  max-height: none !important;
+  height: auto !important;
+  opacity: 1 !important;
+  overflow: visible !important;
   padding: 8px 12px 12px;
   border-top-width: 1px;
 }
 
-/* 思考过程：全展开，不限制高度 */
+/* 思考过程：完全展开，不限制高度，不内部滚动，随 .dt-messages 一起滚动 */
 #panelDeepThink .ai-think-thinking-body {
-  max-height: none;
-  overflow-y: visible;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
   padding: 6px 6px 6px 10px;
   margin: 0 0 8px;
   border-radius: 12px;
@@ -1956,13 +1962,8 @@
   font-size: 11px;
   line-height: 1.55;
   color: rgba(75, 95, 88, .88);
-  scroll-behavior: smooth;
 }
-#panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
-#panelDeepThink .ai-think-thinking-body::-webkit-scrollbar-thumb {
-  background: rgba(140, 196, 158, .3);
-  border-radius: 10px;
-}
+#panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { display: none; }
 #panelDeepThink .ai-thought-entry {
   padding: 3px 0;
   margin-bottom: 2px;
