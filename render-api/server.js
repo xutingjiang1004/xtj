@@ -100,19 +100,65 @@ const DEEP_THINK_CONFIG = {
 // 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
 const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
 
-// Planner 提示词 — 动态决策 0-5 个 agent (★ P 重写)
-// 核心思想: 简单问题不调 agent, 复杂问题才拆; 允许 agent 不搜索
+// ===================== 共享工具函数 (提取自 M/R 架构) =====================
+function buildHistoryContext(ctx, message) {
+  if (!ctx || !Array.isArray(ctx.history) || ctx.history.length === 0) return '';
+  var lines = ['\n\n[历史对话上下文 (重要! 你必须看到这些)]\n'];
+  var recentHistory = ctx.history.slice(-10);
+  recentHistory.forEach(function(h, i) {
+    var role = h.role === 'user' ? '用户' : (h.role === 'assistant' ? 'AI' : h.role);
+    var content = String(h.content || '').slice(0, 800);
+    lines.push((i + 1) + '. [' + role + '] ' + content);
+  });
+  lines.push('\n[当前用户新消息]: ' + (message || ''));
+  return lines.join('\n');
+}
+
+function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum) {
+  return async function(tc) {
+    var tRes = null;
+    try { tRes = await executeToolCall(tc); } catch (e) {
+      tRes = { tool_name: (tc.function && tc.function.name) || '', error: (e && e.message) || '工具执行失败' };
+    }
+    if (tc.function && tc.function.name === 'search_web') {
+      if (searchCountAccum) searchCountAccum.count = (searchCountAccum.count || 0) + 1;
+      try {
+        var wArgs = JSON.parse(tc.function.arguments || '{}');
+        if (wArgs && wArgs.query && queriesAccum) queriesAccum.push(String(wArgs.query).slice(0, 100));
+      } catch (e) {}
+      var lastQuery = queriesAccum ? queriesAccum[queriesAccum.length - 1] || '' : '';
+      if (sseSend) {
+        sseSend({ type: 'deep_think_tool', agent_role: agentRole, tool_name: 'search_web', count: (tRes && tRes.results_count) || 0, query: lastQuery });
+        sseSend({ type: 'deep_think_stage', stage: 'searching', message: '正在搜索: ' + lastQuery });
+      }
+      if (tRes && Array.isArray(tRes.results) === false && tRes.content && sourcesAccum) {
+        try {
+          var wItems = JSON.parse(tRes.content || '[]');
+          if (Array.isArray(wItems)) {
+            wItems.forEach(function(it) {
+              if (it && it.url) sourcesAccum.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
+            });
+          }
+        } catch (e) {}
+      }
+    }
+    return tRes;
+  };
+}
+
+// Planner 提示词 — ★ U3 硬核升级: 领域专精引导 + 自我校验 + 智能长度控制
 const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规划器 (Planner).
-你的职责: 判断问题复杂度, 决定要不要拆解成多个并行 agent, 拆几个, 是否需要搜索.
-目标是像 ChatGPT pro thinking 一样 —— **自然、不啰嗦、按需拆解**, 而不是机械地把所有问题都做成研究报告.
+你的职责: 判断问题复杂度、领域类型, 决定要不要拆解成多个并行 agent, 拆几个, 是否需要搜索.
+目标是像顶尖分析师一样 —— **精确、严谨、不啰嗦、该深则深该浅则浅**.
 
 输出严格 JSON (无 markdown 代码块, 无任何额外文字):
 {
   "complexity": "low|medium|high",
-  "reasoning": "为什么这样安排 (简短一句, 20 字内)",
+  "domain": "general|code|finance|science|travel|health|legal",
+  "reasoning": "为什么这样安排 (简短一句, 30 字内)",
   "agents": [
     {
-      "role": "角色名 (2-6字中文, 如'景点探索师', 不需要写'师'也行, 如'景点')",
+      "role": "角色名 (2-6字中文, 如'代码审查'、'数据分析')",
       "task_description": "该 agent 负责什么, 要具体 (60 字内)",
       "need_search": true|false,
       "search_queries": ["关键词1", "关键词2"]
@@ -120,64 +166,74 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
   ]
 }
 
-**关键决策规则 (像 ChatGPT pro thinking 那样判断, 别机械拆):**
+**领域识别规则 (domain):**
+- code: 编程/代码/算法/调试/架构设计 → 需要精确逻辑, 可以搜索文档/API
+- finance: 投资/理财/股票/加密货币/经济 → 需要实时数据, agent 必搜
+- science: 数学/物理/化学/生物/AI/工程 → 需要严谨推理, 可搜学术资料
+- travel: 旅游/景点/路线/住宿/签证 → 需要实用信息, agent 必搜
+- health: 医疗/养生/药品/症状 → 谨慎(加免责标注), agent 必搜
+- legal: 法律/法规/合同/维权 → 必须精确引用法条, agent 必搜
+- general: 其他通用问题
 
-1. **极简单问题 (1+1=?, 你好, 你叫什么, 简单定义/常识)**: agents = []
-   - 直接给答案就行, 别拆, 别搜, 别装专业
-   - reasoning: "简单问题, 无需拆解"
+**关键决策规则:**
 
-2. **单点问题 (Jennie 生日, 巴黎在哪, 北京天气, 一首歌名)**: agents = []
-   - 1 个 agent 都嫌多, 直接答
-   - reasoning: "单点查询, 无需拆解"
+1. **极简单问题 (1+1=?, 你好, 定义/常识)**: agents = [], complexity: low
+   - 直接给答案, 别装专业. reasoning: "简单问题, 无需拆解"
 
-3. **多方面问题 (介绍一个城市, 怎么做蛋糕, 学英语方法)**: 2-3 个 agent
-   - 几个不同角度, 不要超过 3 个
-   - 需要事实/数据时, agent 配搜索
+2. **单点问题 (生日, 天气, 价格)**: agents = [], complexity: low
+   - 直接答. reasoning: "单点查询, 无需拆解"
 
-4. **复杂研究型 (旅游攻略, 方案对比, 报告)**: 3-5 个 agent
-   - 最多 5 个, 别拆更细
-   - 每个 agent 独立方面, 互不重叠
+3. **多方面/技术问题**: 2-3 个 agent, complexity: medium
+   - 代码问题: 拆成 语法/逻辑/最佳实践 角度
+   - 科学问题: 拆成 原理/数据/应用 角度
 
-**搜索判断 (need_search):**
+4. **复杂研究/方案对比**: 3-5 个 agent, complexity: high
+   - 最多 5 个, 每个独立方面, 互不重叠
+
+**自我校验:**
+- 代码相关: 确保 agent 会检查语法正确性、边界条件、安全性
+- 金融相关: 确保 agent 会标注数据时效性、提醒投资风险
+- 健康相关: 确保 agent 会添加"仅供参考，请咨询专业医生"标注
+- 法律相关: 确保 agent 会添加"具体案件请咨询专业律师"标注
+
+**搜索判断:**
 - 闲聊/常识/简单计算: need_search = false
-- 实时信息/具体数据/事件: need_search = true
-- 你确信的事实 (历史, 经典知识): need_search = false
+- 实时信息/具体数据/事件/API/代码文档: need_search = true
 - 不确定就 true
 
-**搜索关键词:**
-- need_search = false 时, search_queries 留空 []
-- need_search = true 时, 1-3 个精准关键词
-- 关键词要适合搜索引擎, 中英文皆可
-
 **agents = [] 时:**
-- 表示"直接答, 不拆"
-- reasoning 说明为什么简单
-- Synthesizer 会直接基于用户问题给一个简短自然的答案`;
+- 表示"直接答, 不拆", Synthesizer 会给简短自然答案`;
 
 const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案整合者 (Synthesizer).
 你的职责: 把 Planner 拆出来的 agent 报告整合成最终答案, 或者在 agents=[] 时直接回答用户问题.
 
-**风格: 像 ChatGPT pro thinking 一样 —— 自然、有温度、不啰嗦、像朋友聊天, 而不是写研究报告.**
+**风格: 像顶尖分析师 —— 精准、专业、有温度, 不废话也不敷衍.**
 
-整合规则 (按问题复杂度自适应):
+整合规则 (按 复杂度 + 领域 自适应):
 
-1. **agents = [] (Planner 判定简单问题)**:
-   - 直接基于用户问题给一个简短自然的答案
-   - **严禁**展开成长篇大论, **严禁**搞成研究报告格式
-   - 1+1=? 就答 "1+1 = 2", 别说 "从皮亚诺公理的角度..." 之类的废话
-   - 简单定义/事实就 1-3 句话, 像朋友解释
-   - 总长 50-200 字
+1. **complexity=low 或 agents=[] (简单问题)**:
+   - 直接用自然口语回答, 1-3 句话
+   - **严禁**长篇大论, **严禁**研究报告格式
+   - 总长 30-150 字
 
-2. **agents 1-2 个 (单点或多角度)**:
-   - 整合 agent 内容, 但保留自然口语化风格
-   - 不要分段标题堆砌, 1-3 段连贯文字
-   - 总长 200-800 字
+2. **complexity=medium (中等复杂)**:
+   - 整合 agent 内容, 按领域调整结构:
+   - 代码领域: 直接给代码+简要说明, 不用标题堆砌. 300-800 字
+   - 金融/科学领域: 数据先行+解释, 1-3 段连贯文字. 300-1000 字
+   - 其他领域: 1-3 段连贯文字. 200-800 字
 
-3. **agents 3-5 个 (复杂研究)**:
-   - 整合 agent 报告, 结构化呈现 (用标题/列表)
-   - 引用 agent 关键洞察, 用 [来源N] 标注 (N 对应搜索结果列表编号)
-   - 总长 800-2500 字 (按问题实际需要, 别硬撑)
-   - **避免**写成"## 一、引言 ## 二、背景"这种论文体
+3. **complexity=high (复杂研究)**:
+   - 代码领域: 分块展示 (思路→代码→注意事项), 800-2000 字
+   - 金融/法律/科学: 结构化但口语化, 800-2500 字
+   - 旅游: 用清单/路线, 500-1500 字
+   - 健康: 必须加"以上内容仅供参考, 请咨询专业医生". 500-1500 字
+
+**领域专精规则:**
+- 代码: 代码块用三反引号包裹, 标注语言, 检查边界条件和安全性
+- 金融: 标注数据时效性, 加投资风险提示
+- 法律: "以上为法律常识参考, 具体案件请咨询专业律师"
+- 健康: "以上内容仅供参考, 请务必咨询执业医师"
+- 科学: 区分"已知结论"和"推测/假说", 不确定的标注"可能存在, 需验证"
 
 **通用规则:**
 - 直接给答案, 不要说"作为一个 AI"、"以下是..."
@@ -206,7 +262,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'search_web',
-      description: '搜索网络获取实时信息。如果用户的问题比较复杂（例如旅游攻略、对比评测、事件调查），你应该拆解成多个不同关键词分别搜索来获取更全面的信息，可以多次调用此工具。返回结果包含标题、链接、摘要和来源。',
+      description: '搜索网络获取实时信息。使用原则：\n- 必须搜：最新新闻/实时数据/具体事件/价格汇率/天气/人物动态\n- 不要搜：常识问答/简单计算/闲聊寒暄\n- 复杂问题（攻略、对比、调研）拆成3-5 个不同关键词分别搜\n返回结果包含标题、链接、摘要和来源。',
       parameters: {
         type: 'object',
         properties: {
@@ -947,7 +1003,8 @@ function cleanSearchResults(results, maxCount) {
   maxCount = maxCount || 25;
   if (!Array.isArray(results)) return [];
   var out = [];
-  var seen = {};
+  var seenUrl = {};
+  var seenTitle = {};
   results.forEach(function(r) {
     if (!r) return;
     var u = (r.url || '').trim();
@@ -956,13 +1013,29 @@ function cleanSearchResults(results, maxCount) {
     // 跳过完全没有内容的结果
     if (!u && !t && !s) return;
     // URL 去重
-    if (u && seen[u]) return;
-    if (u) seen[u] = true;
+    if (u && seenUrl[u]) return;
+    if (u) seenUrl[u] = true;
+    // 标题模糊去重：取标题前 10 个字作为指纹
+    var titleKey = t.replace(/[\s\-—·•·,，。！？、；：""''（）()\[\]【】《》<>]/g, '').slice(0, 10);
+    if (titleKey && seenTitle[titleKey]) return;
+    if (titleKey) seenTitle[titleKey] = true;
     // 标题兜底
     if (!t) t = (s || u || '').slice(0, 40);
-    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '' });
+    // 评分：有摘要的优先，有来源的优先，标题更完整的优先
+    var score = 0;
+    if (s.length > 20) score += 3;
+    else if (s.length > 0) score += 1;
+    if (r.source && r.source !== 'web') score += 1;
+    if (t.length > 8) score += 1;
+    if (u) score += 1;
+    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '', _score: score });
   });
-  return out.slice(0, maxCount);
+  // 按评分降序排列，高分优先
+  out.sort(function(a, b) { return (b._score || 0) - (a._score || 0); });
+  // 去掉 _score 字段再返回
+  return out.slice(0, maxCount).map(function(item) {
+    return { url: item.url, title: item.title, snippet: item.snippet, source: item.source, published_at: item.published_at };
+  });
 }
 
 // ===================== Gmail SMTP 邮件配置 =====================
@@ -2568,7 +2641,8 @@ async function callDeepSeek(messages, options) {
       reasoning: finalReasoning,
       usage: usage,
       model: finalModel,
-      tool_calls_info: toolCallsInfo
+      tool_calls_info: toolCallsInfo,
+      finalMessages: workingMessages
     };
   } catch (e) {
     clearTimeout(timer);
@@ -2582,6 +2656,225 @@ async function callDeepSeek(messages, options) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ===================== M: 深度思考模式 — 多智能体架构 (Planner→Workers→Synthesizer) =====================
+// 适用于 thinking_mode = 'max'
+// 流程: 1 次 Planner 拆解 → 并行 Worker 执行 → 1 次 Synthesizer 整合
+async function runMultiAgentFlow(opts) {
+  var res = opts.res;
+  var userName = opts.userName;
+  var message = opts.message;
+  var convId = opts.convId;
+  var config = opts.config;
+  var ctx = opts.ctx;
+  var startTime = opts.startTime || Date.now();
+  var cancelToken = opts.cancelToken || { cancelled: false };
+  var deepThinkThinkingMode = (opts.thinking_mode) || (config && config.deep_think && config.deep_think.default_thinking_mode) || 'max';
+  if (['low', 'medium', 'high', 'max'].indexOf(deepThinkThinkingMode) < 0) deepThinkThinkingMode = 'max';
+
+  var thinkingLog = [];
+  var sources = [];
+  var searchQueries = [];
+
+  function sseSend(obj) {
+    if (obj && obj.type === 'thinking_chunk') {
+      try { thinkingLog.push({ agent_role: obj.agent_role || 'AI 智能体', chunk: obj.chunk, round: obj.round || 0, ts: Date.now() }); } catch (e) {}
+    }
+    try { writeSse(res, obj); } catch (e) {}
+  }
+  function isCancelled() { return cancelToken.cancelled === true; }
+  function timeLeft() { return DEEP_THINK_CONFIG.MAX_DURATION_MS - (Date.now() - startTime); }
+
+  var historyContext = buildHistoryContext(ctx, message);
+
+  if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
+
+  // 1. 推 init 事件
+  sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
+  sseSend({ type: 'deep_think_init', message: 'Planner 正在分析问题...', agent_count: 1 });
+  sseSend({ type: 'deep_think_stage', stage: 'agent', message: 'Planner 分析中...' });
+
+  // 2. 调用 Planner (★ U3: +超时机制)
+  var plannerContent = '';
+  try {
+    var plannerPromise = callDeepSeek(
+      [
+        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT },
+        { role: 'user', content: message + '\n\n' + (historyContext || '') + '\n\n请输出你的规划 JSON。' }
+      ],
+      { thinking_mode: deepThinkThinkingMode, model: DEEPSEEK_MODEL_REASONER, max_tokens: 2048, response_format: { type: 'json_object' } }
+    );
+    var plannerTimeout = new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
+    });
+    var plannerResult = await Promise.race([plannerPromise, plannerTimeout]);
+    plannerContent = plannerResult.content || '';
+  } catch (e) {
+    console.error('[MULTI-AGENT] Planner failed:', e && e.message);
+    sseSend({ type: 'deep_think_stage', stage: 'error', message: '规划失败，回退单智能体' });
+    plannerContent = '{"complexity":"low","reasoning":"Planner失败，直接回答","agents":[]}';
+  }
+
+  if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
+
+  // 3. 解析 Planner 输出
+  var plan = null;
+  try {
+    plan = JSON.parse(plannerContent);
+  } catch (e) {
+    try {
+      var m = plannerContent.match(/\{[\s\S]*\}/);
+      if (m) plan = JSON.parse(m[0]);
+    } catch (e2) { plan = null; }
+  }
+  if (!plan || typeof plan !== 'object') {
+    plan = { complexity: 'low', reasoning: '解析失败，直接回答', agents: [] };
+  }
+  var agents = Array.isArray(plan.agents) ? plan.agents : [];
+  var agentCount = agents.length;
+
+  sseSend({ type: 'deep_think_planned', complexity: plan.complexity || 'auto', reasoning: plan.reasoning || '', agents: agents.map(function(a) { return { role: a.role, status: 'pending', need_search: a.need_search }; }) });
+
+  if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
+
+  var workerResults = [];
+  var allSources = [];
+  var allQueries = [];
+
+  // 4. agents=[] → 直接回答，不走 worker
+  if (agentCount === 0) {
+    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '简单问题，直接回答...' });
+    try {
+      var corePrompt = buildAiCorePrompt(config);
+      var directPrompt = corePrompt + '\n\n用户问题: ' + message + '\n\n简单问题，直接给一个简短自然的答案。不要搜索。';
+      var directResult = await callDeepSeek(
+        [{ role: 'system', content: directPrompt + (historyContext || '') }],
+        { thinking_mode: deepThinkThinkingMode, max_tokens: 4096,
+          onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk }); },
+          onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+        }
+      );
+      var fakePlanner = { complexity: plan.complexity || 'low', reasoning: plan.reasoning || '简单问题', agent_count: 0, agents: [] };
+      return {
+        cancelled: false, finalContent: directResult.content || '', planner: fakePlanner, worker_results: [],
+        thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
+        search_count: 0, search_results: [], search_query: '', sources: [], queries: []
+      };
+    } catch (e) {
+      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: DEEPSEEK_MODEL_REASONER, search_count: 0, search_results: [], sources: [], queries: [] };
+    }
+  }
+
+  // 5. 有 agent → 并行执行 Workers
+  sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在并行分析 (' + agentCount + ' 个方向)...' });
+
+  var workerPromises = agents.map(function(agent, idx) {
+    return runDeepThinkWorker({
+      agent: agent,
+      originalMessage: message,
+      cancelToken: cancelToken,
+      timeLeft: timeLeft,
+      sseSend: sseSend,
+      onRound: function(round) {
+        sseSend({ type: 'deep_think_stage', stage: 'agent', message: '[' + agent.role + '] 第 ' + round + ' 轮分析...' });
+      },
+      thinkingMode: deepThinkThinkingMode,
+      needSearch: agent.need_search !== false,
+      historyContext: historyContext
+    }).then(function(wr) {
+      if (wr && wr.sources) {
+        wr.sources.forEach(function(s) { allSources.push(s); });
+      }
+      if (wr && wr.queries) {
+        wr.queries.forEach(function(q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
+      }
+      return { role: agent.role, status: 'success', elapsed_ms: 0, content: wr ? wr.content : '', sources: wr ? wr.sources : [] };
+    }).catch(function(e) {
+      console.error('[MULTI-AGENT] worker failed:', agent.role, e && e.message);
+      return { role: agent.role, status: 'failed', elapsed_ms: 0, content: '', error: e && e.message };
+    });
+  });
+
+  workerResults = await Promise.all(workerPromises);
+  if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
+
+  // 去重合并所有来源
+  allSources = cleanSearchResults(allSources, 50);
+  sources = allSources;
+  allQueries = allQueries.slice(0, 10);
+
+  // 6. Synthesizer 整合
+  sseSend({ type: 'deep_think_stage', stage: 'agent', message: 'Synthesizer 整合答案中...' });
+
+  var synthMessages = [
+    { role: 'system', content: DEEP_THINK_SYNTHESIZER_PROMPT },
+    { role: 'user', content: '用户原始问题: ' + message + '\n\n' + (historyContext || '') }
+  ];
+
+  // 把 worker 结果拼进去
+  if (workerResults.length > 0) {
+    var workerSummary = '\n\n【各方向分析结果】\n';
+    workerResults.forEach(function(wr, idx) {
+      workerSummary += '\n--- ' + (wr.role || ('方向' + (idx + 1))) + ' ---\n';
+      workerSummary += (wr.content || '(无内容)') + '\n';
+    });
+    synthMessages.push({ role: 'user', content: workerSummary });
+  }
+
+  if (allSources.length > 0) {
+    var sourceList = '\n\n【搜索结果引用列表 (供 [来源N] 标注使用)】\n';
+    allSources.forEach(function(sr, idx) {
+      sourceList += (idx + 1) + '. ' + (sr.title || '无标题') + ' - ' + (sr.url || '') + '\n';
+    });
+    synthMessages.push({ role: 'user', content: sourceList });
+  }
+
+  synthMessages.push({ role: 'user', content: '请基于以上各方向的分析结果，整合成最终答案发给用户。引用搜索用 [来源N] 标注。' });
+
+  var synthContent = '';
+  var synthUsage = null;
+  var synthModel = DEEPSEEK_MODEL_REASONER;
+  try {
+    // ★ U3: Synthesizer 超时机制
+    var synthPromise = callDeepSeek(synthMessages, {
+      thinking_mode: deepThinkThinkingMode, max_tokens: 16384,
+      onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: chunk }); },
+      onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+    });
+    var synthTimeout = new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error('Synthesizer 超时')); }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
+    });
+    var synthResult = await Promise.race([synthPromise, synthTimeout]);
+    synthContent = synthResult.content || '';
+    synthUsage = synthResult.usage;
+    synthModel = synthResult.model || DEEPSEEK_MODEL_REASONER;
+  } catch (e) {
+    console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
+    synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+  }
+
+  if (isCancelled()) return { cancelled: true, partial: true, finalContent: synthContent };
+
+  var fakePlanner = { complexity: plan.complexity || 'auto', reasoning: plan.reasoning || '', agent_count: agentCount, agents: agents };
+  var fakeWorkerResults = workerResults.map(function(wr) { return { role: wr.role, status: wr.status, elapsed_ms: wr.elapsed_ms || 0, content: wr.content || '' }; });
+
+  return {
+    cancelled: false,
+    finalContent: synthContent,
+    synth_content: synthContent,
+    planner: fakePlanner,
+    worker_results: fakeWorkerResults,
+    thinking_log: thinkingLog,
+    usage: synthUsage,
+    model: synthModel,
+    search_count: allSources.length,
+    search_results: allSources,
+    search_query: allQueries[0] || '',
+    sources: allSources,
+    queries: allQueries,
+    synth_usage: synthUsage
+  };
 }
 
 // ===================== R: 深度思考模式 — 单智能体架构 (Planner+Workers+Synthesizer 融合) =====================
@@ -2606,6 +2899,12 @@ async function runDeepThinkAgent(opts) {
     || 'max';
   if (['low', 'medium', 'high', 'max'].indexOf(deepThinkThinkingMode) < 0) deepThinkThinkingMode = 'max';
 
+  // ★ P 改: 思考程度差异化参数
+  var disableSearch = opts.disableSearch === true;
+  var maxToolRounds = (typeof opts.max_tool_rounds === 'number') ? opts.max_tool_rounds : 5;
+  var maxTokensLimit = (typeof opts.max_tokens === 'number') ? opts.max_tokens : 32768;
+  var answerLengthHint = opts.answerLengthHint || 'normal'; // short / normal / long
+
   var thinkingLog = []; // [{ agent_role, chunk, round, ts }]
   var searchCount = 0;
   var sources = [];
@@ -2624,33 +2923,42 @@ async function runDeepThinkAgent(opts) {
   function isCancelled() { return cancelToken.cancelled === true; }
   function timeLeft() { return DEEP_THINK_CONFIG.MAX_DURATION_MS - (Date.now() - startTime); }
 
-  // ★ R: 构造 history 文本 (从 ctx.history) — 注入到 system prompt
-  function buildHistoryContext() {
-    if (!ctx || !Array.isArray(ctx.history) || ctx.history.length === 0) return '';
-    var lines = ['\n\n[历史对话上下文 (重要! 你必须看到这些)]\n'];
-    var recentHistory = ctx.history.slice(-10);
-    recentHistory.forEach(function(h, i) {
-      var role = h.role === 'user' ? '用户' : (h.role === 'assistant' ? 'AI' : h.role);
-      var content = String(h.content || '').slice(0, 800);
-      lines.push((i + 1) + '. [' + role + '] ' + content);
-    });
-    lines.push('\n[当前用户新消息]: ' + message);
-    return lines.join('\n');
-  }
-  var historyContext = buildHistoryContext();
+  var historyContext = buildHistoryContext(ctx, message);
 
   // ★ R: 单智能体 prompt — 融合 buildAiCorePrompt + 深度思考特定指令
   var corePrompt = buildAiCorePrompt(config);
+  var lengthHintLine = '';
+  if (answerLengthHint === 'short') {
+    lengthHintLine = '\n- 本次思考程度为 low，请严格控制答案长度：简单问题 1-2 句，复杂问题也不超过 200 字\n';
+  } else if (answerLengthHint === 'long') {
+    lengthHintLine = '\n- 本次思考程度为 high/max，可根据问题需要适当展开，上限不限\n';
+  }
+
   var DEEP_THINK_AGENT_PROMPT = corePrompt + '\n\n' +
-    '当前处于"深度思考模式"。你自己有脑子, 自己决定:\n' +
-    '1. 是否需要搜索 — 闲聊/常识/简单计算 不搜; 实时信息/具体数据/事件 搜\n' +
-    '2. 搜索几次 — 1-3 次足够, 别刷屏\n' +
-    '3. 思考深度 — 简单问题快速答; 复杂问题深入分析\n' +
-    '4. 答案长度 — 完全由你按问题需要决定, 别硬撑别凑字\n' +
-    '   - 1+1=? 你就 1-2 个字; "你好" 就 1-2 句; 复杂问题可长, 上限不限\n' +
-    '   - 怎么答最自然就怎么答, 别为了显专业而写废话\n' +
-    '直接给答案, 别"作为一个 AI"。自然口语化, 别"## 一、引言"论文体。引用搜索用 [来源N] 标注。不确定就说不确定。\n' +
-    '需要搜索时调用 search_web (1-3 次)。不需要搜索时直接基于知识回答。';
+    '你现在是"深度思考模式"下的分析助手。你的工作方式分三步：\n' +
+    '\n' +
+    '【第一步：理解问题】\n' +
+    '- 先判断问题领域：闲聊 / 技术/代码 / 金融/数据 / 科学 / 法律 / 健康 / 通用\n' +
+    '- 找出问题的核心诉求是什么\n' +
+    '- 判断是否需要搜索：纯闲聊/常识/简单计算 → 不搜；需要最新数据/具体事件/实时信息 → 搜\n' +
+    '\n' +
+    '【第二步：分析推理】\n' +
+    '- 如果需要搜索：拆成 1-3 个精准关键词，逐一搜索，别重复搜同样的\n' +
+    '- 如果不需要：直接基于已有知识组织答案\n' +
+    '- 代码问题：检查语法正确性、边界条件、安全性\n' +
+    '- 金融/法律/健康问题：确保添加必要的免责声明\n' +
+    '- 复杂问题先分解成几个方面，想清楚每个方面再整合\n' +
+    '\n' +
+    '【第三步：组织答案】\n' +
+    '- 根据问题复杂度决定答案长度：\n' +
+    '  · 简单问题（"你好""1+1="）→ 几个字到一两句\n' +
+    '  · 一般问答 → 一段话，说清楚即可\n' +
+    '  · 复杂分析 → 分条列点，但别写成论文，保持口语化\n' +
+    lengthHintLine +
+    '- 引用搜索来源用 [来源N] 标注，N 从 1 开始\n' +
+    '- 不确定的事如实说"不太确定"，别编\n' +
+    '- 别用"作为一个 AI""根据我的分析"之类的废话开场\n' +
+    '- 别用"## 一、引言"这种论文体，自然说话就好';
 
   // ★ R: 取消 token 检查
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -2707,79 +3015,49 @@ async function runDeepThinkAgent(opts) {
   }
 
   try {
-    // ★ R: 1 个 callDeepSeek, thinking + tool_use 自由决定
+    // ★ R: 1 个 callDeepSeek, 根据思考程度差异化传参
+    var deepSeekOpts = {
+      thinking_mode: deepThinkThinkingMode,
+      max_tool_rounds: maxToolRounds,
+      max_tokens: maxTokensLimit,
+      onThinkingChunk: function(chunk) {
+        // V2: 首包立即推送(无延迟), 后续 80ms 合并推送, 显著降低首字延迟
+        _thinkingChunkBuf += String(chunk || '');
+        if (!_thinkingFirstFlushed) {
+          _thinkingFirstFlushed = true;
+          _flushThinkingChunk();
+          return;
+        }
+        if (_thinkingChunkTimer) return;
+        _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 80);
+      },
+      onContentChunk: function(chunk) {
+        // V2: 答案流 — 首包立即推 + 50ms 合并, 极低延迟
+        _answerChunkBuf += String(chunk || '');
+        if (!_answerFirstFlushed) {
+          _answerFirstFlushed = true;
+          _flushAnswerChunk();
+          return;
+        }
+        if (_answerChunkTimer) return;
+        _answerChunkTimer = setTimeout(function() { _flushAnswerChunk(); }, 50);
+      }
+    };
+    var searchCountAccum = { count: 0 };
+    // ★ P 改: 思考程度 low 时不传 tools(禁止搜索), 其他级别正常传
+    if (!disableSearch) {
+      deepSeekOpts.tools = AI_TOOLS;
+      deepSeekOpts.tool_choice = 'auto';
+      deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum);
+    }
     var result = await callDeepSeek(
       [
         { role: 'system', content: DEEP_THINK_AGENT_PROMPT + (historyContext || '') },
         { role: 'user', content: message }
       ],
-      {
-        thinking_mode: deepThinkThinkingMode,
-        tools: AI_TOOLS,        // 让 AI 自由决定是否调用 search_web
-        tool_choice: 'auto',
-        max_tool_rounds: 5,     // 内部最多 5 轮 tool_use
-        max_tokens: 32768,
-        onThinkingChunk: function(chunk) {
-          // V2: 首包立即推送(无延迟), 后续 80ms 合并推送, 显著降低首字延迟
-          _thinkingChunkBuf += String(chunk || '');
-          if (!_thinkingFirstFlushed) {
-            _thinkingFirstFlushed = true;
-            _flushThinkingChunk();
-            return;
-          }
-          if (_thinkingChunkTimer) return;
-          _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 80);
-        },
-        onContentChunk: function(chunk) {
-          // V2: 答案流 — 首包立即推 + 50ms 合并, 极低延迟
-          _answerChunkBuf += String(chunk || '');
-          if (!_answerFirstFlushed) {
-            _answerFirstFlushed = true;
-            _flushAnswerChunk();
-            return;
-          }
-          if (_answerChunkTimer) return;
-          _answerChunkTimer = setTimeout(function() { _flushAnswerChunk(); }, 50);
-        },
-        tool_executor: async function(tc) {
-          // ★ R: 通过 tool_executor 收集 sources + 推 SSE
-          var tRes = null;
-          try { tRes = await executeToolCall(tc); } catch (e) {
-            tRes = { tool_name: (tc.function && tc.function.name) || '', error: (e && e.message) || '工具执行失败' };
-          }
-          if (tc.function && tc.function.name === 'search_web') {
-            searchCount++;
-            try {
-              var wArgs = JSON.parse(tc.function.arguments || '{}');
-              if (wArgs && wArgs.query) searchQueries.push(String(wArgs.query).slice(0, 100));
-            } catch (e) {}
-            sseSend({
-              type: 'deep_think_tool',
-              agent_role: 'AI 智能体',
-              tool_name: 'search_web',
-              count: (tRes && tRes.results_count) || 0,
-              query: searchQueries[searchQueries.length - 1] || ''
-            });
-            sseSend({
-              type: 'deep_think_stage',
-              stage: 'searching',
-              message: '正在搜索: ' + (searchQueries[searchQueries.length - 1] || '')
-            });
-            if (tRes && Array.isArray(tRes.results) === false && tRes.content) {
-              try {
-                var wItems = JSON.parse(tRes.content || '[]');
-                if (Array.isArray(wItems)) {
-                  wItems.forEach(function(it) {
-                    if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
-                  });
-                }
-              } catch (e) {}
-            }
-          }
-          return tRes;
-        }
-      }
+      deepSeekOpts
     );
+    searchCount = searchCountAccum.count || 0;
 
     finalContent = result.content || '';
     usage = result.usage;
@@ -2855,6 +3133,7 @@ async function runDeepThinkAgent(opts) {
 }
 
 // runDeepThinkWorker: 单个 worker agent 执行 (内部 tool_use 循环)
+// ★ U3: 使用共享 buildToolExecutor + r.finalMessages 修复 tool_result 丢失问题
 async function runDeepThinkWorker(opts) {
   var agent = opts.agent;
   var originalMessage = opts.originalMessage;
@@ -2862,16 +3141,15 @@ async function runDeepThinkWorker(opts) {
   var timeLeft = opts.timeLeft;
   var sseSend = opts.sseSend;
   var onRound = opts.onRound;
-  // ★ P 新增: thinkingMode (从 config 读) + needSearch (Planner 决定)
   var thinkingMode = opts.thinkingMode || 'max';
   if (['low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
-  var needSearch = opts.needSearch !== false;  // 缺省 true (向后兼容)
+  var needSearch = opts.needSearch !== false;
+  var workerHistoryContext = opts.historyContext || '';
 
   var sources = [];
   var queries = [];
+  var searchCountAccum = { count: 0 };
 
-  // ★ P 改: 允许 worker 不调搜索 (简单/常识问题)
-  //  need_search=false 时, worker 直接基于自身知识产出 100-500 字
   var searchHint = needSearch
     ? '**本任务需要搜索**: 请调用 search_web 工具获取最新/具体数据 (1-3 次足够, 别刷屏)'
     : '**本任务不需要搜索**: 直接基于你的知识回答, 别调用 search_web 浪费 token';
@@ -2879,7 +3157,7 @@ async function runDeepThinkWorker(opts) {
   var workerSystemPrompt = '你是 XTJ 深度思考模式下的 [' + agent.role + '] 专家.\n' +
     '你的具体任务: ' + agent.task_description + '\n' +
     (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
-    (historyContext || '') + '\n\n' +
+    (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
     '执行规则:\n' +
     '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次足够, 别反复搜同样的)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
@@ -2896,6 +3174,9 @@ async function runDeepThinkWorker(opts) {
     { role: 'user', content: '用户原始问题: ' + originalMessage + '\n\n请基于你的任务开始' + (needSearch ? '专业分析, 必要时调用 search_web' : '回答 (不需要搜索)') + '.' }
   ];
 
+  // ★ U3: 超时机制 — 对每个 worker 单次 callDeepSeek 用 Promise.race 强制执行超时
+  var workerTimeoutMs = DEEP_THINK_CONFIG.WORKER_TIMEOUT_MS;
+
   for (var round = 1; round <= DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS; round++) {
     if (cancelToken.cancelled) break;
     if (timeLeft() < 30000) { console.log('[DEEP-THINK] worker time budget low, breaking'); break; }
@@ -2905,69 +3186,43 @@ async function runDeepThinkWorker(opts) {
     var r = null;
     try {
       var callOpts = {
-        thinking_mode: thinkingMode,  // ★ P 改: 用 config 读取, 不再写死 'max'
+        thinking_mode: thinkingMode,
         max_tokens: 8192,
         max_tool_rounds: 1
       };
-      // ★ P 改: needSearch=false 时不传 tools, 避免 AI 仍调用 search_web
       if (needSearch) {
         callOpts.tools = AI_TOOLS;
         callOpts.tool_choice = 'auto';
-        callOpts.tool_executor = async function(tc) {
-          var tRes = await executeToolCall(tc);
-          // 收集 search_web 结果
-          if (tc.function && tc.function.name === 'search_web') {
-            try {
-              var wArgs = JSON.parse(tc.function.arguments || '{}');
-              if (wArgs && wArgs.query) queries.push(String(wArgs.query).slice(0, 100));
-            } catch (e) {}
-            if (tRes && tRes.content) {
-              try {
-                var wItems = JSON.parse(tRes.content || '[]');
-                if (Array.isArray(wItems)) {
-                  wItems.forEach(function(it) {
-                    if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
-                  });
-                }
-              } catch (e) {}
-            }
-            sseSend({ type: 'deep_think_tool', agent_role: agent.role, tool_name: 'search_web', count: tRes.results_count || 0 });
-          }
-          return tRes;
-        };
+        callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum);
       }
-      r = await callDeepSeek(messages, callOpts);
+      // ★ U3: Promise.race 强制超时
+      var callPromise = callDeepSeek(messages, callOpts);
+      var timeoutPromise = new Promise(function(_, reject) {
+        setTimeout(function() { reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
+      });
+      r = await Promise.race([callPromise, timeoutPromise]);
     } catch (e) {
       console.error('[DEEP-THINK] worker callDeepSeek failed:', e && e.message);
       throw e;
     }
 
-    // ★ O 修复 Bug 2: 每轮都推思考过程 (不只是最终轮)
     if (r.reasoning && r.reasoning.length > 0) {
       sseSend({ type: 'thinking_chunk', agent_role: agent.role, chunk: String(r.reasoning).slice(0, 4000), round: round });
     }
 
-    if (!r.tool_calls || r.tool_calls.length === 0) {
-      // 最终回复
-      var finalText = r.content || '';
-      return { content: finalText, sources: sources, queries: queries };
+    // ★ U3 Bug 1 修复: 使用 r.finalMessages 获取真实的 tool_result 上下文
+    if (r.finalMessages && Array.isArray(r.finalMessages)) {
+      messages = r.finalMessages;
     }
 
-    // 有 tool_calls: 追加到 messages
-    messages.push({ role: 'assistant', content: r.content || '', tool_calls: r.tool_calls });
-    for (var ti = 0; ti < (r.tool_calls_info || []).length; ti++) {
-      var tcInfo = r.tool_calls_info[ti];
-      var tcResStr = '{}';
-      try {
-        // 从 workingMessages 反推? callDeepSeek 不返回 tool_result 内容
-        // 简化: 从 sources 推断 (不完美但够用)
-        tcResStr = JSON.stringify({ tool_name: tcInfo.name, ok: tcInfo.ok, results_count: tcInfo.results_count || 0 });
-      } catch (e) {}
-      messages.push({ role: 'tool', tool_call_id: tcInfo.id, content: tcResStr });
+    if (r.tool_calls_info && r.tool_calls_info.length > 0) {
+      continue;
     }
+
+    var finalText = r.content || '';
+    return { content: finalText, sources: sources, queries: queries };
   }
 
-  // 循环结束, 取最后一条 assistant 内容
   var lastAssistant = '';
   for (var mi = messages.length - 1; mi >= 0; mi--) {
     if (messages[mi].role === 'assistant' && messages[mi].content) {
@@ -7059,29 +7314,83 @@ async function handleDeepThinkChat(req, res) {
       }
     }, 1500);
 
+    // ★ P 改: 提前计算思考程度 (后面 usage 和 done 事件也要用)
+    var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
+    var finalThinkingMode = clientThinkingMode ||
+      (config && config.deep_think && config.deep_think.default_thinking_mode) ||
+      'max';
+    if (['low', 'medium', 'high', 'max'].indexOf(finalThinkingMode) < 0) finalThinkingMode = 'max';
+
     // 6. 运行多 agent 流程
     var flowResult = null;
     try {
-      // ★ P 新增: 从 req.body / config 读取深度思考的思考程度
-      //   顺序: 客户端 req body > config.deep_think.default_thinking_mode > 'max'
-      var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
-      flowResult = await runDeepThinkAgent({
-        res: res,
-        userName: userName,
-        message: message,
-        convId: convId,
-        config: config,
-        ctx: ctx,
-        startTime: startTime,
-        cancelToken: cancelToken,
-        thinking_mode: clientThinkingMode  // ★ P 传思考程度 (空则用 config)
-      });
+
+      // ★ P 改: 根据思考程度选择单智能体或多人能体, 并差异化传参
+      if (finalThinkingMode === 'max') {
+        // max → 多智能体 (Planner→Workers→Synthesizer)
+        sseSend({ type: 'deep_think_stage', stage: 'init', message: '深度思考已启动, Planner 分析中...' });
+        flowResult = await runMultiAgentFlow({
+          res: res, userName: userName, message: message, convId: convId,
+          config: config, ctx: ctx, startTime: startTime,
+          cancelToken: cancelToken, thinking_mode: finalThinkingMode
+        });
+      } else {
+        // low/medium/high → 单智能体, 差异化参数
+        var agentOpts = {
+          res: res, userName: userName, message: message, convId: convId,
+          config: config, ctx: ctx, startTime: startTime,
+          cancelToken: cancelToken, thinking_mode: finalThinkingMode
+        };
+        if (finalThinkingMode === 'low') {
+          // low: 禁止搜索, 短答案
+          agentOpts.disableSearch = true;
+          agentOpts.max_tool_rounds = 0;
+          agentOpts.max_tokens = 4096;
+          agentOpts.answerLengthHint = 'short';
+        } else if (finalThinkingMode === 'medium') {
+          // medium: 允许搜索, 最多 2 轮
+          agentOpts.disableSearch = false;
+          agentOpts.max_tool_rounds = 2;
+          agentOpts.max_tokens = 16384;
+          agentOpts.answerLengthHint = 'normal';
+        } else {
+          // high: 允许搜索, 最多 4 轮
+          agentOpts.disableSearch = false;
+          agentOpts.max_tool_rounds = 4;
+          agentOpts.max_tokens = 32768;
+          agentOpts.answerLengthHint = 'long';
+        }
+        flowResult = await runDeepThinkAgent(agentOpts);
+      }
     } catch (e) {
-      console.error('[DEEP-THINK] runDeepThinkAgent exception:', e && e.message);
-      try { clearInterval(_heartbeatTimer); } catch (e2) {}
-      sseSend({ type: 'error', error: '深度思考失败: ' + (e && e.message || '未知错误') });
-      activeDeepThinkJobs.delete(convId);
-      return safeEnd();
+      console.error('[DEEP-THINK] flow exception:', e && e.message);
+      // ★ U3: 降级兜底 — 深度思考失败时, 用简化单智能体 (无工具/低思考) 尝试直接回答
+      try {
+        sseSend({ type: 'deep_think_stage', stage: 'agent', message: '深度思考遇到问题, 降级为快速回复...' });
+        var fallbackCorePrompt = buildAiCorePrompt(config);
+        var fallbackPrompt = fallbackCorePrompt + '\n\n用户问题: ' + message + '\n\n直接给一个简短自然的答案。';
+        var fallbackResult = await callDeepSeek(
+          [{ role: 'system', content: fallbackPrompt + (buildHistoryContext(ctx, message) || '') }],
+          { thinking_mode: 'low', max_tokens: 4096 }
+        );
+        flowResult = {
+          cancelled: false,
+          finalContent: (fallbackResult.content || '') + '\n\n（深度思考模式暂时不可用, 以上为快速回复）',
+          planner: { complexity: 'low', reasoning: '降级回复', agent_count: 1, agents: [{ role: 'AI 智能体', need_search: false }] },
+          worker_results: [{ role: 'AI 智能体', status: 'success', elapsed_ms: 0, content: fallbackResult.content || '' }],
+          thinking_log: [],
+          usage: fallbackResult.usage,
+          model: fallbackResult.model || DEEPSEEK_MODEL_REASONER,
+          search_count: 0, search_results: [], search_query: '',
+          sources: [], queries: [], synth_usage: fallbackResult.usage
+        };
+      } catch (fallbackErr) {
+        console.error('[DEEP-THINK] fallback also failed:', fallbackErr && fallbackErr.message);
+        try { clearInterval(_heartbeatTimer); } catch (e2) {}
+        sseSend({ type: 'error', error: '深度思考失败: ' + (e && e.message || '未知错误') });
+        activeDeepThinkJobs.delete(convId);
+        return safeEnd();
+      }
     }
 
     try { clearInterval(_heartbeatTimer); } catch (e) {}
@@ -7109,8 +7418,8 @@ async function handleDeepThinkChat(req, res) {
     // 9. 构造 usage
     var synthUsage = flowResult.synth_usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
-      thinking_mode: 'max',
-      model: DEEPSEEK_MODEL_REASONER,
+      thinking_mode: finalThinkingMode,
+      model: flowResult.model || DEEPSEEK_MODEL_REASONER,
       deep_think: true,
       agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
     });
@@ -7169,8 +7478,8 @@ async function handleDeepThinkChat(req, res) {
         sanitized_content: finalContent,
         conversation_id: convId,
         deep_think: true,
-        thinking_mode: 'max',
-        model: DEEPSEEK_MODEL_REASONER,
+        thinking_mode: finalThinkingMode,
+        model: flowResult.model || DEEPSEEK_MODEL_REASONER,
         usage: synthUsage,
         agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
         planner: flowResult.planner || null,
