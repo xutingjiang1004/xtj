@@ -1608,11 +1608,26 @@
 }
 
 /* ===================== Deep Think 二级页面 ===================== */
-#panelDeepThink {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  background: linear-gradient(180deg, rgba(248, 252, 250, .98), rgba(240, 248, 244, .98));
+/* 真·全屏二级页面：覆盖 dock、覆盖普通页面、无 padding、无 transform */
+#panelDeepThink,
+#panelDeepThink.dock-panel,
+#panelDeepThink.dock-panel.active {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
+  z-index: 99999 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100vw !important;
+  width: 100dvw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  overflow: hidden !important;
+  opacity: 1 !important;
+  pointer-events: all !important;
+  transform: none !important;
+  background: linear-gradient(180deg, #f8fcfa, #f0f8f4) !important;
+  display: flex !important;
 }
 #panelDeepThink.hidden { display: none !important; }
 
@@ -1621,9 +1636,10 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  max-width: 900px;
+  max-width: 880px;
   margin: 0 auto;
   position: relative;
+  background: inherit;
 }
 
 .dt-header {
@@ -1889,6 +1905,175 @@
 .dt-send:hover { box-shadow: 0 8px 22px rgba(66, 155, 122, .28); }
 .dt-send:active { transform: scale(.96); }
 .dt-send:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ===================== Deep Think 二级页面专项优化 ===================== */
+
+/* 1. 思考卡片更紧凑；collapsed 也显示答案，只折叠思考过程 */
+#panelDeepThink .ai-think-card {
+  margin: 10px 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.78), rgba(250,252,251,.64));
+  box-shadow:
+    0 3px 12px rgba(82, 138, 120, .05),
+    0 1px 0 rgba(255,255,255,.5) inset;
+}
+#panelDeepThink .ai-think-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 5px 18px rgba(82, 138, 120, .08),
+    0 1px 0 rgba(255,255,255,.5) inset;
+}
+#panelDeepThink .ai-think-header {
+  padding: 8px 12px;
+  min-height: 36px;
+}
+#panelDeepThink .ai-think-icon {
+  width: 18px; height: 18px;
+}
+#panelDeepThink .ai-think-title {
+  font-size: 12px;
+}
+#panelDeepThink .ai-think-meta {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+#panelDeepThink .ai-think-body,
+#panelDeepThink .ai-think-card.collapsed .ai-think-body {
+  max-height: none;
+  opacity: 1;
+  overflow: visible;
+  padding: 8px 12px 12px;
+  border-top-width: 1px;
+}
+#panelDeepThink .ai-think-card.collapsed .ai-think-thinking {
+  display: none;
+}
+
+/* 思考过程：无内部滚动，完全随 .dt-messages 滚动；视觉紧凑 */
+#panelDeepThink .ai-think-thinking {
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: rgba(140, 196, 158, .06);
+  margin: 0 0 8px;
+}
+#panelDeepThink .ai-think-thinking summary {
+  padding: 3px 0 3px 20px;
+  font-size: 11px;
+}
+#panelDeepThink .ai-think-thinking-body {
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 4px 2px 4px 8px !important;
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgba(75, 95, 88, .88);
+}
+#panelDeepThink .ai-thought-entry {
+  padding: 3px 0;
+  margin-bottom: 2px;
+  border-bottom: none;
+}
+#panelDeepThink .ai-thought-role {
+  font-size: 10px;
+  margin-bottom: 1px;
+}
+#panelDeepThink .ai-thought-content {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+/* 回答区域：清爽纯文字 */
+#panelDeepThink .ai-think-answer {
+  font-size: 14px;
+  line-height: 1.8;
+  color: rgba(40, 60, 55, .95);
+  letter-spacing: .01em;
+}
+#panelDeepThink .ai-think-answer p { margin: .55em 0; }
+#panelDeepThink .ai-think-answer p:first-child { margin-top: 0; }
+#panelDeepThink .ai-think-answer p:last-child { margin-bottom: 0; }
+#panelDeepThink .ai-think-answer pre {
+  background: rgba(140, 196, 158, .09);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  overflow-x: auto;
+}
+#panelDeepThink .ai-think-answer code {
+  background: rgba(140, 196, 158, .14);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: .92em;
+}
+#panelDeepThink .ai-think-answer blockquote {
+  border-left: 3px solid rgba(140, 196, 158, .5);
+  margin: .6em 0;
+  padding: .25em .9em;
+  background: rgba(140, 196, 158, .05);
+  border-radius: 0 10px 10px 0;
+}
+#panelDeepThink .ai-think-answer a {
+  color: rgb(48, 120, 95);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#panelDeepThink .ai-think-answer h1,
+#panelDeepThink .ai-think-answer h2,
+#panelDeepThink .ai-think-answer h3,
+#panelDeepThink .ai-think-answer h4 {
+  margin: .8em 0 .4em;
+  font-weight: 700;
+  color: rgb(45, 75, 65);
+}
+
+/* 进度卡紧凑 */
+#panelDeepThink .ai-progress-card {
+  margin: 10px 0;
+  border-radius: 18px;
+  padding: 12px 14px;
+}
+
+/* 用户/助手消息动画优化 */
+#panelDeepThink .dt-msg {
+  animation: dt-msg-enter .35s cubic-bezier(.22, 1, .36, 1) both;
+}
+#panelDeepThink .dt-msg.user .dt-msg-content {
+  background: linear-gradient(135deg, rgba(232,250,241,.9), rgba(220,245,234,.9));
+  border-radius: 16px 16px 5px 16px;
+  padding: 9px 13px;
+  box-shadow: 0 3px 10px rgba(82, 138, 120, .08);
+  transition: transform .15s, box-shadow .2s;
+}
+#panelDeepThink .dt-msg.user .dt-msg-content:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(82, 138, 120, .12);
+}
+#panelDeepThink .dt-msg.assistant .dt-msg-content {
+  padding: 2px 0;
+}
+
+@keyframes dt-msg-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 深色模式 */
+[data-theme="dark"] #panelDeepThink .ai-think-card {
+  background: linear-gradient(180deg, rgba(28,38,34,.78), rgba(22,30,27,.64));
+  box-shadow:
+    0 3px 12px rgba(0,0,0,.18),
+    0 1px 0 rgba(255,255,255,.04) inset;
+}
+[data-theme="dark"] #panelDeepThink .ai-think-answer {
+  color: rgba(235, 245, 240, .92);
+}
+[data-theme="dark"] #panelDeepThink .ai-think-answer code {
+  background: rgba(140, 196, 158, .16);
+  color: rgb(160, 220, 195);
+}
+[data-theme="dark"] #panelDeepThink .ai-think-thinking-body {
+  color: rgba(180, 200, 190, .78);
+}
 
 /* 深度思考二级页面中的进度卡与 think-card 适配 */
 .dt-messages .ai-progress-card,

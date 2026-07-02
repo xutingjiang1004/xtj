@@ -2329,6 +2329,11 @@
     ]));
   }
 
+  function setDockBarVisible(visible) {
+    var dockBar = document.querySelector('.dock-bar');
+    if (dockBar) dockBar.style.display = visible ? '' : 'none';
+  }
+
   async function openDeepThinkPage() {
     if (!window.currentUser) {
       notify('请先登录后再使用深度思考');
@@ -2340,8 +2345,42 @@
     var panel = document.getElementById('panelDeepThink');
     if (!panel) return;
 
-    // 首次打开若没有二级页面会话，则创建一个新会话，避免污染普通聊天会话
-    if (!S.dtConversationId) {
+    var msgs = document.getElementById('dtMessages');
+    if (!msgs) return;
+
+    // 隐藏底部 dock，防止二级页面后面透出
+    setDockBarVisible(false);
+
+    // 已有会话 → 从服务器加载历史消息
+    if (S.dtConversationId) {
+      msgs.innerHTML = '';
+      msgs.appendChild(el('div', { style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' }));
+      try {
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=50');
+        if (hist && hist.ok && Array.isArray(hist.data && hist.data.messages)) {
+          msgs.innerHTML = '';
+          hist.data.messages.forEach(function(msg) {
+            if (msg.role === 'user') {
+              var userNode = el('div', { class: 'dt-msg user' });
+              userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+              userNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.content || '' }));
+              msgs.appendChild(userNode);
+            } else if (msg.role === 'assistant') {
+              // 用 think-card 渲染助手回复
+              var thinkNode = buildThinkCardFromHistory(msg, msgs);
+              if (thinkNode) msgs.appendChild(thinkNode);
+            }
+          });
+        } else {
+          // 历史为空，显示空状态
+          if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+        }
+      } catch (e) {
+        if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+      }
+    } else {
+      // 首次打开，创建新会话
+      resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
@@ -2360,7 +2399,6 @@
       }, 80);
     }
 
-    var msgs = document.getElementById('dtMessages');
     if (msgs) scrollToBottom(msgs, true);
   }
 
@@ -2371,6 +2409,9 @@
       panel.classList.remove('active');
     }
 
+    // 恢复底部 dock
+    setDockBarVisible(true);
+
     // 停止正在进行的深度思考请求，避免干扰普通聊天
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
@@ -2380,10 +2421,9 @@
       try { S.deepThinkProgressCard.remove(); } catch (e) {}
     }
 
-    // 清空二级页面输入与消息，保持每次打开都是全新状态
+    // 只清空输入，保留 dtConversationId 以便再次打开时恢复历史
     var input = document.getElementById('dtInput');
     if (input) { input.value = ''; input.style.height = 'auto'; }
-    resetDeepThinkPageEmpty();
 
     S.sending = false;
     S.paused = false;
@@ -2391,7 +2431,7 @@
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     S.abortController = null;
-    S.dtConversationId = null;
+    // ★ 不再清空 S.dtConversationId，保留会话 ID 以便恢复历史
   }
 
   async function handleDeepThinkPageSend(text) {
@@ -2508,6 +2548,7 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard();
+      // 二级页面中思考卡片默认展开（答案可见），但思考过程 details 默认折叠
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
@@ -2686,12 +2727,9 @@
         if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
         if (metaEl) metaEl.textContent = '';
 
-        if (node.classList.contains('collapsed')) {
-          node.classList.remove('collapsed');
-          node.classList.add('expanded');
-          var chev = node.querySelector('.ai-think-chevron');
-          if (chev) chev.textContent = '▴';
-        }
+        // 二级页面中不自动展开思考卡片，保持用户选择/默认折叠状态
+        var chev = node.querySelector('.ai-think-chevron');
+        if (chev) chev.textContent = node.classList.contains('expanded') ? '▴' : '▾';
       }
     }
 
@@ -2793,9 +2831,7 @@
                 var entryCount = thinkBody ? thinkBody.children.length : 0;
                 summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
               }
-              if (detailsEl && !detailsEl.open) {
-                detailsEl.open = true;
-              }
+              // 二级页面：不自动展开思考过程，保持折叠让用户自己点击查看
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
             }
