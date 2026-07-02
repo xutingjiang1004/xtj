@@ -2381,7 +2381,66 @@ function rateLimit(windowMs, maxRequests) {
 // - 内置 25s 超时控制（AbortController），避免长请求拖死 Express 进程
 // - 未配置 API Key 时返 mock 回复（开发模式 + 本地无 Key 测试）
 // - 错误信息统一脱敏，不暴露 DeepSeek 原始错误给前端调用方
+// ===================== 文件内容提取 (PDF/DOCX/XLSX/TXT) =====================
+async function extractEmbeddedFiles(text) {
+  if (!text || typeof text !== 'string') return text;
+  var result = text;
+  // 匹配 ![](data:...) 和 [](data:...) 模式
+  var fileRegex = /(!?)\[([^\]]*)\]\(data:([^,;]+);?[^,]*?(?:;base64)?,(.+?)\)/g;
+  var match;
+  var fileIndex = 0;
+  while ((match = fileRegex.exec(text)) !== null) {
+    var isImage = match[1] === '!';
+    var fileName = match[2] || ('file_' + (++fileIndex));
+    var mimeType = match[3];
+    var base64Data = match[4];
+    fileIndex++;
+    var extractedText = '';
+    try {
+      var buffer = Buffer.from(base64Data, 'base64');
+      if (mimeType === 'application/pdf') {
+        var pdfData = await require('pdf-parse')(buffer);
+        extractedText = pdfData.text || '';
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        var mammothResult = await require('mammoth').extractRawText({ buffer: buffer });
+        extractedText = mammothResult.value || '';
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        var workbook = require('xlsx').read(buffer, { type: 'buffer' });
+        var sheets = [];
+        workbook.SheetNames.forEach(function(sName) {
+          var sheet = workbook.Sheets[sName];
+          var csv = require('xlsx').utils.sheet_to_csv(sheet, { blankrows: false });
+          sheets.push('【工作表: ' + sName + '】\n' + csv);
+        });
+        extractedText = sheets.join('\n\n');
+      } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
+        extractedText = buffer.toString('utf-8');
+      } else if (mimeType.startsWith('image/')) {
+        extractedText = '[用户上传了一张图片: ' + fileName + ' (' + mimeType + '), 当前暂不支持图片识别, 请根据文件名和上下文推测]';
+      } else {
+        // 其他文件类型尝试 utf-8 解码
+        try {
+          extractedText = buffer.toString('utf-8').slice(0, 5000);
+          if (!extractedText.trim()) extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法提取可读内容]';
+        } catch (e) {
+          extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法解析内容]';
+        }
+      }
+      // 截取过长内容 (最大 10000 字)
+      if (extractedText.length > 10000) extractedText = extractedText.slice(0, 10000) + '\n\n[内容过长, 已截断]';
+      extractedText = '\n\n【用户上传文件: ' + fileName + '】\n' + extractedText + '\n【文件结束】\n\n';
+    } catch (e) {
+      extractedText = '\n\n【用户上传文件: ' + fileName + '】\n[文件解析失败: ' + (e.message || '') + ']\n【文件结束】\n\n';
+    }
+    result = result.replace(match[0], extractedText);
+  }
+  return result;
+}
+
 async function callDeepSeek(messages, options) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('AI 调用参数无效');
+  }
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('AI 调用参数无效');
   }
@@ -7416,6 +7475,9 @@ async function handleDeepThinkChat(req, res) {
       return safeEnd();
     }
 
+    // ★ 提取消息中嵌入的文件 (base64 → 文本)
+    message = await extractEmbeddedFiles(message);
+
     // 3. 读取配置和上下文
     var config = await getAiConfig();
     var ctx = await loadAiContext(userName, convId);
@@ -7725,6 +7787,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
     if (message && message.error) return res.status(400).json({ error: message.error });
     if (!message) return res.status(400).json({ error: '消息内容不能为空' });
+    message = await extractEmbeddedFiles(message);
 
     // 3. 会话管理
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -7946,6 +8009,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'error', error: '消息内容不能为空' });
       return safeEnd();
     }
+    message = await extractEmbeddedFiles(message);
     if (aborted) return safeEnd();
     
     // 会话管理
