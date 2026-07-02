@@ -1727,7 +1727,9 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px;
-  scroll-behavior: smooth;
+  contain: layout style;
+  will-change: scroll-position;
+  -webkit-overflow-scrolling: touch;
 }
 .dt-messages::-webkit-scrollbar { width: 5px; }
 .dt-messages::-webkit-scrollbar-thumb {
@@ -1949,7 +1951,7 @@
   border-top: 1px solid rgba(140, 196, 158, .1);
 }
 
-/* 思考过程：完全展开，不限制高度，不内部滚动，随 .dt-messages 一起滚�?*/
+/* 思考过程：完全展开，不限制高度，不内部滚动，随 .dt-messages 一起滚动 */
 #panelDeepThink .ai-think-thinking-body {
   max-height: none !important;
   height: auto !important;
@@ -1964,6 +1966,75 @@
   color: rgba(75, 95, 88, .88);
 }
 #panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { display: none; }
+/* 历史消息的 details/summary 按钮样式（可点击展开思考过程） */
+#panelDeepThink .ai-think-thinking {
+  margin: 0 0 8px;
+  border-radius: 12px;
+  background: rgba(140, 196, 158, .06);
+  overflow: hidden;
+  transition: background .2s;
+}
+#panelDeepThink .ai-think-thinking[open] { background: rgba(140, 196, 158, .1); }
+#panelDeepThink .ai-think-thinking summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 8px 32px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(55, 85, 75, .9);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s;
+}
+#panelDeepThink .ai-think-thinking summary::-webkit-details-marker { display: none; }
+#panelDeepThink .ai-think-thinking summary::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgb(66, 155, 122);
+  transform: translateY(-50%);
+}
+#panelDeepThink .ai-think-thinking summary:hover { background: rgba(140, 196, 158, .08); }
+#panelDeepThink .ai-think-thinking summary:active { background: rgba(140, 196, 158, .14); }
+/* 覆盖全局 summary::after 的 ▾（我们用自己的 chevron span） */
+#panelDeepThink .ai-think-thinking summary::after { display: none; }
+#panelDeepThink .ai-thinking-chevron {
+  display: inline-block;
+  font-size: 10px;
+  color: rgba(120, 145, 138, .7);
+  transition: transform .25s cubic-bezier(.22, 1, .36, 1);
+}
+#panelDeepThink .ai-think-thinking[open] .ai-thinking-chevron {
+  transform: rotate(180deg);
+}
+/* 思考过程展开/收起的平滑动画（仅针对 details 内的版本） */
+#panelDeepThink .ai-think-thinking > .ai-think-thinking-body {
+  display: block !important;
+  max-height: 0 !important;
+  height: auto !important;
+  opacity: 0;
+  overflow: hidden !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin: 0 !important;
+  transition: max-height .32s cubic-bezier(.22, 1, .36, 1),
+              opacity .25s ease,
+              padding .3s ease,
+              margin .3s ease;
+}
+#panelDeepThink .ai-think-thinking[open] > .ai-think-thinking-body {
+  max-height: 6000px !important;
+  opacity: 1;
+  padding: 6px 6px 6px 10px !important;
+  margin: 0 0 8px !important;
+}
 /* 关键：去掉每�?agent 内容的内部滚动条和高度限�?*/
 #panelDeepThink .ai-thought-chunk,
 #panelDeepThink .dt-simple-card .ai-thought-chunk {
@@ -1987,6 +2058,7 @@
   padding: 3px 0;
   margin-bottom: 2px;
   border-bottom: none;
+  contain: layout style;
 }
 #panelDeepThink .ai-thought-role {
   font-size: 11px;
