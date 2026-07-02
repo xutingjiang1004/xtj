@@ -2604,6 +2604,15 @@
       try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
     }
 
+    // ★ 快速双击去重：同一秒内相同文本的请求忽略
+    var dedupKey = text + Math.floor(Date.now() / 1000);
+    if (S._lastDtDedupKey === dedupKey) {
+      try { notify('已发送，请勿重复点击'); } catch (e) {}
+      S.sending = false;
+      return;
+    }
+    S._lastDtDedupKey = dedupKey;
+
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
 
