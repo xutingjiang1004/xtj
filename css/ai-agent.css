@@ -162,7 +162,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
-/* 真实头像图片 — 适配其父容器尺寸 */
+/* 真实头像图片 �?适配其父容器尺寸 */
 .ai-avatar-image-wrapper {
   display: block;
   width: 100%;
@@ -244,7 +244,7 @@
   border-radius: 16px;
   padding: 5px 10px;
   min-height: 31px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
@@ -434,7 +434,7 @@
 .ai-msg-usage,
 .ai-msg-time,
 .ai-msg-warn {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -450,7 +450,7 @@
 }
 
 .ai-msg-thinking-badge {
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(127, 187, 172, 0.12);
@@ -911,7 +911,7 @@
   white-space: nowrap;
   justify-self: end;
   align-self: start;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
   color: rgba(111, 124, 130, 0.72);
   opacity: 0.88;
@@ -936,7 +936,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
   color: rgba(111, 124, 130, 0.72);
   min-width: 0;
@@ -1043,7 +1043,7 @@
   .ai-chat-hist-btn,
   .ai-chat-new-btn,
   .ai-chat-del-btn {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .ai-chat-think-btn,
@@ -1128,7 +1128,7 @@
   .ai-conv-time,
   .ai-conv-meta,
   .ai-conv-count {
-    font-size: 10px;
+    font-size: 11px;
   }
 }
 
@@ -1424,7 +1424,7 @@
   47%, 49% { transform: scaleY(0.2); }
 }
 
-/* 彻底去除思考按钮白色胶囊 */
+/* 彻底去除思考按钮白色胶�?*/
 .ai-chat-root .ai-thinking .ai-thinking-toggle {
   all: unset;
   display: inline-flex !important;
@@ -1502,7 +1502,7 @@
   padding-top: 4px;
 }
 .ai-search-detail-query {
-  font-size: 10px;
+  font-size: 11px;
   color: #aaa;
   margin-bottom: 4px;
   padding: 2px 4px;
@@ -1530,7 +1530,7 @@
   text-decoration: underline;
 }
 .ai-search-detail-snippet {
-  font-size: 10px;
+  font-size: 11px;
   color: #666;
   line-height: 1.4;
   margin-top: 1px;
@@ -1585,7 +1585,7 @@
 .ai-msg-bubble strong { font-weight: 600; }
 .ai-msg-bubble em { font-style: italic; }
 .ai-msg-bubble a { color: var(--ai-primary, #2E9465); text-decoration: underline; }
-/* ★ C 关键修复：[来源N] 链接样式 — 让引用更醒目 */
+/* �?C 关键修复：[来源N] 链接样式 �?让引用更醒目 */
 .ai-msg-bubble a.ai-source-link {
   display: inline-block;
   margin: 0 2px;
@@ -1934,22 +1934,22 @@
   font-size: 12px;
 }
 #panelDeepThink .ai-think-meta {
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 6px;
 }
-#panelDeepThink .ai-think-body,
+#panelDeepThink .ai-think-body {
+  max-height: 0; opacity: 0; overflow: hidden;
+  padding: 0 12px;
+  transition: opacity .28s, padding .2s;
+}
 #panelDeepThink .ai-think-card.expanded .ai-think-body,
-#panelDeepThink .ai-think-card.generating .ai-think-body,
-#panelDeepThink .ai-think-card.collapsed .ai-think-body {
-  max-height: none !important;
-  height: auto !important;
-  opacity: 1 !important;
-  overflow: visible !important;
+#panelDeepThink .ai-think-card.generating .ai-think-body {
+  max-height: none; opacity: 1; overflow: visible;
   padding: 8px 12px 12px;
-  border-top-width: 1px;
+  border-top: 1px solid rgba(140, 196, 158, .1);
 }
 
-/* 思考过程：完全展开，不限制高度，不内部滚动，随 .dt-messages 一起滚动 */
+/* 思考过程：完全展开，不限制高度，不内部滚动，随 .dt-messages 一起滚�?*/
 #panelDeepThink .ai-think-thinking-body {
   max-height: none !important;
   height: auto !important;
@@ -1964,7 +1964,7 @@
   color: rgba(75, 95, 88, .88);
 }
 #panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { display: none; }
-/* 关键：去掉每个 agent 内容的内部滚动条和高度限制 */
+/* 关键：去掉每�?agent 内容的内部滚动条和高度限�?*/
 #panelDeepThink .ai-thought-chunk,
 #panelDeepThink .dt-simple-card .ai-thought-chunk {
   max-height: none !important;
@@ -1975,7 +1975,7 @@
   word-break: break-word;
 }
 #panelDeepThink .ai-thought-chunk::-webkit-scrollbar { display: none; }
-/* 兜底：确保思考过程区域及其所有子元素都不出现滚动条 */
+/* 兜底：确保思考过程区域及其所有子元素都不出现滚动�?*/
 #panelDeepThink .ai-think-thinking-body,
 #panelDeepThink .ai-think-thinking-body *,
 #panelDeepThink .ai-thought-chunk,
@@ -1989,7 +1989,7 @@
   border-bottom: none;
 }
 #panelDeepThink .ai-thought-role {
-  font-size: 10px;
+  font-size: 11px;
   margin-bottom: 1px;
 }
 #panelDeepThink .ai-thought-role::before {
@@ -2044,7 +2044,7 @@
   color: rgb(45, 75, 65);
 }
 
-/* 进度卡紧凑 */
+/* 进度卡紧�?*/
 #panelDeepThink .ai-progress-card {
   margin: 10px 0;
   border-radius: 18px;
@@ -2093,7 +2093,7 @@
   color: rgba(180, 200, 190, .78);
 }
 
-/* 深度思考二级页面中的进度卡与 think-card 适配 */
+/* 深度思考二级页面中的进度卡�?think-card 适配 */
 .dt-messages .ai-progress-card,
 .dt-messages .ai-think-card {
   max-width: 100%;
@@ -2105,9 +2105,9 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ===================== M: 深度思考模式 — 可爱高级风格 ===================== */
+/* ===================== M: 深度思考模�?�?可爱高级风格 ===================== */
 
-/* 深度思考切换按钮 */
+/* 深度思考切换按�?*/
 .ai-deep-think-toggle {
   display: inline-flex;
   align-items: center;
@@ -2240,7 +2240,7 @@
   border-radius: 10px;
 }
 
-/* 思考过程实时日志 */
+/* 思考过程实时日�?*/
 .ai-progress-thinking-log {
   max-height: 200px;
   overflow-y: auto;
@@ -2271,7 +2271,7 @@
   gap: 4px;
   font-weight: 600;
   color: rgb(66, 155, 122);
-  font-size: 10px;
+  font-size: 11px;
   margin-bottom: 3px;
   padding: 2px 7px;
   background: rgba(140, 196, 158, .12);
@@ -2318,11 +2318,11 @@
 }
 .ai-progress-stop:active { transform: scale(.96); }
 .ai-progress-stop::before {
-  content: '✕';
-  font-size: 10px;
+  content: '�?;
+  font-size: 11px;
 }
 
-/* ===================== V3: 深度思考 think-card (可爱高级) ===================== */
+/* ===================== V3: 深度思�?think-card (可爱高级) ===================== */
 .ai-think-card {
   margin: 12px 0;
   border: 1px solid rgba(140, 196, 158, .16);
@@ -2401,7 +2401,7 @@
   border-radius: 10px;
 }
 .ai-think-chevron {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(120, 145, 138, .7);
   flex-shrink: 0;
   margin-left: 2px;
@@ -2417,7 +2417,7 @@
   max-height: 0; opacity: 0; overflow: hidden;
   padding: 0 16px;
   border-top: 0 solid rgba(140, 196, 158, .1);
-  transition: max-height .35s cubic-bezier(.22,1,.36,1), opacity .28s, padding .26s, border-top-width .26s;
+  transition: opacity .28s, padding .26s, border-top-width .26s;
   box-sizing: border-box;
 }
 .ai-think-card.expanded .ai-think-body {
@@ -2425,7 +2425,7 @@
   padding: 10px 16px 14px;
   border-top-width: 1px;
 }
-/* 答案始终可见，不受折叠影响 */
+/* 答案始终可见，不受折叠影�?*/
 .ai-think-answer {
   padding: 4px 16px 8px;
   color: rgba(55, 70, 65, .92);
@@ -2436,7 +2436,7 @@
   padding: 0 16px 10px;
 }
 
-/* 思考过程 details */
+/* 思考过�?details */
 .ai-think-thinking {
   margin: 4px 0 0;
   font-size: 12px;
@@ -2459,7 +2459,7 @@
 .ai-think-thinking summary::-webkit-details-marker { display: none; }
 .ai-think-thinking summary::marker { display: none; }
 .ai-think-thinking summary::after {
-  content: '▾';
+  content: '�?;
   position: absolute;
   left: 16px;
   font-size: 9px;
@@ -2482,7 +2482,7 @@
 .ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
 .ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 
-/* 思考日志条目 */
+/* 思考日志条�?*/
 .ai-thought-entry {
   padding: 6px 0;
   border-bottom: 1px dashed rgba(140, 196, 158, .18);
@@ -2498,7 +2498,7 @@
   gap: 4px;
   font-weight: 600;
   color: rgb(66, 155, 122);
-  font-size: 10px;
+  font-size: 11px;
   margin-bottom: 3px;
   padding: 2px 8px;
   background: rgba(140, 196, 158, .12);
@@ -2519,7 +2519,7 @@
   max-height: 200px; overflow-y: auto;
 }
 
-/* 答案区 */
+/* 答案�?*/
 .ai-think-answer {
   margin: 10px 0 4px;
   font-size: 14.5px; line-height: 1.8;
@@ -2576,7 +2576,7 @@
   transform: translateY(-1px);
 }
 
-/* 分隔线 */
+/* 分隔�?*/
 .ai-think-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .2), transparent);
@@ -2627,7 +2627,7 @@
 }
 .ai-search-supplement a.ai-search-detail-title:hover { text-decoration: underline; }
 
-/* 进度卡内的思考过程日志 */
+/* 进度卡内的思考过程日�?*/
 .ai-progress-thinking-log {
   max-height: 220px;
   overflow-y: auto;
@@ -2645,7 +2645,7 @@
 .ai-progress-thinking-log::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 .ai-progress-thinking-log:empty { display: none; }
 
-/* 暗色模式 — 与项目主题系统保持一致，使用 data-theme="dark" */
+/* 暗色模式 �?与项目主题系统保持一致，使用 data-theme="dark" */
 [data-theme="dark"] .ai-deep-think-toggle {
   border-color: rgba(127, 187, 172, .22);
   color: rgba(194, 208, 205, .82);
@@ -2796,7 +2796,7 @@
   color: rgb(160, 230, 200);
 }
 
-/* 深度思考二级页面暗色模式 */
+/* 深度思考二级页面暗色模�?*/
 [data-theme="dark"] #panelDeepThink {
   background: linear-gradient(180deg, rgba(18, 26, 30, .98), rgba(14, 22, 26, .98));
 }
@@ -2875,7 +2875,7 @@
 .ai-msg-bubble li { margin: 2px 0; }
 
 
-/* ===== 内联style提取CSS类 ===== */
+/* ===== 内联style提取CSS�?===== */
 .ai-copy-menu {
   position: fixed;
   z-index: 9999;
@@ -3045,3 +3045,4 @@
   background: rgba(140, 196, 158, .1);
   color: rgba(60, 140, 110, .9);
 }
+
