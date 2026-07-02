@@ -1908,6 +1908,24 @@
 .dt-send:active { transform: scale(.96); }
 .dt-send:disabled { opacity: .55; cursor: not-allowed; }
 
+.dt-pause {
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(220, 120, 120, .35);
+  border-radius: 18px;
+  background: rgba(255, 240, 240, .65);
+  color: rgb(200, 80, 80);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, border-color .2s, transform .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dt-pause:hover { background: rgba(255, 225, 225, .85); border-color: rgba(220, 100, 100, .55); }
+.dt-pause:active { transform: scale(.96); }
+
 /* ===================== Deep Think 二级页面专项优化 ===================== */
 
 /* 1. 思考卡片更紧凑 */
