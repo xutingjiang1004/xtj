@@ -266,8 +266,8 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
    - 生活决策: 拆成 优缺点/成本/风险/替代方案 角度
    - 时事/商业: 拆成 背景/数据/影响/趋势 角度
 
-3. **复杂研究/方案对比/跨学科问题**: 4-6 个 agent, complexity: high
-   - 最多 6 个, 每个独立方面, 互不重叠
+3. **复杂研究/方案对比/跨学科问题**: {minComplex}-{maxWorkers} 个 agent, complexity: high
+   - 最多 {maxWorkers} 个, 每个独立方面, 互不重叠
 
 **自我校验:**
 - 代码相关: 确保 agent 会检查语法正确性、边界条件、安全性
@@ -2852,7 +2852,7 @@ async function runMultiAgentFlow(opts) {
   try {
     var plannerPromise = callDeepSeek(
       [
-        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT },
+        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
         { role: 'user', content: message + '\n\n' + (historyContext || '') + '\n\n请输出你的规划 JSON。' }
       ],
       {
