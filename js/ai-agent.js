@@ -2417,16 +2417,18 @@
     // 隐藏底部 dock，防止二级页面后面透出
     setDockBarVisible(false);
 
-    // 已有会话 → 从服务器加载历史消息
-    if (S.dtConversationId) {
+    // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
+    if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading')) {
+      // 已有缓存的 DOM 内容，直接显示
+    } else if (S.dtConversationId) {
       msgs.innerHTML = '';
-      msgs.appendChild(el('div', { style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' }));
+      var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
+      msgs.appendChild(loadHint);
       try {
-        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=50');
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30');
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
-        // 如果指定 convId 没找到消息，尝试加载最近对话
         if (!hasMessages) {
-          var fallback = await apiRequest('GET', '/chat/history?limit=50');
+          var fallback = await apiRequest('GET', '/chat/history?limit=30');
           if (fallback && fallback.ok && Array.isArray(fallback.data && fallback.data.messages) && fallback.data.messages.length > 0) {
             hist = fallback;
             hasMessages = true;
