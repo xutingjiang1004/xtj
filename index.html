@@ -486,31 +486,6 @@
             </div>
         </div>
 
-        <!-- 深度思考二级页面 -->
-        <div class="dock-panel hidden" id="panelDeepThink">
-            <div class="dt-page">
-                <div class="dt-header">
-                    <button type="button" class="dt-back" id="dtBackBtn" aria-label="返回">← 返回</button>
-                    <h3 class="dt-title">深度思考</h3>
-                    <div class="dt-actions">
-                        <button type="button" class="dt-action-btn" id="dtNewChatBtn">新对话</button>
-                        <button type="button" class="dt-action-btn dt-danger" id="dtDeleteChatBtn">删除</button>
-                    </div>
-                </div>
-                <div class="dt-messages" id="dtMessages">
-                    <div class="dt-empty" id="dtEmpty">
-                        <div class="dt-empty-icon">🐾</div>
-                        <div class="dt-empty-title">深度思考</div>
-                        <div class="dt-empty-desc">输入复杂问题，AI 会调用多个领域专家协同分析、搜索资料并总结回复。</div>
-                    </div>
-                </div>
-                <div class="dt-input-bar">
-                    <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入思考..." rows="1"></textarea>
-                    <button type="button" class="dt-send" id="dtSendBtn">发送</button>
-                </div>
-            </div>
-        </div>
-
         <div class="dock-panel" id="panelAi">
                         <div class="photo-wall-container" id="photoWallContainer">
                 <div class="photo-wall-header">
@@ -1632,5 +1607,31 @@
     <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
     <script defer src="js/ai-agent.js?v=20260702_v5_dt_page"></script>
 <script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
+
+<!-- 深度思考二级页面：直接放在 body 下，确保真全屏覆盖 -->
+<div class="dock-panel hidden" id="panelDeepThink">
+    <div class="dt-page">
+        <div class="dt-header">
+            <button type="button" class="dt-back" id="dtBackBtn" aria-label="返回">← 返回</button>
+            <h3 class="dt-title">深度思考</h3>
+            <div class="dt-actions">
+                <button type="button" class="dt-action-btn" id="dtNewChatBtn">新对话</button>
+                <button type="button" class="dt-action-btn dt-danger" id="dtDeleteChatBtn">删除</button>
+            </div>
+        </div>
+        <div class="dt-messages" id="dtMessages">
+            <div class="dt-empty" id="dtEmpty">
+                <div class="dt-empty-icon">🐾</div>
+                <div class="dt-empty-title">深度思考</div>
+                <div class="dt-empty-desc">输入复杂问题，AI 会调用多个领域专家协同分析、搜索资料并总结回复。</div>
+            </div>
+        </div>
+        <div class="dt-input-bar">
+            <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入思考..." rows="1"></textarea>
+            <button type="button" class="dt-send" id="dtSendBtn">发送</button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
