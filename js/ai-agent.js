@@ -2391,14 +2391,27 @@
     // ★ 不再清空 S.dtConversationId，保留会话 ID 以便恢复历史
   }
 
-  async function handleDeepThinkPageSend(text) {
+  // 文件上传状态 (dt 页面)
+  var _dtFileData = null;
+
+  async function handleDeepThinkPageSend(text, fileData) {
     var dtMessagesEl = document.getElementById('dtMessages');
     var input = document.getElementById('dtInput');
     if (!dtMessagesEl || !input) { S.sending = false; return; }
 
+    var originalUserText = text || '';
+
+    // 如果有文件, 追加到消息中
+    if (fileData) {
+      var fileTag = fileData.type.startsWith('image/')
+        ? '\n![' + fileData.name + '](' + fileData.dataUrl + ')'
+        : '\n[' + fileData.name + '](' + fileData.dataUrl + ')';
+      text = text ? text + '\n' + fileTag : fileTag;
+    }
+
     var originalText = text;
     function restoreInputText() {
-      input.value = originalText;
+      input.value = originalUserText;
       input.style.height = 'auto';
       try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
     }
@@ -2873,6 +2886,52 @@
     var delBtn = document.getElementById('dtDeleteChatBtn');
     var sendBtn = document.getElementById('dtSendBtn');
     var input = document.getElementById('dtInput');
+    var fileBtn = document.getElementById('dtFileBtn');
+    var fileInput = document.getElementById('dtFileInp');
+    var filePreview = document.getElementById('dtFilePreview');
+
+    function dtDoSend() {
+      var text = String(input.value || '').trim();
+      var fData = _dtFileData;
+      if (!text && !fData) return;
+      _dtFileData = null;
+      if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+      if (fileInput) fileInput.value = '';
+      handleDeepThinkPageSend(text, fData);
+    }
+
+    // 文件上传
+    if (fileBtn && fileInput) {
+      fileBtn.addEventListener('click', function() { fileInput.click(); });
+      fileInput.addEventListener('change', function() {
+        var f = this.files && this.files[0];
+        if (!f) return;
+        if (f.size > 10 * 1024 * 1024) { notify('文件不能超过 10MB'); return; }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          _dtFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
+          if (filePreview) {
+            filePreview.innerHTML = '';
+            var thumb = f.type.startsWith('image/')
+              ? el('img', { src: e.target.result, class: 'ai-file-thumb' })
+              : el('div', { class: 'ai-file-icon' }, '📄');
+            var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
+            var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '✕');
+            removeBtn.addEventListener('click', function() {
+              _dtFileData = null;
+              filePreview.style.display = 'none';
+              filePreview.innerHTML = '';
+              fileInput.value = '';
+            });
+            filePreview.appendChild(thumb);
+            filePreview.appendChild(info);
+            filePreview.appendChild(removeBtn);
+            filePreview.style.display = 'flex';
+          }
+        };
+        reader.readAsDataURL(f);
+      });
+    }
 
     if (backBtn) backBtn.addEventListener('click', function(ev) {
       ev.preventDefault();
@@ -2923,39 +2982,33 @@
       }
     });
 
-    if (sendBtn) sendBtn.addEventListener('click', function() {
-      var text = String(input.value || '').trim();
-      if (!text) return;
-      if (text.length > 6000) {
-        notify('消息过长（最多 6000 字符），请精简后重试');
-        return;
-      }
-      handleDeepThinkPageSend(text);
-    });
+    if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
 
-    if (input) input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        var text = String(input.value || '').trim();
-        if (!text) return;
-        if (text.length > 6000) {
-          notify('消息过长（最多 6000 字符），请精简后重试');
-          return;
+    if (input) {
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          dtDoSend();
         }
-        handleDeepThinkPageSend(text);
-      }
-    });
-
-    if (input) input.addEventListener('input', function() {
-      try {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-      } catch (e) {}
-    });
+      });
+      input.addEventListener('input', function() {
+        try {
+          input.style.height = 'auto';
+          input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+        } catch (e) {}
+      });
+    }
   }
 
-  async function handleSendMessage(input, sendBtn, messagesEl) {
+  async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
+    // 如果有文件, 追加到消息中
+    if (fileData) {
+      var fileTag = fileData.type.startsWith('image/')
+        ? '\n![' + fileData.name + '](' + fileData.dataUrl + ')'
+        : '\n[' + fileData.name + '](' + fileData.dataUrl + ')';
+      text = text ? text + '\n' + fileTag : fileTag;
+    }
     if (!text) { S.sending = false; return; }
     if (text.length > 6000) {
       notify('消息过长（最多 6000 字符），请精简后重试');
@@ -4141,6 +4194,18 @@ function showChatMessages() {
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
+    // 文件上传按钮 (左边)
+    var fileBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-file-btn',
+      id: 'aiChatFileBtn',
+      'aria-label': '上传文件',
+      title: '上传图片或文件'
+    });
+    fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
+    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx', style: 'display:none' });
+    // 文件预览区域
+    var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
       class: 'ai-chat-input',
       id: 'aiChatMsgInput',
@@ -4174,9 +4239,15 @@ function showChatMessages() {
     }
 
     function doSend() {
-      // 移动端先收起键盘再发送，避免 viewport 闪烁
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
-      handleSendMessage(input, sendBtn, messagesEl);
+      var text = String(input.value || '').trim();
+      if (!text && !_aiChatFileData) return;
+      var fileData = _aiChatFileData;
+      _aiChatFileData = null;
+      filePreview.style.display = 'none';
+      filePreview.innerHTML = '';
+      fileInput.value = '';
+      handleSendMessage(input, sendBtn, messagesEl, fileData);
     }
 
     sendBtn.addEventListener('click', doSend);
@@ -4203,6 +4274,42 @@ function showChatMessages() {
     });
     input.addEventListener('input', autoresize);
 
+    // 文件上传逻辑
+    var _aiChatFileData = null; // { name, type, dataUrl }
+    fileBtn.addEventListener('click', function() { fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+      var f = this.files && this.files[0];
+      if (!f) return;
+      if (f.size > 10 * 1024 * 1024) { notify('文件不能超过 10MB'); return; }
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        _aiChatFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
+        filePreview.innerHTML = '';
+        var thumb;
+        if (f.type.startsWith('image/')) {
+          thumb = el('img', { src: e.target.result, class: 'ai-file-thumb' });
+        } else {
+          thumb = el('div', { class: 'ai-file-icon' }, '📄');
+        }
+        var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
+        var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '✕');
+        removeBtn.addEventListener('click', function() {
+          _aiChatFileData = null;
+          filePreview.style.display = 'none';
+          filePreview.innerHTML = '';
+          fileInput.value = '';
+        });
+        filePreview.appendChild(thumb);
+        filePreview.appendChild(info);
+        filePreview.appendChild(removeBtn);
+        filePreview.style.display = 'flex';
+      };
+      reader.readAsDataURL(f);
+    });
+
+    inputBar.appendChild(fileBtn);
+    inputBar.appendChild(fileInput);
+    inputBar.appendChild(filePreview);
     inputBar.appendChild(input);
     inputBar.appendChild(sendBtn);
     inputBar.appendChild(pauseBtn);
