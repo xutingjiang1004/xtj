@@ -969,7 +969,6 @@
       node = el('div', { class: 'ai-think-card expanded dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
         '</div>' +
@@ -982,7 +981,6 @@
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -1761,7 +1759,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -1771,10 +1768,9 @@
             '<summary><span>查看思考过程</span></summary>' +
             '<div class="ai-think-thinking-body"></div>' +
           '</details>' +
-          '<div class="ai-think-divider"></div>' +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
       var headerEl = node.querySelector('.ai-think-header');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
@@ -2122,7 +2118,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -2651,7 +2646,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
         '</div>' +

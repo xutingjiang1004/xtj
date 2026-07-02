@@ -2428,7 +2428,7 @@
   position: relative;
   cursor: pointer; user-select: none; list-style: none;
   display: flex; align-items: center; gap: 6px;
-  padding: 4px 0 4px 22px;
+  padding: 4px 0;
   color: rgba(80, 110, 100, .85);
   font-size: 12px;
   font-weight: 500;
@@ -2438,15 +2438,6 @@
 .ai-think-thinking summary:hover { color: rgb(48, 138, 106); }
 .ai-think-thinking summary::-webkit-details-marker { display: none; }
 .ai-think-thinking summary::marker { display: none; }
-.ai-think-thinking summary::before {
-  content: '';
-  display: inline-block;
-  width: 14px; height: 14px;
-  border-radius: 50%;
-  background: rgba(140, 196, 158, .18);
-  transition: background .2s, transform .2s;
-  flex-shrink: 0;
-}
 .ai-think-thinking summary::after {
   content: '▾';
   position: absolute;
