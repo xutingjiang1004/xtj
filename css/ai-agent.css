@@ -1674,8 +1674,11 @@
     0 4px 16px rgba(82, 138, 120, .06),
     0 1px 0 rgba(255, 255, 255, .5) inset;
   transition: opacity .3s, border-color .2s, transform .2s;
-  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: none;
   overflow: hidden;
+}
+.ai-progress-card.dt-animate-in {
+  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .ai-progress-card:hover {
   transform: translateY(-1px);
@@ -1758,6 +1761,9 @@
 .ai-progress-thinking-log .ai-thought-entry {
   padding: 5px 0;
   border-bottom: 1px dashed rgba(140, 196, 158, .15);
+  animation: none;
+}
+.ai-progress-thinking-log .ai-thought-entry.dt-animate-in {
   animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .ai-progress-thinking-log .ai-thought-entry:last-child { border-bottom: none; }
@@ -1828,10 +1834,13 @@
   color: rgba(55, 70, 65, .92);
   overflow: hidden;
   transition: border-color .25s, box-shadow .25s, background .25s, transform .2s;
-  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: none;
   box-shadow:
     0 4px 18px rgba(82, 138, 120, .05),
     0 1px 0 rgba(255, 255, 255, .5) inset;
+}
+.ai-think-card.dt-animate-in {
+  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .ai-think-card:hover {
   border-color: rgba(140, 196, 158, .28);
@@ -1975,6 +1984,9 @@
 .ai-thought-entry {
   padding: 6px 0;
   border-bottom: 1px dashed rgba(140, 196, 158, .18);
+  animation: none;
+}
+.ai-thought-entry.dt-animate-in {
   animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .ai-thought-entry:last-child { border-bottom: none; }
