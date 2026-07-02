@@ -3732,7 +3732,6 @@ function showChatMessages() {
     if (!S.deepThinkEnabled && S.deepThink) {
     S.deepThink = false;
     try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
-      try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
       try { refreshDeepThinkToggle(); } catch (e) {}
     }
   }
@@ -3747,7 +3746,7 @@ function showChatMessages() {
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
     }
-    S.deepThink = false;
+    // ★ U3 Bug 4 修复: 不再重置 S.deepThink, 保持用户的 toggle 偏好
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     // 重置所有状态，避免重开后残留
