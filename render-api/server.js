@@ -90,9 +90,10 @@ const DEEP_THINK_CONFIG = {
   PLANNER_TIMEOUT_MS: 60 * 1000,      // Planner 1 分钟
   WORKER_TIMEOUT_MS: 5 * 60 * 1000,   // 单 worker 5 分钟上限
   SYNTHESIZER_TIMEOUT_MS: 3 * 60 * 1000, // Synthesizer 3 分钟
-  MAX_WORKERS: 5,                     // ★ P 改: Planner 最多拆 5 个 (原 10)
-  MIN_WORKERS: 0,                     // ★ P 改: 0 = Planner 可决定不调 agent (直接答)
-  DEFAULT_WORKERS_IF_PLANNER_FAILS: 1, // Planner 失败时 fallback 1 个
+  MAX_WORKERS: 6,                     // 最多 6 个并行 agent
+  MIN_WORKERS: 0,                     // 0 = 允许直接回答, 但复杂问题会强制拆分
+  DEFAULT_WORKERS_IF_PLANNER_FAILS: 3, // Planner 失败时 fallback 3 个通用方向
+  FORCE_SPLIT_MIN_LENGTH: 24,         // 超过此长度且疑似复杂, 强制拆分
   WORKER_MAX_TOOL_ROUNDS: 5,          // 单 worker 内部最多 tool_use 5 轮
   HEARTBEAT_MS: 3000                  // 3s 推一次进度
 };
@@ -112,6 +113,57 @@ function buildHistoryContext(ctx, message) {
   });
   lines.push('\n[当前用户新消息]: ' + (message || ''));
   return lines.join('\n');
+}
+
+// 判断用户问题是否值得强制拆分多个 agent
+function shouldForceSplitAgents(message) {
+  if (!message) return false;
+  var m = String(message).trim();
+  if (m.length < 12) return false;
+  // 简单问候/常识直接答
+  var simplePatterns = /^(你好|您好|在吗|hi|hello|嗨|谢谢|再见|拜拜|请问|什么是).{0,8}[?？]?$/i;
+  if (simplePatterns.test(m)) return false;
+  // 数学/代码单行表达式直接答
+  if (/^[\d\+\-\*\/\^\(\)\s\.=<>!]+$/.test(m.replace(/\s/g, ''))) return false;
+  // 复杂关键词
+  var complexKeywords = [
+    '为什么', '怎么', '如何', '分析', '对比', '比较', '区别', '优劣', '优缺点',
+    '方案', '建议', '推荐', '影响', '原因', '机制', '原理', '趋势', '前景',
+    '策略', '规划', '设计', '架构', '实现', '调试', '排查', '优化', '性能',
+    '选择', '应该', '哪个好', '哪個好', '哪家', '多少钱', '值得', '风险',
+    '法律', '法规', '合同', '维权', '健康', '症状', '治疗', '用药',
+    '股票', '基金', '投资', '理财', '经济', '市场', '房价', '汇率',
+    '旅游', '路线', '攻略', '住宿', '签证', '景点'
+  ];
+  var hasComplexKeyword = complexKeywords.some(function(kw) { return m.indexOf(kw) >= 0; });
+  if (m.length >= DEEP_THINK_CONFIG.FORCE_SPLIT_MIN_LENGTH && hasComplexKeyword) return true;
+  // 长问题默认拆分
+  if (m.length >= 60) return true;
+  return false;
+}
+
+function buildDefaultAgents(message) {
+  var m = String(message || '');
+  var agents = [];
+  // 代码/技术
+  if (/[\{\}\(\)\[\];<>\/\\=]/.test(m) || /(代码|编程|程序|bug|报错|算法|api|框架|库|组件)/i.test(m)) {
+    agents.push({ role: '代码诊断', task_description: '检查代码语法、报错原因、边界条件', need_search: true, search_queries: [m.slice(0, 30) + ' 报错', m.slice(0, 30) + ' 解决方案'] });
+    agents.push({ role: '架构建议', task_description: '评估实现方案、最佳实践、可维护性', need_search: true, search_queries: [m.slice(0, 30) + ' best practice'] });
+    agents.push({ role: '安全审查', task_description: '检查潜在安全风险和性能隐患', need_search: false, search_queries: [] });
+    return agents;
+  }
+  // 决策/购买
+  if (/(对比|比较|区别|优劣|哪个|选择|推荐|建议|值得|买|选)/.test(m)) {
+    agents.push({ role: '方案梳理', task_description: '整理可选方案/产品/选项', need_search: true, search_queries: [m.slice(0, 30)] });
+    agents.push({ role: '优劣分析', task_description: '对比各方案优缺点、适用场景', need_search: true, search_queries: [m.slice(0, 30) + ' 评测'] });
+    agents.push({ role: '决策建议', task_description: '结合需求给出推荐和注意事项', need_search: false, search_queries: [] });
+    return agents;
+  }
+  // 通用分析
+  agents.push({ role: '背景梳理', task_description: '梳理问题背景、核心概念和已知事实', need_search: true, search_queries: [m.slice(0, 40)] });
+  agents.push({ role: '深度分析', task_description: '分析原因、机制、影响因素', need_search: true, search_queries: [m.slice(0, 40) + ' 分析'] });
+  agents.push({ role: '结论建议', task_description: '总结要点并给出 actionable 建议', need_search: false, search_queries: [] });
+  return agents;
 }
 
 function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum) {
@@ -177,18 +229,17 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
 
 **关键决策规则:**
 
-1. **极简单问题 (1+1=?, 你好, 定义/常识)**: agents = [], complexity: low
+1. **极简单问题 (1+1=?, 你好, 定义/常识, 单点查询)**: agents = [], complexity: low
    - 直接给答案, 别装专业. reasoning: "简单问题, 无需拆解"
 
-2. **单点问题 (生日, 天气, 价格)**: agents = [], complexity: low
-   - 直接答. reasoning: "单点查询, 无需拆解"
+2. **其他所有问题 (哪怕只是稍微需要分析、比较、解释原因)**: **请至少拆 2-3 个 agent**, complexity: medium 或 high
+   - 代码问题: 拆成 语法/逻辑/最佳实践/安全性 角度
+   - 科学问题: 拆成 原理/数据/应用/前沿 角度
+   - 生活决策: 拆成 优缺点/成本/风险/替代方案 角度
+   - 时事/商业: 拆成 背景/数据/影响/趋势 角度
 
-3. **多方面/技术问题**: 2-3 个 agent, complexity: medium
-   - 代码问题: 拆成 语法/逻辑/最佳实践 角度
-   - 科学问题: 拆成 原理/数据/应用 角度
-
-4. **复杂研究/方案对比**: 3-5 个 agent, complexity: high
-   - 最多 5 个, 每个独立方面, 互不重叠
+3. **复杂研究/方案对比/跨学科问题**: 4-6 个 agent, complexity: high
+   - 最多 6 个, 每个独立方面, 互不重叠
 
 **自我校验:**
 - 代码相关: 确保 agent 会检查语法正确性、边界条件、安全性
@@ -234,6 +285,12 @@ const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案
 - 法律: "以上为法律常识参考, 具体案件请咨询专业律师"
 - 健康: "以上内容仅供参考, 请务必咨询执业医师"
 - 科学: 区分"已知结论"和"推测/假说", 不确定的标注"可能存在, 需验证"
+
+**多 Agent 整合规则:**
+- 你不是简单罗列每个 agent 的报告, 而是把它们融合成一篇连贯答案.
+- 识别各 agent 观点的共识与分歧, 明确呈现最终判断.
+- 如果 agent 之间有冲突, 指出原因并给出你的综合结论.
+- 充分利用搜索结果, 标注数据来源([来源N]), 不要编造.
 
 **通用规则:**
 - 直接给答案, 不要说"作为一个 AI"、"以下是..."
@@ -2712,8 +2769,8 @@ async function runMultiAgentFlow(opts) {
     plannerContent = plannerResult.content || '';
   } catch (e) {
     console.error('[MULTI-AGENT] Planner failed:', e && e.message);
-    sseSend({ type: 'deep_think_stage', stage: 'error', message: '规划失败，回退单智能体' });
-    plannerContent = '{"complexity":"low","reasoning":"Planner失败，直接回答","agents":[]}';
+    sseSend({ type: 'deep_think_stage', stage: 'error', message: '规划失败，回退通用多智能体' });
+    plannerContent = '{"complexity":"medium","reasoning":"Planner失败，使用通用方向并行分析","agents":[]}';
   }
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -2742,7 +2799,17 @@ async function runMultiAgentFlow(opts) {
   var allSources = [];
   var allQueries = [];
 
-  // 4. agents=[] → 直接回答，不走 worker
+  // 4. agents=[] → 直接回答，不走 worker (除非判定为复杂问题, 强制拆分)
+  if (agentCount === 0) {
+    if (shouldForceSplitAgents(message)) {
+      agents = buildDefaultAgents(message);
+      agentCount = agents.length;
+      plan.complexity = plan.complexity || 'medium';
+      plan.reasoning = plan.reasoning || '问题涉及分析/决策, 自动拆分多方向并行研究';
+      sseSend({ type: 'deep_think_planned', complexity: plan.complexity, reasoning: plan.reasoning, agents: agents.map(function(a) { return { role: a.role, status: 'pending', need_search: a.need_search }; }) });
+    }
+  }
+
   if (agentCount === 0) {
     sseSend({ type: 'deep_think_stage', stage: 'agent', message: '简单问题，直接回答...' });
     try {
@@ -3160,14 +3227,15 @@ async function runDeepThinkWorker(opts) {
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
     '执行规则:\n' +
-    '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次足够, 别反复搜同样的)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
+    '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次, 每次关键词要不同角度)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
     '2. 产出 200-800 字的本方面分析 (按问题需要, 别硬撑字数)\n' +
-    '3. ' + (needSearch ? '输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号' : '不需要引用列表') + '\n' +
-    '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
-    '5. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
-    '6. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
-    '7. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜\n' +
-    '8. ★ 别写成研究报告, 保持自然简洁';
+    '3. 输出结构建议: 【结论】→【关键依据】→【不确定点/注意事项】\n' +
+    '4. ' + (needSearch ? '输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号' : '不需要引用列表') + '\n' +
+    '5. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
+    '6. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
+    '7. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
+    '8. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜\n' +
+    '9. ★ 别写成研究报告, 保持自然简洁';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },

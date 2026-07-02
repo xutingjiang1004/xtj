@@ -1607,6 +1607,301 @@
   text-decoration: none;
 }
 
+/* ===================== Deep Think 二级页面 ===================== */
+#panelDeepThink {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: linear-gradient(180deg, rgba(248, 252, 250, .98), rgba(240, 248, 244, .98));
+}
+#panelDeepThink.hidden { display: none !important; }
+
+.dt-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.dt-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  min-height: 56px;
+  background: rgba(255, 255, 255, .72);
+  border-bottom: 1px solid rgba(140, 196, 158, .16);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.dt-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid rgba(140, 196, 158, .28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .65);
+  color: rgba(70, 95, 85, .9);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .2s, border-color .2s, transform .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dt-back:hover {
+  background: rgba(255, 255, 255, .9);
+  border-color: rgba(66, 155, 122, .45);
+}
+.dt-back:active { transform: scale(.96); }
+
+.dt-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: rgb(55, 85, 75);
+  letter-spacing: .02em;
+}
+
+.dt-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.dt-action-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(140, 196, 158, .28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .65);
+  color: rgba(70, 95, 85, .9);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .2s, border-color .2s, transform .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dt-action-btn:hover {
+  background: rgba(255, 255, 255, .9);
+  border-color: rgba(66, 155, 122, .45);
+}
+.dt-action-btn:active { transform: scale(.96); }
+.dt-action-btn.dt-danger {
+  border-color: rgba(220, 120, 120, .28);
+  color: rgb(200, 80, 80);
+}
+.dt-action-btn.dt-danger:hover {
+  background: rgba(255, 240, 240, .8);
+  border-color: rgba(220, 100, 100, .45);
+}
+
+.dt-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  scroll-behavior: smooth;
+}
+.dt-messages::-webkit-scrollbar { width: 5px; }
+.dt-messages::-webkit-scrollbar-thumb {
+  background: rgba(140, 196, 158, .35);
+  border-radius: 10px;
+}
+
+.dt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  text-align: center;
+  color: rgba(90, 115, 105, .85);
+}
+.dt-empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: .85;
+}
+.dt-empty-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: rgb(55, 85, 75);
+  margin-bottom: 8px;
+}
+.dt-empty-desc {
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(100, 125, 115, .8);
+}
+
+.dt-msg {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 18px;
+  animation: dt-fade-in .25s ease both;
+}
+.dt-msg.user { align-items: flex-end; }
+.dt-msg.assistant { align-items: flex-start; }
+
+.dt-msg-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(120, 145, 138, .8);
+  margin-bottom: 5px;
+  padding: 0 4px;
+}
+.dt-msg.user .dt-msg-label { color: rgb(66, 155, 122); }
+.dt-msg.assistant .dt-msg-label { color: rgba(120, 145, 138, .8); }
+
+.dt-msg-content {
+  max-width: min(92%, 760px);
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: rgba(45, 60, 55, .92);
+  white-space: pre-wrap;
+  word-break: break-word;
+  letter-spacing: .01em;
+}
+.dt-msg.user .dt-msg-content {
+  color: rgba(45, 60, 55, .95);
+  background: rgba(232, 250, 241, .8);
+  padding: 10px 14px;
+  border-radius: 16px 16px 6px 16px;
+  border: 1px solid rgba(140, 196, 158, .2);
+}
+.dt-msg.assistant .dt-msg-content {
+  padding: 2px 4px;
+  color: rgba(45, 60, 55, .92);
+}
+
+.dt-msg-content h1, .dt-msg-content h2, .dt-msg-content h3,
+.dt-msg-content h4, .dt-msg-content h5, .dt-msg-content h6 {
+  margin: .9em 0 .45em;
+  font-weight: 700;
+  line-height: 1.35;
+  color: rgb(45, 75, 65);
+}
+.dt-msg-content p { margin: .6em 0; }
+.dt-msg-content p:first-child { margin-top: 0; }
+.dt-msg-content p:last-child { margin-bottom: 0; }
+.dt-msg-content ul, .dt-msg-content ol { padding-left: 1.6em; }
+.dt-msg-content li { margin: .25em 0; }
+.dt-msg-content pre {
+  background: rgba(140, 196, 158, .08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: .7em 0;
+}
+.dt-msg-content code {
+  background: rgba(140, 196, 158, .12);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: .9em;
+  color: rgb(48, 120, 95);
+}
+.dt-msg-content pre code { background: transparent; padding: 0; color: inherit; }
+.dt-msg-content blockquote {
+  border-left: 3px solid rgba(140, 196, 158, .45);
+  margin: .7em 0;
+  padding: .3em 1em;
+  color: rgba(80, 100, 95, .9);
+  background: rgba(140, 196, 158, .05);
+  border-radius: 0 10px 10px 0;
+}
+.dt-msg-content a {
+  color: rgb(48, 120, 95);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dt-msg-content a:hover { color: rgb(66, 155, 122); }
+.dt-msg-content table { border-collapse: collapse; margin: .7em 0; font-size: 13px; }
+.dt-msg-content th, .dt-msg-content td {
+  border: 1px solid rgba(140, 196, 158, .25);
+  padding: 5px 10px;
+}
+.dt-msg-content th { background: rgba(140, 196, 158, .1); }
+
+.dt-input-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, .78);
+  border-top: 1px solid rgba(140, 196, 158, .16);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.dt-input {
+  flex: 1 1 auto;
+  min-height: 44px;
+  max-height: 140px;
+  padding: 10px 14px;
+  border: 1px solid rgba(140, 196, 158, .28);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .9);
+  color: rgba(45, 60, 55, .95);
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 4px 14px rgba(82, 138, 120, .06);
+  transition: border-color .2s, box-shadow .2s;
+}
+.dt-input::placeholder { color: rgba(120, 145, 138, .75); }
+.dt-input:focus {
+  border-color: rgba(66, 155, 122, .5);
+  box-shadow: 0 0 0 3px rgba(66, 155, 122, .08), 0 6px 18px rgba(82, 138, 120, .1);
+}
+
+.dt-send {
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgb(66, 155, 122), rgb(88, 178, 158));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(66, 155, 122, .2);
+  transition: transform .15s, box-shadow .2s, opacity .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dt-send:hover { box-shadow: 0 8px 22px rgba(66, 155, 122, .28); }
+.dt-send:active { transform: scale(.96); }
+.dt-send:disabled { opacity: .55; cursor: not-allowed; }
+
+/* 深度思考二级页面中的进度卡与 think-card 适配 */
+.dt-messages .ai-progress-card,
+.dt-messages .ai-think-card {
+  max-width: 100%;
+  margin: 12px 0;
+}
+
+@keyframes dt-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ===================== M: 深度思考模式 — 可爱高级风格 ===================== */
 
 /* 深度思考切换按钮 */
@@ -1981,6 +2276,9 @@
   max-height: none;
   overflow-y: visible;
 }
+.ai-think-card.generating .ai-think-body {
+  max-height: none;
+}
 .ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
 .ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 
@@ -2296,6 +2594,73 @@
 [data-theme="dark"] .ai-search-supplement a.ai-search-detail-title {
   color: rgb(160, 230, 200);
 }
+
+/* 深度思考二级页面暗色模式 */
+[data-theme="dark"] #panelDeepThink {
+  background: linear-gradient(180deg, rgba(18, 26, 30, .98), rgba(14, 22, 26, .98));
+}
+[data-theme="dark"] .dt-header,
+[data-theme="dark"] .dt-input-bar {
+  background: rgba(22, 30, 34, .72);
+  border-color: rgba(127, 187, 172, .12);
+}
+[data-theme="dark"] .dt-back,
+[data-theme="dark"] .dt-action-btn {
+  background: rgba(27, 34, 38, .65);
+  border-color: rgba(127, 187, 172, .18);
+  color: rgba(194, 208, 205, .85);
+}
+[data-theme="dark"] .dt-back:hover,
+[data-theme="dark"] .dt-action-btn:hover {
+  background: rgba(34, 44, 48, .85);
+  border-color: rgba(127, 187, 172, .35);
+}
+[data-theme="dark"] .dt-title { color: #f3f4f6; }
+[data-theme="dark"] .dt-empty-title { color: #f3f4f6; }
+[data-theme="dark"] .dt-empty-desc,
+[data-theme="dark"] .dt-empty { color: rgba(162, 176, 178, .8); }
+[data-theme="dark"] .dt-msg-content {
+  color: #e5e7eb;
+}
+[data-theme="dark"] .dt-msg.user .dt-msg-content {
+  background: rgba(34, 77, 65, .45);
+  border-color: rgba(127, 187, 172, .2);
+  color: #e5e7eb;
+}
+[data-theme="dark"] .dt-msg.assistant .dt-msg-content {
+  color: #e5e7eb;
+}
+[data-theme="dark"] .dt-msg-content h1,
+[data-theme="dark"] .dt-msg-content h2,
+[data-theme="dark"] .dt-msg-content h3,
+[data-theme="dark"] .dt-msg-content h4,
+[data-theme="dark"] .dt-msg-content h5,
+[data-theme="dark"] .dt-msg-content h6 { color: #f3f4f6; }
+[data-theme="dark"] .dt-msg-content code {
+  background: rgba(127, 187, 172, .12);
+  color: rgb(160, 230, 200);
+}
+[data-theme="dark"] .dt-msg-content pre { background: rgba(127, 187, 172, .08); }
+[data-theme="dark"] .dt-msg-content blockquote {
+  border-left-color: rgba(127, 187, 172, .4);
+  background: rgba(127, 187, 172, .05);
+  color: rgba(194, 208, 205, .85);
+}
+[data-theme="dark"] .dt-msg-content th,
+[data-theme="dark"] .dt-msg-content td { border-color: rgba(127, 187, 172, .18); }
+[data-theme="dark"] .dt-msg-content th { background: rgba(127, 187, 172, .1); }
+[data-theme="dark"] .dt-msg-content a { color: rgb(160, 230, 200); }
+[data-theme="dark"] .dt-input {
+  background: rgba(28, 35, 39, .9);
+  border-color: rgba(127, 187, 172, .18);
+  color: #e5e7eb;
+}
+[data-theme="dark"] .dt-input::placeholder { color: rgba(162, 176, 178, .65); }
+[data-theme="dark"] .dt-input:focus {
+  border-color: rgba(127, 187, 172, .45);
+  box-shadow: 0 0 0 3px rgba(127, 187, 172, .1), 0 6px 18px rgba(0, 0, 0, .2);
+}
+
 .ai-msg-bubble h1, .ai-msg-bubble h2, .ai-msg-bubble h3,
 .ai-msg-bubble h4, .ai-msg-bubble h5, .ai-msg-bubble h6 {
   margin: 8px 0 4px;
