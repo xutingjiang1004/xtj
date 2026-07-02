@@ -2340,8 +2340,39 @@
     var panel = document.getElementById('panelDeepThink');
     if (!panel) return;
 
-    // 首次打开若没有二级页面会话，则创建一个新会话，避免污染普通聊天会话
-    if (!S.dtConversationId) {
+    var msgs = document.getElementById('dtMessages');
+    if (!msgs) return;
+
+    // 已有会话 → 从服务器加载历史消息
+    if (S.dtConversationId) {
+      msgs.innerHTML = '';
+      msgs.appendChild(el('div', { style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' }));
+      try {
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=50');
+        if (hist && hist.ok && Array.isArray(hist.data && hist.data.messages)) {
+          msgs.innerHTML = '';
+          hist.data.messages.forEach(function(msg) {
+            if (msg.role === 'user') {
+              var userNode = el('div', { class: 'dt-msg user' });
+              userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+              userNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.content || '' }));
+              msgs.appendChild(userNode);
+            } else if (msg.role === 'assistant') {
+              // 用 think-card 渲染助手回复
+              var thinkNode = buildThinkCardFromHistory(msg, msgs);
+              if (thinkNode) msgs.appendChild(thinkNode);
+            }
+          });
+        } else {
+          // 历史为空，显示空状态
+          if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+        }
+      } catch (e) {
+        if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+      }
+    } else {
+      // 首次打开，创建新会话
+      resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
@@ -2360,7 +2391,6 @@
       }, 80);
     }
 
-    var msgs = document.getElementById('dtMessages');
     if (msgs) scrollToBottom(msgs, true);
   }
 
@@ -2380,10 +2410,9 @@
       try { S.deepThinkProgressCard.remove(); } catch (e) {}
     }
 
-    // 清空二级页面输入与消息，保持每次打开都是全新状态
+    // 只清空输入，保留 dtConversationId 以便再次打开时恢复历史
     var input = document.getElementById('dtInput');
     if (input) { input.value = ''; input.style.height = 'auto'; }
-    resetDeepThinkPageEmpty();
 
     S.sending = false;
     S.paused = false;
@@ -2391,7 +2420,7 @@
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     S.abortController = null;
-    S.dtConversationId = null;
+    // ★ 不再清空 S.dtConversationId，保留会话 ID 以便恢复历史
   }
 
   async function handleDeepThinkPageSend(text) {
