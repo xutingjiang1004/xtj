@@ -90,16 +90,27 @@ const DEEP_THINK_CONFIG = {
   PLANNER_TIMEOUT_MS: 60 * 1000,      // Planner 1 分钟
   WORKER_TIMEOUT_MS: 5 * 60 * 1000,   // 单 worker 5 分钟上限
   SYNTHESIZER_TIMEOUT_MS: 3 * 60 * 1000, // Synthesizer 3 分钟
-  MAX_WORKERS: 6,                     // 最多 6 个并行 agent
-  MIN_WORKERS: 0,                     // 0 = 允许直接回答, 但复杂问题会强制拆分
+  MAX_WORKERS: 6,                     // 最多 6 个并行 agent (可由 config.deep_think.max_workers 覆盖)
+  MIN_WORKERS: 0,                     // 0 = 允许直接回答 (可由 config.deep_think.min_workers 覆盖)
   DEFAULT_WORKERS_IF_PLANNER_FAILS: 3, // Planner 失败时 fallback 3 个通用方向
-  FORCE_SPLIT_MIN_LENGTH: 24,         // 超过此长度且疑似复杂, 强制拆分
-  WORKER_MAX_TOOL_ROUNDS: 5,          // 单 worker 内部最多 tool_use 5 轮
+  FORCE_SPLIT_MIN_LENGTH: 24,         // 超过此长度且疑似复杂, 强制拆分 (可由 config.deep_think.force_split_min_length 覆盖)
+  WORKER_MAX_TOOL_ROUNDS: 5,          // 单 worker 内部最多 tool_use (可由 config.deep_think.worker_max_tool_rounds 覆盖)
   HEARTBEAT_MS: 3000                  // 3s 推一次进度
 };
 
 // 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
 const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
+
+// 简单 exact-match 缓存 (TTL 5 分钟, key = userName + '::' + message + '::' + thinking_mode)
+const aiResponseCache = new Map();
+const AI_CACHE_TTL_MS = 5 * 60 * 1000;
+// 每 5 分钟清理过期缓存
+setInterval(function() {
+  var now = Date.now();
+  aiResponseCache.forEach(function(val, key) {
+    if (now > val.expiresAt) aiResponseCache.delete(key);
+  });
+}, 5 * 60 * 1000);
 
 // ===================== 共享工具函数 (提取自 M/R 架构) =====================
 function buildHistoryContext(ctx, message) {
@@ -116,7 +127,9 @@ function buildHistoryContext(ctx, message) {
 }
 
 // 判断用户问题是否值得强制拆分多个 agent
-function shouldForceSplitAgents(message) {
+// minLen: 最小长度阈值, 可从 config.deep_think.force_split_min_length 传入
+function shouldForceSplitAgents(message, minLen) {
+  minLen = minLen || 24;
   if (!message) return false;
   var m = String(message).trim();
   if (m.length < 12) return false;
@@ -136,7 +149,7 @@ function shouldForceSplitAgents(message) {
     '旅游', '路线', '攻略', '住宿', '签证', '景点'
   ];
   var hasComplexKeyword = complexKeywords.some(function(kw) { return m.indexOf(kw) >= 0; });
-  if (m.length >= DEEP_THINK_CONFIG.FORCE_SPLIT_MIN_LENGTH && hasComplexKeyword) return true;
+  if (m.length >= minLen && hasComplexKeyword) return true;
   // 长问题默认拆分
   if (m.length >= 60) return true;
   return false;
@@ -265,6 +278,7 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
 **搜索判断:**
 - 闲聊/常识/简单计算: need_search = false
 - 实时信息/具体数据/事件/API/代码文档: need_search = true
+- **景点/地点/旅游/景区/公园/酒店/餐厅/活动**: need_search = true (用户需要最新信息如门票价格、开放时间、当前状况)
 - 不确定就 true
 
 **agents = [] 时:**
@@ -305,11 +319,11 @@ const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案
 - 你不是简单罗列每个 agent 的报告, 而是把它们融合成一篇连贯答案.
 - 识别各 agent 观点的共识与分歧, 明确呈现最终判断.
 - 如果 agent 之间有冲突, 指出原因并给出你的综合结论.
-- 充分利用搜索结果, 标注数据来源([来源N]), 不要编造.
+- 充分利用搜索结果, 确保数据真实可查, 不要编造.
 
 **通用规则:**
 - 直接给答案, 不要说"作为一个 AI"、"以下是..."
-- 不要列原始 URL, 引用处直接 [来源N] 即可
+- 不要列原始 URL
 - 中文回复, 自然口语化
 - 不确定就说不确定, 别编
 - 代码/列表/标题该用就用, 但**别为了显示专业而过度格式化**`;
@@ -2586,8 +2600,8 @@ async function callDeepSeek(messages, options) {
         tool_calls: toolCalls
       });
 
-      for (var t = 0; t < toolCalls.length; t++) {
-        var tc = toolCalls[t];
+      // ★ 并行执行所有工具调用 (原串行 for 循环改为 Promise.all)
+      var toolResults = await Promise.all(toolCalls.map(async function(tc, t) {
         var tcName = tc.function && tc.function.name ? tc.function.name : '';
         var tcArgs = tc.function && tc.function.arguments ? tc.function.arguments : '{}';
         var tcId = tc.id || ('call_' + Date.now() + '_' + t);
@@ -2596,15 +2610,16 @@ async function callDeepSeek(messages, options) {
         try { toolResult = await toolExecutor(tc); } catch (e) { toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' }; }
         var tElapsed = Date.now() - tStart;
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
-        var infoObj = {
-          id: tcId, name: tcName, args: tcArgs, elapsed_ms: tElapsed,
-          ok: !toolResult || !toolResult.error
-        };
-        if (tcName === 'search_web' && toolResult && typeof toolResult.results_count === 'number') infoObj.results_count = toolResult.results_count;
-        toolCallsInfo.push(infoObj);
-        var toolContent = toolResult ? JSON.stringify(toolResult).slice(0, 8000) : '{}';
-        workingMessages.push({ role: 'tool', tool_call_id: tcId, content: toolContent });
-      }
+        return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
+      }));
+      toolResults.forEach(function(r) {
+        toolCallsInfo.push({ id: r.tcId, name: r.tcName, args: r.tcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
+        if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
+          toolCallsInfo[toolCallsInfo.length - 1].results_count = r.toolResult.results_count;
+        }
+        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 8000) : '{}';
+        workingMessages.push({ role: 'tool', tool_call_id: r.tcId, content: toolContent });
+      });
     }
 
     // 如果循环结束还有 tool_calls（达到 maxToolRounds），最后内容可能为空
@@ -2762,12 +2777,18 @@ async function runMultiAgentFlow(opts) {
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
 
+  // 从 config 覆盖 DEEP_THINK_CONFIG (管理员可在后台自定义)
+  var dtCfg = (config && config.deep_think) || {};
+  var effectiveMaxWorkers = Math.min(parseInt(dtCfg.max_workers) || DEEP_THINK_CONFIG.MAX_WORKERS, 10);
+  var effectiveWorkerToolRounds = parseInt(dtCfg.worker_max_tool_rounds) || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
+  var effectiveForceSplitLen = parseInt(dtCfg.force_split_min_length) || DEEP_THINK_CONFIG.FORCE_SPLIT_MIN_LENGTH;
+
   // 1. 推 init 事件
   sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
   sseSend({ type: 'deep_think_init', message: 'Planner 正在分析问题...', agent_count: 1 });
   sseSend({ type: 'deep_think_stage', stage: 'agent', message: 'Planner 分析中...' });
 
-  // 2. 调用 Planner (★ U3: +超时机制)
+  // 2. 调用 Planner (★ U3: +超时机制 + 流式thinking)
   var plannerContent = '';
   try {
     var plannerPromise = callDeepSeek(
@@ -2775,7 +2796,16 @@ async function runMultiAgentFlow(opts) {
         { role: 'system', content: DEEP_THINK_PLANNER_PROMPT },
         { role: 'user', content: message + '\n\n' + (historyContext || '') + '\n\n请输出你的规划 JSON。' }
       ],
-      { thinking_mode: deepThinkThinkingMode, model: DEEPSEEK_MODEL_REASONER, max_tokens: 2048, response_format: { type: 'json_object' } }
+      {
+        thinking_mode: deepThinkThinkingMode,
+        model: DEEPSEEK_MODEL_REASONER,
+        max_tokens: 2048,
+        response_format: { type: 'json_object' },
+        // ★ 流式推 Planner 的思考过程，用户实时看到规划中的思考，不再空等 15-20 秒
+        onThinkingChunk: function(chunk) {
+          sseSend({ type: 'thinking_chunk', agent_role: 'Planner', chunk: chunk, round: 0 });
+        }
+      }
     );
     var plannerTimeout = new Promise(function(_, reject) {
       setTimeout(function() { reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
@@ -2816,7 +2846,7 @@ async function runMultiAgentFlow(opts) {
 
   // 4. agents=[] → 直接回答，不走 worker (除非判定为复杂问题, 强制拆分)
   if (agentCount === 0) {
-    if (shouldForceSplitAgents(message)) {
+    if (shouldForceSplitAgents(message, effectiveForceSplitLen)) {
       agents = buildDefaultAgents(message);
       agentCount = agents.length;
       plan.complexity = plan.complexity || 'medium';
@@ -2863,7 +2893,8 @@ async function runMultiAgentFlow(opts) {
       },
       thinkingMode: deepThinkThinkingMode,
       needSearch: agent.need_search !== false,
-      historyContext: historyContext
+      historyContext: historyContext,
+      workerMaxToolRounds: effectiveWorkerToolRounds
     }).then(function(wr) {
       if (wr && wr.sources) {
         wr.sources.forEach(function(s) { allSources.push(s); });
@@ -2905,14 +2936,14 @@ async function runMultiAgentFlow(opts) {
   }
 
   if (allSources.length > 0) {
-    var sourceList = '\n\n【搜索结果引用列表 (供 [来源N] 标注使用)】\n';
+    var sourceList = '\n\n【搜索结果引用列表 (供整合参考)】\n';
     allSources.forEach(function(sr, idx) {
       sourceList += (idx + 1) + '. ' + (sr.title || '无标题') + ' - ' + (sr.url || '') + '\n';
     });
     synthMessages.push({ role: 'user', content: sourceList });
   }
 
-  synthMessages.push({ role: 'user', content: '请基于以上各方向的分析结果，整合成最终答案发给用户。引用搜索用 [来源N] 标注。' });
+  synthMessages.push({ role: 'user', content: '请基于以上各方向的分析结果，整合成最终答案发给用户。不要列来源和链接。' });
 
   var synthContent = '';
   var synthUsage = null;
@@ -3022,7 +3053,7 @@ async function runDeepThinkAgent(opts) {
     '【第一步：理解问题】\n' +
     '- 先判断问题领域：闲聊 / 技术/代码 / 金融/数据 / 科学 / 法律 / 健康 / 通用\n' +
     '- 找出问题的核心诉求是什么\n' +
-    '- 判断是否需要搜索：纯闲聊/常识/简单计算 → 不搜；需要最新数据/具体事件/实时信息 → 搜\n' +
+    '- 判断是否需要搜索：纯闲聊/常识/简单计算 → 不搜；需要最新数据/具体事件/景点/地点/旅游/实时信息 → 搜\n' +
     '\n' +
     '【第二步：分析推理】\n' +
     '- 如果需要搜索：拆成 1-3 个精准关键词，逐一搜索，别重复搜同样的\n' +
@@ -3037,7 +3068,7 @@ async function runDeepThinkAgent(opts) {
     '  · 一般问答 → 一段话，说清楚即可\n' +
     '  · 复杂分析 → 分条列点，但别写成论文，保持口语化\n' +
     lengthHintLine +
-    '- 引用搜索来源用 [来源N] 标注，N 从 1 开始\n' +
+    '- 基于搜索结果的回答要准确，不确定的如实说\n' +
     '- 不确定的事如实说"不太确定"，别编\n' +
     '- 别用"作为一个 AI""根据我的分析"之类的废话开场\n' +
     '- 别用"## 一、引言"这种论文体，自然说话就好';
@@ -3227,6 +3258,7 @@ async function runDeepThinkWorker(opts) {
   if (['low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
   var needSearch = opts.needSearch !== false;
   var workerHistoryContext = opts.historyContext || '';
+  var workerMaxToolRounds = opts.workerMaxToolRounds || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
 
   var sources = [];
   var queries = [];
@@ -3245,7 +3277,7 @@ async function runDeepThinkWorker(opts) {
     '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次, 每次关键词要不同角度)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
     '2. 产出 200-800 字的本方面分析 (按问题需要, 别硬撑字数)\n' +
     '3. 输出结构建议: 【结论】→【关键依据】→【不确定点/注意事项】\n' +
-    '4. ' + (needSearch ? '输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号' : '不需要引用列表') + '\n' +
+    '4. ' + (needSearch ? '输出搜索到的关键信息，确保准确' : '不需要搜索，直接基于知识回答') + '\n' +
     '5. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
     '6. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
     '7. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
@@ -3260,7 +3292,7 @@ async function runDeepThinkWorker(opts) {
   // ★ U3: 超时机制 — 对每个 worker 单次 callDeepSeek 用 Promise.race 强制执行超时
   var workerTimeoutMs = DEEP_THINK_CONFIG.WORKER_TIMEOUT_MS;
 
-  for (var round = 1; round <= DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS; round++) {
+  for (var round = 1; round <= workerMaxToolRounds; round++) {
     if (cancelToken.cancelled) break;
     if (timeLeft() < 30000) { console.log('[DEEP-THINK] worker time budget low, breaking'); break; }
 
@@ -7108,7 +7140,7 @@ function buildAiCorePrompt(config) {
 
   // 联网搜索
   if (allowWebSearch) {
-    lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用，引用结果用 [来源N] 标注。');
+    lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用。');
   }
 
   // 回复风格 — 管理员可配置，所有字段全部接入
@@ -7194,7 +7226,16 @@ const AI_DEFAULT_CONFIG = {
   deep_think: {
     enabled: true,                    // 是否启用深度思考模式 (前端 toggle 可用)
     default_thinking_mode: 'max',     // Planner/Worker/Synthesizer 默认思考程度 (low/medium/high/max)
-    max_workers: 5,                   // Planner 最多拆几个 agent (运行时也受 DEEP_THINK_CONFIG.MAX_WORKERS 限制)
+    max_workers: 6,                   // Planner 最多拆几个 agent
+    min_workers: 0,                   // 最小 agent 数 (0 = 允许直接回答)
+    force_split_min_length: 24,       // 问题超过此长度且含复杂关键词时强制拆分
+    worker_max_tool_rounds: 5,        // 单 worker 内部最多 tool_use 轮数
+    low_max_tokens: 4096,             // low 模式最大 token
+    medium_max_tokens: 16384,         // medium 模式最大 token
+    high_max_tokens: 32768,           // high 模式最大 token
+    low_max_tool_rounds: 0,           // low 模式最大工具轮数
+    medium_max_tool_rounds: 2,        // medium 模式最大工具轮数
+    high_max_tool_rounds: 4,          // high 模式最大工具轮数
     require_history_injection: true   // 是否把 history 注入到 Planner/Worker/Synthesizer
   },
   security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
@@ -7404,47 +7445,70 @@ async function handleDeepThinkChat(req, res) {
       'max';
     if (['low', 'medium', 'high', 'max'].indexOf(finalThinkingMode) < 0) finalThinkingMode = 'max';
 
+    // ★ 缓存检查: exact-match, TTL 5分钟
+    var cacheKey = userName + '::' + message + '::' + finalThinkingMode;
+    var cachedHit = aiResponseCache.get(cacheKey);
+    if (cachedHit && cachedHit.expiresAt > Date.now()) {
+      console.log('[AI-CACHE] 缓存命中, 直接返回');
+      var nowTs = Date.now();
+      sseSend({
+        type: 'done',
+        content: cachedHit.content,
+        sanitized_content: cachedHit.content,
+        conversation_id: convId,
+        deep_think: true,
+        thinking_mode: finalThinkingMode,
+        model: DEEPSEEK_MODEL_REASONER,
+        usage: cachedHit.usage || null,
+        agent_count: cachedHit.agent_count || 1,
+        search_count: 0,
+        search_expires_at: 0,
+        duration_ms: 0,
+        remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+      });
+      activeDeepThinkJobs.delete(convId);
+      return safeEnd();
+    }
+
     // 6. 运行多 agent 流程
     var flowResult = null;
     try {
 
-      // ★ P 改: 根据思考程度选择单智能体或多人能体, 并差异化传参
-      if (finalThinkingMode === 'max') {
-        // max → 多智能体 (Planner→Workers→Synthesizer)
-        sseSend({ type: 'deep_think_stage', stage: 'init', message: '深度思考已启动, Planner 分析中...' });
-        flowResult = await runMultiAgentFlow({
-          res: res, userName: userName, message: message, convId: convId,
-          config: config, ctx: ctx, startTime: startTime,
-          cancelToken: cancelToken, thinking_mode: finalThinkingMode
-        });
-      } else {
-        // low/medium/high → 单智能体, 差异化参数
-        var agentOpts = {
-          res: res, userName: userName, message: message, convId: convId,
-          config: config, ctx: ctx, startTime: startTime,
-          cancelToken: cancelToken, thinking_mode: finalThinkingMode
-        };
-        if (finalThinkingMode === 'low') {
-          // low: 禁止搜索, 短答案
-          agentOpts.disableSearch = true;
-          agentOpts.max_tool_rounds = 0;
-          agentOpts.max_tokens = 4096;
-          agentOpts.answerLengthHint = 'short';
-        } else if (finalThinkingMode === 'medium') {
-          // medium: 允许搜索, 最多 2 轮
-          agentOpts.disableSearch = false;
-          agentOpts.max_tool_rounds = 2;
-          agentOpts.max_tokens = 16384;
-          agentOpts.answerLengthHint = 'normal';
+        // ★ P 改: 根据思考程度选择单智能体或多人能体, 并差异化传参 (参数从 config 读取)
+        var dt = (config && config.deep_think) || {};
+        if (finalThinkingMode === 'max') {
+          // max → 多智能体 (Planner→Workers→Synthesizer)
+          sseSend({ type: 'deep_think_stage', stage: 'init', message: '深度思考已启动, Planner 分析中...' });
+          flowResult = await runMultiAgentFlow({
+            res: res, userName: userName, message: message, convId: convId,
+            config: config, ctx: ctx, startTime: startTime,
+            cancelToken: cancelToken, thinking_mode: finalThinkingMode
+          });
         } else {
-          // high: 允许搜索, 最多 4 轮
-          agentOpts.disableSearch = false;
-          agentOpts.max_tool_rounds = 4;
-          agentOpts.max_tokens = 32768;
-          agentOpts.answerLengthHint = 'long';
+          // low/medium/high → 单智能体, 差异化参数 (从 config 读取, 可后台自定义)
+          var agentOpts = {
+            res: res, userName: userName, message: message, convId: convId,
+            config: config, ctx: ctx, startTime: startTime,
+            cancelToken: cancelToken, thinking_mode: finalThinkingMode
+          };
+          if (finalThinkingMode === 'low') {
+            agentOpts.disableSearch = true;
+            agentOpts.max_tool_rounds = parseInt(dt.low_max_tool_rounds) || 0;
+            agentOpts.max_tokens = parseInt(dt.low_max_tokens) || 4096;
+            agentOpts.answerLengthHint = 'short';
+          } else if (finalThinkingMode === 'medium') {
+            agentOpts.disableSearch = false;
+            agentOpts.max_tool_rounds = parseInt(dt.medium_max_tool_rounds) || 2;
+            agentOpts.max_tokens = parseInt(dt.medium_max_tokens) || 16384;
+            agentOpts.answerLengthHint = 'normal';
+          } else {
+            agentOpts.disableSearch = false;
+            agentOpts.max_tool_rounds = parseInt(dt.high_max_tool_rounds) || 4;
+            agentOpts.max_tokens = parseInt(dt.high_max_tokens) || 32768;
+            agentOpts.answerLengthHint = 'long';
+          }
+          flowResult = await runDeepThinkAgent(agentOpts);
         }
-        flowResult = await runDeepThinkAgent(agentOpts);
-      }
     } catch (e) {
       console.error('[DEEP-THINK] flow exception:', e && e.message);
       // ★ U3: 降级兜底 — 深度思考失败时, 用简化单智能体 (无工具/低思考) 尝试直接回答
@@ -7551,6 +7615,23 @@ async function handleDeepThinkChat(req, res) {
       } catch (e) {
         console.error('[DEEP-THINK] save messages failed:', e.message);
       }
+    }
+
+    // ★ 写入缓存
+    if (!aborted && finalContent && !flowResult.cancelled) {
+      try {
+        aiResponseCache.set(cacheKey, {
+          content: finalContent,
+          usage: synthUsage,
+          agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
+          expiresAt: Date.now() + AI_CACHE_TTL_MS
+        });
+        // 限制缓存大小
+        if (aiResponseCache.size > 500) {
+          var oldestKey = aiResponseCache.keys().next().value;
+          if (oldestKey) aiResponseCache.delete(oldestKey);
+        }
+      } catch (e) {}
     }
 
     // 11. 推 done 事件
