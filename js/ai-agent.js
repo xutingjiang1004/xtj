@@ -832,11 +832,16 @@
   function scrollToBottom(container, force) {
     if (!container) return;
     if (!force && !S.autoScrollPinned) return;
+    // V5: 每帧最多一次，rAF 合并，避免高频写入触发 reflow
+    if (container._dtScrollRaf) return;
+    container._dtScrollRaf = true;
     try {
       requestAnimationFrame(function() {
+        container._dtScrollRaf = false;
         try { container.scrollTop = container.scrollHeight; } catch (e) {}
       });
     } catch (e2) {
+      container._dtScrollRaf = false;
       try { container.scrollTop = container.scrollHeight; } catch (e3) {}
     }
   }
@@ -970,7 +975,7 @@
 
     var node;
     if (simpleMode) {
-      // 二级页面：简洁结构，无 details/summary/chevron，思考过程完全展开
+      // 二级页面历史消息：思考过程默认收起，答案直接可见
       node = el('div', { class: 'ai-think-card expanded dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
@@ -979,10 +984,26 @@
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
-          (thinkingLog.length > 0 ? '<div class="ai-think-thinking-body"></div>' : '') +
+          (thinkingLog.length > 0 ?
+            '<details class="ai-think-thinking">' +
+              '<summary><span class="ai-thinking-summary-text">查看思考过程 (' + thinkingLog.length + ' 步)</span><span class="ai-thinking-chevron">▾</span></summary>' +
+              '<div class="ai-think-thinking-body"></div>' +
+            '</details>' : '') +
+          (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
           '<div class="ai-think-answer"></div>' +
           '<div class="ai-msg-footer"></div>' +
         '</div>';
+
+      // 点击 header 切换 details 展开/收起
+      var headerEl2 = node.querySelector('.ai-think-header');
+      headerEl2.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var detailsEl = node.querySelector('.ai-think-thinking');
+        if (detailsEl) {
+          detailsEl.open = !detailsEl.open;
+        }
+      });
     } else {
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
@@ -1052,11 +1073,9 @@
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
-        // 非简洁模式才更新 summary
-        if (!simpleMode) {
-          var summaryEl = node.querySelector('.ai-think-thinking summary span:last-child');
-          if (summaryEl) summaryEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
-        }
+        // 更新 summary 显示合并后的步数（两种模式都更新）
+        var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
       }
     }
 
@@ -1285,9 +1304,12 @@
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
-    // V4: 基于时间推进，适配不同刷新率；plainStream 更慢营造流水感
+    // V5: 基于时间推进，适配不同刷新率；plainStream 单文本节点 + 微批次，避免每帧建节点卡顿
     var lastFrameTime = 0;
-    var charsPerMs = options.plainStream ? 0.35 : 0.65;
+    var charsPerMs = options.plainStream ? 0.55 : 0.7;
+    // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
+    var plainTextNode = null;
+    var plainTextBuffer = '';
     // V3: 末尾呼吸竖线光标 (替代闪光光点)
     var cursor = null;
     function ensureCursor() {
@@ -1296,7 +1318,13 @@
         cursor = document.createElement('span');
         cursor.className = 'ai-stream-cursor';
         cursor.setAttribute('aria-hidden', 'true');
-        targetEl.appendChild(cursor);
+        if (options.plainStream && plainTextNode && plainTextNode.parentNode === targetEl) {
+          // 插在 plainTextNode 之后
+          if (plainTextNode.nextSibling) targetEl.insertBefore(cursor, plainTextNode.nextSibling);
+          else targetEl.appendChild(cursor);
+        } else {
+          targetEl.appendChild(cursor);
+        }
       } catch (e) {}
     }
     function removeCursor() {
@@ -1310,22 +1338,30 @@
       rafId = 0;
     }
 
+    function ensurePlainTextNode() {
+      if (plainTextNode && plainTextNode.parentNode === targetEl) return plainTextNode;
+      // 初始化时插入新文本节点（放在光标前面，光标可能尚未存在）
+      plainTextNode = document.createTextNode('');
+      targetEl.insertBefore(plainTextNode, cursor || null);
+      return plainTextNode;
+    }
+
     function emitText(forceAll, budget) {
       if (cancelled || !targetEl) return;
       if (!pending) {
-        targetEl.classList.remove(streamClass);
+        if (streamClass) targetEl.classList.remove(streamClass);
         return;
       }
-      targetEl.classList.add(streamClass);
+      if (streamClass) targetEl.classList.add(streamClass);
       var next = '';
       if (reducedMotion || forceAll) {
         next = pending;
         pending = '';
       } else {
-        // V4: 基于时间 budget 推进，帧率无关；plainStream 直接追加文本节点
-        var frameBudget = Math.max(1, Math.floor(budget || 12));
+        // V5: 基于时间 budget 推进，帧率无关；plainStream 累积到缓冲区一帧只写一次
+        var frameBudget = Math.max(1, Math.floor(budget || 16));
         while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 12, frameBudget - next.length) }));
+          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 16, frameBudget - next.length) }));
           if (!chunk) break;
           next += chunk;
           pending = pending.slice(chunk.length);
@@ -1334,9 +1370,11 @@
       if (!next) return;
       rendered += next;
       if (options.plainStream) {
-        // 流水模式：直接追加文本节点，避免整段 innerHTML 重排
-        var textNode = document.createTextNode(next);
-        targetEl.insertBefore(textNode, cursor || null);
+        // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
+        plainTextBuffer += next;
+        var node = ensurePlainTextNode();
+        // 用 data 设置文本，高效
+        try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
         targetEl.innerHTML = renderMarkdown(rendered);
       }
@@ -1345,7 +1383,7 @@
         try { options.onRender(rendered); } catch (e2) {}
       }
       if (!pending) {
-        targetEl.classList.remove(streamClass);
+        if (streamClass) targetEl.classList.remove(streamClass);
         if (finished && typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -2476,6 +2514,11 @@
       } catch (e) {}
     }
 
+    // 在显示面板前先定位到最底部（无动画），避免用户看到从顶部滚动的过程
+    if (msgs) {
+      try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
+    }
+
     panel.classList.remove('hidden');
     panel.classList.add('active');
 
@@ -2485,8 +2528,6 @@
         try { input.focus(); } catch (e) {}
       }, 80);
     }
-
-    if (msgs) scrollToBottom(msgs, true);
   }
 
   function closeDeepThinkPage() {
