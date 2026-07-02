@@ -121,10 +121,11 @@ setInterval(function() {
 function buildHistoryContext(ctx, message) {
   if (!ctx || !Array.isArray(ctx.history) || ctx.history.length === 0) return '';
   var lines = ['\n\n[历史对话上下文 (重要! 你必须看到这些)]\n'];
-  var recentHistory = ctx.history.slice(-10);
+  // ★ 缓存优化：最近 6 条 (原 10)，每条 ≤ 500 字符。太多历史会撑爆 user 消息
+  var recentHistory = ctx.history.slice(-6);
   recentHistory.forEach(function(h, i) {
     var role = h.role === 'user' ? '用户' : (h.role === 'assistant' ? 'AI' : h.role);
-    var content = String(h.content || '').slice(0, 800);
+    var content = String(h.content || '').slice(0, 500);
     lines.push((i + 1) + '. [' + role + '] ' + content);
   });
   lines.push('\n[当前用户新消息]: ' + (message || ''));
@@ -157,6 +158,25 @@ function shouldForceSplitAgents(message, minLen) {
   if (m.length >= minLen && hasComplexKeyword) return true;
   // 长问题默认拆分
   if (m.length >= 60) return true;
+  return false;
+}
+
+// 判定消息是否完全无需多 agent：短消息、纯情绪/指令词
+// 即使有历史上下文，对这种新消息也直接简短回答，不走多 agent
+function isTrivialNewMessage(message) {
+  if (!message) return true;
+  var m = String(message).trim();
+  if (!m) return true;
+  // 太短（≤6 字）一律 trivial
+  if (m.length <= 6) return true;
+  // 去掉 [图片:...] / [文件:...] 标记后的纯文本
+  var cleaned = m.replace(/\[(图片|文件)[^\]]*\]/g, '').trim();
+  if (cleaned.length <= 6) return true;
+  // 常见的极简情绪/指令词（即使在历史后也无需多 agent）
+  var trivialPatterns = /^(停|滚|哈哈+|呵呵+|呵呵呵+|嗯+|哦+|啊+|哇+|耶+|好+|行+|可以+|不对+|是的+|没错+|666+|233+|哈哈哈+|嘿嘿+|嘻嘻+|ok|OK|no |no$|yes|yes$|yep|yeah|nope|草|艹|牛逼|nb|牛|强|赞|溜|服|呕|吐|笑死|笑哭|笑)|[\.\!\?\。，！？]{1,5}$/;
+  if (trivialPatterns.test(cleaned)) return true;
+  // 单字/双字回复
+  if (/^[\u4e00-\u9fa5]{1,3}$/.test(cleaned)) return true;
   return false;
 }
 
@@ -388,6 +408,23 @@ const AI_TOOLS = [
         properties: {}
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'compress_history',
+      description: '压缩历史对话。当历史消息已经很长（>10 条或上下文快接近模型上限），你判断继续累加会导致响应变慢/费用变高/超过上下文限制时，主动调用此工具压缩历史。压缩后会用一段简洁的摘要替换原历史（保留关键事实和上下文），后续对话继续基于摘要+最近几条消息。\n\n调用时机建议：\n- 历史消息 ≥ 8 条 且 累计内容很多\n- 用户聊到完全不相关的新话题，旧的细节可以丢\n- 你感觉前面的细节对你回答当前问题没用了\n\n压缩后只需简短回答，无需重复摘要内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: {
+            type: 'string',
+            description: '对历史的精炼摘要。包含：用户身份/偏好/重要事实、对话主线、未解决问题。每条用一行，不要超过 800 字。'
+          }
+        },
+        required: ['summary']
+      }
+    }
   }
 ];
 
@@ -438,6 +475,11 @@ async function executeToolCall(toolCall) {
       var weekday = weekdays[now.getDay()];
       var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
       return { tool_name: name, content: timeResult };
+    }
+    case 'compress_history': {
+      var summary = String(args.summary || '').trim().slice(0, 2000);
+      if (!summary) return { tool_name: name, error: '摘要为空' };
+      return { tool_name: name, content: '✓ 历史已压缩，' + summary.length + ' 字符摘要已应用。后续对话基于此摘要 + 最近消息继续。', _compressed: true, summary: summary };
     }
     default:
       return { tool_name: name, error: '未知工具: ' + name };
@@ -2683,6 +2725,25 @@ async function callDeepSeek(messages, options) {
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
         return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
       }));
+
+      // ★ 缓存优化：处理 compress_history — 用摘要替换历史（保留 system + 最近 2 条）
+      var compressSummary = null;
+      toolResults.forEach(function(r) {
+        if (r.tcName === 'compress_history' && r.toolResult && r.toolResult._compressed && r.toolResult.summary) {
+          compressSummary = r.toolResult.summary;
+        }
+      });
+      if (compressSummary) {
+        var sysMsgs = workingMessages.filter(function(m) { return m.role === 'system'; });
+        var userAsst = workingMessages.filter(function(m) { return m.role === 'user' || m.role === 'assistant'; });
+        // 保留 system + 最近 2 条 user/assistant
+        var keep = userAsst.slice(-2);
+        workingMessages = sysMsgs.concat([
+          { role: 'user', content: '[历史摘要] ' + compressSummary + '\n(以上是之前对话的摘要。最近 2 条消息保留在下方)' },
+          { role: 'assistant', content: '已了解历史摘要，请继续回答当前问题。' }
+        ]).concat(keep);
+        try { console.log('[DEEPSEEK] history compressed to summary, new length:', workingMessages.length, 'summary chars:', compressSummary.length); } catch (e) {}
+      }
       toolResults.forEach(function(r) {
         toolCallsInfo.push({ id: r.tcId, name: r.tcName, args: r.tcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
         if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
@@ -2847,6 +2908,31 @@ async function runMultiAgentFlow(opts) {
   var historyContext = buildHistoryContext(ctx, message);
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
+
+  // ★ 极简新消息直接简短回答：跳过 Planner + Workers + Synthesizer
+  // 适用于"停"、"滚"、"666"、单字回复等，无需多 agent
+  if (isTrivialNewMessage(message)) {
+    sseSend({ type: 'deep_think_init', message: '极简问题，直接回答...', agent_count: 0 });
+    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '极简问题，直接回答...' });
+    try {
+      var corePrompt = buildAiCorePrompt(config);
+      var directPrompt = corePrompt + '\n\n用户新消息: ' + message + '\n\n' + (historyContext || '') + '\n\n这是极简消息（短/情绪/指令词），不要做任何深度分析或研究，直接给一个简短自然的回答（1-2 句话）。不要搜索。';
+      var directResult = await callDeepSeek(
+        [{ role: 'system', content: directPrompt }],
+        { thinking_mode: deepThinkThinkingMode, max_tokens: 1024,
+          onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+        }
+      );
+      var fakePlannerTrivial = { complexity: 'low', reasoning: '极简消息，直接回答', agent_count: 0, agents: [] };
+      return {
+        cancelled: false, finalContent: directResult.content || '', planner: fakePlannerTrivial, worker_results: [],
+        thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
+        search_count: 0, search_results: [], search_query: '', sources: [], queries: []
+      };
+    } catch (e) {
+      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: DEEPSEEK_MODEL_REASONER, search_count: 0, search_results: [], sources: [], queries: [] };
+    }
+  }
 
   // 从 config 覆盖 DEEP_THINK_CONFIG (管理员可在后台自定义)
   var dtCfg = (config && config.deep_think) || {};
@@ -3118,31 +3204,14 @@ async function runDeepThinkAgent(opts) {
     lengthHintLine = '\n- 本次思考程度为 high/max，可根据问题需要适当展开，上限不限\n';
   }
 
+  // ★ 缓存优化：紧凑 prompt，节省 token
   var DEEP_THINK_AGENT_PROMPT = corePrompt + '\n\n' +
-    '你现在是"深度思考模式"下的分析助手。你的工作方式分三步：\n' +
-    '\n' +
-    '【第一步：理解问题】\n' +
-    '- 先判断问题领域：闲聊 / 技术/代码 / 金融/数据 / 科学 / 法律 / 健康 / 通用\n' +
-    '- 找出问题的核心诉求是什么\n' +
-    '- 判断是否需要搜索：纯闲聊/常识/简单计算 → 不搜；需要最新数据/具体事件/景点/地点/旅游/实时信息 → 搜\n' +
-    '\n' +
-    '【第二步：分析推理】\n' +
-    '- 如果需要搜索：拆成 1-3 个精准关键词，逐一搜索，别重复搜同样的\n' +
-    '- 如果不需要：直接基于已有知识组织答案\n' +
-    '- 代码问题：检查语法正确性、边界条件、安全性\n' +
-    '- 金融/法律/健康问题：确保添加必要的免责声明\n' +
-    '- 复杂问题先分解成几个方面，想清楚每个方面再整合\n' +
-    '\n' +
-    '【第三步：组织答案】\n' +
-    '- 根据问题复杂度决定答案长度：\n' +
-    '  · 简单问题（"你好""1+1="）→ 几个字到一两句\n' +
-    '  · 一般问答 → 一段话，说清楚即可\n' +
-    '  · 复杂分析 → 分条列点，但别写成论文，保持口语化\n' +
+    '你处于"深度思考模式"。三步工作：\n' +
+    '1) 理解：判断领域(闲聊/代码/金融/科学/法律/健康/通用)，是否需搜(常识/闲聊/计算 → 不搜；实时数据/事件/地点 → 搜)。\n' +
+    '2) 分析：需搜则拆 1-3 个不同关键词；不搜则直接基于知识。代码要查语法/边界/安全。金融/法律/健康加免责声明。\n' +
+    '3) 回答：按复杂度控长度——简单问题 1-2 句，一般问答一段话，复杂分析分条但口语化。\n' +
     lengthHintLine +
-    '- 基于搜索结果的回答要准确，不确定的如实说\n' +
-    '- 不确定的事如实说"不太确定"，别编\n' +
-    '- 别用"作为一个 AI""根据我的分析"之类的废话开场\n' +
-    '- 别用"## 一、引言"这种论文体，自然说话就好';
+    '不确定就说不确定。别写"作为 AI/根据分析"开场。别用"## 一、引言"论文体。';
 
   // ★ R: 取消 token 检查
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -3344,16 +3413,16 @@ async function runDeepThinkWorker(opts) {
     (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
-    '执行规则:\n' +
-    '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次, 每次关键词要不同角度)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
-    '2. 产出 200-800 字的本方面分析 (按问题需要, 别硬撑字数)\n' +
-    '3. 输出结构建议: 【结论】→【关键依据】→【不确定点/注意事项】\n' +
-    '4. ' + (needSearch ? '输出搜索到的关键信息，确保准确' : '不需要搜索，直接基于知识回答') + '\n' +
-    '5. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
-    '6. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
-    '7. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
-    '8. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜\n' +
-    '9. ★ 别写成研究报告, 保持自然简洁';
+    '执行规则 (务必精炼, 不要废话):\n' +
+    '1. ' + (needSearch ? '最多搜 2 次, 关键词要不同角度, 别反复搜同样的' : '**不调用** search_web, 直接基于知识回答') + '\n' +
+    '2. 产出 150-500 字的本方面分析 (按问题需要, **别硬撑字数**, 简单问题 1-2 句话即可)\n' +
+    '3. 输出结构: 【结论】→【关键依据】→【不确定点】(简单问题可省略依据/不确定点)\n' +
+    '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
+    '5. 不要做最终总结, Synthesizer 会整合\n' +
+    '6. 严禁以下废话开头: "考虑历史"/"根据系统提示"/"作为 AI"/"我们需要"/"根据规则"\n' +
+    '7. 直接开始分析本方面, 不要先复述用户问题或解释你在做什么\n' +
+    '8. ★ 看到 [历史对话上下文] 时, 只用它理解语境, 不要把历史当新问题去搜\n' +
+    '9. ★ 别写成研究报告, 像专家简短回答一样';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },
@@ -7010,7 +7079,10 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
   Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '50000', 10) || 50000, 1000),
   100000
 );
-const AI_CHAT_HISTORY_LIMIT = 10;
+// ★ 缓存优化：历史消息保留 20 条 (原 10)，更稳定的前缀，命中率更高
+// 同时每条历史消息截断到 4000 字符 (~1500 tokens)，防止单条长消息撑爆请求
+const AI_CHAT_HISTORY_LIMIT = 20;
+const AI_CHAT_HISTORY_MSG_MAX_CHARS = 4000;
 const AI_CHAT_HOURLY_IP_LIMIT = 200;
 
 // 生成简短的 conversation_id
@@ -7194,60 +7266,38 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
 function buildAiCorePrompt(config) {
   var cfg = migrateConfig(config || {});
   var name = String(cfg.name || 'XTJ 智能助手').slice(0, 30);
-  var persona = String(cfg.persona || '').slice(0, 500);
-  var tone = String(cfg.tone || '').slice(0, 200);
-  var sysPrompt = String(cfg.system_prompt || '').slice(0, 2000);
+  var persona = String(cfg.persona || '').slice(0, 300);
+  var sysPrompt = String(cfg.system_prompt || '').slice(0, 1000);
   var rs = cfg.reply_style || {};
   var allowWebSearch = cfg.allow_web_search === true || (cfg.search && cfg.search.allow_web_search === true);
 
+  // ★ 缓存优化：紧凑单行 prompt，减少 token 数（命中率不变的情况下降低单次成本）
+  var toneMap = { direct: '直接', gentle: '委婉' };
+  var detailMap = { brief: '简洁', detailed: '详细' };
+  var humorMap = { low: '严肃', medium: '中性幽默', high: '幽默' };
+  var sarcasmMap = { low: '温和', medium: '犀利', high: '毒舌' };
+  var warmthMap = { low: '冷淡', medium: '中性', high: '温暖' };
+
+  var style = [
+    toneMap[rs.directness] || '直接',
+    detailMap[rs.detail_level] || '适中',
+    humorMap[rs.humor_level] || '中性幽默',
+    sarcasmMap[rs.sarcasm_level] || '犀利',
+    warmthMap[rs.warmth_level] || '中性',
+    rs.use_markdown !== false ? '用 Markdown' : '不用 Markdown',
+    rs.use_emoji !== false ? '用 emoji' : '不用 emoji'
+  ].join('，');
+
   var lines = [
-    '你是 XTJ 网站的 AI 聊天智能体，名字是：' + name,
-    '只根据对话上下文回答。不编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
+    '你是 ' + name + '。',
+    persona ? '人设：' + persona : '',
+    sysPrompt ? '指令：' + sysPrompt : '',
+    '风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
+    allowWebSearch ? '可用工具：search_web / get_weather / get_current_time。' : '',
+    '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复，不写括号动作。'
   ];
 
-  // 人设和语气 — 管理员在后台配置
-  if (persona) lines.push('人设：' + persona);
-  if (tone) lines.push('语气：' + tone);
-
-  // 联网搜索
-  if (allowWebSearch) {
-    lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用。');
-  }
-
-  // 回复风格 — 管理员可配置，所有字段全部接入
-  var styleParts = [];
-  if (rs.directness === 'direct') styleParts.push('直接');
-  else if (rs.directness === 'gentle') styleParts.push('委婉');
-  if (rs.detail_level === 'brief') styleParts.push('简洁');
-  else if (rs.detail_level === 'detailed') styleParts.push('详细');
-
-  var toneParts = [];
-  // 幽默程度：low/medium/high 全部注入
-  if (rs.humor_level === 'high') toneParts.push('幽默风趣');
-  else if (rs.humor_level === 'low') toneParts.push('严肃');
-  else toneParts.push('中等幽默');
-  // 毒舌程度
-  if (rs.sarcasm_level === 'high') toneParts.push('毒舌犀利');
-  else if (rs.sarcasm_level === 'low') toneParts.push('温和');
-  else toneParts.push('中等毒舌');
-  // 温暖程度
-  if (rs.warmth_level === 'high') toneParts.push('温暖友善');
-  else if (rs.warmth_level === 'low') toneParts.push('冷淡疏离');
-  else toneParts.push('中等温暖');
-  // markdown / emoji
-  toneParts.push(rs.use_markdown !== false ? '使用 Markdown' : '不用 Markdown');
-  toneParts.push(rs.use_emoji !== false ? '用 emoji' : '不用 emoji');
-
-  if (styleParts.length) lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
-  if (toneParts.length) lines.push('语气风格：' + toneParts.join('，') + '。');
-
-  // 管理员额外指令
-  if (sysPrompt) lines.push('管理员指令：' + sysPrompt);
-
-  // 一句话收尾
-  lines.push('中文回复，简洁自然，不要括号动作描写。');
-
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 // 动态上下文：每次可能变，独立 token 段
@@ -7416,7 +7466,10 @@ async function loadAiContext(userName, convId) {
             try { console.warn('[AI-PARSE] parseMsgMeta error:', e && e.message); } catch(ee) {}
           }
         }
-        return { role: meta.role || 'user', content: content.slice(0, AI_CHAT_MESSAGE_MAX_LEN) };
+        // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
+        // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
+        var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
+        return { role: meta.role || 'user', content: normalized };
       });
     }
   } catch (e) {
@@ -8057,37 +8110,40 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       hour: '2-digit', minute: '2-digit', hour12: false
     });
 
-    // 组装 system prompt
+    // 组装 system prompt — 缓存优化：corePrompt 必须完全固定且放在最前
     var corePrompt = buildAiCorePrompt(config);
     var dynamicContext = buildAiDynamicContext(ctx, config);
-    
-    // 分层上下文
+
+    // ★ 缓存优化：消息顺序 = corePrompt(固定) → history(稳定) → user(新) → [time/weather 仅必要时后置]
+    // 当前时间从 system 提前位移到末尾，且仅在时间相关查询时注入，避免每分钟破坏缓存前缀
     var messages = [
-      { role: 'system', content: corePrompt },
-      { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
+      { role: 'system', content: corePrompt }
     ];
-    
-    messages.push({ role: 'system', content: dynamicContext });
+    if (dynamicContext) messages.push({ role: 'system', content: dynamicContext });
 
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
     }
-    
+
     // 思考模式
     // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var useThinking = thinkingMode !== 'off';
-    
-    // 天气查询（Open-Meteo 免费 API）
+
+    // 天气查询（Open-Meteo 免费 API）— 结果后置到 user 之后，不破坏缓存
     var isWeatherQuery = /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     var weatherResult = null;
     if (isWeatherQuery && !aborted) {
       weatherResult = await queryWeather(message);
-      if (weatherResult) {
-        messages.push({ role: 'system', content: weatherResult });
-      }
+    }
+
+    // ★ 时间敏感词检测：仅当用户问"今天/现在/最新/刚刚/当前"等才注入时间，且放在 user 之后
+    var isTimeSensitive = /今天|现在|最新|刚刚|当前|今日|今晚|今早|明天|昨天|本周|本月|今年|几点|什么时候|何时/i.test(message);
+    var timeContext = '';
+    if (isTimeSensitive || isWeatherQuery) {
+      timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。回答时间相关问题时以此为准，不能编造其他日期。';
     }
 
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
@@ -8095,6 +8151,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (aborted) return safeEnd();
 
     messages.push({ role: 'user', content: message });
+
+    // ★ 缓存优化：动态内容（天气结果、时间）放在 user 之后，破坏的只是尾部一小段缓存
+    if (weatherResult) {
+      messages.push({ role: 'user', content: weatherResult });
+    }
+    if (timeContext) {
+      messages.push({ role: 'user', content: timeContext });
+    }
 
     // console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
