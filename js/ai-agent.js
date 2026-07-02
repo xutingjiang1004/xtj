@@ -2329,6 +2329,11 @@
     ]));
   }
 
+  function setDockBarVisible(visible) {
+    var dockBar = document.querySelector('.dock-bar');
+    if (dockBar) dockBar.style.display = visible ? '' : 'none';
+  }
+
   async function openDeepThinkPage() {
     if (!window.currentUser) {
       notify('请先登录后再使用深度思考');
@@ -2342,6 +2347,9 @@
 
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
+
+    // 隐藏底部 dock，防止二级页面后面透出
+    setDockBarVisible(false);
 
     // 已有会话 → 从服务器加载历史消息
     if (S.dtConversationId) {
@@ -2400,6 +2408,9 @@
       panel.classList.add('hidden');
       panel.classList.remove('active');
     }
+
+    // 恢复底部 dock
+    setDockBarVisible(true);
 
     // 停止正在进行的深度思考请求，避免干扰普通聊天
     if (S.deepThinkJob) {
@@ -2537,6 +2548,7 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard();
+      // 二级页面中思考卡片默认展开（答案可见），但思考过程 details 默认折叠
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
@@ -2715,12 +2727,9 @@
         if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
         if (metaEl) metaEl.textContent = '';
 
-        if (node.classList.contains('collapsed')) {
-          node.classList.remove('collapsed');
-          node.classList.add('expanded');
-          var chev = node.querySelector('.ai-think-chevron');
-          if (chev) chev.textContent = '▴';
-        }
+        // 二级页面中不自动展开思考卡片，保持用户选择/默认折叠状态
+        var chev = node.querySelector('.ai-think-chevron');
+        if (chev) chev.textContent = node.classList.contains('expanded') ? '▴' : '▾';
       }
     }
 
@@ -2822,9 +2831,7 @@
                 var entryCount = thinkBody ? thinkBody.children.length : 0;
                 summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
               }
-              if (detailsEl && !detailsEl.open) {
-                detailsEl.open = true;
-              }
+              // 二级页面：不自动展开思考过程，保持折叠让用户自己点击查看
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
             }
