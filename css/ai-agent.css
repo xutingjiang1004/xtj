@@ -2449,16 +2449,12 @@
 .ai-think-thinking[open] summary::before { background: rgba(140, 196, 158, .3); }
 .ai-think-thinking[open] summary::after { transform: rotate(180deg); }
 .ai-think-thinking-body {
-  max-height: 260px; overflow-y: auto;
+  max-height: none; overflow-y: visible;
   padding: 6px 6px 6px 14px;
   margin-top: 4px;
   font-size: 12px;
   line-height: 1.7;
   color: rgba(80, 95, 90, .9);
-}
-.ai-think-card.generating .ai-think-thinking-body {
-  max-height: none;
-  overflow-y: visible;
 }
 .ai-think-card.generating .ai-think-body {
   max-height: none;
