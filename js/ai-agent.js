@@ -1668,9 +1668,11 @@
       if (el) el.textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
     } else if (evt.type === 'done') {
       if (titleText) titleText.textContent = '思考完成';
+      card.classList.add('ai-progress-card-done');
     } else if (evt.type === 'error') {
       if (titleText) titleText.textContent = '思考中断';
       card.classList.add('ai-progress-card-error');
+      card.classList.add('ai-progress-card-done');
     }
   }
 
@@ -1681,6 +1683,7 @@
     }
     // Cleanup progress card timer and state
     if (S.deepThinkProgressCard) {
+      try { S.deepThinkProgressCard.classList.add('ai-progress-card-done'); } catch (e) {}
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
       try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e) {}
     }
@@ -1822,6 +1825,7 @@
 
     function safeRemoveProgressCard() {
       if (progressCard) {
+        try { progressCard.classList.add('ai-progress-card-done'); } catch (e) {}
         try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
         try { progressCard.remove(); } catch (e) {}
         try { progressCard._done = true; } catch (e) {}
