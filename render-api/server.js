@@ -3162,31 +3162,14 @@ async function runDeepThinkAgent(opts) {
     lengthHintLine = '\n- 本次思考程度为 high/max，可根据问题需要适当展开，上限不限\n';
   }
 
+  // ★ 缓存优化：紧凑 prompt，节省 token
   var DEEP_THINK_AGENT_PROMPT = corePrompt + '\n\n' +
-    '你现在是"深度思考模式"下的分析助手。你的工作方式分三步：\n' +
-    '\n' +
-    '【第一步：理解问题】\n' +
-    '- 先判断问题领域：闲聊 / 技术/代码 / 金融/数据 / 科学 / 法律 / 健康 / 通用\n' +
-    '- 找出问题的核心诉求是什么\n' +
-    '- 判断是否需要搜索：纯闲聊/常识/简单计算 → 不搜；需要最新数据/具体事件/景点/地点/旅游/实时信息 → 搜\n' +
-    '\n' +
-    '【第二步：分析推理】\n' +
-    '- 如果需要搜索：拆成 1-3 个精准关键词，逐一搜索，别重复搜同样的\n' +
-    '- 如果不需要：直接基于已有知识组织答案\n' +
-    '- 代码问题：检查语法正确性、边界条件、安全性\n' +
-    '- 金融/法律/健康问题：确保添加必要的免责声明\n' +
-    '- 复杂问题先分解成几个方面，想清楚每个方面再整合\n' +
-    '\n' +
-    '【第三步：组织答案】\n' +
-    '- 根据问题复杂度决定答案长度：\n' +
-    '  · 简单问题（"你好""1+1="）→ 几个字到一两句\n' +
-    '  · 一般问答 → 一段话，说清楚即可\n' +
-    '  · 复杂分析 → 分条列点，但别写成论文，保持口语化\n' +
+    '你处于"深度思考模式"。三步工作：\n' +
+    '1) 理解：判断领域(闲聊/代码/金融/科学/法律/健康/通用)，是否需搜(常识/闲聊/计算 → 不搜；实时数据/事件/地点 → 搜)。\n' +
+    '2) 分析：需搜则拆 1-3 个不同关键词；不搜则直接基于知识。代码要查语法/边界/安全。金融/法律/健康加免责声明。\n' +
+    '3) 回答：按复杂度控长度——简单问题 1-2 句，一般问答一段话，复杂分析分条但口语化。\n' +
     lengthHintLine +
-    '- 基于搜索结果的回答要准确，不确定的如实说\n' +
-    '- 不确定的事如实说"不太确定"，别编\n' +
-    '- 别用"作为一个 AI""根据我的分析"之类的废话开场\n' +
-    '- 别用"## 一、引言"这种论文体，自然说话就好';
+    '不确定就说不确定。别写"作为 AI/根据分析"开场。别用"## 一、引言"论文体。';
 
   // ★ R: 取消 token 检查
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -7238,60 +7221,38 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
 function buildAiCorePrompt(config) {
   var cfg = migrateConfig(config || {});
   var name = String(cfg.name || 'XTJ 智能助手').slice(0, 30);
-  var persona = String(cfg.persona || '').slice(0, 500);
-  var tone = String(cfg.tone || '').slice(0, 200);
-  var sysPrompt = String(cfg.system_prompt || '').slice(0, 2000);
+  var persona = String(cfg.persona || '').slice(0, 300);
+  var sysPrompt = String(cfg.system_prompt || '').slice(0, 1000);
   var rs = cfg.reply_style || {};
   var allowWebSearch = cfg.allow_web_search === true || (cfg.search && cfg.search.allow_web_search === true);
 
+  // ★ 缓存优化：紧凑单行 prompt，减少 token 数（命中率不变的情况下降低单次成本）
+  var toneMap = { direct: '直接', gentle: '委婉' };
+  var detailMap = { brief: '简洁', detailed: '详细' };
+  var humorMap = { low: '严肃', medium: '中性幽默', high: '幽默' };
+  var sarcasmMap = { low: '温和', medium: '犀利', high: '毒舌' };
+  var warmthMap = { low: '冷淡', medium: '中性', high: '温暖' };
+
+  var style = [
+    toneMap[rs.directness] || '直接',
+    detailMap[rs.detail_level] || '适中',
+    humorMap[rs.humor_level] || '中性幽默',
+    sarcasmMap[rs.sarcasm_level] || '犀利',
+    warmthMap[rs.warmth_level] || '中性',
+    rs.use_markdown !== false ? '用 Markdown' : '不用 Markdown',
+    rs.use_emoji !== false ? '用 emoji' : '不用 emoji'
+  ].join('，');
+
   var lines = [
-    '你是 XTJ 网站的 AI 聊天智能体，名字是：' + name,
-    '只根据对话上下文回答。不编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
+    '你是 ' + name + '。',
+    persona ? '人设：' + persona : '',
+    sysPrompt ? '指令：' + sysPrompt : '',
+    '风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
+    allowWebSearch ? '可用工具：search_web / get_weather / get_current_time。' : '',
+    '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复，不写括号动作。'
   ];
 
-  // 人设和语气 — 管理员在后台配置
-  if (persona) lines.push('人设：' + persona);
-  if (tone) lines.push('语气：' + tone);
-
-  // 联网搜索
-  if (allowWebSearch) {
-    lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用。');
-  }
-
-  // 回复风格 — 管理员可配置，所有字段全部接入
-  var styleParts = [];
-  if (rs.directness === 'direct') styleParts.push('直接');
-  else if (rs.directness === 'gentle') styleParts.push('委婉');
-  if (rs.detail_level === 'brief') styleParts.push('简洁');
-  else if (rs.detail_level === 'detailed') styleParts.push('详细');
-
-  var toneParts = [];
-  // 幽默程度：low/medium/high 全部注入
-  if (rs.humor_level === 'high') toneParts.push('幽默风趣');
-  else if (rs.humor_level === 'low') toneParts.push('严肃');
-  else toneParts.push('中等幽默');
-  // 毒舌程度
-  if (rs.sarcasm_level === 'high') toneParts.push('毒舌犀利');
-  else if (rs.sarcasm_level === 'low') toneParts.push('温和');
-  else toneParts.push('中等毒舌');
-  // 温暖程度
-  if (rs.warmth_level === 'high') toneParts.push('温暖友善');
-  else if (rs.warmth_level === 'low') toneParts.push('冷淡疏离');
-  else toneParts.push('中等温暖');
-  // markdown / emoji
-  toneParts.push(rs.use_markdown !== false ? '使用 Markdown' : '不用 Markdown');
-  toneParts.push(rs.use_emoji !== false ? '用 emoji' : '不用 emoji');
-
-  if (styleParts.length) lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
-  if (toneParts.length) lines.push('语气风格：' + toneParts.join('，') + '。');
-
-  // 管理员额外指令
-  if (sysPrompt) lines.push('管理员指令：' + sysPrompt);
-
-  // 一句话收尾
-  lines.push('中文回复，简洁自然，不要括号动作描写。');
-
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 // 动态上下文：每次可能变，独立 token 段
@@ -8101,37 +8062,40 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       hour: '2-digit', minute: '2-digit', hour12: false
     });
 
-    // 组装 system prompt
+    // 组装 system prompt — 缓存优化：corePrompt 必须完全固定且放在最前
     var corePrompt = buildAiCorePrompt(config);
     var dynamicContext = buildAiDynamicContext(ctx, config);
-    
-    // 分层上下文
+
+    // ★ 缓存优化：消息顺序 = corePrompt(固定) → history(稳定) → user(新) → [time/weather 仅必要时后置]
+    // 当前时间从 system 提前位移到末尾，且仅在时间相关查询时注入，避免每分钟破坏缓存前缀
     var messages = [
-      { role: 'system', content: corePrompt },
-      { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
+      { role: 'system', content: corePrompt }
     ];
-    
-    messages.push({ role: 'system', content: dynamicContext });
+    if (dynamicContext) messages.push({ role: 'system', content: dynamicContext });
 
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
     }
-    
+
     // 思考模式
     // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var useThinking = thinkingMode !== 'off';
-    
-    // 天气查询（Open-Meteo 免费 API）
+
+    // 天气查询（Open-Meteo 免费 API）— 结果后置到 user 之后，不破坏缓存
     var isWeatherQuery = /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     var weatherResult = null;
     if (isWeatherQuery && !aborted) {
       weatherResult = await queryWeather(message);
-      if (weatherResult) {
-        messages.push({ role: 'system', content: weatherResult });
-      }
+    }
+
+    // ★ 时间敏感词检测：仅当用户问"今天/现在/最新/刚刚/当前"等才注入时间，且放在 user 之后
+    var isTimeSensitive = /今天|现在|最新|刚刚|当前|今日|今晚|今早|明天|昨天|本周|本月|今年|几点|什么时候|何时/i.test(message);
+    var timeContext = '';
+    if (isTimeSensitive || isWeatherQuery) {
+      timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。回答时间相关问题时以此为准，不能编造其他日期。';
     }
 
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
@@ -8139,6 +8103,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (aborted) return safeEnd();
 
     messages.push({ role: 'user', content: message });
+
+    // ★ 缓存优化：动态内容（天气结果、时间）放在 user 之后，破坏的只是尾部一小段缓存
+    if (weatherResult) {
+      messages.push({ role: 'user', content: weatherResult });
+    }
+    if (timeContext) {
+      messages.push({ role: 'user', content: timeContext });
+    }
 
     // console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
