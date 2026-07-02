@@ -2015,12 +2015,13 @@
         // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
         if (metaEl) metaEl.textContent = '';
 
-        // ★ Q: 完成后**自动展开**让用户直接看答案, 但思考过程仍可点击折叠
+        // ★ 完成后**自动折叠思考过程**, 但答案保持可见
+        var dtDetails = node.querySelector('.ai-think-thinking');
+        if (dtDetails) dtDetails.open = false;
+        // 确保卡片展开 (答案可见)
         if (node.classList.contains('collapsed')) {
           node.classList.remove('collapsed');
           node.classList.add('expanded');
-          var chev = node.querySelector('.ai-think-chevron');
-          if (chev) chev.textContent = '▴';
         }
       }
     }
@@ -2649,6 +2650,9 @@
         var metaEl = node.querySelector('.ai-think-meta');
         if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 已思考 ' + durationStr;
         if (metaEl) metaEl.textContent = '';
+        // ★ 完成时折叠思考过程, 答案保持可见
+        var doneDetails = node.querySelector('.ai-think-thinking');
+        if (doneDetails) doneDetails.open = false;
       }
     }
 
