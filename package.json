@@ -27,10 +27,13 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "iconv-lite": "^0.7.2",
+    "mammoth": "^1.12.0",
     "nodemailer": "^6.9.16",
+    "pdf-parse": "^2.4.5",
     "playwright": "^1.45.3",
     "playwright-core": "^1.45.3",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "csso-cli": "^4.0.2",
