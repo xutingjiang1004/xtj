@@ -969,7 +969,6 @@
       node = el('div', { class: 'ai-think-card expanded dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
         '</div>' +
@@ -982,7 +981,6 @@
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -1064,6 +1062,7 @@
       badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + (msg.search_count || 0) }));
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
         if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -1761,7 +1760,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -1771,10 +1769,9 @@
             '<summary><span>查看思考过程</span></summary>' +
             '<div class="ai-think-thinking-body"></div>' +
           '</details>' +
-          '<div class="ai-think-divider"></div>' +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
       var headerEl = node.querySelector('.ai-think-header');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
@@ -1852,6 +1849,7 @@
           footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: finalThinkingMode + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModelRef.value) {
             var ul = buildUsageLine(Object.assign({}, usage || {}, { model: finalModelRef.value, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
             if (ul) footer.appendChild(el('span', { class: 'ai-msg-usage', text: ul }));
@@ -1875,8 +1873,6 @@
         var metaEl = node.querySelector('.ai-think-meta');
         if (titleEl) titleEl.textContent = '已思考 ' + durStr;
         if (metaEl) metaEl.textContent = '';
-        var dtDetails2 = node.querySelector('.ai-think-thinking');
-        if (dtDetails2) dtDetails2.open = false;
         if (node.classList.contains('collapsed')) { node.classList.remove('collapsed'); node.classList.add('expanded'); }
       }
     }
@@ -1890,10 +1886,8 @@
       var readResult;
       try { readResult = await reader.read(); } catch (e) { break; }
       if (readResult.done) break;
-      if (isDtPage) {
-        var _dtP = document.getElementById('panelDeepThink');
-        if (!_dtP || _dtP.classList.contains('hidden')) { reader.cancel().catch(function(){}); break; }
-      } else if (!S.active) { reader.cancel().catch(function(){}); break; }
+      // ★ 不检查面板可见性：用户关闭页面后 AI 继续在后台运行，回来后可继续看到
+      if (!S.active) { reader.cancel().catch(function(){}); break; }
 
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
@@ -2124,7 +2118,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">▾</span>' +
@@ -2268,8 +2261,8 @@
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
           // V2: 简洁模式标签, 去掉重复 sparkle
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
-          // V2: 合并 agent 数, 避免与 header meta 重复
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -2317,10 +2310,6 @@
         // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
         if (metaEl) metaEl.textContent = '';
 
-        // ★ 完成后**自动折叠思考过程**, 但答案保持可见
-        var dtDetails = node.querySelector('.ai-think-thinking');
-        if (dtDetails) dtDetails.open = false;
-        // 确保卡片展开 (答案可见)
         if (node.classList.contains('collapsed')) {
           node.classList.remove('collapsed');
           node.classList.add('expanded');
@@ -2501,29 +2490,15 @@
     // 恢复底部 dock
     setDockBarVisible(true);
 
-    // 停止正在进行的深度思考请求，避免干扰普通聊天
-    if (S.deepThinkJob) {
-      try { S.deepThinkJob.abort(); } catch (e) {}
-    }
-    if (S.deepThinkProgressCard) {
-      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
-      try { S.deepThinkProgressCard.remove(); } catch (e) {}
-    }
-
+    // ★ 不再停止正在进行的请求，让 AI 继续在后台完成，用户回来后可见
     // 持久化 dtConversationId（页面刷新后也能恢复）
     saveDtConvId();
 
     // 只清空输入，保留 dtConversationId 以便再次打开时恢复历史
     var input = document.getElementById('dtInput');
     if (input) { input.value = ''; input.style.height = 'auto'; }
-
-    S.sending = false;
-    S.paused = false;
-    S.activeRenderers = [];
-    S.deepThinkJob = null;
-    S.deepThinkProgressCard = null;
-    S.abortController = null;
-    // ★ 不再清空 S.dtConversationId，保留会话 ID 以便恢复历史
+    // ★ 不清空 sending/activeRenderers/abortController 等状态，
+    //   保留 SSE 连接和渲染状态，用户回来后继续展示
   }
 
   // 文件上传状态 (dt 页面)
@@ -2657,7 +2632,6 @@
       var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
         '</div>' +
@@ -2742,6 +2716,7 @@
           footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索 ' + searchCount }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
