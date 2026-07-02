@@ -2406,6 +2406,16 @@
   border-top-width: 1px;
   overflow-y: auto;
 }
+/* 答案始终可见，不受折叠影响 */
+.ai-think-answer {
+  padding: 4px 16px 8px;
+  color: rgba(55, 70, 65, .92);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.ai-think-card .ai-msg-footer {
+  padding: 0 16px 10px;
+}
 
 /* 思考过程 details */
 .ai-think-thinking {
