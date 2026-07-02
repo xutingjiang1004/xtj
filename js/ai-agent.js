@@ -10,6 +10,7 @@
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+  var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
   var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
@@ -2292,6 +2293,10 @@
     if (dockBar) dockBar.style.display = visible ? '' : 'none';
   }
 
+  function saveDtConvId() {
+    try { if (S.dtConversationId) localStorage.setItem(DT_CONV_KEY, S.dtConversationId); else localStorage.removeItem(DT_CONV_KEY); } catch (e) {}
+  }
+
   async function openDeepThinkPage() {
     if (!window.currentUser) {
       notify('请先登录后再使用深度思考');
@@ -2305,6 +2310,11 @@
 
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
+
+    // 先从 localStorage 恢复会话 ID（刷新页面后也能恢复）
+    if (!S.dtConversationId) {
+      try { var saved = localStorage.getItem(DT_CONV_KEY); if (saved) S.dtConversationId = saved; } catch (e) {}
+    }
 
     // 隐藏底部 dock，防止二级页面后面透出
     setDockBarVisible(false);
@@ -2343,6 +2353,7 @@
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.dtConversationId = r.data.conversation_id;
+          saveDtConvId();
         }
       } catch (e) {}
     }
@@ -2378,6 +2389,9 @@
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
       try { S.deepThinkProgressCard.remove(); } catch (e) {}
     }
+
+    // 持久化 dtConversationId（页面刷新后也能恢复）
+    saveDtConvId();
 
     // 只清空输入，保留 dtConversationId 以便再次打开时恢复历史
     var input = document.getElementById('dtInput');
@@ -2715,7 +2729,7 @@
 
           if (evt.type === 'meta') {
             streamConvId = evt.conversation_id;
-            if (streamConvId) { S.dtConversationId = streamConvId; }
+            if (streamConvId) { S.dtConversationId = streamConvId; saveDtConvId(); }
             continue;
           }
           if (evt.type === 'heartbeat') {
@@ -2953,6 +2967,7 @@
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.dtConversationId = r.data.conversation_id;
+          saveDtConvId();
         }
       } catch (e) {
         notify('创建新会话失败');
@@ -2971,10 +2986,12 @@
         var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.dtConversationId });
         if (dr && dr.ok) {
           S.dtConversationId = null;
+          saveDtConvId();
           resetDeepThinkPageEmpty();
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.dtConversationId = r2.data.conversation_id;
+            saveDtConvId();
           }
         } else {
           notify('删除失败');
