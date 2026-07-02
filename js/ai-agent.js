@@ -136,6 +136,20 @@
     }
   }
 
+  // 清理模型 reasoning 内容里常见的整段括号包裹，提升可读性
+  function cleanReasoningText(txt) {
+    if (!txt) return '';
+    return String(txt).split('\n').map(function(line) {
+      var trimmed = line.trim();
+      if (!trimmed) return line;
+      // 仅当整行以 ( 开头、以 ) 结尾时去掉最外层括号
+      if (trimmed.charAt(0) === '(' && trimmed.charAt(trimmed.length - 1) === ')') {
+        return trimmed.slice(1, -1);
+      }
+      return line;
+    }).join('\n');
+  }
+
   // 简单 Markdown → HTML 渲染
   function renderMarkdown(txt) {
     if (!txt) return '';
@@ -917,7 +931,7 @@
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
-    panel.appendChild(el('div', { class: 'ai-thinking-body', text: reasoning }));
+    panel.appendChild(el('div', { class: 'ai-thinking-body', text: cleanReasoningText(reasoning) }));
 
     toggle.addEventListener('click', function() {
       setThinkingExpanded(container, !container.classList.contains('expanded'), messagesEl || S.messagesEl);
@@ -1022,7 +1036,7 @@
           var roleLabel = entry.agent_role || 'AI';
           var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
           entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
-          entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
+          entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
         // 更新 summary 显示合并后的步数
@@ -1635,12 +1649,12 @@
         var lastEntry = logBox.lastElementChild;
         if (lastEntry && lastEntry._role === roleLabel) {
           var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
-          if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000);
+          if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
         } else {
           var entry = el('div', { class: 'ai-thought-entry' });
           entry._role = roleLabel;
           entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
-          entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
+          entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
           logBox.appendChild(entry);
         }
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
@@ -1964,7 +1978,7 @@
             var roleLabel = entry.agent_role || 'AI';
             var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
             entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
-            entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
+          entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
             thinkLogBox.appendChild(entEl);
           });
           var summaryEl = node.querySelector('.ai-think-thinking summary');
@@ -2125,13 +2139,13 @@
                 var chunkText = String(evt.chunk).slice(0, 4000);
                 if (lastEntry && lastEntry._role === roleLabel) {
                   var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
-                  if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + chunkText;
+                  if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + chunkText);
                 } else {
                   var entry = document.createElement('div');
                   entry.className = 'ai-thought-entry';
                   entry._role = roleLabel;
                   entry.innerHTML = '<div class="ai-thought-role">▸ ' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
-                  entry.querySelector('.ai-thought-chunk').textContent = chunkText;
+                  entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
                   thinkBody.appendChild(entry);
                 }
                 try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
@@ -2479,7 +2493,7 @@
             node.insertBefore(rNode, node.firstChild);
           } else if (rNode) {
             var body = rNode.querySelector('.ai-thinking-body');
-            if (body) body.textContent = thinking;
+            if (body) body.textContent = cleanReasoningText(thinking);
           }
           if (rNode) {
             setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
