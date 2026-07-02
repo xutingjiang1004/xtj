@@ -970,18 +970,19 @@
 
     var node;
     if (simpleMode) {
-      // 二级页面：简洁结构，无 details/summary/chevron
+      // 二级页面：简洁结构，无 details/summary/chevron，思考过程完全展开
       node = el('div', { class: 'ai-think-card expanded dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           (thinkingLog.length > 0 ? '<div class="ai-think-thinking-body"></div>' : '') +
-        '</div>' +
-        '<div class="ai-think-answer"></div>' +
-        '<div class="ai-msg-footer"></div>';
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
     } else {
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
@@ -996,9 +997,10 @@
               '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
               '<div class="ai-think-thinking-body"></div>' +
             '</details>' : '') +
-        '</div>' +
-        '<div class="ai-think-answer"></div>' +
-        '<div class="ai-msg-footer"></div>';
+          (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
 
       // header 整行可点击展开/折叠
       var headerEl = node.querySelector('.ai-think-header');
@@ -2637,18 +2639,19 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard();
-      // 二级页面：思考卡片直接展示思考过程（无 details/summary），顶部仅保留标题
+      // 二级页面：思考过程完全展开，无 details/summary/chevron
       var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           '<div class="ai-think-thinking-body"></div>' +
-        '</div>' +
-        '<div class="ai-think-answer"></div>' +
-        '<div class="ai-msg-footer"></div>';
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
       dtMessagesEl.appendChild(node);
       aiNode = node;
       scrollToBottom(dtMessagesEl, true);
