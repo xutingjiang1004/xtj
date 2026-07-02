@@ -39,6 +39,7 @@
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
     deepThinkProgressCard: null, // DOM node for progress card
+    dtConversationId: null,      // 深度思考二级页面当前会话 ID（与普通聊天分开）
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -1564,22 +1565,14 @@
   }
 
   // ===================== M: 深度思考模式 — 进度卡 / toggle / cancel =====================
-  // 切换深度思考模式 (持久化到 localStorage, 重开对话框后恢复)
+  // 切换深度思考模式：改为打开独立二级页面，不再切换普通聊天的 S.deepThink
   function toggleDeepThink() {
     if (!S.deepThinkEnabled) {
       notify('深度思考模式已被管理员关闭');
       return;
     }
-    if (S.sending && !S.deepThink) {
-      notify('当前消息处理中, 请稍后再开启深度思考');
-      return;
-    }
-    S.deepThink = !S.deepThink;
-    try { localStorage.setItem('xtj_ai_deep_think', S.deepThink ? '1' : '0'); } catch (e) {}
-    refreshDeepThinkToggle();
-    // 关闭深度思考时, 不取消当前正在进行的深度思考请求
-    // 允许用户切换模式, 后续消息用新模式发送
-    // 当前深度思考继续在后台运行
+    // 普通聊天中深度思考入口统一走二级页面，避免与普通聊天共用气泡面板
+    openDeepThinkPage();
   }
 
   function refreshDeepThinkToggle() {
@@ -1598,19 +1591,17 @@
     }
   }
 
-  // 从 localStorage 恢复 deepThink 状态
+  // 深度思考已改为独立二级页面，普通聊天不再恢复 deepThink 状态
   function restoreDeepThinkState() {
-    try {
-      var saved = localStorage.getItem('xtj_ai_deep_think');
-      S.deepThink = saved === '1';
-    } catch (e) { S.deepThink = false; }
+    S.deepThink = false;
   }
 
   // 构造深度思考进度卡片 (极简风格)
   // ★ U2 重做: 4 角凹星 sparkle (ChatGPT/Claude 风格, 替代菱形)
   var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
 
-  function buildDeepThinkProgressCard() {
+  function buildDeepThinkProgressCard(options) {
+    options = options || {};
     var card = el('div', { class: 'ai-progress-card' });
     card.innerHTML =
       '<div class="ai-progress-header">' +
@@ -1623,7 +1614,8 @@
     card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      cancelDeepThink();
+      if (typeof options.cancelFn === 'function') options.cancelFn();
+      else cancelDeepThink();
     });
     var cardStart = Date.now();
     var cardEl = card;
@@ -1689,8 +1681,8 @@
     }
   }
 
-  // 取消深度思考
-  function cancelDeepThink() {
+  // 取消深度思考（convId 可选，二级页面使用 S.dtConversationId）
+  function cancelDeepThink(convId) {
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
     }
@@ -1716,7 +1708,7 @@
       fetch(API_BASE + '/chat/cancel', {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({ conversation_id: S.conversationId || '' })
+        body: JSON.stringify({ conversation_id: convId || S.conversationId || '' })
       }).catch(function() {});
     } catch (e) {}
     notify('\u5df2\u53d6\u6d88\u601d\u8003');
@@ -2322,6 +2314,707 @@
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
     scrollToBottom(messagesEl, true);
+  }
+
+  // ===================== 深度思考二级页面 =====================
+
+  function resetDeepThinkPageEmpty() {
+    var msgs = document.getElementById('dtMessages');
+    if (!msgs) return;
+    msgs.innerHTML = '';
+    msgs.appendChild(el('div', { class: 'dt-empty' }, [
+      el('div', { class: 'dt-empty-icon', text: '🐾' }),
+      el('div', { class: 'dt-empty-title', text: '深度思考' }),
+      el('div', { class: 'dt-empty-desc', text: '输入复杂问题，AI 会调用多个领域专家协同分析、搜索资料并总结回复。' })
+    ]));
+  }
+
+  async function openDeepThinkPage() {
+    if (!window.currentUser) {
+      notify('请先登录后再使用深度思考');
+      return;
+    }
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) return;
+
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+
+    // 首次打开若没有二级页面会话，则创建一个新会话，避免污染普通聊天会话
+    if (!S.dtConversationId) {
+      try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (r && r.ok && r.data && r.data.conversation_id) {
+          S.dtConversationId = r.data.conversation_id;
+        }
+      } catch (e) {}
+    }
+
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+
+    var input = document.getElementById('dtInput');
+    if (input) {
+      setTimeout(function() {
+        try { input.focus(); } catch (e) {}
+      }, 80);
+    }
+
+    var msgs = document.getElementById('dtMessages');
+    if (msgs) scrollToBottom(msgs, true);
+  }
+
+  function closeDeepThinkPage() {
+    var panel = document.getElementById('panelDeepThink');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.classList.remove('active');
+    }
+
+    // 停止正在进行的深度思考请求，避免干扰普通聊天
+    if (S.deepThinkJob) {
+      try { S.deepThinkJob.abort(); } catch (e) {}
+    }
+    if (S.deepThinkProgressCard) {
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+      try { S.deepThinkProgressCard.remove(); } catch (e) {}
+    }
+
+    // 清空二级页面输入与消息，保持每次打开都是全新状态
+    var input = document.getElementById('dtInput');
+    if (input) { input.value = ''; input.style.height = 'auto'; }
+    resetDeepThinkPageEmpty();
+
+    S.sending = false;
+    S.paused = false;
+    S.activeRenderers = [];
+    S.deepThinkJob = null;
+    S.deepThinkProgressCard = null;
+    S.abortController = null;
+    S.dtConversationId = null;
+  }
+
+  async function handleDeepThinkPageSend(text) {
+    var dtMessagesEl = document.getElementById('dtMessages');
+    var input = document.getElementById('dtInput');
+    if (!dtMessagesEl || !input) { S.sending = false; return; }
+
+    var originalText = text;
+    function restoreInputText() {
+      input.value = originalText;
+      input.style.height = 'auto';
+      try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
+    }
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) { S.sending = false; return; }
+
+    if (S.sending) {
+      if (S.deepThinkJob) {
+        try { S.deepThinkJob.abort(); } catch (e) {}
+      }
+      try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
+    }
+
+    S.clientRequestId++;
+    var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
+    S._currentReqId = reqId;
+    function resetSendingIfCurrent() {
+      if (S._currentReqId === reqId) {
+        S.sending = false;
+        S.deepThinkJob = null;
+        S.deepThinkProgressCard = null;
+        S.abortController = null;
+        S.paused = false;
+        S.activeRenderers = [];
+      }
+    }
+    S.sending = true;
+    clearReplyTimer();
+
+    // 1. 追加 user 消息（手动创建 .dt-msg.user，不使用气泡）
+    var empty = dtMessagesEl.querySelector('.dt-empty');
+    if (empty) { try { empty.remove(); } catch (e) {} }
+    var userNode = el('div', { class: 'dt-msg user' });
+    userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+    userNode.appendChild(el('div', { class: 'dt-msg-content', text: text }));
+    dtMessagesEl.appendChild(userNode);
+    scrollToBottom(dtMessagesEl, true);
+
+    // 2. 创建进度卡
+    var progressCard = buildDeepThinkProgressCard({
+      cancelFn: function() { cancelDeepThink(S.dtConversationId); }
+    });
+    progressCard.classList.add('dt-animate-in');
+    S.deepThinkProgressCard = progressCard;
+    dtMessagesEl.appendChild(progressCard);
+    scrollToBottom(dtMessagesEl, true);
+
+    // 3. 清空输入框
+    input.value = '';
+    input.style.height = 'auto';
+    if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
+    else { try { input.focus(); } catch (e2) {} }
+
+    // 4. 创建 AbortController
+    var controller = new AbortController();
+    S.abortController = controller;
+    S.deepThinkJob = controller;
+    S.currentStreamAborted = false;
+
+    var url = API_BASE + '/chat';
+    var auth = await getUserAuthPayload({ forceNoToken: false });
+    var headers = auth.headers || {};
+    var fetchBody = JSON.stringify({
+      message: text,
+      conversation_id: S.dtConversationId,
+      client_request_id: reqId,
+      deep_think: true,
+      thinking_mode: S.deepThinkEffort || 'max'
+    });
+
+    var aborted = false;
+    var aiContent = '';
+    var finalMeta = null;
+    var finalModel = '';
+    var finalThinkingMode = S.deepThinkEffort || 'max';
+    var streamConvId = null;
+    var aiNode = null;
+    var contentRenderer = null;
+    var answerRenderer = null;
+    var answerStarted = false;
+    var doneReceived = false;
+    var evtHandled = false;
+
+    function safeRemoveProgressCard() {
+      if (progressCard) {
+        try { progressCard.classList.add('ai-progress-card-done'); } catch (e) {}
+        try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
+        try { progressCard.remove(); } catch (e) {}
+        try { progressCard._done = true; } catch (e) {}
+      }
+    }
+
+    function removeLastDtUserMessage() {
+      var nodes = dtMessagesEl.querySelectorAll('.dt-msg.user');
+      if (nodes && nodes.length) {
+        try { nodes[nodes.length - 1].remove(); } catch (e) {}
+      }
+      if (!dtMessagesEl.querySelector('.dt-msg') && !dtMessagesEl.querySelector('.ai-think-card') && !dtMessagesEl.querySelector('.ai-progress-card')) {
+        resetDeepThinkPageEmpty();
+      }
+    }
+
+    function ensureThinkCardNode() {
+      if (aiNode) return aiNode;
+      safeRemoveProgressCard();
+      var node = el('div', { class: 'ai-think-card expanded generating' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
+          '<span class="ai-think-title">思考中…</span>' +
+          '<span class="ai-think-meta"></span>' +
+          '<span class="ai-think-chevron">▾</span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          '<details class="ai-think-thinking">' +
+            '<summary><span>查看思考过程</span></summary>' +
+            '<div class="ai-think-thinking-body"></div>' +
+          '</details>' +
+          '<div class="ai-think-divider"></div>' +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
+      var headerEl = node.querySelector('.ai-think-header');
+      var chevronEl = node.querySelector('.ai-think-chevron');
+      headerEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isCollapsed = node.classList.contains('collapsed');
+        if (isCollapsed) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          if (chevronEl) chevronEl.textContent = '▴';
+        } else {
+          node.classList.add('collapsed');
+          node.classList.remove('expanded');
+          if (chevronEl) chevronEl.textContent = '▾';
+        }
+      });
+      dtMessagesEl.appendChild(node);
+      aiNode = node;
+      scrollToBottom(dtMessagesEl, true);
+      return node;
+    }
+
+    function finishThinkCard(node, content, evt) {
+      if (node) node.classList.remove('generating');
+      if (node) node.classList.add('done');
+
+      var searchCount = evt ? (evt.search_count || 0) : 0;
+      var searchQuery = evt ? (evt.search_query || '') : '';
+      var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+      var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
+      var usage = evt && evt.usage ? evt.usage : null;
+      var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
+      var plannerInfo = evt && evt.planner ? evt.planner : null;
+      var workerResults = evt && Array.isArray(evt.worker_results) ? evt.worker_results : null;
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) ? evt.thinking_log : [];
+      var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
+
+      if (node) {
+        // [来源N] 渲染
+        var contentForRender = content || '';
+        if (searchResults && searchResults.length > 0) {
+          contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
+            var idx = parseInt(n, 10);
+            if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
+            var sr = searchResults[idx - 1] || {};
+            if (!sr.url) return m;
+            return '[来源' + n + '](' + sr.url.replace(/"/g, '%22').replace(/\)/g, '%29') + ')';
+          });
+        }
+
+        var answerEl = node.querySelector('.ai-think-answer');
+        function finalizeAnswer() {
+          try {
+            var as = answerEl.querySelectorAll('a');
+            for (var ai = 0; ai < as.length; ai++) {
+              var atxt = (as[ai].textContent || '').trim();
+              if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
+            }
+          } catch (e) {}
+          setupBubbleCopy(answerEl, dtMessagesEl);
+          var titleEl = node.querySelector('.ai-think-title');
+          if (titleEl) titleEl.textContent = '已思考';
+        }
+        if (answerEl) {
+          if (answerRenderer) {
+            answerRenderer.finish(contentForRender);
+            answerRenderer = null;
+            finalizeAnswer();
+          } else {
+            if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
+            answerEl.innerHTML = '';
+            contentRenderer = createSmoothTextRenderer(answerEl, {
+              minChunk: 2, maxChunk: 6,
+              onDone: function() { finalizeAnswer(); }
+            });
+            contentRenderer.append(contentForRender);
+            contentRenderer.finish(contentForRender);
+            contentRenderer = null;
+          }
+        }
+
+        var thinkLogBox = node.querySelector('.ai-think-thinking-body');
+        if (thinkLogBox && thinkingLog.length > 0) {
+          thinkLogBox.innerHTML = '';
+          var mergedLog = [];
+          for (var tli = 0; tli < thinkingLog.length; tli++) {
+            var mtl = thinkingLog[tli];
+            var mlast = mergedLog[mergedLog.length - 1];
+            if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
+              mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
+            } else {
+              mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
+            }
+          }
+          mergedLog.forEach(function(entry, idx) {
+            var entEl = el('div', { class: 'ai-thought-entry' });
+            var roleLabel = entry.agent_role || 'AI';
+            var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
+            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+            entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
+            thinkLogBox.appendChild(entEl);
+          });
+          var summaryEl = node.querySelector('.ai-think-thinking summary');
+          if (summaryEl) {
+            var sumSpan = summaryEl.querySelector('span:last-child');
+            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+          }
+        } else {
+          var detailsEl = node.querySelector('.ai-think-thinking');
+          if (detailsEl) detailsEl.style.display = 'none';
+        }
+
+        var footer = node.querySelector('.ai-msg-footer');
+        if (footer) {
+          footer.innerHTML = '';
+          footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
+          if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (usage || finalModel) {
+            var usageLine = buildUsageLine(Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
+            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+          }
+        }
+
+        if (searchResults && searchResults.length > 0 && searchQuery) {
+          var searchBox = document.createElement('div');
+          searchBox.className = 'ai-search-supplement';
+          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
+          var shownResults = searchResults.slice(0, 5);
+          for (var si = 0; si < shownResults.length; si++) {
+            var sr = shownResults[si];
+            if (sr.title && sr.url) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
+            } else if (sr.url) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.url) + '</a><br>';
+            }
+          }
+          if (searchResults.length > 5) {
+            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
+          }
+          searchBox.innerHTML = searchHtml;
+          var thinkBody = node.querySelector('.ai-think-body');
+          if (thinkBody) {
+            answerEl = node.querySelector('.ai-think-answer');
+            if (answerEl) {
+              thinkBody.insertBefore(searchBox, answerEl);
+            } else {
+              thinkBody.appendChild(searchBox);
+            }
+          }
+        }
+
+        var durationSec = Math.round(thinkDurationMs / 1000);
+        var min = Math.floor(durationSec / 60);
+        var sec = durationSec % 60;
+        var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+        var titleEl = node.querySelector('.ai-think-title');
+        var metaEl = node.querySelector('.ai-think-meta');
+        if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
+        if (metaEl) metaEl.textContent = '';
+
+        if (node.classList.contains('collapsed')) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          var chev = node.querySelector('.ai-think-chevron');
+          if (chev) chev.textContent = '▴';
+        }
+      }
+    }
+
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: fetchBody,
+        signal: controller.signal
+      });
+
+      if (!resp.ok) {
+        try {
+          var errJson = await resp.json().catch(function() { return {}; });
+          if (S._currentReqId !== reqId) return;
+          safeRemoveProgressCard();
+          notify(String(errJson.error || ('AI 失败 (' + resp.status + ')')));
+        } catch (e) {}
+        resetSendingIfCurrent();
+        return;
+      }
+
+      if (!resp.body) {
+        safeRemoveProgressCard();
+        notify('AI 没有响应');
+        resetSendingIfCurrent();
+        return;
+      }
+
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      while (true) {
+        if (S._currentReqId !== reqId || controller.signal.aborted) {
+          aborted = true;
+          if (reader) try { reader.cancel(); } catch (e) {}
+          break;
+        }
+        var readResult;
+        try { readResult = await reader.read(); } catch (e) { break; }
+        if (readResult.done) break;
+        // 二级页面不依赖 S.active，改为检测面板是否仍显示
+        var dtPanel = document.getElementById('panelDeepThink');
+        if (!dtPanel || dtPanel.classList.contains('hidden')) { reader.cancel().catch(function(){}); break; }
+
+        buffer += decoder.decode(readResult.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || !line.startsWith('data: ')) continue;
+          var eventStr = line.slice(6);
+          var evt;
+          try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+          if (!evt) continue;
+
+          if (S._currentReqId !== reqId) { aborted = true; break; }
+
+          if (evt.type === 'meta') {
+            streamConvId = evt.conversation_id;
+            if (streamConvId) { S.dtConversationId = streamConvId; }
+            continue;
+          }
+          if (evt.type === 'heartbeat') {
+            updateDeepThinkProgressCard(progressCard, evt);
+            continue;
+          }
+          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
+            updateDeepThinkProgressCard(progressCard, evt);
+            continue;
+          }
+          if (evt.type === 'thinking_chunk') {
+            if (!aiNode) ensureThinkCardNode();
+            if (evt.chunk) {
+              var thinkBody = aiNode.querySelector('.ai-think-thinking-body');
+              var detailsEl = aiNode.querySelector('.ai-think-thinking');
+              var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
+              if (thinkBody) {
+                var roleLabel = evt.agent_role || 'AI 智能体';
+                var lastEntry = thinkBody.lastElementChild;
+                var chunkText = String(evt.chunk).slice(0, 4000);
+                if (lastEntry && lastEntry._role === roleLabel) {
+                  var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
+                  if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + chunkText);
+                } else {
+                  var entry = document.createElement('div');
+                  entry.className = 'ai-thought-entry';
+                  entry._role = roleLabel;
+                  entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
+                  entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
+                  thinkBody.appendChild(entry);
+                }
+                try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
+                while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
+              }
+              if (summaryEl) {
+                var entryCount = thinkBody ? thinkBody.children.length : 0;
+                summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
+              }
+              if (detailsEl && !detailsEl.open) {
+                detailsEl.open = true;
+              }
+              var titleEl = aiNode.querySelector('.ai-think-title');
+              if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
+            }
+            scrollToBottom(dtMessagesEl, true);
+            continue;
+          }
+          if (evt.type === 'answer_chunk') {
+            if (!evt.chunk) continue;
+            if (!aiNode) ensureThinkCardNode();
+            if (!answerStarted) {
+              answerStarted = true;
+              var tTitle = aiNode.querySelector('.ai-think-title');
+              if (tTitle) tTitle.innerHTML = AI_THINK_ICON + ' 回答中…';
+            }
+            var aEl = aiNode.querySelector('.ai-think-answer');
+            if (aEl && !answerRenderer) {
+              aEl.innerHTML = '';
+              answerRenderer = createSmoothTextRenderer(aEl, {
+                minChunk: 1, maxChunk: 3, plainStream: true
+              });
+            }
+            aiContent += String(evt.chunk);
+            if (answerRenderer) answerRenderer.append(evt.chunk);
+            scrollToBottom(dtMessagesEl, true);
+            continue;
+          }
+          if (evt.type === 'content') {
+            aiContent += evt.text || '';
+            ensureThinkCardNode();
+            continue;
+          }
+          if (evt.type === 'error') {
+            safeRemoveProgressCard();
+            var errMsg = evt.error || 'AI 调用失败';
+            if (aiContent) {
+              ensureThinkCardNode();
+              var errNote = el('div', { class: 'ai-error-note' }, errMsg);
+              try { aiNode.appendChild(errNote); } catch (e) {}
+              finishThinkCard(aiNode, aiContent, evt);
+            } else {
+              notify(errMsg);
+              removeLastDtUserMessage();
+              restoreInputText();
+            }
+            resetSendingIfCurrent();
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          if (evt.type === 'done') {
+            safeRemoveProgressCard();
+            S.sending = false;
+            S.paused = false;
+            S.activeRenderers = [];
+            S.abortController = null;
+            S.deepThinkJob = null;
+            S.deepThinkProgressCard = null;
+            if (progressCard) { try { progressCard._done = true; } catch (e) {} }
+            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+            try {
+              finalModel = evt.model || 'deepseek-v4-flash';
+              finalThinkingMode = evt.thinking_mode || S.deepThinkEffort || 'max';
+              if (evt.sanitized_content) aiContent = evt.sanitized_content;
+              else if (evt.content) aiContent = evt.content;
+              finalMeta = evt;
+            } catch (e) {}
+            if (!aiNode) ensureThinkCardNode();
+            if (!aiContent || !String(aiContent).trim()) {
+              aiContent = '（AI 只返回了思考过程，没有生成正文回复）';
+            }
+            finishThinkCard(aiNode, aiContent, evt);
+            doneReceived = true;
+            evtHandled = true;
+            break;
+          }
+        }
+        if (doneReceived || aborted) break;
+      }
+
+      if (S._currentReqId !== reqId || aborted) {
+        safeRemoveProgressCard();
+        if (answerRenderer) { try { answerRenderer.cancel(); } catch (e) {} answerRenderer = null; }
+        if (contentRenderer) { try { contentRenderer.cancel(); } catch (e) {} contentRenderer = null; }
+        answerStarted = false;
+        if (aiNode) try { aiNode.remove(); } catch (e) {}
+        resetSendingIfCurrent();
+        return;
+      }
+
+      safeRemoveProgressCard();
+      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
+      if (evtHandled) {
+        // already handled in done
+      } else if (aiNode && aiContent) {
+        finishThinkCard(aiNode, aiContent, finalMeta);
+      } else if (!doneReceived) {
+        if (aiContent) {
+          if (!aiNode) ensureThinkCardNode();
+          finishThinkCard(aiNode, aiContent, finalMeta);
+        } else {
+          removeLastDtUserMessage();
+          restoreInputText();
+          notify('AI 暂时没有回应, 请稍后再试');
+        }
+      }
+    } catch (fetchErr) {
+      if (S._currentReqId !== reqId) return;
+      safeRemoveProgressCard();
+      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
+      if (fetchErr && fetchErr.name !== 'AbortError') {
+        if (aiContent) {
+          ensureThinkCardNode();
+          var connNote = el('div', { class: 'ai-error-note' }, '连接中断, 已保留部分回复');
+          try { aiNode.appendChild(connNote); } catch (e) {}
+          finishThinkCard(aiNode, aiContent, finalMeta);
+        } else {
+          removeLastDtUserMessage();
+          restoreInputText();
+          notify('网络异常, 请检查连接后重试');
+        }
+      } else {
+        if (aiContent) {
+          if (!aiNode) ensureThinkCardNode();
+          finishThinkCard(aiNode, aiContent, finalMeta);
+        } else {
+          removeLastDtUserMessage();
+        }
+      }
+    }
+    resetSendingIfCurrent();
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+    scrollToBottom(dtMessagesEl, true);
+  }
+
+  function bindDeepThinkPageEvents() {
+    var backBtn = document.getElementById('dtBackBtn');
+    var newBtn = document.getElementById('dtNewChatBtn');
+    var delBtn = document.getElementById('dtDeleteChatBtn');
+    var sendBtn = document.getElementById('dtSendBtn');
+    var input = document.getElementById('dtInput');
+
+    if (backBtn) backBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeDeepThinkPage();
+    });
+
+    if (newBtn) newBtn.addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (S.sending) return;
+      newBtn.disabled = true;
+      try {
+        resetDeepThinkPageEmpty();
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (r && r.ok && r.data && r.data.conversation_id) {
+          S.dtConversationId = r.data.conversation_id;
+        }
+      } catch (e) {
+        notify('创建新会话失败');
+      } finally {
+        newBtn.disabled = false;
+      }
+    });
+
+    if (delBtn) delBtn.addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!S.dtConversationId) return;
+      if (!confirm('确定删除当前深度思考会话吗？删除后不可恢复。')) return;
+      delBtn.disabled = true;
+      try {
+        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.dtConversationId });
+        if (dr && dr.ok) {
+          S.dtConversationId = null;
+          resetDeepThinkPageEmpty();
+          var r2 = await apiRequest('POST', '/chat/new', null);
+          if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
+            S.dtConversationId = r2.data.conversation_id;
+          }
+        } else {
+          notify('删除失败');
+        }
+      } catch (e) {
+        notify('删除失败');
+      } finally {
+        delBtn.disabled = false;
+      }
+    });
+
+    if (sendBtn) sendBtn.addEventListener('click', function() {
+      var text = String(input.value || '').trim();
+      if (!text) return;
+      if (text.length > 6000) {
+        notify('消息过长（最多 6000 字符），请精简后重试');
+        return;
+      }
+      handleDeepThinkPageSend(text);
+    });
+
+    if (input) input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        var text = String(input.value || '').trim();
+        if (!text) return;
+        if (text.length > 6000) {
+          notify('消息过长（最多 6000 字符），请精简后重试');
+          return;
+        }
+        handleDeepThinkPageSend(text);
+      }
+    });
+
+    if (input) input.addEventListener('input', function() {
+      try {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+      } catch (e) {}
+    });
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
@@ -3742,6 +4435,8 @@ function showChatMessages() {
     window.__xtjAiChatActive = false;
     clearReplyTimer();
     abortCurrentRequest(); // 内部已调用 clearStreamCleanup
+    // 关闭深度思考二级页面，避免它残留在普通聊天之上
+    try { closeDeepThinkPage(); } catch (e) {}
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
@@ -3927,6 +4622,10 @@ function showChatMessages() {
       if (tab !== 'chat' && S.active) {
         try { closeAiChat(); } catch (e) {}
       }
+      // 切换出聊天 tab 时一并关闭深度思考二级页面
+      if (tab !== 'chat') {
+        try { closeDeepThinkPage(); } catch (e) {}
+      }
       return result;
     };
     window.__xtjAiTabVisibilityHooked = true;
@@ -3970,6 +4669,7 @@ function showChatMessages() {
     });
     hookChatList();
     hookAiTabVisibility();
+    bindDeepThinkPageEvents();
   }
 
   if (document.readyState === 'loading') {
