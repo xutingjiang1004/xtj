@@ -158,9 +158,12 @@
     var s = String(txt);
     // HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // 代码块（先处理，避免内部 markdown 被二次转换）
+    // 代码块（标记保护，防止后续替换破坏内部内容）
+    var codeBlocks = [];
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
-      return '<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>';
+      var idx = codeBlocks.length;
+      codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>');
+      return '%%%CODEBLOCK' + idx + '%%%';
     });
     // 行内代码
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -174,21 +177,26 @@
       if (safe !== href) return '<span class="ai-blocked-link" title="已屏蔽危险链接">' + label + '</span>';
       return '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>';
     });
-    // 无序列表
-    s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
-    s = s.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ul>' + m + '</ul>'; });
-    // 有序列表
-    s = s.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-    s = s.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ol>' + m + '</ol>'; });
-    // 标题
+    // 标题（先处理，避免匹配到列表里的 #）
     s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
     s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
     s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
     s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    // 换行转 <br>
+    // 列表：用不同 class 区分有序和无序，避免混合包裹
+    s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
+    s = s.replace(/(<li class="ul-item">.*<\/li>\n?)+/g, function(m) {
+      return '<ul>' + m.replace(/ class="ul-item"/g, '') + '</ul>';
+    });
+    s = s.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
+    s = s.replace(/(<li class="ol-item">.*<\/li>\n?)+/g, function(m) {
+      return '<ol>' + m.replace(/ class="ol-item"/g, '') + '</ol>';
+    });
+    // 换行转 <br>（跳过已保护的代码块）
     s = s.replace(/\n/g, '<br>');
+    // 恢复代码块
+    s = s.replace(/%%%CODEBLOCK(\d+)%%%/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
     return s;
   }
 
@@ -2225,13 +2233,16 @@
       }
 
       safeRemoveProgressCard()
+      S.paused = false;
+      S.activeRenderers = [];
       if (progressCard) { try { progressCard._done = true; } catch (e) {} }
       if (evtHandled) {
         // already handled in done
       } else if (aiNode && aiContent) {
         finishThinkCard(aiNode, aiContent, finalMeta);
       } else if (!doneReceived) {
-        // 流意外结束, 没有 done
+        S.paused = false;
+        S.activeRenderers = [];
         if (aiContent) {
           if (!aiNode) ensureThinkCardNode();
           finishThinkCard(aiNode, aiContent, finalMeta);
@@ -2898,6 +2909,8 @@
     scrollToBottom(dtMessagesEl, true);
   }
 
+  var _dtListeners = []; // 存储事件监听引用用于清除
+
   function bindDeepThinkPageEvents() {
     var backBtn = document.getElementById('dtBackBtn');
     var newBtn = document.getElementById('dtNewChatBtn');
@@ -2907,6 +2920,16 @@
     var fileBtn = document.getElementById('dtFileBtn');
     var fileInput = document.getElementById('dtFileInp');
     var filePreview = document.getElementById('dtFilePreview');
+
+    // 清除之前的监听器（防止重复绑定泄漏）
+    _dtListeners.forEach(function(fn) { try { fn(); } catch (e) {} });
+    _dtListeners = [];
+
+    function addDtListener(el, event, handler) {
+      if (!el) return;
+      el.addEventListener(event, handler);
+      _dtListeners.push(function() { el.removeEventListener(event, handler); });
+    }
 
     function dtDoSend() {
       var text = String(input.value || '').trim();
@@ -3037,6 +3060,9 @@
       return;
     }
 
+    // ★ 立即标记发送中，防止并发竞态
+    S.sending = true;
+
     // ★ M: 深度思考模式分支 — 走独立流程 (Planner→Workers→Synthesizer)
     if (S.deepThink) {
       return handleSendDeepThink(text, input, sendBtn, messagesEl);
@@ -3057,16 +3083,16 @@
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
     
-    // 如果有正在进行的请求，中断它
-    if (S.sending) {
-      abortCurrentRequest();
-      try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
-    }
-    
     // 快速双击去重：同一秒内相同文本的请求忽略
     var msgDedupKey = text + Math.floor(Date.now() / 1000);
     if (S._lastMsgDedupKey === msgDedupKey) { S.sending = false; return; }
     S._lastMsgDedupKey = msgDedupKey;
+    
+    // 如果有正在进行的请求，中断它
+    if (S.sending && S.abortController) {
+      abortCurrentRequest();
+      try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
+    }
     
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
