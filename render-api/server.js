@@ -549,9 +549,16 @@ var aiConfigCache = null;
 var aiConfigFetchedAt = 0;
 
 // Web Search 配置
-const SEARCH_CACHE_TTL_MS = 60000;
-const SEARCH_EMPTY_CACHE_TTL_MS = 5000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;   // 有结果缓存 5 分钟
+const SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;  // 无结果缓存 30 秒
 const searchCache = new Map();
+// 每 10 分钟清理过期搜索缓存
+setInterval(function() {
+  var now = Date.now();
+  searchCache.forEach(function(val, key) {
+    if (val.expiresAt && now > val.expiresAt) searchCache.delete(key);
+  });
+}, 10 * 60 * 1000);
 
 // ===================== 搜索 Provider 架构 =====================
 // 每个 provider 返回 { results: [...], error: string|null }
@@ -850,7 +857,7 @@ async function searchWeb(query, maxResults) {
   };
 
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
-  searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
+  searchCache.set(cacheKey, { ts: Date.now(), results: finalResult, expiresAt: Date.now() + cacheTtl });
   clearTimeout(searchTimer);
 
   if (searchTimedOut && mergedResults.length === 0) {
@@ -3974,7 +3981,7 @@ app.post('/api/announcements/read', authenticateUser, async (req, res) => {
 });
 
 // ===================== 帖子管理 ======================
-app.delete('/admin/post/:id', verifyToken, async (req, res) => {
+app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res) => {
   var auditUser = 'unknown';
   try {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -6318,7 +6325,7 @@ const VIP_PLANS = [
 // 获取可用套餐列表
 // 2026-06-25：Pro 改为限量/限定/限时活动制，不再开放常驻购买
 // 查询VIP状态
-app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
+app.get('/api/vip/status', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
     const userName = req.query.user_name;
     if (!userName) return res.status(400).json({ error: '缺少用户名' });
@@ -6921,7 +6928,7 @@ app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (re
 });
 
 // ===================== 客户端错误监控 =====================
-app.post('/api/client-error-log', rateLimit(60000, 30), async (req, res) => {
+app.post('/api/client-error-log', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var { type, message, stack, url, line, col, user_agent, timestamp } = req.body;
     var errorType = (type || 'unknown').slice(0, 50);
