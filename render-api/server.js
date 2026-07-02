@@ -77,6 +77,11 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
+// 文件解析库（预先 require，避免每次调用时重复加载）
+let pdfParser = null, mammothParser = null, xlsxParser = null;
+try { pdfParser = require('pdf-parse'); } catch(e) { console.warn('[FILE] pdf-parse not available'); }
+try { mammothParser = require('mammoth'); } catch(e) { console.warn('[FILE] mammoth not available'); }
+try { xlsxParser = require('xlsx'); } catch(e) { console.warn('[FILE] xlsx not available'); }
 
 // ===================== P: 深度思考模式 (Deep Think / Multi-Agent) =====================
 // P 改动:
@@ -2396,23 +2401,23 @@ async function extractEmbeddedFiles(text) {
     var base64Data = match[4];
     fileIndex++;
     var extractedText = '';
-    try {
-      var buffer = Buffer.from(base64Data, 'base64');
-      if (mimeType === 'application/pdf') {
-        var pdfData = await require('pdf-parse')(buffer);
-        extractedText = pdfData.text || '';
-      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        var mammothResult = await require('mammoth').extractRawText({ buffer: buffer });
-        extractedText = mammothResult.value || '';
-      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-        var workbook = require('xlsx').read(buffer, { type: 'buffer' });
-        var sheets = [];
-        workbook.SheetNames.forEach(function(sName) {
-          var sheet = workbook.Sheets[sName];
-          var csv = require('xlsx').utils.sheet_to_csv(sheet, { blankrows: false });
-          sheets.push('【工作表: ' + sName + '】\n' + csv);
-        });
-        extractedText = sheets.join('\n\n');
+      try {
+        var buffer = Buffer.from(base64Data, 'base64');
+        if (mimeType === 'application/pdf' && pdfParser) {
+          var pdfData = await pdfParser(buffer);
+          extractedText = pdfData.text || '';
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && mammothParser) {
+          var mammothResult = await mammothParser.extractRawText({ buffer: buffer });
+          extractedText = mammothResult.value || '';
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && xlsxParser) {
+          var workbook = xlsxParser.read(buffer, { type: 'buffer' });
+          var sheets = [];
+          workbook.SheetNames.forEach(function(sName) {
+            var sheet = workbook.Sheets[sName];
+            var csv = xlsxParser.utils.sheet_to_csv(sheet, { blankrows: false });
+            sheets.push('【工作表: ' + sName + '】\n' + csv);
+          });
+          extractedText = sheets.join('\n\n');
       } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
         extractedText = buffer.toString('utf-8');
       } else if (mimeType.startsWith('image/')) {
@@ -6995,8 +7000,8 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
 const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
-  Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '8000', 10) || 8000, 1000),
-  20000
+  Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '50000', 10) || 50000, 1000),
+  100000
 );
 const AI_CHAT_HISTORY_LIMIT = 10;
 const AI_CHAT_HOURLY_IP_LIMIT = 200;

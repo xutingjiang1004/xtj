@@ -171,9 +171,14 @@
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     // 斜体
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // 链接 (阻止 javascript:/data:/vbscript: 等危险协议)
+    // 图片（data URI 直接渲染）
+    s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
+      return '<img src="data:image/' + ext + ';base64,' + b64 + '" alt="' + escapeHtml(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
+    });
+    // 链接 (阻止 javascript:/vbscript: 等危险协议, 但 data: URI 放行)
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
-      var safe = href.replace(/^javascript:/i, 'blocked:').replace(/^data:/i, 'blocked:').replace(/^vbscript:/i, 'blocked:');
+      if (href.indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeHtml(label) + '">📄 ' + escapeHtml(label) + '</span>';
+      var safe = href.replace(/^javascript:/i, 'blocked:').replace(/^vbscript:/i, 'blocked:');
       if (safe !== href) return '<span class="ai-blocked-link" title="已屏蔽危险链接">' + label + '</span>';
       return '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>';
     });
@@ -2515,11 +2520,13 @@
 
     // 如果有文件, 追加到消息中
     if (fileData) {
+      var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
       var fileTag = fileData.type.startsWith('image/')
-        ? '\n![' + fileData.name + '](' + fileData.dataUrl + ')'
-        : '\n[' + fileData.name + '](' + fileData.dataUrl + ')';
+        ? '\n![' + safeName + '](' + fileData.dataUrl + ')'
+        : '\n[' + safeName + '](' + fileData.dataUrl + ')';
       text = text ? text + '\n' + fileTag : fileTag;
     }
+    if (text.length > 50000) { notify('消息过长（最多 50000 字符），请精简后重试'); S.sending = false; return; }
 
     var originalText = text;
     function restoreInputText() {
@@ -2847,6 +2854,8 @@
       var text = String(input.value || '').trim();
       var fData = _dtFileData;
       if (!text && !fData) return;
+      var totalLen = text.length + (fData ? (fData.type.startsWith('image/') ? 0 : fData.dataUrl.length) : 0);
+      if (totalLen > 50000) { notify('消息过长（最多 50000 字符）'); return; }
       _dtFileData = null;
       if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
       if (fileInput) fileInput.value = '';
@@ -2960,13 +2969,14 @@
     var text = String(input.value || '').trim();
     // 如果有文件, 追加到消息中
     if (fileData) {
+      var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
       var fileTag = fileData.type.startsWith('image/')
-        ? '\n![' + fileData.name + '](' + fileData.dataUrl + ')'
-        : '\n[' + fileData.name + '](' + fileData.dataUrl + ')';
+        ? '\n![' + safeName + '](' + fileData.dataUrl + ')'
+        : '\n[' + safeName + '](' + fileData.dataUrl + ')';
       text = text ? text + '\n' + fileTag : fileTag;
     }
     if (!text) { S.sending = false; return; }
-    if (text.length > 6000) {
+    if (text.length > 50000) {
       notify('消息过长（最多 6000 字符），请精简后重试');
       S.sending = false;
       return;
