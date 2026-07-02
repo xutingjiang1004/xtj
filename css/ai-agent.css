@@ -1945,10 +1945,10 @@
   border-top-width: 1px;
 }
 
-/* 思考过程：直接显示，固定高度，内部滚动 */
+/* 思考过程：全展开，不限制高度 */
 #panelDeepThink .ai-think-thinking-body {
-  max-height: 150px;
-  overflow-y: auto;
+  max-height: none;
+  overflow-y: visible;
   padding: 6px 6px 6px 10px;
   margin: 0 0 8px;
   border-radius: 12px;
@@ -2401,10 +2401,9 @@
   box-sizing: border-box;
 }
 .ai-think-card.expanded .ai-think-body {
-  max-height: 3000px; opacity: 1;
+  max-height: none; opacity: 1;
   padding: 10px 16px 14px;
   border-top-width: 1px;
-  overflow-y: auto;
 }
 /* 答案始终可见，不受折叠影响 */
 .ai-think-answer {
