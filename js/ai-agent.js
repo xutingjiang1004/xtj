@@ -1293,6 +1293,9 @@
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
+    // V4: 基于时间推进，适配不同刷新率；plainStream 更慢营造流水感
+    var lastFrameTime = 0;
+    var charsPerMs = options.plainStream ? 0.55 : 0.9;
     // V3: 末尾呼吸竖线光标 (替代闪光光点)
     var cursor = null;
     function ensureCursor() {
@@ -1315,7 +1318,7 @@
       rafId = 0;
     }
 
-    function emitText(forceAll) {
+    function emitText(forceAll, budget) {
       if (cancelled || !targetEl) return;
       if (!pending) {
         targetEl.classList.remove(streamClass);
@@ -1327,10 +1330,10 @@
         next = pending;
         pending = '';
       } else {
-        // V3: 直接渲染 markdown, 每帧 12-28 字, 快速自然
-        var frameBudget = pending.length > 300 ? 28 : (pending.length > 120 ? 20 : 12);
+        // V4: 基于时间 budget 推进，帧率无关；plainStream 直接追加文本节点
+        var frameBudget = Math.max(1, Math.floor(budget || 12));
         while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothTextChunk(pending, options);
+          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 12, frameBudget - next.length) }));
           if (!chunk) break;
           next += chunk;
           pending = pending.slice(chunk.length);
@@ -1338,8 +1341,13 @@
       }
       if (!next) return;
       rendered += next;
-      try { console.log('[AI-RENDER] emitText', rendered.length, 'chars, target:', (targetEl && targetEl.className) || 'null'); } catch(_) {}
-      targetEl.innerHTML = renderMarkdown(rendered);
+      if (options.plainStream) {
+        // 流水模式：直接追加文本节点，避免整段 innerHTML 重排
+        var textNode = document.createTextNode(next);
+        targetEl.insertBefore(textNode, cursor || null);
+      } else {
+        targetEl.innerHTML = renderMarkdown(rendered);
+      }
       ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
@@ -1352,10 +1360,14 @@
       }
     }
 
-    function tick() {
+    function tick(timestamp) {
       rafId = 0;
       if (cancelled || paused) return;
-      emitText(false);
+      if (!lastFrameTime) lastFrameTime = timestamp;
+      var elapsed = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+      var budget = Math.max(1, Math.floor(elapsed * charsPerMs));
+      emitText(false, budget);
       if (pending) schedule();
     }
 
@@ -1365,6 +1377,7 @@
         emitText(true);
         return;
       }
+      lastFrameTime = 0;
       rafId = requestFrame(tick);
     }
 
@@ -1651,7 +1664,7 @@
           var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
           if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
         } else {
-          var entry = el('div', { class: 'ai-thought-entry' });
+          var entry = el('div', { class: 'ai-thought-entry' + (logBox.children.length === 0 ? ' dt-animate-in' : '') });
           entry._role = roleLabel;
           entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
           entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
@@ -1779,6 +1792,7 @@
 
     // 2. 创建进度卡 (而不是 typing node)
     var progressCard = buildDeepThinkProgressCard();
+    progressCard.classList.add('dt-animate-in');
     S.deepThinkProgressCard = progressCard;
     messagesEl.appendChild(progressCard);
     scrollToBottom(messagesEl, true);
@@ -1835,7 +1849,7 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard()
-      var node = el('div', { class: 'ai-think-card expanded' });
+      var node = el('div', { class: 'ai-think-card expanded dt-animate-in' });
       node.innerHTML =
         '<div class="ai-think-header">' +
           '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
@@ -2146,9 +2160,9 @@
                   if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + chunkText);
                 } else {
                   var entry = document.createElement('div');
-                  entry.className = 'ai-thought-entry';
+                  entry.className = 'ai-thought-entry' + (thinkBody.children.length === 0 ? ' dt-animate-in' : '');
                   entry._role = roleLabel;
-                  entry.innerHTML = '<div class="ai-thought-role">▸ ' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
+                  entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
                   entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
                   thinkBody.appendChild(entry);
                 }
@@ -2181,7 +2195,7 @@
             if (aEl && !answerRenderer) {
               aEl.innerHTML = '';
               answerRenderer = createSmoothTextRenderer(aEl, {
-                minChunk: 4, maxChunk: 16
+                minChunk: 2, maxChunk: 8, plainStream: true
               });
             }
             aiContent += String(evt.chunk);
