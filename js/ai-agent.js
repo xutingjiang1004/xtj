@@ -2576,14 +2576,24 @@
     if (!dtMessagesEl || !input) { S.sending = false; return; }
 
     var originalUserText = text || '';
+    var displayText = text;
 
-    // 如果有文件, 追加到消息中
+    // 如果有文件, 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
     if (fileData) {
       var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
-      var fileTag = fileData.type.startsWith('image/')
-        ? '\n![' + safeName + '](' + fileData.dataUrl + ')'
-        : '\n[' + safeName + '](' + fileData.dataUrl + ')';
-      text = text ? text + '\n' + fileTag : fileTag;
+      var isImage2 = fileData.type.startsWith('image/');
+      var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
+      // UI 显示
+      if (isImage2) {
+        displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
+      } else {
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB2 + 'KB]';
+      }
+      // 发送给服务器: 简短标记
+      var serverTag2 = isImage2
+        ? '[图片: ' + safeName + ' · ' + sizeKB2 + 'KB]'
+        : '[文件: ' + safeName + ' · ' + sizeKB2 + 'KB]';
+      text = text ? text + '\n' + serverTag2 : serverTag2;
     }
     if (text.length > 50000) { notify('消息过长（最多 50000 字符），请精简后重试'); S.sending = false; return; }
 
@@ -2615,17 +2625,27 @@
         S.abortController = null;
         S.paused = false;
         S.activeRenderers = [];
+        var dtPB = document.getElementById('dtPauseBtn');
+        if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
       }
     }
     S.sending = true;
     clearReplyTimer();
+
+    // 显示暂停按钮
+    var dtPauseBtn = document.getElementById('dtPauseBtn');
+    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '暂停'; }
 
     // 1. 追加 user 消息（手动创建 .dt-msg.user，不使用气泡）
     var empty = dtMessagesEl.querySelector('.dt-empty');
     if (empty) { try { empty.remove(); } catch (e) {} }
     var userNode = el('div', { class: 'dt-msg user' });
     userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
-    userNode.appendChild(el('div', { class: 'dt-msg-content', text: text }));
+    var userContent = el('div', { class: 'dt-msg-content' });
+    // 渲染 markdown (包含图片 data URL 或文件占位)
+    var renderFn = window.renderMarkdown || renderMarkdown;
+    userContent.innerHTML = renderFn(displayText);
+    userNode.appendChild(userContent);
     dtMessagesEl.appendChild(userNode);
     scrollToBottom(dtMessagesEl, true);
 
@@ -2895,6 +2915,7 @@
     var newBtn = document.getElementById('dtNewChatBtn');
     var delBtn = document.getElementById('dtDeleteChatBtn');
     var sendBtn = document.getElementById('dtSendBtn');
+    var pauseBtn = document.getElementById('dtPauseBtn');
     var input = document.getElementById('dtInput');
     var fileBtn = document.getElementById('dtFileBtn');
     var fileInput = document.getElementById('dtFileInp');
@@ -3009,6 +3030,27 @@
 
     if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
 
+    // 暂停按钮：真正中止 SSE 请求 + 暂停渲染
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (!S.sending) return;
+        var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
+        if (anyPaused) {
+          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
+          S.paused = false;
+          pauseBtn.textContent = '暂停';
+        } else {
+          try { if (S.abortController) S.abortController.abort(); } catch (e) {}
+          try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
+          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
+          S.paused = true;
+          pauseBtn.textContent = '继续';
+        }
+      });
+    }
+
     if (input) {
       input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -3027,17 +3069,28 @@
 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
-    // 如果有文件, 追加到消息中
+    var displayText = text;
+    // 如果有文件, 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
     if (fileData) {
       var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
-      var fileTag = fileData.type.startsWith('image/')
-        ? '\n![' + safeName + '](' + fileData.dataUrl + ')'
-        : '\n[' + safeName + '](' + fileData.dataUrl + ')';
-      text = text ? text + '\n' + fileTag : fileTag;
+      var isImage = fileData.type.startsWith('image/');
+      // 估算文件大小（data URL 约 4/3 倍原始大小）
+      var sizeKB = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
+      // UI 显示
+      if (isImage) {
+        displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
+      } else {
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB + 'KB]';
+      }
+      // 发送给服务器: 简短标记，不含大 data URL
+      var serverTag = isImage
+        ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]'
+        : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]';
+      text = text ? text + '\n' + serverTag : serverTag;
     }
     if (!text) { S.sending = false; return; }
     if (text.length > 50000) {
-      notify('消息过长（最多 6000 字符），请精简后重试');
+      notify('消息过长（最多 50000 字符），请精简后重试');
       S.sending = false;
       return;
     }
@@ -3093,7 +3146,7 @@
     clearReplyTimer();
     
     var nowIso = new Date().toISOString();
-    var userMsg = { role: 'user', content: text, created_at: nowIso };
+    var userMsg = { role: 'user', content: displayText, created_at: nowIso };
     S.messages.push(userMsg);
     appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
@@ -4282,16 +4335,18 @@ function showChatMessages() {
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending) return;
-      if (!S.activeRenderers || S.activeRenderers.length === 0) return;
-      var anyPaused = S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
+      var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
       if (anyPaused) {
-        S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
+        // 恢复
+        if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
         S.paused = false;
         pauseBtn.textContent = '暂停';
       } else {
-        S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
+        // 真正中止 SSE 请求 + 暂停渲染
+        try { if (S.abortController) S.abortController.abort(); } catch (e) {}
+        try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
+        if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
-        // 只暂停前端渲染, 不kill SSE, resume后继续看积累的内容
         pauseBtn.textContent = '继续';
       }
     });
