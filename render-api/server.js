@@ -161,22 +161,22 @@ function shouldForceSplitAgents(message, minLen) {
   return false;
 }
 
-// 判定消息是否完全无需多 agent：短消息、纯情绪/指令词
-// 即使有历史上下文，对这种新消息也直接简短回答，不走多 agent
+// 判定消息是否完全无需多 agent：极短的纯情绪/指令词
+// 谨慎判断：宁可让多 agent 跑，也不要把有效问题当 trivial
 function isTrivialNewMessage(message) {
   if (!message) return true;
   var m = String(message).trim();
   if (!m) return true;
-  // 太短（≤6 字）一律 trivial
-  if (m.length <= 6) return true;
   // 去掉 [图片:...] / [文件:...] 标记后的纯文本
   var cleaned = m.replace(/\[(图片|文件)[^\]]*\]/g, '').trim();
-  if (cleaned.length <= 6) return true;
-  // 常见的极简情绪/指令词（即使在历史后也无需多 agent）
-  var trivialPatterns = /^(停|滚|哈哈+|呵呵+|呵呵呵+|嗯+|哦+|啊+|哇+|耶+|好+|行+|可以+|不对+|是的+|没错+|666+|233+|哈哈哈+|嘿嘿+|嘻嘻+|ok|OK|no |no$|yes|yes$|yep|yeah|nope|草|艹|牛逼|nb|牛|强|赞|溜|服|呕|吐|笑死|笑哭|笑)|[\.\!\?\。，！？]{1,5}$/;
-  if (trivialPatterns.test(cleaned)) return true;
-  // 单字/双字回复
-  if (/^[\u4e00-\u9fa5]{1,3}$/.test(cleaned)) return true;
+  if (!cleaned) return true;
+  // ★ 仅 1-2 字才 trivial (例: "?", "嗯", "哦", "滚", "停")
+  if (cleaned.length <= 2) return true;
+  // 极短的纯标点/表情
+  if (/^[\.\!\?\。，！？~～()()【】…\s]{1,5}$/.test(cleaned)) return true;
+  // 常见的极简情绪/指令词
+  var trivialWords = /^(停|滚|好+|行+|可以+|不对+|是的+|没错+|666|233|哈哈+|呵呵+|嘿嘿+|嘻嘻+|ok|OK|yes|yes$|yep|yeah|nope|草|艹|牛逼|nb|牛|强|赞|溜|服|呕|吐|笑死|笑哭|嗯+|哦+|啊+|哇+|耶+|好的|行吧|可以|收到|了解|明白|知道了|谢谢|感谢|多谢|辛苦|哈喽|嗨|hi|hello|再见|拜拜|bye)$/i;
+  if (trivialWords.test(cleaned)) return true;
   return false;
 }
 
@@ -408,23 +408,6 @@ const AI_TOOLS = [
         properties: {}
       }
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'compress_history',
-      description: '压缩历史对话。当历史消息已经很长（>10 条或上下文快接近模型上限），你判断继续累加会导致响应变慢/费用变高/超过上下文限制时，主动调用此工具压缩历史。压缩后会用一段简洁的摘要替换原历史（保留关键事实和上下文），后续对话继续基于摘要+最近几条消息。\n\n调用时机建议：\n- 历史消息 ≥ 8 条 且 累计内容很多\n- 用户聊到完全不相关的新话题，旧的细节可以丢\n- 你感觉前面的细节对你回答当前问题没用了\n\n压缩后只需简短回答，无需重复摘要内容。',
-      parameters: {
-        type: 'object',
-        properties: {
-          summary: {
-            type: 'string',
-            description: '对历史的精炼摘要。包含：用户身份/偏好/重要事实、对话主线、未解决问题。每条用一行，不要超过 800 字。'
-          }
-        },
-        required: ['summary']
-      }
-    }
   }
 ];
 
@@ -475,11 +458,6 @@ async function executeToolCall(toolCall) {
       var weekday = weekdays[now.getDay()];
       var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
       return { tool_name: name, content: timeResult };
-    }
-    case 'compress_history': {
-      var summary = String(args.summary || '').trim().slice(0, 2000);
-      if (!summary) return { tool_name: name, error: '摘要为空' };
-      return { tool_name: name, content: '✓ 历史已压缩，' + summary.length + ' 字符摘要已应用。后续对话基于此摘要 + 最近消息继续。', _compressed: true, summary: summary };
     }
     default:
       return { tool_name: name, error: '未知工具: ' + name };
@@ -2725,25 +2703,6 @@ async function callDeepSeek(messages, options) {
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
         return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
       }));
-
-      // ★ 缓存优化：处理 compress_history — 用摘要替换历史（保留 system + 最近 2 条）
-      var compressSummary = null;
-      toolResults.forEach(function(r) {
-        if (r.tcName === 'compress_history' && r.toolResult && r.toolResult._compressed && r.toolResult.summary) {
-          compressSummary = r.toolResult.summary;
-        }
-      });
-      if (compressSummary) {
-        var sysMsgs = workingMessages.filter(function(m) { return m.role === 'system'; });
-        var userAsst = workingMessages.filter(function(m) { return m.role === 'user' || m.role === 'assistant'; });
-        // 保留 system + 最近 2 条 user/assistant
-        var keep = userAsst.slice(-2);
-        workingMessages = sysMsgs.concat([
-          { role: 'user', content: '[历史摘要] ' + compressSummary + '\n(以上是之前对话的摘要。最近 2 条消息保留在下方)' },
-          { role: 'assistant', content: '已了解历史摘要，请继续回答当前问题。' }
-        ]).concat(keep);
-        try { console.log('[DEEPSEEK] history compressed to summary, new length:', workingMessages.length, 'summary chars:', compressSummary.length); } catch (e) {}
-      }
       toolResults.forEach(function(r) {
         toolCallsInfo.push({ id: r.tcId, name: r.tcName, args: r.tcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
         if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
@@ -2924,6 +2883,14 @@ async function runMultiAgentFlow(opts) {
         }
       );
       var fakePlannerTrivial = { complexity: 'low', reasoning: '极简消息，直接回答', agent_count: 0, agents: [] };
+      // 极简路径也加一个 thinking_log 条目, 让 UI 能展示"已思考 0s"
+      try {
+        if (directResult.reasoning) {
+          thinkingLog.push({ agent_role: 'AI 智能体', chunk: directResult.reasoning, round: 0, ts: Date.now() });
+        } else {
+          thinkingLog.push({ agent_role: '系统', chunk: '极简消息，AI 直接回答（无多 agent 分析）', round: 0, ts: Date.now() });
+        }
+      } catch (e) {}
       return {
         cancelled: false, finalContent: directResult.content || '', planner: fakePlannerTrivial, worker_results: [],
         thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
@@ -7578,16 +7545,46 @@ async function handleDeepThinkChat(req, res) {
     if (cachedHit && cachedHit.expiresAt > Date.now()) {
       console.log('[AI-CACHE] 缓存命中, 直接返回');
       var nowTs = Date.now();
+      var cachedContent = cachedHit.content;
+      var cachedUsage = cachedHit.usage || null;
+      var cachedAgentCount = cachedHit.agent_count || 1;
+      // ★ 缓存命中也要把消息保存到 DB (否则用户重进看不到), 用原始 thinking_log
+      try {
+        var cacheExtra = {
+          deep_think: true,
+          agent_count: cachedAgentCount,
+          planner: cachedHit.planner || null,
+          worker_results: cachedHit.worker_results || [],
+          thinking_log: cachedHit.thinking_log || [],
+          think_duration_ms: cachedHit.think_duration_ms || 0
+        };
+        await supabase.from('posts').insert([
+          {
+            user_name: userName,
+            content: message,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('user', convId, null, null, 1),
+            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+          },
+          {
+            user_name: userName,
+            content: cachedContent,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('assistant', convId, cachedUsage, '', 2, null, cacheExtra.think_duration_ms, cacheExtra),
+            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+          }
+        ]);
+      } catch (e) { try { console.error('[AI-CACHE] save on hit failed:', e && e.message); } catch (_) {} }
       sseSend({
         type: 'done',
-        content: cachedHit.content,
-        sanitized_content: cachedHit.content,
+        content: cachedContent,
+        sanitized_content: cachedContent,
         conversation_id: convId,
         deep_think: true,
         thinking_mode: finalThinkingMode,
         model: DEEPSEEK_MODEL_REASONER,
-        usage: cachedHit.usage || null,
-        agent_count: cachedHit.agent_count || 1,
+        usage: cachedUsage,
+        agent_count: cachedAgentCount,
         search_count: 0,
         search_expires_at: 0,
         duration_ms: 0,
@@ -7744,13 +7741,18 @@ async function handleDeepThinkChat(req, res) {
       }
     }
 
-    // ★ 写入缓存
+    // ★ 写入缓存 (含 thinking_log, 让缓存命中也能保存完整历史)
     if (!aborted && finalContent && !flowResult.cancelled) {
       try {
+        var cacheThinkingLog = Array.isArray(flowResult.thinking_log) ? flowResult.thinking_log : [];
         aiResponseCache.set(cacheKey, {
           content: finalContent,
           usage: synthUsage,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
+          planner: flowResult.planner || null,
+          worker_results: Array.isArray(flowResult.worker_results) ? flowResult.worker_results.map(function(w){ return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }) : [],
+          thinking_log: cacheThinkingLog,
+          think_duration_ms: totalDurationMs,
           expiresAt: Date.now() + AI_CACHE_TTL_MS
         });
         // 限制缓存大小
