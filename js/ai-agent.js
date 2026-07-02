@@ -1295,7 +1295,7 @@
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
     // V4: 基于时间推进，适配不同刷新率；plainStream 更慢营造流水感
     var lastFrameTime = 0;
-    var charsPerMs = options.plainStream ? 0.55 : 0.9;
+    var charsPerMs = options.plainStream ? 0.35 : 0.65;
     // V3: 末尾呼吸竖线光标 (替代闪光光点)
     var cursor = null;
     function ensureCursor() {
@@ -1664,7 +1664,7 @@
           var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
           if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
         } else {
-          var entry = el('div', { class: 'ai-thought-entry' + (logBox.children.length === 0 ? ' dt-animate-in' : '') });
+          var entry = el('div', { class: 'ai-thought-entry' });
           entry._role = roleLabel;
           entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
           entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
@@ -1849,7 +1849,7 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard()
-      var node = el('div', { class: 'ai-think-card expanded dt-animate-in' });
+      var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
           '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
@@ -1895,6 +1895,7 @@
     //   退出对话框重进后, think-card 从 history 恢复
     function finishThinkCard(node, content, evt) {
       if (node) node.classList.remove('generating');
+      if (node) node.classList.add('done');
 
       var searchCount = evt ? (evt.search_count || 0) : 0;
       var searchQuery = evt ? (evt.search_query || '') : '';
@@ -2160,7 +2161,7 @@
                   if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + chunkText);
                 } else {
                   var entry = document.createElement('div');
-                  entry.className = 'ai-thought-entry' + (thinkBody.children.length === 0 ? ' dt-animate-in' : '');
+                  entry.className = 'ai-thought-entry';
                   entry._role = roleLabel;
                   entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
                   entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
@@ -2195,7 +2196,7 @@
             if (aEl && !answerRenderer) {
               aEl.innerHTML = '';
               answerRenderer = createSmoothTextRenderer(aEl, {
-                minChunk: 2, maxChunk: 8, plainStream: true
+                minChunk: 1, maxChunk: 3, plainStream: true
               });
             }
             aiContent += String(evt.chunk);
@@ -2653,8 +2654,8 @@
         }
         if (!contentRenderer) {
           contentRenderer = createSmoothTextRenderer(aiBubble, {
-            minChunk: 4,
-            maxChunk: 16,
+            minChunk: 2,
+            maxChunk: 8,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
               scrollToBottom(messagesEl, false);
@@ -2954,8 +2955,8 @@
               if (!reasoningRenderer) {
                 body.textContent = '';
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                minChunk: 4,
-                maxChunk: 16,
+                minChunk: 2,
+                maxChunk: 8,
                 onRender: function() {
                   if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
                 }
