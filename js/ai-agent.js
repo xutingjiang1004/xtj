@@ -1884,10 +1884,8 @@
       var readResult;
       try { readResult = await reader.read(); } catch (e) { break; }
       if (readResult.done) break;
-      if (isDtPage) {
-        var _dtP = document.getElementById('panelDeepThink');
-        if (!_dtP || _dtP.classList.contains('hidden')) { reader.cancel().catch(function(){}); break; }
-      } else if (!S.active) { reader.cancel().catch(function(){}); break; }
+      // ★ 不检查面板可见性：用户关闭页面后 AI 继续在后台运行，回来后可继续看到
+      if (!S.active) { reader.cancel().catch(function(){}); break; }
 
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
@@ -2490,29 +2488,15 @@
     // 恢复底部 dock
     setDockBarVisible(true);
 
-    // 停止正在进行的深度思考请求，避免干扰普通聊天
-    if (S.deepThinkJob) {
-      try { S.deepThinkJob.abort(); } catch (e) {}
-    }
-    if (S.deepThinkProgressCard) {
-      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
-      try { S.deepThinkProgressCard.remove(); } catch (e) {}
-    }
-
+    // ★ 不再停止正在进行的请求，让 AI 继续在后台完成，用户回来后可见
     // 持久化 dtConversationId（页面刷新后也能恢复）
     saveDtConvId();
 
     // 只清空输入，保留 dtConversationId 以便再次打开时恢复历史
     var input = document.getElementById('dtInput');
     if (input) { input.value = ''; input.style.height = 'auto'; }
-
-    S.sending = false;
-    S.paused = false;
-    S.activeRenderers = [];
-    S.deepThinkJob = null;
-    S.deepThinkProgressCard = null;
-    S.abortController = null;
-    // ★ 不再清空 S.dtConversationId，保留会话 ID 以便恢复历史
+    // ★ 不清空 sending/activeRenderers/abortController 等状态，
+    //   保留 SSE 连接和渲染状态，用户回来后继续展示
   }
 
   // 文件上传状态 (dt 页面)
