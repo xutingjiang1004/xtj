@@ -2484,6 +2484,9 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  if (options && options.signal) {
+    options.signal.addEventListener('abort', function() { controller.abort(); });
+  }
 
   // 用于汇总 tool_use 信息（返回给上层做徽章 / 计费 / 统计）
   var toolCallsInfo = [];
@@ -2835,6 +2838,7 @@ async function runMultiAgentFlow(opts) {
   var searchQueries = [];
 
   function sseSend(obj) {
+    if (res.writableEnded) return;
     if (obj && obj.type === 'thinking_chunk') {
       try { thinkingLog.push({ agent_role: obj.agent_role || 'AI 智能体', chunk: obj.chunk, round: obj.round || 0, ts: Date.now() }); } catch (e) {}
     }
@@ -2864,6 +2868,7 @@ async function runMultiAgentFlow(opts) {
   // 2. 调用 Planner (★ U3: +超时机制 + 流式thinking)
   var plannerContent = '';
   try {
+    var plannerAbortController = new AbortController();
     var plannerPromise = callDeepSeek(
       [
         { role: 'system', content: sharedPrefix + '\n\n---\n\n' + DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
@@ -2875,6 +2880,7 @@ async function runMultiAgentFlow(opts) {
         // ★ P3 修复 bug 2: max_tokens 2048→4096, 防止 max 思考消耗完 token 导致 Planner 输出空 agents:[] 触发退路
         max_tokens: 4096,
         response_format: { type: 'json_object' },
+        signal: plannerAbortController.signal,
         // ★ 流式推 Planner 的思考过程，用户实时看到规划中的思考，不再空等 15-20 秒
         onThinkingChunk: function(chunk) {
           sseSend({ type: 'thinking_chunk', agent_role: 'Planner', chunk: chunk, round: 0 });
@@ -2882,7 +2888,7 @@ async function runMultiAgentFlow(opts) {
       }
     );
     var plannerTimeout = new Promise(function(_, reject) {
-      setTimeout(function() { reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
+      setTimeout(function() { plannerAbortController.abort(); reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
     });
     var plannerResult = await Promise.race([plannerPromise, plannerTimeout]);
     plannerContent = plannerResult.content || '';
@@ -3102,6 +3108,7 @@ async function runDeepThinkAgent(opts) {
 
   // SSE helpers
   function sseSend(obj) {
+    if (res.writableEnded) return;
     // ★ R: 记录 thinking_chunk 到 thinkingLog
     if (obj && obj.type === 'thinking_chunk') {
       try {
@@ -3364,10 +3371,11 @@ async function runDeepThinkWorker(opts) {
         callOpts.tool_choice = 'auto';
         callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum);
       }
-      // ★ U3: Promise.race 强制超时
-      var callPromise = callDeepSeek(messages, callOpts);
+      // ★ U3: Promise.race 强制超时（同时中止底层 HTTP 请求）
+      var workerAbortController = new AbortController();
+      var callPromise = callDeepSeek(messages, Object.assign({}, callOpts, { signal: workerAbortController.signal }));
       var timeoutPromise = new Promise(function(_, reject) {
-        setTimeout(function() { reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
+        setTimeout(function() { workerAbortController.abort(); reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
       });
       r = await Promise.race([callPromise, timeoutPromise]);
     } catch (e) {
@@ -7001,7 +7009,10 @@ const AI_CHAT_HOURLY_IP_LIMIT = 200;
 
 // 生成简短的 conversation_id
 function genConvId() {
-  return Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  var ts = Date.now().toString(36).toUpperCase();
+  var rnd;
+  try { rnd = crypto.randomUUID().split('-').slice(0,2).join('').toUpperCase(); } catch(e) { rnd = Math.random().toString(36).slice(2, 8).toUpperCase(); }
+  return ts + '-' + rnd;
 }
 
 // 解析 media_url 中的元数据：新数据为 JSON {role, convId, usage}，旧数据为纯字符串 role
@@ -7663,8 +7674,10 @@ async function handleDeepThinkChat(req, res) {
             mergedThinkingLog.push({ agent_role: rtl.agent_role || 'AI 智能体', chunk: rtl.chunk || '', round: rtl.round || 0 });
           }
         }
+        var chatMode = (req.body && req.body.chat_mode) || 'normal';
         var deepThinkExtra = {
           deep_think: true,
+          chat_mode: chatMode,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
           planner: flowResult.planner || null,
           worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
@@ -8899,10 +8912,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 });
 
 // GET /api/agent/chat/conversations - 获取用户会话列表
+//   mode=normal → 只返回普通聊天会话（deep_think=false）
+//   mode=deep_think → 只返回深度研究会话（deep_think=true）
+//   不传 mode → 返回全部
 app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
+    var mode = (req.query.mode || '').trim();
 
     // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
     var { data: rows } = await supabase.from('posts')
@@ -8926,6 +8943,11 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       if (meta && meta.deleted) continue; // 用户已删除的跳过
       var convId = resolveConvId(r);
       if (!convId) continue;
+      
+      // mode 过滤：chat_mode = 'deep_think' 的只出现在深度研究列表
+      // 旧消息无 chat_mode 字段，视为 normal
+      if (mode === 'normal' && meta.chat_mode === 'deep_think') continue;
+      if (mode === 'deep_think' && meta.chat_mode !== 'deep_think') continue;
       
       if (!convData[convId]) {
         convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
