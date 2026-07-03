@@ -7663,8 +7663,10 @@ async function handleDeepThinkChat(req, res) {
             mergedThinkingLog.push({ agent_role: rtl.agent_role || 'AI 智能体', chunk: rtl.chunk || '', round: rtl.round || 0 });
           }
         }
+        var chatMode = (req.body && req.body.chat_mode) || 'normal';
         var deepThinkExtra = {
           deep_think: true,
+          chat_mode: chatMode,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
           planner: flowResult.planner || null,
           worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
@@ -8899,10 +8901,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 });
 
 // GET /api/agent/chat/conversations - 获取用户会话列表
+//   mode=normal → 只返回普通聊天会话（deep_think=false）
+//   mode=deep_think → 只返回深度研究会话（deep_think=true）
+//   不传 mode → 返回全部
 app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
+    var mode = (req.query.mode || '').trim();
 
     // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
     var { data: rows } = await supabase.from('posts')
@@ -8926,6 +8932,11 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       if (meta && meta.deleted) continue; // 用户已删除的跳过
       var convId = resolveConvId(r);
       if (!convId) continue;
+      
+      // mode 过滤：chat_mode = 'deep_think' 的只出现在深度研究列表
+      // 旧消息无 chat_mode 字段，视为 normal
+      if (mode === 'normal' && meta.chat_mode === 'deep_think') continue;
+      if (mode === 'deep_think' && meta.chat_mode !== 'deep_think') continue;
       
       if (!convData[convId]) {
         convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
