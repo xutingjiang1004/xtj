@@ -2402,7 +2402,7 @@
         else if (!dr.value) { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('AI 暂时没有回应'); }
       }
     } catch (fetchErr) {
-      if (S._currentReqId !== reqId) return;
+      if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
       safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
       S.paused = false; S.activeRenderers = [];
       if (fetchErr && fetchErr.name !== 'AbortError') {
@@ -2904,7 +2904,7 @@
         else if (!dr.value) { removeLastDtUserMessage(); restoreInputText(); notify('AI 暂时没有回应'); }
       }
     } catch (fetchErr) {
-      if (S._currentReqId !== reqId) return;
+      if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
       safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
