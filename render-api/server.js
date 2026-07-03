@@ -2484,6 +2484,9 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  if (options && options.signal) {
+    options.signal.addEventListener('abort', function() { controller.abort(); });
+  }
 
   // 用于汇总 tool_use 信息（返回给上层做徽章 / 计费 / 统计）
   var toolCallsInfo = [];
@@ -2864,6 +2867,7 @@ async function runMultiAgentFlow(opts) {
   // 2. 调用 Planner (★ U3: +超时机制 + 流式thinking)
   var plannerContent = '';
   try {
+    var plannerAbortController = new AbortController();
     var plannerPromise = callDeepSeek(
       [
         { role: 'system', content: sharedPrefix + '\n\n---\n\n' + DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
@@ -2875,6 +2879,7 @@ async function runMultiAgentFlow(opts) {
         // ★ P3 修复 bug 2: max_tokens 2048→4096, 防止 max 思考消耗完 token 导致 Planner 输出空 agents:[] 触发退路
         max_tokens: 4096,
         response_format: { type: 'json_object' },
+        signal: plannerAbortController.signal,
         // ★ 流式推 Planner 的思考过程，用户实时看到规划中的思考，不再空等 15-20 秒
         onThinkingChunk: function(chunk) {
           sseSend({ type: 'thinking_chunk', agent_role: 'Planner', chunk: chunk, round: 0 });
@@ -2882,7 +2887,7 @@ async function runMultiAgentFlow(opts) {
       }
     );
     var plannerTimeout = new Promise(function(_, reject) {
-      setTimeout(function() { reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
+      setTimeout(function() { plannerAbortController.abort(); reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
     });
     var plannerResult = await Promise.race([plannerPromise, plannerTimeout]);
     plannerContent = plannerResult.content || '';
@@ -3364,10 +3369,11 @@ async function runDeepThinkWorker(opts) {
         callOpts.tool_choice = 'auto';
         callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum);
       }
-      // ★ U3: Promise.race 强制超时
-      var callPromise = callDeepSeek(messages, callOpts);
+      // ★ U3: Promise.race 强制超时（同时中止底层 HTTP 请求）
+      var workerAbortController = new AbortController();
+      var callPromise = callDeepSeek(messages, Object.assign({}, callOpts, { signal: workerAbortController.signal }));
       var timeoutPromise = new Promise(function(_, reject) {
-        setTimeout(function() { reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
+        setTimeout(function() { workerAbortController.abort(); reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
       });
       r = await Promise.race([callPromise, timeoutPromise]);
     } catch (e) {
