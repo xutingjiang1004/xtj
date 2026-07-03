@@ -83,7 +83,7 @@ try { pdfParser = require('pdf-parse'); } catch(e) { console.warn('[FILE] pdf-pa
 try { mammothParser = require('mammoth'); } catch(e) { console.warn('[FILE] mammoth not available'); }
 try { xlsxParser = require('xlsx'); } catch(e) { console.warn('[FILE] xlsx not available'); }
 
-// ===================== P: 深度思考模式 (Deep Think / Multi-Agent) =====================
+// ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
 //   - MAX_WORKERS 10 -> 5
 //   - Planner 自主动态决策 (可拆 0/1/2..5 agent, 简单问题不调 agent)
@@ -135,48 +135,19 @@ function buildHistoryContext(ctx, message) {
 // 判断用户问题是否值得强制拆分多个 agent
 // minLen: 最小长度阈值, 可从 config.deep_think.force_split_min_length 传入
 function shouldForceSplitAgents(message, minLen) {
-  minLen = minLen || 24;
+  // 深度研究模式：不再根据长度限制，直接让 Planner 决策
+  // 只要有内容就应该尝试多角度分析
   if (!message) return false;
   var m = String(message).trim();
-  if (m.length < 12) return false;
-  // 简单问候/常识直接答
-  var simplePatterns = /^(你好|您好|在吗|hi|hello|嗨|谢谢|再见|拜拜|请问|什么是).{0,8}[?？]?$/i;
-  if (simplePatterns.test(m)) return false;
-  // 数学/代码单行表达式直接答
+  if (!m) return false;
+  // 数学/代码单行表达式仍然直接答
   if (/^[\d\+\-\*\/\^\(\)\s\.=<>!]+$/.test(m.replace(/\s/g, ''))) return false;
-  // 复杂关键词
-  var complexKeywords = [
-    '为什么', '怎么', '如何', '分析', '对比', '比较', '区别', '优劣', '优缺点',
-    '方案', '建议', '推荐', '影响', '原因', '机制', '原理', '趋势', '前景',
-    '策略', '规划', '设计', '架构', '实现', '调试', '排查', '优化', '性能',
-    '选择', '应该', '哪个好', '哪個好', '哪家', '多少钱', '值得', '风险',
-    '法律', '法规', '合同', '维权', '健康', '症状', '治疗', '用药',
-    '股票', '基金', '投资', '理财', '经济', '市场', '房价', '汇率',
-    '旅游', '路线', '攻略', '住宿', '签证', '景点'
-  ];
-  var hasComplexKeyword = complexKeywords.some(function(kw) { return m.indexOf(kw) >= 0; });
-  if (m.length >= minLen && hasComplexKeyword) return true;
-  // 长问题默认拆分
-  if (m.length >= 60) return true;
-  return false;
+  return true;
 }
 
-// 判定消息是否完全无需多 agent：极短的纯情绪/指令词
-// 谨慎判断：宁可让多 agent 跑，也不要把有效问题当 trivial
+// 深度研究模式：不再根据字数跳过多 agent 分析
+// AI 自主判断是否需要深度研究，直接交给 Planner 决策
 function isTrivialNewMessage(message) {
-  if (!message) return true;
-  var m = String(message).trim();
-  if (!m) return true;
-  // 去掉 [图片:...] / [文件:...] 标记后的纯文本
-  var cleaned = m.replace(/\[(图片|文件)[^\]]*\]/g, '').trim();
-  if (!cleaned) return true;
-  // ★ 仅 1-2 字才 trivial (例: "?", "嗯", "哦", "滚", "停")
-  if (cleaned.length <= 2) return true;
-  // 极短的纯标点/表情
-  if (/^[\.\!\?\。，！？~～()()【】…\s]{1,5}$/.test(cleaned)) return true;
-  // 常见的极简情绪/指令词
-  var trivialWords = /^(停|滚|好+|行+|可以+|不对+|是的+|没错+|666|233|哈哈+|呵呵+|嘿嘿+|嘻嘻+|ok|OK|yes|yes$|yep|yeah|nope|草|艹|牛逼|nb|牛|强|赞|溜|服|呕|吐|笑死|笑哭|嗯+|哦+|啊+|哇+|耶+|好的|行吧|可以|收到|了解|明白|知道了|谢谢|感谢|多谢|辛苦|哈喽|嗨|hi|hello|再见|拜拜|bye)$/i;
-  if (trivialWords.test(cleaned)) return true;
   return false;
 }
 
@@ -191,6 +162,15 @@ function buildDefaultAgents(message) {
     var lastSpace = cut.lastIndexOf(' ');
     if (lastSpace > maxLen * 0.5) return text.slice(0, lastSpace);
     return cut;
+  }
+
+  // 如果消息很短（<=5字），从多个解读角度分析
+  if (m.length <= 10) {
+    return [
+      { role: '意图解析', task_description: '分析用户可能的意图和需求', need_search: false, search_queries: [] },
+      { role: '多角度解读', task_description: '从不同角度理解问题和深层含义', need_search: true, search_queries: [smartTruncate(m, 40)] },
+      { role: '深度回答', task_description: '给出有深度的回答和建议', need_search: false, search_queries: [] }
+    ];
   }
 
   var agents = [];
@@ -252,7 +232,7 @@ function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searc
 }
 
 // Planner 提示词 — ★ U3 硬核升级: 领域专精引导 + 自我校验 + 智能长度控制
-const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规划器 (Planner).
+const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度研究模式的任务规划器 (Planner).
 你的职责: 判断问题复杂度、领域类型, 决定要不要拆解成多个并行 agent, 拆几个, 是否需要搜索.
 目标是像顶尖分析师一样 —— **精确、严谨、不啰嗦、该深则深该浅则浅**.
 
@@ -282,16 +262,15 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
 
 **关键决策规则:**
 
-1. **极简单问题 (1+1=?, 你好, 定义/常识, 单点查询)**: agents = [], complexity: low
-   - 直接给答案, 别装专业. reasoning: "简单问题, 无需拆解"
-
-2. **其他所有问题 (哪怕只是稍微需要分析、比较、解释原因)**: **请至少拆 2-3 个 agent**, complexity: medium 或 high
+1. **所有问题 (哪怕只有几个字)**: **至少拆 2-3 个 agent**, complexity 不低于 medium
+   - 不要因为用户问题短就跳过多角度分析
+   - 短问题可以从不同解读角度切入（意图猜测、隐含需求、多个可能性方向）
    - 代码问题: 拆成 语法/逻辑/最佳实践/安全性 角度
    - 科学问题: 拆成 原理/数据/应用/前沿 角度
    - 生活决策: 拆成 优缺点/成本/风险/替代方案 角度
    - 时事/商业: 拆成 背景/数据/影响/趋势 角度
 
-3. **复杂研究/方案对比/跨学科问题**: {minComplex}-{maxWorkers} 个 agent, complexity: high
+2. **复杂研究/方案对比/跨学科问题**: {minComplex}-{maxWorkers} 个 agent, complexity: high
    - 最多 {maxWorkers} 个, 每个独立方面, 互不重叠
 
 **自我校验:**
@@ -306,32 +285,31 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规�
 - **景点/地点/旅游/景区/公园/酒店/餐厅/活动**: need_search = true (用户需要最新信息如门票价格、开放时间、当前状况)
 - 不确定就 true
 
-**agents = [] 时:**
-- 表示"直接答, 不拆", Synthesizer 会给简短自然答案`;
+`;
 
-const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案整合者 (Synthesizer).
-你的职责: 把 Planner 拆出来的 agent 报告整合成最终答案, 或者在 agents=[] 时直接回答用户问题.
+const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度研究模式的答案整合者 (Synthesizer).
+你的职责: 把 Planner 拆出来的 agent 报告整合成最终答案.
 
-**风格: 像顶尖分析师 —— 精准、专业、有温度, 不废话也不敷衍.**
+**风格: 像顶尖研究分析师 —— 深度、严谨、有洞察力, 不敷衍不浅薄.**
 
 整合规则 (按 复杂度 + 领域 自适应):
 
-1. **complexity=low 或 agents=[] (简单问题)**:
-   - 直接用自然口语回答, 1-3 句话
-   - **严禁**长篇大论, **严禁**研究报告格式
-   - 总长 30-150 字
+1. **通用原则**: 无论问题长短, 都要给出有深度的回答
+   - 短问题也要挖掘深层含义, 从多角度解读
+   - 不要因为用户只问了几个字就给 1-2 句敷衍
+   - 展现推理过程和分析深度
 
 2. **complexity=medium (中等复杂)**:
    - 整合 agent 内容, 按领域调整结构:
-   - 代码领域: 直接给代码+简要说明, 不用标题堆砌. 300-800 字
-   - 金融/科学领域: 数据先行+解释, 1-3 段连贯文字. 300-1000 字
-   - 其他领域: 1-3 段连贯文字. 200-800 字
+   - 代码领域: 直接给代码+简要说明, 不用标题堆砌. 500-1500 字
+   - 金融/科学领域: 数据先行+解释, 2-4 段连贯文字. 500-2000 字
+   - 其他领域: 2-4 段连贯文字. 400-1500 字
 
 3. **complexity=high (复杂研究)**:
-   - 代码领域: 分块展示 (思路→代码→注意事项), 800-2000 字
-   - 金融/法律/科学: 结构化但口语化, 800-2500 字
-   - 旅游: 用清单/路线, 500-1500 字
-   - 健康: 必须加"以上内容仅供参考, 请咨询专业医生". 500-1500 字
+   - 代码领域: 分块展示 (思路→代码→注意事项), 1000-3000 字
+   - 金融/法律/科学: 结构化但口语化, 1000-3500 字
+   - 旅游: 用清单/路线, 800-2500 字
+   - 健康: 必须加"以上内容仅供参考, 请咨询专业医生". 800-2500 字
 
 **领域专精规则:**
 - 代码: 代码块用三反引号包裹, 标注语言, 检查边界条件和安全性
@@ -351,7 +329,8 @@ const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案
 - 不要列原始 URL
 - 中文回复, 自然口语化
 - 不确定就说不确定, 别编
-- 代码/列表/标题该用就用, 但**别为了显示专业而过度格式化**`;
+- 代码/列表/标题该用就用
+- **深度优先**: 宁可多分析不可浅尝辄止, 每个 agent 的发现都要充分展开`;
 
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
 //   缓存未命中输入 1 元/1M tokens → DEEPSEEK_INPUT_PRICE_PER_1M
@@ -2836,7 +2815,7 @@ async function callDeepSeek(messages, options) {
   }
 }
 
-// ===================== M: 深度思考模式 — 多智能体架构 (Planner→Workers→Synthesizer) =====================
+// ===================== M: 深度研究模式 — 多智能体架构 (Planner→Workers→Synthesizer) =====================
 // 适用于 thinking_mode = 'max'
 // 流程: 1 次 Planner 拆解 → 并行 Worker 执行 → 1 次 Synthesizer 整合
 async function runMultiAgentFlow(opts) {
@@ -2868,48 +2847,18 @@ async function runMultiAgentFlow(opts) {
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
 
-  // ★ 极简新消息直接简短回答：跳过 Planner + Workers + Synthesizer
-  // 适用于"停"、"滚"、"666"、单字回复等，无需多 agent
-  if (isTrivialNewMessage(message)) {
-    sseSend({ type: 'deep_think_init', message: '极简问题，直接回答...', agent_count: 0 });
-    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '极简问题，直接回答...' });
-    try {
-      var corePrompt = buildAiCorePrompt(config);
-      var directPrompt = corePrompt + '\n\n用户新消息: ' + message + '\n\n' + (historyContext || '') + '\n\n这是极简消息（短/情绪/指令词），不要做任何深度分析或研究，直接给一个简短自然的回答（1-2 句话）。不要搜索。';
-      var directResult = await callDeepSeek(
-        [{ role: 'system', content: directPrompt }],
-        { thinking_mode: deepThinkThinkingMode, max_tokens: 1024,
-          onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
-        }
-      );
-      var fakePlannerTrivial = { complexity: 'low', reasoning: '极简消息，直接回答', agent_count: 0, agents: [] };
-      // 极简路径也加一个 thinking_log 条目, 让 UI 能展示"已思考 0s"
-      try {
-        if (directResult.reasoning) {
-          thinkingLog.push({ agent_role: 'AI 智能体', chunk: directResult.reasoning, round: 0, ts: Date.now() });
-        } else {
-          thinkingLog.push({ agent_role: '系统', chunk: '极简消息，AI 直接回答（无多 agent 分析）', round: 0, ts: Date.now() });
-        }
-      } catch (e) {}
-      return {
-        cancelled: false, finalContent: directResult.content || '', planner: fakePlannerTrivial, worker_results: [],
-        thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
-        search_count: 0, search_results: [], search_query: '', sources: [], queries: []
-      };
-    } catch (e) {
-      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: DEEPSEEK_MODEL_REASONER, search_count: 0, search_results: [], sources: [], queries: [] };
-    }
-  }
-
   // 从 config 覆盖 DEEP_THINK_CONFIG (管理员可在后台自定义)
   var dtCfg = (config && config.deep_think) || {};
   var effectiveMaxWorkers = Math.min(parseInt(dtCfg.max_workers) || DEEP_THINK_CONFIG.MAX_WORKERS, 10);
   var effectiveWorkerToolRounds = parseInt(dtCfg.worker_max_tool_rounds) || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
   var effectiveForceSplitLen = parseInt(dtCfg.force_split_min_length) || DEEP_THINK_CONFIG.FORCE_SPLIT_MIN_LENGTH;
 
+  // 共享前缀：所有角色共用 buildAiCorePrompt 以利用 DeepSeek prompt cache
+  var sharedPrefix = buildAiCorePrompt(config);
+
   // 1. 推 init 事件
   sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
-  sseSend({ type: 'deep_think_init', message: 'Planner 正在分析问题...', agent_count: 1 });
+    sseSend({ type: 'deep_think_init', message: '深度研究已启动, Planner 分析中...', agent_count: 1 });
   sseSend({ type: 'deep_think_stage', stage: 'agent', message: 'Planner 分析中...' });
 
   // 2. 调用 Planner (★ U3: +超时机制 + 流式thinking)
@@ -2917,7 +2866,7 @@ async function runMultiAgentFlow(opts) {
   try {
     var plannerPromise = callDeepSeek(
       [
-        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
+        { role: 'system', content: sharedPrefix + '\n\n---\n\n' + DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
         { role: 'user', content: message + '\n\n' + (historyContext || '') + '\n\n请输出你的规划 JSON。' }
       ],
       {
@@ -2984,18 +2933,18 @@ async function runMultiAgentFlow(opts) {
   }
 
   if (agentCount === 0) {
-    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '简单问题，直接回答...' });
+    sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在进行深度分析...' });
     try {
       var corePrompt = buildAiCorePrompt(config);
-      var directPrompt = corePrompt + '\n\n用户问题: ' + message + '\n\n简单问题，直接给一个简短自然的答案。不要搜索。';
+      var directPrompt = corePrompt + '\n\n用户问题: ' + message + '\n\n作为深度研究模式，请从以下角度进行全面分析：\n1. 问题的核心是什么？\n2. 从哪些维度可以深入探讨？\n3. 给出有深度的分析和结论\n不要因为问题简短就敷衍。';
       var directResult = await callDeepSeek(
         [{ role: 'system', content: directPrompt + (historyContext || '') }],
-        { thinking_mode: deepThinkThinkingMode, max_tokens: 4096,
+        { thinking_mode: deepThinkThinkingMode, max_tokens: 8192,
           onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk }); },
           onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
         }
       );
-      var fakePlanner = { complexity: plan.complexity || 'low', reasoning: plan.reasoning || '简单问题', agent_count: 0, agents: [] };
+      var fakePlanner = { complexity: 'medium', reasoning: '深度模式直接分析', agent_count: 1, agents: [{ role: 'AI 研究员', need_search: false }] };
       return {
         cancelled: false, finalContent: directResult.content || '', planner: fakePlanner, worker_results: [],
         thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
@@ -3007,7 +2956,7 @@ async function runMultiAgentFlow(opts) {
   }
 
   // 5. 有 agent → 并行执行 Workers
-  sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在并行分析 (' + agentCount + ' 个方向)...' });
+  sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在并行研究 (' + agentCount + ' 个方向)...' });
 
   var workerPromises = agents.map(function(agent, idx) {
     return runDeepThinkWorker({
@@ -3022,7 +2971,8 @@ async function runMultiAgentFlow(opts) {
       thinkingMode: deepThinkThinkingMode,
       needSearch: agent.need_search !== false,
       historyContext: historyContext,
-      workerMaxToolRounds: effectiveWorkerToolRounds
+      workerMaxToolRounds: effectiveWorkerToolRounds,
+      sharedPrefix: sharedPrefix
     }).then(function(wr) {
       if (wr && wr.sources) {
         wr.sources.forEach(function(s) { allSources.push(s); });
@@ -3049,7 +2999,7 @@ async function runMultiAgentFlow(opts) {
   sseSend({ type: 'deep_think_stage', stage: 'agent', message: 'Synthesizer 整合答案中...' });
 
   var synthMessages = [
-    { role: 'system', content: DEEP_THINK_SYNTHESIZER_PROMPT },
+    { role: 'system', content: sharedPrefix + '\n\n---\n\n' + DEEP_THINK_SYNTHESIZER_PROMPT },
     { role: 'user', content: '用户原始问题: ' + message + '\n\n' + (historyContext || '') }
   ];
 
@@ -3118,7 +3068,7 @@ async function runMultiAgentFlow(opts) {
   };
 }
 
-// ===================== R: 深度思考模式 — 单智能体架构 (Planner+Workers+Synthesizer 融合) =====================
+// ===================== R: 深度研究模式 — 单智能体架构 (单智能体深度分析) =====================
 // 之前 M 架构: Planner → Workers 并行 → Synthesizer (3 步, 像研究报告)
 // R 架构: 1 个 DeepSeek 智能体, thinking + tool_use 自由决定是否搜索 (1 步, 像 ChatGPT pro thinking)
 //   - 1 次 callDeepSeek, 内部最多 5 轮 tool_use
@@ -3144,7 +3094,6 @@ async function runDeepThinkAgent(opts) {
   var disableSearch = opts.disableSearch === true;
   var maxToolRounds = (typeof opts.max_tool_rounds === 'number') ? opts.max_tool_rounds : 5;
   var maxTokensLimit = (typeof opts.max_tokens === 'number') ? opts.max_tokens : 32768;
-  var answerLengthHint = opts.answerLengthHint || 'normal'; // short / normal / long
 
   var thinkingLog = []; // [{ agent_role, chunk, round, ts }]
   var searchCount = 0;
@@ -3166,22 +3115,15 @@ async function runDeepThinkAgent(opts) {
 
   var historyContext = buildHistoryContext(ctx, message);
 
-  // ★ R: 单智能体 prompt — 融合 buildAiCorePrompt + 深度思考特定指令
+  // ★ R: 单智能体 prompt — 融合 buildAiCorePrompt + 深度研究特定指令
   var corePrompt = buildAiCorePrompt(config);
-  var lengthHintLine = '';
-  if (answerLengthHint === 'short') {
-    lengthHintLine = '\n- 本次思考程度为 low，请严格控制答案长度：简单问题 1-2 句，复杂问题也不超过 200 字\n';
-  } else if (answerLengthHint === 'long') {
-    lengthHintLine = '\n- 本次思考程度为 high/max，可根据问题需要适当展开，上限不限\n';
-  }
 
   // ★ 缓存优化：紧凑 prompt，节省 token
   var DEEP_THINK_AGENT_PROMPT = corePrompt + '\n\n' +
-    '你处于"深度思考模式"。三步工作：\n' +
+    '你处于"深度研究模式"。工作方式：\n' +
     '1) 理解：判断领域(闲聊/代码/金融/科学/法律/健康/通用)，是否需搜(常识/闲聊/计算 → 不搜；实时数据/事件/地点 → 搜)。\n' +
-    '2) 分析：需搜则拆 1-3 个不同关键词；不搜则直接基于知识。代码要查语法/边界/安全。金融/法律/健康加免责声明。\n' +
-    '3) 回答：按复杂度控长度——简单问题 1-2 句，一般问答一段话，复杂分析分条但口语化。\n' +
-    lengthHintLine +
+    '2) 分析：深度挖掘问题本质，从多角度审视。需搜则拆 1-3 个不同关键词；不搜则深入推理。\n' +
+    '3) 回答：无论问题长短，都要给出有深度的分析。宁可多分析不可浅尝辄止。\n' +
     '不确定就说不确定。别写"作为 AI/根据分析"开场。别用"## 一、引言"论文体。';
 
   // ★ R: 取消 token 检查
@@ -3196,7 +3138,7 @@ async function runDeepThinkAgent(opts) {
   });
   sseSend({
     type: 'deep_think_init',
-    message: '深度思考已启动, 智能体正在分析...',
+    message: '深度研究已启动, 智能体正在分析...',
     agent_count: 1
   });
   sseSend({
@@ -3370,6 +3312,7 @@ async function runDeepThinkWorker(opts) {
   var needSearch = opts.needSearch !== false;
   var workerHistoryContext = opts.historyContext || '';
   var workerMaxToolRounds = opts.workerMaxToolRounds || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
+  var sharedPrefix = opts.sharedPrefix || '';
 
   var sources = [];
   var queries = [];
@@ -3379,21 +3322,21 @@ async function runDeepThinkWorker(opts) {
     ? '**本任务需要搜索**: 请调用 search_web 工具获取最新/具体数据 (1-3 次足够, 别刷屏)'
     : '**本任务不需要搜索**: 直接基于你的知识回答, 别调用 search_web 浪费 token';
 
-  var workerSystemPrompt = '你是 XTJ 深度思考模式下的 [' + agent.role + '] 专家.\n' +
+  var workerSystemPrompt = sharedPrefix + '\n\n---\n\n你是 XTJ 深度研究模式下的 [' + agent.role + '] 专家.\n' +
     '你的具体任务: ' + agent.task_description + '\n' +
     (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
     '执行规则 (务必精炼, 不要废话):\n' +
     '1. ' + (needSearch ? '最多搜 2 次, 关键词要不同角度, 别反复搜同样的' : '**不调用** search_web, 直接基于知识回答') + '\n' +
-    '2. 产出 150-500 字的本方面分析 (按问题需要, **别硬撑字数**, 简单问题 1-2 句话即可)\n' +
-    '3. 输出结构: 【结论】→【关键依据】→【不确定点】(简单问题可省略依据/不确定点)\n' +
+    '2. 产出 200-800 字的本方面深入分析 (深度挖掘, 充分展开)\n' +
+    '3. 输出结构: 【结论】→【关键依据】→【深入分析】→【不确定点】\n' +
     '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
     '5. 不要做最终总结, Synthesizer 会整合\n' +
     '6. 严禁以下废话开头: "考虑历史"/"根据系统提示"/"作为 AI"/"我们需要"/"根据规则"\n' +
     '7. 直接开始分析本方面, 不要先复述用户问题或解释你在做什么\n' +
     '8. ★ 看到 [历史对话上下文] 时, 只用它理解语境, 不要把历史当新问题去搜\n' +
-    '9. ★ 别写成研究报告, 像专家简短回答一样';
+    '9. ★ 深度优先, 充分展现你的专业分析能力';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },
@@ -7610,7 +7553,7 @@ async function handleDeepThinkChat(req, res) {
         var dt = (config && config.deep_think) || {};
         if (finalThinkingMode === 'max') {
           // max → 多智能体 (Planner→Workers→Synthesizer)
-          sseSend({ type: 'deep_think_stage', stage: 'init', message: '深度思考已启动, Planner 分析中...' });
+          sseSend({ type: 'deep_think_stage', stage: 'init', message: '深度研究已启动, Planner 分析中...' });
           flowResult = await runMultiAgentFlow({
             res: res, userName: userName, message: message, convId: convId,
             config: config, ctx: ctx, startTime: startTime,
@@ -7645,16 +7588,16 @@ async function handleDeepThinkChat(req, res) {
       console.error('[DEEP-THINK] flow exception:', e && e.message);
       // ★ U3: 降级兜底 — 深度思考失败时, 用简化单智能体 (无工具/低思考) 尝试直接回答
       try {
-        sseSend({ type: 'deep_think_stage', stage: 'agent', message: '深度思考遇到问题, 降级为快速回复...' });
+        sseSend({ type: 'deep_think_stage', stage: 'agent', message: '深度研究遇到问题, 降级为快速回复...' });
         var fallbackCorePrompt = buildAiCorePrompt(config);
-        var fallbackPrompt = fallbackCorePrompt + '\n\n用户问题: ' + message + '\n\n直接给一个简短自然的答案。';
+        var fallbackPrompt = fallbackCorePrompt + '\n\n用户问题: ' + message + '\n\n直接给出有深度的答案。';
         var fallbackResult = await callDeepSeek(
           [{ role: 'system', content: fallbackPrompt + (buildHistoryContext(ctx, message) || '') }],
           { thinking_mode: 'low', max_tokens: 4096 }
         );
         flowResult = {
           cancelled: false,
-          finalContent: (fallbackResult.content || '') + '\n\n（深度思考模式暂时不可用, 以上为快速回复）',
+          finalContent: (fallbackResult.content || '') + '\n\n（深度研究模式暂时不可用, 以上为降级回复）',
           planner: { complexity: 'low', reasoning: '降级回复', agent_count: 1, agents: [{ role: 'AI 智能体', need_search: false }] },
           worker_results: [{ role: 'AI 智能体', status: 'success', elapsed_ms: 0, content: fallbackResult.content || '' }],
           thinking_log: [],
@@ -7666,7 +7609,7 @@ async function handleDeepThinkChat(req, res) {
       } catch (fallbackErr) {
         console.error('[DEEP-THINK] fallback also failed:', fallbackErr && fallbackErr.message);
         try { clearInterval(_heartbeatTimer); } catch (e2) {}
-        sseSend({ type: 'error', error: '深度思考失败: ' + (e && e.message || '未知错误') });
+        sseSend({ type: 'error', error: '深度研究失败: ' + (e && e.message || '未知错误') });
         activeDeepThinkJobs.delete(convId);
         return safeEnd();
       }
@@ -7679,7 +7622,7 @@ async function handleDeepThinkChat(req, res) {
     //   兼容: runDeepThinkAgent 返回 finalContent, runMultiAgentFlow 返回 synth_content
     var _rawContent = flowResult.finalContent || flowResult.synth_content || '';
     var finalContent = sanitizeAssistantVisibleText(_rawContent);
-    if (!finalContent) finalContent = '（深度思考未生成内容, 请重试）';
+    if (!finalContent) finalContent = '（深度研究未生成内容, 请重试）';
 
     // 8. 构造 searchMeta
     var nowTs = Date.now();
@@ -7807,7 +7750,7 @@ async function handleDeepThinkChat(req, res) {
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/event-stream');
         }
-        sseSend({ type: 'error', error: '深度思考异常: ' + (e && e.message || '请稍后重试') });
+        sseSend({ type: 'error', error: '深度研究异常: ' + (e && e.message || '请稍后重试') });
       }
     } catch (e3) {}
     activeDeepThinkJobs.delete(convId);
