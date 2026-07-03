@@ -135,14 +135,13 @@ function buildHistoryContext(ctx, message) {
 // 判断用户问题是否值得强制拆分多个 agent
 // minLen: 最小长度阈值, 可从 config.deep_think.force_split_min_length 传入
 function shouldForceSplitAgents(message, minLen) {
-  // 深度研究模式：不再根据长度限制，直接让 Planner 决策
-  // 只要有内容就应该尝试多角度分析
   if (!message) return false;
   var m = String(message).trim();
   if (!m) return false;
+  if (minLen <= 1) return true;
   // 数学/代码单行表达式仍然直接答
   if (/^[\d\+\-\*\/\^\(\)\s\.=<>!]+$/.test(m.replace(/\s/g, ''))) return false;
-  return true;
+  return m.length >= minLen;
 }
 
 // 深度研究模式：不再根据字数跳过多 agent 分析
@@ -2856,6 +2855,7 @@ async function runMultiAgentFlow(opts) {
   var effectiveMaxWorkers = Math.min(parseInt(dtCfg.max_workers) || DEEP_THINK_CONFIG.MAX_WORKERS, 10);
   var effectiveWorkerToolRounds = parseInt(dtCfg.worker_max_tool_rounds) || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
   var effectiveForceSplitLen = parseInt(dtCfg.force_split_min_length) || DEEP_THINK_CONFIG.FORCE_SPLIT_MIN_LENGTH;
+  var effectiveMinWorkers = parseInt(dtCfg.min_workers) || DEEP_THINK_CONFIG.MIN_WORKERS;
 
   // 共享前缀：所有角色共用 buildAiCorePrompt 以利用 DeepSeek prompt cache
   var sharedPrefix = buildAiCorePrompt(config);
@@ -2915,6 +2915,14 @@ async function runMultiAgentFlow(opts) {
   }
   var agents = Array.isArray(plan.agents) ? plan.agents : [];
   var agentCount = agents.length;
+
+  // ★ 最小 agent 数强制: 如果 Planner 生成的 agent 数低于 min_workers, 用默认 agent 兜底
+  if (agentCount < effectiveMinWorkers && effectiveMinWorkers > 0) {
+    agents = buildDefaultAgents(message);
+    agentCount = agents.length;
+    plan.complexity = plan.complexity || 'medium';
+    plan.reasoning = '最小agent数强制拆分';
+  }
 
   sseSend({ type: 'deep_think_planned', complexity: plan.complexity || 'auto', reasoning: plan.reasoning || '', agents: agents.map(function(a) { return { role: a.role, status: 'pending', need_search: a.need_search }; }) });
 
@@ -7109,7 +7117,16 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
           if (rs.directness === 'direct') p.push('直接回答');
           if (!rs.use_emoji) p.push('少用emoji');
           return p.join('，');
-        })()
+        })(),
+        deep_think: {
+          enabled: config.deep_think ? config.deep_think.enabled !== false : true,
+          default_thinking_mode: (config.deep_think && config.deep_think.default_thinking_mode) || 'max',
+          max_workers: (config.deep_think && parseInt(config.deep_think.max_workers)) || 6,
+          min_workers: (config.deep_think && parseInt(config.deep_think.min_workers)) || 0
+        },
+        model: {
+          default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max'
+        }
       }
     });
   } catch (e) {
