@@ -1019,7 +1019,7 @@ async function finishStream(res, opt) {
   var thinkingMode = opt.thinkingMode || 'off';
   var useThinking = opt.useThinking || false;
   var usedModel = opt.usedModel || DEEPSEEK_MODEL_REASONER;
-  var isComplete = finishReason === 'stop' || finishReason === 'length';
+  var isComplete = finishReason === 'stop' || finishReason === 'length' || (hasContent && finishReason === 'upstream_closed') || finishReason === 'idle_timeout' || finishReason === 'partial_content';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
   var searchMeta = opt.searchMeta || null;
   var thinkingElapsedMs = opt.reasoningStartedAt > 0 ? Date.now() - opt.reasoningStartedAt : 0;
@@ -2923,7 +2923,8 @@ async function runMultiAgentFlow(opts) {
       {
         thinking_mode: deepThinkThinkingMode,
         model: DEEPSEEK_MODEL_REASONER,
-        max_tokens: 2048,
+        // ★ P3 修复 bug 2: max_tokens 2048→4096, 防止 max 思考消耗完 token 导致 Planner 输出空 agents:[] 触发退路
+        max_tokens: 4096,
         response_format: { type: 'json_object' },
         // ★ 流式推 Planner 的思考过程，用户实时看到规划中的思考，不再空等 15-20 秒
         onThinkingChunk: function(chunk) {
@@ -2968,9 +2969,12 @@ async function runMultiAgentFlow(opts) {
   var allSources = [];
   var allQueries = [];
 
-  // 4. agents=[] → 直接回答，不走 worker (除非判定为复杂问题, 强制拆分)
+  // 4. agents=[] → 深度思考模式下强制拆分多 agent
+  //   修复 bug 2: 用户主动开启深度思考, 期待 Planner→Workers→Synthesizer 多角度分析
+  //   之前: Planner 输出 agents=[] + 不满足 shouldForceSplitAgents (长度 < 24) → 走"直接回答", 看起来多 agent "消失"
+  //   现在: 深度思考模式下 Planner 输出空时无条件 buildDefaultAgents, 保证一定有 Workers 并行执行
   if (agentCount === 0) {
-    if (shouldForceSplitAgents(message, effectiveForceSplitLen)) {
+    if (shouldForceSplitAgents(message, effectiveForceSplitLen) || deepThinkThinkingMode === 'max') {
       agents = buildDefaultAgents(message);
       agentCount = agents.length;
       plan.complexity = plan.complexity || 'medium';
@@ -8137,6 +8141,35 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var useThinking = thinkingMode !== 'off';
+    var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
+
+    // ★ P3 修复 bug 3: 提前预加载 useThinking 模式下的搜索结果, 与后续 fetch DeepSeek 完全并行
+    //   之前在 line 8560-8595 才 await searchWeb, 阻塞 5-15s, 导致首字延迟 = searchWeb + max 思考 = 15-25s
+    //   现在在思考模式决定后立即 fire (不 await), 跟 config/ctx 加载 + 后续 fetch DeepSeek 同时进行
+    var _preloadedSearchPromise = null;
+    var _preloadedSearchResults = null;
+    var _preloadedQuery = '';
+    if (useThinking && allowSearch && !aborted) {
+      // 简单快速检测搜索意图 (与 line 8537-8556 needsWebSearch 取最常用关键词, 涵盖 90%+ 场景)
+      var _quickSearchHint = /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(message);
+      if (_quickSearchHint) {
+        // 复用 line 8561-8573 的 _psQuery 计算逻辑 (剥前缀)
+        var _psQuery = message.slice(0, 80);
+        var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
+        if (_psStripped.length >= 3) {
+          _psQuery = _psStripped;
+        }
+        _preloadedQuery = _psQuery;
+        // fire searchWeb (不 await), 与 fetch DeepSeek 同步进行
+        _preloadedSearchPromise = searchWeb(_psQuery, 20).then(function(r) {
+          _preloadedSearchResults = r;
+          return r;
+        }).catch(function(e) {
+          try { console.error('[AGENT-STREAM] preload search error:', e && e.message); } catch (_) {}
+          return null;
+        });
+      }
+    }
 
     // 天气查询（Open-Meteo 免费 API）— 结果后置到 user 之后，不破坏缓存
     var isWeatherQuery = /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
@@ -8152,7 +8185,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。回答时间相关问题时以此为准，不能编造其他日期。';
     }
 
-    var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
     var usedModel = DEEPSEEK_MODEL_REASONER;
     if (aborted) return safeEnd();
 
@@ -8558,21 +8590,29 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 搜索 → 思考 → 回复：先执行搜索（阻塞），再将搜索结果注入上下文，最后开始思考流
     if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
-      var _psQuery = message.slice(0, 80);
-      var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
-      if (_psStripped.length >= 3) {
-        _psQuery = _psStripped;
-      } else {
-        for (var _psi = messages.length - 1; _psi >= 0; _psi--) {
-          var _psm = messages[_psi];
-          if (_psm.role === 'user' && _psm.content !== message && _psm.content) {
-            _psQuery = String(_psm.content).slice(0, 150);
-            break;
+      var _psQuery = _preloadedQuery || message.slice(0, 80);
+      if (!_preloadedSearchPromise) {
+        var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
+        if (_psStripped.length >= 3) {
+          _psQuery = _psStripped;
+        } else {
+          for (var _psi = messages.length - 1; _psi >= 0; _psi--) {
+            var _psm = messages[_psi];
+            if (_psm.role === 'user' && _psm.content !== message && _psm.content) {
+              _psQuery = String(_psm.content).slice(0, 150);
+              break;
+            }
           }
         }
       }
       try {
-        var _psSr = await searchWeb(_psQuery, 20);
+        // ★ P3 修复 bug 3: 8s 超时 + 优先复用 line 8145 预加载的 promise 避免重复 fire searchWeb
+        var _psSr = await Promise.race([
+          _preloadedSearchPromise || searchWeb(_psQuery, 20),
+          new Promise(function(_, reject) {
+            setTimeout(function() { reject(new Error('search_timeout_8s')); }, 8000);
+          })
+        ]).catch(function() { return _preloadedSearchResults || null; });
         var _psResults = _psSr && Array.isArray(_psSr.results) ? cleanSearchResults(_psSr.results, 20) : [];
         if (_psResults.length > 0) {
           var _psCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + _psQuery + '\n\n' +
@@ -8671,10 +8711,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         controller.abort();
         return safeEnd();
       }
-      // idle timeout: 20 秒无 chunk 则中断
+      // idle timeout: 60 秒无 chunk 则中断(深度思考需要更长时间思考, 不应误判)
       var idleElapsed = Date.now() - lastChunkTime;
-      if (idleElapsed > 20000) {
-        console.log('[AGENT-STREAM] idle timeout 20s, aborting');
+      if (idleElapsed > 60000) {
+        console.log('[AGENT-STREAM] idle timeout 60s, aborting');
         controller.abort();
         if (!aborted) {
           if (contentBuffer && contentBuffer.length > 0) {
