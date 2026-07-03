@@ -2838,6 +2838,7 @@ async function runMultiAgentFlow(opts) {
   var searchQueries = [];
 
   function sseSend(obj) {
+    if (res.writableEnded) return;
     if (obj && obj.type === 'thinking_chunk') {
       try { thinkingLog.push({ agent_role: obj.agent_role || 'AI 智能体', chunk: obj.chunk, round: obj.round || 0, ts: Date.now() }); } catch (e) {}
     }
@@ -3107,6 +3108,7 @@ async function runDeepThinkAgent(opts) {
 
   // SSE helpers
   function sseSend(obj) {
+    if (res.writableEnded) return;
     // ★ R: 记录 thinking_chunk 到 thinkingLog
     if (obj && obj.type === 'thinking_chunk') {
       try {
@@ -7007,7 +7009,10 @@ const AI_CHAT_HOURLY_IP_LIMIT = 200;
 
 // 生成简短的 conversation_id
 function genConvId() {
-  return Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  var ts = Date.now().toString(36).toUpperCase();
+  var rnd;
+  try { rnd = crypto.randomUUID().split('-').slice(0,2).join('').toUpperCase(); } catch(e) { rnd = Math.random().toString(36).slice(2, 8).toUpperCase(); }
+  return ts + '-' + rnd;
 }
 
 // 解析 media_url 中的元数据：新数据为 JSON {role, convId, usage}，旧数据为纯字符串 role

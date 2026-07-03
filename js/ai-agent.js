@@ -1784,7 +1784,6 @@
     var streamConvIdRef = opts.streamConvIdRef;
     var abortedRef = opts.abortedRef;
     var messagesEl = opts.messagesEl;
-    var isDtPage = opts.isDtPage === true;
     var scrollEl = opts.scrollEl || messagesEl;
 
     var decoder = new TextDecoder();
@@ -2384,7 +2383,7 @@
         reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
         aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
         answerRendererRef: ar, contentRendererRef: cr, answerStartedRef: as, doneReceivedRef: dr, evtHandledRef: eh,
-        streamConvIdRef: sc, abortedRef: ab, messagesEl: messagesEl, isDtPage: false, scrollEl: messagesEl,
+        streamConvIdRef: sc, abortedRef: ab, messagesEl: messagesEl, scrollEl: messagesEl,
         defaultThinkingMode: S.deepThinkEffort || 'max',
         onErrorNoContent: function() { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); },
         onResetSending: resetSendingIfCurrent
@@ -2416,7 +2415,7 @@
     resetSendingIfCurrent();
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
-    scrollToBottom(messagesEl, true);
+    scrollToBottom(messagesEl, false);
   }
 
   // ===================== 深度思考二级页面 =====================
@@ -2886,7 +2885,7 @@
         reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
         aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
         answerRendererRef: ar, contentRendererRef: cr, answerStartedRef: as, doneReceivedRef: dr, evtHandledRef: eh,
-        streamConvIdRef: sc, abortedRef: ab, messagesEl: dtMessagesEl, isDtPage: true, scrollEl: dtMessagesEl,
+        streamConvIdRef: sc, abortedRef: ab, messagesEl: dtMessagesEl, scrollEl: dtMessagesEl,
         defaultThinkingMode: S.deepThinkEffort || 'max',
         onErrorNoContent: function() { removeLastDtUserMessage(); restoreInputText(); },
         onResetSending: resetSendingIfCurrent
@@ -2916,7 +2915,8 @@
     }
     resetSendingIfCurrent();
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
-    scrollToBottom(dtMessagesEl, true);
+    updateInputMetrics();
+    scrollToBottom(dtMessagesEl, false);
   }
 
   var _dtListeners = []; // 存储事件监听引用用于清除
