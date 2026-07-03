@@ -1982,7 +1982,7 @@
             var tTitle = aiNodeRef.value.querySelector('.ai-think-title');
             if (tTitle) tTitle.innerHTML = AI_THINK_ICON + ' 思考中…';
           }
-          scrollToBottom(scrollEl, true);
+          scrollToBottom(scrollEl, false);
           continue;
         }
         if (evt.type === 'answer_chunk') {
@@ -2000,7 +2000,7 @@
           }
           aiContentRef.value += String(evt.chunk);
           if (answerRendererRef.value) answerRendererRef.value.append(evt.chunk);
-          scrollToBottom(scrollEl, true);
+          scrollToBottom(scrollEl, false);
           continue;
         }
         if (evt.type === 'content') {
@@ -3072,6 +3072,14 @@
           input.style.height = 'auto';
           input.style.height = Math.min(input.scrollHeight, 140) + 'px';
         } catch (e) {}
+      });
+    }
+
+    // 深度研究页面滚动监听：用户向上翻时停止自动滚动
+    var dtMessagesEl = document.getElementById('dtMessages');
+    if (dtMessagesEl) {
+      addDtListener(dtMessagesEl, 'scroll', function() {
+        S.autoScrollPinned = isNearBottom(dtMessagesEl, 84);
       });
     }
   }
