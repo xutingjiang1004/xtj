@@ -2129,6 +2129,7 @@
       conversation_id: S.conversationId,
       client_request_id: reqId,
       deep_think: true,
+      chat_mode: 'normal',
       // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
       thinking_mode: S.deepThinkEffort || 'max'
     });
@@ -2687,6 +2688,7 @@
       conversation_id: S.dtConversationId,
       client_request_id: reqId,
       deep_think: true,
+      chat_mode: 'deep_think',
       thinking_mode: S.deepThinkEffort || 'max'
     });
 
@@ -3955,10 +3957,10 @@
     }
   }
 
-  // 获取会话列表
+  // 获取会话列表（普通聊天只显示普通会话，深度研究会话分开管理）
   async function fetchConversations() {
     try {
-      var r = await apiRequest('GET', '/chat/conversations?limit=50');
+      var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal');
       if (r && r.ok && r.data && Array.isArray(r.data.conversations)) {
         S.conversations = r.data.conversations;
       }
