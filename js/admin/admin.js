@@ -213,12 +213,6 @@
         );
         return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
     }
-    async function adminHashPassword(password) {
-        var saltBytes = crypto.getRandomValues(new Uint8Array(16));
-        var salt = Array.from(saltBytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-        var hash = await adminPbkdf2Hash(password, salt);
-        return salt + ':' + hash;
-    }
 
     // ===================== Session 超时管理（24小时无操作自动登出） =====================
     var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
@@ -537,10 +531,6 @@
             var s = JSON.parse(raw);
             return !!s && (Date.now() - Number(s.t || 0)) < ADMIN_SESSION_TTL_MS;
         } catch(e) { return false; }
-    }
-
-    function hasApiToken() {
-        return !!getToken();
     }
 
     async function tryRestoreAdminSession() {
@@ -900,14 +890,6 @@ async function initAdminClient() {
         return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/</g, '\\x3C').replace(/>/g, '\\x3E').replace(/\n/g, '\\n');
     }
 
-    function maskIp(ip) {
-        if (!ip) return '-';
-        var s = String(ip).trim();
-        var parts = s.split('.');
-        if (parts.length === 4) return parts[0] + '.xxx.xxx.xxx';
-        return s.slice(0, 4) + 'xxx';
-    }
-
     function getDisplayContent(content) {
         if (!content) return '';
         try {
@@ -1019,7 +1001,7 @@ async function initAdminClient() {
         }
         return users.map(function(name) {
             var activeClass = name === selected ? ' is-selected' : '';
-            var escapedName = escapeHtml(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            var escapedName = safeJsStr(name);
             return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + inputId + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
         }).join('');
     }
@@ -1142,7 +1124,7 @@ async function initAdminClient() {
             var stats = getUserActivityStats(u.name);
             var flags = getUserStateFlags(u.name);
             var info = u.info || {};
-            var safeName = u.name.replace(/'/g, "\\'");
+            var safeName = safeJsStr(u.name);
             var activeRecord = findActiveRecordByUser(activeList, u.name);
             var primaryLabel = kind === 'ban' ? '执行封禁' : (kind === 'mute' ? '执行禁言' : '加入黑名单');
             var primaryAction = kind === 'ban' ? 'applyBanToUser' : (kind === 'mute' ? 'applyMuteToUser' : 'applyBlacklistToUser');
@@ -1441,7 +1423,7 @@ async function initAdminClient() {
                 // 图片预览
                 var imgHtml = '';
                 if (p.media_url && p.media_url.indexOf('http') === 0) {
-                    imgHtml = '<img src="' + escapeHtml(p.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + escapeHtml(p.media_url) + '\',\'' + escapeHtml(p.user_name || '') + '\',\'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">';
+                    imgHtml = '<img src="' + escapeHtml(p.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + safeJsStr(p.media_url) + '\',\'' + safeJsStr(p.user_name || '') + '\',\'' + safeJsStr(p.created_at || '') + '\')" title="点击预览大图">';
                 } else if (p.media_url) {
                     imgHtml = '📎';
                 }
@@ -2187,7 +2169,7 @@ async function initAdminClient() {
                 var thumbUrl = extra.thumb || p.media_url || '';
                 var fullUrl = p.media_url || extra.thumb || '';
                 var previewUrl = fullUrl || thumbUrl;
-                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(previewUrl) + '\', \'' + escapeHtml(thumbUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="\u70b9\u51fb\u9884\u89c8\u5927\u56fe">' : '-';
+                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + safeJsStr(previewUrl) + '\', \'' + safeJsStr(thumbUrl) + '\', \'' + safeJsStr(p.user_name || '') + '\', \'' + safeJsStr(p.created_at || '') + '\')" title="\u70b9\u51fb\u9884\u89c8\u5927\u56fe">' : '-';
                 var actions = '';
                 if (p.is_deleted) {
                     actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">\u6062\u590d</button>';
@@ -3025,7 +3007,7 @@ async function initAdminClient() {
                         : (flags.isMuted
                             ? '禁言中'
                             : '正常'));
-                var safeName = u.name.replace(/'/g, "\\'");
+                var safeName = safeJsStr(u.name);
                 var actions = flags.isAdmin
                     ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button><button class="btn-sm del" onclick="confirmDeleteUser(\'' + safeName + '\')">删除账号</button>';
@@ -3181,7 +3163,7 @@ async function initAdminClient() {
     function buildAdminMediaThumb(post, username, createdAt) {
         if (!post || !post.media_url) return '-';
         if (String(post.media_url).indexOf('http') === 0) {
-            return '<img src="' + escapeHtml(post.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + escapeHtml(post.media_url) + '\',\'' + escapeHtml(username || post.user_name || '') + '\',\'' + escapeHtml(createdAt || post.created_at || '') + '\')" title="点击预览大图">';
+            return '<img src="' + escapeHtml(post.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + safeJsStr(post.media_url) + '\',\'' + safeJsStr(username || post.user_name || '') + '\',\'' + safeJsStr(createdAt || post.created_at || '') + '\')" title="点击预览大图">';
         }
         return '📎';
     }
@@ -4510,7 +4492,7 @@ async function initAdminClient() {
           var label = displayName ? (displayName + ' <' + r.email + '>') : r.email;
           var escapedEmail = r.email.replace(/'/g,"\\'");
           var escapedLabel = label.replace(/'/g, "\\'");
-          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span class="email-history-remove" onclick="event.stopPropagation();emailConfirmDeleteRecipientHistory(\'' + escapeHtml(escapedEmail) + '\',\'' + escapeHtml(escapedLabel) + '\')" style="cursor:pointer;opacity:0.55;font-size:14px;line-height:1;padding:0 2px;border-radius:999px;" title="删除此历史邮箱">×</span></span>';
+          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + safeJsStr(r.email) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span class="email-history-remove" onclick="event.stopPropagation();emailConfirmDeleteRecipientHistory(\'' + safeJsStr(r.email) + '\',\'' + safeJsStr(label) + '\')" style="cursor:pointer;opacity:0.55;font-size:14px;line-height:1;padding:0 2px;border-radius:999px;" title="删除此历史邮箱">×</span></span>';
         });
         wrap.innerHTML = h;
       } catch(e) {
@@ -5412,6 +5394,12 @@ async function initAdminClient() {
                                 show_reasoning_length: document.getElementById('debugReasonLen').checked
                             }
                         };
+                        if (!configPayload.name || configPayload.name.length > 30) { showToast('名称不能为空且不超过30字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
+                        if (configPayload.description.length > 200) { showToast('描述不超过200字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
+                        if (configPayload.welcome_message.length > 200) { showToast('欢迎语不超过200字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
+                        if (configPayload.persona.length > 500) { showToast('人设不超过500字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
+                        if (configPayload.system_prompt.length > 2000) { showToast('系统提示词不超过2000字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
+                        if (!configPayload.model.reasoner_model) { showToast('请填写模型名称'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
                         configPayload.allow_web_search = configPayload.search.allow_web_search;
                         var r = await apiCall('POST', '/admin/ai-agent/config', configPayload);
                         if (r && r.ok) {
