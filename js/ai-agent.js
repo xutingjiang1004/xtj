@@ -2,12 +2,13 @@
   'use strict';
 
   var ROOT_API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
-  ROOT_API_BASE = String(ROOT_API_BASE || '').replace(/\/$/, '');
+  ROOT_API_BASE = (ROOT_API_BASE || '').replace(/\/$/, '');
   var API_BASE = ROOT_API_BASE + '/api/agent';
   try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {}
 
   var HISTORY_PAGE_SIZE = 30;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
+  var CONFIG_REFRESH_INTERVAL = 60 * 1000;
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
   var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
@@ -65,7 +66,13 @@
     conversations: [],
     conversationsEl: null,
     showingHistory: false,
-    headerButtonsCleanup: null
+    headerButtonsCleanup: null,
+    _currentReqId: null,
+    _lastMsgDedupKey: '',
+    _lastDtDedupKey: '',
+    _lastConfigVersion: 0,
+    resizeTimer: null,
+    _configRefreshTimer: null
   };
 
   function getAiStatusText() {
@@ -215,7 +222,8 @@
     }
 
     function showCopyMenu(ev) {
-      if (_copyMenuActive) return;
+      if (_copyMenuActive && _copyMenuActive.isConnected) return;
+      if (_copyMenuActive && !_copyMenuActive.isConnected) _copyMenuActive = null;
       ev.preventDefault();
       ev.stopPropagation();
       var text = getBubbleText();
@@ -568,6 +576,20 @@
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
     }
+    if (S.deepThinkJob) {
+      try { S.deepThinkJob.abort(); } catch (e) {}
+      S.deepThinkJob = null;
+    }
+    if (S.deepThinkProgressCard) {
+      try { S.deepThinkProgressCard.classList.add('ai-progress-card-done'); } catch (e) {}
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+      try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e) {}
+      S.deepThinkProgressCard = null;
+    }
+    S.sending = false;
+    S.paused = false;
+    S.activeRenderers = [];
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
   
   function isAdminUser() {
@@ -803,8 +825,8 @@
     var parts = [];
     var isAdmin = isAdminUser();
     if (isAdmin) {
-      if (usage.prompt_tokens) parts.push('输入 ' + usage.prompt_tokens);
-      if (usage.completion_tokens) parts.push('输出 ' + usage.completion_tokens);
+      if (typeof usage.prompt_tokens === 'number') parts.push('输入 ' + usage.prompt_tokens);
+      if (typeof usage.completion_tokens === 'number') parts.push('输出 ' + usage.completion_tokens);
       if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
       if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
@@ -3199,7 +3221,8 @@
     var fetchBody = JSON.stringify({
       message: text,
       conversation_id: S.conversationId,
-      client_request_id: reqId
+      client_request_id: reqId,
+      thinking_mode: S.thinkingMode || 'max'
     });
     
     try {
@@ -4484,6 +4507,8 @@ function showChatMessages() {
       try { clearInterval(S.statusTimer); } catch (e2) {}
     }
     S.statusTimer = setInterval(updateAiStatus, 60000);
+    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
+    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
 
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e3) {}
@@ -4597,6 +4622,7 @@ function showChatMessages() {
     S.activeRenderers = [];
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     S.messages = [];
+    S.conversations = [];
     S.oldestCursor = null;
     S.hasMore = false;
     S.loading = false;
@@ -4609,6 +4635,10 @@ function showChatMessages() {
     if (S.statusTimer) {
       try { clearInterval(S.statusTimer); } catch (e3) {}
       S.statusTimer = null;
+    }
+    if (S._configRefreshTimer) {
+      try { clearInterval(S._configRefreshTimer); } catch (e) {}
+      S._configRefreshTimer = null;
     }
     if (S.keyboardResetTimer) {
       try { clearTimeout(S.keyboardResetTimer); } catch (e4) {}
@@ -4672,6 +4702,7 @@ function showChatMessages() {
     } catch (e9) {
       scheduleInsertEntry();
     }
+    if (insertTimer) { try { clearTimeout(insertTimer); } catch(e) {} insertTimer = null; }
   }
 
   function removeAllAiEntries() {
