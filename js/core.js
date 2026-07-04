@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -3685,16 +3685,14 @@ function renderProfileActivityList(kind) {
             }
 
             window.toggleProfileActivity = function(kind) {
-                console.warn('[DEBUG-DOCK] toggleProfileActivity called:', kind, 'currentUser:', currentUser, 'activeUser:', typeof dockChatActiveUser !== 'undefined' ? dockChatActiveUser : 'n/a');
                 if (!currentUser) {
                     showToast('请先登录');
                     return;
                 }
                 try {
                     renderProfileActivityModal(kind);
-                    console.warn('[DEBUG-DOCK] renderProfileActivityModal ok, modal classList:', document.getElementById('profileActivityModal').className);
                 } catch(e) {
-                    console.error('[DEBUG-DOCK] renderProfileActivityModal ERROR:', e);
+                    console.error('[ProfileActivity] ERROR:', e);
                     showToast('打开记录失败：' + (e?.message || e));
                 }
             };
