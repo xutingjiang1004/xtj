@@ -978,7 +978,14 @@ async function queryWeather(query) {
 function writeSse(res, payload) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
-      res.write('data: ' + JSON.stringify(payload) + '\n\n');
+      var ok = res.write('data: ' + JSON.stringify(payload) + '\n\n');
+      if (!ok) {
+        // 背压：内部缓冲区满，暂停并等待 drain
+        if (!res._sseDrainQueued) {
+          res._sseDrainQueued = true;
+          res.once('drain', function() { res._sseDrainQueued = false; });
+        }
+      }
     }
   } catch (e) {
     console.error('[SSE] write error:', e && e.message);
@@ -2451,9 +2458,6 @@ async function callDeepSeek(messages, options) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('AI 调用参数无效');
   }
-  if (!Array.isArray(messages) || messages.length === 0) {
-    throw new Error('AI 调用参数无效');
-  }
 
   // 开发模式：API Key 未配置时返 mock 回复
   if (!DEEPSEEK_API_KEY) {
@@ -2738,6 +2742,7 @@ async function callDeepSeek(messages, options) {
             }
           }
         } catch (e) {
+          clearTimeout(noToolTimer);
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
         }
       }
@@ -7079,7 +7084,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
   // ★ O 修复 Bug 4: 额外字段 (deep_think / planner / worker_results / thinking_log / think_duration_ms)
   if (extra && typeof extra === 'object') {
     if (extra.deep_think) obj.deep_think = true;
-    if (extra.agent_count) obj.agent_count = extra.agent_count;
+    if (typeof extra.agent_count === 'number') obj.agent_count = extra.agent_count;
     if (extra.planner) obj.planner = extra.planner;
     if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
     if (Array.isArray(extra.thinking_log)) obj.thinking_log = extra.thinking_log;
@@ -7367,7 +7372,10 @@ async function getAiConfig() {
   } catch (e) {
     console.error('[AI-CONFIG] getAiConfig error:', e.message);
   }
-  aiConfigCache = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
+  // DB 异常时不覆盖已有缓存（保留旧配置继续服务），只有无缓存时才用默认值兜底
+  if (!aiConfigCache) {
+    aiConfigCache = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
+  }
   aiConfigFetchedAt = now;
   return aiConfigCache;
 }
