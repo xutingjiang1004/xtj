@@ -3494,6 +3494,8 @@ setInterval(function() {
   aiUserRateStore.forEach(function(record, name) {
     if (now > record.daily.resetAt + 86400000) aiUserRateStore.delete(name);
   });
+  // 清理过期 revokedTokenHashes（异步）
+  loadRevokedTokenHashes().catch(function(){});
 }, 600000);
 
 // 生成签名 token：base64(payload) + '.' + HMAC
@@ -3588,7 +3590,8 @@ async function loadRevokedTokenHashes() {
 }
 
 var revokedTokenHashes = new Set();
-loadRevokedTokenHashes().catch(function(){});
+var revokedTokenHashesReady = false;
+loadRevokedTokenHashes().then(function() { revokedTokenHashesReady = true; }).catch(function(){});
 
 function isTokenRevoked(token) {
   if (revokedTokens.has(token)) return true;
@@ -3636,8 +3639,8 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// 邮件配置健康检查（无需鉴权，便于排查 GAS / SendGrid 配置）
-app.get('/health/mail', (req, res) => {
+// 邮件配置健康检查（需管理员鉴权）
+app.get('/health/mail', verifyToken, (req, res) => {
   res.json({
     ok: true,
     mail_config: {
@@ -3747,7 +3750,10 @@ async function authenticateUser(req, res, next) {
       .eq('user_name', userNameVal)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
-    if (!authRec || authRec.media_url !== password_hash) {
+    if (!authRec) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
+    if (!crypto.timingSafeEqual(Buffer.from(authRec.media_url || ''), Buffer.from(password_hash))) {
       return res.status(403).json({ error: '身份验证失败' });
     }
     req.userName = userNameVal;
@@ -3770,7 +3776,7 @@ app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
       .eq('user_name', userNameVal)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
-    if (!authRec || authRec.media_url !== password_hash) {
+    if (!authRec || !crypto.timingSafeEqual(Buffer.from(authRec.media_url || ''), Buffer.from(password_hash))) {
       return res.status(401).json({ error: '账号或密码错误' });
     }
     var token = signUserToken(userNameVal);
@@ -4484,7 +4490,10 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
           if (p.media_url) {
             var url = p.media_url;
             var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
-            if (pathMatch) storagePaths.push(pathMatch[1]);
+            if (pathMatch) {
+              var p = pathMatch[1];
+              if (p.indexOf('..') === -1 && p.indexOf('/') === -1) storagePaths.push(p);
+            }
           }
         });
       }
@@ -6331,8 +6340,8 @@ const VIP_PLANS = [
 // 查询VIP状态
 app.get('/api/vip/status', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
-    const userName = req.query.user_name;
-    if (!userName) return res.status(400).json({ error: '缺少用户名' });
+    const userName = req.userName;
+    if (!userName) return res.status(401).json({ error: '请先登录' });
 
     const { data: vipRecords } = await supabase.from('posts')
       .select('*')
@@ -6647,13 +6656,15 @@ app.get('/api/pro-gifts/available', rateLimit(60000, 30), authenticateUser, asyn
 });
 
 // 用户：领取 Pro 赠送活动（强校验：身份、发布状态、时间、限定用户、名额、重复领取）
+var claimLocks = {};
 app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (req, res) => {
+  var lockKey, userNameVal, giftId;
   try {
     var { user_name, gift_id } = req.body;
-    var userNameVal = String(user_name || req.userName || '').trim();
+    userNameVal = String(user_name || req.userName || '').trim();
     // 强制以 req.userName 为准（认证中间件写入），避免 body 传任意 user_name 替别人领
     if (req.userName) userNameVal = String(req.userName).trim();
-    var giftId = String(gift_id || '').trim();
+    giftId = String(gift_id || '').trim();
     if (!userNameVal) return res.status(401).json({ error: '请先登录' });
     if (!giftId) return res.status(400).json({ error: '缺少活动ID' });
     var now = new Date();
@@ -6682,7 +6693,11 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     if (hasAllowList && allowedArr.indexOf(userNameVal) === -1) {
       return res.status(403).json({ error: '你不在本次活动领取名单中' });
     }
-    // 6. 查当前活动领取总数（用于 claim_limit 二次校验）
+    // 6-8. 加锁防并发重复领取
+    lockKey = 'claim_' + giftId + '_' + userNameVal;
+    if (claimLocks[lockKey]) return res.status(429).json({ error: '领取请求正在处理中' });
+    claimLocks[lockKey] = true;
+
     var claimLimit = parseInt(giftInfo.claim_limit || giftInfo.limit || giftInfo.max_claims) || 0;
     if (claimLimit > 0) {
       var { data: allClaimRows } = await supabase.from('posts')
@@ -6694,7 +6709,6 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
         return res.status(400).json({ error: '活动名额已满' });
       }
     }
-    // 7. 当前用户是否已领取同一活动（强校验，不依赖前端）
     var { data: existingClaim } = await supabase.from('posts')
       .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userNameVal)
@@ -6705,7 +6719,6 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     var durationDays = giftInfo.duration_days || 30;
     var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     var features = normalizeVisualProFeatures(giftInfo.features);
-    // 写入领取记录（先写，防并发重复领取）
     var claimContent = JSON.stringify({
       campaign_id: giftId,
       campaign_title: giftInfo.title || '',
@@ -6767,6 +6780,8 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
   } catch(e) {
     console.error('[ProGift] 领取失败:', e.message);
     return res.status(500).json({ error: '领取失败' });
+  } finally {
+    delete claimLocks[lockKey];
   }
 });
 
@@ -9080,6 +9095,7 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId) return res.status(400).json({ error: '缺少 conversation_id' });
+    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
 
     // 查该 conv 的所有消息
     var { data: rows } = await supabase.from('posts')
@@ -9126,6 +9142,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
     var convId = String(req.query.conversation_id || '').trim();
+    if (convId && !/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
     var limit = Math.min(Math.max(parseInt(req.query.limit) || 30, 1), 100);
     var before = String(req.query.before || '').trim();
 
@@ -9866,6 +9883,14 @@ async function autoCleanupAiMessages() {
 setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
 // 服务启动 30s 后执行首次清理
 setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
+
+// ===================== 全局错误处理 =====================
+process.on('uncaughtException', function(err) {
+  console.error('[FATAL] uncaughtException:', err && err.message || err);
+});
+process.on('unhandledRejection', function(reason) {
+  console.error('[FATAL] unhandledRejection:', reason && reason.message || reason);
+});
 
 // ===================== 启动 =====================
 const port = process.env.PORT || 3000;

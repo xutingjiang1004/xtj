@@ -4814,7 +4814,6 @@ function showChatMessages() {
       var x = window.innerWidth / 2;
       var y = window.innerHeight - 80;
       var node = document.elementFromPoint(x, y);
-      try { console.log('[DEBUG-AI] elementFromPoint(' + x + ', ' + y + ') =', node); } catch (e) {}
       return node;
     } catch (e2) {
       return null;
