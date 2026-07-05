@@ -9577,20 +9577,19 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/users - 管理员查看有 AI 聊天记录的用户列表（含 tokens 统计）
-// 性能：limit 10000 + 30 天默认窗口
 app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
   try {
     var days = parseInt(req.query.days, 10);
-    if (isNaN(days) || days < 1) days = 30;
+    if (isNaN(days) || days < 1) days = 90;
     if (days > 365) days = 365;
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
     var { data: rows } = await supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
+      .select('user_name, media_url, created_at')
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .gte('created_at', since)
       .order('created_at', { ascending: false })
-      .limit(10000);
+      .limit(50000);
 
     if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: days });
 
