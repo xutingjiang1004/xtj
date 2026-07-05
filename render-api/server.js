@@ -109,12 +109,20 @@ const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, co
 // 简单 exact-match 缓存 (TTL 5 分钟, key = userName + '::' + message + '::' + thinking_mode)
 const aiResponseCache = new Map();
 const AI_CACHE_TTL_MS = 5 * 60 * 1000;
-// 每 5 分钟清理过期缓存
+const AI_CACHE_MAX_SIZE = 500;
+function limitAiCacheSize() {
+  if (aiResponseCache.size <= AI_CACHE_MAX_SIZE) return;
+  var overflow = aiResponseCache.size - AI_CACHE_MAX_SIZE;
+  var keys = Array.from(aiResponseCache.keys());
+  for (var i = 0; i < overflow && i < keys.length; i++) aiResponseCache.delete(keys[i]);
+}
+// 每 5 分钟清理过期缓存 + 限制大小
 setInterval(function() {
   var now = Date.now();
   aiResponseCache.forEach(function(val, key) {
     if (now > val.expiresAt) aiResponseCache.delete(key);
   });
+  limitAiCacheSize();
 }, 5 * 60 * 1000);
 
 // ===================== 共享工具函数 (提取自 M/R 架构) =====================
@@ -550,12 +558,20 @@ var aiConfigFetchedAt = 0;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;   // 有结果缓存 5 分钟
 const SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;  // 无结果缓存 30 秒
 const searchCache = new Map();
+const SEARCH_CACHE_MAX_SIZE = 1000;
+function limitSearchCacheSize() {
+  if (searchCache.size <= SEARCH_CACHE_MAX_SIZE) return;
+  var overflow = searchCache.size - SEARCH_CACHE_MAX_SIZE;
+  var keys = Array.from(searchCache.keys());
+  for (var i = 0; i < overflow && i < keys.length; i++) searchCache.delete(keys[i]);
+}
 // 每 10 分钟清理过期搜索缓存
 setInterval(function() {
   var now = Date.now();
   searchCache.forEach(function(val, key) {
     if (val.expiresAt && now > val.expiresAt) searchCache.delete(key);
   });
+  limitSearchCacheSize();
 }, 10 * 60 * 1000);
 
 // ===================== 搜索 Provider 架构 =====================
@@ -669,6 +685,9 @@ async function searchCustomApi(query, maxResults) {
   var apiUrl = process.env.SEARCH_API_URL;
   if (!apiUrl) return { results: [], error: null };
   try {
+    var parsedUrl = new URL(apiUrl);
+    if (parsedUrl.protocol !== 'https:') return { results: [], error: 'CustomApi must use https' };
+    if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(parsedUrl.hostname)) return { results: [], error: 'CustomApi invalid hostname' };
     apiUrl = apiUrl.replace(/\/+$/, '');
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
@@ -703,8 +722,15 @@ async function searchSearxng(query, maxResults) {
     'https://searx.foss.family', 'https://searx.tuxcloud.net'
   ];
   if (process.env.SEARCH_API_URL) {
-    var customUrl = process.env.SEARCH_API_URL.replace(/\/+$/, '');
-    if (instances.indexOf(customUrl) < 0) instances.unshift(customUrl);
+    try {
+      var parsedUrl = new URL(process.env.SEARCH_API_URL);
+      if (parsedUrl.protocol !== 'https:') throw new Error('must be https');
+      if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(parsedUrl.hostname)) throw new Error('invalid hostname');
+      var customUrl = process.env.SEARCH_API_URL.replace(/\/+$/, '');
+      if (instances.indexOf(customUrl) < 0) instances.unshift(customUrl);
+    } catch (e) {
+      console.warn('[SEARCH] invalid SEARCH_API_URL, ignored:', e.message);
+    }
   }
   var category = /新闻|资讯|报道|快讯|新闻|头条/i.test(query) ? 'news' : 'general';
   var fetchers = instances.map(function(baseUrl) {
@@ -856,6 +882,7 @@ async function searchWeb(query, maxResults) {
 
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
   searchCache.set(cacheKey, { ts: Date.now(), results: finalResult, expiresAt: Date.now() + cacheTtl });
+  limitSearchCacheSize();
   clearTimeout(searchTimer);
 
   if (searchTimedOut && mergedResults.length === 0) {
@@ -1703,13 +1730,8 @@ function getRealIp(req) {
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-// 获取客户端 IP（优先 X-Forwarded-For 第一段，用于登录事件记录）
+// 获取客户端 IP（信任 req.ip，由 trust proxy 解析 X-Forwarded-For，用于登录事件记录）
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    const first = String(forwarded).split(',')[0].trim();
-    if (first) return first;
-  }
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
@@ -3628,7 +3650,6 @@ function verifyToken(req, res, next) {
     return res.status(401).json({ error: '令牌已过期或无效，请重新登录' });
   }
 
-  session.expiresAt = Date.now() + TOKEN_EXPIRY_MS;
   req.adminToken = token;
   req.adminName = session.userName || 'admin';
   next();
@@ -3750,10 +3771,10 @@ async function authenticateUser(req, res, next) {
       .eq('user_name', userNameVal)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
-    if (!authRec) {
+    if (!authRec || !authRec.media_url) {
       return res.status(403).json({ error: '身份验证失败' });
     }
-    if (!crypto.timingSafeEqual(Buffer.from(authRec.media_url || ''), Buffer.from(password_hash))) {
+    if (!crypto.timingSafeEqual(Buffer.from(authRec.media_url), Buffer.from(password_hash))) {
       return res.status(403).json({ error: '身份验证失败' });
     }
     req.userName = userNameVal;
@@ -3776,7 +3797,7 @@ app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
       .eq('user_name', userNameVal)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
-    if (!authRec || !crypto.timingSafeEqual(Buffer.from(authRec.media_url || ''), Buffer.from(password_hash))) {
+    if (!authRec || !authRec.media_url || !crypto.timingSafeEqual(Buffer.from(authRec.media_url), Buffer.from(password_hash))) {
       return res.status(401).json({ error: '账号或密码错误' });
     }
     var token = signUserToken(userNameVal);
@@ -4134,65 +4155,31 @@ app.post('/admin/photo/restore/:id', verifyToken, async (req, res) => {
 });
 
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
-app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
+app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
-    const { photoId, username, password_hash, currentUser } = req.body;
+    const { photoId, admin_pw } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
-    if (!username) return res.status(400).json({ error: '缺少用户名' });
 
-    // 优先验证 token（兼容旧 password_hash）
-    var token = _getTokenFromRequest(req);
-    var tokenUser = null;
-    if (token) {
-      var payload = verifyUserToken(token);
-      if (payload && payload.user_name) tokenUser = payload.user_name;
-    }
-
-    const isAdmin = currentUser === ADMIN_USERNAME;
-
-    if (isAdmin) {
-      // 管理员：使用 password_hash 验证管理员身份标记（非 JWT admin token）
-      if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+    var isAdminOp = false;
+    if (req.userName === ADMIN_USERNAME && admin_pw) {
       const { data: adminAuth } = await supabase.from('posts')
         .select('media_url')
         .eq('user_name', ADMIN_USERNAME)
         .eq('media_type', ADMIN_AUTH_MARKER)
         .maybeSingle();
-      if (!adminAuth || adminAuth.media_url !== password_hash) {
-        return res.status(403).json({ error: '管理员身份验证失败' });
-      }
-    } else {
-      // 普通用户：优先使用 token 认证，回退到 password_hash
-      if (!tokenUser) {
-        if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-        const { data: authRec } = await supabase.from('posts')
-          .select('media_url')
-          .eq('user_name', username)
-          .eq('media_type', AUTH_MARKER)
-          .maybeSingle();
-        if (!authRec || authRec.media_url !== password_hash) {
-          return res.status(403).json({ error: '身份验证失败' });
-        }
-      } else if (tokenUser !== username) {
-        return res.status(403).json({ error: '身份验证失败' });
-      }
-
-      const { data: photo } = await supabase.from('posts')
-        .select('user_name')
-        .eq('id', photoId)
-        .maybeSingle();
-
-      if (!photo) return res.status(404).json({ error: '照片不存在' });
-      if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
+      if (adminAuth && adminAuth.media_url === admin_pw) isAdminOp = true;
     }
 
-    // 硬删除：获取 media_url 后从 Storage 和 DB 双清
     const { data: photo } = await supabase.from('posts')
-      .select('media_url')
+      .select('user_name, media_url')
       .eq('id', photoId)
       .maybeSingle();
+
+    if (!photo) return res.status(404).json({ error: '照片不存在' });
+    if (!isAdminOp && photo.user_name !== req.userName) return res.status(403).json({ error: '无权删除此照片' });
+
     var storagePath = null;
-    if (photo && photo.media_url) {
+    if (photo.media_url) {
       try {
         var parsed = new URL(photo.media_url);
         var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
@@ -4203,9 +4190,7 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
     if (storagePath) {
       try { await supabase.storage.from('uploads').remove([storagePath]); } catch(_) {}
     }
-    var delQuery = supabase.from('posts').delete().eq('id', photoId);
-    if (!isAdmin && username) delQuery = delQuery.eq('user_name', username);
-    const { error } = await delQuery;
+    const { error } = await supabase.from('posts').delete().eq('id', photoId);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
 
     return res.json({ ok: true });
@@ -6676,7 +6661,7 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     var giftInfo = {};
     try { giftInfo = JSON.parse(gift.content || '{}'); } catch(e) {}
     // 2. 已发布
-    if (!giftInfo.is_published && giftInfo.status !== 'published') return res.status(400).json({ error: '活动未发布' });
+    if (!giftInfo.is_published) return res.status(400).json({ error: '活动未发布' });
     // 3. 未禁用
     if (giftInfo.is_active === false) return res.status(400).json({ error: '活动已禁用' });
     // 4. 时间窗口
@@ -6693,28 +6678,25 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     if (hasAllowList && allowedArr.indexOf(userNameVal) === -1) {
       return res.status(403).json({ error: '你不在本次活动领取名单中' });
     }
-    // 6-8. 加锁防并发重复领取
-    lockKey = 'claim_' + giftId + '_' + userNameVal;
+    // 防并发重复领取（进程内锁 + DB 事后重检，双保险）
+    var lockKey = 'claim_' + giftId + '_' + userNameVal;
     if (claimLocks[lockKey]) return res.status(429).json({ error: '领取请求正在处理中' });
     claimLocks[lockKey] = true;
 
     var claimLimit = parseInt(giftInfo.claim_limit || giftInfo.limit || giftInfo.max_claims) || 0;
     if (claimLimit > 0) {
-      var { data: allClaimRows } = await supabase.from('posts')
-        .select('id')
+      var { count: claimCount } = await supabase.from('posts')
+        .select('id', { count: 'exact', head: true })
         .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-        .eq('media_url', giftId)
-        .limit(5000);
-      if (allClaimRows && allClaimRows.length >= claimLimit) {
-        return res.status(400).json({ error: '活动名额已满' });
-      }
+        .eq('media_url', giftId);
+      if (claimCount && claimCount >= claimLimit) { delete claimLocks[lockKey]; return res.status(400).json({ error: '活动名额已满' }); }
     }
     var { data: existingClaim } = await supabase.from('posts')
       .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userNameVal)
       .eq('media_url', giftId)
       .maybeSingle();
-    if (existingClaim) return res.status(400).json({ error: '你已经领取过该活动' });
+    if (existingClaim) { delete claimLocks[lockKey]; return res.status(400).json({ error: '你已经领取过该活动' }); }
 
     var durationDays = giftInfo.duration_days || 30;
     var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
@@ -6733,9 +6715,19 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
       media_type: PRO_GIFT_CLAIM_MARKER,
       media_url: giftId,
       content: claimContent,
-      actor_key: 'pro_claim_' + Date.now()
+      actor_key: 'pro_claim_' + giftId + '_' + userNameVal + '_' + Date.now()
     }]).select('id').maybeSingle();
-    if (claimErr) return res.status(400).json({ error: sanitizeError(claimErr) });
+    if (claimErr) { delete claimLocks[lockKey]; return res.status(400).json({ error: sanitizeError(claimErr) }); }
+
+    // 事后重检：如果查到两条以上，说明有并发竞态，滚掉本条
+    var { data: dupCheck } = await supabase.from('posts')
+      .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .eq('user_name', userNameVal).eq('media_url', giftId);
+    if (dupCheck && dupCheck.length > 1) {
+      await supabase.from('posts').delete().eq('id', claimData.id).maybeSingle();
+      delete claimLocks[lockKey];
+      return res.status(400).json({ error: '你已经领取过该活动' });
+    }
     // 写入 VIP 激活记录
     var vipContent = JSON.stringify({
       plan_id: 'pro_gift_' + giftId,
@@ -7099,6 +7091,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
   // ★ O 修复 Bug 4: 额外字段 (deep_think / planner / worker_results / thinking_log / think_duration_ms)
   if (extra && typeof extra === 'object') {
     if (extra.deep_think) obj.deep_think = true;
+    if (extra.chat_mode) obj.chat_mode = extra.chat_mode;
     if (typeof extra.agent_count === 'number') obj.agent_count = extra.agent_count;
     if (extra.planner) obj.planner = extra.planner;
     if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
@@ -7340,6 +7333,7 @@ function migrateConfig(config) {
   var merged = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
   Object.keys(config).forEach(function(k) {
     if (k === 'version') return;
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     if (k === 'reply_style' && typeof config.reply_style === 'object') {
       Object.assign(merged.reply_style, config.reply_style);
     } else if (k === 'roleplay' && typeof config.roleplay === 'object') {
@@ -7759,11 +7753,7 @@ async function handleDeepThinkChat(req, res) {
           think_duration_ms: totalDurationMs,
           expiresAt: Date.now() + AI_CACHE_TTL_MS
         });
-        // 限制缓存大小
-        if (aiResponseCache.size > 500) {
-          var oldestKey = aiResponseCache.keys().next().value;
-          if (oldestKey) aiResponseCache.delete(oldestKey);
-        }
+        limitAiCacheSize();
       } catch (e) {}
     }
 
@@ -9069,23 +9059,12 @@ app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
         enabled_providers: diagnostics.enabled_providers || [],
         missing_env: diagnostics.missing_env || [],
         provider_results: diagnostics.provider_results || [],
-        provider_errors: diagnostics.provider_errors || [],
-        env_status: {
-          TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
-          BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
-          SERPER_API_KEY: !!process.env.SERPER_API_KEY,
-          SEARCH_API_URL: !!process.env.SEARCH_API_URL
-        }
+        provider_errors: diagnostics.provider_errors || []
       },
       timestamp: new Date().toISOString()
     });
   } catch (e) {
-    return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [], diagnostics: { enabled_providers: [], missing_env: [], provider_results: [], provider_errors: [], env_status: {
-      TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
-      BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
-      SERPER_API_KEY: !!process.env.SERPER_API_KEY,
-      SEARCH_API_URL: !!process.env.SEARCH_API_URL
-    } } });
+    return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [], diagnostics: { enabled_providers: [], missing_env: [], provider_results: [], provider_errors: [] } });
   }
 });
 
@@ -9577,20 +9556,19 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/users - 管理员查看有 AI 聊天记录的用户列表（含 tokens 统计）
-// 性能：limit 10000 + 30 天默认窗口
 app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
   try {
     var days = parseInt(req.query.days, 10);
-    if (isNaN(days) || days < 1) days = 30;
+    if (isNaN(days) || days < 1) days = 90;
     if (days > 365) days = 365;
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
     var { data: rows } = await supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
+      .select('user_name, media_url, created_at')
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .gte('created_at', since)
       .order('created_at', { ascending: false })
-      .limit(10000);
+      .limit(50000);
 
     if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: days });
 
@@ -9857,13 +9835,13 @@ setInterval(function() {
   cleanupOldLogs('error').catch(function() {});
 }, 24 * 60 * 60 * 1000);
 
-// 自动清理 30 天前的 AI 聊天记录 (每天一次)
+// 自动清理 7 天前的 AI 聊天记录 (每天一次)
 var _aiCleanupLock = false;
 async function autoCleanupAiMessages() {
   if (_aiCleanupLock) return;
   _aiCleanupLock = true;
   try {
-    var cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+    var cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
     var { count, error: countErr } = await supabase.from('posts')
       .select('id', { count: 'exact', head: true })
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
@@ -9876,7 +9854,7 @@ async function autoCleanupAiMessages() {
       deleted += 500;
       await new Promise(function(r) { setTimeout(r, 300); });
     }
-    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 30 天前的 AI 消息');
+    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 7 天前的 AI 消息');
   } catch (e) { /* 静默失败, 不影响主流程 */ }
   _aiCleanupLock = false;
 }
