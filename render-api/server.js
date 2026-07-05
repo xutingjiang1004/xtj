@@ -1005,12 +1005,25 @@ async function queryWeather(query) {
 function writeSse(res, payload) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
-      var ok = res.write('data: ' + JSON.stringify(payload) + '\n\n');
+      var data = 'data: ' + JSON.stringify(payload) + '\n\n';
+      if (!res._sseBuffer) res._sseBuffer = [];
+      if (res._sseBuffer.length > 0) {
+        res._sseBuffer.push(data);
+        return;
+      }
+      var ok = res.write(data);
       if (!ok) {
-        // 背压：内部缓冲区满，暂停并等待 drain
+        res._sseBuffer.push(data);
         if (!res._sseDrainQueued) {
           res._sseDrainQueued = true;
-          res.once('drain', function() { res._sseDrainQueued = false; });
+          res.once('drain', function() {
+            res._sseDrainQueued = false;
+            if (res._sseBuffer && res._sseBuffer.length > 0) {
+              var buf = res._sseBuffer.slice();
+              res._sseBuffer = [];
+              buf.forEach(function(d) { try { if (!res.writableEnded) res.write(d); } catch(e) {} });
+            }
+          });
         }
       }
     }
@@ -2805,7 +2818,8 @@ async function callDeepSeek(messages, options) {
       }
       var cost = null;
       if (DEEPSEEK_INPUT_PRICE_PER_1M || DEEPSEEK_OUTPUT_PRICE_PER_1M) {
-        var inputCost  = (miss * DEEPSEEK_INPUT_PRICE_PER_1M / 1000000) + (hit * DEEPSEEK_CACHE_HIT_PRICE_PER_1M / 1000000);
+        var cacheHitPrice = typeof DEEPSEEK_CACHE_HIT_PRICE_PER_1M === 'number' ? DEEPSEEK_CACHE_HIT_PRICE_PER_1M : 0;
+        var inputCost  = (miss * DEEPSEEK_INPUT_PRICE_PER_1M / 1000000) + (hit * cacheHitPrice / 1000000);
         var outputCost = (totalUsage.completion_tokens * DEEPSEEK_OUTPUT_PRICE_PER_1M / 1000000);
         cost = Math.round((inputCost + outputCost) * 1000000) / 1000000;
       }
@@ -3463,32 +3477,28 @@ function checkAiUserRateLimit(userName) {
     var record = aiUserRateStore.get(userName);
     if (!record) {
       record = {
-        hourly: { count: 1, resetAt: now + 3600000 },
-        daily:  { count: 1, resetAt: now + 86400000 }
+        hourly: { count: 0, resetAt: now + 3600000 },
+        daily:  { count: 0, resetAt: now + 86400000 }
       };
       aiUserRateStore.set(userName, record);
-      return {
-        allowed: true,
-        remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - 1),
-        remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - 1)
-      };
     }
 
     if (now > record.hourly.resetAt) {
-      record.hourly = { count: 1, resetAt: now + 3600000 };
-    } else if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
-      return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
-    } else {
-      record.hourly.count++;
+      record.hourly = { count: 0, resetAt: now + 3600000 };
+    }
+    if (now > record.daily.resetAt) {
+      record.daily = { count: 0, resetAt: now + 86400000 };
     }
 
-    if (now > record.daily.resetAt) {
-      record.daily = { count: 1, resetAt: now + 86400000 };
-    } else if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
-      return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
-    } else {
-      record.daily.count++;
+    if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
+      return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
     }
+    if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
+      return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
+    }
+
+    record.hourly.count++;
+    record.daily.count++;
 
     return {
       allowed: true,
@@ -3599,14 +3609,18 @@ async function loadRevokedTokenHashes() {
       } catch(e) {}
     });
     // 清理过期吊销记录
+    var expiredIds = [];
     for (var i = 0; i < (data || []).length; i++) {
       try {
         var r = data[i];
         var info = JSON.parse(r.content || '{}');
         if (info.expires_at && new Date(info.expires_at).getTime() <= Date.now()) {
-          supabase.from('posts').delete().eq('id', r.id).then(function(){}).catch(function(){});
+          expiredIds.push(r.id);
         }
       } catch(e) {}
+    }
+    if (expiredIds.length > 0) {
+      supabase.from('posts').delete().in('id', expiredIds).then(function(){}).catch(function(e){ console.warn('[Revoke] 清理过期吊销记录失败:', e && e.message); });
     }
   } catch(e) { console.warn('[Revoke] 加载吊销列表失败:', e.message); }
 }
@@ -9269,7 +9283,8 @@ app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
       default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max'
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
+    console.error('[ADMIN-AI] effective-prompt error:', e.message);
+    return res.status(500).json({ ok: false, error: '查询失败' });
   }
 });
 
@@ -9835,7 +9850,7 @@ setInterval(function() {
   cleanupOldLogs('error').catch(function() {});
 }, 24 * 60 * 60 * 1000);
 
-// 自动清理 7 天前的 AI 聊天记录 (每天一次)
+// 自动清理 AI 聊天记录 (每天一次)
 var _aiCleanupLock = false;
 async function autoCleanupAiMessages() {
   if (_aiCleanupLock) return;
@@ -9847,6 +9862,17 @@ async function autoCleanupAiMessages() {
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .lt('created_at', cutoff);
     if (countErr || !count) { _aiCleanupLock = false; return; }
+
+    // 安全阀：如果待删除占比超过 50%，说明窗口变更过大，跳过本轮避免误删
+    var { count: totalAll } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER);
+    if (totalAll && count > totalAll * 0.5) {
+      console.warn('[AUTO-CLEANUP] 跳过本轮：待删除 ' + count + ' 条/共 ' + totalAll + ' 条，占比过高避免误删');
+      _aiCleanupLock = false;
+      return;
+    }
+
     var deleted = 0;
     while (deleted < count) {
       var { error: delErr } = await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
