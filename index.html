@@ -221,7 +221,7 @@
             border-color: transparent !important;
         }
 
-        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile):not(.anim-brain) .anim-layer {
+        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile) .anim-layer {
             opacity: 0 !important;
             visibility: hidden !important;
         }
@@ -229,7 +229,6 @@
         .dock-bar .dock-tab.anim-post .anim-layer,
         .dock-bar .dock-tab.anim-chat .anim-layer,
         .dock-bar .dock-tab.anim-ai .anim-layer,
-        .dock-bar .dock-tab.anim-brain .anim-layer,
         .dock-bar .dock-tab.anim-profile .anim-layer {
             visibility: visible !important;
         }
@@ -1135,21 +1134,6 @@
                     <circle class="al-flash" cx="0" cy="0" r="10" fill="url(#flower-flash)" opacity="0"/>
                 </g>
             </svg>
-        </button>
-        <button class="dock-tab" data-tab="brain" onclick="window.open('brain.html', '_self')">
-            <span class="dt-icon">
-                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 4a4 4 0 0 1 3.5 2.1"/>
-                    <path d="M12 4a4 4 0 0 0-3.5 2.1"/>
-                    <path d="M12 20v-6"/>
-                    <path d="M5 12h2"/>
-                    <path d="M17 12h2"/>
-                    <path d="M12 2v2"/>
-                    <path d="M4 6l2 2"/>
-                    <path d="M18 8l2-2"/>
-                    <circle cx="12" cy="12" r="3"/>
-                </svg>
-            </span>
         </button>
         <button class="dock-tab" data-tab="profile">
             <span class="dt-icon">
