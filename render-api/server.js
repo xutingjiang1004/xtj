@@ -1155,11 +1155,27 @@ function cleanSearchResults(results, maxCount) {
   var out = [];
   var seenUrl = {};
   var seenTitle = {};
+  // ★ U3: URL 协议白名单, 防止 javascript:/data:text/html 等危险协议
+  var ALLOWED_URL_PROTOCOLS = ['http:', 'https:'];
+  function isUrlSafe(url) {
+    if (!url) return false;
+    var lower = url.toLowerCase().trim();
+    // 提取协议部分
+    var colonIdx = lower.indexOf(':');
+    if (colonIdx < 0) return true; // 相对路径
+    var proto = lower.slice(0, colonIdx + 1);
+    for (var i = 0; i < ALLOWED_URL_PROTOCOLS.length; i++) {
+      if (proto === ALLOWED_URL_PROTOCOLS[i]) return true;
+    }
+    return false;
+  }
   results.forEach(function(r) {
     if (!r) return;
     var u = (r.url || '').trim();
     var t = (r.title || '').trim();
     var s = (r.snippet || '').trim();
+    // ★ U3: 过滤危险协议 URL
+    if (u && !isUrlSafe(u)) return;
     // 跳过完全没有内容的结果
     if (!u && !t && !s) return;
     // URL 去重
@@ -2704,8 +2720,14 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  // ★ U3 修复: signal listener 内存泄漏 — 用 { once: true } 自动清理
   if (options && options.signal) {
-    options.signal.addEventListener('abort', function() { controller.abort(); });
+    var _onExternalAbort = function() { try { controller.abort(); } catch (e) {} };
+    if (options.signal.aborted) {
+      try { controller.abort(); } catch (e) {}
+    } else {
+      options.signal.addEventListener('abort', _onExternalAbort, { once: true });
+    }
   }
 
   // 用于汇总 tool_use 信息（返回给上层做徽章 / 计费 / 统计）
@@ -3240,12 +3262,14 @@ async function runMultiAgentFlow(opts) {
     { role: 'user', content: '用户原始问题: ' + message + '\n\n' + (historyContext || '') }
   ];
 
-  // 把 worker 结果拼进去
+  // 把 worker 结果拼进去 (★ U3: 截断每个 worker 内容到 1500 字, 防止 prompt 超限)
   if (workerResults.length > 0) {
     var workerSummary = '\n\n【各方向分析结果】\n';
     workerResults.forEach(function(wr, idx) {
+      var wrContent = String(wr.content || '(无内容)');
+      if (wrContent.length > 1500) wrContent = wrContent.slice(0, 1500) + '\n...(截断)';
       workerSummary += '\n--- ' + (wr.role || ('方向' + (idx + 1))) + ' ---\n';
-      workerSummary += (wr.content || '(无内容)') + '\n';
+      workerSummary += wrContent + '\n';
     });
     synthMessages.push({ role: 'user', content: workerSummary });
   }
@@ -3279,7 +3303,18 @@ async function runMultiAgentFlow(opts) {
     synthModel = synthResult.model || DEEPSEEK_MODEL_REASONER;
   } catch (e) {
     console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
-    synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+    // ★ U3 修复: Synthesizer 失败时 fallback 拼接 worker 结果, 不让用户看到空内容
+    if (workerResults && workerResults.length > 0) {
+      var parts2 = ['(Synthesizer 整合失败: ' + (e.message || '') + ', 以下是各方向原始分析)\n'];
+      workerResults.forEach(function(wr, idx) {
+        var wrC = String(wr.content || '(无内容)');
+        if (wrC.length > 1500) wrC = wrC.slice(0, 1500) + '\n...(截断)';
+        parts2.push('\n【' + (wr.role || ('方向' + (idx + 1))) + '】\n' + wrC);
+      });
+      synthContent = parts2.join('\n');
+    } else {
+      synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+    }
   }
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: synthContent };
@@ -7596,15 +7631,10 @@ async function loadAiContext(userName, convId) {
     // ★ 关键：先按 created_at desc 取最近的消息（更准确反映"最近聊了什么"），
     //         然后在内存里 reverse 成时间正序给 AI。
     //         修复：之前带 convId 的分支 limit(15) + desc + reverse = 实际只取到最旧 15 条
-    var query = supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(AI_CHAT_HISTORY_LIMIT);
+    var msgRows;
     if (convId) {
-      query = supabase.from('posts')
+      // ★ U3 修复: 避免双查询泄漏 — 用 if/else 而非 query 覆盖
+      var r = await supabase.from('posts')
         .select('user_name, content, media_url, created_at')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
@@ -7612,8 +7642,17 @@ async function loadAiContext(userName, convId) {
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_LIMIT);
+      msgRows = r.data;
+    } else {
+      var r2 = await supabase.from('posts')
+        .select('user_name, content, media_url, created_at')
+        .eq('user_name', userName)
+        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(AI_CHAT_HISTORY_LIMIT);
+      msgRows = r2.data;
     }
-    var { data: msgRows } = await query;
     if (Array.isArray(msgRows)) {
       // desc 拿到的是最新在前，reverse 后变正序（旧→新），再 slice 取最近 15 条
       ctx.history = msgRows.slice().reverse().map(function(r) {
@@ -9507,7 +9546,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       }
     }
 
-    // 查指定 convId 的消息（desc + limit + 内存 reverse）
+    // 查指定 convId 的消息（desc + limit+1 用于 has_more 检测）
+    // ★ U3 修复: 多取一条避免 off-by-one
     var query = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', userName)
@@ -9515,7 +9555,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(limit);
+      .limit(limit + 1);
     if (before) {
       query = query.lt('created_at', before);
     }
@@ -9548,10 +9588,16 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return A.roleWeight - B.roleWeight;
     });
 
+    // ★ U3: 多取的那一条用于判断是否还有更多, 然后去掉
+    var hasMore = (rows || []).length > limit;
+    if (hasMore) {
+      filteredRows = filteredRows.slice(0, limit);
+    }
+
     return res.json({
       ok: true,
       conversation_id: convId,
-      has_more: (filteredRows || []).length >= limit,
+      has_more: hasMore,
       oldest: sortedRows.length ? sortedRows[0].created_at : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
