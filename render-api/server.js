@@ -9888,6 +9888,151 @@ setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
 // 服务启动 30s 后执行首次清理
 setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
 
+// ===================== Brain 个人知识库 =====================
+// POST /api/brain/add - 添加一条知识
+app.post('/api/brain/add', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var rawContent = String(req.body && req.body.content || '').trim();
+    var isPublic = req.body && req.body.is_public === true;
+    if (!rawContent) return res.status(400).json({ error: '内容不能为空' });
+    if (rawContent.length > 10000) return res.status(400).json({ error: '内容太长（最多10000字）' });
+
+    var { data, error } = await supabase.from('brain_nodes').insert({
+      user_name: userName,
+      raw_content: rawContent,
+      node_type: 'note',
+      status: 'pending',
+      is_public: isPublic
+    }).select('id').single();
+
+    if (error) return res.status(500).json({ error: '保存失败' });
+    // 立即触发异步整理（不等待）
+    processBrainNode(data.id).catch(function(e) {
+      console.error('[BRAIN] process error:', e && e.message);
+    });
+    res.json({ ok: true, id: data.id, status: 'pending' });
+  } catch (e) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// GET /api/brain/list - 获取知识列表（支持筛选）
+app.get('/api/brain/list', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var tag = String(req.query.tag || '').trim();
+    var type = String(req.query.type || '').trim();
+    var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
+    var offset = Math.max(parseInt(req.query.offset) || 0, 0);
+
+    var query = supabase.from('brain_nodes')
+      .select('*', { count: 'exact' })
+      .eq('user_name', userName)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (tag) query = query.contains('tags', [tag]);
+    if (type) query = query.eq('node_type', type);
+
+    var { data, count, error } = await query;
+    if (error) return res.status(500).json({ error: '查询失败' });
+    res.json({ ok: true, data: data || [], total: count || 0 });
+  } catch (e) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// GET /api/brain/graph - 人际关系图谱数据
+app.get('/api/brain/graph', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var { data } = await supabase.from('brain_nodes')
+      .select('tags, people')
+      .eq('user_name', userName)
+      .not('people', 'is', null)
+      .not('people', 'eq', '{}');
+
+    var personMap = {};
+    var tagMap = {};
+    var edges = [];
+    (data || []).forEach(function(row) {
+      var people = row.people || [];
+      var tags = row.tags || [];
+      people.forEach(function(p) { personMap[p] = (personMap[p] || 0) + 1; });
+      tags.forEach(function(t) { tagMap[t] = (tagMap[t] || 0) + 1; });
+      // 人物-标签关联边
+      people.forEach(function(p) {
+        tags.forEach(function(t) {
+          edges.push({ source: p, target: t, weight: 1 });
+        });
+      });
+    });
+
+    var nodes = [];
+    Object.keys(personMap).forEach(function(k) { nodes.push({ id: k, type: 'person', weight: personMap[k] }); });
+    Object.keys(tagMap).forEach(function(k) { nodes.push({ id: k, type: 'tag', weight: tagMap[k] }); });
+
+    res.json({ ok: true, nodes: nodes, edges: edges });
+  } catch (e) {
+    res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 异步整理单条知识
+async function processBrainNode(id) {
+  if (!id) return;
+  try {
+    await supabase.from('brain_nodes').update({ status: 'processing' }).eq('id', id);
+    var { data: row } = await supabase.from('brain_nodes').select('*').eq('id', id).single();
+    if (!row || !row.raw_content) { await supabase.from('brain_nodes').update({ status: 'failed' }).eq('id', id); return; }
+
+    var prompt = '你是一个知识整理助手。分析以下用户输入的碎片内容，提取结构化信息。\n\n' +
+      '内容: "' + row.raw_content.slice(0, 2000) + '"\n\n' +
+      '请严格按 JSON 格式返回，不要多余文字:\n' +
+      '{\n' +
+      '  "summary": "一句话总结 (20字内)",\n' +
+      '  "tags": ["标签1", "标签2"],\n' +
+      '  "people": ["提到的人名"],\n' +
+      '  "type": "knowledge|idea|diary|plan|question"\n' +
+      '}\n\n' +
+      '规则: tags 用 2-5 个中文关键词概括主题；people 提取内容中提到的所有人名，没人则 []；type 根据内容判断类型。';
+
+    var result = await callDeepSeek(
+      [{ role: 'system', content: prompt }],
+      { thinking_mode: 'low', max_tokens: 1024, temperature: 0.3, response_format: { type: 'json_object' } }
+    );
+
+    var parsed = null;
+    try { parsed = JSON.parse(result.content || '{}'); } catch (e) {
+      var m = (result.content || '').match(/\{[\s\S]*\}/);
+      if (m) try { parsed = JSON.parse(m[0]); } catch (e2) {}
+    }
+
+    var updateData = {
+      status: parsed ? 'completed' : 'failed',
+      ai_summary: (parsed && parsed.summary) || '',
+      tags: (parsed && Array.isArray(parsed.tags)) ? parsed.tags : [],
+      people: (parsed && Array.isArray(parsed.people)) ? parsed.people : [],
+      node_type: (parsed && parsed.type) || 'note',
+      updated_at: new Date().toISOString()
+    };
+    await supabase.from('brain_nodes').update(updateData).eq('id', id);
+  } catch (e) {
+    console.error('[BRAIN] process error for id', id, ':', e && e.message);
+    try { await supabase.from('brain_nodes').update({ status: 'failed' }).eq('id', id); } catch (e2) {}
+  }
+}
+
+// 定时处理 pending 知识（每分钟）
+setInterval(function() {
+  supabase.from('brain_nodes').select('id').eq('status', 'pending').limit(5).then(function(resp) {
+    if (resp.data && resp.data.length) {
+      resp.data.forEach(function(row) { processBrainNode(row.id).catch(function() {}); });
+    }
+  }).catch(function() {});
+}, 60 * 1000);
+
 // ===================== 全局错误处理 =====================
 process.on('uncaughtException', function(err) {
   console.error('[FATAL] uncaughtException:', err && err.message || err);
