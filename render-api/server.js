@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 var nodemailer = null;
-try { nodemailer = require('nodemailer'); } catch(e) {}
+try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
 
 const app = express();
 
@@ -1089,7 +1089,7 @@ async function finishStream(res, opt) {
   }
 
   // 发送 done
-  try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered, 'preview:', String(content).slice(0,60)); } catch(_) {}
+  try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered); } catch(_) {}
   writeSse(res, {
     type: 'done',
     complete: isComplete,
@@ -1323,7 +1323,7 @@ async function logVisit(ip) {
       media_url: today,
       actor_key: 'visit_' + Date.now()
     }]);
-  } catch(e) { /* 静默失败 */ }
+  } catch(e) { console.warn('[LOG] Visit logging failed:', e && e.message); }
 }
 
 // 记录攻击/拦截日志
@@ -1337,7 +1337,7 @@ async function logAttack(ip, type, detail) {
       media_url: type,
       actor_key: 'attack_' + Date.now()
     }]);
-  } catch(e) { /* 静默失败 */ }
+  } catch(e) { console.warn('[LOG] Visit logging failed:', e && e.message); }
 }
 
 // 访问计数去重（同IP同天只计一次，按天自动清理）
@@ -1670,10 +1670,22 @@ app.use(express.json({ limit: '10mb' }));
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
 app.use((req, res, next) => {
   if (!req.secure && req.headers['x-forwarded-proto'] !== 'https') {
-    const host = req.headers.host || '';
-    // 仅在非本地开发环境重定向（避免本地 localhost 也被跳转）
-    if (host && !host.startsWith('localhost:') && !host.startsWith('127.0.0.1:')) {
-      return res.redirect(301, 'https://' + host + req.originalUrl);
+    const host = (req.headers.host || '').toLowerCase();
+    // ★ U3: 白名单域名防止 open redirect
+    const allowedHosts = [
+      'xtj.onrender.com',
+      'localhost',
+      '127.0.0.1'
+    ];
+    var hostAllowed = false;
+    for (var hi = 0; hi < allowedHosts.length; hi++) {
+      if (host === allowedHosts[hi] || host.endsWith('.' + allowedHosts[hi])) {
+        hostAllowed = true;
+        break;
+      }
+    }
+    if (hostAllowed && !host.startsWith('localhost:') && !host.startsWith('127.0.0.1:')) {
+      return res.redirect(301, 'https://' + req.headers.host + req.originalUrl);
     }
   }
   next();
@@ -10051,7 +10063,7 @@ async function autoCleanupAiMessages() {
       await new Promise(function(r) { setTimeout(r, 300); });
     }
     console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 7 天前的 AI 消息');
-  } catch (e) { /* 静默失败, 不影响主流程 */ }
+  } catch (e) { console.warn('[AUTO-CLEANUP] cleanup failed:', e && e.message); }
   _aiCleanupLock = false;
 }
 setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
