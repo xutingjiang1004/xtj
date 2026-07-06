@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的知识库</title>
+<link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1">
+<style>
+body { background: var(--xtj-bg-1, #f5f7f6); color: var(--text-main, #1f2937); font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 0; }
+.brain-app { max-width: 720px; margin: 0 auto; padding: 16px; }
+.brain-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.brain-header h1 { font-size: 20px; font-weight: 700; margin: 0; }
+.brain-header .nav { display: flex; gap: 8px; }
+.brain-header .nav a { color: var(--primary, #16a085); text-decoration: none; font-size: 13px; padding: 4px 10px; border-radius: 8px; }
+.brain-header .nav a:hover { background: rgba(22,160,133,.1); }
+.brain-input-box { background: var(--panel-bg, #fff); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.brain-input-box textarea { width: 100%; min-height: 100px; border: 1px solid var(--border,rgba(140,196,158,.25)); border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.6; resize: vertical; background: var(--input-bg, #fff); color: var(--text-main); box-sizing: border-box; font-family: inherit; }
+.brain-input-box textarea:focus { outline: none; border-color: var(--primary, #16a085); }
+.brain-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+.brain-actions button { padding: 8px 20px; border: none; border-radius: 10px; font-size: 13px; cursor: pointer; font-weight: 600; transition: opacity .15s; }
+.brain-actions button:active { opacity: .7; }
+.btn-save-private { background: var(--primary, #16a085); color: #fff; }
+.btn-save-public { background: transparent; color: var(--primary, #16a085); border: 1px solid var(--primary, #16a085) !important; }
+.brain-loading { text-align: center; padding: 30px; color: #999; font-size: 13px; }
+.brain-item { background: var(--panel-bg, #fff); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.04); border-left: 3px solid #ddd; transition: border-color .2s; }
+.brain-item.type-knowledge { border-left-color: #3b82f6; }
+.brain-item.type-idea { border-left-color: #f59e0b; }
+.brain-item.type-diary { border-left-color: #8b5cf6; }
+.brain-item.type-plan { border-left-color: #10b981; }
+.brain-item.type-question { border-left-color: #ef4444; }
+.brain-item .raw { font-size: 14px; line-height: 1.65; margin-bottom: 6px; white-space: pre-wrap; word-break: break-word; }
+.brain-item .summary { font-size: 12px; color: #888; margin-bottom: 6px; }
+.brain-item .meta { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; }
+.brain-item .tag { background: rgba(22,160,133,.1); color: var(--primary, #16a085); padding: 2px 8px; border-radius: 6px; }
+.brain-item .person { background: rgba(59,130,246,.1); color: #3b82f6; padding: 2px 8px; border-radius: 6px; }
+.brain-item .time { color: #aaa; font-size: 11px; margin-left: auto; }
+.brain-item .pending-badge { font-size: 11px; color: #f59e0b; }
+.brain-item .public-badge { font-size: 11px; color: #10b981; margin-left: 4px; }
+.brain-filter { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.brain-filter button { padding: 4px 12px; border: 1px solid var(--border,rgba(140,196,158,.25)); border-radius: 8px; background: transparent; font-size: 12px; cursor: pointer; color: var(--text-muted,#666); }
+.brain-filter button.active { background: var(--primary, #16a085); color: #fff; border-color: var(--primary); }
+.empty-state { text-align: center; padding: 60px 20px; color: #bbb; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="brain-app" id="app">
+  <div class="brain-header">
+    <h1>🧠 我的知识库</h1>
+    <div class="nav">
+      <a href="#" onclick="loadGraph()">关系图</a>
+      <a href="index.html">← 返回</a>
+    </div>
+  </div>
+
+  <div class="brain-input-box">
+    <textarea id="inputContent" placeholder="写下你的想法、学到的知识、认识的人…&#10;AI 会自动整理标签和关系。"></textarea>
+    <div class="brain-actions">
+      <button class="btn-save-private" onclick="saveNote(false)">📝 私密保存</button>
+      <button class="btn-save-public" onclick="saveNote(true)">🌍 公开保存</button>
+    </div>
+  </div>
+
+  <div class="brain-filter" id="filterBar">
+    <button class="active" data-type="">全部</button>
+    <button data-type="knowledge">📚 知识</button>
+    <button data-type="idea">💡 想法</button>
+    <button data-type="diary">📖 日记</button>
+    <button data-type="plan">🎯 计划</button>
+    <button data-type="question">❓ 问题</button>
+  </div>
+
+  <div id="list"></div>
+  <div class="brain-loading" id="loading">加载中...</div>
+</div>
+
+<script>
+var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin + '/api/agent';
+var currentType = '';
+var loading = false;
+var hasMore = true;
+
+document.getElementById('inputContent').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveNote(false);
+});
+
+document.getElementById('filterBar').addEventListener('click', function(e) {
+  var btn = e.target.closest('button');
+  if (!btn) return;
+  document.querySelectorAll('#filterBar button').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  currentType = btn.getAttribute('data-type') || '';
+  document.getElementById('list').innerHTML = '';
+  hasMore = true;
+  loadNotes(true);
+});
+
+async function saveNote(isPublic) {
+  var content = document.getElementById('inputContent').value.trim();
+  if (!content) return alert('写点内容再保存');
+  var btn = event.target;
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    var r = await fetch(API_BASE + '/brain/add', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: content, is_public: isPublic })
+    });
+    var j = await r.json();
+    if (j.ok) {
+      document.getElementById('inputContent').value = '';
+      document.getElementById('list').innerHTML = '';
+      hasMore = true;
+      loadNotes(true);
+    } else {
+      alert(j.error || '保存失败');
+    }
+  } catch(e) { alert('网络错误'); }
+  btn.disabled = false; btn.textContent = isPublic ? '🌍 公开保存' : '📝 私密保存';
+}
+
+async function loadNotes(reset) {
+  if (loading || !hasMore) return;
+  loading = true;
+  document.getElementById('loading').style.display = 'block';
+  var listEl = document.getElementById('list');
+  var offset = reset ? 0 : listEl.children.length;
+  try {
+    var url = API_BASE + '/brain/list?limit=30&offset=' + offset;
+    if (currentType) url += '&type=' + currentType;
+    var r = await fetch(url);
+    var j = await r.json();
+    if (j.ok && j.data) {
+      if (reset) listEl.innerHTML = '';
+      j.data.forEach(function(item) { listEl.appendChild(renderItem(item)); });
+      hasMore = j.data.length >= 30;
+      if (!hasMore && !reset) document.getElementById('loading').textContent = '— 没有更多了 —';
+      else document.getElementById('loading').textContent = '加载中...';
+    }
+  } catch(e) {}
+  loading = false;
+  if (!hasMore) document.getElementById('loading').style.display = 'none';
+}
+
+function renderItem(item) {
+  var div = document.createElement('div');
+  div.className = 'brain-item type-' + (item.node_type || 'note');
+  var statusHtml = item.status === 'pending' ? '<span class="pending-badge">⏳ AI 整理中...</span>' : '';
+  var publicHtml = item.is_public ? '<span class="public-badge">🌍 公开</span>' : '';
+  var summaryHtml = item.ai_summary ? '<div class="summary">💬 ' + escapeHtml(item.ai_summary) + '</div>' : '';
+  var tagsHtml = (item.tags || []).map(function(t) { return '<span class="tag">#' + escapeHtml(t) + '</span>'; }).join('');
+  var peopleHtml = (item.people || []).map(function(p) { return '<span class="person">👤 ' + escapeHtml(p) + '</span>'; }).join('');
+  var timeHtml = item.created_at ? new Date(item.created_at).toLocaleString('zh-CN', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  div.innerHTML = '<div class="raw">' + escapeHtml(item.raw_content) + '</div>' + summaryHtml +
+    '<div class="meta">' + tagsHtml + peopleHtml + statusHtml + publicHtml + '<span class="time">' + timeHtml + '</span></div>';
+  return div;
+}
+
+function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// 关系图谱
+function loadGraph() {
+  var listEl = document.getElementById('list');
+  listEl.innerHTML = '<div class="brain-loading">加载关系图...</div>';
+  fetch(API_BASE + '/brain/graph').then(function(r) { return r.json(); }).then(function(j) {
+    if (!j.ok || !j.nodes || !j.nodes.length) { listEl.innerHTML = '<div class="empty-state">还没有足够的数据生成关系图</div>'; return; }
+    var html = '<div style="text-align:center;padding:10px 0"><h3 style="font-size:15px;margin:0 0 12px">🧠 知识关系图谱</h3></div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:center;padding:10px 0">';
+    html += '<div><b style="font-size:13px">👤 人物</b><div style="margin-top:6px">';
+    j.nodes.filter(function(n) { return n.type === 'person'; }).sort(function(a,b) { return b.weight - a.weight; }).forEach(function(n) {
+      html += '<div style="display:inline-block;margin:3px;padding:3px 10px;border-radius:8px;font-size:12px;background:rgba(59,130,246,.1);color:#3b82f6">' + escapeHtml(n.id) + ' <small>×' + n.weight + '</small></div>';
+    });
+    html += '</div></div>';
+    html += '<div><b style="font-size:13px">🏷️ 标签</b><div style="margin-top:6px">';
+    j.nodes.filter(function(n) { return n.type === 'tag'; }).sort(function(a,b) { return b.weight - a.weight; }).forEach(function(n) {
+      html += '<div style="display:inline-block;margin:3px;padding:3px 10px;border-radius:8px;font-size:12px;background:rgba(22,160,133,.1);color:#16a085">#' + escapeHtml(n.id) + ' <small>×' + n.weight + '</small></div>';
+    });
+    html += '</div></div></div>';
+    listEl.innerHTML = html;
+  }).catch(function() { listEl.innerHTML = '<div class="empty-state">加载失败</div>'; });
+}
+
+// 滚动加载
+window.addEventListener('scroll', function() {
+  if (document.documentElement.scrollHeight - window.innerHeight - window.scrollY < 300) loadNotes(false);
+});
+
+loadNotes(true);
+</script>
+</body>
+</html>
