@@ -4231,6 +4231,27 @@ function showChatMessages() {
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
+    // ★ U3: 英语学习按钮 (在深度思考左边, AI 聊天内入口)
+    var englishBtn = el('button', {
+      type: 'button',
+      class: 'ai-english-toggle',
+      'aria-label': '英语学习',
+      title: '英语学习 — 单词库 + AI 生成阅读文章和题目',
+      id: 'aiEnglishToggle'
+    });
+    englishBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>';
+    englishBtn.appendChild(el('span', { class: 'ai-english-label', text: '英语' }));
+    englishBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+        window.EnglishLearning.open();
+      } else {
+        notify('英语学习模块未加载');
+      }
+    });
+    header.appendChild(englishBtn);
+
     // 深度思考 toggle 按钮 (M: 在历史按钮左边)
     var deepThinkBtn = el('button', {
       type: 'button',
