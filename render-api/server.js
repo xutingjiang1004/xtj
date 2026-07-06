@@ -961,7 +961,10 @@ var CITY_COORDS = {
 async function queryWeather(query) {
   try {
     var matchedCity = null;
-    for (var cityName in CITY_COORDS) {
+    // ★ U3: 按城市名长度倒序匹配, 避免"济州岛"先匹配到"济"或"京"等子串
+    var cityNames = Object.keys(CITY_COORDS).sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < cityNames.length; i++) {
+      var cityName = cityNames[i];
       if (query.indexOf(cityName) >= 0) {
         matchedCity = { name: cityName, coords: CITY_COORDS[cityName] };
         break;
@@ -1129,13 +1132,16 @@ async function finishStream(res, opt) {
 function buildSearchQuery(message) {
   var q = String(message || '').trim();
   var hasTimeWord = /今天|现在|当前|实时|最新/i.test(q);
+  var hasNewest = /最新/i.test(q);
   // 不再删除时效词 — 保留原样获得更精准的搜索
   var cleaned = q.slice(0, 120);
-  // 包含时效词的问题：追加当前中文日期，让搜索更精准
+  // 包含时效词的问题：追加当前中文日期, 让搜索更精准
+  // ★ U3: 避免重复追加 (如"最新的XX"已经有"最新", 不再追加)
   if (hasTimeWord) {
     var now = new Date();
     var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
-    cleaned = cleaned + ' ' + dateStr + ' 最新';
+    cleaned = cleaned + ' ' + dateStr;
+    if (!hasNewest) cleaned = cleaned + ' 最新';
   }
   if (/新闻|资讯|报道|快讯/i.test(q)) {
     return (cleaned + ' 新闻').slice(0, 120);
@@ -1155,11 +1161,27 @@ function cleanSearchResults(results, maxCount) {
   var out = [];
   var seenUrl = {};
   var seenTitle = {};
+  // ★ U3: URL 协议白名单, 防止 javascript:/data:text/html 等危险协议
+  var ALLOWED_URL_PROTOCOLS = ['http:', 'https:'];
+  function isUrlSafe(url) {
+    if (!url) return false;
+    var lower = url.toLowerCase().trim();
+    // 提取协议部分
+    var colonIdx = lower.indexOf(':');
+    if (colonIdx < 0) return true; // 相对路径
+    var proto = lower.slice(0, colonIdx + 1);
+    for (var i = 0; i < ALLOWED_URL_PROTOCOLS.length; i++) {
+      if (proto === ALLOWED_URL_PROTOCOLS[i]) return true;
+    }
+    return false;
+  }
   results.forEach(function(r) {
     if (!r) return;
     var u = (r.url || '').trim();
     var t = (r.title || '').trim();
     var s = (r.snippet || '').trim();
+    // ★ U3: 过滤危险协议 URL
+    if (u && !isUrlSafe(u)) return;
     // 跳过完全没有内容的结果
     if (!u && !t && !s) return;
     // URL 去重
@@ -2704,8 +2726,14 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  // ★ U3 修复: signal listener 内存泄漏 — 用 { once: true } 自动清理
   if (options && options.signal) {
-    options.signal.addEventListener('abort', function() { controller.abort(); });
+    var _onExternalAbort = function() { try { controller.abort(); } catch (e) {} };
+    if (options.signal.aborted) {
+      try { controller.abort(); } catch (e) {}
+    } else {
+      options.signal.addEventListener('abort', _onExternalAbort, { once: true });
+    }
   }
 
   // 用于汇总 tool_use 信息（返回给上层做徽章 / 计费 / 统计）
@@ -2841,8 +2869,8 @@ async function callDeepSeek(messages, options) {
               totalUsage.prompt_tokens = sJson.usage.prompt_tokens || 0;
               totalUsage.completion_tokens = sJson.usage.completion_tokens || 0;
               totalUsage.total_tokens = sJson.usage.total_tokens || 0;
-              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = sJson.usage.prompt_cache_hit_tokens;
-              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = sJson.usage.prompt_cache_miss_tokens;
+              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
             }
           }
         }
@@ -3013,7 +3041,7 @@ async function callDeepSeek(messages, options) {
         prompt_cache_miss_tokens: typeof lastUsage.prompt_cache_miss_tokens === 'number' ? lastUsage.prompt_cache_miss_tokens : null,
         cost: cost,
         currency: DEEPSEEK_CURRENCY,
-        tool_call_rounds: toolCallsInfo.length > 0 ? Math.ceil(toolCallsInfo.length / 1) : 0,
+        // ★ U3: tool_call_rounds 是有 tool_call 的轮数, 即 max(round)+1; 简化用 count 替代
         tool_call_count: toolCallsInfo.length
       };
     }
@@ -3240,12 +3268,14 @@ async function runMultiAgentFlow(opts) {
     { role: 'user', content: '用户原始问题: ' + message + '\n\n' + (historyContext || '') }
   ];
 
-  // 把 worker 结果拼进去
+  // 把 worker 结果拼进去 (★ U3: 截断每个 worker 内容到 1500 字, 防止 prompt 超限)
   if (workerResults.length > 0) {
     var workerSummary = '\n\n【各方向分析结果】\n';
     workerResults.forEach(function(wr, idx) {
+      var wrContent = String(wr.content || '(无内容)');
+      if (wrContent.length > 1500) wrContent = wrContent.slice(0, 1500) + '\n...(截断)';
       workerSummary += '\n--- ' + (wr.role || ('方向' + (idx + 1))) + ' ---\n';
-      workerSummary += (wr.content || '(无内容)') + '\n';
+      workerSummary += wrContent + '\n';
     });
     synthMessages.push({ role: 'user', content: workerSummary });
   }
@@ -3279,7 +3309,18 @@ async function runMultiAgentFlow(opts) {
     synthModel = synthResult.model || DEEPSEEK_MODEL_REASONER;
   } catch (e) {
     console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
-    synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+    // ★ U3 修复: Synthesizer 失败时 fallback 拼接 worker 结果, 不让用户看到空内容
+    if (workerResults && workerResults.length > 0) {
+      var parts2 = ['(Synthesizer 整合失败: ' + (e.message || '') + ', 以下是各方向原始分析)\n'];
+      workerResults.forEach(function(wr, idx) {
+        var wrC = String(wr.content || '(无内容)');
+        if (wrC.length > 1500) wrC = wrC.slice(0, 1500) + '\n...(截断)';
+        parts2.push('\n【' + (wr.role || ('方向' + (idx + 1))) + '】\n' + wrC);
+      });
+      synthContent = parts2.join('\n');
+    } else {
+      synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+    }
   }
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: synthContent };
@@ -7596,15 +7637,10 @@ async function loadAiContext(userName, convId) {
     // ★ 关键：先按 created_at desc 取最近的消息（更准确反映"最近聊了什么"），
     //         然后在内存里 reverse 成时间正序给 AI。
     //         修复：之前带 convId 的分支 limit(15) + desc + reverse = 实际只取到最旧 15 条
-    var query = supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(AI_CHAT_HISTORY_LIMIT);
+    var msgRows;
     if (convId) {
-      query = supabase.from('posts')
+      // ★ U3 修复: 避免双查询泄漏 — 用 if/else 而非 query 覆盖
+      var r = await supabase.from('posts')
         .select('user_name, content, media_url, created_at')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
@@ -7612,8 +7648,17 @@ async function loadAiContext(userName, convId) {
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_LIMIT);
+      msgRows = r.data;
+    } else {
+      var r2 = await supabase.from('posts')
+        .select('user_name, content, media_url, created_at')
+        .eq('user_name', userName)
+        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(AI_CHAT_HISTORY_LIMIT);
+      msgRows = r2.data;
     }
-    var { data: msgRows } = await query;
     if (Array.isArray(msgRows)) {
       // desc 拿到的是最新在前，reverse 后变正序（旧→新），再 slice 取最近 15 条
       ctx.history = msgRows.slice().reverse().map(function(r) {
@@ -9308,6 +9353,173 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
 
+// POST /api/agent/english/generate - 英语学习: 基于单词库生成阅读文章+题目
+app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var words = Array.isArray(req.body && req.body.words) ? req.body.words : [];
+    var level = String((req.body && req.body.level) || 'cet4').toLowerCase();
+    var types = Array.isArray(req.body && req.body.types) ? req.body.types : ['article', 'mc'];
+    if (['cet4', 'cet6', 'ielts'].indexOf(level) < 0) level = 'cet4';
+    if (words.length === 0) return res.status(400).json({ error: '单词库为空' });
+    if (words.length > 200) return res.status(400).json({ error: '单词过多 (上限 200)' });
+
+    var sanitized = words.slice(0, 200).map(function(w) {
+      return String(w.en || '').slice(0, 60).toLowerCase();
+    }).filter(function(s) { return s && /^[a-zA-Z\s\-']+$/.test(s); });
+    if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
+
+    var levelDesc = level === 'cet6' ? 'CET-6 (大学英语六级)' : level === 'ielts' ? '雅思 (IELTS)' : 'CET-4 (大学英语四级)';
+    var wantsArticle = types.indexOf('article') >= 0;
+    var wantsMC = types.indexOf('mc') >= 0;
+    var wantsCloze = types.indexOf('cloze') >= 0;
+    if (!wantsMC && !wantsCloze) wantsMC = true;
+
+    var wordList = sanitized.map(function(en, i) {
+      var orig = words[i];
+      var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
+      return en + (cn ? ' (' + cn + ')' : '');
+    }).join(', ');
+
+    var mcCount = 4;
+    var clozeCount = 2;
+    var parts = [
+      '你是一个专业的英语教学老师。请基于以下用户单词库, 生成 ' + levelDesc + ' 难度的英语练习。',
+      '',
+      '【用户单词库】',
+      wordList,
+      '',
+      '【要求】',
+      '1. 优先使用用户单词库中的单词 (覆盖率 >= 60%), 不够的部分用同难度其他常用词。',
+      '2. 严格输出 JSON, 严禁任何额外文字、严禁 markdown 代码块、严禁中文说明。',
+      '',
+      'JSON 结构:',
+      '{',
+      '  "article": "完整的阅读文章 (200-350 词' + (wantsArticle ? ', 必填' : ', 可省略') + ')",',
+      '  "words_used": ["在文章中实际用到的单词 (用户单词库优先)"],',
+      '  "questions": ['
+    ];
+    var qId = 1;
+    if (wantsMC) {
+      for (var mi = 0; mi < mcCount; mi++) {
+        if (mi > 0) parts.push('    ,');
+        parts.push('    {');
+        parts.push('      "id": ' + qId++ + ',');
+        parts.push('      "type": "mc",');
+        parts.push('      "question": "题目 (词汇辨析/词义/同义词/语境理解, 围绕用户单词库或文章)",');
+        parts.push('      "options": ["A. ...", "B. ...", "C. ...", "D. ..."],');
+        parts.push('      "answer": 0,');
+        parts.push('      "explain": "中文解析 30-60 字"');
+        parts.push('    }');
+      }
+    }
+    if (wantsCloze) {
+      if (wantsMC) parts.push('    ,');
+      parts.push('    {');
+      parts.push('      "id": ' + qId++ + ',');
+      parts.push('      "type": "cloze",');
+      parts.push('      "question": "完形填空: 一段 100-150 词文章, 挖空 4 个单词 (用 ___ 标记)",');
+      parts.push('      "context": "完整段落 (含 ___ 挖空)",');
+      parts.push('      "blanks": [');
+      for (var ci = 0; ci < clozeCount; ci++) {
+        if (ci > 0) parts.push('        ,');
+        parts.push('        {"options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": 0, "explain": "解析 30 字"}');
+      }
+      parts.push('      ]');
+      parts.push('    }');
+    }
+    parts.push('  ]');
+    parts.push('}');
+    parts.push('');
+    parts.push('注意: answer 是 0-3 的数组下标; 解析必须中文; 仅输出 JSON。');
+
+    var prompt = parts.join('\n');
+    var responseFormat = { type: 'json_object' };
+
+    var aiResult;
+    try {
+      aiResult = await callDeepSeek(
+        [
+          { role: 'system', content: '你是英语教学 AI, 严格输出 JSON, 不输出任何额外文字。' },
+          { role: 'user', content: prompt }
+        ],
+        { thinking_mode: 'low', max_tokens: 4096, response_format: responseFormat }
+      );
+    } catch (e) {
+      console.error('[ENGLISH-GEN] AI failed:', e && e.message);
+      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
+    }
+
+    var text = (aiResult && aiResult.content) || '';
+    // 尝试提取 JSON
+    var firstBrace = text.indexOf('{');
+    var lastBrace = text.lastIndexOf('}');
+    var jsonText = (firstBrace >= 0 && lastBrace > firstBrace) ? text.slice(firstBrace, lastBrace + 1) : text;
+    var data;
+    try {
+      data = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[ENGLISH-GEN] parse failed:', e && e.message, 'raw:', text.slice(0, 300));
+      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    }
+
+    // 校验 + 清理
+    var result = {
+      article: data.article ? String(data.article).slice(0, 5000) : '',
+      words_used: Array.isArray(data.words_used) ? data.words_used.slice(0, 30).map(String) : sanitized.slice(0, 20),
+      questions: []
+    };
+    if (Array.isArray(data.questions)) {
+      data.questions.forEach(function(q) {
+        if (!q || !q.type) return;
+        if (q.type === 'mc') {
+          if (!q.question || !Array.isArray(q.options) || q.options.length < 2) return;
+          var ans = parseInt(q.answer);
+          if (isNaN(ans) || ans < 0 || ans >= q.options.length) ans = 0;
+          result.questions.push({
+            id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
+            type: 'mc',
+            question: String(q.question).slice(0, 500),
+            options: q.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
+            answer: ans,
+            explain: String(q.explain || '').slice(0, 300)
+          });
+        } else if (q.type === 'cloze') {
+          if (!q.context || !Array.isArray(q.blanks)) return;
+          var blanks = [];
+          q.blanks.forEach(function(b) {
+            if (!b || !Array.isArray(b.options)) return;
+            var a2 = parseInt(b.answer);
+            if (isNaN(a2) || a2 < 0 || a2 >= b.options.length) a2 = 0;
+            blanks.push({
+              options: b.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
+              answer: a2,
+              explain: String(b.explain || '').slice(0, 200)
+            });
+          });
+          if (blanks.length > 0) {
+            result.questions.push({
+              id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
+              type: 'cloze',
+              question: String(q.question || '完形填空').slice(0, 300),
+              context: String(q.context).slice(0, 3000),
+              blanks: blanks
+            });
+          }
+        }
+      });
+    }
+
+    if (result.questions.length === 0 && !result.article) {
+      return res.status(500).json({ error: 'AI 返回内容为空, 请重试' });
+    }
+
+    return res.json({ ok: true, data: result, usage: aiResult.usage || null });
+  } catch (e) {
+    console.error('[ENGLISH-GEN] exception:', e && e.message);
+    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
+  }
+});
+
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
 // 查询策略：
 //   - 带 conversation_id：只返回该 conv 的消息
@@ -9340,7 +9552,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       }
     }
 
-    // 查指定 convId 的消息（desc + limit + 内存 reverse）
+    // 查指定 convId 的消息（desc + limit+1 用于 has_more 检测）
+    // ★ U3 修复: 多取一条避免 off-by-one
     var query = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', userName)
@@ -9348,7 +9561,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(limit);
+      .limit(limit + 1);
     if (before) {
       query = query.lt('created_at', before);
     }
@@ -9381,10 +9594,16 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return A.roleWeight - B.roleWeight;
     });
 
+    // ★ U3: 多取的那一条用于判断是否还有更多, 然后去掉
+    var hasMore = (rows || []).length > limit;
+    if (hasMore) {
+      filteredRows = filteredRows.slice(0, limit);
+    }
+
     return res.json({
       ok: true,
       conversation_id: convId,
-      has_more: (filteredRows || []).length >= limit,
+      has_more: hasMore,
       oldest: sortedRows.length ? sortedRows[0].created_at : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
