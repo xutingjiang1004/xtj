@@ -961,7 +961,10 @@ var CITY_COORDS = {
 async function queryWeather(query) {
   try {
     var matchedCity = null;
-    for (var cityName in CITY_COORDS) {
+    // ★ U3: 按城市名长度倒序匹配, 避免"济州岛"先匹配到"济"或"京"等子串
+    var cityNames = Object.keys(CITY_COORDS).sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < cityNames.length; i++) {
+      var cityName = cityNames[i];
       if (query.indexOf(cityName) >= 0) {
         matchedCity = { name: cityName, coords: CITY_COORDS[cityName] };
         break;
@@ -1129,13 +1132,16 @@ async function finishStream(res, opt) {
 function buildSearchQuery(message) {
   var q = String(message || '').trim();
   var hasTimeWord = /今天|现在|当前|实时|最新/i.test(q);
+  var hasNewest = /最新/i.test(q);
   // 不再删除时效词 — 保留原样获得更精准的搜索
   var cleaned = q.slice(0, 120);
-  // 包含时效词的问题：追加当前中文日期，让搜索更精准
+  // 包含时效词的问题：追加当前中文日期, 让搜索更精准
+  // ★ U3: 避免重复追加 (如"最新的XX"已经有"最新", 不再追加)
   if (hasTimeWord) {
     var now = new Date();
     var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
-    cleaned = cleaned + ' ' + dateStr + ' 最新';
+    cleaned = cleaned + ' ' + dateStr;
+    if (!hasNewest) cleaned = cleaned + ' 最新';
   }
   if (/新闻|资讯|报道|快讯/i.test(q)) {
     return (cleaned + ' 新闻').slice(0, 120);
@@ -2863,8 +2869,8 @@ async function callDeepSeek(messages, options) {
               totalUsage.prompt_tokens = sJson.usage.prompt_tokens || 0;
               totalUsage.completion_tokens = sJson.usage.completion_tokens || 0;
               totalUsage.total_tokens = sJson.usage.total_tokens || 0;
-              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = sJson.usage.prompt_cache_hit_tokens;
-              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = sJson.usage.prompt_cache_miss_tokens;
+              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
             }
           }
         }
@@ -3035,7 +3041,7 @@ async function callDeepSeek(messages, options) {
         prompt_cache_miss_tokens: typeof lastUsage.prompt_cache_miss_tokens === 'number' ? lastUsage.prompt_cache_miss_tokens : null,
         cost: cost,
         currency: DEEPSEEK_CURRENCY,
-        tool_call_rounds: toolCallsInfo.length > 0 ? Math.ceil(toolCallsInfo.length / 1) : 0,
+        // ★ U3: tool_call_rounds 是有 tool_call 的轮数, 即 max(round)+1; 简化用 count 替代
         tool_call_count: toolCallsInfo.length
       };
     }
