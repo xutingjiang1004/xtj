@@ -98,7 +98,7 @@
         if (v === undefined || v === null) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
-        else if (k === 'html') node.innerHTML = v;
+        else if (k === 'html') node.textContent = v; // ★ 安全: 禁止 innerHTML, 改用 textContent
         else if (k === 'style') node.style.cssText = v;
         else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
         else node.setAttribute(k, v);
@@ -162,7 +162,7 @@
   // 简单 Markdown → HTML 渲染
   function escapeAttr(val) {
     if (!val) return '';
-    return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   function renderMarkdown(txt) {
