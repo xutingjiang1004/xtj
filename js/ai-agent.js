@@ -2989,7 +2989,7 @@
       fileInput.addEventListener('change', function() {
         var f = this.files && this.files[0];
         if (!f) return;
-        if (f.size > 10 * 1024 * 1024) { notify('文件不能超过 10MB'); return; }
+        if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB (data URL 编码后)'); return; }
         var reader = new FileReader();
         reader.onload = function(e) {
           _dtFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
@@ -4413,7 +4413,7 @@ function showChatMessages() {
     fileInput.addEventListener('change', function() {
       var f = this.files && this.files[0];
       if (!f) return;
-      if (f.size > 10 * 1024 * 1024) { notify('文件不能超过 10MB'); return; }
+      if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB (data URL 编码后)'); return; }
       var reader = new FileReader();
       reader.onload = function(e) {
         _aiChatFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
