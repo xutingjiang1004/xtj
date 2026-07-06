@@ -2489,6 +2489,169 @@ async function extractEmbeddedFiles(text) {
   return result;
 }
 
+// ===================== 1. DeepSeek 统一封装 =====================
+// 比旧 callDeepSeek 更干净的接口，支持 jsonMode、stream、tools
+// 使用方式:
+//   const result = await callDeepSeekAI({ messages, jsonMode: true })
+//   const content = await callDeepSeekAI({ messages, system: '你是个助手' })
+async function callDeepSeekAI(opts) {
+  var messages = opts.messages || [];
+  var system = opts.system || '';
+  var jsonMode = opts.jsonMode === true;
+  var stream = opts.stream === true;
+  var model = opts.model || DEEPSEEK_MODEL_REASONER;
+  var thinkingMode = opts.thinking_mode || 'low';
+  var maxTokens = opts.max_tokens || 2048;
+  var temperature = opts.temperature ?? 0.3;
+
+  if (system) messages = [{ role: 'system', content: system }, ...messages];
+
+  var apiOpts = {
+    thinking_mode: thinkingMode,
+    model: model,
+    max_tokens: maxTokens,
+    temperature: temperature
+  };
+  if (jsonMode) apiOpts.response_format = { type: 'json_object' };
+  if (stream) {
+    apiOpts.onThinkingChunk = opts.onThinkingChunk;
+    apiOpts.onContentChunk = opts.onContentChunk;
+  }
+
+  try {
+    var result = await callDeepSeek(messages, apiOpts);
+    var content = result.content || '';
+    if (jsonMode) {
+      try { return JSON.parse(content); } catch (e) {
+        var m = content.match(/\{[\s\S]*\}/);
+        if (m) try { return JSON.parse(m[0]); } catch (e2) {}
+        return null;
+      }
+    }
+    return content;
+  } catch (e) {
+    console.error('[AI] callDeepSeekAI failed:', e && e.message);
+    return jsonMode ? null : '';
+  }
+}
+
+// ===================== 2. 异步 Job 队列 =====================
+// 用于 brain 整理、深度思考等后台任务
+async function enqueueJob(userName, jobType, refTable, refId) {
+  try {
+    await supabase.from('ai_jobs').insert({
+      user_name: userName, job_type: jobType,
+      ref_table: refTable, ref_id: refId,
+      status: 'queued', scheduled_at: new Date().toISOString()
+    });
+  } catch (e) { console.error('[JOBS] enqueue error:', e && e.message); }
+}
+
+async function processBrainJob(job) {
+  var refId = job.ref_id;
+  try {
+    await supabase.from('ai_jobs').update({ status: 'running' }).eq('id', job.id);
+    var { data: row } = await supabase.from('brain_nodes').select('*').eq('id', refId).single();
+    if (!row || !row.raw_content) throw new Error('记录不存在');
+
+    var prompt = '你是一个知识整理助手。分析以下内容，提取结构化信息。\n\n' +
+      '内容: "' + String(row.raw_content).slice(0, 2000) + '"\n\n' +
+      '严格按 JSON 格式返回，不要多余文字:\n' +
+      '{\n  "title": "简短标题（10字内）",\n  "summary": "一句话总结（20字内）",\n' +
+      '  "tags": ["标签1","标签2"],\n  "people": ["提到的人名"],\n' +
+      '  "type": "knowledge|idea|diary|plan|question",\n  "mood": "happy|sad|neutral|excited|anxious"\n}\n\n' +
+      '规则: tags 2-5个关键词；people 提取所有人名，没人则[]；type 判断内容类型；mood 判断情绪。';
+
+    var result = await callDeepSeekAI({ messages: [{ role: 'user', content: '' }], system: prompt, jsonMode: true, max_tokens: 1024 });
+    var updateData = {
+      status: result ? 'completed' : 'failed',
+      ai_title: (result && result.title) || '',
+      ai_summary: (result && result.summary) || '',
+      tags: (result && Array.isArray(result.tags)) ? result.tags : [],
+      people: (result && Array.isArray(result.people)) ? result.people : [],
+      node_type: (result && result.type) || 'note',
+      updated_at: new Date().toISOString()
+    };
+    await supabase.from('brain_nodes').update(updateData).eq('id', refId);
+    await supabase.from('ai_jobs').update({ status: 'succeeded', result: 'ok', updated_at: new Date().toISOString() }).eq('id', job.id);
+  } catch (e) {
+    console.error('[JOBS] process error for', refId, ':', e && e.message);
+    await supabase.from('ai_jobs').update({ status: 'failed', error: String(e && e.message || '').slice(0, 500), updated_at: new Date().toISOString() }).eq('id', job.id);
+    await supabase.from('brain_nodes').update({ status: 'failed' }).eq('id', refId);
+  }
+}
+
+async function processNextJob() {
+  try {
+    var { data: jobs } = await supabase.from('ai_jobs')
+      .select('*').eq('status', 'queued').order('scheduled_at', { ascending: true }).limit(1);
+    if (!jobs || !jobs.length) return;
+    var job = jobs[0];
+    if (job.job_type === 'organize' && job.ref_table === 'brain_nodes') await processBrainJob(job);
+  } catch (e) { console.error('[JOBS] processNext error:', e && e.message); }
+}
+
+// worker 轮询（每 5 秒）
+setInterval(function() { processNextJob().catch(function() {}); }, 5000);
+
+// ===================== 3. Brain/Memory CRUD =====================
+app.post('/api/brain/add', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var rawContent = String(req.body && req.body.content || '').trim();
+    var isPublic = req.body && req.body.is_public === true;
+    if (!rawContent) return res.status(400).json({ error: '内容不能为空' });
+    if (rawContent.length > 10000) return res.status(400).json({ error: '内容太长' });
+
+    var { data, error } = await supabase.from('brain_nodes').insert({
+      user_name: userName, raw_content: rawContent, node_type: 'note', status: 'pending', is_public: isPublic
+    }).select('id').single();
+    if (error) return res.status(500).json({ error: '保存失败' });
+
+    await enqueueJob(userName, 'organize', 'brain_nodes', data.id);
+    res.json({ ok: true, id: data.id, status: 'pending' });
+  } catch (e) { res.status(500).json({ error: '服务器错误' }); }
+});
+
+app.get('/api/brain/list', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var tag = String(req.query.tag || '').trim();
+    var type = String(req.query.type || '').trim();
+    var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
+    var offset = Math.max(parseInt(req.query.offset) || 0, 0);
+
+    var query = supabase.from('brain_nodes').select('*', { count: 'exact' })
+      .eq('user_name', userName).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (tag) query = query.contains('tags', [tag]);
+    if (type) query = query.eq('node_type', type);
+
+    var { data, count, error } = await query;
+    if (error) return res.status(500).json({ error: '查询失败' });
+    res.json({ ok: true, data: data || [], total: count || 0 });
+  } catch (e) { res.status(500).json({ error: '服务器错误' }); }
+});
+
+app.get('/api/brain/graph', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var { data } = await supabase.from('brain_nodes')
+      .select('tags, people').eq('user_name', userName).not('people', 'is', null).not('people', 'eq', '{}');
+
+    var personMap = {}, tagMap = {}, edges = [];
+    (data || []).forEach(function(row) {
+      (row.people || []).forEach(function(p) { personMap[p] = (personMap[p] || 0) + 1; });
+      (row.tags || []).forEach(function(t) { tagMap[t] = (tagMap[t] || 0) + 1; });
+      (row.people || []).forEach(function(p) { (row.tags || []).forEach(function(t) { edges.push({ source: p, target: t }); }); });
+    });
+
+    var nodes = [];
+    Object.keys(personMap).forEach(function(k) { nodes.push({ id: k, type: 'person', weight: personMap[k] }); });
+    Object.keys(tagMap).forEach(function(k) { nodes.push({ id: k, type: 'tag', weight: tagMap[k] }); });
+    res.json({ ok: true, nodes: nodes, edges: edges });
+  } catch (e) { res.status(500).json({ error: '查询失败' }); }
+});
+
 async function callDeepSeek(messages, options) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('AI 调用参数无效');
