@@ -69,7 +69,7 @@ npm start
 - 服务类型：`web`
 - 运行时：`node`
 - 构建命令：`npm install`
-- 启动命令：`node --env-file=render-api/.env render-api/server.js`
+- 启动命令：`node render-api/server.js`
 
 这意味着 Render 线上实际走的是：
 
@@ -87,7 +87,7 @@ npm start
 - 流式/非流式回复均强制清洗，done 事件返回 sanitized_content
 
 **搜索 Provider 架构（render-api/server.js searchWeb）**：
-- Tavily > Brave > Serper > Custom API > SearXNG > Bing HTML 六层降级链
+- Tavily > Brave > Serper > Custom API > Bing HTML > SearXNG 六层降级链
 - 统一返回值格式 `{ results, diagnostics }`，含 provider 错误追踪
 - search-health 端点返回完整 Provider 状态与环境变量配置
 
@@ -346,7 +346,7 @@ npm start
 每次发版建议至少同步这三处：
 
 1. `CHANGELOG.md`
-2. `index.html` 中关于页版本号（当前 `v0.85`）
+2. `index.html` 中关于页版本号（当前 `v0.93`）
 3. `js/core.js` 中站内 changelog 数据
 
 这样可以避免“仓库版本、站内版本、关于页版本”再次分裂。
