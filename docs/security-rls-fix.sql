@@ -126,13 +126,16 @@ END;
 $$;
 
 -- 恢复照片 RPC
-CREATE OR REPLACE FUNCTION restore_photo_wall_post(p_post_id bigint, p_admin_user text)
+CREATE OR REPLACE FUNCTION restore_photo_wall_post(p_post_id bigint, p_admin_user text, p_is_admin boolean DEFAULT false)
 RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
+    IF p_is_admin IS NOT TRUE THEN
+        RETURN json_build_object('ok', false, 'error', 'unauthorized');
+    END IF;
     UPDATE posts SET is_deleted = false, deleted_at = NULL, deleted_by = NULL WHERE id = p_post_id AND media_type = '__photo_wall__';
     IF FOUND THEN
         RETURN json_build_object('ok', true);
