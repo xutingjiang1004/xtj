@@ -2248,6 +2248,46 @@
 .ai-deep-think-icon { font-size: 13px; line-height: 1; display: inline-flex; align-items: center; }
 .ai-deep-think-label { font-weight: inherit; }
 
+/* ★ U3: 英语学习按钮 (放在深度思考左边, AI 聊天内入口) */
+.ai-english-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  margin-right: 4px;
+  border: 1px solid rgba(140, 196, 158, 0.22);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(100, 120, 112, 0.88);
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(82, 138, 120, 0.06);
+  transition: border-color .25s, background .25s, color .25s, box-shadow .25s, transform .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-english-toggle:hover {
+  border-color: rgba(66, 155, 122, 0.42);
+  background: rgba(255, 255, 255, 0.85);
+  color: rgba(58, 142, 112, 0.95);
+  box-shadow: 0 4px 14px rgba(82, 138, 120, 0.1);
+  transform: translateY(-1px);
+}
+.ai-english-toggle:active { transform: scale(.96) translateY(0); }
+.ai-english-label { font-weight: inherit; display: inline-block; }
+
+[data-theme="dark"] .ai-english-toggle {
+  background: rgba(40, 44, 52, 0.55);
+  border-color: rgba(140, 196, 158, 0.18);
+  color: rgba(180, 200, 190, 0.85);
+}
+[data-theme="dark"] .ai-english-toggle:hover {
+  background: rgba(50, 56, 64, 0.85);
+  border-color: rgba(66, 155, 122, 0.42);
+  color: rgb(140, 220, 180);
+}
+
 /* 深度思考进度卡 */
 .ai-progress-card {
   position: relative;
