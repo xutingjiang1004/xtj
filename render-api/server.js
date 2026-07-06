@@ -9308,6 +9308,173 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
 
+// POST /api/agent/english/generate - 英语学习: 基于单词库生成阅读文章+题目
+app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var words = Array.isArray(req.body && req.body.words) ? req.body.words : [];
+    var level = String((req.body && req.body.level) || 'cet4').toLowerCase();
+    var types = Array.isArray(req.body && req.body.types) ? req.body.types : ['article', 'mc'];
+    if (['cet4', 'cet6', 'ielts'].indexOf(level) < 0) level = 'cet4';
+    if (words.length === 0) return res.status(400).json({ error: '单词库为空' });
+    if (words.length > 200) return res.status(400).json({ error: '单词过多 (上限 200)' });
+
+    var sanitized = words.slice(0, 200).map(function(w) {
+      return String(w.en || '').slice(0, 60).toLowerCase();
+    }).filter(function(s) { return s && /^[a-zA-Z\s\-']+$/.test(s); });
+    if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
+
+    var levelDesc = level === 'cet6' ? 'CET-6 (大学英语六级)' : level === 'ielts' ? '雅思 (IELTS)' : 'CET-4 (大学英语四级)';
+    var wantsArticle = types.indexOf('article') >= 0;
+    var wantsMC = types.indexOf('mc') >= 0;
+    var wantsCloze = types.indexOf('cloze') >= 0;
+    if (!wantsMC && !wantsCloze) wantsMC = true;
+
+    var wordList = sanitized.map(function(en, i) {
+      var orig = words[i];
+      var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
+      return en + (cn ? ' (' + cn + ')' : '');
+    }).join(', ');
+
+    var mcCount = 4;
+    var clozeCount = 2;
+    var parts = [
+      '你是一个专业的英语教学老师。请基于以下用户单词库, 生成 ' + levelDesc + ' 难度的英语练习。',
+      '',
+      '【用户单词库】',
+      wordList,
+      '',
+      '【要求】',
+      '1. 优先使用用户单词库中的单词 (覆盖率 >= 60%), 不够的部分用同难度其他常用词。',
+      '2. 严格输出 JSON, 严禁任何额外文字、严禁 markdown 代码块、严禁中文说明。',
+      '',
+      'JSON 结构:',
+      '{',
+      '  "article": "完整的阅读文章 (200-350 词' + (wantsArticle ? ', 必填' : ', 可省略') + ')",',
+      '  "words_used": ["在文章中实际用到的单词 (用户单词库优先)"],',
+      '  "questions": ['
+    ];
+    var qId = 1;
+    if (wantsMC) {
+      for (var mi = 0; mi < mcCount; mi++) {
+        if (mi > 0) parts.push('    ,');
+        parts.push('    {');
+        parts.push('      "id": ' + qId++ + ',');
+        parts.push('      "type": "mc",');
+        parts.push('      "question": "题目 (词汇辨析/词义/同义词/语境理解, 围绕用户单词库或文章)",');
+        parts.push('      "options": ["A. ...", "B. ...", "C. ...", "D. ..."],');
+        parts.push('      "answer": 0,');
+        parts.push('      "explain": "中文解析 30-60 字"');
+        parts.push('    }');
+      }
+    }
+    if (wantsCloze) {
+      if (wantsMC) parts.push('    ,');
+      parts.push('    {');
+      parts.push('      "id": ' + qId++ + ',');
+      parts.push('      "type": "cloze",');
+      parts.push('      "question": "完形填空: 一段 100-150 词文章, 挖空 4 个单词 (用 ___ 标记)",');
+      parts.push('      "context": "完整段落 (含 ___ 挖空)",');
+      parts.push('      "blanks": [');
+      for (var ci = 0; ci < clozeCount; ci++) {
+        if (ci > 0) parts.push('        ,');
+        parts.push('        {"options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": 0, "explain": "解析 30 字"}');
+      }
+      parts.push('      ]');
+      parts.push('    }');
+    }
+    parts.push('  ]');
+    parts.push('}');
+    parts.push('');
+    parts.push('注意: answer 是 0-3 的数组下标; 解析必须中文; 仅输出 JSON。');
+
+    var prompt = parts.join('\n');
+    var responseFormat = { type: 'json_object' };
+
+    var aiResult;
+    try {
+      aiResult = await callDeepSeek(
+        [
+          { role: 'system', content: '你是英语教学 AI, 严格输出 JSON, 不输出任何额外文字。' },
+          { role: 'user', content: prompt }
+        ],
+        { thinking_mode: 'low', max_tokens: 4096, response_format: responseFormat }
+      );
+    } catch (e) {
+      console.error('[ENGLISH-GEN] AI failed:', e && e.message);
+      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
+    }
+
+    var text = (aiResult && aiResult.content) || '';
+    // 尝试提取 JSON
+    var firstBrace = text.indexOf('{');
+    var lastBrace = text.lastIndexOf('}');
+    var jsonText = (firstBrace >= 0 && lastBrace > firstBrace) ? text.slice(firstBrace, lastBrace + 1) : text;
+    var data;
+    try {
+      data = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[ENGLISH-GEN] parse failed:', e && e.message, 'raw:', text.slice(0, 300));
+      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    }
+
+    // 校验 + 清理
+    var result = {
+      article: data.article ? String(data.article).slice(0, 5000) : '',
+      words_used: Array.isArray(data.words_used) ? data.words_used.slice(0, 30).map(String) : sanitized.slice(0, 20),
+      questions: []
+    };
+    if (Array.isArray(data.questions)) {
+      data.questions.forEach(function(q) {
+        if (!q || !q.type) return;
+        if (q.type === 'mc') {
+          if (!q.question || !Array.isArray(q.options) || q.options.length < 2) return;
+          var ans = parseInt(q.answer);
+          if (isNaN(ans) || ans < 0 || ans >= q.options.length) ans = 0;
+          result.questions.push({
+            id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
+            type: 'mc',
+            question: String(q.question).slice(0, 500),
+            options: q.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
+            answer: ans,
+            explain: String(q.explain || '').slice(0, 300)
+          });
+        } else if (q.type === 'cloze') {
+          if (!q.context || !Array.isArray(q.blanks)) return;
+          var blanks = [];
+          q.blanks.forEach(function(b) {
+            if (!b || !Array.isArray(b.options)) return;
+            var a2 = parseInt(b.answer);
+            if (isNaN(a2) || a2 < 0 || a2 >= b.options.length) a2 = 0;
+            blanks.push({
+              options: b.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
+              answer: a2,
+              explain: String(b.explain || '').slice(0, 200)
+            });
+          });
+          if (blanks.length > 0) {
+            result.questions.push({
+              id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
+              type: 'cloze',
+              question: String(q.question || '完形填空').slice(0, 300),
+              context: String(q.context).slice(0, 3000),
+              blanks: blanks
+            });
+          }
+        }
+      });
+    }
+
+    if (result.questions.length === 0 && !result.article) {
+      return res.status(500).json({ error: 'AI 返回内容为空, 请重试' });
+    }
+
+    return res.json({ ok: true, data: result, usage: aiResult.usage || null });
+  } catch (e) {
+    console.error('[ENGLISH-GEN] exception:', e && e.message);
+    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
+  }
+});
+
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
 // 查询策略：
 //   - 带 conversation_id：只返回该 conv 的消息

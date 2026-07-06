@@ -83,14 +83,26 @@
   }
 
   // ============= Auth helper =============
-  async function getAuthPayload() {
+  function readUserName() {
+    try { return sessionStorage.getItem('xtj_user_name') || localStorage.getItem('xtj_user_name') || ''; } catch (e) { return ''; }
+  }
+  function readPwHash() {
+    try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
+  }
+  function readUserToken() {
+    try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; }
+  }
+  async function getAuthHeaders() {
+    var headers = { 'Content-Type': 'application/json' };
     try {
-      if (typeof window.apiRequest === 'function') {
-        var r = await window.apiRequest('GET', '/auth/status', null);
-        if (r && r.ok) return { ok: true, userName: window.currentUser || null };
+      if (typeof window.ensureUserToken === 'function') {
+        var t = await window.ensureUserToken();
+        if (t) { headers.Authorization = 'Bearer ' + t; return headers; }
       }
     } catch (e) {}
-    return { ok: !!window.currentUser, userName: window.currentUser || null };
+    var tok = readUserToken();
+    if (tok) headers.Authorization = 'Bearer ' + tok;
+    return headers;
   }
 
   // ============= Word library =============
@@ -210,61 +222,43 @@
     hideArticle();
     hideQuestions();
 
-    var wordList = S.words.map(function(w) { return w.en + (w.cn ? ' (' + w.cn + ')' : ''); }).join(', ');
-
-    var prompt = buildPrompt(wordList, level, types);
-
     try {
       var apiBase = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : '/api/agent';
-      var resp = await fetch(apiBase + '/chat/stream', {
+      var headers = await getAuthHeaders();
+      var un = readUserName();
+      var pw = readPwHash();
+      var body = {
+        words: S.words.map(function(w) { return { en: w.en, cn: w.cn || '' }; }),
+        level: level,
+        types: types
+      };
+      // 兼容旧认证: 附带 user_name + password_hash
+      if (!headers.Authorization && un && pw) {
+        body.user_name = un;
+        body.password_hash = pw;
+      }
+      var resp = await fetch(apiBase + '/english/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: prompt,
-          thinking_mode: 'low'
-        })
+        headers: headers,
+        body: JSON.stringify(body)
       });
 
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-      var reader = resp.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-      var fullText = '';
-
-      while (true) {
-        var r = await reader.read();
-        if (r.done) break;
-        buffer += decoder.decode(r.value, { stream: true });
-        var lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i].trim();
-          if (!line || line.indexOf('data: ') !== 0) continue;
-          var data = line.slice(6);
-          if (data === '[DONE]') continue;
-          try {
-            var evt = JSON.parse(data);
-            if (evt.type === 'content' || evt.type === 'answer_chunk') {
-              fullText += evt.text || evt.chunk || '';
-            } else if (evt.type === 'done') {
-              fullText = evt.sanitized_content || evt.content || fullText;
-            } else if (evt.type === 'error') {
-              throw new Error(evt.error || 'AI error');
-            }
-          } catch (e) { /* skip non-JSON lines */ }
-        }
+      if (!resp.ok) {
+        var errText = '';
+        try { var ej = await resp.json(); errText = (ej && ej.error) || ''; } catch (e) {}
+        throw new Error(errText || ('HTTP ' + resp.status));
       }
 
-      if (!fullText) throw new Error('AI 未返回内容');
-
-      var parsed = parseAIResponse(fullText, types, level);
-      if (!parsed) throw new Error('解析 AI 返回失败');
+      var json = await resp.json();
+      if (!json.ok || !json.data) {
+        throw new Error(json.error || '返回数据异常');
+      }
+      var data = json.data;
 
       S.currentQuiz = {
-        article: parsed.article || '',
-        words: parsed.wordsUsed || S.words.map(function(w) { return w.en; }),
-        questions: parsed.questions || [],
+        article: data.article || '',
+        words: data.words_used || S.words.map(function(w) { return w.en; }),
+        questions: data.questions || [],
         answers: {},
         level: level,
         types: types,
@@ -280,122 +274,6 @@
       notify('生成失败: ' + (e.message || '未知错误'));
     } finally {
       S.isGenerating = false;
-    }
-  }
-
-  function buildPrompt(wordList, level, types) {
-    var levelMap = {
-      cet4: 'CET-4 (大学英语四级)',
-      cet6: 'CET-6 (大学英语六级)',
-      ielts: '雅思 (IELTS)'
-    };
-    var levelDesc = levelMap[level] || 'CET-4';
-    var wantsArticle = types.indexOf('article') >= 0;
-    var wantsMC = types.indexOf('mc') >= 0;
-    var wantsCloze = types.indexOf('cloze') >= 0;
-
-    var parts = [
-      '你是一个专业的英语教学老师。请基于以下用户单词库, 生成 ' + levelDesc + ' 难度的英语练习。',
-      '',
-      '【用户单词库】',
-      wordList,
-      '',
-      '【要求】',
-      '1. 优先使用用户单词库中的单词, 不够的部分用同难度其他常用词。',
-      '2. 输出必须严格使用以下 JSON 格式, 不要任何额外文字、不要 markdown 代码块:',
-      '{',
-      '  "article": "完整的阅读文章 (200-350 词, ' + (wantsArticle ? '必填' : '可省略填空字符串') + ')",',
-      '  "words_used": ["在文章中实际用到的单词 (用户单词库优先)"],',
-      '  "questions": ['
-    ];
-    var qId = 1;
-    if (wantsMC) {
-      parts.push('    {');
-      parts.push('      "id": ' + qId++ + ',');
-      parts.push('      "type": "mc",');
-      parts.push('      "question": "题目 (考察词汇辨析/词义/同义词/语境理解, 必须围绕用户单词库或文章内容)",');
-      parts.push('      "options": ["A. ...", "B. ...", "C. ...", "D. ..."],');
-      parts.push('      "answer": 0,');
-      parts.push('      "explain": "中文解析, 30-60 字"');
-      parts.push('    }');
-      if (wantsCloze) parts.push('    ,');
-    }
-    if (wantsCloze) {
-      parts.push('    {');
-      parts.push('      "id": ' + qId++ + ',');
-      parts.push('      "type": "cloze",');
-      parts.push('      "question": "完形填空: 给出一段 100-150 词的文章, 其中挖空 4 个单词 (用 ___ 标记), 选项 4 选 1",');
-      parts.push('      "context": "完整段落 (含 ___ 挖空)",');
-      parts.push('      "blanks": [');
-      parts.push('        {"index": 0, "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": 0, "explain": "解析"}');
-      parts.push('      ]');
-      parts.push('    }');
-    }
-    parts.push('  ]');
-    parts.push('}');
-    parts.push('');
-    parts.push('3. 选择题每题 4 个选项, answer 是 0-3 的数字 (数组下标)。');
-    parts.push('4. 完形填空: blanks 中 index 对应第几个 ___ (从 0 开始), 每个空独立 4 选 1。');
-    parts.push('5. 解析用中文, 简洁专业。');
-    parts.push('6. 仅输出 JSON, 任何前言后语都不需要。');
-
-    return parts.join('\n');
-  }
-
-  function parseAIResponse(text, types, level) {
-    // 尝试从文本中提取 JSON
-    var jsonText = text;
-    // 找第一个 { 和最后一个 }
-    var firstBrace = jsonText.indexOf('{');
-    var lastBrace = jsonText.lastIndexOf('}');
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      jsonText = jsonText.slice(firstBrace, lastBrace + 1);
-    }
-    try {
-      var data = JSON.parse(jsonText);
-      var result = { article: '', wordsUsed: [], questions: [] };
-      if (data.article) result.article = String(data.article);
-      if (Array.isArray(data.words_used)) result.wordsUsed = data.words_used.map(String);
-      if (Array.isArray(data.questions)) {
-        data.questions.forEach(function(q) {
-          if (!q || !q.type) return;
-          if (q.type === 'mc') {
-            if (!q.question || !Array.isArray(q.options) || q.options.length < 2) return;
-            result.questions.push({
-              id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
-              type: 'mc',
-              question: String(q.question),
-              options: q.options.map(String),
-              answer: parseInt(q.answer) || 0,
-              explain: String(q.explain || '')
-            });
-          } else if (q.type === 'cloze') {
-            if (!q.context || !Array.isArray(q.blanks)) return;
-            var blanks = [];
-            q.blanks.forEach(function(b) {
-              if (!b || !Array.isArray(b.options)) return;
-              blanks.push({
-                options: b.options.map(String),
-                answer: parseInt(b.answer) || 0,
-                explain: String(b.explain || '')
-              });
-            });
-            if (blanks.length > 0) {
-              result.questions.push({
-                id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
-                type: 'cloze',
-                question: String(q.question || '完形填空'),
-                context: String(q.context),
-                blanks: blanks
-              });
-            }
-          }
-        });
-      }
-      return result.questions.length > 0 || result.article ? result : null;
-    } catch (e) {
-      console.error('[EL] parse failed:', e, 'text:', text.slice(0, 200));
-      return null;
     }
   }
 
