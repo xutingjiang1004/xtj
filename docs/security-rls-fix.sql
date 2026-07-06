@@ -80,27 +80,23 @@ ALTER TABLE blacklist ENABLE ROW LEVEL SECURITY;
 -- SELECT count(*) FROM blacklist;
 
 -- ============================================================
--- H3: 修复 posts 表 UPDATE — 软删除（保留 media_url）
--- 问题：anon_update_posts 是 USING (false)，导致照片墙
---       软删除请求（UPDATE is_deleted=true）被 RLS 拦截。
--- 修复：允许 anon 对 __photo_wall__ 类型帖子执行 UPDATE
---       （前端只改 is_deleted=true，不改 media_url）。
---       安全性由前端 JS + RPC 双重校验。
--- 注意：已移除 anon DELETE 策略——不允许硬删除。
+-- H3: 修复 posts 表 UPDATE — 禁止 anon 直接 UPDATE（走 RPC）
+-- 策略: anon 不允许直接 UPDATE/DELETE posts，统一走后端 RPC
+--       RPC 由 server.js service_role key 调用，绕过 RLS
 -- ============================================================
 DROP POLICY IF EXISTS "anon_update_posts" ON posts;
 CREATE POLICY "anon_update_posts" ON posts
   FOR UPDATE
-  USING (media_type = '__photo_wall__')
-  WITH CHECK (media_type = '__photo_wall__');
+  USING (false);
 
 DROP POLICY IF EXISTS "anon_delete_posts" ON posts;
 CREATE POLICY "anon_delete_posts" ON posts
   FOR DELETE
-  USING (media_type = '__photo_wall__');
+  USING (false);
 
 -- ============================================================
--- H4: 创建 delete_photo_wall_post RPC（安全硬删除）
+-- H4: 创建 delete_photo_wall_post RPC（安全硬删除 + 权限检查）
+-- 校验: 当前用户是资源 owner，或当前用户是管理员
 -- ============================================================
 CREATE OR REPLACE FUNCTION delete_photo_wall_post(p_post_id bigint, p_username text, p_is_admin boolean)
 RETURNS json
@@ -146,6 +142,33 @@ BEGIN
 END;
 $$;
 
+-- 软删除照片 RPC（设置 is_deleted=true，不改 media_url）
+CREATE OR REPLACE FUNCTION soft_delete_photo_wall_post(p_post_id bigint, p_username text, p_is_admin boolean)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_user_name text;
+BEGIN
+    SELECT user_name INTO v_user_name
+    FROM posts
+    WHERE id = p_post_id AND media_type = '__photo_wall__';
+
+    IF NOT FOUND THEN
+        RETURN json_build_object('ok', false, 'error', 'not_found');
+    END IF;
+
+    IF p_is_admin OR (p_username IS NOT NULL AND p_username <> '' AND v_user_name = p_username) THEN
+        UPDATE posts SET is_deleted = true, deleted_at = now(), deleted_by = p_username WHERE id = p_post_id;
+        RETURN json_build_object('ok', true);
+    ELSE
+        RETURN json_build_object('ok', false, 'error', 'unauthorized');
+    END IF;
+END;
+$$;
+
 -- ============================================================
 -- H5: 修复 Realtime 广播 — 照片墙删除跨设备同步
 -- 问题：posts 表默认 REPLICA IDENTITY 只发送主键，不包含
@@ -156,11 +179,7 @@ $$;
 ALTER TABLE posts REPLICA IDENTITY FULL;
 
 -- ============================================================
--- H6: 允许 anon 删除 Storage 中的照片文件（保留，供管理端清理用）
--- 用途：管理端调用 storage.from('uploads').remove() 清理
---       过期或废弃的图片文件。前端软删除不会触发 Storage 清理。
+-- H6: 禁止 anon 删除 Storage 文件（改为后端 service_role 管理）
+-- 所有 Storage 文件删除操作必须通过后端 RPC / service_role key
 -- ============================================================
 DROP POLICY IF EXISTS "anon_delete_uploads" ON storage.objects;
-CREATE POLICY "anon_delete_uploads" ON storage.objects
-  FOR DELETE
-  USING (bucket_id = 'uploads' AND name LIKE 'photos/%');
