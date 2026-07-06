@@ -160,43 +160,54 @@
   }
 
   // 简单 Markdown → HTML 渲染
+  function escapeAttr(val) {
+    if (!val) return '';
+    return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   function renderMarkdown(txt) {
     if (!txt) return '';
     var s = String(txt);
-    // HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // 代码块（标记保护，防止后续替换破坏内部内容）
     var codeBlocks = [];
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
       var idx = codeBlocks.length;
       codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>');
       return '%%%CODEBLOCK' + idx + '%%%';
     });
-    // 行内代码
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // 粗体
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // 斜体
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // 图片（data URI 直接渲染）
+    // 图片: 只允许 data:image/ 协议
     s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
-      return '<img src="data:image/' + ext + ';base64,' + b64 + '" alt="' + escapeHtml(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
+      return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
     });
-    // 链接 (阻止 javascript:/vbscript: 等危险协议, 但 data: URI 放行)
+    // 链接: 使用 DOM API 防 XSS, 白名单协议: http:, https:, mailto:
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
-      if (href.indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeHtml(label) + '">📄 ' + escapeHtml(label) + '</span>';
-      var safe = href.replace(/^javascript:/i, 'blocked:').replace(/^vbscript:/i, 'blocked:');
-      if (safe !== href) return '<span class="ai-blocked-link" title="已屏蔽危险链接">' + label + '</span>';
-      return '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>';
+      var cleanHref = String(href).trim();
+      var lowerHref = cleanHref.toLowerCase();
+      var allowedProtocols = ['http:', 'https:', 'mailto:'];
+      var protocolOk = false;
+      for (var p = 0; p < allowedProtocols.length; p++) {
+        if (lowerHref.indexOf(allowedProtocols[p]) === 0) { protocolOk = true; break; }
+      }
+      if (!protocolOk) {
+        if (lowerHref.indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
+        return '<span class="ai-blocked-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
+      }
+      var a = document.createElement('a');
+      a.setAttribute('href', cleanHref);
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener');
+      a.textContent = label;
+      return a.outerHTML;
     });
-    // 标题（先处理，避免匹配到列表里的 #）
     s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
     s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
     s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
     s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    // 列表：用不同 class 区分有序和无序，避免混合包裹
     s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
     s = s.replace(/(<li class="ul-item">.*<\/li>\n?)+/g, function(m) {
       return '<ul>' + m.replace(/ class="ul-item"/g, '') + '</ul>';
@@ -205,9 +216,7 @@
     s = s.replace(/(<li class="ol-item">.*<\/li>\n?)+/g, function(m) {
       return '<ol>' + m.replace(/ class="ol-item"/g, '') + '</ol>';
     });
-    // 换行转 <br>（跳过已保护的代码块）
     s = s.replace(/\n/g, '<br>');
-    // 恢复代码块
     s = s.replace(/%%%CODEBLOCK(\d+)%%%/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
     return s;
   }
@@ -1952,9 +1961,6 @@
       var readResult;
       try { readResult = await reader.read(); } catch (e) { break; }
       if (readResult.done) break;
-      // ★ 不检查面板可见性：用户关闭页面后 AI 继续在后台运行，回来后可继续看到
-      if (!S.active) { reader.cancel().catch(function(){}); break; }
-
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -2091,7 +2097,8 @@
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
 
-    if (S.sending) {
+    // ★ U3 P0-3 修复: 只有存在真实的旧请求时才 abort, 避免误杀自己
+    if (S.abortController || S.deepThinkJob) {
       abortCurrentRequest();
       try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
     }
@@ -4324,7 +4331,7 @@ function showChatMessages() {
       class: 'ai-chat-file-btn',
       id: 'aiChatFileBtn',
       'aria-label': '上传文件',
-      title: '上传图片或文件'
+      title: '上传图片或文件（AI 不读取文件内容，仅记录文件名）'
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
     var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx', style: 'display:none' });

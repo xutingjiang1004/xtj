@@ -221,7 +221,7 @@
             border-color: transparent !important;
         }
 
-        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile) .anim-layer {
+        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile):not(.anim-brain) .anim-layer {
             opacity: 0 !important;
             visibility: hidden !important;
         }
@@ -229,6 +229,7 @@
         .dock-bar .dock-tab.anim-post .anim-layer,
         .dock-bar .dock-tab.anim-chat .anim-layer,
         .dock-bar .dock-tab.anim-ai .anim-layer,
+        .dock-bar .dock-tab.anim-brain .anim-layer,
         .dock-bar .dock-tab.anim-profile .anim-layer {
             visibility: visible !important;
         }
@@ -674,7 +675,7 @@
                             </span>
                             <span class="profile-setting-text">关于</span>
                         </div>
-                        <span class="profile-setting-value">xtj v0.92</span>
+                        <span class="profile-setting-value">xtj v0.93</span>
                     </div>
                 </div>
                 <div class="profile-totals-bar" id="profileTotalsBar" aria-label="累计互动数据">
@@ -1135,6 +1136,16 @@
                 </g>
             </svg>
         </button>
+        <button class="dock-tab" data-tab="brain" onclick="window.open('brain.html','_self')">
+            <span class="dt-icon">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4a4 4 0 0 1 3.5 2.1"/><path d="M12 4a4 4 0 0 0-3.5 2.1"/>
+                    <path d="M12 20v-6"/><path d="M5 12h2"/><path d="M17 12h2"/>
+                    <path d="M12 2v2"/><path d="M4 6l2 2"/><path d="M18 8l2-2"/>
+                    <circle cx="12" cy="12" r="3"/>
+                </svg>
+            </span>
+        </button>
         <button class="dock-tab" data-tab="profile">
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1561,6 +1572,7 @@
         // (1) ERR_ABORTED = Supabase SDK AbortController 5s timeout / page unload 自动 abort, 不是真错误
         // (2) onErr/onLoad ReferenceError = preview.min.js 第三方库 bug, 我们无权修改 minified 文件
         // (3) SyntaxError from preview.min.js = 上面 onErr 引发的二次错误
+        // ★ U3: 被过滤的错误以 console.warn 记录, 方便排查但不打断用户
         (function() {
             function isAbort(reason) {
                 if (!reason) return false;
@@ -1577,15 +1589,17 @@
                 if (/missing \) after argument list/.test(message)) return true;
                 return false;
             }
-            // 静默 AbortError unhandled rejection
+            // 静默 AbortError unhandled rejection (记录 warn 级别日志)
             window.addEventListener('unhandledrejection', function(e) {
                 if (isAbort(e.reason)) {
+                    console.warn('[XTJ] Suppressed AbortError (not a real error):', e.reason);
                     e.preventDefault();
                 }
             });
-            // 静默照片墙第三方库已知 bug
+            // 静默照片墙第三方库已知 bug (记录 warn 级别日志)
             window.addEventListener('error', function(e) {
                 if (isPhotoWallLibNoise(e.message, e.filename)) {
+                    console.warn('[XTJ] Suppressed preview.min.js known bug:', e.message);
                     e.preventDefault();
                     e.stopImmediatePropagation();
                 }
