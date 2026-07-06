@@ -761,4 +761,5 @@
     addWord: addWord,
     getWords: function() { return S.words.slice(); }
   };
+  try { console.log('[EL] English learning loaded, panel:', !!document.getElementById('panelEnglishLearning')); } catch (e) {}
 })();

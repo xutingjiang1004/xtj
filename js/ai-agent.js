@@ -4239,18 +4239,53 @@ function showChatMessages() {
       title: '英语学习 — 单词库 + AI 生成阅读文章和题目',
       id: 'aiEnglishToggle'
     });
-    englishBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>';
+    // ★ U3: 用 DOM API 创建 SVG 而非 innerHTML 字符串, 避免任何解析问题
+    var englishSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    englishSvg.setAttribute('viewBox', '0 0 24 24');
+    englishSvg.setAttribute('width', '14');
+    englishSvg.setAttribute('height', '14');
+    englishSvg.setAttribute('fill', 'none');
+    englishSvg.setAttribute('stroke', 'currentColor');
+    englishSvg.setAttribute('stroke-width', '2');
+    englishSvg.setAttribute('stroke-linecap', 'round');
+    englishSvg.setAttribute('stroke-linejoin', 'round');
+    englishSvg.style.verticalAlign = '-2px';
+    var p1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p1.setAttribute('d', 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20');
+    englishSvg.appendChild(p1);
+    var p2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p2.setAttribute('d', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z');
+    englishSvg.appendChild(p2);
+    var l1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l1.setAttribute('x1', '9'); l1.setAttribute('y1', '7'); l1.setAttribute('x2', '15'); l1.setAttribute('y2', '7');
+    englishSvg.appendChild(l1);
+    var l2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l2.setAttribute('x1', '9'); l2.setAttribute('y1', '11'); l2.setAttribute('x2', '15'); l2.setAttribute('y2', '11');
+    englishSvg.appendChild(l2);
+    englishBtn.appendChild(englishSvg);
     englishBtn.appendChild(el('span', { class: 'ai-english-label', text: '英语' }));
     englishBtn.addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-        window.EnglishLearning.open();
-      } else {
-        notify('英语学习模块未加载');
+      try {
+        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+          window.EnglishLearning.open();
+        } else {
+          // ★ 兜底: 直接显示 panel, 避免模块未加载时无响应
+          var panel = document.getElementById('panelEnglishLearning');
+          if (panel) {
+            panel.classList.remove('hidden');
+            try { window.notify && window.notify('英语学习模块正在加载中, 请稍后重试'); } catch (e) {}
+          } else {
+            try { notify('英语学习模块未加载'); } catch (e) {}
+          }
+        }
+      } catch (e) {
+        try { console.error('[EnglishBtn] click error:', e); notify('英语学习打开失败: ' + (e.message || '未知')); } catch (_) {}
       }
     });
     header.appendChild(englishBtn);
+    try { console.log('[AI] English button appended, handler bound'); } catch (e) {}
 
     // 深度思考 toggle 按钮 (M: 在历史按钮左边)
     var deepThinkBtn = el('button', {
