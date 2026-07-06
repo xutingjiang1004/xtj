@@ -8,14 +8,14 @@
 
   var HISTORY_PAGE_SIZE = 30;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
-  var CONFIG_REFRESH_INTERVAL = 60 * 1000;
+  var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 一致, 避免每分钟做无用功
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
   var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
   var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
-  var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+  var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
 
   var S = {
     config: null,
@@ -135,6 +135,7 @@
   }
 
   var _copyMenuActive = null;
+  var _menuAbort = null; // ★ U3: 管理复制菜单的 document 监听器
 
   function closeCopyMenu() {
     if (_copyMenuActive) {
@@ -142,6 +143,11 @@
         if (_copyMenuActive.parentNode) _copyMenuActive.parentNode.removeChild(_copyMenuActive);
       } catch (e) {}
       _copyMenuActive = null;
+    }
+    // ★ U3: 关闭菜单时立即取消 pending 的 document 监听器, 避免累积
+    if (_menuAbort) {
+      try { _menuAbort.abort(); } catch (e) {}
+      _menuAbort = null;
     }
   }
 
@@ -225,6 +231,8 @@
     if (!bubbleEl || !bubbleEl.parentNode) return;
     var _longPressTimer = null;
     var _longPressStarted = false;
+    // ★ U3: AbortController 管理所有监听器, 软删除时可统一清理
+    var _bubbleAbort = new AbortController();
 
     function getBubbleText() {
       return (bubbleEl.textContent || '').trim();
@@ -261,13 +269,16 @@
       if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
       menu.style.left = Math.max(8, left) + 'px';
       menu.style.top = Math.max(8, top) + 'px';
+      // ★ U3: 用 AbortController 关闭旧的 document 监听器
+      if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
+      _menuAbort = new AbortController();
       setTimeout(function() {
+        if (_menuAbort && _menuAbort.signal.aborted) return;
         document.addEventListener('click', function onDoc(ce2) {
           if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
             closeCopyMenu();
-            document.removeEventListener('click', onDoc);
           }
-        }, { once: true });
+        }, { signal: _menuAbort.signal, once: true });
       }, 0);
     }
 
@@ -293,19 +304,27 @@
       }
     }
 
-    bubbleEl.addEventListener('pointerdown', startLongPress);
-    bubbleEl.addEventListener('pointerup', cancelLongPress);
-    bubbleEl.addEventListener('pointercancel', cancelLongPress);
+    // ★ U3: 所有事件监听统一通过 AbortController 管理
+    bubbleEl.addEventListener('pointerdown', startLongPress, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('pointerup', cancelLongPress, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('pointercancel', cancelLongPress, { signal: _bubbleAbort.signal });
     bubbleEl.addEventListener('pointermove', function(ev) {
       if (_longPressTimer && ev.pointerType === 'touch') {
         clearTimeout(_longPressTimer);
         _longPressTimer = null;
       }
-    });
+    }, { signal: _bubbleAbort.signal });
     bubbleEl.addEventListener('contextmenu', function(ev) {
       var text = getBubbleText();
       if (text) showCopyMenu(ev);
-    });
+    }, { signal: _bubbleAbort.signal });
+
+    // 暴露 cleanup 钩子供软删除时调用
+    bubbleEl._aiCleanupBubble = function() {
+      try { _bubbleAbort.abort(); } catch (e) {}
+      if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
+      if (_longPressTimer) { try { clearTimeout(_longPressTimer); } catch (e) {} }
+    };
   }
 
   function doCopy(text) {
@@ -418,6 +437,12 @@
 
   function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
+    // ★ U3: 如果 version 相同且已有内容, 跳过重建 (避免每分钟重新下载头像)
+    if (target._aiAvatarVersion === avatarVersion && target._aiAvatarUrl === avatarUrl && target.children.length > 0) {
+      return;
+    }
+    target._aiAvatarVersion = avatarVersion;
+    target._aiAvatarUrl = avatarUrl;
     target.innerHTML = '';
     if (avatarUrl) {
       var wrapper = el('span', { class: 'ai-avatar-image-wrapper' });
@@ -581,6 +606,18 @@
   
   function abortCurrentRequest() {
     clearStreamCleanup();
+    // ★ U3 修复: 通知后端停止 SSE 任务, 避免继续计费
+    if (S.conversationId) {
+      try {
+        var cancelUrl = API_BASE + '/chat/cancel';
+        var cancelBody = JSON.stringify({ conversation_id: S.conversationId });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(cancelUrl, new Blob([cancelBody], { type: 'application/json' }));
+        } else {
+          fetch(cancelUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: cancelBody, keepalive: true }).catch(function() {});
+        }
+      } catch (e) {}
+    }
     if (S.abortController) {
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
@@ -838,7 +875,12 @@
       if (typeof usage.completion_tokens === 'number') parts.push('输出 ' + usage.completion_tokens);
       if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
       if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
-      if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
+      if (typeof usage.cost === 'number' && usage.cost > 0) {
+        // ★ U3: 动态 currency 符号
+        var currency = usage.currency || 'CNY';
+        var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : '';
+        parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
+      }
     }
     return parts.length ? parts.join(' · ') : null;
   }
@@ -1527,6 +1569,9 @@
         keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
+      // ★ U3: clamp keyboardHeight 防止某些浏览器算出异常值
+      var maxKb = Math.round(window.innerHeight * 0.6);
+      if (keyboardHeight > maxKb) keyboardHeight = maxKb;
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
 
       if (_isTouchMobile) {
@@ -1696,7 +1741,16 @@
   // 更新进度卡
   function updateDeepThinkProgressCard(card, evt) {
     if (!card) return;
-    var titleText = card.querySelector('.ai-progress-title');
+    // ★ U3: 缓存 querySelector 结果, 避免每个事件都做 DOM 查询
+    if (!card._cached) {
+      card._cached = {
+        titleText: card.querySelector('.ai-progress-title'),
+        logBox: card.querySelector('.ai-progress-thinking-log'),
+        lastEntry: null
+      };
+    }
+    var cached = card._cached;
+    var titleText = cached.titleText;
 
     if (evt.type === 'deep_think_stage') {
       var stageMap = { init: '准备中...', agent: '思考中...', searching: '搜索中...', error: '失败' };
@@ -1706,14 +1760,13 @@
     } else if (evt.type === 'thinking_chunk') {
       if (!card._thinkingLog) card._thinkingLog = [];
       card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
-      var logBox = card.querySelector('.ai-progress-thinking-log');
+      var logBox = cached.logBox;
       if (logBox) {
         if (logBox.style.display === 'none') logBox.style.display = '';
         var roleLabel = escapeHtml(evt.agent_role || 'AI');
-        // 同角色累积到最后一个条目, 不每字创建新条目
-        var lastEntry = logBox.lastElementChild;
-        if (lastEntry && lastEntry._role === roleLabel) {
-          var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
+        // ★ U3: 同角色累积到最后一个条目 (缓存 lastEntry 加速)
+        if (cached.lastEntry && cached.lastEntry._role === roleLabel && cached.lastEntry.parentNode === logBox) {
+          var lastChunk = cached.lastEntry.querySelector('.ai-thought-chunk');
           if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
         } else {
           var entry = el('div', { class: 'ai-thought-entry' });
@@ -1721,6 +1774,7 @@
           entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
           entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
           logBox.appendChild(entry);
+          cached.lastEntry = entry;
         }
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
         while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
@@ -2609,7 +2663,7 @@
 
     // 如果有文件, 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
     if (fileData) {
-      var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
+      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
       var isImage2 = fileData.type.startsWith('image/');
       var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
       // UI 显示
@@ -3120,7 +3174,7 @@
     var displayText = text;
     // 如果有文件, 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
     if (fileData) {
-      var safeName = String(fileData.name).replace(/[\[\]()]/g, '_');
+      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
       var isImage = fileData.type.startsWith('image/');
       // 估算文件大小（data URL 约 4/3 倍原始大小）
       var sizeKB = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
@@ -3146,10 +3200,8 @@
     // ★ 立即标记发送中，防止并发竞态
     S.sending = true;
 
-    // ★ M: 深度思考模式分支 — 走独立流程 (Planner→Workers→Synthesizer)
-    if (S.deepThink) {
-      return handleSendDeepThink(text, input, sendBtn, messagesEl);
-    }
+    // ★ U3: 深度思考已迁至独立二级页面, 普通聊天不再有 deepThink 分支
+    // (删除 S.deepThink 死代码, 保留 S.sending=true 防止并发)
 
     var originalText = text;
     
@@ -3168,7 +3220,12 @@
     
     // 快速双击去重：同一秒内相同文本的请求忽略
     var msgDedupKey = text + Math.floor(Date.now() / 1000);
-    if (S._lastMsgDedupKey === msgDedupKey) { S.sending = false; return; }
+    if (S._lastMsgDedupKey === msgDedupKey) {
+      // ★ U3: 统一行为, 提示用户避免困惑
+      try { notify('已发送，请勿重复点击'); } catch (e) {}
+      S.sending = false;
+      return;
+    }
     S._lastMsgDedupKey = msgDedupKey;
     
     // 如果有正在进行的请求，中断它
@@ -4343,6 +4400,8 @@ function showChatMessages() {
       placeholder: '和徐旭泽的小猫说点什么吧…',
       rows: '1',
       'aria-label': '聊天输入框',
+      inputmode: 'text',
+      enterkeyhint: 'send',
       autocapitalize: 'sentences',
       autocorrect: 'on',
       spellcheck: 'true'
