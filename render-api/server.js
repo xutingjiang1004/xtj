@@ -1128,8 +1128,15 @@ async function finishStream(res, opt) {
 
 function buildSearchQuery(message) {
   var q = String(message || '').trim();
-  var cleaned = q.replace(/今天|现在|当前|实时|最新/g, '').trim();
-  if (!cleaned) return q.slice(0, 120);
+  var hasTimeWord = /今天|现在|当前|实时|最新/i.test(q);
+  // 不再删除时效词 — 保留原样获得更精准的搜索
+  var cleaned = q.slice(0, 120);
+  // 包含时效词的问题：追加当前中文日期，让搜索更精准
+  if (hasTimeWord) {
+    var now = new Date();
+    var dateStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日';
+    cleaned = cleaned + ' ' + dateStr + ' 最新';
+  }
   if (/新闻|资讯|报道|快讯/i.test(q)) {
     return (cleaned + ' 新闻').slice(0, 120);
   }
@@ -1137,7 +1144,7 @@ function buildSearchQuery(message) {
     return (cleaned + ' 价格').slice(0, 120);
   }
   if (/天气|温度|下雨|降雨/i.test(q)) {
-    return ''; // 天气不走搜素
+    return ''; // 天气不走搜索
   }
   return cleaned.slice(0, 120);
 }
