@@ -1239,10 +1239,9 @@ body.english-learning-open {
     justify-content: space-between;
   }
   #panelEnglishLearning .el-word-item {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-  #panelEnglishLearning .el-word-del {
-    grid-column: 3;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    padding: 10px;
+    gap: 8px;
   }
   #panelEnglishLearning .el-article {
     max-height: none;
@@ -1284,8 +1283,8 @@ body.english-learning-open {
     color: var(--el-danger);
     font-size: 16px;
   }
-  #panelEnglishLearning .el-word-del {
-    grid-column: 3;
+  #panelEnglishLearning .el-word-item {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 }
 
@@ -1307,4 +1306,283 @@ body.english-learning-open {
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }
+}
+
+
+/* ============================================================
+ * 文章 locale bar (阅读文章头部 + 重新生成按钮组)
+ * ============================================================ */
+#panelEnglishLearning .el-locale-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(20,124,90,0.06), rgba(50,180,137,0.04));
+  border: 1px solid var(--el-line);
+}
+#panelEnglishLearning .el-locale-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+#panelEnglishLearning .el-locale-title {
+  font-size: 15px;
+  font-weight: 720;
+  color: var(--el-text);
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-locale-meta {
+  font-size: 12px;
+  color: var(--el-muted);
+}
+#panelEnglishLearning .el-locale-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#panelEnglishLearning .el-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--el-line);
+  background: var(--el-surface-solid);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 180ms var(--el-ease);
+}
+#panelEnglishLearning .el-regen-btn:hover {
+  border-color: var(--el-line-strong);
+  background: var(--el-accent-soft);
+  transform: translateY(-1px);
+}
+#panelEnglishLearning .el-regen-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+#panelEnglishLearning .el-regen-btn.is-loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+#panelEnglishLearning .el-regen-btn .el-regen-icon {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 600ms var(--el-ease);
+}
+#panelEnglishLearning .el-regen-btn:hover .el-regen-icon {
+  transform: rotate(-180deg);
+}
+#panelEnglishLearning .el-regen-btn.is-loading .el-regen-icon {
+  animation: el-regen-spin 0.9s linear infinite;
+}
+@keyframes el-regen-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ============================================================
+ * AI 单词解释弹层
+ * ============================================================ */
+.el-ai-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 20, 0.42);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 200ms var(--el-ease);
+  padding: 24px;
+}
+.el-ai-modal.show {
+  opacity: 1;
+}
+.el-ai-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 80vh;
+  overflow: auto;
+  border-radius: 18px;
+  background: var(--el-surface-solid);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.18);
+  transform: translateY(8px) scale(0.985);
+  transition: transform 220ms var(--el-ease);
+  color: var(--el-text);
+}
+.el-ai-modal.show .el-ai-card {
+  transform: translateY(0) scale(1);
+}
+.el-ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--el-line);
+}
+.el-ai-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--el-accent);
+}
+.el-ai-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--el-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 160ms var(--el-ease), color 160ms var(--el-ease);
+}
+.el-ai-close:hover { background: var(--el-accent-soft); color: var(--el-accent); }
+.el-ai-body {
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.el-ai-loading,
+.el-ai-error {
+  padding: 30px 10px;
+  text-align: center;
+  color: var(--el-muted);
+  font-size: 14px;
+}
+.el-ai-error { color: var(--el-danger); }
+.el-ai-cn {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--el-text);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(120deg, var(--el-accent-soft), rgba(50,180,137,0.06));
+  border-left: 3px solid var(--el-accent);
+}
+.el-ai-tip {
+  font-size: 13px;
+  color: var(--el-muted);
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(50,180,137,0.05);
+}
+.el-ai-row { display: flex; flex-direction: column; gap: 6px; }
+.el-ai-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--el-faint);
+  text-transform: uppercase;
+}
+.el-ai-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.el-ai-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--el-accent-soft);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.el-ai-ex {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--el-text);
+  padding: 6px 0;
+}
+
+/* ============================================================
+ * 流光 shimmer + pane 切换动画 + 加载动画
+ * ============================================================ */
+@keyframes el-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes el-loader-orbit {
+  0%   { transform: rotate(0deg); opacity: 0.85; }
+  50%  { opacity: 1; }
+  100% { transform: rotate(360deg); opacity: 0.85; }
+}
+@keyframes el-pane-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#panelEnglishLearning .el-pane {
+  animation: el-pane-in 320ms var(--el-ease) both;
+}
+
+#panelEnglishLearning .el-loading {
+  position: relative;
+  overflow: hidden;
+}
+#panelEnglishLearning .el-loading::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 25%,
+    rgba(20,124,90,0.06) 45%,
+    rgba(50,180,137,0.10) 50%,
+    rgba(20,124,90,0.06) 55%,
+    transparent 75%);
+  background-size: 200% 100%;
+  animation: el-shimmer 2.4s linear infinite;
+  pointer-events: none;
+}
+#panelEnglishLearning .el-loader-orbit {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    transparent 0deg,
+    var(--el-accent) 90deg,
+    var(--el-accent-2) 180deg,
+    transparent 360deg);
+  -webkit-mask: radial-gradient(circle, transparent 22px, #000 23px);
+  mask: radial-gradient(circle, transparent 22px, #000 23px);
+  animation: el-loader-orbit 1.4s linear infinite;
+  filter: drop-shadow(0 4px 14px rgba(20,124,90,0.35));
+}
+#panelEnglishLearning .el-loader-orbit span { display: none; }
+#panelEnglishLearning .el-loading-text {
+  font-size: 14px;
+  color: var(--el-muted);
+  letter-spacing: 0.4px;
+}
+
+/* 单词 AI 按钮 (替代原发音按钮) */
+#panelEnglishLearning .el-word-speak {
+  background: linear-gradient(135deg, rgba(20,124,90,0.10), rgba(50,180,137,0.18));
+  color: var(--el-accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  border: 1px solid rgba(20,124,90,0.18);
+}
+#panelEnglishLearning .el-word-speak:hover {
+  background: linear-gradient(135deg, rgba(20,124,90,0.22), rgba(50,180,137,0.32));
+  color: #fff;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 6px 18px rgba(20,124,90,0.25);
+}
+
+/* tab 切换: indicator 弹性 */
+#panelEnglishLearning .el-tab-indicator {
+  transition: transform 320ms var(--el-ease), width 320ms var(--el-ease);
 }
