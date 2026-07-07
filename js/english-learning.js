@@ -526,18 +526,12 @@
     return w && (w.seen || 0) >= 2 && (w.mastery || 0) >= 80;
   }
 
-  function wordHasMistake(w) {
-    if (!w) return false;
-    return S.mistakes.some(function(m) { return (m.words || []).indexOf(w.en) >= 0; });
-  }
-
   function getFilteredWords() {
     var q = String(S.search || '').trim().toLowerCase();
     return S.words.filter(function(w) {
       if (S.filter === 'weak' && !isWeakWord(w)) return false;
       if (S.filter === 'mastered' && !isMasteredWord(w)) return false;
       if (S.filter === 'recent' && now() - (w.addedAt || 0) > 7 * 86400000) return false;
-      if (S.filter === 'mistake' && !wordHasMistake(w)) return false;
       if (!q) return true;
       return w.en.indexOf(q) >= 0 || String(w.cn || '').toLowerCase().indexOf(q) >= 0;
     });
@@ -580,10 +574,6 @@
       var main = el('div', { class: 'el-word-main' });
       main.appendChild(el('div', { class: 'el-word-en', text: w.en }));
       main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '暂无释义' }));
-      var meta = el('div', { class: 'el-word-meta' });
-      meta.appendChild(el('span', { class: 'el-mastery ' + masteryClass(w), text: masteryLabel(w) + ' ' + Math.round(w.mastery || 0) + '%' }));
-      meta.appendChild(el('span', { text: '练习 ' + (w.seen || 0) + ' 次' }));
-      main.appendChild(meta);
       var delBtn = el('button', { type: 'button', class: 'el-word-del', 'aria-label': '删除 ' + w.en, title: '删除', text: '×' });
       delBtn.addEventListener('click', function() {
         deleteWord(w.id);
@@ -1036,65 +1026,6 @@
     node.classList.add('is-visible');
   }
 
-  function renderHistory() {
-    var list = $('elHistoryList');
-    if (!list) return;
-    list.innerHTML = '';
-    if (!S.history.length) {
-      list.appendChild(el('div', { class: 'el-empty-hint', text: '还没有练习记录' }));
-      return;
-    }
-    S.history.forEach(function(h) {
-      var correct = typeof h.correct === 'number' ? h.correct : (h.score || 0);
-      var item = el('article', { class: 'el-history-item' });
-      item.appendChild(el('div', { class: 'el-h-score ' + scoreClass(h.pct), text: (h.pct || 0) + '%' }));
-      var info = el('div', { class: 'el-h-info' });
-      info.appendChild(el('div', { class: 'el-h-title', text: correct + '/' + (h.total || 0) + ' · ' + ((h.level || 'cet4').toUpperCase()) }));
-      info.appendChild(el('div', { class: 'el-h-meta', text: (h.types || []).join(' / ') + (h.mistakeCount ? ' · 错题 ' + h.mistakeCount : '') }));
-      item.appendChild(info);
-      item.appendChild(el('time', { class: 'el-h-time', text: formatTime(h.time || h.updatedAt) }));
-      list.appendChild(item);
-    });
-  }
-
-  function scoreClass(pct) {
-    pct = Number(pct) || 0;
-    return pct >= 80 ? 'high' : (pct >= 60 ? 'mid' : 'low');
-  }
-
-  function renderMistakes() {
-    var list = $('elMistakeList');
-    if (!list) return;
-    list.innerHTML = '';
-    if (!S.mistakes.length) {
-      list.appendChild(el('div', { class: 'el-empty-hint', text: '还没有错题。' }));
-      return;
-    }
-    S.mistakes.forEach(function(m) {
-      var item = el('article', { class: 'el-mistake-item' });
-      item.appendChild(el('div', { class: 'el-mistake-head', text: (m.type === 'cloze' ? '完形' : '单选') + ' · ' + (m.level || '').toUpperCase() }));
-      item.appendChild(el('div', { class: 'el-mistake-question', text: m.question || '题目' }));
-      if (m.context) item.appendChild(el('div', { class: 'el-mistake-context', text: m.context }));
-      item.appendChild(el('div', { class: 'el-mistake-answer', text: '你的答案: ' + (m.userAnswer || '未作答') }));
-      item.appendChild(el('div', { class: 'el-mistake-correct', text: '正确答案: ' + (m.correctAnswer || '') }));
-      if (m.explain) item.appendChild(el('div', { class: 'el-mistake-explain', text: m.explain }));
-      if (m.words && m.words.length) {
-        var words = el('div', { class: 'el-wordlist-inline' });
-        m.words.forEach(function(w) { words.appendChild(el('span', { class: 'el-word-tag', text: w })); });
-        item.appendChild(words);
-      }
-      list.appendChild(item);
-    });
-  }
-
-  function formatTime(ts) {
-    var d = new Date(ts || now());
-    var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-    var today = new Date();
-    if (d.toDateString() === today.toDateString()) return '今天 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-
   function renderAll() {
     applySettingsToInputs();
     renderStats();
@@ -1345,17 +1276,10 @@
     });
     var clear = $('elDeleteBtn');
     if (clear) clear.addEventListener('click', function() {
-      if (!confirm('确定清空全部单词、练习记录和错题吗?')) return;
+      if (!confirm('确定清空全部单词吗?')) return;
       clearAll();
       renderAll();
       notify('已清空');
-    });
-    var practiceMistakes = $('elPracticeMistakesBtn');
-    if (practiceMistakes) practiceMistakes.addEventListener('click', function() {
-      if (!S.mistakes.length) { notify('还没有错题'); return; }
-      S.settings.focus = 'weak';
-      applySettingsToInputs();
-      switchTab('practice');
     });
     var speakArticle = $('elSpeakArticleBtn');
     if (speakArticle) speakArticle.addEventListener('click', function() {
@@ -1531,32 +1455,35 @@
   }
 
   /* ============================================================
-   * Tabs 拖拽排序 (单词库/生成练习/复习记录/错题本)
+   * Tabs 拖拽排序 (单词库/生成练习)
    * 支持鼠标拖拽 + 触摸拖拽, 样式与 dock 胶囊一致
+   * 所有索引均动态计算, 避免 restoreTabOrder 后闭包 index 错位
    * ============================================================ */
   var _dragTabIndex = -1;
   var _dragOverIndex = -1;
-  var _dragTabClone = null;
-  var _dragStartX = 0;
-  var _dragStartY = 0;
   var _isDraggingTab = false;
+
+  function getTabIndex(container, tab) {
+    return Array.prototype.indexOf.call(container.querySelectorAll('.el-tab'), tab);
+  }
 
   function initTabDrag() {
     var tabsContainer = document.querySelector('#panelEnglishLearning .el-tabs');
     if (!tabsContainer) return;
     var tabs = tabsContainer.querySelectorAll('.el-tab');
 
-    tabs.forEach(function(tab, index) {
-      // 鼠标拖拽
+    tabs.forEach(function(tab) {
       tab.setAttribute('draggable', 'true');
+
+      // 鼠标拖拽
       tab.addEventListener('dragstart', function(e) {
-        if (e.target.closest('.el-tab')) {
-          _dragTabIndex = index;
-          _isDraggingTab = true;
-          tab.style.opacity = '0.5';
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', String(index));
-        }
+        var idx = getTabIndex(tabsContainer, tab);
+        if (idx < 0) return;
+        _dragTabIndex = idx;
+        _isDraggingTab = true;
+        tab.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(idx));
       });
       tab.addEventListener('dragend', function() {
         tab.style.opacity = '';
@@ -1568,8 +1495,10 @@
       tab.addEventListener('dragover', function(e) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        if (_dragTabIndex >= 0 && _dragTabIndex !== index) {
-          _dragOverIndex = index;
+        var fromIdx = _dragTabIndex;
+        var toIdx = getTabIndex(tabsContainer, tab);
+        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+          _dragOverIndex = toIdx;
           tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
           tab.classList.add('drag-over');
         }
@@ -1577,8 +1506,10 @@
       tab.addEventListener('drop', function(e) {
         e.preventDefault();
         tab.classList.remove('drag-over');
-        if (_dragTabIndex >= 0 && _dragTabIndex !== index) {
-          reorderTabs(tabsContainer, _dragTabIndex, index);
+        var fromIdx = _dragTabIndex;
+        var toIdx = getTabIndex(tabsContainer, tab);
+        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+          reorderTabs(tabsContainer, fromIdx, toIdx);
         }
         _dragTabIndex = -1;
         _dragOverIndex = -1;
@@ -1592,7 +1523,7 @@
         touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
         touchMoved = false;
-        _dragTabIndex = index;
+        _dragTabIndex = getTabIndex(tabsContainer, tab);
       }, { passive: false });
       tab.addEventListener('touchmove', function(e) {
         if (_dragTabIndex < 0) return;
@@ -1603,11 +1534,10 @@
         _isDraggingTab = true;
         e.preventDefault();
         tab.style.opacity = '0.5';
-        // 检测悬停在哪个 tab 上
         var target = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
         var targetTab = target ? target.closest('.el-tab') : null;
         if (targetTab && targetTab !== tab) {
-          var targetIndex = Array.prototype.indexOf.call(tabs, targetTab);
+          var targetIndex = getTabIndex(tabsContainer, targetTab);
           if (targetIndex >= 0 && targetIndex !== _dragOverIndex) {
             _dragOverIndex = targetIndex;
             tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
@@ -1707,8 +1637,8 @@
   }
 
   function init() {
-    bindEventsSafe();
     restoreTabOrder();
+    bindEventsSafe();
     applyState(getLocalState());
     renderAll();
   }
