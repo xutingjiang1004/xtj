@@ -2248,48 +2248,96 @@
 .ai-deep-think-icon { font-size: 13px; line-height: 1; display: inline-flex; align-items: center; }
 .ai-deep-think-label { font-weight: inherit; }
 
-/* ★ U3: 英语学习按钮 (放在深度思考左边, AI 聊天内入口) */
-.ai-english-toggle {
+/* 英语学习入口: scoped to AI header */
+.ai-chat-header .ai-english-toggle {
   display: inline-flex !important;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 6px 14px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 11px;
   margin-right: 4px;
-  border: 2px solid rgba(99, 102, 241, 0.4);
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
-  font-size: 13px;
-  font-weight: 600;
-  color: rgb(67, 56, 202);
+  border: 1px solid rgba(43, 74, 63, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  color: rgba(24, 46, 39, 0.86);
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer !important;
   pointer-events: auto !important;
   user-select: none;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
-  transition: border-color .25s, background .25s, color .25s, box-shadow .25s, transform .15s;
-  -webkit-tap-highlight-color: transparent;
-  flex: 0 0 auto;
   position: relative;
+  overflow: hidden;
   z-index: 10;
+  box-shadow: 0 8px 20px rgba(31, 91, 70, 0.08);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease, background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  -webkit-tap-highlight-color: transparent;
 }
-.ai-english-toggle:hover {
-  border-color: rgba(99, 102, 241, 0.7);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(139, 92, 246, 0.18));
-  color: rgb(55, 48, 163);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
+.ai-chat-header .ai-english-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 1px auto 1px -40%;
+  width: 34%;
+  transform: skewX(-18deg);
+  background: linear-gradient(90deg, transparent, rgba(20, 124, 90, 0.18), transparent);
+  opacity: 0;
+  transition: transform 360ms ease, opacity 220ms ease;
+}
+.ai-chat-header .ai-english-toggle:hover {
+  border-color: rgba(20, 124, 90, 0.34);
+  background: rgba(20, 124, 90, 0.08);
+  color: rgb(20, 124, 90);
+  box-shadow: 0 12px 26px rgba(31, 91, 70, 0.12);
   transform: translateY(-1px);
 }
-.ai-english-toggle:active { transform: scale(.96) translateY(0); }
-.ai-english-label { font-weight: inherit; display: inline-block; }
-
-[data-theme="dark"] .ai-english-toggle {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
-  border-color: rgba(139, 92, 246, 0.5);
-  color: rgb(165, 180, 252);
+.ai-chat-header .ai-english-toggle:hover::after {
+  opacity: 1;
+  transform: translateX(420%) skewX(-18deg);
 }
-[data-theme="dark"] .ai-english-toggle:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
-  border-color: rgba(139, 92, 246, 0.8);
-  color: rgb(199, 210, 254);
+.ai-chat-header .ai-english-toggle:active { transform: scale(.97) translateY(0); }
+.ai-chat-header .ai-english-toggle svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.ai-chat-header .ai-english-label { font-weight: inherit; display: inline-block; }
+
+[data-theme="dark"] .ai-chat-header .ai-english-toggle {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(218, 242, 232, 0.12);
+  color: rgba(231, 245, 240, 0.78);
+  box-shadow: none;
+}
+[data-theme="dark"] .ai-chat-header .ai-english-toggle:hover {
+  background: rgba(101, 214, 166, 0.12);
+  border-color: rgba(101, 214, 166, 0.28);
+  color: rgb(128, 228, 188);
+}
+
+@media (max-width: 640px) {
+  .ai-chat-header .ai-english-toggle {
+    min-height: 30px;
+    padding: 0 8px;
+    margin-right: 2px;
+    gap: 4px;
+    font-size: 11px;
+  }
+  .ai-chat-header .ai-english-toggle svg {
+    width: 13px;
+    height: 13px;
+  }
+}
+
+@media (max-width: 375px) {
+  .ai-chat-header .ai-english-toggle {
+    width: 30px;
+    padding: 0;
+  }
+  .ai-chat-header .ai-english-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
 }
 
 /* 深度思考进度卡 */
