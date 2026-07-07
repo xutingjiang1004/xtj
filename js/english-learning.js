@@ -453,97 +453,58 @@
   }
 
   /* ============================================================
-   * 添加单词: 用户只输入英文时, 自动调 AI 补全中文释义
+   * 添加单词: 用户手动填释义, 不再自动调 AI
    * ============================================================ */
-  async function handleAddWord() {
+  function handleAddWord() {
     var wordInput = $('elWordInput');
     var cnInput = $('elMeaningInput');
     if (!wordInput) return;
     var en = String(wordInput.value || '').trim();
     var cn = String(cnInput && cnInput.value || '').trim();
     if (!en) { notify('请输入英文单词'); return; }
-    // 先本地添加 (有 cn 就直接用, 没 cn 也允许空 cn 留位)
     var w = addWord(en, cn);
     if (!w) return;
     if (wordInput) wordInput.value = '';
     if (cnInput) cnInput.value = '';
     renderAll();
-    notify('已添加 ' + w.en + (w.cn ? ' · ' + w.cn : ' · AI 补全中...'));
+    notify('已添加 ' + w.en + (w.cn ? ' · ' + w.cn : ''));
     if (wordInput) wordInput.focus();
-    // 没填 cn 时, 调 AI 补全
-    if (!w.cn) {
-      try {
-        var headers = await getAuthHeaders();
-        var resp = await fetch(apiBase() + '/english/explain-word', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ en: w.en })
-        });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        var json = await resp.json();
-        if (json && json.ok && json.data && json.data.cn) {
-          w.cn = json.data.cn;
-          scheduleSave();
-          renderAll();
-          notify('AI 补全: ' + w.en + ' = ' + w.cn);
-        }
-      } catch (e) {
-        try { console.warn('[EL] ai-fill-cn failed:', e && e.message); } catch (_) {}
-        // 失败静默, 用户可以手动补
-      }
-    }
   }
 
   /* ============================================================
-   * AI 解释单词: 点击单词卡 AI 按钮
-   * 弹层显示 例句 / 同义词 / 记忆技巧
+   * 单词详情弹层: 点击单词卡 AI 按钮 -> 显示本地数据 (en/cn/时间/掌握度), 不调 AI
    * ============================================================ */
-  async function aiExplainWord(w) {
+  function aiExplainWord(w) {
     if (!w || !w.en) return;
-    var cached = w._aiExplain;
     var modal = ensureAiModal();
     modal.title.textContent = w.en;
-    modal.body.innerHTML = '<div class="el-ai-loading">AI 正在分析...</div>';
+    modal.body.innerHTML = buildWordDetailHtml(w);
     modal.root.style.display = 'flex';
     requestAnimationFrame(function() { modal.root.classList.add('show'); });
-    if (cached) {
-      renderAiExplain(modal.body, w.en, cached);
-      return;
-    }
-    try {
-      var headers = await getAuthHeaders();
-      var resp = await fetch(apiBase() + '/english/explain-word', {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({ en: w.en })
-      });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var json = await resp.json();
-      if (!json.ok || !json.data) throw new Error(json.error || 'AI 返回异常');
-      w._aiExplain = json.data;
-      renderAiExplain(modal.body, w.en, json.data);
-    } catch (e) {
-      modal.body.innerHTML = '<div class="el-ai-error">AI 解析失败: ' + (e.message || '网络异常') + '</div>';
-    }
   }
 
-  function renderAiExplain(body, en, data) {
+  function buildWordDetailHtml(w) {
     var html = '';
-    html += '<div class="el-ai-cn">' + escapeHtml(data.cn || '—') + '</div>';
-    if (data.tip) html += '<div class="el-ai-tip">💡 ' + escapeHtml(data.tip) + '</div>';
-    if (Array.isArray(data.synonyms) && data.synonyms.length) {
-      html += '<div class="el-ai-row"><div class="el-ai-label">近义词</div><div class="el-ai-tags">';
-      data.synonyms.forEach(function(s) { html += '<span class="el-ai-tag">' + escapeHtml(s) + '</span>'; });
-      html += '</div></div>';
+    if (w.cn) {
+      html += '<div class="el-ai-cn">' + escapeHtml(w.cn) + '</div>';
+    } else {
+      html += '<div class="el-ai-cn el-ai-empty">暂无释义, 请手动补充</div>';
     }
-    if (Array.isArray(data.examples) && data.examples.length) {
-      html += '<div class="el-ai-row"><div class="el-ai-label">例句</div>';
-      data.examples.forEach(function(ex) {
-        html += '<div class="el-ai-ex">• ' + escapeHtml(ex) + '</div>';
-      });
-      html += '</div>';
+    var rows = [];
+    if (w.seen || w.correct || w.wrong) {
+      rows.push('练习 ' + (w.seen || 0) + ' 次 · 正确 ' + (w.correct || 0) + ' · 错误 ' + (w.wrong || 0));
     }
-    body.innerHTML = html;
+    if (typeof w.mastery === 'number') {
+      rows.push('掌握度 ' + w.mastery + '%');
+    }
+    if (w.addedAt) {
+      var t = new Date(w.addedAt);
+      if (!isNaN(t.getTime())) rows.push('添加于 ' + t.toLocaleString('zh-CN'));
+    }
+    if (rows.length) {
+      html += '<div class="el-ai-tip">' + escapeHtml(rows.join(' · ')) + '</div>';
+    }
+    return html;
   }
 
   function ensureAiModal() {
@@ -979,6 +940,7 @@
     var text = $('elArticleText');
     var meta = $('elArticleMeta');
     var wordsBox = $('elArticleWords');
+    var lb = $('elLocaleBar');
     if (!card || !text) return;
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
@@ -991,6 +953,7 @@
       });
     }
     card.style.display = '';
+    if (lb) lb.style.display = '';
   }
 
   function buildHighlightedArticle(article, words) {
@@ -1013,14 +976,25 @@
    * 真正的 AI 内容需要后端, 这里只是不让用户卡住
    */
   function buildLocalQuiz(words, level, types, settings) {
-    var sample = words.slice(0, Math.min(8, words.length));
+    // Fisher-Yates 洗牌, 每次生成不同的样本
+    function shuffle(arr) {
+      var out = arr.slice();
+      for (var i = out.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = out[i]; out[i] = out[j]; out[j] = tmp;
+      }
+      return out;
+    }
+    var sample = shuffle(words).slice(0, Math.min(8, words.length));
     var used = sample.map(function(w) { return w.en; });
     var cnList = sample.map(function(w) { return w.cn || ''; });
-    var article = 'Local Practice (offline mode)\n\n'
+    // 加入随机种子让 article 每次都不同
+    var seed = ' (sample ' + Math.random().toString(36).slice(2, 6) + ')';
+    var article = 'Local Practice (offline mode)' + seed + '\n\n'
       + 'This is a sample article for offline practice. '
-      + 'Words: ' + used.join(', ') + '. '
-      + 'These words are great for your study: ' + cnList.join('; ') + '. '
-      + 'You can add more words to your library and try again when the server is available.';
+      + 'Words in this set: ' + used.join(', ') + '. '
+      + 'You can learn them: ' + cnList.join('; ') + '. '
+      + 'Add more words to your library and try again when the server is available.';
     var topic = (settings && settings.topic) ? settings.topic : 'general';
     var levelLabel = (level || 'cet4').toUpperCase();
 
@@ -1030,15 +1004,6 @@
         if (opts[i] === ans) return i;
       }
       return 0;
-    }
-    // Fisher-Yates 洗牌
-    function shuffle(arr) {
-      var out = arr.slice();
-      for (var i = out.length - 1; i > 0; i--) {
-        var j = Math.floor(Math.random() * (i + 1));
-        var tmp = out[i]; out[i] = out[j]; out[j] = tmp;
-      }
-      return out;
     }
 
     var questions = [];
@@ -1219,7 +1184,10 @@
     return text.replace(new RegExp('^\\s*' + letter + '[\\.|、\\)]\\s*', 'i'), '');
   }
 
-  function hideArticle() { var c = $('elArticleCard'); if (c) c.style.display = 'none'; }
+  function hideArticle() {
+    var c = $('elArticleCard'); if (c) c.style.display = 'none';
+    var lb = $('elLocaleBar'); if (lb) lb.style.display = 'none';
+  }
   function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.display = 'none'; }
   function hideResult() { var c = $('elResultCard'); if (c) c.style.display = 'none'; }
 
@@ -1765,7 +1733,6 @@
 
     safeBind('elGenBtn', 'click', function() { generateQuiz(); });
     safeBind('elRegenArticleBtn', 'click', function() { generateQuiz({ regenArticle: true }); });
-    safeBind('elRegenQuizBtn', 'click', function() { generateQuiz({ regenQuiz: true }); });
     safeBind('elSubmitBtn', 'click', submitAnswers);
     safeBind('elShowAnswerBtn', 'click', showAllAnswers);
     safeBind('elNewPracticeBtn', 'click', function() {
