@@ -1286,6 +1286,7 @@ const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const USER_STYLE_MARKER = '__user_style__';
+const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -1327,6 +1328,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AI_AGENT_MESSAGE_MARKER)
     .neq('media_type', AI_AGENT_CONFIG_MARKER)
     .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
+    .neq('media_type', AI_ENGLISH_LEARNING_MARKER)
     .neq('media_type', REVOKED_TOKEN_MARKER);
 }
 
@@ -9353,13 +9355,176 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
 
+function sanitizeEnglishWordState(input) {
+  var en = String(input && input.en || '').trim().toLowerCase().slice(0, 60);
+  if (!en || !/^[a-zA-Z\s\-']+$/.test(en)) return null;
+  return {
+    id: String(input && input.id || ('w_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8))).slice(0, 80),
+    en: en,
+    cn: String(input && input.cn || '').trim().slice(0, 80),
+    mastery: Math.max(0, Math.min(100, parseInt(input && input.mastery, 10) || 0)),
+    seen: Math.max(0, Math.min(9999, parseInt(input && input.seen, 10) || 0)),
+    correct: Math.max(0, Math.min(9999, parseInt(input && input.correct, 10) || 0)),
+    wrong: Math.max(0, Math.min(9999, parseInt(input && input.wrong, 10) || 0)),
+    lastReviewedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.lastReviewedAt) || 0)),
+    addedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.addedAt) || Date.now())),
+    updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.updatedAt) || Date.now()))
+  };
+}
+
+function sanitizeEnglishLearningState(input) {
+  input = input && typeof input === 'object' ? input : {};
+  var wordMap = {};
+  (Array.isArray(input.words) ? input.words : []).slice(0, 240).forEach(function(item) {
+    var w = sanitizeEnglishWordState(item);
+    if (!w) return;
+    var prev = wordMap[w.en];
+    if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) wordMap[w.en] = w;
+  });
+  var words = Object.keys(wordMap).map(function(k) { return wordMap[k]; }).slice(0, 200);
+  var allowedLevels = { cet4: true, cet6: true, ielts: true };
+  var allowedTypes = { article: true, mc: true, cloze: true };
+  var cleanTypes = function(arr) {
+    return (Array.isArray(arr) ? arr : []).map(String).filter(function(t) { return allowedTypes[t]; }).slice(0, 3);
+  };
+  var history = (Array.isArray(input.history) ? input.history : []).slice(0, 80).map(function(h) {
+    var level = String(h && h.level || 'cet4').toLowerCase();
+    if (!allowedLevels[level]) level = 'cet4';
+    return {
+      id: String(h && h.id || ('h_' + Date.now())).slice(0, 80),
+      correct: Math.max(0, Math.min(999, parseInt(h && (h.correct != null ? h.correct : h.score), 10) || 0)),
+      score: Math.max(0, Math.min(999, parseInt(h && (h.score != null ? h.score : h.correct), 10) || 0)),
+      total: Math.max(0, Math.min(999, parseInt(h && h.total, 10) || 0)),
+      pct: Math.max(0, Math.min(100, parseInt(h && h.pct, 10) || 0)),
+      level: level,
+      types: cleanTypes(h && h.types),
+      topic: String(h && h.topic || '').slice(0, 80),
+      words: (Array.isArray(h && h.words) ? h.words : []).map(String).slice(0, 40),
+      mistakeCount: Math.max(0, Math.min(999, parseInt(h && h.mistakeCount, 10) || 0)),
+      time: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(h && h.time) || Date.now()))
+    };
+  });
+  var mistakes = (Array.isArray(input.mistakes) ? input.mistakes : []).slice(0, 120).map(function(m) {
+    var level = String(m && m.level || 'cet4').toLowerCase();
+    if (!allowedLevels[level]) level = 'cet4';
+    return {
+      id: String(m && m.id || ('m_' + Date.now())).slice(0, 80),
+      questionId: String(m && m.questionId || '').slice(0, 80),
+      type: allowedTypes[String(m && m.type || 'mc')] ? String(m.type) : 'mc',
+      question: String(m && m.question || '').slice(0, 500),
+      context: String(m && m.context || '').slice(0, 2000),
+      blankIndex: Math.max(-1, Math.min(20, parseInt(m && m.blankIndex, 10) || -1)),
+      userAnswer: String(m && m.userAnswer || '').slice(0, 240),
+      correctAnswer: String(m && m.correctAnswer || '').slice(0, 240),
+      explain: String(m && m.explain || '').slice(0, 400),
+      words: (Array.isArray(m && m.words) ? m.words : []).map(String).slice(0, 20),
+      level: level,
+      time: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(m && m.time) || Date.now()))
+    };
+  });
+  var settingsIn = input.settings || {};
+  var levelDefault = String(settingsIn.defaultLevel || 'cet4').toLowerCase();
+  if (!allowedLevels[levelDefault]) levelDefault = 'cet4';
+  var len = String(settingsIn.articleLength || 'medium').toLowerCase();
+  if (['short', 'medium', 'long'].indexOf(len) < 0) len = 'medium';
+  var focus = String(settingsIn.focus || 'weak').toLowerCase();
+  if (['all', 'weak', 'selected'].indexOf(focus) < 0) focus = 'weak';
+  return {
+    version: 1,
+    words: words,
+    history: history,
+    mistakes: mistakes,
+    settings: {
+      defaultLevel: levelDefault,
+      articleLength: len,
+      questionCount: Math.max(4, Math.min(10, parseInt(settingsIn.questionCount, 10) || 6)),
+      focus: focus,
+      topic: String(settingsIn.topic || '').slice(0, 80)
+    },
+    updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input.updatedAt) || Date.now())),
+    server_updated_at: Date.now()
+  };
+}
+
+async function loadEnglishLearningRow(userName) {
+  var actorKey = 'english_learning_state:' + userName;
+  var { data, error } = await supabase.from('posts')
+    .select('id, content, created_at')
+    .eq('user_name', userName)
+    .eq('media_type', AI_ENGLISH_LEARNING_MARKER)
+    .eq('actor_key', actorKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var row = await loadEnglishLearningRow(req.userName);
+    if (!row || !row.content) return res.json({ ok: true, data: sanitizeEnglishLearningState({}) });
+    var parsed = safeJsonParse(row.content) || {};
+    return res.json({ ok: true, data: sanitizeEnglishLearningState(parsed) });
+  } catch (e) {
+    console.error('[ENGLISH-STATE] load failed:', e && e.message);
+    return res.status(500).json({ error: '同步读取失败' });
+  }
+});
+
+app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var userName = req.userName;
+    var payload = sanitizeEnglishLearningState((req.body && req.body.data) || req.body || {});
+    var actorKey = 'english_learning_state:' + userName;
+    payload.server_updated_at = Date.now();
+    var content = JSON.stringify(payload);
+    var existing = await loadEnglishLearningRow(userName);
+    if (existing && existing.id) {
+      var upd = await supabase.from('posts').update({
+        content: content,
+        media_url: 'state:v1',
+        actor_key: actorKey
+      }).eq('id', existing.id);
+      if (upd.error) throw upd.error;
+    } else {
+      var ins = await supabase.from('posts').insert([{
+        user_name: userName,
+        content: content,
+        media_type: AI_ENGLISH_LEARNING_MARKER,
+        media_url: 'state:v1',
+        actor_key: actorKey
+      }]);
+      if (ins.error) throw ins.error;
+    }
+    return res.json({
+      ok: true,
+      saved: true,
+      data: {
+        version: 1,
+        words_count: payload.words.length,
+        history_count: payload.history.length,
+        mistakes_count: payload.mistakes.length,
+        server_updated_at: payload.server_updated_at
+      }
+    });
+  } catch (e) {
+    console.error('[ENGLISH-STATE] save failed:', e && e.message);
+    return res.status(500).json({ error: '同步保存失败' });
+  }
+});
+
 // POST /api/agent/english/generate - 英语学习: 基于单词库生成阅读文章+题目
 app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), async (req, res) => {
   try {
     var words = Array.isArray(req.body && req.body.words) ? req.body.words : [];
     var level = String((req.body && req.body.level) || 'cet4').toLowerCase();
     var types = Array.isArray(req.body && req.body.types) ? req.body.types : ['article', 'mc'];
+    var questionCount = Math.max(4, Math.min(10, parseInt(req.body && req.body.question_count, 10) || 6));
+    var articleLength = String((req.body && req.body.article_length) || 'medium').toLowerCase();
+    var topic = String((req.body && req.body.topic) || '').trim().slice(0, 80);
+    var focus = String((req.body && req.body.focus) || 'all').toLowerCase();
     if (['cet4', 'cet6', 'ielts'].indexOf(level) < 0) level = 'cet4';
+    if (['short', 'medium', 'long'].indexOf(articleLength) < 0) articleLength = 'medium';
+    if (['all', 'weak', 'selected'].indexOf(focus) < 0) focus = 'all';
     if (words.length === 0) return res.status(400).json({ error: '单词库为空' });
     if (words.length > 200) return res.status(400).json({ error: '单词过多 (上限 200)' });
 
@@ -9369,19 +9534,21 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
     if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
 
     var levelDesc = level === 'cet6' ? 'CET-6 (大学英语六级)' : level === 'ielts' ? '雅思 (IELTS)' : 'CET-4 (大学英语四级)';
+    var lengthDesc = articleLength === 'short' ? '120-180 词' : articleLength === 'long' ? '350-520 词' : '220-350 词';
     var wantsArticle = types.indexOf('article') >= 0;
     var wantsMC = types.indexOf('mc') >= 0;
     var wantsCloze = types.indexOf('cloze') >= 0;
-    if (!wantsMC && !wantsCloze) wantsMC = true;
+    if (!wantsArticle && !wantsMC && !wantsCloze) wantsMC = true;
 
     var wordList = sanitized.map(function(en, i) {
       var orig = words[i];
       var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
-      return en + (cn ? ' (' + cn + ')' : '');
+      var mastery = orig && orig.mastery != null ? (' mastery=' + Math.max(0, Math.min(100, parseInt(orig.mastery, 10) || 0))) : '';
+      return en + (cn ? ' (' + cn + ')' : '') + mastery;
     }).join(', ');
 
-    var mcCount = 4;
-    var clozeCount = 2;
+    var mcCount = wantsMC ? Math.max(2, Math.min(8, questionCount - (wantsCloze ? 1 : 0))) : 0;
+    var clozeBlankCount = wantsCloze ? Math.max(2, Math.min(5, Math.ceil(questionCount / 3))) : 0;
     var parts = [
       '你是一个专业的英语教学老师。请基于以下用户单词库, 生成 ' + levelDesc + ' 难度的英语练习。',
       '',
@@ -9390,11 +9557,14 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
       '',
       '【要求】',
       '1. 优先使用用户单词库中的单词 (覆盖率 >= 60%), 不够的部分用同难度其他常用词。',
-      '2. 严格输出 JSON, 严禁任何额外文字、严禁 markdown 代码块、严禁中文说明。',
+      '2. 生成风格要自然, 不要机械堆砌单词。',
+      '3. 文章篇幅: ' + lengthDesc + '。' + (topic ? ('主题: ' + topic + '。') : ''),
+      '4. 选词策略: ' + (focus === 'weak' ? '优先照顾 mastery 较低的薄弱词。' : focus === 'selected' ? '尽量只使用用户本次选中的单词。' : '均衡覆盖用户单词。'),
+      '5. 严格输出 JSON, 严禁任何额外文字、严禁 markdown 代码块、严禁中文说明。',
       '',
       'JSON 结构:',
       '{',
-      '  "article": "完整的阅读文章 (200-350 词' + (wantsArticle ? ', 必填' : ', 可省略') + ')",',
+      '  "article": "完整的阅读文章 (' + lengthDesc + (wantsArticle ? ', 必填' : ', 可省略') + ')",',
       '  "words_used": ["在文章中实际用到的单词 (用户单词库优先)"],',
       '  "questions": ['
     ];
@@ -9417,10 +9587,10 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
       parts.push('    {');
       parts.push('      "id": ' + qId++ + ',');
       parts.push('      "type": "cloze",');
-      parts.push('      "question": "完形填空: 一段 100-150 词文章, 挖空 4 个单词 (用 ___ 标记)",');
+      parts.push('      "question": "完形填空: 一段 100-180 词文章, 挖空 ' + clozeBlankCount + ' 个单词 (用 ___ 标记)",');
       parts.push('      "context": "完整段落 (含 ___ 挖空)",');
       parts.push('      "blanks": [');
-      for (var ci = 0; ci < clozeCount; ci++) {
+      for (var ci = 0; ci < clozeBlankCount; ci++) {
         if (ci > 0) parts.push('        ,');
         parts.push('        {"options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": 0, "explain": "解析 30 字"}');
       }
