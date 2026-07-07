@@ -4306,6 +4306,22 @@ function showChatMessages() {
     };
 
     // 深度思考 toggle 按钮 (M: 在历史按钮左边)
+    window.__aiEnglishClick = function(ev) {
+      try {
+        ev = ev || window.event;
+        if (ev && ev.preventDefault) ev.preventDefault();
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        console.log('[EnglishBtn] click fired');
+        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+          window.EnglishLearning.open();
+        } else {
+          try { notify('英语学习模块加载中，请稍后再试'); } catch (e) {}
+        }
+      } catch (e) {
+        try { console.error('[EnglishBtn] fatal error:', e); } catch (e2) {}
+      }
+    };
+
     var deepThinkBtn = el('button', {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
