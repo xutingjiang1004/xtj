@@ -473,67 +473,6 @@
     if (wordInput) wordInput.focus();
   }
 
-  /* ============================================================
-   * 单词详情弹层: 点击单词卡 AI 按钮 -> 显示本地数据 (en/cn/时间/掌握度), 不调 AI
-   * ============================================================ */
-  function aiExplainWord(w) {
-    if (!w || !w.en) return;
-    var modal = ensureAiModal();
-    modal.title.textContent = w.en;
-    modal.body.innerHTML = buildWordDetailHtml(w);
-    modal.root.style.display = 'flex';
-    requestAnimationFrame(function() { modal.root.classList.add('show'); });
-  }
-
-  function buildWordDetailHtml(w) {
-    var html = '';
-    if (w.cn) {
-      html += '<div class="el-ai-cn">' + escapeHtml(w.cn) + '</div>';
-    } else {
-      html += '<div class="el-ai-cn el-ai-empty">暂无释义, 请手动补充</div>';
-    }
-    var rows = [];
-    if (w.seen || w.correct || w.wrong) {
-      rows.push('练习 ' + (w.seen || 0) + ' 次 · 正确 ' + (w.correct || 0) + ' · 错误 ' + (w.wrong || 0));
-    }
-    if (typeof w.mastery === 'number') {
-      rows.push('掌握度 ' + w.mastery + '%');
-    }
-    if (w.addedAt) {
-      var t = new Date(w.addedAt);
-      if (!isNaN(t.getTime())) rows.push('添加于 ' + t.toLocaleString('zh-CN'));
-    }
-    if (rows.length) {
-      html += '<div class="el-ai-tip">' + escapeHtml(rows.join(' · ')) + '</div>';
-    }
-    return html;
-  }
-
-  function ensureAiModal() {
-    var root = $('elAiModal');
-    if (!root) {
-      root = document.createElement('div');
-      root.id = 'elAiModal';
-      root.className = 'el-ai-modal';
-      root.innerHTML = '<div class="el-ai-card"><div class="el-ai-head"><div class="el-ai-title">—</div><button type="button" class="el-ai-close" aria-label="关闭">×</button></div><div class="el-ai-body">—</div></div>';
-      document.body.appendChild(root);
-      root.addEventListener('click', function(e) { if (e.target === root) closeAiModal(); });
-      root.querySelector('.el-ai-close').addEventListener('click', closeAiModal);
-    }
-    return {
-      root: root,
-      title: root.querySelector('.el-ai-title'),
-      body: root.querySelector('.el-ai-body')
-    };
-  }
-
-  function closeAiModal() {
-    var root = $('elAiModal');
-    if (!root) return;
-    root.classList.remove('show');
-    setTimeout(function() { root.style.display = 'none'; }, 220);
-  }
-
   function deleteSelected(ids) {
     ids = ids || [];
     S.words = S.words.filter(function(w) { return ids.indexOf(w.id) < 0; });
@@ -662,11 +601,9 @@
         renderAll();
         notify('已删除: ' + w.en);
       });
-      var speakBtn = el('button', { type: 'button', class: 'el-word-speak', title: '发音', 'aria-label': '发音 ' + w.en, text: 'AI' });
-      speakBtn.addEventListener('click', function() { aiExplainWord(w); });
+      // 已删除: AI 按钮 (用户要求), 单词只保留 勾选 + 词义 + 删除
       item.appendChild(cb);
       item.appendChild(main);
-      item.appendChild(speakBtn);
       item.appendChild(delBtn);
       list.appendChild(item);
     });
@@ -743,9 +680,8 @@
   }
 
   /**
-   * 批量导入: 智能判断格式, 必要时调 AI 解析
-   * 1. 全部行都是 "en cn" 格式 (英文开头) → 本地解析, 不调用 AI
-   * 2. 否则 (含中文句子/短语/不规范) → 调用 /english/parse-batch
+   * 批量导入: 默认调 deepseek 解析 (后端 /english/parse-batch)
+   * AI 失败时回退到本地规则解析
    */
   async function doBatchImport(btn) {
     var input = $('elBatchInput');
@@ -755,66 +691,73 @@
     if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
 
     var parsed = null;
-    var lines = text.split(/[\n\r]+/);
-    var allEng = lines.every(function(line) {
-      var t = line.trim();
-      if (!t) return true;
-      // 整行必须以英文单词开头
-      return /^[a-zA-Z][a-zA-Z\s\-']*(\s|$)/.test(t);
-    });
+    var aiMode = 'deepseek';
 
-    if (allEng) {
-      // 本地解析
+    // 1) 首选: 调 deepseek 解析 (用户要求 AI 自动识别)
+    try {
+      var headers = await getAuthHeaders();
+      var resp = await fetch(apiBase() + '/english/parse-batch', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ text: text, max_count: 120 })
+      });
+      if (resp.ok) {
+        var json = await resp.json();
+        if (json.ok && json.data && Array.isArray(json.data.words) && json.data.words.length) {
+          parsed = json.data.words;
+        }
+      }
+    } catch (e) {
+      // 静默回退
+    }
+
+    // 2) 兜底: 本地规则解析 (服务端不可用时)
+    if (!parsed || !parsed.length) {
+      aiMode = 'local';
       parsed = [];
+      var lines = text.split(/[\n\r,，;；]+/);
       lines.forEach(function(line) {
         line = line.trim();
         if (!line) return;
+        // 优先按 "en cn" 切分 (第一个空白)
         var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']*?)\s+(.+)$/);
-        var en, cn;
-        if (m) { en = m[1].trim(); cn = m[2].trim(); }
-        else { en = line; cn = ''; }
-        parsed.push({ en: en, cn: cn });
-      });
-    } else {
-      // 调用 AI 解析
-      try {
-        var headers = await getAuthHeaders();
-        var resp = await fetch(apiBase() + '/english/parse-batch', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ text: text, max_count: 80 })
-        });
-        if (!resp.ok) {
-          var ej = null;
-          try { ej = await resp.json(); } catch (e) {}
-          throw new Error((ej && ej.error) || ('HTTP ' + resp.status));
+        if (m) {
+          parsed.push({ en: m[1].trim(), cn: m[2].trim() });
+        } else if (/^[a-zA-Z]/.test(line)) {
+          // 纯英文单词
+          var en = line.replace(/[^a-zA-Z\s\-']/g, '').trim();
+          if (en) parsed.push({ en: en, cn: '' });
+        } else if (/[\u4e00-\u9fa5]/.test(line)) {
+          // 纯中文 -> 单词留空, 由用户后续补
+          parsed.push({ en: '__pending_' + Date.now() + '_' + parsed.length, cn: line });
         }
-        var json = await resp.json();
-        if (!json.ok || !json.data || !Array.isArray(json.data.words)) throw new Error('AI 返回数据异常');
-        parsed = json.data.words;
-      } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-        notify('AI 解析失败: ' + (e.message || '未知错误'), 'error');
-        return;
-      }
+      });
     }
 
     if (!parsed || !parsed.length) {
       if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-      notify('没有提取到有效单词, 请重试');
+      notify('没有提取到有效单词, 请检查输入', 'error');
       return;
     }
 
     var before = S.words.length;
     var added = 0;
+    var skipped = 0;
     parsed.forEach(function(p) {
-      if (addWord(p.en, p.cn, true)) added++;
+      if (!p || !p.en) return;
+      if (p.en.indexOf('__pending_') === 0) { skipped++; return; }
+      if (addWord(p.en, p.cn || '', true)) added++;
     });
     var totalAdded = S.words.length - before;
     if (input) input.value = '';
     renderAll();
     if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-    notify(totalAdded > 0 ? ('批量导入完成: +' + totalAdded + ' 词') : '这些词已经在单词库了');
+    var tip = '';
+    if (aiMode === 'deepseek') tip = '(deepseek 解析) ';
+    else tip = '(本地解析 · 服务端未响应) ';
+    if (totalAdded > 0) notify('批量导入完成 ' + tip + '+' + totalAdded + ' 词' + (skipped ? ' · 跳过' + skipped + '条中文' : ''));
+    else if (skipped) notify('输入是中文, 请直接用 "英文 释义" 格式 ' + tip + '跳过' + skipped + '条');
+    else notify('这些词已经在单词库了 ' + tip);
   }
 
   async function generateQuiz(opts) {
@@ -1563,9 +1506,6 @@
       wordInput.addEventListener('blur', function() { setTimeout(hideAutocomplete, 180); });
     }
 
-    var batchBtn = $('elBatchAddBtn');
-    if (batchBtn) batchBtn.addEventListener('click', function() { doBatchImport(batchBtn); });
-
     var search = $('elSearchInput');
     if (search) search.addEventListener('input', function() {
       S.search = search.value || '';
@@ -1692,25 +1632,7 @@
     }
 
     safeBind('elBatchAddBtn', 'click', function() {
-      var input = $('elBatchInput');
-      if (!input) { notify('批量导入输入框未找到', 'error'); return; }
-      var text = String(input.value || '').trim();
-      if (!text) { notify('请先输入要导入的单词'); return; }
-      var beforeCount = S.words.length;
-      var lines = text.split(/[\n\r]+/);
-      var added = 0;
-      lines.forEach(function(line) {
-        line = line.trim();
-        if (!line) return;
-        var parts = line.split(/\s+/);
-        var en = parts[0];
-        var cn = parts.slice(1).join(' ');
-        if (addWord(en, cn, true)) added++;
-      });
-      var totalAdded = S.words.length - beforeCount;
-      if (input) input.value = '';
-      renderAll();
-      notify(totalAdded > 0 ? '批量导入完成: +' + totalAdded + ' 词' : '没有新增有效单词，请检查格式（如: apple 苹果）');
+      doBatchImport($('elBatchAddBtn'));
     });
 
     safeBind('elSearchInput', 'input', function() {

@@ -161,7 +161,6 @@ body.english-learning-open {
 #panelEnglishLearning .el-btn-mini,
 #panelEnglishLearning .el-filter,
 #panelEnglishLearning .el-tab,
-#panelEnglishLearning .el-word-speak,
 #panelEnglishLearning .el-word-del,
 #panelEnglishLearning .el-word-tag {
   border: 0;
@@ -767,7 +766,6 @@ body.english-learning-open {
 #panelEnglishLearning .el-mastery.is-mastered { color: var(--el-accent); background: var(--el-accent-soft); }
 #panelEnglishLearning .el-mastery.is-weak { color: var(--el-danger); background: rgba(200, 77, 91, 0.12); }
 
-#panelEnglishLearning .el-word-speak,
 #panelEnglishLearning .el-word-del {
   width: 30px;
   height: 30px;
@@ -777,14 +775,9 @@ body.english-learning-open {
   font-weight: 760;
 }
 
-#panelEnglishLearning .el-word-speak:hover {
-  color: var(--el-accent);
-  background: var(--el-accent-soft);
-}
-
 #panelEnglishLearning .el-word-del:hover {
   color: var(--el-danger);
-  background: rgba(200, 77, 91, 0.12);
+  background: rgba(200, 77, 91, 0.10);
 }
 
 #panelEnglishLearning .el-empty-hint {
@@ -1379,146 +1372,12 @@ body.english-learning-open {
 }
 
 /* ============================================================
- * AI 单词解释弹层
- * ============================================================ */
-.el-ai-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1000001;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 20, 0.42);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 200ms var(--el-ease);
-  padding: 24px;
-}
-.el-ai-modal.show {
-  opacity: 1;
-}
-.el-ai-card {
-  width: 100%;
-  max-width: 460px;
-  max-height: 80vh;
-  overflow: auto;
-  border-radius: 18px;
-  background: var(--el-surface-solid);
-  box-shadow: 0 30px 80px rgba(0,0,0,0.18);
-  transform: translateY(8px) scale(0.985);
-  transition: transform 220ms var(--el-ease);
-  color: var(--el-text);
-}
-.el-ai-modal.show .el-ai-card {
-  transform: translateY(0) scale(1);
-}
-.el-ai-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px 12px;
-  border-bottom: 1px solid var(--el-line);
-}
-.el-ai-title {
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  color: var(--el-accent);
-}
-.el-ai-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 0;
-  background: transparent;
-  color: var(--el-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 160ms var(--el-ease), color 160ms var(--el-ease);
-}
-.el-ai-close:hover { background: var(--el-accent-soft); color: var(--el-accent); }
-.el-ai-body {
-  padding: 18px 20px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.el-ai-loading,
-.el-ai-error {
-  padding: 30px 10px;
-  text-align: center;
-  color: var(--el-muted);
-  font-size: 14px;
-}
-.el-ai-error { color: var(--el-danger); }
-.el-ai-cn {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.4;
-  color: var(--el-text);
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: linear-gradient(120deg, var(--el-accent-soft), rgba(50,180,137,0.06));
-  border-left: 3px solid var(--el-accent);
-}
-.el-ai-tip {
-  font-size: 13px;
-  color: var(--el-muted);
-  line-height: 1.5;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(50,180,137,0.05);
-}
-.el-ai-row { display: flex; flex-direction: column; gap: 6px; }
-.el-ai-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  color: var(--el-faint);
-  text-transform: uppercase;
-}
-.el-ai-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.el-ai-tag {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--el-accent-soft);
-  color: var(--el-accent);
-  font-size: 12px;
-  font-weight: 600;
-}
-.el-ai-ex {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--el-text);
-  padding: 6px 0;
-}
-
-/* ============================================================
  * 流光 shimmer + pane 切换动画 + 加载动画 (v2 在文件末尾)
  * 这里只保留 el-shimmer keyframes, 加载动画用 v2 dot pulse
  * ============================================================ */
 @keyframes el-shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
-}
-
-/* 单词 AI 按钮 (替代原发音按钮) */
-#panelEnglishLearning .el-word-speak {
-  background: linear-gradient(135deg, rgba(20,124,90,0.10), rgba(50,180,137,0.18));
-  color: var(--el-accent);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  border: 1px solid rgba(20,124,90,0.18);
-}
-#panelEnglishLearning .el-word-speak:hover {
-  background: linear-gradient(135deg, rgba(20,124,90,0.22), rgba(50,180,137,0.32));
-  color: #fff;
-  transform: translateY(-1px) scale(1.04);
-  box-shadow: 0 6px 18px rgba(20,124,90,0.25);
 }
 
 
