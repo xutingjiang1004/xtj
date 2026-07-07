@@ -834,37 +834,7 @@ body.english-learning-open {
   background: var(--el-accent-soft);
 }
 
-#panelEnglishLearning .el-loading {
-  display: grid;
-  place-items: center;
-  gap: 14px;
-  min-height: 220px;
-  text-align: center;
-}
-
-#panelEnglishLearning .el-loader-orbit {
-  position: relative;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  border: 1px solid var(--el-line);
-}
-
-#panelEnglishLearning .el-loader-orbit span {
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--el-accent);
-  box-shadow: 0 0 18px var(--el-accent);
-  transform-origin: 29px 29px;
-  animation: el-orbit 1.45s linear infinite;
-}
-
-#panelEnglishLearning .el-loader-orbit span:nth-child(1) { left: 25px; top: -4px; }
-#panelEnglishLearning .el-loader-orbit span:nth-child(2) { left: 25px; top: -4px; animation-delay: -0.48s; opacity: 0.65; }
-#panelEnglishLearning .el-loader-orbit span:nth-child(3) { left: 25px; top: -4px; animation-delay: -0.96s; opacity: 0.38; }
-
+/* 加载动画: 见文件末尾"v2 加载动画"段, 这里不再重复 */
 #panelEnglishLearning .el-loading-text {
   color: var(--el-muted);
   font-size: 13px;
@@ -1506,64 +1476,12 @@ body.english-learning-open {
 }
 
 /* ============================================================
- * 流光 shimmer + pane 切换动画 + 加载动画
+ * 流光 shimmer + pane 切换动画 + 加载动画 (v2 在文件末尾)
+ * 这里只保留 el-shimmer keyframes, 加载动画用 v2 dot pulse
  * ============================================================ */
 @keyframes el-shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
-}
-@keyframes el-loader-orbit {
-  0%   { transform: rotate(0deg); opacity: 0.85; }
-  50%  { opacity: 1; }
-  100% { transform: rotate(360deg); opacity: 0.85; }
-}
-@keyframes el-pane-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-#panelEnglishLearning .el-pane {
-  animation: el-pane-in 320ms var(--el-ease) both;
-}
-
-#panelEnglishLearning .el-loading {
-  position: relative;
-  overflow: hidden;
-}
-#panelEnglishLearning .el-loading::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(110deg,
-    transparent 25%,
-    rgba(20,124,90,0.06) 45%,
-    rgba(50,180,137,0.10) 50%,
-    rgba(20,124,90,0.06) 55%,
-    transparent 75%);
-  background-size: 200% 100%;
-  animation: el-shimmer 2.4s linear infinite;
-  pointer-events: none;
-}
-#panelEnglishLearning .el-loader-orbit {
-  position: relative;
-  width: 68px;
-  height: 68px;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg,
-    transparent 0deg,
-    var(--el-accent) 90deg,
-    var(--el-accent-2) 180deg,
-    transparent 360deg);
-  -webkit-mask: radial-gradient(circle, transparent 22px, #000 23px);
-  mask: radial-gradient(circle, transparent 22px, #000 23px);
-  animation: el-loader-orbit 1.4s linear infinite;
-  filter: drop-shadow(0 4px 14px rgba(20,124,90,0.35));
-}
-#panelEnglishLearning .el-loader-orbit span { display: none; }
-#panelEnglishLearning .el-loading-text {
-  font-size: 14px;
-  color: var(--el-muted);
-  letter-spacing: 0.4px;
 }
 
 /* 单词 AI 按钮 (替代原发音按钮) */
@@ -1580,11 +1498,6 @@ body.english-learning-open {
   color: #fff;
   transform: translateY(-1px) scale(1.04);
   box-shadow: 0 6px 18px rgba(20,124,90,0.25);
-}
-
-/* tab 切换: indicator 弹性 */
-#panelEnglishLearning .el-tab-indicator {
-  transition: transform 320ms var(--el-ease), width 320ms var(--el-ease);
 }
 
 
@@ -1909,4 +1822,155 @@ body.english-learning-open {
   display: inline-flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+
+/* ============================================================
+ * 关键样式统一覆盖 (放在文件最末尾, 覆盖前面的所有重复定义)
+ * - el-tabs: 严格 1fr 1fr + 高度 40px + align-items stretch
+ * - el-loader-orbit: dot pulse 1.2s (替代 conic + shimmer)
+ * - el-tab-indicator: 弹性 380ms + 视觉胶囊 (active cell 内缩 4px)
+ * - el-loading: flex 居中 + min-height 200px
+ * - el-page: 滚动条样式 + 防 scroll snap
+ * ============================================================ */
+
+/* tabs 高度 + 居中对齐 + 防 nav 全局样式干扰 */
+#panelEnglishLearning.el-show .el-tabs,
+#panelEnglishLearning .el-tabs {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 10 !important;
+  box-sizing: border-box !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 2px !important;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 14px 10px !important;
+  padding: 3px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  align-items: stretch !important;
+  align-content: stretch !important;
+  border: 1px solid var(--el-line) !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  backdrop-filter: blur(14px) !important;
+  overflow: hidden !important;
+  font: inherit !important;
+  color: inherit !important;
+  text-align: center !important;
+  box-shadow: none !important;
+}
+#panelEnglishLearning .el-tab {
+  position: relative !important;
+  z-index: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  padding: 0 10px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--el-muted) !important;
+  font-size: 13px !important;
+  font-weight: 720 !important;
+  letter-spacing: 0.2px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  transition: color 180ms ease, background 180ms ease !important;
+  -webkit-tap-highlight-color: transparent !important;
+  user-select: none !important;
+}
+#panelEnglishLearning .el-tab:hover {
+  color: var(--el-text) !important;
+}
+#panelEnglishLearning .el-tab.active {
+  color: var(--el-text) !important;
+  font-weight: 800 !important;
+}
+
+/* indicator: 弹性过渡 + 视觉胶囊 (active cell 内缩 4px) */
+#panelEnglishLearning .el-tab-indicator {
+  position: absolute !important;
+  z-index: 1 !important;
+  top: 3px !important;
+  bottom: 3px !important;
+  left: 0 !important;
+  border-radius: 11px !important;
+  background: var(--el-surface-solid) !important;
+  box-shadow: 0 6px 18px rgba(20, 124, 90, 0.10), inset 0 0 0 1px var(--el-line) !important;
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1) !important;
+  pointer-events: none !important;
+  will-change: transform, width !important;
+}
+
+/* 加载动画 v2: 三个 dot pulse (替代 conic + shimmer) */
+#panelEnglishLearning .el-loading {
+  position: relative !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px !important;
+  min-height: 200px !important;
+  text-align: center !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+#panelEnglishLearning .el-loading::before { content: none !important; }
+#panelEnglishLearning .el-loader-orbit {
+  position: relative !important;
+  width: 48px !important;
+  height: 48px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  filter: none !important;
+  animation: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+#panelEnglishLearning .el-loader-orbit::before { content: none !important; }
+#panelEnglishLearning .el-loader-orbit > span {
+  display: inline-block !important;
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background: var(--el-accent) !important;
+  box-shadow: none !important;
+  transform-origin: center !important;
+  animation: el-pulse-dot 1.2s ease-in-out infinite !important;
+  opacity: 1 !important;
+}
+#panelEnglishLearning .el-loader-orbit > span:nth-child(2) { animation-delay: 0.15s !important; }
+#panelEnglishLearning .el-loader-orbit > span:nth-child(3) { animation-delay: 0.30s !important; }
+#panelEnglishLearning .el-loading-text {
+  font-size: 13px !important;
+  color: var(--el-muted) !important;
+  letter-spacing: 0.3px !important;
+  font-weight: 680 !important;
+}
+@keyframes el-pulse-dot {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.0); opacity: 1; }
+}
+
+/* page 滚动: 平滑 + 防 scroll snap 跳 */
+#panelEnglishLearning .el-page {
+  scroll-behavior: auto !important;
+  scrollbar-gutter: stable !important;
+  overscroll-behavior-y: contain !important;
 }
