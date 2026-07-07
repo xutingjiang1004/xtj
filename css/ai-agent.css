@@ -2250,42 +2250,46 @@
 
 /* ★ U3: 英语学习按钮 (放在深度思考左边, AI 聊天内入口) */
 .ai-english-toggle {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   gap: 5px;
-  padding: 5px 12px;
+  padding: 6px 14px;
   margin-right: 4px;
-  border: 1px solid rgba(140, 196, 158, 0.22);
+  border: 2px solid rgba(99, 102, 241, 0.4);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(100, 120, 112, 0.88);
-  cursor: pointer;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(67, 56, 202);
+  cursor: pointer !important;
+  pointer-events: auto !important;
   user-select: none;
-  box-shadow: 0 2px 8px rgba(82, 138, 120, 0.06);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
   transition: border-color .25s, background .25s, color .25s, box-shadow .25s, transform .15s;
   -webkit-tap-highlight-color: transparent;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 10;
 }
 .ai-english-toggle:hover {
-  border-color: rgba(66, 155, 122, 0.42);
-  background: rgba(255, 255, 255, 0.85);
-  color: rgba(58, 142, 112, 0.95);
-  box-shadow: 0 4px 14px rgba(82, 138, 120, 0.1);
+  border-color: rgba(99, 102, 241, 0.7);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(139, 92, 246, 0.18));
+  color: rgb(55, 48, 163);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
   transform: translateY(-1px);
 }
 .ai-english-toggle:active { transform: scale(.96) translateY(0); }
 .ai-english-label { font-weight: inherit; display: inline-block; }
 
 [data-theme="dark"] .ai-english-toggle {
-  background: rgba(40, 44, 52, 0.55);
-  border-color: rgba(140, 196, 158, 0.18);
-  color: rgba(180, 200, 190, 0.85);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
+  border-color: rgba(139, 92, 246, 0.5);
+  color: rgb(165, 180, 252);
 }
 [data-theme="dark"] .ai-english-toggle:hover {
-  background: rgba(50, 56, 64, 0.85);
-  border-color: rgba(66, 155, 122, 0.42);
-  color: rgb(140, 220, 180);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
+  border-color: rgba(139, 92, 246, 0.8);
+  color: rgb(199, 210, 254);
 }
 
 /* 深度思考进度卡 */
