@@ -1,15 +1,18 @@
 /* ============================================================
- * XTJ 英语学习二级页面
- * 单词库 + AI 生成阅读文章 + 选择题 + 完形填空 + 答题评分
+ * XTJ 英语学习二级页面 v3
+ * - 单词库 (含自动补全)
+ * - AI 生成阅读文章 + 选择题 + 完形填空
+ * - 答题评分 + 解析
+ * - 简洁可爱 UI + 流畅动画
  * ============================================================ */
 
 (function() {
   'use strict';
 
   var S = {
-    words: [],          // [{id, en, cn, addedAt}]
-    history: [],        // [{id, score, total, level, time}]
-    currentQuiz: null,  // {article, words, questions, answers, level, types}
+    words: [],
+    history: [],
+    currentQuiz: null,
     isGenerating: false
   };
 
@@ -24,13 +27,10 @@
       var raw = localStorage.getItem(STORAGE_KEY);
       var arr = raw ? JSON.parse(raw) : [];
       return Array.isArray(arr) ? arr : [];
-    } catch (e) {
-      console.warn('[EL] loadWords failed:', e && e.message);
-      return [];
-    }
+    } catch (e) { return []; }
   }
   function saveWords() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(S.words.slice(0, MAX_WORDS))); } catch (e) { console.warn('[EL] saveWords failed:', e && e.message); }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(S.words.slice(0, MAX_WORDS))); } catch (e) {}
   }
   function loadHistory() {
     try {
@@ -40,7 +40,7 @@
     } catch (e) { return []; }
   }
   function saveHistory() {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history.slice(0, MAX_HISTORY))); } catch (e) { console.warn('[EL] saveHistory failed:', e && e.message); }
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history.slice(0, MAX_HISTORY))); } catch (e) {}
   }
 
   function uid() {
@@ -72,26 +72,19 @@
     }
     return node;
   }
+  function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   function notify(msg, type) {
     if (window.notify && typeof window.notify === 'function') {
       try { window.notify(msg, type); return; } catch (e) {}
     }
-    if (type !== 'silent') {
-      console.log('[EL]', msg);
-    }
+    console.log('[EL]', msg);
   }
 
-  // ============= Auth helper =============
-  function readUserName() {
-    try { return sessionStorage.getItem('xtj_user_name') || localStorage.getItem('xtj_user_name') || ''; } catch (e) { return ''; }
-  }
-  function readPwHash() {
-    try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
-  }
-  function readUserToken() {
-    try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; }
-  }
+  // ============= Auth =============
+  function readUserName() { try { return sessionStorage.getItem('xtj_user_name') || localStorage.getItem('xtj_user_name') || ''; } catch (e) { return ''; } }
+  function readPwHash() { try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; } }
+  function readUserToken() { try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; } }
   async function getAuthHeaders() {
     var headers = { 'Content-Type': 'application/json' };
     try {
@@ -112,16 +105,14 @@
     if (!en) return null;
     if (!/^[a-zA-Z\s\-']+$/.test(en)) return null;
     if (en.length > 60) return null;
-    // 去重
     for (var i = 0; i < S.words.length; i++) {
       if (S.words[i].en === en) {
-        // 更新释义
         if (cn && S.words[i].cn !== cn) S.words[i].cn = cn;
         return S.words[i];
       }
     }
     if (S.words.length >= MAX_WORDS) {
-      notify('单词库已满 (' + MAX_WORDS + ' 词), 请删除部分');
+      notify('单词库已满 (' + MAX_WORDS + ' 词)');
       return null;
     }
     var w = { id: uid(), en: en, cn: cn || '', addedAt: Date.now() };
@@ -134,17 +125,68 @@
     S.words = S.words.filter(function(w) { return w.id !== id; });
     saveWords();
   }
-
   function deleteSelected(ids) {
     if (!ids || !ids.length) return 0;
     S.words = S.words.filter(function(w) { return ids.indexOf(w.id) < 0; });
     saveWords();
     return ids.length;
   }
+  function clearAllWords() { S.words = []; saveWords(); }
 
-  function clearAllWords() {
-    S.words = [];
-    saveWords();
+  // ============= Autocomplete =============
+  function getDictMatches(query, maxResults) {
+    maxResults = maxResults || 8;
+    query = String(query || '').trim().toLowerCase();
+    if (!query || !window.ENGLISH_WORD_DICT) return [];
+    var matches = [];
+    var DICT = window.ENGLISH_WORD_DICT;
+    // 优先前缀匹配
+    for (var i = 0; i < DICT.length && matches.length < maxResults; i++) {
+      if (DICT[i].en.indexOf(query) === 0) {
+        matches.push(DICT[i]);
+      }
+    }
+    // 然后包含匹配
+    for (var j = 0; j < DICT.length && matches.length < maxResults; j++) {
+      if (DICT[j].en.indexOf(query) > 0 && DICT[j].en.indexOf(query) >= 0) {
+        matches.push(DICT[j]);
+      }
+    }
+    return matches;
+  }
+
+  function showAutocomplete(input, suggestions) {
+    var box = $('elAutocomplete');
+    if (!box) return;
+    if (!suggestions || suggestions.length === 0) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = '';
+    suggestions.forEach(function(s) {
+      var item = el('div', { class: 'el-ac-item' });
+      var enSpan = el('span', { class: 'el-ac-en', text: s.en });
+      var cnSpan = el('span', { class: 'el-ac-cn', text: s.cn || '' });
+      item.appendChild(enSpan);
+      item.appendChild(cnSpan);
+      item.addEventListener('mousedown', function(ev) {
+        ev.preventDefault();
+        input.value = s.en;
+        var cnInput = $('elMeaningInput');
+        if (cnInput && !cnInput.value) cnInput.value = s.cn || '';
+        box.style.display = 'none';
+        box.innerHTML = '';
+        input.focus();
+      });
+      box.appendChild(item);
+    });
+    box.style.display = 'block';
+  }
+
+  function hideAutocomplete() {
+    var box = $('elAutocomplete');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
   }
 
   // ============= Render word list =============
@@ -167,7 +209,7 @@
       });
       var en = el('div', { class: 'el-word-en', text: w.en });
       var cn = el('div', { class: 'el-word-cn', text: w.cn || '—' });
-      var delBtn = el('button', { class: 'el-word-del', 'aria-label': '删除', title: '删除', text: '×' });
+      var delBtn = el('button', { class: 'el-word-del', 'aria-label': '删除', title: '删除', text: '✕' });
       delBtn.addEventListener('click', function() {
         deleteWord(w.id);
         renderWordList();
@@ -223,7 +265,8 @@
     hideQuestions();
 
     try {
-      var apiBase = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : '/api/agent';
+      // ★ U3 修复: window.API_BASE 是 origin (https://xtj.onrender.com), 需补 /api/agent
+      var apiBase = (typeof window.API_BASE === 'string' && window.API_BASE) ? (window.API_BASE.replace(/\/$/, '') + '/api/agent') : '/api/agent';
       var headers = await getAuthHeaders();
       var un = readUserName();
       var pw = readPwHash();
@@ -232,7 +275,6 @@
         level: level,
         types: types
       };
-      // 兼容旧认证: 附带 user_name + password_hash
       if (!headers.Authorization && un && pw) {
         body.user_name = un;
         body.password_hash = pw;
@@ -285,8 +327,20 @@
     var wordsBox = $('elArticleWords');
     if (!card || !text) return;
 
-    text.textContent = quiz.article || '(本轮未生成文章)';
-    if (meta) meta.textContent = quiz.words.length + ' 词 · ' + (quiz.level || '').toUpperCase();
+    // 高亮单词
+    var articleHtml = escapeHtml(quiz.article || '(本轮未生成文章)');
+    if (quiz.words && quiz.words.length) {
+      quiz.words.forEach(function(w) {
+        if (w && w.length > 1) {
+          try {
+            var re = new RegExp('\\b(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')\\b', 'gi');
+            articleHtml = articleHtml.replace(re, '<span class="el-word-highlight">$1</span>');
+          } catch (e) {}
+        }
+      });
+    }
+    text.innerHTML = articleHtml;
+    if (meta) meta.textContent = (quiz.words.length || 0) + ' 词 · ' + (quiz.level || '').toUpperCase();
 
     if (wordsBox) {
       wordsBox.innerHTML = '';
@@ -297,6 +351,7 @@
       }
     }
     card.style.display = '';
+    card.classList.add('el-fade-in');
   }
 
   function renderQuestions(quiz) {
@@ -315,12 +370,10 @@
         qEl.appendChild(title);
         var opts = el('div', { class: 'el-q-options' });
         q.options.forEach(function(opt, oi) {
-          var oid = q.id + '_' + oi;
-          var optEl = el('label', { class: 'el-q-option', 'data-oid': oid, 'data-oi': oi, 'data-qid': q.id });
+          var optEl = el('label', { class: 'el-q-option', 'data-oi': oi, 'data-qid': q.id });
           var input = el('input', { type: 'radio', name: 'q_' + q.id, value: String(oi) });
           input.addEventListener('change', function() {
             S.currentQuiz.answers[q.id] = oi;
-            // 高亮选中
             var siblings = opts.querySelectorAll('.el-q-option');
             siblings.forEach(function(s) { s.classList.remove('selected'); });
             optEl.classList.add('selected');
@@ -336,18 +389,16 @@
         title2.appendChild(el('span', { class: 'el-q-type', text: '完形' }));
         title2.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + q.question));
         qEl.appendChild(title2);
-        var ctx = el('div', { class: 'el-q-context', style: 'font-size:13px;line-height:1.85;margin:6px 0;white-space:pre-wrap;color:rgb(55,70,65);' });
-        // 渲染 context 并替换 ___ 为 select
+        var ctx = el('div', { class: 'el-q-context' });
         var ctxHtml = escapeHtml(q.context);
-        var blankIdx = 0;
         var parts = ctxHtml.split('___');
         var ctxFrag = document.createDocumentFragment();
+        var blankIdx = 0;
         parts.forEach(function(p, pi) {
           if (pi > 0) {
-            // 插入 select
             var bk = q.blanks[blankIdx];
             if (bk) {
-              var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': String(blankIdx), style: 'padding:2px 6px;font-size:12px;border:1px solid rgba(140,196,158,0.4);border-radius:6px;background:rgba(255,255,255,0.7);' });
+              var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': String(blankIdx) });
               sel.appendChild(el('option', { value: '-1', text: '(选)' }));
               bk.options.forEach(function(o, oi2) {
                 sel.appendChild(el('option', { value: String(oi2), text: String.fromCharCode(65 + oi2) }));
@@ -377,10 +428,7 @@
       meta.textContent = mcCount + ' 单选 + ' + clCount + ' 完形, 共 ' + total + ' 空';
     }
     card.style.display = '';
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    card.classList.add('el-fade-in');
   }
 
   function hideArticle() { var c = $('elArticleCard'); if (c) c.style.display = 'none'; }
@@ -419,7 +467,6 @@
     var pct = total > 0 ? Math.round((correct / total) * 100) : 0;
     showResult(correct, total, pct);
 
-    // 记录
     S.history.unshift({
       id: 'h_' + Date.now(),
       score: correct,
@@ -448,7 +495,7 @@
       text.textContent = advice;
     }
     card.style.display = '';
-    // 滚动到结果
+    card.classList.add('el-fade-in');
     setTimeout(function() {
       try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
     }, 100);
@@ -493,7 +540,6 @@
         }
       }
     });
-    // 禁用提交按钮
     var sb = $('elSubmitBtn');
     if (sb) sb.disabled = true;
   }
@@ -557,25 +603,16 @@
   }
 
   function openPage() {
-    try { console.log('[EL] openPage called'); } catch (e) {}
     var panel = $('panelEnglishLearning');
-    if (!panel) {
-      try { console.warn('[EL] panel not found'); } catch (e) {}
-      return;
-    }
-    // 直接显示 panel (去掉登录检查, 用户能看到 UI 后再处理登录态)
+    if (!panel) return;
     panel.classList.remove('hidden');
     setTimeout(function() { try { panel.classList.add('el-show'); } catch (e) {} }, 10);
-    try { setDockBarVisible(false); } catch (e) {}
-    try {
-      S.words = loadWords();
-      S.history = loadHistory();
-      renderWordList();
-      renderHistory();
-      updateGenInfo();
-    } catch (e) {
-      try { console.error('[EL] init error:', e); } catch (e2) {}
-    }
+    setDockBarVisible(false);
+    S.words = loadWords();
+    S.history = loadHistory();
+    renderWordList();
+    renderHistory();
+    updateGenInfo();
   }
 
   function closePage() {
@@ -588,26 +625,12 @@
 
   // ============= Event bindings =============
   function bindEvents() {
-    // Dock tab click - use capture phase and stop propagation to prevent switchDockTab
-    var dockBtn = $('englishLearnBtn');
-    if (dockBtn) {
-      dockBtn.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        openPage();
-      }, true);
-    }
-
-    // Back button
     var back = $('elBackBtn');
     if (back) back.addEventListener('click', function() { closePage(); });
 
-    // Tabs
     var tabs = document.querySelectorAll('.el-tab');
     tabs.forEach(function(t) {
-      t.addEventListener('click', function() {
-        switchTab(t.getAttribute('data-eltab'));
-      });
+      t.addEventListener('click', function() { switchTab(t.getAttribute('data-eltab')); });
     });
 
     // Add single word
@@ -641,6 +664,31 @@
       }
     });
 
+    // ★ U3: Autocomplete for word input
+    var wordInput = $('elWordInput');
+    if (wordInput) {
+      var acTimer = null;
+      wordInput.addEventListener('input', function() {
+        var q = wordInput.value.trim();
+        if (acTimer) clearTimeout(acTimer);
+        if (q.length < 1) { hideAutocomplete(); return; }
+        acTimer = setTimeout(function() {
+          var matches = getDictMatches(q, 8);
+          showAutocomplete(wordInput, matches);
+        }, 200);
+      });
+      wordInput.addEventListener('focus', function() {
+        var q = wordInput.value.trim();
+        if (q.length >= 1) {
+          var matches = getDictMatches(q, 8);
+          showAutocomplete(wordInput, matches);
+        }
+      });
+      wordInput.addEventListener('blur', function() {
+        setTimeout(hideAutocomplete, 200);
+      });
+    }
+
     // Batch add
     var batchBtn = $('elBatchAddBtn');
     if (batchBtn) {
@@ -648,7 +696,6 @@
         var text = $('elBatchInput').value;
         var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
         var added = 0;
-        var dupes = 0;
         var before = S.words.length;
         lines.forEach(function(line) {
           var parts = line.split(/\s+/);
@@ -660,7 +707,6 @@
           }
         });
         var after = S.words.length;
-        dupes = added - (after - before);
         if (added > 0) {
           notify('批量添加完成: +' + (after - before) + ' 新词');
           $('elBatchInput').value = '';
@@ -671,7 +717,6 @@
       });
     }
 
-    // Select all
     var sa = $('elSelectAllCb');
     if (sa) {
       sa.addEventListener('change', function() {
@@ -680,7 +725,6 @@
       });
     }
 
-    // Delete selected
     var ds = $('elDeleteSelBtn');
     if (ds) {
       ds.addEventListener('click', function() {
@@ -695,41 +739,31 @@
       });
     }
 
-    // Generate
     var genBtn = $('elGenBtn');
     if (genBtn) genBtn.addEventListener('click', generateQuiz);
 
-    // Submit
     var subBtn = $('elSubmitBtn');
     if (subBtn) subBtn.addEventListener('click', submitAnswers);
 
-    // Show answer
     var showBtn = $('elShowAnswerBtn');
     if (showBtn) showBtn.addEventListener('click', showAllAnswers);
 
-    // New practice
     var newBtn = $('elNewPracticeBtn');
     if (newBtn) newBtn.addEventListener('click', function() {
-      hideResult();
-      hideArticle();
-      hideQuestions();
+      hideResult(); hideArticle(); hideQuestions();
       switchTab('practice');
       $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    // Header: new practice button
     var newTopBtn = $('elNewChatBtn');
     if (newTopBtn) newTopBtn.addEventListener('click', function() {
-      hideResult();
-      hideArticle();
-      hideQuestions();
+      hideResult(); hideArticle(); hideQuestions();
       switchTab('practice');
     });
 
-    // Header: clear
     var delBtn = $('elDeleteBtn');
     if (delBtn) delBtn.addEventListener('click', function() {
-      if (!confirm('确定清空全部单词和练习记录? 此操作不可恢复!')) return;
+      if (!confirm('确定清空全部单词和练习记录?')) return;
       clearAllWords();
       S.history = [];
       saveHistory();
@@ -739,31 +773,25 @@
     });
   }
 
-  // ============= Bootstrap =============
-  function bootstrap() {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init);
-    } else {
-      init();
-    }
-  }
-
   function init() {
-    try { S.words = loadWords(); } catch (e) { S.words = []; console.warn('[EL] init loadWords:', e); }
-    try { S.history = loadHistory(); } catch (e) { S.history = []; console.warn('[EL] init loadHistory:', e); }
+    S.words = loadWords();
+    S.history = loadHistory();
     try { bindEvents(); } catch (e) { console.error('[EL] bindEvents error:', e); }
-    try { console.log('[EL] English learning initialized. Words:', S.words.length, 'History:', S.history.length); } catch (e) {}
   }
 
-  // Expose for external usage FIRST (so ai-agent.js can always find it)
+  // Expose FIRST
   window.EnglishLearning = {
     open: openPage,
     close: closePage,
     addWord: addWord,
     getWords: function() { return S.words.slice(); }
   };
-  try { console.log('[EL] English learning loaded, panel:', !!document.getElementById('panelEnglishLearning')); } catch (e) {}
+  try { console.log('[EL] English learning loaded'); } catch (e) {}
 
-  // Then bootstrap (in case init throws)
-  try { bootstrap(); } catch (e) { console.error('[EL] bootstrap error:', e); }
+  // Then init
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    try { init(); } catch (e) { console.error('[EL] init error:', e); }
+  }
 })();
