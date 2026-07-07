@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="description" content="XTJ - 照片墙与社区平台" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, shrink-to-fit=no" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://ithowxqignlhkwaykglt.supabase.co; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://ithowxqignlhkwaykglt.supabase.co; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; font-src 'self' data:; base-uri 'self'" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
@@ -47,7 +48,7 @@
     <link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1" />
     <link rel="stylesheet" href="css/visual-refinements.css?v=20260627_v1" />
     <link rel="stylesheet" href="css/ai-agent.css?v=20260702_v12_rollback" />
-    <link rel="stylesheet" href="css/english-learning.css?v=20260707_v1" />
+    <link rel="stylesheet" href="css/english-learning.css?v=20260707_v2" />
     <noscript><link rel="stylesheet" href="css/style.css" /><link rel="stylesheet" href="css/visual-refinements.css" /><link rel="stylesheet" href="css/ai-agent.css" /></noscript>
     <style id="xtj-inline-hotfix-20260612">
         .hidden { display: none !important; }
@@ -1613,7 +1614,7 @@
     <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
     <script defer src="js/ai-agent.js?v=20260707_v1"></script>
 <script defer src="js/english-dict.js?v=20260706_v4"></script>
-<script defer src="js/english-learning.js?v=20260707_v1"></script>
+<script defer src="js/english-learning.js?v=20260707_v2"></script>
 <script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
@@ -1673,17 +1674,12 @@
             </div>
             <div class="el-stats">
                 <div class="el-stat"><span id="elWordCount">0</span><label>单词</label></div>
-                <div class="el-stat"><span id="elWeakCount">0</span><label>薄弱</label></div>
-                <div class="el-stat"><span id="elMasteredCount">0</span><label>掌握</label></div>
-                <div class="el-stat"><span id="elMistakeCount">0</span><label>错题</label></div>
             </div>
         </section>
 
         <nav class="el-tabs" aria-label="英语学习导航">
             <button class="el-tab active" data-eltab="library">单词库</button>
             <button class="el-tab" data-eltab="practice">生成练习</button>
-            <button class="el-tab" data-eltab="history">复习记录</button>
-            <button class="el-tab" data-eltab="mistakes">错题本</button>
             <span class="el-tab-indicator" aria-hidden="true"></span>
         </nav>
 
@@ -1821,27 +1817,6 @@
                                 <button type="button" class="el-btn el-btn-primary" id="elNewPracticeBtn">再来一组</button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="el-pane" id="elPaneHistory">
-                <div class="el-card">
-                    <div class="el-card-title">复习记录</div>
-                    <div class="el-history" id="elHistoryList">
-                        <div class="el-empty-hint">还没有练习记录</div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="el-pane" id="elPaneMistakes">
-                <div class="el-card">
-                    <div class="el-card-title el-flex">
-                        <span>错题本</span>
-                        <button type="button" class="el-btn-mini" id="elPracticeMistakesBtn">用错题生成练习</button>
-                    </div>
-                    <div class="el-mistakes" id="elMistakeList">
-                        <div class="el-empty-hint">还没有错题。</div>
                     </div>
                 </div>
             </section>
