@@ -33,6 +33,8 @@
     filter: 'all',
     search: '',
     isGenerating: false,
+    isCancelled: false,
+    currentController: null,
     initialized: false,
     syncStatus: 'local',
     syncTimer: null,
@@ -843,12 +845,19 @@
       hideQuestions();
     }
     scheduleSave();
+
+    // AbortController: 用户点"取消" 或 切到单词库后想停止生成时可立即中止 fetch
+    var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    S.currentController = controller;
+    S.isCancelled = false;
+
     var headers;
     try {
       headers = await getAuthHeaders();
     } catch (e) {
       showLoading(false);
       S.isGenerating = false;
+      S.currentController = null;
       updateGenInfo();
       notify('请先登录后再生成练习', 'error');
       return;
@@ -865,11 +874,13 @@
         regen_article: !!opts.regenArticle,
         regen_quiz: !!opts.regenQuiz
       }, headers);
-      var resp = await fetch(apiBase() + '/english/generate', {
+      var fetchOpts = {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(body)
-      });
+      };
+      if (controller) fetchOpts.signal = controller.signal;
+      var resp = await fetch(apiBase() + '/english/generate', fetchOpts);
       if (!resp.ok) {
         var err = '';
         try { var ej = await resp.json(); err = (ej && ej.error) || ''; } catch (e) {}
@@ -893,6 +904,11 @@
       renderQuestions(S.currentQuiz);
       switchTab('practice');
     } catch (e2) {
+      // 用户主动取消: 静默关闭 loading
+      if (S.isCancelled || (e2 && e2.name === 'AbortError')) {
+        S.isCancelled = false;
+        return;
+      }
       try { console.error('[EL] generate error:', e2); } catch (e3) {}
       // 后端不可用时, 用本地模板兜底, 用户不至于完全卡住
       var emsg = String((e2 && e2.message) || '');
@@ -931,8 +947,20 @@
     } finally {
       showLoading(false);
       S.isGenerating = false;
+      S.currentController = null;
       updateGenInfo();
     }
+  }
+
+  function cancelGeneration() {
+    if (!S.isGenerating) return;
+    S.isCancelled = true;
+    try { if (S.currentController) S.currentController.abort(); } catch (e) {}
+    showLoading(false);
+    S.isGenerating = false;
+    S.currentController = null;
+    updateGenInfo();
+    notify('已取消生成');
   }
 
   function renderArticle(quiz) {
@@ -1155,6 +1183,9 @@
           });
           sel.addEventListener('change', function() {
             var v = parseInt(sel.value, 10);
+            // selected 视觉态: 选了真答案 (>=0) 后加 selected
+            if (v >= 0) sel.classList.add('selected');
+            else sel.classList.remove('selected');
             if (!S.currentQuiz.answers[q.id]) S.currentQuiz.answers[q.id] = {};
             S.currentQuiz.answers[q.id][currentBlankIndex] = v;
           });
@@ -1166,6 +1197,7 @@
     });
     parent.appendChild(ctx);
     var optionPanel = el('div', { class: 'el-cloze-options' });
+    optionPanel.appendChild(el('div', { class: 'el-cloze-ref-label', text: '参考答案 · 提交后显示' }));
     (q.blanks || []).forEach(function(blank, bi) {
       var group = el('div', { class: 'el-cloze-group' });
       group.appendChild(el('div', { class: 'el-cloze-label', text: '空 ' + (bi + 1) }));
@@ -1194,8 +1226,9 @@
     var l = $('elLoading');
     var g = $('elGenBtn');
     if (l) {
-      // 用 setProperty + important 强制覆盖 CSS 末尾的 !important
-      l.style.setProperty('display', on ? 'flex' : 'none', 'important');
+      // 用 hidden 属性控制可见性 (el-loading 浮在 panel 级别, 切任何 tab 都能看到)
+      l.hidden = !on;
+      l.setAttribute('aria-busy', on ? 'true' : 'false');
     }
     if (g) {
       g.disabled = on || getWordsForGeneration(false).length === 0;
@@ -1737,6 +1770,7 @@
     safeBind('elRegenArticleBtn', 'click', function() { generateQuiz({ regenArticle: true }); });
     safeBind('elSubmitBtn', 'click', submitAnswers);
     safeBind('elShowAnswerBtn', 'click', showAllAnswers);
+    safeBind('elLoadingCancel', 'click', function() { cancelGeneration(); });
     safeBind('elNewPracticeBtn', 'click', function() {
       hideArticle();
       hideQuestions();
@@ -1765,7 +1799,7 @@
   }
 
   /* ============================================================
-   * Tabs 点击切换 (单词库/生成练习位置固定, 不可拖拽调换)
+   * Tabs 点击切换 + indicator 拖动切换 (iOS segmented control 风格)
    * ============================================================ */
   function initTabs() {
     var tabsContainer = document.querySelector('#panelEnglishLearning .el-tabs');
@@ -1781,6 +1815,111 @@
         if (name) switchTab(name);
       });
     });
+
+    // indicator 拖动切换 (借鉴 dock-bar drag 模式)
+    if (!tabsContainer.dataset._elDragInited) {
+      tabsContainer.dataset._elDragInited = '1';
+      var indicator = tabsContainer.querySelector('.el-tab-indicator');
+      var dragState = null;
+      var dragStartX = 0;
+      var dragStartIndicatorLeft = 0;
+      var dragStartIndicatorWidth = 0;
+      var dragSuppressClick = false;
+
+      function currentRect() {
+        if (!indicator) return { left: 0, width: 0, containerLeft: tabsContainer.getBoundingClientRect().left };
+        var tr = tabsContainer.getBoundingClientRect();
+        var ir = indicator.getBoundingClientRect();
+        return { left: ir.left - tr.left, width: ir.width, containerLeft: tr.left };
+      }
+      function getTabRects() {
+        var tr = tabsContainer.getBoundingClientRect();
+        var rects = [];
+        tabs.forEach(function(t) {
+          var r = t.getBoundingClientRect();
+          rects.push({ tab: t, center: r.left - tr.left + r.width / 2, width: r.width, left: r.left - tr.left });
+        });
+        return rects;
+      }
+      function setIndicatorImmediate(left, width) {
+        if (!indicator) return;
+        indicator.style.width = Math.max(40, width) + 'px';
+        indicator.style.transform = 'translateX(' + Math.max(0, left) + 'px)';
+      }
+      function snapToNearestTab() {
+        if (!indicator) return;
+        var rects = getTabRects();
+        if (!rects.length) return;
+        var info = currentRect();
+        var center = info.left + info.width / 2;
+        var best = rects[0];
+        var bestDist = Math.abs(rects[0].center - center);
+        for (var i = 1; i < rects.length; i++) {
+          var d = Math.abs(rects[i].center - center);
+          if (d < bestDist) { bestDist = d; best = rects[i]; }
+        }
+        // 恢复弹性过渡 + 切到对应 tab
+        tabsContainer.classList.remove('is-dragging');
+        var tr = tabsContainer.getBoundingClientRect();
+        var ar = best.tab.getBoundingClientRect();
+        var inset = 4;
+        setIndicatorImmediate(ar.left - tr.left + inset, ar.width - inset * 2);
+        var name = best.tab.getAttribute('data-eltab');
+        if (name) {
+          var active = document.querySelector('.el-tab.active');
+          if (active !== best.tab) switchTab(name);
+        }
+      }
+
+      tabsContainer.addEventListener('pointerdown', function(e) {
+        // 只在主指针/触摸
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        // 点击 tab 自己: 走 click, 不抢拖动
+        if (e.target.closest('.el-tab')) return;
+        if (!indicator) return;
+        dragStartX = e.clientX;
+        var info = currentRect();
+        dragStartIndicatorLeft = info.left;
+        dragStartIndicatorWidth = info.width;
+        dragState = 'pending';
+        try { tabsContainer.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      tabsContainer.addEventListener('pointermove', function(e) {
+        if (dragState == null) return;
+        if (dragState === 'pending') {
+          if (Math.abs(e.clientX - dragStartX) < 4) return; // 4px 死区
+          dragState = 'dragging';
+          dragSuppressClick = true;
+          tabsContainer.classList.add('is-dragging');
+        }
+        if (dragState !== 'dragging') return;
+        var dx = e.clientX - dragStartX;
+        var newLeft = dragStartIndicatorLeft + dx;
+        setIndicatorImmediate(newLeft, dragStartIndicatorWidth);
+      });
+      function endDrag(e) {
+        if (dragState == null) return;
+        if (dragState === 'dragging') {
+          snapToNearestTab();
+        } else {
+          // 没真正拖动: 解除 capturing, 让 click 走
+        }
+        try { tabsContainer.releasePointerCapture(e.pointerId); } catch (_) {}
+        dragState = null;
+      }
+      tabsContainer.addEventListener('pointerup', endDrag);
+      tabsContainer.addEventListener('pointercancel', endDrag);
+
+      // 拖动结束后短暂忽略 click 防止误触 (借鉴 dockBar 模式)
+      tabsContainer.addEventListener('click', function(e) {
+        if (dragSuppressClick) {
+          dragSuppressClick = false;
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      }, true);
+    }
+
     // 初始化 indicator 位置
     setTimeout(updateTabIndicator, 30);
   }

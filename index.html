@@ -1683,6 +1683,63 @@
             <span class="el-tab-indicator" aria-hidden="true"></span>
         </div>
 
+        <!-- 加载层 (浮在 panel 级别, 切到任何 tab 都能看到, 不会被 tab 切换打断) -->
+        <div class="el-loading" id="elLoading" aria-live="polite" aria-busy="true" hidden>
+            <div class="el-loading-scene" aria-hidden="true">
+                <svg class="el-butterfly-svg" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+                    <!-- 装饰花草 -->
+                    <g class="el-scene-flower el-scene-flower-1">
+                        <path d="M 14 70 Q 14 60 18 56 Q 22 60 22 70 Z" fill="rgba(20,124,90,0.18)"/>
+                        <path d="M 18 70 L 18 56" stroke="rgba(20,124,90,0.35)" stroke-width="1" stroke-linecap="round"/>
+                        <circle cx="18" cy="55" r="2.2" fill="rgba(50,180,137,0.55)"/>
+                    </g>
+                    <g class="el-scene-flower el-scene-flower-2">
+                        <path d="M 102 72 Q 102 64 106 60 Q 110 64 110 72 Z" fill="rgba(20,124,90,0.14)"/>
+                        <path d="M 106 72 L 106 60" stroke="rgba(20,124,90,0.3)" stroke-width="1" stroke-linecap="round"/>
+                        <circle cx="106" cy="59" r="1.8" fill="rgba(50,180,137,0.5)"/>
+                    </g>
+                    <g class="el-scene-leaf el-scene-leaf-1">
+                        <path d="M 60 75 Q 56 70 60 65 Q 64 70 60 75 Z" fill="rgba(20,124,90,0.16)"/>
+                    </g>
+
+                    <!-- 蝴蝶 1 (主) -->
+                    <g class="el-butterfly el-butterfly-1">
+                        <g class="el-butterfly-flight">
+                            <g class="el-butterfly-wings">
+                                <path class="el-wing el-wing-l" d="M 0 0 Q -10 -8 -14 -4 Q -10 2 0 0 Z" fill="rgba(50,180,137,0.85)"/>
+                                <path class="el-wing el-wing-r" d="M 0 0 Q 10 -8 14 -4 Q 10 2 0 0 Z" fill="rgba(20,124,90,0.85)"/>
+                                <circle cx="0" cy="0" r="1.2" fill="rgba(20,124,90,1)"/>
+                            </g>
+                        </g>
+                    </g>
+
+                    <!-- 蝴蝶 2 (副) -->
+                    <g class="el-butterfly el-butterfly-2">
+                        <g class="el-butterfly-flight">
+                            <g class="el-butterfly-wings">
+                                <path class="el-wing el-wing-l" d="M 0 0 Q -7 -6 -10 -3 Q -7 1 0 0 Z" fill="rgba(94,191,153,0.75)"/>
+                                <path class="el-wing el-wing-r" d="M 0 0 Q 7 -6 10 -3 Q 7 1 0 0 Z" fill="rgba(38,150,109,0.78)"/>
+                                <circle cx="0" cy="0" r="0.9" fill="rgba(20,124,90,0.95)"/>
+                            </g>
+                        </g>
+                    </g>
+
+                    <!-- 蝴蝶 3 (小) -->
+                    <g class="el-butterfly el-butterfly-3">
+                        <g class="el-butterfly-flight">
+                            <g class="el-butterfly-wings">
+                                <path class="el-wing el-wing-l" d="M 0 0 Q -5 -4 -7 -2 Q -5 1 0 0 Z" fill="rgba(120,210,170,0.8)"/>
+                                <path class="el-wing el-wing-r" d="M 0 0 Q 5 -4 7 -2 Q 5 1 0 0 Z" fill="rgba(50,180,137,0.85)"/>
+                                <circle cx="0" cy="0" r="0.7" fill="rgba(20,124,90,0.95)"/>
+                            </g>
+                        </g>
+                    </g>
+                </svg>
+            </div>
+            <div class="el-loading-text">DeepSeek 正在组织文章、题目和解析…</div>
+            <button type="button" class="el-loading-cancel" id="elLoadingCancel" aria-label="取消生成">取消</button>
+        </div>
+
         <main class="el-main">
             <section class="el-pane active" id="elPaneLibrary">
                 <div class="el-dashboard-grid">
@@ -1780,11 +1837,6 @@
                     </div>
 
                     <div class="el-practice-output">
-                        <div class="el-card el-loading" id="elLoading" style="display:none">
-                            <div class="el-loader-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-                            <div class="el-loading-text">DeepSeek 正在组织文章、题目和解析...</div>
-                        </div>
-
                         <div class="el-locale-bar" id="elLocaleBar">
                             <div class="el-locale-info">
                                 <div class="el-locale-title">阅读文章</div>
