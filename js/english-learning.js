@@ -38,7 +38,10 @@
     syncTimer: null,
     saveInFlight: false,
     pendingSave: false,
-    lastRemoteUpdatedAt: 0
+    lastRemoteUpdatedAt: 0,
+    openTimer: null,
+    closeTimer: null,
+    eventsBound: false
   };
 
   function $(id) { return document.getElementById(id); }
@@ -75,6 +78,41 @@
       try { window.showToast(msg); return; } catch (e2) {}
     }
     try { console.log('[EL]', msg); } catch (e3) {}
+  }
+
+  function safeBind(id, eventName, handler, options) {
+    try {
+      var node = $(id);
+      if (!node) return null;
+      node.addEventListener(eventName, handler, options);
+      return node;
+    } catch (e) {
+      try { console.error('[EL] bind failed:', id, e); } catch (e2) {}
+      return null;
+    }
+  }
+
+  function safeBindNode(node, eventName, handler, label, options) {
+    try {
+      if (!node) return false;
+      node.addEventListener(eventName, handler, options);
+      return true;
+    } catch (e) {
+      try { console.error('[EL] bind failed:', label || eventName, e); } catch (e2) {}
+      return false;
+    }
+  }
+
+  function safeForEach(selector, binder) {
+    try {
+      Array.prototype.forEach.call(document.querySelectorAll(selector), function(node, index) {
+        try { binder(node, index); } catch (e) {
+          try { console.error('[EL] bind failed:', selector, e); } catch (e2) {}
+        }
+      });
+    } catch (e) {
+      try { console.error('[EL] bind failed:', selector, e); } catch (e2) {}
+    }
   }
 
   function apiBase() {
@@ -1130,11 +1168,38 @@
     if (dockBar) dockBar.style.display = visible ? '' : 'none';
   }
 
+  function setPageScrollLocked(locked) {
+    try {
+      document.body.classList.toggle('english-learning-open', !!locked);
+      document.documentElement.style.overflow = locked ? 'hidden' : '';
+      document.body.style.overflow = locked ? 'hidden' : '';
+      document.body.style.touchAction = locked ? 'none' : '';
+    } catch (e) {}
+  }
+
   async function openPage() {
     var panel = $('panelEnglishLearning');
     if (!panel) return;
+    if (S.closeTimer) {
+      clearTimeout(S.closeTimer);
+      S.closeTimer = null;
+    }
+    if (S.openTimer) {
+      clearTimeout(S.openTimer);
+      S.openTimer = null;
+    }
     panel.classList.remove('hidden');
-    setTimeout(function() { panel.classList.add('el-show'); }, 20);
+    panel.setAttribute('aria-hidden', 'false');
+    panel.classList.remove('el-closing');
+    panel.classList.remove('el-opening');
+    void panel.offsetWidth;
+    panel.classList.add('el-opening');
+    panel.classList.add('el-show');
+    S.openTimer = setTimeout(function() {
+      panel.classList.remove('el-opening');
+      S.openTimer = null;
+    }, 180);
+    setPageScrollLocked(true);
     setDockBarVisible(false);
     if (!S.initialized) {
       S.initialized = true;
@@ -1149,8 +1214,24 @@
   function closePage() {
     var panel = $('panelEnglishLearning');
     if (!panel) return;
+    if (S.openTimer) {
+      clearTimeout(S.openTimer);
+      S.openTimer = null;
+    }
+    if (S.closeTimer) {
+      clearTimeout(S.closeTimer);
+      S.closeTimer = null;
+    }
+    panel.classList.remove('el-opening');
+    panel.classList.add('el-closing');
     panel.classList.remove('el-show');
-    setTimeout(function() { panel.classList.add('hidden'); }, 180);
+    panel.setAttribute('aria-hidden', 'true');
+    S.closeTimer = setTimeout(function() {
+      panel.classList.add('hidden');
+      panel.classList.remove('el-closing');
+      S.closeTimer = null;
+    }, 180);
+    setPageScrollLocked(false);
     setDockBarVisible(true);
   }
 
@@ -1305,6 +1386,169 @@
     window.addEventListener('resize', function() { setTimeout(updateTabIndicator, 80); });
   }
 
+  function bindEventsSafe() {
+    if (S.eventsBound) return;
+    S.eventsBound = true;
+
+    safeBind('elBackBtn', 'click', closePage);
+
+    safeForEach('.el-tab', function(tab) {
+      safeBindNode(tab, 'click', function() {
+        switchTab(tab.getAttribute('data-eltab'));
+      }, 'el-tab');
+    });
+
+    safeBind('elAddWordBtn', 'click', function() {
+      var word = $('elWordInput');
+      var cn = $('elMeaningInput');
+      var w = addWord(word && word.value, cn && cn.value);
+      if (w) {
+        notify('已添加 ' + w.en);
+        if (word) word.value = '';
+        if (cn) cn.value = '';
+        renderAll();
+        if (word) word.focus();
+      }
+    });
+
+    ['elWordInput', 'elMeaningInput'].forEach(function(id) {
+      safeBind(id, 'keydown', function(ev) {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          var btn = $('elAddWordBtn');
+          if (btn) btn.click();
+        }
+      });
+    });
+
+    var wordInput = $('elWordInput');
+    if (wordInput) {
+      var acTimer = null;
+      safeBindNode(wordInput, 'input', function() {
+        if (acTimer) clearTimeout(acTimer);
+        var q = wordInput.value.trim();
+        if (!q) {
+          hideAutocomplete();
+          return;
+        }
+        acTimer = setTimeout(function() {
+          showAutocomplete(wordInput, getDictMatches(q, 8));
+        }, 160);
+      }, 'elWordInput:input');
+      safeBindNode(wordInput, 'focus', function() {
+        var q = wordInput.value.trim();
+        if (q) showAutocomplete(wordInput, getDictMatches(q, 8));
+      }, 'elWordInput:focus');
+      safeBindNode(wordInput, 'blur', function() {
+        setTimeout(hideAutocomplete, 180);
+      }, 'elWordInput:blur');
+    }
+
+    safeBind('elBatchAddBtn', 'click', function() {
+      var text = String(($('elBatchInput') || {}).value || '');
+      var beforeCount = S.words.length;
+      text.split('\n').map(function(line) { return line.trim(); }).filter(Boolean).forEach(function(line) {
+        var parts = line.split(/\s+/);
+        addWord(parts[0], parts.slice(1).join(' '), true);
+      });
+      var added = S.words.length - beforeCount;
+      if ($('elBatchInput')) $('elBatchInput').value = '';
+      renderAll();
+      notify(added > 0 ? '批量导入完成: +' + added : '没有新增有效单词');
+    });
+
+    safeBind('elSearchInput', 'input', function() {
+      var search = $('elSearchInput');
+      S.search = search ? (search.value || '') : '';
+      renderWordList();
+    });
+
+    safeForEach('.el-filter', function(btn) {
+      safeBindNode(btn, 'click', function() {
+        S.filter = btn.getAttribute('data-filter') || 'all';
+        document.querySelectorAll('.el-filter').forEach(function(node) { node.classList.remove('active'); });
+        btn.classList.add('active');
+        renderWordList();
+      }, 'el-filter');
+    });
+
+    var selectAllNode = $('elSelectAllCb');
+    safeBind('elSelectAllCb', 'change', function() {
+      safeForEach('.el-word-cb', function(cb) {
+        cb.checked = !!(selectAllNode && selectAllNode.checked);
+        cb.dispatchEvent(new Event('change'));
+      });
+    });
+
+    safeBind('elDeleteSelBtn', 'click', function() {
+      var ids = Array.from(document.querySelectorAll('.el-word-cb:checked')).map(function(cb) {
+        return cb.getAttribute('data-id');
+      });
+      if (!ids.length) {
+        notify('请先选择要删除的单词');
+        return;
+      }
+      if (!confirm('确定删除选中的 ' + ids.length + ' 个单词吗？')) return;
+      deleteSelected(ids);
+      if (selectAllNode) selectAllNode.checked = false;
+      renderAll();
+    });
+
+    safeForEach('input[name="elType"], input[name="elLevel"]', function(input) {
+      safeBindNode(input, 'change', function() {
+        refreshChipStates();
+        syncSettingsFromInputs();
+        scheduleSave();
+      }, 'settings-radio');
+    });
+
+    ['elQuestionCount', 'elArticleLength', 'elFocusMode', 'elTopicInput'].forEach(function(id) {
+      safeBind(id, 'change', function() {
+        syncSettingsFromInputs();
+        scheduleSave();
+        updateGenInfo();
+      });
+    });
+
+    safeBind('elGenBtn', 'click', generateQuiz);
+    safeBind('elSubmitBtn', 'click', submitAnswers);
+    safeBind('elShowAnswerBtn', 'click', showAllAnswers);
+    safeBind('elNewPracticeBtn', 'click', function() {
+      hideArticle();
+      hideQuestions();
+      hideResult();
+      switchTab('practice');
+      try { $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    });
+    safeBind('elNewChatBtn', 'click', function() {
+      hideArticle();
+      hideQuestions();
+      hideResult();
+      switchTab('practice');
+    });
+    safeBind('elDeleteBtn', 'click', function() {
+      if (!confirm('确定清空全部单词、练习记录和错题吗？')) return;
+      clearAll();
+      renderAll();
+      notify('已清空');
+    });
+    safeBind('elPracticeMistakesBtn', 'click', function() {
+      if (!S.mistakes.length) {
+        notify('还没有错题');
+        return;
+      }
+      S.settings.focus = 'weak';
+      applySettingsToInputs();
+      switchTab('practice');
+    });
+    safeBind('elSpeakArticleBtn', 'click', function() {
+      if (S.currentQuiz && S.currentQuiz.article) speakText(S.currentQuiz.article, 'en-US');
+    });
+    safeBindNode(window, 'resize', function() {
+      setTimeout(updateTabIndicator, 80);
+    }, 'window:resize');
+  }
+
   function findWord(en) {
     en = String(en || '').toLowerCase();
     for (var i = 0; i < S.words.length; i++) if (S.words[i].en === en) return S.words[i];
@@ -1328,7 +1572,7 @@
   }
 
   function init() {
-    try { bindEvents(); } catch (e) { console.error('[EL] bindEvents error:', e); }
+    bindEventsSafe();
     applyState(getLocalState());
     renderAll();
   }

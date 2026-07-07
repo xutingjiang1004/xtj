@@ -6,9 +6,9 @@
 #panelEnglishLearning {
   --el-bg: #eef5f2;
   --el-bg-2: #f8fbf9;
-  --el-surface: rgba(255, 255, 255, 0.78);
+  --el-surface: rgba(255, 255, 255, 0.92);
   --el-surface-solid: #ffffff;
-  --el-surface-soft: rgba(255, 255, 255, 0.52);
+  --el-surface-soft: rgba(255, 255, 255, 0.84);
   --el-line: rgba(43, 74, 63, 0.12);
   --el-line-strong: rgba(29, 96, 72, 0.24);
   --el-text: #17231f;
@@ -25,7 +25,7 @@
   --el-ease: cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed !important;
   inset: 0 !important;
-  z-index: 99999 !important;
+  z-index: 999999 !important;
   display: flex !important;
   width: 100vw !important;
   width: 100dvw !important;
@@ -35,23 +35,43 @@
   overflow: hidden !important;
   color: var(--el-text);
   background:
-    radial-gradient(circle at 12% 8%, rgba(50, 180, 137, 0.14), transparent 28%),
-    radial-gradient(circle at 88% 4%, rgba(72, 115, 205, 0.12), transparent 30%),
-    linear-gradient(145deg, var(--el-bg), var(--el-bg-2));
-  opacity: 0;
-  transform: translateY(12px) scale(0.99);
-  transition: opacity 220ms var(--el-ease), transform 240ms var(--el-ease);
+    radial-gradient(circle at 14% 10%, rgba(69, 166, 126, 0.12), transparent 32%),
+    radial-gradient(circle at 84% 6%, rgba(88, 131, 214, 0.08), transparent 30%),
+    linear-gradient(145deg, #eef5f2, #f8fbf9) !important;
+  opacity: 1;
+  pointer-events: auto !important;
+  transition: opacity 180ms var(--el-ease), transform 180ms var(--el-ease);
   -webkit-text-size-adjust: 100%;
 }
 
+#panelEnglishLearning:not(.hidden):not(.el-show) {
+  pointer-events: none !important;
+}
+
 #panelEnglishLearning.el-show {
+  opacity: 1 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+}
+
+#panelEnglishLearning.el-opening {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: none;
+}
+
+#panelEnglishLearning.el-closing {
+  opacity: 0;
+  transform: translateY(10px) scale(0.995);
+  pointer-events: none !important;
 }
 
 #panelEnglishLearning.hidden {
   display: none !important;
   visibility: hidden !important;
+}
+
+body.english-learning-open {
+  overflow: hidden !important;
 }
 
 #panelEnglishLearning::before {
@@ -69,9 +89,9 @@
 [data-theme="dark"] #panelEnglishLearning {
   --el-bg: #0d1513;
   --el-bg-2: #111c19;
-  --el-surface: rgba(19, 31, 28, 0.82);
+  --el-surface: rgba(19, 31, 28, 0.94);
   --el-surface-solid: #15221f;
-  --el-surface-soft: rgba(255, 255, 255, 0.045);
+  --el-surface-soft: rgba(29, 46, 41, 0.88);
   --el-line: rgba(203, 239, 224, 0.11);
   --el-line-strong: rgba(95, 220, 170, 0.28);
   --el-text: #edf7f3;
@@ -114,13 +134,13 @@
   flex: 0 0 auto;
   padding: calc(14px + env(safe-area-inset-top, 0px)) 18px 12px;
   border-bottom: 1px solid var(--el-line);
-  background: rgba(255, 255, 255, 0.48);
+  background: rgba(250, 253, 251, 0.9);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
 
 [data-theme="dark"] #panelEnglishLearning .el-header {
-  background: rgba(13, 21, 19, 0.58);
+  background: rgba(13, 21, 19, 0.88);
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -316,7 +336,7 @@
   padding: 4px;
   border: 1px solid var(--el-line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.78);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   overflow: hidden;
@@ -419,7 +439,7 @@
   background: var(--el-surface);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
-  box-shadow: var(--el-shadow);
+  box-shadow: 0 18px 48px rgba(23, 52, 42, 0.08);
 }
 
 #panelEnglishLearning .el-card + .el-card {
