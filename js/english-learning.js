@@ -552,12 +552,7 @@
   }
 
   function renderStats() {
-    var weak = S.words.filter(isWeakWord).length;
-    var mastered = S.words.filter(isMasteredWord).length;
     setText('elWordCount', S.words.length);
-    setText('elWeakCount', weak);
-    setText('elMasteredCount', mastered);
-    setText('elMistakeCount', S.mistakes.length);
     setText('elGenTotal', getWordsForGeneration(false).length);
   }
 
@@ -1126,14 +1121,12 @@
     applySettingsToInputs();
     renderStats();
     renderWordList();
-    renderHistory();
-    renderMistakes();
     updateGenInfo();
     updateTabIndicator();
   }
 
   function switchTab(name) {
-    ['library', 'practice', 'history', 'mistakes'].forEach(function(p) {
+    ['library', 'practice'].forEach(function(p) {
       var pane = $('elPane' + p.charAt(0).toUpperCase() + p.slice(1));
       if (pane) pane.classList.toggle('active', p === name);
     });
@@ -1141,8 +1134,6 @@
       t.classList.toggle('active', t.getAttribute('data-eltab') === name);
     });
     setTimeout(updateTabIndicator, 20);
-    if (name === 'history') renderHistory();
-    if (name === 'mistakes') renderMistakes();
   }
 
   function updateTabIndicator() {
@@ -1287,16 +1278,25 @@
 
     var batchBtn = $('elBatchAddBtn');
     if (batchBtn) batchBtn.addEventListener('click', function() {
-      var text = String(($('elBatchInput') || {}).value || '');
+      var input = $('elBatchInput');
+      if (!input) { notify('批量导入输入框未找到', 'error'); return; }
+      var text = String(input.value || '').trim();
+      if (!text) { notify('请先输入要导入的单词'); return; }
       var before = S.words.length;
-      text.split('\n').map(function(line) { return line.trim(); }).filter(Boolean).forEach(function(line) {
+      var lines = text.split(/[\n\r]+/);
+      var added = 0;
+      lines.forEach(function(line) {
+        line = line.trim();
+        if (!line) return;
         var parts = line.split(/\s+/);
-        addWord(parts[0], parts.slice(1).join(' '), true);
+        var en = parts[0];
+        var cn = parts.slice(1).join(' ');
+        if (addWord(en, cn, true)) added++;
       });
-      var added = S.words.length - before;
-      if ($('elBatchInput')) $('elBatchInput').value = '';
+      var totalAdded = S.words.length - before;
+      if (input) input.value = '';
       renderAll();
-      notify(added > 0 ? '批量导入完成: +' + added : '没有新增有效单词');
+      notify(totalAdded > 0 ? '批量导入完成: +' + totalAdded + ' 词' : '没有新增有效单词，请检查格式（如: apple 苹果）');
     });
 
     var search = $('elSearchInput');
@@ -1445,16 +1445,25 @@
     }
 
     safeBind('elBatchAddBtn', 'click', function() {
-      var text = String(($('elBatchInput') || {}).value || '');
+      var input = $('elBatchInput');
+      if (!input) { notify('批量导入输入框未找到', 'error'); return; }
+      var text = String(input.value || '').trim();
+      if (!text) { notify('请先输入要导入的单词'); return; }
       var beforeCount = S.words.length;
-      text.split('\n').map(function(line) { return line.trim(); }).filter(Boolean).forEach(function(line) {
+      var lines = text.split(/[\n\r]+/);
+      var added = 0;
+      lines.forEach(function(line) {
+        line = line.trim();
+        if (!line) return;
         var parts = line.split(/\s+/);
-        addWord(parts[0], parts.slice(1).join(' '), true);
+        var en = parts[0];
+        var cn = parts.slice(1).join(' ');
+        if (addWord(en, cn, true)) added++;
       });
-      var added = S.words.length - beforeCount;
-      if ($('elBatchInput')) $('elBatchInput').value = '';
+      var totalAdded = S.words.length - beforeCount;
+      if (input) input.value = '';
       renderAll();
-      notify(added > 0 ? '批量导入完成: +' + added : '没有新增有效单词');
+      notify(totalAdded > 0 ? '批量导入完成: +' + totalAdded + ' 词' : '没有新增有效单词，请检查格式（如: apple 苹果）');
     });
 
     safeBind('elSearchInput', 'input', function() {
@@ -1532,21 +1541,169 @@
       renderAll();
       notify('已清空');
     });
-    safeBind('elPracticeMistakesBtn', 'click', function() {
-      if (!S.mistakes.length) {
-        notify('还没有错题');
-        return;
-      }
-      S.settings.focus = 'weak';
-      applySettingsToInputs();
-      switchTab('practice');
-    });
     safeBind('elSpeakArticleBtn', 'click', function() {
       if (S.currentQuiz && S.currentQuiz.article) speakText(S.currentQuiz.article, 'en-US');
     });
     safeBindNode(window, 'resize', function() {
       setTimeout(updateTabIndicator, 80);
     }, 'window:resize');
+
+    // 初始化 tabs 拖拽排序
+    initTabDrag();
+  }
+
+  /* ============================================================
+   * Tabs 拖拽排序 (单词库/生成练习/复习记录/错题本)
+   * 支持鼠标拖拽 + 触摸拖拽, 样式与 dock 胶囊一致
+   * ============================================================ */
+  var _dragTabIndex = -1;
+  var _dragOverIndex = -1;
+  var _dragTabClone = null;
+  var _dragStartX = 0;
+  var _dragStartY = 0;
+  var _isDraggingTab = false;
+
+  function initTabDrag() {
+    var tabsContainer = document.querySelector('#panelEnglishLearning .el-tabs');
+    if (!tabsContainer) return;
+    var tabs = tabsContainer.querySelectorAll('.el-tab');
+
+    tabs.forEach(function(tab, index) {
+      // 鼠标拖拽
+      tab.setAttribute('draggable', 'true');
+      tab.addEventListener('dragstart', function(e) {
+        if (e.target.closest('.el-tab')) {
+          _dragTabIndex = index;
+          _isDraggingTab = true;
+          tab.style.opacity = '0.5';
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(index));
+        }
+      });
+      tab.addEventListener('dragend', function() {
+        tab.style.opacity = '';
+        _dragTabIndex = -1;
+        _dragOverIndex = -1;
+        _isDraggingTab = false;
+        tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
+      });
+      tab.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (_dragTabIndex >= 0 && _dragTabIndex !== index) {
+          _dragOverIndex = index;
+          tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
+          tab.classList.add('drag-over');
+        }
+      });
+      tab.addEventListener('drop', function(e) {
+        e.preventDefault();
+        tab.classList.remove('drag-over');
+        if (_dragTabIndex >= 0 && _dragTabIndex !== index) {
+          reorderTabs(tabsContainer, _dragTabIndex, index);
+        }
+        _dragTabIndex = -1;
+        _dragOverIndex = -1;
+        _isDraggingTab = false;
+      });
+
+      // 触摸拖拽
+      var touchStartX = 0, touchStartY = 0, touchMoved = false;
+      tab.addEventListener('touchstart', function(e) {
+        if (e.touches.length !== 1) return;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchMoved = false;
+        _dragTabIndex = index;
+      }, { passive: false });
+      tab.addEventListener('touchmove', function(e) {
+        if (_dragTabIndex < 0) return;
+        var dx = e.touches[0].clientX - touchStartX;
+        var dy = e.touches[0].clientY - touchStartY;
+        if (!touchMoved && Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        touchMoved = true;
+        _isDraggingTab = true;
+        e.preventDefault();
+        tab.style.opacity = '0.5';
+        // 检测悬停在哪个 tab 上
+        var target = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+        var targetTab = target ? target.closest('.el-tab') : null;
+        if (targetTab && targetTab !== tab) {
+          var targetIndex = Array.prototype.indexOf.call(tabs, targetTab);
+          if (targetIndex >= 0 && targetIndex !== _dragOverIndex) {
+            _dragOverIndex = targetIndex;
+            tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
+            targetTab.classList.add('drag-over');
+          }
+        }
+      }, { passive: false });
+      tab.addEventListener('touchend', function() {
+        tab.style.opacity = '';
+        tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
+        if (_isDraggingTab && _dragOverIndex >= 0 && _dragOverIndex !== _dragTabIndex) {
+          reorderTabs(tabsContainer, _dragTabIndex, _dragOverIndex);
+        }
+        _dragTabIndex = -1;
+        _dragOverIndex = -1;
+        _isDraggingTab = false;
+        touchMoved = false;
+      });
+    });
+  }
+
+  function reorderTabs(container, fromIndex, toIndex) {
+    var tabs = container.querySelectorAll('.el-tab');
+    if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length) return;
+    var fromTab = tabs[fromIndex];
+    var toTab = tabs[toIndex];
+    if (fromIndex < toIndex) {
+      container.insertBefore(fromTab, toTab.nextSibling);
+    } else {
+      container.insertBefore(fromTab, toTab);
+    }
+    // 保持 indicator 在最后
+    var indicator = container.querySelector('.el-tab-indicator');
+    if (indicator) container.appendChild(indicator);
+    setTimeout(updateTabIndicator, 30);
+    // 保存 tab 顺序
+    saveTabOrder(container);
+  }
+
+  function saveTabOrder(container) {
+    var order = [];
+    container.querySelectorAll('.el-tab').forEach(function(tab) {
+      order.push(tab.getAttribute('data-eltab'));
+    });
+    try { localStorage.setItem('xtj_el_tab_order', JSON.stringify(order)); } catch (e) {}
+  }
+
+  function loadTabOrder() {
+    try {
+      var raw = localStorage.getItem('xtj_el_tab_order');
+      if (!raw) return null;
+      var order = JSON.parse(raw);
+      if (Array.isArray(order) && order.length === 2) return order;
+    } catch (e) {}
+    return null;
+  }
+
+  function restoreTabOrder() {
+    var container = document.querySelector('#panelEnglishLearning .el-tabs');
+    if (!container) return;
+    var order = loadTabOrder();
+    if (!order) return;
+    var tabs = container.querySelectorAll('.el-tab');
+    var currentOrder = [];
+    tabs.forEach(function(t) { currentOrder.push(t.getAttribute('data-eltab')); });
+    if (JSON.stringify(currentOrder) === JSON.stringify(order)) return;
+    // 按保存的顺序重新排列
+    order.forEach(function(name) {
+      var tab = container.querySelector('.el-tab[data-eltab="' + name + '"]');
+      if (tab) container.appendChild(tab);
+    });
+    var indicator = container.querySelector('.el-tab-indicator');
+    if (indicator) container.appendChild(indicator);
+    setTimeout(updateTabIndicator, 30);
   }
 
   function findWord(en) {
@@ -1573,6 +1730,7 @@
 
   function init() {
     bindEventsSafe();
+    restoreTabOrder();
     applyState(getLocalState());
     renderAll();
   }
