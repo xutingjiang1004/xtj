@@ -1677,11 +1677,11 @@
             </div>
         </section>
 
-        <nav class="el-tabs" aria-label="英语学习导航">
-            <button class="el-tab active" data-eltab="library">单词库</button>
-            <button class="el-tab" data-eltab="practice">生成练习</button>
+        <div class="el-tabs" role="tablist" aria-label="英语学习导航">
+            <button class="el-tab active" data-eltab="library" role="tab" aria-selected="true">单词库</button>
+            <button class="el-tab" data-eltab="practice" role="tab" aria-selected="false">生成练习</button>
             <span class="el-tab-indicator" aria-hidden="true"></span>
-        </nav>
+        </div>
 
         <main class="el-main">
             <section class="el-pane active" id="elPaneLibrary">
@@ -1785,13 +1785,13 @@
                             <div class="el-loading-text">DeepSeek 正在组织文章、题目和解析...</div>
                         </div>
 
-                        <div class="el-locale-bar" id="elLocaleBar" style="display:none">
+                        <div class="el-locale-bar" id="elLocaleBar">
                             <div class="el-locale-info">
                                 <div class="el-locale-title">阅读文章</div>
-                                <div class="el-locale-meta" id="elArticleMeta"></div>
+                                <div class="el-locale-meta" id="elArticleMeta">尚未生成, 点击右下方"重新生成"开始</div>
                             </div>
                             <div class="el-locale-actions">
-                                <button type="button" class="el-btn-mini el-regen-btn" id="elRegenArticleBtn" title="重新生成文章与题目">
+                                <button type="button" class="el-btn-mini el-regen-btn" id="elRegenArticleBtn" title="生成新的文章与题目">
                                     <span class="el-regen-icon" aria-hidden="true">↻</span> 重新生成
                                 </button>
                             </div>
