@@ -900,16 +900,12 @@ body.english-learning-open {
   display: inline;
   margin: 0 1px;
   padding: 0 2px;
-  border: 0;
   border-radius: 4px;
   color: var(--el-accent);
   background: linear-gradient(180deg, transparent 58%, rgba(50, 180, 137, 0.2) 58%);
   font-weight: 760;
-  cursor: pointer;
-}
-
-#panelEnglishLearning .el-word-highlight:hover {
-  background: var(--el-accent-soft);
+  cursor: text;
+  pointer-events: none;
 }
 
 #panelEnglishLearning .el-wordlist-inline {
