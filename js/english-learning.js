@@ -452,6 +452,125 @@
     scheduleSave();
   }
 
+  /* ============================================================
+   * 添加单词: 用户只输入英文时, 自动调 AI 补全中文释义
+   * ============================================================ */
+  async function handleAddWord() {
+    var wordInput = $('elWordInput');
+    var cnInput = $('elMeaningInput');
+    if (!wordInput) return;
+    var en = String(wordInput.value || '').trim();
+    var cn = String(cnInput && cnInput.value || '').trim();
+    if (!en) { notify('请输入英文单词'); return; }
+    // 先本地添加 (有 cn 就直接用, 没 cn 也允许空 cn 留位)
+    var w = addWord(en, cn);
+    if (!w) return;
+    if (wordInput) wordInput.value = '';
+    if (cnInput) cnInput.value = '';
+    renderAll();
+    notify('已添加 ' + w.en + (w.cn ? ' · ' + w.cn : ' · AI 补全中...'));
+    if (wordInput) wordInput.focus();
+    // 没填 cn 时, 调 AI 补全
+    if (!w.cn) {
+      try {
+        var headers = await getAuthHeaders();
+        var resp = await fetch(apiBase() + '/english/explain-word', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ en: w.en })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        var json = await resp.json();
+        if (json && json.ok && json.data && json.data.cn) {
+          w.cn = json.data.cn;
+          scheduleSave();
+          renderAll();
+          notify('AI 补全: ' + w.en + ' = ' + w.cn);
+        }
+      } catch (e) {
+        try { console.warn('[EL] ai-fill-cn failed:', e && e.message); } catch (_) {}
+        // 失败静默, 用户可以手动补
+      }
+    }
+  }
+
+  /* ============================================================
+   * AI 解释单词: 点击单词卡 AI 按钮
+   * 弹层显示 例句 / 同义词 / 记忆技巧
+   * ============================================================ */
+  async function aiExplainWord(w) {
+    if (!w || !w.en) return;
+    var cached = w._aiExplain;
+    var modal = ensureAiModal();
+    modal.title.textContent = w.en;
+    modal.body.innerHTML = '<div class="el-ai-loading">AI 正在分析...</div>';
+    modal.root.style.display = 'flex';
+    requestAnimationFrame(function() { modal.root.classList.add('show'); });
+    if (cached) {
+      renderAiExplain(modal.body, w.en, cached);
+      return;
+    }
+    try {
+      var headers = await getAuthHeaders();
+      var resp = await fetch(apiBase() + '/english/explain-word', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ en: w.en })
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var json = await resp.json();
+      if (!json.ok || !json.data) throw new Error(json.error || 'AI 返回异常');
+      w._aiExplain = json.data;
+      renderAiExplain(modal.body, w.en, json.data);
+    } catch (e) {
+      modal.body.innerHTML = '<div class="el-ai-error">AI 解析失败: ' + (e.message || '网络异常') + '</div>';
+    }
+  }
+
+  function renderAiExplain(body, en, data) {
+    var html = '';
+    html += '<div class="el-ai-cn">' + escapeHtml(data.cn || '—') + '</div>';
+    if (data.tip) html += '<div class="el-ai-tip">💡 ' + escapeHtml(data.tip) + '</div>';
+    if (Array.isArray(data.synonyms) && data.synonyms.length) {
+      html += '<div class="el-ai-row"><div class="el-ai-label">近义词</div><div class="el-ai-tags">';
+      data.synonyms.forEach(function(s) { html += '<span class="el-ai-tag">' + escapeHtml(s) + '</span>'; });
+      html += '</div></div>';
+    }
+    if (Array.isArray(data.examples) && data.examples.length) {
+      html += '<div class="el-ai-row"><div class="el-ai-label">例句</div>';
+      data.examples.forEach(function(ex) {
+        html += '<div class="el-ai-ex">• ' + escapeHtml(ex) + '</div>';
+      });
+      html += '</div>';
+    }
+    body.innerHTML = html;
+  }
+
+  function ensureAiModal() {
+    var root = $('elAiModal');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'elAiModal';
+      root.className = 'el-ai-modal';
+      root.innerHTML = '<div class="el-ai-card"><div class="el-ai-head"><div class="el-ai-title">—</div><button type="button" class="el-ai-close" aria-label="关闭">×</button></div><div class="el-ai-body">—</div></div>';
+      document.body.appendChild(root);
+      root.addEventListener('click', function(e) { if (e.target === root) closeAiModal(); });
+      root.querySelector('.el-ai-close').addEventListener('click', closeAiModal);
+    }
+    return {
+      root: root,
+      title: root.querySelector('.el-ai-title'),
+      body: root.querySelector('.el-ai-body')
+    };
+  }
+
+  function closeAiModal() {
+    var root = $('elAiModal');
+    if (!root) return;
+    root.classList.remove('show');
+    setTimeout(function() { root.style.display = 'none'; }, 220);
+  }
+
   function deleteSelected(ids) {
     ids = ids || [];
     S.words = S.words.filter(function(w) { return ids.indexOf(w.id) < 0; });
@@ -580,8 +699,8 @@
         renderAll();
         notify('已删除: ' + w.en);
       });
-      var speakBtn = el('button', { type: 'button', class: 'el-word-speak', title: '朗读', 'aria-label': '朗读 ' + w.en, text: '♪' });
-      speakBtn.addEventListener('click', function() { speakText(w.en, 'en-US'); });
+      var speakBtn = el('button', { type: 'button', class: 'el-word-speak', title: '发音', 'aria-label': '发音 ' + w.en, text: 'AI' });
+      speakBtn.addEventListener('click', function() { aiExplainWord(w); });
       item.appendChild(cb);
       item.appendChild(main);
       item.appendChild(speakBtn);
@@ -660,8 +779,87 @@
     refreshChipStates();
   }
 
-  async function generateQuiz() {
-    if (S.isGenerating) return;
+  /**
+   * 批量导入: 智能判断格式, 必要时调 AI 解析
+   * 1. 全部行都是 "en cn" 格式 (英文开头) → 本地解析, 不调用 AI
+   * 2. 否则 (含中文句子/短语/不规范) → 调用 /english/parse-batch
+   */
+  async function doBatchImport(btn) {
+    var input = $('elBatchInput');
+    if (!input) { notify('批量导入输入框未找到', 'error'); return; }
+    var text = String(input.value || '').trim();
+    if (!text) { notify('请先输入要导入的单词'); return; }
+    if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
+
+    var parsed = null;
+    var lines = text.split(/[\n\r]+/);
+    var allEng = lines.every(function(line) {
+      var t = line.trim();
+      if (!t) return true;
+      // 整行必须以英文单词开头
+      return /^[a-zA-Z][a-zA-Z\s\-']*(\s|$)/.test(t);
+    });
+
+    if (allEng) {
+      // 本地解析
+      parsed = [];
+      lines.forEach(function(line) {
+        line = line.trim();
+        if (!line) return;
+        var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']*?)\s+(.+)$/);
+        var en, cn;
+        if (m) { en = m[1].trim(); cn = m[2].trim(); }
+        else { en = line; cn = ''; }
+        parsed.push({ en: en, cn: cn });
+      });
+    } else {
+      // 调用 AI 解析
+      try {
+        var headers = await getAuthHeaders();
+        var resp = await fetch(apiBase() + '/english/parse-batch', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ text: text, max_count: 80 })
+        });
+        if (!resp.ok) {
+          var ej = null;
+          try { ej = await resp.json(); } catch (e) {}
+          throw new Error((ej && ej.error) || ('HTTP ' + resp.status));
+        }
+        var json = await resp.json();
+        if (!json.ok || !json.data || !Array.isArray(json.data.words)) throw new Error('AI 返回数据异常');
+        parsed = json.data.words;
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
+        notify('AI 解析失败: ' + (e.message || '未知错误'), 'error');
+        return;
+      }
+    }
+
+    if (!parsed || !parsed.length) {
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
+      notify('没有提取到有效单词, 请重试');
+      return;
+    }
+
+    var before = S.words.length;
+    var added = 0;
+    parsed.forEach(function(p) {
+      if (addWord(p.en, p.cn, true)) added++;
+    });
+    var totalAdded = S.words.length - before;
+    if (input) input.value = '';
+    renderAll();
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
+    notify(totalAdded > 0 ? ('批量导入完成: +' + totalAdded + ' 词') : '这些词已经在单词库了');
+  }
+
+  async function generateQuiz(opts) {
+    opts = opts || {};
+    if (S.isGenerating) {
+      notify('正在生成中, 请稍候...');
+      return;
+    }
     syncSettingsFromInputs();
     var words = getWordsForGeneration(true);
     if (!words.length) return;
@@ -672,13 +870,29 @@
     }
     var level = getSelectedLevel();
     S.isGenerating = true;
+    updateGenInfo();
     showLoading(true);
     hideResult();
-    hideArticle();
-    hideQuestions();
+    // 重新生成时只隐藏旧题/旧文章, 保留 scrollTop 体验更平滑
+    if (opts.regenArticle || opts.regenQuiz) {
+      hideArticle();
+      hideQuestions();
+    } else {
+      hideArticle();
+      hideQuestions();
+    }
     scheduleSave();
+    var headers;
     try {
-      var headers = await getAuthHeaders();
+      headers = await getAuthHeaders();
+    } catch (e) {
+      showLoading(false);
+      S.isGenerating = false;
+      updateGenInfo();
+      notify('请先登录后再生成练习', 'error');
+      return;
+    }
+    try {
       var body = addLegacyAuth({
         words: words.map(function(w) { return { en: w.en, cn: w.cn || '', mastery: w.mastery || 0 }; }),
         level: level,
@@ -686,7 +900,9 @@
         question_count: S.settings.questionCount || 6,
         article_length: S.settings.articleLength || 'medium',
         topic: S.settings.topic || '',
-        focus: S.settings.focus || 'weak'
+        focus: S.settings.focus || 'weak',
+        regen_article: !!opts.regenArticle,
+        regen_quiz: !!opts.regenQuiz
       }, headers);
       var resp = await fetch(apiBase() + '/english/generate', {
         method: 'POST',
@@ -714,13 +930,45 @@
       };
       renderArticle(S.currentQuiz);
       renderQuestions(S.currentQuiz);
-      showLoading(false);
       switchTab('practice');
     } catch (e2) {
-      showLoading(false);
-      notify('生成失败: ' + (e2.message || '未知错误'), 'error');
       try { console.error('[EL] generate error:', e2); } catch (e3) {}
+      // 后端不可用时, 用本地模板兜底, 用户不至于完全卡住
+      var emsg = String((e2 && e2.message) || '');
+      var backendDown = /HTTP (501|404|502|503)|Failed to fetch|NetworkError|AbortError/i.test(emsg);
+      if (backendDown) {
+        try {
+          var fallback = buildLocalQuiz(words, level, types, S.settings);
+          S.currentQuiz = {
+            id: uid('quiz'),
+            article: fallback.article,
+            words: fallback.words,
+            questions: fallback.questions,
+            answers: {},
+            level: level,
+            types: types,
+            topic: S.settings.topic || '',
+            time: now(),
+            local: true
+          };
+          renderArticle(S.currentQuiz);
+          renderQuestions(S.currentQuiz);
+          switchTab('practice');
+          notify('已使用本地模板生成 (后端不可用, 题目为示例格式)');
+          return;
+        } catch (e4) {
+          try { console.error('[EL] local fallback failed:', e4); } catch (_) {}
+        }
+      }
+      var hint = emsg || '未知错误';
+      if (/HTTP 501|Unsupported method/i.test(hint)) {
+        hint = '本地服务不支持 POST, 已尝试本地模板失败';
+      } else if (/HTTP 404|Not Found/i.test(hint)) {
+        hint = '本地服务未启动, 已尝试本地模板失败';
+      }
+      notify('生成失败: ' + hint, 'error');
     } finally {
+      showLoading(false);
       S.isGenerating = false;
       updateGenInfo();
     }
@@ -738,8 +986,7 @@
     if (wordsBox) {
       wordsBox.innerHTML = '';
       (quiz.words || []).slice(0, 24).forEach(function(w) {
-        var tag = el('button', { type: 'button', class: 'el-word-tag', text: w });
-        tag.addEventListener('click', function() { speakText(w, 'en-US'); });
+        var tag = el('span', { class: 'el-word-tag', text: w });
         wordsBox.appendChild(tag);
       });
     }
@@ -759,6 +1006,124 @@
 
   function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /**
+   * 本地兜底: 模板化生成文章 + 题目
+   * 真正的 AI 内容需要后端, 这里只是不让用户卡住
+   */
+  function buildLocalQuiz(words, level, types, settings) {
+    var sample = words.slice(0, Math.min(8, words.length));
+    var used = sample.map(function(w) { return w.en; });
+    var cnList = sample.map(function(w) { return w.cn || ''; });
+    var article = 'Local Practice (offline mode)\n\n'
+      + 'This is a sample article for offline practice. '
+      + 'Words: ' + used.join(', ') + '. '
+      + 'These words are great for your study: ' + cnList.join('; ') + '. '
+      + 'You can add more words to your library and try again when the server is available.';
+    var topic = (settings && settings.topic) ? settings.topic : 'general';
+    var levelLabel = (level || 'cet4').toUpperCase();
+
+    // 工具: 找到 opts 数组中正确项的位置 (answer 必须是数字索引, 与 renderMcQuestion 兼容)
+    function indexOfAnswer(opts, ans) {
+      for (var i = 0; i < opts.length; i++) {
+        if (opts[i] === ans) return i;
+      }
+      return 0;
+    }
+    // Fisher-Yates 洗牌
+    function shuffle(arr) {
+      var out = arr.slice();
+      for (var i = out.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = out[i]; out[i] = out[j]; out[j] = tmp;
+      }
+      return out;
+    }
+
+    var questions = [];
+    var qid = 1;
+    var qcount = Math.max(2, Math.min(8, (settings && settings.questionCount) || 6));
+
+    if (types.indexOf('reading') >= 0 && sample.length) {
+      // 阅读理解: 匹配单词-释义 (mc 类型, 答案用索引)
+      var w0 = sample[0];
+      var correctOpt = w0.en + ' (' + (w0.cn || '主题词') + ')';
+      var opts1 = sample.slice(0, Math.min(3, sample.length)).map(function(w) { return w.en + ' (' + (w.cn || '') + ')'; });
+      opts1.push(correctOpt);
+      opts1 = shuffle(opts1).slice(0, 4);
+      // 确保正确项在 opts 中
+      if (opts1.indexOf(correctOpt) < 0) opts1[0] = correctOpt;
+      questions.push({
+        id: 'q' + (qid++),
+        type: 'mc',
+        question: '下列哪个单词与 "' + (w0.cn || '主题') + '" 对应?',
+        options: opts1,
+        answer: indexOfAnswer(opts1, correctOpt),
+        explain: '答案来自单词库中 ' + w0.en + ' 的释义。'
+      });
+    }
+
+    if (types.indexOf('choice') >= 0) {
+      // 选择题: 每单词一道释义匹配 (mc 类型)
+      var need = Math.max(1, qcount - questions.length);
+      sample.slice(0, need).forEach(function(w) {
+        var correctOpt = w.cn || ('释义: ' + w.en);
+        var pool = [correctOpt];
+        var distractors = sample.filter(function(x) { return x.en !== w.en; }).slice(0, 6);
+        distractors.forEach(function(d) { pool.push((d.cn || d.en) + ' / ' + d.en); });
+        pool = shuffle(pool).slice(0, 4);
+        if (pool.indexOf(correctOpt) < 0) pool[0] = correctOpt;
+        pool = shuffle(pool);
+        questions.push({
+          id: 'q' + (qid++),
+          type: 'mc',
+          question: '"' + w.en + '" 的中文释义最接近:',
+          options: pool,
+          answer: indexOfAnswer(pool, correctOpt),
+          explain: '该单词在单词库中释义为: ' + (w.cn || '暂无')
+        });
+      });
+    }
+
+    if (types.indexOf('cloze') >= 0 && sample.length) {
+      // 完形填空: 必须用 q.blanks 数组结构, renderClozeQuestion 才能渲染
+      var target = sample[0];
+      var optTexts = [target.en].concat(sample.slice(1, 4).map(function(x) { return x.en; })).slice(0, 4);
+      optTexts = shuffle(optTexts);
+      // 用 ___ 作为挖空标记, renderClozeQuestion 会按 ___ 切分并插入下拉框
+      var clozeContext = 'In this example, please fill in the blank: ___ means ' + (target.cn || 'something') + '.';
+      var blank = {
+        options: optTexts,
+        answer: indexOfAnswer(optTexts, target.en),
+        explain: '完形填空示例 (本地模式)。'
+      };
+      questions.push({
+        id: 'q' + (qid++),
+        type: 'cloze',
+        question: '完形填空 (本地模板)',
+        context: clozeContext,
+        blanks: [blank]
+      });
+    }
+
+    // 不足数量补选择题
+    while (questions.length < qcount && sample.length) {
+      var w2 = sample[questions.length % sample.length];
+      var correctOpt2 = w2.cn || ('释义: ' + w2.en);
+      var pool2 = [correctOpt2, '其他含义', '不相关', '跳过'];
+      pool2 = shuffle(pool2);
+      questions.push({
+        id: 'q' + (qid++),
+        type: 'mc',
+        question: '"' + w2.en + '" 的中文释义是?',
+        options: pool2,
+        answer: indexOfAnswer(pool2, correctOpt2),
+        explain: '本地模板示例题。'
+      });
+    }
+
+    return { article: article, words: used, questions: questions, topic: topic, level: levelLabel };
   }
 
   function escapeAttr(s) {
@@ -1027,11 +1392,16 @@
   }
 
   function renderAll() {
-    applySettingsToInputs();
-    renderStats();
-    renderWordList();
-    updateGenInfo();
-    updateTabIndicator();
+    // 性能优化: 使用 rAF 合并多次 renderAll 调用, 避免连续触发 DOM 抖动
+    if (renderAll._rafId) return;
+    renderAll._rafId = requestAnimationFrame(function() {
+      renderAll._rafId = 0;
+      applySettingsToInputs();
+      renderStats();
+      renderWordList();
+      updateGenInfo();
+      updateTabIndicator();
+    });
   }
 
   function switchTab(name) {
@@ -1043,6 +1413,11 @@
       t.classList.toggle('active', t.getAttribute('data-eltab') === name);
     });
     setTimeout(updateTabIndicator, 20);
+    // 切 tab 时重置页面滚动到顶部, 避免停留在旧 tab 位置
+    try {
+      var page = document.querySelector('#panelEnglishLearning .el-page');
+      if (page) page.scrollTop = 0;
+    } catch (e) {}
   }
 
   function updateTabIndicator() {
@@ -1186,27 +1561,7 @@
     }
 
     var batchBtn = $('elBatchAddBtn');
-    if (batchBtn) batchBtn.addEventListener('click', function() {
-      var input = $('elBatchInput');
-      if (!input) { notify('批量导入输入框未找到', 'error'); return; }
-      var text = String(input.value || '').trim();
-      if (!text) { notify('请先输入要导入的单词'); return; }
-      var before = S.words.length;
-      var lines = text.split(/[\n\r]+/);
-      var added = 0;
-      lines.forEach(function(line) {
-        line = line.trim();
-        if (!line) return;
-        var parts = line.split(/\s+/);
-        var en = parts[0];
-        var cn = parts.slice(1).join(' ');
-        if (addWord(en, cn, true)) added++;
-      });
-      var totalAdded = S.words.length - before;
-      if (input) input.value = '';
-      renderAll();
-      notify(totalAdded > 0 ? '批量导入完成: +' + totalAdded + ' 词' : '没有新增有效单词，请检查格式（如: apple 苹果）');
-    });
+    if (batchBtn) batchBtn.addEventListener('click', function() { doBatchImport(batchBtn); });
 
     var search = $('elSearchInput');
     if (search) search.addEventListener('input', function() {
@@ -1281,10 +1636,6 @@
       renderAll();
       notify('已清空');
     });
-    var speakArticle = $('elSpeakArticleBtn');
-    if (speakArticle) speakArticle.addEventListener('click', function() {
-      if (S.currentQuiz && S.currentQuiz.article) speakText(S.currentQuiz.article, 'en-US');
-    });
     window.addEventListener('resize', function() { setTimeout(updateTabIndicator, 80); });
   }
 
@@ -1301,16 +1652,7 @@
     });
 
     safeBind('elAddWordBtn', 'click', function() {
-      var word = $('elWordInput');
-      var cn = $('elMeaningInput');
-      var w = addWord(word && word.value, cn && cn.value);
-      if (w) {
-        notify('已添加 ' + w.en);
-        if (word) word.value = '';
-        if (cn) cn.value = '';
-        renderAll();
-        if (word) word.focus();
-      }
+      handleAddWord();
     });
 
     ['elWordInput', 'elMeaningInput'].forEach(function(id) {
@@ -1421,7 +1763,9 @@
       });
     });
 
-    safeBind('elGenBtn', 'click', generateQuiz);
+    safeBind('elGenBtn', 'click', function() { generateQuiz(); });
+    safeBind('elRegenArticleBtn', 'click', function() { generateQuiz({ regenArticle: true }); });
+    safeBind('elRegenQuizBtn', 'click', function() { generateQuiz({ regenQuiz: true }); });
     safeBind('elSubmitBtn', 'click', submitAnswers);
     safeBind('elShowAnswerBtn', 'click', showAllAnswers);
     safeBind('elNewPracticeBtn', 'click', function() {
@@ -1443,174 +1787,32 @@
       renderAll();
       notify('已清空');
     });
-    safeBind('elSpeakArticleBtn', 'click', function() {
-      if (S.currentQuiz && S.currentQuiz.article) speakText(S.currentQuiz.article, 'en-US');
-    });
     safeBindNode(window, 'resize', function() {
       setTimeout(updateTabIndicator, 80);
     }, 'window:resize');
 
-    // 初始化 tabs 拖拽排序
-    initTabDrag();
+    // 初始化 tabs 点击切换 (拖拽调换顺序已禁用, 单词库和练习题位置固定)
+    initTabs();
   }
 
   /* ============================================================
-   * Tabs 拖拽排序 (单词库/生成练习)
-   * 支持鼠标拖拽 + 触摸拖拽, 样式与 dock 胶囊一致
-   * 所有索引均动态计算, 避免 restoreTabOrder 后闭包 index 错位
+   * Tabs 点击切换 (单词库/生成练习位置固定, 不可拖拽调换)
    * ============================================================ */
-  var _dragTabIndex = -1;
-  var _dragOverIndex = -1;
-  var _isDraggingTab = false;
-
-  function getTabIndex(container, tab) {
-    return Array.prototype.indexOf.call(container.querySelectorAll('.el-tab'), tab);
-  }
-
-  function initTabDrag() {
+  function initTabs() {
     var tabsContainer = document.querySelector('#panelEnglishLearning .el-tabs');
     if (!tabsContainer) return;
     var tabs = tabsContainer.querySelectorAll('.el-tab');
-
     tabs.forEach(function(tab) {
-      tab.setAttribute('draggable', 'true');
-
-      // 鼠标拖拽
-      tab.addEventListener('dragstart', function(e) {
-        var idx = getTabIndex(tabsContainer, tab);
-        if (idx < 0) return;
-        _dragTabIndex = idx;
-        _isDraggingTab = true;
-        tab.style.opacity = '0.5';
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(idx));
-      });
-      tab.addEventListener('dragend', function() {
-        tab.style.opacity = '';
-        _dragTabIndex = -1;
-        _dragOverIndex = -1;
-        _isDraggingTab = false;
-        tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
-      });
-      tab.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        var fromIdx = _dragTabIndex;
-        var toIdx = getTabIndex(tabsContainer, tab);
-        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
-          _dragOverIndex = toIdx;
-          tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
-          tab.classList.add('drag-over');
-        }
-      });
-      tab.addEventListener('drop', function(e) {
-        e.preventDefault();
-        tab.classList.remove('drag-over');
-        var fromIdx = _dragTabIndex;
-        var toIdx = getTabIndex(tabsContainer, tab);
-        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
-          reorderTabs(tabsContainer, fromIdx, toIdx);
-        }
-        _dragTabIndex = -1;
-        _dragOverIndex = -1;
-        _isDraggingTab = false;
-      });
-
-      // 触摸拖拽
-      var touchStartX = 0, touchStartY = 0, touchMoved = false;
-      tab.addEventListener('touchstart', function(e) {
-        if (e.touches.length !== 1) return;
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-        touchMoved = false;
-        _dragTabIndex = getTabIndex(tabsContainer, tab);
-      }, { passive: false });
-      tab.addEventListener('touchmove', function(e) {
-        if (_dragTabIndex < 0) return;
-        var dx = e.touches[0].clientX - touchStartX;
-        var dy = e.touches[0].clientY - touchStartY;
-        if (!touchMoved && Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-        touchMoved = true;
-        _isDraggingTab = true;
-        e.preventDefault();
-        tab.style.opacity = '0.5';
-        var target = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-        var targetTab = target ? target.closest('.el-tab') : null;
-        if (targetTab && targetTab !== tab) {
-          var targetIndex = getTabIndex(tabsContainer, targetTab);
-          if (targetIndex >= 0 && targetIndex !== _dragOverIndex) {
-            _dragOverIndex = targetIndex;
-            tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
-            targetTab.classList.add('drag-over');
-          }
-        }
-      }, { passive: false });
-      tab.addEventListener('touchend', function() {
-        tab.style.opacity = '';
-        tabsContainer.querySelectorAll('.el-tab').forEach(function(t) { t.classList.remove('drag-over'); });
-        if (_isDraggingTab && _dragOverIndex >= 0 && _dragOverIndex !== _dragTabIndex) {
-          reorderTabs(tabsContainer, _dragTabIndex, _dragOverIndex);
-        }
-        _dragTabIndex = -1;
-        _dragOverIndex = -1;
-        _isDraggingTab = false;
-        touchMoved = false;
+      // 防止重复绑定 (兼容 init() 重复调用)
+      if (tab.dataset._elTabInited) return;
+      tab.dataset._elTabInited = '1';
+      tab.setAttribute('draggable', 'false');
+      tab.addEventListener('click', function() {
+        var name = tab.getAttribute('data-eltab');
+        if (name) switchTab(name);
       });
     });
-  }
-
-  function reorderTabs(container, fromIndex, toIndex) {
-    var tabs = container.querySelectorAll('.el-tab');
-    if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length) return;
-    var fromTab = tabs[fromIndex];
-    var toTab = tabs[toIndex];
-    if (fromIndex < toIndex) {
-      container.insertBefore(fromTab, toTab.nextSibling);
-    } else {
-      container.insertBefore(fromTab, toTab);
-    }
-    // 保持 indicator 在最后
-    var indicator = container.querySelector('.el-tab-indicator');
-    if (indicator) container.appendChild(indicator);
-    setTimeout(updateTabIndicator, 30);
-    // 保存 tab 顺序
-    saveTabOrder(container);
-  }
-
-  function saveTabOrder(container) {
-    var order = [];
-    container.querySelectorAll('.el-tab').forEach(function(tab) {
-      order.push(tab.getAttribute('data-eltab'));
-    });
-    try { localStorage.setItem('xtj_el_tab_order', JSON.stringify(order)); } catch (e) {}
-  }
-
-  function loadTabOrder() {
-    try {
-      var raw = localStorage.getItem('xtj_el_tab_order');
-      if (!raw) return null;
-      var order = JSON.parse(raw);
-      if (Array.isArray(order) && order.length === 2) return order;
-    } catch (e) {}
-    return null;
-  }
-
-  function restoreTabOrder() {
-    var container = document.querySelector('#panelEnglishLearning .el-tabs');
-    if (!container) return;
-    var order = loadTabOrder();
-    if (!order) return;
-    var tabs = container.querySelectorAll('.el-tab');
-    var currentOrder = [];
-    tabs.forEach(function(t) { currentOrder.push(t.getAttribute('data-eltab')); });
-    if (JSON.stringify(currentOrder) === JSON.stringify(order)) return;
-    // 按保存的顺序重新排列
-    order.forEach(function(name) {
-      var tab = container.querySelector('.el-tab[data-eltab="' + name + '"]');
-      if (tab) container.appendChild(tab);
-    });
-    var indicator = container.querySelector('.el-tab-indicator');
-    if (indicator) container.appendChild(indicator);
+    // 初始化 indicator 位置
     setTimeout(updateTabIndicator, 30);
   }
 
@@ -1620,24 +1822,8 @@
     return null;
   }
 
-  function speakText(text, lang) {
-    try {
-      if (!window.speechSynthesis) {
-        notify('当前浏览器不支持朗读');
-        return;
-      }
-      window.speechSynthesis.cancel();
-      var u = new SpeechSynthesisUtterance(String(text || '').slice(0, 1200));
-      u.lang = lang || 'en-US';
-      u.rate = 0.92;
-      window.speechSynthesis.speak(u);
-    } catch (e) {
-      notify('朗读失败');
-    }
-  }
-
   function init() {
-    restoreTabOrder();
+    initTabs();
     bindEventsSafe();
     applyState(getLocalState());
     renderAll();
