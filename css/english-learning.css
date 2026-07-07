@@ -834,37 +834,7 @@ body.english-learning-open {
   background: var(--el-accent-soft);
 }
 
-#panelEnglishLearning .el-loading {
-  display: grid;
-  place-items: center;
-  gap: 14px;
-  min-height: 220px;
-  text-align: center;
-}
-
-#panelEnglishLearning .el-loader-orbit {
-  position: relative;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  border: 1px solid var(--el-line);
-}
-
-#panelEnglishLearning .el-loader-orbit span {
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--el-accent);
-  box-shadow: 0 0 18px var(--el-accent);
-  transform-origin: 29px 29px;
-  animation: el-orbit 1.45s linear infinite;
-}
-
-#panelEnglishLearning .el-loader-orbit span:nth-child(1) { left: 25px; top: -4px; }
-#panelEnglishLearning .el-loader-orbit span:nth-child(2) { left: 25px; top: -4px; animation-delay: -0.48s; opacity: 0.65; }
-#panelEnglishLearning .el-loader-orbit span:nth-child(3) { left: 25px; top: -4px; animation-delay: -0.96s; opacity: 0.38; }
-
+/* 加载动画: 见文件末尾"v2 加载动画"段, 这里不再重复 */
 #panelEnglishLearning .el-loading-text {
   color: var(--el-muted);
   font-size: 13px;
@@ -1239,10 +1209,9 @@ body.english-learning-open {
     justify-content: space-between;
   }
   #panelEnglishLearning .el-word-item {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-  #panelEnglishLearning .el-word-del {
-    grid-column: 3;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    padding: 10px;
+    gap: 8px;
   }
   #panelEnglishLearning .el-article {
     max-height: none;
@@ -1284,8 +1253,8 @@ body.english-learning-open {
     color: var(--el-danger);
     font-size: 16px;
   }
-  #panelEnglishLearning .el-word-del {
-    grid-column: 3;
+  #panelEnglishLearning .el-word-item {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 }
 
@@ -1307,4 +1276,701 @@ body.english-learning-open {
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }
+}
+
+
+/* ============================================================
+ * 文章 locale bar (阅读文章头部 + 重新生成按钮组)
+ * ============================================================ */
+#panelEnglishLearning .el-locale-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(20,124,90,0.06), rgba(50,180,137,0.04));
+  border: 1px solid var(--el-line);
+}
+#panelEnglishLearning .el-locale-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+#panelEnglishLearning .el-locale-title {
+  font-size: 15px;
+  font-weight: 720;
+  color: var(--el-text);
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-locale-meta {
+  font-size: 12px;
+  color: var(--el-muted);
+}
+#panelEnglishLearning .el-locale-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#panelEnglishLearning .el-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--el-line);
+  background: var(--el-surface-solid);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 180ms var(--el-ease);
+}
+#panelEnglishLearning .el-regen-btn:hover {
+  border-color: var(--el-line-strong);
+  background: var(--el-accent-soft);
+  transform: translateY(-1px);
+}
+#panelEnglishLearning .el-regen-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+#panelEnglishLearning .el-regen-btn.is-loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+#panelEnglishLearning .el-regen-btn .el-regen-icon {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 600ms var(--el-ease);
+}
+#panelEnglishLearning .el-regen-btn:hover .el-regen-icon {
+  transform: rotate(-180deg);
+}
+#panelEnglishLearning .el-regen-btn.is-loading .el-regen-icon {
+  animation: el-regen-spin 0.9s linear infinite;
+}
+@keyframes el-regen-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ============================================================
+ * AI 单词解释弹层
+ * ============================================================ */
+.el-ai-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 20, 0.42);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 200ms var(--el-ease);
+  padding: 24px;
+}
+.el-ai-modal.show {
+  opacity: 1;
+}
+.el-ai-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 80vh;
+  overflow: auto;
+  border-radius: 18px;
+  background: var(--el-surface-solid);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.18);
+  transform: translateY(8px) scale(0.985);
+  transition: transform 220ms var(--el-ease);
+  color: var(--el-text);
+}
+.el-ai-modal.show .el-ai-card {
+  transform: translateY(0) scale(1);
+}
+.el-ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--el-line);
+}
+.el-ai-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--el-accent);
+}
+.el-ai-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--el-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 160ms var(--el-ease), color 160ms var(--el-ease);
+}
+.el-ai-close:hover { background: var(--el-accent-soft); color: var(--el-accent); }
+.el-ai-body {
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.el-ai-loading,
+.el-ai-error {
+  padding: 30px 10px;
+  text-align: center;
+  color: var(--el-muted);
+  font-size: 14px;
+}
+.el-ai-error { color: var(--el-danger); }
+.el-ai-cn {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--el-text);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(120deg, var(--el-accent-soft), rgba(50,180,137,0.06));
+  border-left: 3px solid var(--el-accent);
+}
+.el-ai-tip {
+  font-size: 13px;
+  color: var(--el-muted);
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(50,180,137,0.05);
+}
+.el-ai-row { display: flex; flex-direction: column; gap: 6px; }
+.el-ai-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--el-faint);
+  text-transform: uppercase;
+}
+.el-ai-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.el-ai-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--el-accent-soft);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.el-ai-ex {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--el-text);
+  padding: 6px 0;
+}
+
+/* ============================================================
+ * 流光 shimmer + pane 切换动画 + 加载动画 (v2 在文件末尾)
+ * 这里只保留 el-shimmer keyframes, 加载动画用 v2 dot pulse
+ * ============================================================ */
+@keyframes el-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* 单词 AI 按钮 (替代原发音按钮) */
+#panelEnglishLearning .el-word-speak {
+  background: linear-gradient(135deg, rgba(20,124,90,0.10), rgba(50,180,137,0.18));
+  color: var(--el-accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  border: 1px solid rgba(20,124,90,0.18);
+}
+#panelEnglishLearning .el-word-speak:hover {
+  background: linear-gradient(135deg, rgba(20,124,90,0.22), rgba(50,180,137,0.32));
+  color: #fff;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 6px 18px rgba(20,124,90,0.25);
+}
+
+
+/* ============================================================
+ * 重新设计的动画 (替代原来的 conic + shimmer)
+ * 风格: 简洁的 fade + 弹性 indicator + 轻量 pulse
+ * ============================================================ */
+@keyframes el-pane-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes el-progress-ring {
+  0%   { stroke-dashoffset: 220; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes el-pulse-dot {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.0); opacity: 1; }
+}
+
+#panelEnglishLearning .el-pane {
+  animation: el-pane-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#panelEnglishLearning .el-pane > * {
+  animation: el-pane-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#panelEnglishLearning .el-pane > *:nth-child(1) { animation-delay: 0ms; }
+#panelEnglishLearning .el-pane > *:nth-child(2) { animation-delay: 60ms; }
+
+/* tab 切换: 弹性 indicator (320ms) */
+#panelEnglishLearning .el-tab-indicator {
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* 加载动画: 三个点 + 简洁的进度环 (替代 conic-gradient) */
+#panelEnglishLearning .el-loading {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 200px;
+  text-align: center;
+}
+#panelEnglishLearning .el-loader-orbit {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+#panelEnglishLearning .el-loader-orbit::before { content: none; }
+#panelEnglishLearning .el-loader-orbit > span {
+  display: inline-block !important;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-accent);
+  animation: el-pulse-dot 1.2s ease-in-out infinite;
+}
+#panelEnglishLearning .el-loader-orbit > span:nth-child(2) { animation-delay: 0.15s; }
+#panelEnglishLearning .el-loader-orbit > span:nth-child(3) { animation-delay: 0.30s; }
+#panelEnglishLearning .el-loading-text {
+  font-size: 13px;
+  color: var(--el-muted);
+  letter-spacing: 0.3px;
+}
+
+/* 重新生成按钮: 悬停淡入 + 加载时旋转 */
+#panelEnglishLearning .el-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--el-line);
+  background: var(--el-surface);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+#panelEnglishLearning .el-regen-btn:hover {
+  background: var(--el-accent-soft);
+  border-color: var(--el-line-strong);
+  color: var(--el-accent);
+}
+#panelEnglishLearning .el-regen-btn:active {
+  transform: scale(0.96);
+}
+#panelEnglishLearning .el-regen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+#panelEnglishLearning .el-regen-btn .el-regen-icon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 400ms ease;
+}
+#panelEnglishLearning .el-regen-btn:hover:not(:disabled) .el-regen-icon {
+  transform: rotate(-120deg);
+}
+#panelEnglishLearning .el-regen-btn.is-loading .el-regen-icon {
+  animation: el-regen-spin 0.8s linear infinite;
+}
+@keyframes el-regen-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ============================================================
+ * UI 对齐修复: 紧凑 hero + tabs + main 间距
+ * ============================================================ */
+#panelEnglishLearning .el-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 20px 10px;
+  box-sizing: border-box;
+}
+#panelEnglishLearning .el-hero h2 {
+  margin: 2px 0 4px;
+  font-size: clamp(18px, 2.6vw, 24px);
+  line-height: 1.2;
+}
+#panelEnglishLearning .el-hero p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--el-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+#panelEnglishLearning .el-kicker {
+  color: var(--el-accent);
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#panelEnglishLearning .el-stat {
+  min-height: 46px;
+  padding: 8px 16px;
+}
+#panelEnglishLearning .el-stat span {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--el-text);
+}
+#panelEnglishLearning .el-stat label {
+  display: block;
+  margin-top: 2px;
+  color: var(--el-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+/* tabs 紧凑 + 居中对齐 */
+#panelEnglishLearning .el-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  width: calc(100% - 28px);
+  margin: 0 14px 10px;
+  padding: 3px;
+  border: 1px solid var(--el-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+  height: 40px;
+  align-items: stretch;
+}
+#panelEnglishLearning .el-tab {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  height: 100%;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--el-muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 720;
+  transition: color 180ms ease;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#panelEnglishLearning .el-tab.active {
+  color: var(--el-text);
+}
+
+/* main 顶部 padding 0, 让 card 直接接 tabs */
+#panelEnglishLearning .el-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 14px calc(14px + env(safe-area-inset-bottom, 0px));
+}
+
+/* pane 间距 紧凑 */
+#panelEnglishLearning .el-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-height: 0;
+}
+#panelEnglishLearning .el-practice-grid {
+  grid-template-columns: 1fr;
+}
+#panelEnglishLearning .el-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+}
+#panelEnglishLearning .el-card-title {
+  font-size: 14px;
+  font-weight: 720;
+  margin-bottom: 12px;
+  color: var(--el-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* gen row 紧凑 */
+#panelEnglishLearning .el-gen-row {
+  margin-bottom: 12px;
+}
+#panelEnglishLearning .el-label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--el-muted);
+  margin-bottom: 6px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#panelEnglishLearning .el-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--el-line);
+  border-radius: 999px;
+  color: var(--el-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+#panelEnglishLearning .el-chip:hover,
+#panelEnglishLearning .el-chip.selected,
+#panelEnglishLearning .el-chip.is-checked {
+  color: var(--el-accent);
+  border-color: var(--el-line-strong);
+  background: var(--el-accent-soft);
+}
+#panelEnglishLearning .el-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+/* article 头部 locale bar 紧凑 */
+#panelEnglishLearning .el-locale-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: var(--el-surface);
+  border: 1px solid var(--el-line);
+}
+#panelEnglishLearning .el-locale-title {
+  font-size: 13px;
+  font-weight: 720;
+  color: var(--el-text);
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-locale-meta {
+  font-size: 11px;
+  color: var(--el-muted);
+  margin-top: 2px;
+}
+#panelEnglishLearning .el-locale-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+#panelEnglishLearning .el-locale-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+
+/* ============================================================
+ * 关键样式统一覆盖 (放在文件最末尾, 覆盖前面的所有重复定义)
+ * - el-tabs: 严格 1fr 1fr + 高度 40px + align-items stretch
+ * - el-loader-orbit: dot pulse 1.2s (替代 conic + shimmer)
+ * - el-tab-indicator: 弹性 380ms + 视觉胶囊 (active cell 内缩 4px)
+ * - el-loading: flex 居中 + min-height 200px
+ * - el-page: 滚动条样式 + 防 scroll snap
+ * ============================================================ */
+
+/* tabs 高度 + 居中对齐 + 防 nav 全局样式干扰 */
+#panelEnglishLearning.el-show .el-tabs,
+#panelEnglishLearning .el-tabs {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 10 !important;
+  box-sizing: border-box !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 2px !important;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 14px 10px !important;
+  padding: 3px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  align-items: stretch !important;
+  align-content: stretch !important;
+  border: 1px solid var(--el-line) !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  backdrop-filter: blur(14px) !important;
+  overflow: hidden !important;
+  font: inherit !important;
+  color: inherit !important;
+  text-align: center !important;
+  box-shadow: none !important;
+}
+#panelEnglishLearning .el-tab {
+  position: relative !important;
+  z-index: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  padding: 0 10px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--el-muted) !important;
+  font-size: 13px !important;
+  font-weight: 720 !important;
+  letter-spacing: 0.2px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  transition: color 180ms ease, background 180ms ease !important;
+  -webkit-tap-highlight-color: transparent !important;
+  user-select: none !important;
+}
+#panelEnglishLearning .el-tab:hover {
+  color: var(--el-text) !important;
+}
+#panelEnglishLearning .el-tab.active {
+  color: var(--el-text) !important;
+  font-weight: 800 !important;
+}
+
+/* indicator: 弹性过渡 + 视觉胶囊 (active cell 内缩 4px) */
+#panelEnglishLearning .el-tab-indicator {
+  position: absolute !important;
+  z-index: 1 !important;
+  top: 3px !important;
+  bottom: 3px !important;
+  left: 0 !important;
+  border-radius: 11px !important;
+  background: var(--el-surface-solid) !important;
+  box-shadow: 0 6px 18px rgba(20, 124, 90, 0.10), inset 0 0 0 1px var(--el-line) !important;
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1) !important;
+  pointer-events: none !important;
+  will-change: transform, width !important;
+}
+
+/* 加载动画 v2: 三个 dot pulse (替代 conic + shimmer) */
+#panelEnglishLearning .el-loading {
+  position: relative !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px !important;
+  min-height: 200px !important;
+  text-align: center !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+#panelEnglishLearning .el-loading::before { content: none !important; }
+#panelEnglishLearning .el-loader-orbit {
+  position: relative !important;
+  width: 48px !important;
+  height: 48px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  filter: none !important;
+  animation: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+#panelEnglishLearning .el-loader-orbit::before { content: none !important; }
+#panelEnglishLearning .el-loader-orbit > span {
+  display: inline-block !important;
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background: var(--el-accent) !important;
+  box-shadow: none !important;
+  transform-origin: center !important;
+  animation: el-pulse-dot 1.2s ease-in-out infinite !important;
+  opacity: 1 !important;
+}
+#panelEnglishLearning .el-loader-orbit > span:nth-child(2) { animation-delay: 0.15s !important; }
+#panelEnglishLearning .el-loader-orbit > span:nth-child(3) { animation-delay: 0.30s !important; }
+#panelEnglishLearning .el-loading-text {
+  font-size: 13px !important;
+  color: var(--el-muted) !important;
+  letter-spacing: 0.3px !important;
+  font-weight: 680 !important;
+}
+@keyframes el-pulse-dot {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.0); opacity: 1; }
+}
+
+/* page 滚动: 平滑 + 防 scroll snap 跳 */
+#panelEnglishLearning .el-page {
+  scroll-behavior: auto !important;
+  scrollbar-gutter: stable !important;
+  overscroll-behavior-y: contain !important;
 }

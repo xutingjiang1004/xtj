@@ -9690,6 +9690,154 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
   }
 });
 
+// POST /api/agent/english/parse-batch - 英语学习: AI 智能解析批量输入
+// 接收任意格式文本 (单词/句子/短语混合), 返回 [{en, cn}] 列表
+app.post('/api/agent/english/parse-batch', authenticateUser, rateLimit(60000, 15), async (req, res) => {
+  try {
+    var text = String((req.body && req.body.text) || '').trim();
+    var maxCount = Math.max(1, Math.min(200, parseInt(req.body && req.body.max_count, 10) || 60));
+    if (!text) return res.status(400).json({ error: '文本为空' });
+    if (text.length > 4000) text = text.slice(0, 4000);
+
+    var prompt = [
+      '你是一个英语单词提取助手。从用户输入的文本中提取**值得学习的英语单词或短语**, 并给出简洁的中文释义。',
+      '',
+      '【输入文本】',
+      text,
+      '',
+      '【要求】',
+      '1. 提取用户**想学的**英语单词或短语 (不要提取每个词, 只提取有学习价值的)。',
+      '2. 中等及以上难度的常用词优先; 过于简单 (the, a, is) 跳过。',
+      '3. 短语 (如 take off, look forward to) 可以保留为整体。',
+      '4. 去重; 最多输出 ' + maxCount + ' 条。',
+      '5. 严格输出 JSON 数组, 严禁额外文字, 严禁 markdown 代码块。',
+      '',
+      '输出格式 (严格 JSON):',
+      '[{"en": "apple", "cn": "苹果"}, {"en": "take off", "cn": "起飞; 脱下"}]'
+    ].join('\n');
+
+    var aiResult;
+    try {
+      aiResult = await callDeepSeek(
+        [
+          { role: 'system', content: '你是英语单词提取 AI, 严格输出 JSON 数组, 不输出任何额外文字。' },
+          { role: 'user', content: prompt }
+        ],
+        { thinking_mode: 'low', max_tokens: 2048, response_format: { type: 'json_object' } }
+      );
+    } catch (e) {
+      console.error('[ENGLISH-PARSE] AI failed:', e && e.message);
+      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
+    }
+
+    var raw = (aiResult && aiResult.content) || '';
+    var firstArr = raw.indexOf('[');
+    var lastArr = raw.lastIndexOf(']');
+    var jsonText = (firstArr >= 0 && lastArr > firstArr) ? raw.slice(firstArr, lastArr + 1) : raw;
+    var arr;
+    try {
+      arr = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[ENGLISH-PARSE] JSON parse failed:', e && e.message, 'raw:', raw.slice(0, 200));
+      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    }
+    if (!Array.isArray(arr)) {
+      // 兼容 AI 把数组包在对象里返回的情况
+      if (arr && Array.isArray(arr.words)) arr = arr.words;
+      else if (arr && Array.isArray(arr.data)) arr = arr.data;
+      else return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    }
+
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < arr.length && out.length < maxCount; i++) {
+      var w = arr[i];
+      if (!w) continue;
+      var en = String(w.en || w.word || w.english || '').trim().toLowerCase();
+      var cn = String(w.cn || w.meaning || w.zh || '').trim().slice(0, 80);
+      if (!en) continue;
+      if (!/^[a-zA-Z\s\-']+$/.test(en)) continue;
+      if (en.length > 60) continue;
+      if (seen[en]) continue;
+      seen[en] = true;
+      out.push({ en: en, cn: cn });
+    }
+
+    return res.json({ ok: true, data: { words: out }, usage: aiResult.usage || null });
+  } catch (e) {
+    console.error('[ENGLISH-PARSE] exception:', e && e.message);
+    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
+  }
+});
+
+// POST /api/agent/english/explain-word - AI 查询单词释义/例句/同义词
+// 接收 en, 返回 {en, cn, examples, synonyms, tip}
+app.post('/api/agent/english/explain-word', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var en = String((req.body && req.body.en) || '').trim().toLowerCase();
+    if (!en) return res.status(400).json({ error: '单词为空' });
+    if (!/^[a-zA-Z\s\-']+$/.test(en) || en.length > 60) {
+      return res.status(400).json({ error: '单词格式不合法' });
+    }
+    var context = String((req.body && req.body.context) || '').slice(0, 200);
+    var prompt = [
+      '请为英语单词/短语 "' + en + '" 提供简洁学习信息。',
+      context ? ('用户上下文: ' + context) : '',
+      '',
+      '【要求】',
+      '1. cn: 简洁中文释义 (≤30字, 多个含义用 ; 分隔)。',
+      '2. examples: 2 个日常英文例句 (数组, 每个 ≤80 字符)。',
+      '3. synonyms: 最多 3 个常用近义词 (数组)。',
+      '4. tip: 一句话记忆技巧或易错点 (≤50字)。',
+      '5. 严格输出 JSON 对象, 严禁额外文字, 严禁 markdown 代码块。',
+      '',
+      '输出格式:',
+      '{"en":"' + en + '","cn":"","examples":["",""], "synonyms":["","",""], "tip":""}'
+    ].filter(Boolean).join('\n');
+
+    var aiResult;
+    try {
+      aiResult = await callDeepSeek(
+        [
+          { role: 'system', content: '你是英语单词解释 AI, 严格输出 JSON 对象, 不输出任何额外文字。' },
+          { role: 'user', content: prompt }
+        ],
+        { thinking_mode: 'low', max_tokens: 600, response_format: { type: 'json_object' } }
+      );
+    } catch (e) {
+      console.error('[ENGLISH-EXPLAIN] AI failed:', e && e.message);
+      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
+    }
+
+    var raw = (aiResult && aiResult.content) || '';
+    var firstObj = raw.indexOf('{');
+    var lastObj = raw.lastIndexOf('}');
+    var jsonText = (firstObj >= 0 && lastObj > firstObj) ? raw.slice(firstObj, lastObj + 1) : raw;
+    var data;
+    try {
+      data = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[ENGLISH-EXPLAIN] JSON parse failed:', e && e.message, 'raw:', raw.slice(0, 200));
+      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    }
+    if (!data || typeof data !== 'object') return res.status(500).json({ error: 'AI 返回数据异常' });
+
+    var cn = String(data.cn || data.meaning || '').trim().slice(0, 80);
+    var examples = Array.isArray(data.examples) ? data.examples.slice(0, 2).map(function(s) { return String(s || '').slice(0, 200); }) : [];
+    var synonyms = Array.isArray(data.synonyms) ? data.synonyms.slice(0, 3).map(function(s) { return String(s || '').slice(0, 40); }) : [];
+    var tip = String(data.tip || data.memo || '').trim().slice(0, 120);
+
+    return res.json({
+      ok: true,
+      data: { en: en, cn: cn, examples: examples, synonyms: synonyms, tip: tip },
+      usage: aiResult.usage || null
+    });
+  } catch (e) {
+    console.error('[ENGLISH-EXPLAIN] exception:', e && e.message);
+    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
+  }
+});
+
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
 // 查询策略：
 //   - 带 conversation_id：只返回该 conv 的消息
