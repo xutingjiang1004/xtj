@@ -4232,60 +4232,78 @@ function showChatMessages() {
     header.appendChild(info);
 
     // ★ U3: 英语学习按钮 (在深度思考左边, AI 聊天内入口)
-    var englishBtn = el('button', {
-      type: 'button',
-      class: 'ai-english-toggle',
-      'aria-label': '英语学习',
-      title: '英语学习 — 单词库 + AI 生成阅读文章和题目',
-      id: 'aiEnglishToggle'
-    });
-    // ★ U3: 用 DOM API 创建 SVG 而非 innerHTML 字符串, 避免任何解析问题
-    var englishSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    englishSvg.setAttribute('viewBox', '0 0 24 24');
-    englishSvg.setAttribute('width', '14');
-    englishSvg.setAttribute('height', '14');
-    englishSvg.setAttribute('fill', 'none');
-    englishSvg.setAttribute('stroke', 'currentColor');
-    englishSvg.setAttribute('stroke-width', '2');
-    englishSvg.setAttribute('stroke-linecap', 'round');
-    englishSvg.setAttribute('stroke-linejoin', 'round');
-    englishSvg.style.verticalAlign = '-2px';
-    var p1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p1.setAttribute('d', 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20');
-    englishSvg.appendChild(p1);
-    var p2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p2.setAttribute('d', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z');
-    englishSvg.appendChild(p2);
-    var l1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    l1.setAttribute('x1', '9'); l1.setAttribute('y1', '7'); l1.setAttribute('x2', '15'); l1.setAttribute('y2', '7');
-    englishSvg.appendChild(l1);
-    var l2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    l2.setAttribute('x1', '9'); l2.setAttribute('y1', '11'); l2.setAttribute('x2', '15'); l2.setAttribute('y2', '11');
-    englishSvg.appendChild(l2);
-    englishBtn.appendChild(englishSvg);
-    englishBtn.appendChild(el('span', { class: 'ai-english-label', text: '英语' }));
-    englishBtn.addEventListener('click', function(ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      try {
-        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-          window.EnglishLearning.open();
-        } else {
-          // ★ 兜底: 直接显示 panel, 避免模块未加载时无响应
-          var panel = document.getElementById('panelEnglishLearning');
-          if (panel) {
-            panel.classList.remove('hidden');
-            try { window.notify && window.notify('英语学习模块正在加载中, 请稍后重试'); } catch (e) {}
-          } else {
-            try { notify('英语学习模块未加载'); } catch (e) {}
-          }
-        }
-      } catch (e) {
-        try { console.error('[EnglishBtn] click error:', e); notify('英语学习打开失败: ' + (e.message || '未知')); } catch (_) {}
-      }
-    });
+    // ★ 极简实现: 用原生 DOM + 内联 onclick, 避开 el() helper 任何潜在问题
+    var englishBtn = document.createElement('button');
+    englishBtn.type = 'button';
+    englishBtn.id = 'aiEnglishToggle';
+    englishBtn.className = 'ai-english-toggle';
+    englishBtn.setAttribute('aria-label', '英语学习');
+    englishBtn.title = '英语学习 — 单词库 + AI 生成阅读文章和题目';
+    // 书本图标
+    var englishSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>';
+    // ★ 安全: 用 DOM API 而非 innerHTML
+    var englishSvgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    englishSvgEl.setAttribute('viewBox', '0 0 24 24');
+    englishSvgEl.setAttribute('width', '14');
+    englishSvgEl.setAttribute('height', '14');
+    englishSvgEl.setAttribute('fill', 'none');
+    englishSvgEl.setAttribute('stroke', 'currentColor');
+    englishSvgEl.setAttribute('stroke-width', '2');
+    englishSvgEl.setAttribute('stroke-linecap', 'round');
+    englishSvgEl.setAttribute('stroke-linejoin', 'round');
+    englishSvgEl.style.verticalAlign = '-2px';
+    var pp1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pp1.setAttribute('d', 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20');
+    englishSvgEl.appendChild(pp1);
+    var pp2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pp2.setAttribute('d', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z');
+    englishSvgEl.appendChild(pp2);
+    var ll1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ll1.setAttribute('x1', '9'); ll1.setAttribute('y1', '7'); ll1.setAttribute('x2', '15'); ll1.setAttribute('y2', '7');
+    englishSvgEl.appendChild(ll1);
+    var ll2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ll2.setAttribute('x1', '9'); ll2.setAttribute('y1', '11'); ll2.setAttribute('x2', '15'); ll2.setAttribute('y2', '11');
+    englishSvgEl.appendChild(ll2);
+    englishBtn.appendChild(englishSvgEl);
+    var englishLabel = document.createElement('span');
+    englishLabel.className = 'ai-english-label';
+    englishLabel.textContent = '英语';
+    englishBtn.appendChild(englishLabel);
+    // ★ U3: 用 inline onclick 属性, 完全避开 addEventListener 任何问题
+    englishBtn.setAttribute('onclick', 'window.__aiEnglishClick && window.__aiEnglishClick(event)');
     header.appendChild(englishBtn);
-    try { console.log('[AI] English button appended, handler bound'); } catch (e) {}
+    try { console.log('[AI] English button appended'); } catch (e) {}
+
+    // ★ U3: 暴露全局 click handler (确保按钮 onclick 一定能找到)
+    window.__aiEnglishClick = function(ev) {
+      try {
+        ev = ev || window.event;
+        if (ev && ev.preventDefault) ev.preventDefault();
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        console.log('[EnglishBtn] click fired');
+        var panel = document.getElementById('panelEnglishLearning');
+        if (!panel) {
+          try { notify('panelEnglishLearning 元素不存在'); } catch (e) {}
+          return;
+        }
+        panel.classList.remove('hidden');
+        console.log('[EnglishBtn] panel shown');
+        // 延迟调用英语学习模块
+        setTimeout(function() {
+          try {
+            if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+              window.EnglishLearning.open();
+            } else {
+              try { notify('英语学习模块加载中...'); } catch (e) {}
+            }
+          } catch (e) {
+            try { console.error('[EnglishBtn] module error:', e); } catch (e2) {}
+          }
+        }, 50);
+      } catch (e) {
+        try { console.error('[EnglishBtn] fatal error:', e); } catch (e2) {}
+      }
+    };
 
     // 深度思考 toggle 按钮 (M: 在历史按钮左边)
     var deepThinkBtn = el('button', {
