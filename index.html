@@ -1650,125 +1650,202 @@
 <!-- 英语学习二级页面 -->
 <div class="dock-panel hidden" id="panelEnglishLearning">
     <div class="el-page">
-        <div class="el-header">
-            <button type="button" class="el-back" id="elBackBtn" aria-label="返回">← 返回</button>
-            <h3 class="el-title">📖 英语学习</h3>
+        <header class="el-header">
+            <button type="button" class="el-back" id="elBackBtn" aria-label="返回">
+                <span aria-hidden="true">←</span>
+            </button>
+            <div class="el-title-block">
+                <h3 class="el-title">英语学习</h3>
+                <div class="el-subtitle">Personal vocabulary studio</div>
+            </div>
+            <div class="el-sync" id="elSyncStatus" aria-live="polite">本机模式</div>
             <div class="el-actions">
                 <button type="button" class="el-action-btn" id="elNewChatBtn">新练习</button>
                 <button type="button" class="el-action-btn el-danger" id="elDeleteBtn">清空</button>
             </div>
-        </div>
+        </header>
 
-        <div class="el-tabs">
-            <button class="el-tab active" data-eltab="library">📚 单词库</button>
-            <button class="el-tab" data-eltab="practice">✏️ 练习</button>
-            <button class="el-tab" data-eltab="history">📊 记录</button>
-        </div>
-
-        <!-- 单词库 Tab -->
-        <div class="el-pane active" id="elPaneLibrary">
-            <div class="el-card el-add-card">
-                <div class="el-card-title">➕ 添加单词 <span class="el-card-tip">输入 "ap" 会提示 apple 等</span></div>
-                <div class="el-add-row el-ac-wrap">
-                    <input type="text" class="el-input" id="elWordInput" placeholder="英文单词 (输入前缀自动补全)" maxlength="60" autocomplete="off" />
-                    <div class="el-autocomplete" id="elAutocomplete" style="display:none"></div>
-                    <input type="text" class="el-input el-input-cn" id="elMeaningInput" placeholder="中文释义 (选填, 留空用词典)" maxlength="80" />
-                    <button type="button" class="el-btn el-btn-primary" id="elAddWordBtn">添加</button>
-                </div>
-                <div class="el-add-row">
-                    <textarea class="el-input el-textarea" id="elBatchInput" placeholder="批量添加 (一行一词, 格式: 单词 释义), 例如:&#10;serendipity 意外发现美好事物的能力&#10;ephemeral 短暂的" rows="3" maxlength="2000"></textarea>
-                    <button type="button" class="el-btn el-btn-primary" id="elBatchAddBtn">批量添加</button>
-                </div>
+        <section class="el-hero" aria-label="学习概览">
+            <div class="el-hero-copy">
+                <div class="el-kicker">DeepSeek reading lab</div>
+                <h2>用自己的单词生成阅读和题目</h2>
+                <p>同步单词、追踪掌握度、优先复习薄弱词，再按主题和难度生成专属文章。</p>
             </div>
+            <div class="el-stats">
+                <div class="el-stat"><span id="elWordCount">0</span><label>单词</label></div>
+                <div class="el-stat"><span id="elWeakCount">0</span><label>薄弱</label></div>
+                <div class="el-stat"><span id="elMasteredCount">0</span><label>掌握</label></div>
+                <div class="el-stat"><span id="elMistakeCount">0</span><label>错题</label></div>
+            </div>
+        </section>
 
-            <div class="el-card">
-                <div class="el-card-title el-flex">
-                    <span>📚 我的单词 (<span id="elWordCount">0</span>)</span>
-                    <div class="el-toolbar">
-                        <label class="el-checkbox">
-                            <input type="checkbox" id="elSelectAllCb" /> 全选
-                        </label>
-                        <button type="button" class="el-btn-mini el-danger" id="elDeleteSelBtn">删除选中</button>
+        <nav class="el-tabs" aria-label="英语学习导航">
+            <button class="el-tab active" data-eltab="library">单词库</button>
+            <button class="el-tab" data-eltab="practice">生成练习</button>
+            <button class="el-tab" data-eltab="history">复习记录</button>
+            <button class="el-tab" data-eltab="mistakes">错题本</button>
+            <span class="el-tab-indicator" aria-hidden="true"></span>
+        </nav>
+
+        <main class="el-main">
+            <section class="el-pane active" id="elPaneLibrary">
+                <div class="el-dashboard-grid">
+                    <div class="el-card el-add-card">
+                        <div class="el-card-title">添加单词 <span class="el-card-tip">支持自动补全和批量导入</span></div>
+                        <div class="el-add-row el-ac-wrap">
+                            <input type="text" class="el-input" id="elWordInput" placeholder="英文单词" maxlength="60" autocomplete="off" />
+                            <div class="el-autocomplete" id="elAutocomplete" style="display:none"></div>
+                            <input type="text" class="el-input el-input-cn" id="elMeaningInput" placeholder="中文释义，可选" maxlength="80" />
+                            <button type="button" class="el-btn el-btn-primary" id="elAddWordBtn">添加</button>
+                        </div>
+                        <div class="el-add-row">
+                            <textarea class="el-input el-textarea" id="elBatchInput" placeholder="批量添加：一行一词，格式为 单词 释义" rows="3" maxlength="2000"></textarea>
+                            <button type="button" class="el-btn" id="elBatchAddBtn">批量导入</button>
+                        </div>
+                    </div>
+
+                    <div class="el-card el-library-card">
+                        <div class="el-card-title el-flex">
+                            <span>我的单词</span>
+                            <div class="el-toolbar">
+                                <label class="el-checkbox">
+                                    <input type="checkbox" id="elSelectAllCb" /> 全选
+                                </label>
+                                <button type="button" class="el-btn-mini el-danger" id="elDeleteSelBtn">删除</button>
+                            </div>
+                        </div>
+                        <div class="el-library-tools">
+                            <input type="search" class="el-input" id="elSearchInput" placeholder="搜索单词或释义" autocomplete="off" />
+                            <div class="el-filter-row" id="elFilterRow">
+                                <button type="button" class="el-filter active" data-filter="all">全部</button>
+                                <button type="button" class="el-filter" data-filter="weak">薄弱</button>
+                                <button type="button" class="el-filter" data-filter="mastered">已掌握</button>
+                                <button type="button" class="el-filter" data-filter="recent">最近</button>
+                                <button type="button" class="el-filter" data-filter="mistake">错题关联</button>
+                            </div>
+                        </div>
+                        <div class="el-wordlist" id="elWordList">
+                            <div class="el-empty-hint">还没有单词，添加一个开始学习。</div>
+                        </div>
                     </div>
                 </div>
-                <div class="el-wordlist" id="elWordList">
-                    <div class="el-empty-hint">还没有单词, 添加一个开始学习吧 ✨</div>
-                </div>
-            </div>
-        </div>
+            </section>
 
-        <!-- 练习 Tab -->
-        <div class="el-pane" id="elPanePractice">
-            <div class="el-card el-gen-card" id="elGenCard">
-                <div class="el-card-title">🎯 生成练习</div>
-                <div class="el-gen-row">
-                    <label class="el-label">选择单词</label>
-                    <div class="el-gen-info" id="elGenInfo">将使用全部 <span id="elGenTotal">0</span> 个单词</div>
-                </div>
-                <div class="el-gen-row">
-                    <label class="el-label">题目类型</label>
-                    <div class="el-type-row">
-                        <label class="el-chip"><input type="checkbox" name="elType" value="article" checked> 📖 阅读文章</label>
-                        <label class="el-chip"><input type="checkbox" name="elType" value="mc" checked> ✏️ 选择题 (4选1)</label>
-                        <label class="el-chip"><input type="checkbox" name="elType" value="cloze" checked> 🧩 完形填空</label>
+            <section class="el-pane" id="elPanePractice">
+                <div class="el-dashboard-grid el-practice-grid">
+                    <div class="el-card el-gen-card" id="elGenCard">
+                        <div class="el-card-title">生成练习 <span class="el-card-tip" id="elGenInfo">将使用全部 <span id="elGenTotal">0</span> 个单词</span></div>
+                        <div class="el-gen-row">
+                            <label class="el-label">题目类型</label>
+                            <div class="el-type-row">
+                                <label class="el-chip selected"><input type="checkbox" name="elType" value="article" checked> 阅读文章</label>
+                                <label class="el-chip selected"><input type="checkbox" name="elType" value="mc" checked> 选择题</label>
+                                <label class="el-chip selected"><input type="checkbox" name="elType" value="cloze" checked> 完形填空</label>
+                            </div>
+                        </div>
+                        <div class="el-gen-row">
+                            <label class="el-label">难度</label>
+                            <div class="el-type-row">
+                                <label class="el-chip selected"><input type="radio" name="elLevel" value="cet4" checked> CET-4</label>
+                                <label class="el-chip"><input type="radio" name="elLevel" value="cet6"> CET-6</label>
+                                <label class="el-chip"><input type="radio" name="elLevel" value="ielts"> IELTS</label>
+                            </div>
+                        </div>
+                        <div class="el-gen-row el-settings-grid">
+                            <label class="el-field">
+                                <span class="el-label">题量</span>
+                                <select class="el-input" id="elQuestionCount">
+                                    <option value="4">4 题</option>
+                                    <option value="6" selected>6 题</option>
+                                    <option value="8">8 题</option>
+                                </select>
+                            </label>
+                            <label class="el-field">
+                                <span class="el-label">篇幅</span>
+                                <select class="el-input" id="elArticleLength">
+                                    <option value="short">短篇</option>
+                                    <option value="medium" selected>标准</option>
+                                    <option value="long">长篇</option>
+                                </select>
+                            </label>
+                            <label class="el-field">
+                                <span class="el-label">选词策略</span>
+                                <select class="el-input" id="elFocusMode">
+                                    <option value="all">全部单词</option>
+                                    <option value="weak" selected>优先薄弱词</option>
+                                    <option value="selected">只用选中词</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="el-gen-row">
+                            <label class="el-label" for="elTopicInput">主题</label>
+                            <input type="text" class="el-input" id="elTopicInput" maxlength="80" placeholder="例如 technology, travel, campus life，可留空" />
+                        </div>
+                        <button type="button" class="el-btn el-btn-primary el-btn-big" id="elGenBtn">生成专属练习</button>
+                    </div>
+
+                    <div class="el-practice-output">
+                        <div class="el-card el-loading" id="elLoading" style="display:none">
+                            <div class="el-loader-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+                            <div class="el-loading-text">DeepSeek 正在组织文章、题目和解析...</div>
+                        </div>
+
+                        <div class="el-card" id="elArticleCard" style="display:none">
+                            <div class="el-card-title el-flex">
+                                <span>阅读文章</span>
+                                <span class="el-meta" id="elArticleMeta"></span>
+                            </div>
+                            <div class="el-article-actions">
+                                <button type="button" class="el-btn-mini" id="elSpeakArticleBtn">朗读</button>
+                            </div>
+                            <div class="el-article" id="elArticleText"></div>
+                            <div class="el-wordlist-inline" id="elArticleWords"></div>
+                        </div>
+
+                        <div class="el-card" id="elQuestionsCard" style="display:none">
+                            <div class="el-card-title el-flex">
+                                <span>题目</span>
+                                <span class="el-meta" id="elQuestionsMeta"></span>
+                            </div>
+                            <div class="el-questions" id="elQuestionsList"></div>
+                            <div class="el-actions-row">
+                                <button type="button" class="el-btn el-btn-primary" id="elSubmitBtn">提交答案</button>
+                                <button type="button" class="el-btn" id="elShowAnswerBtn">查看解析</button>
+                            </div>
+                        </div>
+
+                        <div class="el-card el-result" id="elResultCard" style="display:none">
+                            <div class="el-result-ring"><span id="elResultScore">0 / 0</span></div>
+                            <div class="el-result-text" id="elResultText"></div>
+                            <div class="el-actions-row">
+                                <button type="button" class="el-btn el-btn-primary" id="elNewPracticeBtn">再来一组</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="el-gen-row">
-                    <label class="el-label">难度</label>
-                    <div class="el-type-row">
-                        <label class="el-chip"><input type="radio" name="elLevel" value="cet4" checked> 四级 (CET-4)</label>
-                        <label class="el-chip"><input type="radio" name="elLevel" value="cet6"> 六级 (CET-6)</label>
-                        <label class="el-chip"><input type="radio" name="elLevel" value="ielts"> 雅思</label>
+            </section>
+
+            <section class="el-pane" id="elPaneHistory">
+                <div class="el-card">
+                    <div class="el-card-title">复习记录</div>
+                    <div class="el-history" id="elHistoryList">
+                        <div class="el-empty-hint">还没有练习记录</div>
                     </div>
                 </div>
-                <button type="button" class="el-btn el-btn-primary el-btn-big" id="elGenBtn">✨ 生成练习</button>
-            </div>
+            </section>
 
-            <div class="el-card el-loading" id="elLoading" style="display:none">
-                <div class="el-spinner"></div>
-                <div class="el-loading-text">AI 正在生成中...</div>
-            </div>
-
-            <div class="el-card" id="elArticleCard" style="display:none">
-                <div class="el-card-title el-flex">
-                    <span>📖 阅读文章</span>
-                    <span class="el-meta" id="elArticleMeta"></span>
+            <section class="el-pane" id="elPaneMistakes">
+                <div class="el-card">
+                    <div class="el-card-title el-flex">
+                        <span>错题本</span>
+                        <button type="button" class="el-btn-mini" id="elPracticeMistakesBtn">用错题生成练习</button>
+                    </div>
+                    <div class="el-mistakes" id="elMistakeList">
+                        <div class="el-empty-hint">还没有错题。</div>
+                    </div>
                 </div>
-                <div class="el-article" id="elArticleText"></div>
-                <div class="el-wordlist-inline" id="elArticleWords"></div>
-            </div>
-
-            <div class="el-card" id="elQuestionsCard" style="display:none">
-                <div class="el-card-title el-flex">
-                    <span>✏️ 题目</span>
-                    <span class="el-meta" id="elQuestionsMeta"></span>
-                </div>
-                <div class="el-questions" id="elQuestionsList"></div>
-                <div class="el-actions-row">
-                    <button type="button" class="el-btn el-btn-primary" id="elSubmitBtn">提交答案</button>
-                    <button type="button" class="el-btn" id="elShowAnswerBtn">查看解析</button>
-                </div>
-            </div>
-
-            <div class="el-card el-result" id="elResultCard" style="display:none">
-                <div class="el-result-icon" id="elResultIcon">🎉</div>
-                <div class="el-result-score" id="elResultScore">0 / 0</div>
-                <div class="el-result-text" id="elResultText"></div>
-                <div class="el-actions-row">
-                    <button type="button" class="el-btn el-btn-primary" id="elNewPracticeBtn">再来一组</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 历史记录 Tab -->
-        <div class="el-pane" id="elPaneHistory">
-            <div class="el-card">
-                <div class="el-card-title">📊 练习记录</div>
-                <div class="el-history" id="elHistoryList">
-                    <div class="el-empty-hint">还没有练习记录</div>
-                </div>
-            </div>
-        </div>
+            </section>
+        </main>
     </div>
 </div>
 

@@ -1,156 +1,446 @@
 /* ============================================================
- * XTJ 英语学习二级页面 v3
- * - 单词库 (含自动补全)
- * - AI 生成阅读文章 + 选择题 + 完形填空
- * - 答题评分 + 解析
- * - 简洁可爱 UI + 流畅动画
+ * XTJ English Learning Studio
+ * - Account-synced vocabulary state
+ * - DeepSeek reading/question generation
+ * - Mastery, mistakes, history, review queue
  * ============================================================ */
 
 (function() {
   'use strict';
 
+  var STORAGE_KEY = 'xtj_english_state_v2';
+  var LEGACY_WORDS_KEY = 'xtj_english_words_v1';
+  var LEGACY_HISTORY_KEY = 'xtj_english_history_v1';
+  var MAX_WORDS = 200;
+  var MAX_HISTORY = 80;
+  var MAX_MISTAKES = 120;
+  var SAVE_DEBOUNCE_MS = 800;
+
+  var DEFAULT_SETTINGS = {
+    defaultLevel: 'cet4',
+    articleLength: 'medium',
+    questionCount: 6,
+    focus: 'weak',
+    topic: ''
+  };
+
   var S = {
     words: [],
     history: [],
+    mistakes: [],
+    settings: Object.assign({}, DEFAULT_SETTINGS),
     currentQuiz: null,
-    isGenerating: false
+    filter: 'all',
+    search: '',
+    isGenerating: false,
+    initialized: false,
+    syncStatus: 'local',
+    syncTimer: null,
+    saveInFlight: false,
+    pendingSave: false,
+    lastRemoteUpdatedAt: 0
   };
 
-  var STORAGE_KEY = 'xtj_english_words_v1';
-  var HISTORY_KEY = 'xtj_english_history_v1';
-  var MAX_WORDS = 200;
-  var MAX_HISTORY = 50;
-
-  // ============= Storage =============
-  function loadWords() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      var arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    } catch (e) { return []; }
-  }
-  function saveWords() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(S.words.slice(0, MAX_WORDS))); } catch (e) {}
-  }
-  function loadHistory() {
-    try {
-      var raw = localStorage.getItem(HISTORY_KEY);
-      var arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    } catch (e) { return []; }
-  }
-  function saveHistory() {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history.slice(0, MAX_HISTORY))); } catch (e) {}
-  }
-
-  function uid() {
-    return 'w_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  }
-
-  // ============= Element helpers =============
   function $(id) { return document.getElementById(id); }
+
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
     if (attrs) {
-      for (var k in attrs) {
-        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+      Object.keys(attrs).forEach(function(k) {
         var v = attrs[k];
-        if (v === undefined || v === null) continue;
+        if (v === undefined || v === null) return;
         if (k === 'class') node.className = v;
-        else if (k === 'text') node.textContent = v;
-        else if (k === 'html') node.textContent = v;
-        else if (k === 'style') node.style.cssText = v;
-        else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
-        else node.setAttribute(k, v);
-      }
+        else if (k === 'text') node.textContent = String(v);
+        else if (k === 'style') node.style.cssText = String(v);
+        else if (k.indexOf('on') === 0 && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+        else node.setAttribute(k, String(v));
+      });
     }
     if (children !== undefined && children !== null) {
       if (typeof children === 'string') node.textContent = children;
-      else if (Array.isArray(children)) {
-        children.forEach(function(c) { if (c) node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
-      }
+      else if (Array.isArray(children)) children.forEach(function(c) {
+        if (!c) return;
+        node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      });
+      else node.appendChild(children);
     }
     return node;
   }
-  function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   function notify(msg, type) {
     if (window.notify && typeof window.notify === 'function') {
       try { window.notify(msg, type); return; } catch (e) {}
     }
-    console.log('[EL]', msg);
+    if (window.showToast && typeof window.showToast === 'function') {
+      try { window.showToast(msg); return; } catch (e2) {}
+    }
+    try { console.log('[EL]', msg); } catch (e3) {}
   }
 
-  // ============= Auth =============
-  function readUserName() { try { return sessionStorage.getItem('xtj_user_name') || localStorage.getItem('xtj_user_name') || ''; } catch (e) { return ''; } }
-  function readPwHash() { try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; } }
-  function readUserToken() { try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; } }
+  function apiBase() {
+    return (typeof window.API_BASE === 'string' && window.API_BASE)
+      ? window.API_BASE.replace(/\/$/, '') + '/api/agent'
+      : '/api/agent';
+  }
+
+  function readUserName() {
+    try {
+      return sessionStorage.getItem('xtj_user_name') ||
+        localStorage.getItem('xtj_user_name') ||
+        localStorage.getItem('xtj_user') ||
+        window.currentUser ||
+        '';
+    } catch (e) { return window.currentUser || ''; }
+  }
+
+  function readPwHash() {
+    try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
+  }
+
+  function readUserToken() {
+    try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; }
+  }
+
   async function getAuthHeaders() {
     var headers = { 'Content-Type': 'application/json' };
     try {
       if (typeof window.ensureUserToken === 'function') {
-        var t = await window.ensureUserToken();
-        if (t) { headers.Authorization = 'Bearer ' + t; return headers; }
+        var ensured = await window.ensureUserToken();
+        if (ensured) {
+          headers.Authorization = 'Bearer ' + ensured;
+          return headers;
+        }
       }
     } catch (e) {}
-    var tok = readUserToken();
-    if (tok) headers.Authorization = 'Bearer ' + tok;
+    var token = readUserToken();
+    if (token) headers.Authorization = 'Bearer ' + token;
     return headers;
   }
 
-  // ============= Word library =============
-  function addWord(en, cn) {
+  function addLegacyAuth(body, headers) {
+    if (headers && headers.Authorization) return body;
+    var un = readUserName();
+    var pw = readPwHash();
+    if (un && pw) {
+      body.user_name = un;
+      body.password_hash = pw;
+    }
+    return body;
+  }
+
+  function uid(prefix) {
+    return (prefix || 'id') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function now() { return Date.now(); }
+
+  function normalizeWord(en, cn, existing) {
     en = String(en || '').trim().toLowerCase();
     cn = String(cn || '').trim();
-    if (!en) return null;
-    if (!/^[a-zA-Z\s\-']+$/.test(en)) return null;
-    if (en.length > 60) return null;
+    if (!en || !/^[a-zA-Z\s\-']+$/.test(en) || en.length > 60) return null;
+    var base = existing || {};
+    return {
+      id: base.id || uid('w'),
+      en: en,
+      cn: cn || base.cn || '',
+      mastery: clampNumber(base.mastery, 0, 100, 0),
+      seen: clampNumber(base.seen, 0, 9999, 0),
+      correct: clampNumber(base.correct, 0, 9999, 0),
+      wrong: clampNumber(base.wrong, 0, 9999, 0),
+      lastReviewedAt: clampNumber(base.lastReviewedAt, 0, Number.MAX_SAFE_INTEGER, 0),
+      addedAt: clampNumber(base.addedAt, 0, Number.MAX_SAFE_INTEGER, now()),
+      updatedAt: clampNumber(base.updatedAt, 0, Number.MAX_SAFE_INTEGER, now())
+    };
+  }
+
+  function clampNumber(v, min, max, fallback) {
+    v = Number(v);
+    if (!isFinite(v)) return fallback;
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function normalizeState(raw) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var words = Array.isArray(raw.words) ? raw.words : [];
+    var byEn = {};
+    words.forEach(function(item) {
+      var w = normalizeWord(item && item.en, item && item.cn, item);
+      if (!w) return;
+      var prev = byEn[w.en];
+      if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) byEn[w.en] = w;
+    });
+    var list = Object.keys(byEn).map(function(k) { return byEn[k]; })
+      .sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); })
+      .slice(0, MAX_WORDS);
+    return {
+      version: 1,
+      words: list,
+      history: Array.isArray(raw.history) ? raw.history.slice(0, MAX_HISTORY) : [],
+      mistakes: Array.isArray(raw.mistakes) ? raw.mistakes.slice(0, MAX_MISTAKES) : [],
+      settings: Object.assign({}, DEFAULT_SETTINGS, raw.settings || {}),
+      updatedAt: clampNumber(raw.updatedAt, 0, Number.MAX_SAFE_INTEGER, 0)
+    };
+  }
+
+  function getLocalState() {
+    var parsed = {};
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch (e) { parsed = {}; }
+
+    var state = normalizeState(parsed);
+    try {
+      var legacyWords = localStorage.getItem(LEGACY_WORDS_KEY);
+      if (legacyWords) {
+        var arr = JSON.parse(legacyWords);
+        if (Array.isArray(arr)) {
+          state = mergeStates(state, normalizeState({ words: arr, updatedAt: 0 }));
+        }
+      }
+      var legacyHistory = localStorage.getItem(LEGACY_HISTORY_KEY);
+      if (legacyHistory && state.history.length === 0) {
+        var hist = JSON.parse(legacyHistory);
+        if (Array.isArray(hist)) state.history = hist.slice(0, MAX_HISTORY);
+      }
+    } catch (e2) {}
+    return state;
+  }
+
+  function saveLocalState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildStatePayload()));
+    } catch (e) {}
+  }
+
+  function mergeStates(local, remote) {
+    local = normalizeState(local);
+    remote = normalizeState(remote);
+    var map = {};
+    local.words.concat(remote.words).forEach(function(w) {
+      if (!w || !w.en) return;
+      var key = w.id || w.en;
+      var enKey = 'en:' + w.en;
+      var prev = map[key] || map[enKey];
+      if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) {
+        map[key] = w;
+        map[enKey] = w;
+      }
+    });
+    var seenIds = {};
+    var words = [];
+    Object.keys(map).forEach(function(k) {
+      var w = map[k];
+      if (!w || seenIds[w.id]) return;
+      seenIds[w.id] = true;
+      words.push(w);
+    });
+    words.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+    return {
+      version: 1,
+      words: words.slice(0, MAX_WORDS),
+      history: mergeById(local.history, remote.history, MAX_HISTORY),
+      mistakes: mergeById(local.mistakes, remote.mistakes, MAX_MISTAKES),
+      settings: Object.assign({}, DEFAULT_SETTINGS, remote.settings || {}, local.settings || {}),
+      updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0)
+    };
+  }
+
+  function mergeById(a, b, cap) {
+    var map = {};
+    (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []).forEach(function(item) {
+      if (!item) return;
+      var id = item.id || uid('row');
+      var prev = map[id];
+      if (!prev || (item.time || item.updatedAt || 0) >= (prev.time || prev.updatedAt || 0)) map[id] = item;
+    });
+    return Object.keys(map).map(function(k) { return map[k]; })
+      .sort(function(x, y) { return (y.time || y.updatedAt || 0) - (x.time || x.updatedAt || 0); })
+      .slice(0, cap);
+  }
+
+  function applyState(state) {
+    state = normalizeState(state);
+    S.words = state.words;
+    S.history = state.history;
+    S.mistakes = state.mistakes;
+    S.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings || {});
+    S.lastRemoteUpdatedAt = state.updatedAt || 0;
+  }
+
+  function buildStatePayload() {
+    return {
+      version: 1,
+      words: S.words.slice(0, MAX_WORDS),
+      history: S.history.slice(0, MAX_HISTORY),
+      mistakes: S.mistakes.slice(0, MAX_MISTAKES),
+      settings: Object.assign({}, DEFAULT_SETTINGS, S.settings || {}),
+      updatedAt: now()
+    };
+  }
+
+  function setSyncStatus(status, label) {
+    S.syncStatus = status;
+    var node = $('elSyncStatus');
+    if (!node) return;
+    node.className = 'el-sync ' + 'is-' + status;
+    node.textContent = label || (
+      status === 'synced' ? '已同步' :
+      status === 'syncing' ? '同步中' :
+      status === 'dirty' ? '待同步' :
+      status === 'error' ? '未同步' :
+      '本机模式'
+    );
+  }
+
+  async function loadRemoteState() {
+    var headers = await getAuthHeaders();
+    var body = addLegacyAuth({}, headers);
+    if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+      setSyncStatus('local', '本机模式');
+      return null;
+    }
+    var url = apiBase() + '/english/state';
+    if (!headers.Authorization) {
+      url += '?user_name=' + encodeURIComponent(body.user_name) + '&password_hash=' + encodeURIComponent(body.password_hash);
+    }
+    setSyncStatus('syncing', '同步中');
+    var resp = await fetch(url, { method: 'GET', headers: headers });
+    if (!resp.ok) throw new Error('同步读取失败');
+    var json = await resp.json();
+    if (!json.ok) throw new Error(json.error || '同步读取失败');
+    setSyncStatus('synced', '已同步');
+    return normalizeState(json.data || {});
+  }
+
+  function scheduleSave() {
+    saveLocalState();
+    setSyncStatus('dirty', '待同步');
+    if (S.syncTimer) clearTimeout(S.syncTimer);
+    S.syncTimer = setTimeout(saveRemoteState, SAVE_DEBOUNCE_MS);
+  }
+
+  async function saveRemoteState() {
+    if (S.saveInFlight) {
+      S.pendingSave = true;
+      return;
+    }
+    S.saveInFlight = true;
+    S.pendingSave = false;
+    try {
+      var headers = await getAuthHeaders();
+      var payload = buildStatePayload();
+      var body = addLegacyAuth({ data: payload }, headers);
+      if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+        setSyncStatus('local', '本机模式');
+        return;
+      }
+      setSyncStatus('syncing', '同步中');
+      var resp = await fetch(apiBase() + '/english/state', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        var err = '';
+        try { var ej = await resp.json(); err = ej && ej.error || ''; } catch (e) {}
+        throw new Error(err || '同步保存失败');
+      }
+      var json = await resp.json();
+      if (!json.ok) throw new Error(json.error || '同步保存失败');
+      setSyncStatus('synced', '已同步');
+    } catch (e2) {
+      setSyncStatus('error', '未同步');
+      try { console.warn('[EL] sync failed:', e2 && e2.message); } catch (e3) {}
+    } finally {
+      S.saveInFlight = false;
+      if (S.pendingSave) saveRemoteState();
+    }
+  }
+
+  async function initializeState() {
+    var local = getLocalState();
+    applyState(local);
+    saveLocalState();
+    try {
+      var remote = await loadRemoteState();
+      if (remote) {
+        var merged = mergeStates(local, remote);
+        applyState(merged);
+        saveLocalState();
+        if ((merged.updatedAt || 0) > (remote.updatedAt || 0) || local.words.length) scheduleSave();
+      }
+    } catch (e) {
+      setSyncStatus('error', '未同步');
+    }
+    renderAll();
+  }
+
+  function findDictWord(en) {
+    en = String(en || '').toLowerCase();
+    var dict = window.ENGLISH_WORD_DICT || [];
+    for (var i = 0; i < dict.length; i++) {
+      if (String(dict[i].en || '').toLowerCase() === en) return dict[i];
+    }
+    return null;
+  }
+
+  function addWord(en, cn, silent) {
+    var dict = findDictWord(en);
+    var normalized = normalizeWord(en, cn || (dict && dict.cn) || '');
+    if (!normalized) {
+      if (!silent) notify('请输入有效英文单词');
+      return null;
+    }
     for (var i = 0; i < S.words.length; i++) {
-      if (S.words[i].en === en) {
-        if (cn && S.words[i].cn !== cn) S.words[i].cn = cn;
+      if (S.words[i].en === normalized.en) {
+        if (normalized.cn && normalized.cn !== S.words[i].cn) S.words[i].cn = normalized.cn;
+        S.words[i].updatedAt = now();
+        scheduleSave();
         return S.words[i];
       }
     }
     if (S.words.length >= MAX_WORDS) {
-      notify('单词库已满 (' + MAX_WORDS + ' 词)');
+      if (!silent) notify('单词库已满 (' + MAX_WORDS + ' 词)');
       return null;
     }
-    var w = { id: uid(), en: en, cn: cn || '', addedAt: Date.now() };
-    S.words.unshift(w);
-    saveWords();
-    return w;
+    S.words.unshift(normalized);
+    scheduleSave();
+    return normalized;
   }
 
   function deleteWord(id) {
     S.words = S.words.filter(function(w) { return w.id !== id; });
-    saveWords();
+    scheduleSave();
   }
+
   function deleteSelected(ids) {
-    if (!ids || !ids.length) return 0;
+    ids = ids || [];
     S.words = S.words.filter(function(w) { return ids.indexOf(w.id) < 0; });
-    saveWords();
+    scheduleSave();
     return ids.length;
   }
-  function clearAllWords() { S.words = []; saveWords(); }
 
-  // ============= Autocomplete =============
+  function clearAll() {
+    S.words = [];
+    S.history = [];
+    S.mistakes = [];
+    S.currentQuiz = null;
+    scheduleSave();
+  }
+
   function getDictMatches(query, maxResults) {
     maxResults = maxResults || 8;
     query = String(query || '').trim().toLowerCase();
     if (!query || !window.ENGLISH_WORD_DICT) return [];
+    var dict = window.ENGLISH_WORD_DICT;
     var matches = [];
-    var DICT = window.ENGLISH_WORD_DICT;
-    // 优先前缀匹配
-    for (var i = 0; i < DICT.length && matches.length < maxResults; i++) {
-      if (DICT[i].en.indexOf(query) === 0) {
-        matches.push(DICT[i]);
-      }
+    for (var i = 0; i < dict.length && matches.length < maxResults; i++) {
+      if (String(dict[i].en || '').toLowerCase().indexOf(query) === 0) matches.push(dict[i]);
     }
-    // 然后包含匹配
-    for (var j = 0; j < DICT.length && matches.length < maxResults; j++) {
-      if (DICT[j].en.indexOf(query) > 0 && DICT[j].en.indexOf(query) >= 0) {
-        matches.push(DICT[j]);
-      }
+    for (var j = 0; j < dict.length && matches.length < maxResults; j++) {
+      var en = String(dict[j].en || '').toLowerCase();
+      if (en.indexOf(query) > 0 && matches.indexOf(dict[j]) < 0) matches.push(dict[j]);
     }
     return matches;
   }
@@ -158,25 +448,21 @@
   function showAutocomplete(input, suggestions) {
     var box = $('elAutocomplete');
     if (!box) return;
-    if (!suggestions || suggestions.length === 0) {
+    box.innerHTML = '';
+    if (!suggestions || !suggestions.length) {
       box.style.display = 'none';
-      box.innerHTML = '';
       return;
     }
-    box.innerHTML = '';
     suggestions.forEach(function(s) {
-      var item = el('div', { class: 'el-ac-item' });
-      var enSpan = el('span', { class: 'el-ac-en', text: s.en });
-      var cnSpan = el('span', { class: 'el-ac-cn', text: s.cn || '' });
-      item.appendChild(enSpan);
-      item.appendChild(cnSpan);
+      var item = el('button', { type: 'button', class: 'el-ac-item' });
+      item.appendChild(el('span', { class: 'el-ac-en', text: s.en }));
+      item.appendChild(el('span', { class: 'el-ac-cn', text: s.cn || '' }));
       item.addEventListener('mousedown', function(ev) {
         ev.preventDefault();
         input.value = s.en;
         var cnInput = $('elMeaningInput');
         if (cnInput && !cnInput.value) cnInput.value = s.cn || '';
-        box.style.display = 'none';
-        box.innerHTML = '';
+        hideAutocomplete();
         input.focus();
       });
       box.appendChild(item);
@@ -186,172 +472,290 @@
 
   function hideAutocomplete() {
     var box = $('elAutocomplete');
-    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    if (box) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+    }
   }
 
-  // ============= Render word list =============
+  function isWeakWord(w) {
+    if (!w) return false;
+    if ((w.seen || 0) === 0) return false;
+    return (w.mastery || 0) < 60 || (w.wrong || 0) > (w.correct || 0);
+  }
+
+  function isMasteredWord(w) {
+    return w && (w.seen || 0) >= 2 && (w.mastery || 0) >= 80;
+  }
+
+  function wordHasMistake(w) {
+    if (!w) return false;
+    return S.mistakes.some(function(m) { return (m.words || []).indexOf(w.en) >= 0; });
+  }
+
+  function getFilteredWords() {
+    var q = String(S.search || '').trim().toLowerCase();
+    return S.words.filter(function(w) {
+      if (S.filter === 'weak' && !isWeakWord(w)) return false;
+      if (S.filter === 'mastered' && !isMasteredWord(w)) return false;
+      if (S.filter === 'recent' && now() - (w.addedAt || 0) > 7 * 86400000) return false;
+      if (S.filter === 'mistake' && !wordHasMistake(w)) return false;
+      if (!q) return true;
+      return w.en.indexOf(q) >= 0 || String(w.cn || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function masteryLabel(w) {
+    var m = w.mastery || 0;
+    if ((w.seen || 0) === 0) return '新词';
+    if (m >= 80) return '掌握';
+    if (m >= 60) return '熟悉';
+    return '薄弱';
+  }
+
+  function renderStats() {
+    var weak = S.words.filter(isWeakWord).length;
+    var mastered = S.words.filter(isMasteredWord).length;
+    setText('elWordCount', S.words.length);
+    setText('elWeakCount', weak);
+    setText('elMasteredCount', mastered);
+    setText('elMistakeCount', S.mistakes.length);
+    setText('elGenTotal', getWordsForGeneration(false).length);
+  }
+
+  function setText(id, value) {
+    var node = $(id);
+    if (node) node.textContent = String(value);
+  }
+
   function renderWordList() {
     var list = $('elWordList');
     if (!list) return;
     list.innerHTML = '';
-    if (S.words.length === 0) {
-      list.appendChild(el('div', { class: 'el-empty-hint', text: '还没有单词, 添加一个开始学习吧 ✨' }));
-      $('elWordCount').textContent = '0';
-      updateGenInfo();
+    var words = getFilteredWords();
+    if (!words.length) {
+      list.appendChild(el('div', { class: 'el-empty-hint', text: S.words.length ? '没有匹配的单词。' : '还没有单词，添加一个开始学习。' }));
       return;
     }
-    S.words.forEach(function(w) {
-      var item = el('div', { class: 'el-word-item', 'data-id': w.id });
-      var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id });
+    words.forEach(function(w, index) {
+      var item = el('article', { class: 'el-word-item', 'data-id': w.id, style: '--el-i:' + Math.min(index, 16) });
+      var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id, 'aria-label': '选择 ' + w.en });
       cb.addEventListener('change', function() {
-        if (cb.checked) item.classList.add('selected');
-        else item.classList.remove('selected');
+        item.classList.toggle('selected', cb.checked);
+        updateGenInfo();
       });
-      var en = el('div', { class: 'el-word-en', text: w.en });
-      var cn = el('div', { class: 'el-word-cn', text: w.cn || '—' });
-      var delBtn = el('button', { class: 'el-word-del', 'aria-label': '删除', title: '删除', text: '✕' });
+      var main = el('div', { class: 'el-word-main' });
+      main.appendChild(el('div', { class: 'el-word-en', text: w.en }));
+      main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '暂无释义' }));
+      var meta = el('div', { class: 'el-word-meta' });
+      meta.appendChild(el('span', { class: 'el-mastery ' + masteryClass(w), text: masteryLabel(w) + ' ' + Math.round(w.mastery || 0) + '%' }));
+      meta.appendChild(el('span', { text: '练习 ' + (w.seen || 0) + ' 次' }));
+      main.appendChild(meta);
+      var delBtn = el('button', { type: 'button', class: 'el-word-del', 'aria-label': '删除 ' + w.en, title: '删除', text: '×' });
       delBtn.addEventListener('click', function() {
         deleteWord(w.id);
-        renderWordList();
-        updateGenInfo();
+        renderAll();
         notify('已删除: ' + w.en);
       });
+      var speakBtn = el('button', { type: 'button', class: 'el-word-speak', title: '朗读', 'aria-label': '朗读 ' + w.en, text: '♪' });
+      speakBtn.addEventListener('click', function() { speakText(w.en, 'en-US'); });
       item.appendChild(cb);
-      item.appendChild(en);
-      item.appendChild(cn);
+      item.appendChild(main);
+      item.appendChild(speakBtn);
       item.appendChild(delBtn);
       list.appendChild(item);
     });
-    $('elWordCount').textContent = String(S.words.length);
-    updateGenInfo();
+  }
+
+  function masteryClass(w) {
+    if (isMasteredWord(w)) return 'is-mastered';
+    if (isWeakWord(w)) return 'is-weak';
+    return 'is-new';
   }
 
   function updateGenInfo() {
-    var el2 = $('elGenTotal');
-    if (el2) el2.textContent = String(S.words.length);
-    var el3 = $('elGenBtn');
-    if (el3) el3.disabled = S.words.length === 0;
+    var total = getWordsForGeneration(false).length;
+    setText('elGenTotal', total);
+    var info = $('elGenInfo');
+    if (info) info.innerHTML = '将使用 <span id="elGenTotal">' + total + '</span> 个单词';
+    var gen = $('elGenBtn');
+    if (gen) gen.disabled = S.isGenerating || total === 0;
   }
 
-  // ============= AI Generation =============
+  function getSelectedWordIds() {
+    var ids = [];
+    document.querySelectorAll('.el-word-cb:checked').forEach(function(cb) {
+      ids.push(cb.getAttribute('data-id'));
+    });
+    return ids;
+  }
+
+  function getWordsForGeneration(notifyIfEmpty) {
+    var mode = S.settings.focus || 'weak';
+    var selectedIds = getSelectedWordIds();
+    var words = S.words.slice();
+    if (mode === 'selected' && selectedIds.length) {
+      words = words.filter(function(w) { return selectedIds.indexOf(w.id) >= 0; });
+    } else if (mode === 'weak') {
+      var weak = words.filter(isWeakWord);
+      var fresh = words.filter(function(w) { return (w.seen || 0) === 0; });
+      var rest = words.filter(function(w) { return weak.indexOf(w) < 0 && fresh.indexOf(w) < 0; });
+      words = weak.concat(fresh).concat(rest);
+    }
+    words = words.slice(0, MAX_WORDS);
+    if (notifyIfEmpty && !words.length) notify('请先添加单词到单词库');
+    return words;
+  }
+
   function getSelectedTypes() {
     var types = [];
-    var boxes = document.querySelectorAll('input[name="elType"]:checked');
-    boxes.forEach(function(b) { types.push(b.value); });
+    document.querySelectorAll('input[name="elType"]:checked').forEach(function(input) { types.push(input.value); });
     return types;
   }
+
   function getSelectedLevel() {
     var r = document.querySelector('input[name="elLevel"]:checked');
-    return r ? r.value : 'cet4';
+    return r ? r.value : (S.settings.defaultLevel || 'cet4');
+  }
+
+  function syncSettingsFromInputs() {
+    S.settings.defaultLevel = getSelectedLevel();
+    S.settings.questionCount = parseInt(($('elQuestionCount') || {}).value, 10) || 6;
+    S.settings.articleLength = (($('elArticleLength') || {}).value || 'medium');
+    S.settings.focus = (($('elFocusMode') || {}).value || 'weak');
+    S.settings.topic = String((($('elTopicInput') || {}).value || '')).trim().slice(0, 80);
+  }
+
+  function applySettingsToInputs() {
+    var level = S.settings.defaultLevel || 'cet4';
+    var levelInput = document.querySelector('input[name="elLevel"][value="' + level + '"]');
+    if (levelInput) levelInput.checked = true;
+    if ($('elQuestionCount')) $('elQuestionCount').value = String(S.settings.questionCount || 6);
+    if ($('elArticleLength')) $('elArticleLength').value = S.settings.articleLength || 'medium';
+    if ($('elFocusMode')) $('elFocusMode').value = S.settings.focus || 'weak';
+    if ($('elTopicInput')) $('elTopicInput').value = S.settings.topic || '';
+    refreshChipStates();
   }
 
   async function generateQuiz() {
     if (S.isGenerating) return;
-    if (S.words.length === 0) {
-      notify('请先添加单词到单词库');
-      return;
-    }
+    syncSettingsFromInputs();
+    var words = getWordsForGeneration(true);
+    if (!words.length) return;
     var types = getSelectedTypes();
-    if (types.length === 0) {
+    if (!types.length) {
       notify('请至少选择一种题目类型');
       return;
     }
     var level = getSelectedLevel();
-
     S.isGenerating = true;
     showLoading(true);
     hideResult();
     hideArticle();
     hideQuestions();
-
+    scheduleSave();
     try {
-      // ★ U3 修复: window.API_BASE 是 origin (https://xtj.onrender.com), 需补 /api/agent
-      var apiBase = (typeof window.API_BASE === 'string' && window.API_BASE) ? (window.API_BASE.replace(/\/$/, '') + '/api/agent') : '/api/agent';
       var headers = await getAuthHeaders();
-      var un = readUserName();
-      var pw = readPwHash();
-      var body = {
-        words: S.words.map(function(w) { return { en: w.en, cn: w.cn || '' }; }),
+      var body = addLegacyAuth({
+        words: words.map(function(w) { return { en: w.en, cn: w.cn || '', mastery: w.mastery || 0 }; }),
         level: level,
-        types: types
-      };
-      if (!headers.Authorization && un && pw) {
-        body.user_name = un;
-        body.password_hash = pw;
-      }
-      var resp = await fetch(apiBase + '/english/generate', {
+        types: types,
+        question_count: S.settings.questionCount || 6,
+        article_length: S.settings.articleLength || 'medium',
+        topic: S.settings.topic || '',
+        focus: S.settings.focus || 'weak'
+      }, headers);
+      var resp = await fetch(apiBase() + '/english/generate', {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(body)
       });
-
       if (!resp.ok) {
-        var errText = '';
-        try { var ej = await resp.json(); errText = (ej && ej.error) || ''; } catch (e) {}
-        throw new Error(errText || ('HTTP ' + resp.status));
+        var err = '';
+        try { var ej = await resp.json(); err = (ej && ej.error) || ''; } catch (e) {}
+        throw new Error(err || ('HTTP ' + resp.status));
       }
-
       var json = await resp.json();
-      if (!json.ok || !json.data) {
-        throw new Error(json.error || '返回数据异常');
-      }
+      if (!json.ok || !json.data) throw new Error(json.error || '返回数据异常');
       var data = json.data;
-
       S.currentQuiz = {
+        id: uid('quiz'),
         article: data.article || '',
-        words: data.words_used || S.words.map(function(w) { return w.en; }),
-        questions: data.questions || [],
+        words: Array.isArray(data.words_used) && data.words_used.length ? data.words_used : words.map(function(w) { return w.en; }),
+        questions: Array.isArray(data.questions) ? data.questions : [],
         answers: {},
         level: level,
         types: types,
-        time: Date.now()
+        topic: S.settings.topic || '',
+        time: now()
       };
-
       renderArticle(S.currentQuiz);
       renderQuestions(S.currentQuiz);
       showLoading(false);
-    } catch (e) {
+      switchTab('practice');
+    } catch (e2) {
       showLoading(false);
-      console.error('[EL] generate error:', e);
-      notify('生成失败: ' + (e.message || '未知错误'));
+      notify('生成失败: ' + (e2.message || '未知错误'), 'error');
+      try { console.error('[EL] generate error:', e2); } catch (e3) {}
     } finally {
       S.isGenerating = false;
+      updateGenInfo();
     }
   }
 
-  // ============= Render Article & Questions =============
   function renderArticle(quiz) {
     var card = $('elArticleCard');
     var text = $('elArticleText');
     var meta = $('elArticleMeta');
     var wordsBox = $('elArticleWords');
     if (!card || !text) return;
-
-    // 高亮单词
-    var articleHtml = escapeHtml(quiz.article || '(本轮未生成文章)');
-    if (quiz.words && quiz.words.length) {
-      quiz.words.forEach(function(w) {
-        if (w && w.length > 1) {
-          try {
-            var re = new RegExp('\\b(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')\\b', 'gi');
-            articleHtml = articleHtml.replace(re, '<span class="el-word-highlight">$1</span>');
-          } catch (e) {}
+    var article = String(quiz.article || '(本轮未生成文章)');
+    text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
+    text.querySelectorAll('.el-word-highlight').forEach(function(span) {
+      span.addEventListener('click', function() {
+        var word = String(span.getAttribute('data-word') || span.textContent || '').toLowerCase();
+        var existing = findWord(word);
+        if (existing) notify(word + ': ' + (existing.cn || '已在单词库'));
+        else {
+          var dict = findDictWord(word);
+          addWord(word, dict && dict.cn || '', true);
+          renderAll();
+          notify('已加入单词库: ' + word);
         }
       });
-    }
-    text.innerHTML = articleHtml;
-    if (meta) meta.textContent = (quiz.words.length || 0) + ' 词 · ' + (quiz.level || '').toUpperCase();
-
+    });
+    if (meta) meta.textContent = (quiz.words.length || 0) + ' words · ' + (quiz.level || '').toUpperCase();
     if (wordsBox) {
       wordsBox.innerHTML = '';
-      if (quiz.words && quiz.words.length) {
-        quiz.words.slice(0, 20).forEach(function(w) {
-          wordsBox.appendChild(el('span', { class: 'el-word-tag', text: w }));
-        });
-      }
+      (quiz.words || []).slice(0, 24).forEach(function(w) {
+        var tag = el('button', { type: 'button', class: 'el-word-tag', text: w });
+        tag.addEventListener('click', function() { speakText(w, 'en-US'); });
+        wordsBox.appendChild(tag);
+      });
     }
     card.style.display = '';
-    card.classList.add('el-fade-in');
+    card.classList.remove('el-reveal');
+    void card.offsetWidth;
+    card.classList.add('el-reveal');
+  }
+
+  function buildHighlightedArticle(article, words) {
+    var tokens = String(article || '').split(/(\b[a-zA-Z][a-zA-Z\-']*\b)/g);
+    var wordSet = {};
+    (words || []).forEach(function(w) { wordSet[String(w || '').toLowerCase()] = true; });
+    return tokens.map(function(t) {
+      var low = t.toLowerCase();
+      if (wordSet[low]) return '<button type="button" class="el-word-highlight" data-word="' + escapeAttr(low) + '">' + escapeHtml(t) + '</button>';
+      return escapeHtml(t);
+    }).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, '&quot;');
   }
 
   function renderQuestions(quiz) {
@@ -360,438 +764,587 @@
     var meta = $('elQuestionsMeta');
     if (!card || !list) return;
     list.innerHTML = '';
-
-    quiz.questions.forEach(function(q, qi) {
-      var qEl = el('div', { class: 'el-question', 'data-qid': q.id });
-      if (q.type === 'mc') {
-        var title = el('div', { class: 'el-q-title' });
-        title.appendChild(el('span', { class: 'el-q-type', text: '单选' }));
-        title.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + q.question));
-        qEl.appendChild(title);
-        var opts = el('div', { class: 'el-q-options' });
-        q.options.forEach(function(opt, oi) {
-          var optEl = el('label', { class: 'el-q-option', 'data-oi': oi, 'data-qid': q.id });
-          var input = el('input', { type: 'radio', name: 'q_' + q.id, value: String(oi) });
-          input.addEventListener('change', function() {
-            S.currentQuiz.answers[q.id] = oi;
-            var siblings = opts.querySelectorAll('.el-q-option');
-            siblings.forEach(function(s) { s.classList.remove('selected'); });
-            optEl.classList.add('selected');
-          });
-          optEl.appendChild(input);
-          optEl.appendChild(el('span', { text: opt }));
-          opts.appendChild(optEl);
-        });
-        qEl.appendChild(opts);
-        qEl.appendChild(el('div', { class: 'el-q-explain', 'data-explain-for': q.id, style: 'display:none' }));
-      } else if (q.type === 'cloze') {
-        var title2 = el('div', { class: 'el-q-title' });
-        title2.appendChild(el('span', { class: 'el-q-type', text: '完形' }));
-        title2.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + q.question));
-        qEl.appendChild(title2);
-        var ctx = el('div', { class: 'el-q-context' });
-        var ctxHtml = escapeHtml(q.context);
-        var parts = ctxHtml.split('___');
-        var ctxFrag = document.createDocumentFragment();
-        var blankIdx = 0;
-        parts.forEach(function(p, pi) {
-          if (pi > 0) {
-            var bk = q.blanks[blankIdx];
-            if (bk) {
-              var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': String(blankIdx) });
-              sel.appendChild(el('option', { value: '-1', text: '(选)' }));
-              bk.options.forEach(function(o, oi2) {
-                sel.appendChild(el('option', { value: String(oi2), text: String.fromCharCode(65 + oi2) }));
-              });
-              sel.addEventListener('change', function() {
-                var v = parseInt(sel.value);
-                if (!S.currentQuiz.answers[q.id]) S.currentQuiz.answers[q.id] = {};
-                S.currentQuiz.answers[q.id][blankIdx] = v;
-              });
-              ctxFrag.appendChild(sel);
-            }
-            blankIdx++;
-          }
-          ctxFrag.appendChild(document.createTextNode(p));
-        });
-        ctx.appendChild(ctxFrag);
-        qEl.appendChild(ctx);
-        qEl.appendChild(el('div', { class: 'el-q-explain', 'data-explain-for': q.id, style: 'display:none' }));
-      }
+    (quiz.questions || []).forEach(function(q, qi) {
+      var qEl = el('article', { class: 'el-question', 'data-qid': q.id, style: '--el-i:' + Math.min(qi, 12) });
+      var title = el('div', { class: 'el-q-title' });
+      title.appendChild(el('span', { class: 'el-q-type', text: q.type === 'cloze' ? '完形' : '单选' }));
+      title.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + (q.question || '题目')));
+      qEl.appendChild(title);
+      if (q.type === 'mc') renderMcQuestion(qEl, q);
+      else if (q.type === 'cloze') renderClozeQuestion(qEl, q);
+      qEl.appendChild(el('div', { class: 'el-q-explain', 'data-explain-for': q.id, style: 'display:none' }));
       list.appendChild(qEl);
     });
-
     if (meta) {
-      var mcCount = quiz.questions.filter(function(q) { return q.type === 'mc'; }).length;
-      var clCount = quiz.questions.filter(function(q) { return q.type === 'cloze'; }).length;
-      var total = quiz.questions.length + quiz.questions.reduce(function(s, q) { return s + (q.blanks ? q.blanks.length : 0); }, 0);
-      meta.textContent = mcCount + ' 单选 + ' + clCount + ' 完形, 共 ' + total + ' 空';
+      var mc = (quiz.questions || []).filter(function(q) { return q.type === 'mc'; }).length;
+      var cloze = (quiz.questions || []).filter(function(q) { return q.type === 'cloze'; }).length;
+      meta.textContent = mc + ' 单选 · ' + cloze + ' 完形';
     }
     card.style.display = '';
-    card.classList.add('el-fade-in');
+    card.classList.remove('el-reveal');
+    void card.offsetWidth;
+    card.classList.add('el-reveal');
+    var submit = $('elSubmitBtn');
+    if (submit) submit.disabled = false;
+  }
+
+  function renderMcQuestion(parent, q) {
+    var opts = el('div', { class: 'el-q-options' });
+    (q.options || []).forEach(function(opt, oi) {
+      var optEl = el('label', { class: 'el-q-option', 'data-oi': oi, 'data-qid': q.id });
+      var input = el('input', { type: 'radio', name: 'q_' + q.id, value: String(oi) });
+      input.addEventListener('change', function() {
+        S.currentQuiz.answers[q.id] = oi;
+        opts.querySelectorAll('.el-q-option').forEach(function(s) { s.classList.remove('selected'); });
+        optEl.classList.add('selected');
+      });
+      optEl.appendChild(input);
+      optEl.appendChild(el('span', { class: 'el-option-letter', text: String.fromCharCode(65 + oi) }));
+      optEl.appendChild(el('span', { class: 'el-option-text', text: stripOptionPrefix(opt, oi) }));
+      opts.appendChild(optEl);
+    });
+    parent.appendChild(opts);
+  }
+
+  function renderClozeQuestion(parent, q) {
+    var ctx = el('div', { class: 'el-q-context' });
+    var parts = String(q.context || '').split('___');
+    var blankIndex = 0;
+    parts.forEach(function(part, pi) {
+      if (pi > 0) {
+        var currentBlankIndex = blankIndex;
+        var blank = q.blanks && q.blanks[currentBlankIndex];
+        if (blank) {
+          var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': currentBlankIndex, 'aria-label': '第 ' + (currentBlankIndex + 1) + ' 空' });
+          sel.appendChild(el('option', { value: '-1', text: '空' + (currentBlankIndex + 1) }));
+          (blank.options || []).forEach(function(opt, oi) {
+            sel.appendChild(el('option', { value: String(oi), text: String.fromCharCode(65 + oi) }));
+          });
+          sel.addEventListener('change', function() {
+            var v = parseInt(sel.value, 10);
+            if (!S.currentQuiz.answers[q.id]) S.currentQuiz.answers[q.id] = {};
+            S.currentQuiz.answers[q.id][currentBlankIndex] = v;
+          });
+          ctx.appendChild(sel);
+        }
+        blankIndex++;
+      }
+      ctx.appendChild(document.createTextNode(part));
+    });
+    parent.appendChild(ctx);
+    var optionPanel = el('div', { class: 'el-cloze-options' });
+    (q.blanks || []).forEach(function(blank, bi) {
+      var group = el('div', { class: 'el-cloze-group' });
+      group.appendChild(el('div', { class: 'el-cloze-label', text: '空 ' + (bi + 1) }));
+      (blank.options || []).forEach(function(opt, oi) {
+        group.appendChild(el('div', { class: 'el-cloze-choice', text: String.fromCharCode(65 + oi) + '. ' + stripOptionPrefix(opt, oi) }));
+      });
+      optionPanel.appendChild(group);
+    });
+    parent.appendChild(optionPanel);
+  }
+
+  function stripOptionPrefix(opt, index) {
+    var text = String(opt || '');
+    var letter = String.fromCharCode(65 + index);
+    return text.replace(new RegExp('^\\s*' + letter + '[\\.|、\\)]\\s*', 'i'), '');
   }
 
   function hideArticle() { var c = $('elArticleCard'); if (c) c.style.display = 'none'; }
   function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.display = 'none'; }
   function hideResult() { var c = $('elResultCard'); if (c) c.style.display = 'none'; }
-  function showLoading(b) {
+
+  function showLoading(on) {
     var l = $('elLoading');
     var g = $('elGenBtn');
-    if (l) l.style.display = b ? '' : 'none';
-    if (g) g.disabled = b || S.words.length === 0;
-    if (b && g) g.textContent = '⏳ 生成中...';
-    else if (g) g.textContent = '✨ 生成练习';
+    if (l) l.style.display = on ? '' : 'none';
+    if (g) {
+      g.disabled = on || getWordsForGeneration(false).length === 0;
+      g.textContent = on ? '生成中...' : '生成专属练习';
+    }
   }
 
-  // ============= Submit & Scoring =============
   function submitAnswers() {
     if (!S.currentQuiz) return;
-    var q = S.currentQuiz;
+    var quiz = S.currentQuiz;
     var correct = 0;
     var total = 0;
-
-    q.questions.forEach(function(qu) {
-      if (qu.type === 'mc') {
+    var missed = [];
+    (quiz.questions || []).forEach(function(q) {
+      if (q.type === 'mc') {
         total++;
-        var ua = q.answers[qu.id];
-        if (typeof ua === 'number' && ua === qu.answer) correct++;
-      } else if (qu.type === 'cloze') {
-        qu.blanks.forEach(function(bk, bi) {
+        var ua = quiz.answers[q.id];
+        var ok = typeof ua === 'number' && ua === parseInt(q.answer, 10);
+        if (ok) correct++;
+        else missed.push(buildMistake(q, ua, quiz));
+      } else if (q.type === 'cloze') {
+        (q.blanks || []).forEach(function(blank, bi) {
           total++;
-          var ua2 = (q.answers[qu.id] || {})[bi];
-          if (typeof ua2 === 'number' && ua2 === bk.answer) correct++;
+          var ua2 = (quiz.answers[q.id] || {})[bi];
+          var ok2 = typeof ua2 === 'number' && ua2 === parseInt(blank.answer, 10);
+          if (ok2) correct++;
+          else missed.push(buildMistake(q, ua2, quiz, bi));
         });
       }
     });
-
-    var pct = total > 0 ? Math.round((correct / total) * 100) : 0;
+    var pct = total ? Math.round((correct / total) * 100) : 0;
     showResult(correct, total, pct);
-
+    updateMasteryFromQuiz(quiz, correct, total);
+    S.mistakes = missed.concat(S.mistakes).slice(0, MAX_MISTAKES);
     S.history.unshift({
-      id: 'h_' + Date.now(),
+      id: uid('h'),
+      correct: correct,
       score: correct,
       total: total,
       pct: pct,
-      level: q.level,
-      types: q.types,
-      time: Date.now()
+      level: quiz.level,
+      types: quiz.types,
+      topic: quiz.topic || '',
+      words: quiz.words || [],
+      mistakeCount: missed.length,
+      time: now()
     });
-    saveHistory();
-    renderHistory();
+    S.history = S.history.slice(0, MAX_HISTORY);
+    scheduleSave();
+    renderAll();
+    showAllAnswers();
+  }
+
+  function buildMistake(q, answer, quiz, blankIndex) {
+    var words = findWordsInText([q.question, q.context, (q.options || []).join(' '), quiz.article].join(' '));
+    var correctAnswer = '';
+    var userAnswer = '';
+    if (q.type === 'mc') {
+      correctAnswer = optionText(q.options, q.answer);
+      userAnswer = typeof answer === 'number' ? optionText(q.options, answer) : '未作答';
+    } else {
+      var blank = q.blanks && q.blanks[blankIndex];
+      correctAnswer = blank ? optionText(blank.options, blank.answer) : '';
+      userAnswer = blank && typeof answer === 'number' ? optionText(blank.options, answer) : '未作答';
+    }
+    return {
+      id: uid('m'),
+      questionId: q.id,
+      type: q.type,
+      question: q.question || (q.type === 'cloze' ? '完形填空' : '题目'),
+      context: q.context || '',
+      blankIndex: typeof blankIndex === 'number' ? blankIndex : -1,
+      userAnswer: userAnswer,
+      correctAnswer: correctAnswer,
+      explain: q.explain || (q.blanks && q.blanks[blankIndex] && q.blanks[blankIndex].explain) || '',
+      words: words,
+      level: quiz.level,
+      time: now()
+    };
+  }
+
+  function optionText(options, index) {
+    index = parseInt(index, 10);
+    if (!Array.isArray(options) || isNaN(index) || index < 0 || index >= options.length) return '';
+    return String.fromCharCode(65 + index) + '. ' + stripOptionPrefix(options[index], index);
+  }
+
+  function findWordsInText(text) {
+    text = String(text || '').toLowerCase();
+    return S.words.filter(function(w) {
+      return w.en && new RegExp('\\b' + escapeRegExp(w.en) + '\\b', 'i').test(text);
+    }).map(function(w) { return w.en; }).slice(0, 12);
+  }
+
+  function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function updateMasteryFromQuiz(quiz, correct, total) {
+    var used = {};
+    (quiz.words || []).forEach(function(w) { used[String(w || '').toLowerCase()] = true; });
+    var ratio = total ? correct / total : 0;
+    S.words.forEach(function(w) {
+      if (!used[w.en]) return;
+      w.seen = (w.seen || 0) + 1;
+      if (ratio >= 0.7) w.correct = (w.correct || 0) + 1;
+      else w.wrong = (w.wrong || 0) + 1;
+      var score = w.correct + w.wrong > 0 ? Math.round((w.correct / (w.correct + w.wrong)) * 100) : 0;
+      w.mastery = Math.round((w.mastery || 0) * 0.45 + score * 0.55);
+      w.lastReviewedAt = now();
+      w.updatedAt = now();
+    });
   }
 
   function showResult(correct, total, pct) {
     var card = $('elResultCard');
-    var icon = $('elResultIcon');
     var score = $('elResultScore');
     var text = $('elResultText');
     if (!card) return;
-    if (icon) icon.textContent = pct >= 80 ? '🎉' : (pct >= 60 ? '👍' : '💪');
-    if (score) score.textContent = correct + ' / ' + total + '  (' + pct + '%)';
+    if (score) score.textContent = correct + ' / ' + total + ' · ' + pct + '%';
     if (text) {
-      var advice = pct >= 80 ? '太棒了! 你对这些单词掌握得很扎实~' :
-                   pct >= 60 ? '不错哦! 错题可以再复习一下解析~' :
-                   '加油! 错题解析值得仔细看, 多记几遍会更好的~';
-      text.textContent = advice;
+      text.textContent = pct >= 80 ? '表现稳定，薄弱词会自动降低复习优先级。' :
+        pct >= 60 ? '整体不错，错题已进入复习队列。' :
+        '建议先用错题本和薄弱词再生成一组练习。';
     }
     card.style.display = '';
-    card.classList.add('el-fade-in');
-    setTimeout(function() {
-      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
-    }, 100);
+    card.classList.remove('el-reveal');
+    void card.offsetWidth;
+    card.classList.add('el-reveal');
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
   }
 
   function showAllAnswers() {
     if (!S.currentQuiz) return;
-    var q = S.currentQuiz;
-    q.questions.forEach(function(qu) {
-      if (qu.type === 'mc') {
-        var opts = document.querySelectorAll('.el-q-option[data-qid="' + qu.id + '"]');
-        opts.forEach(function(opt) {
+    var quiz = S.currentQuiz;
+    (quiz.questions || []).forEach(function(q) {
+      if (q.type === 'mc') {
+        document.querySelectorAll('.el-q-option[data-qid="' + q.id + '"]').forEach(function(opt) {
           opt.classList.add('disabled');
-          var oi = parseInt(opt.getAttribute('data-oi'));
-          if (oi === qu.answer) opt.classList.add('correct');
-          var ua = q.answers[qu.id];
-          if (typeof ua === 'number' && ua === oi && ua !== qu.answer) opt.classList.add('wrong');
+          var oi = parseInt(opt.getAttribute('data-oi'), 10);
+          if (oi === parseInt(q.answer, 10)) opt.classList.add('correct');
+          var ua = quiz.answers[q.id];
+          if (typeof ua === 'number' && ua === oi && ua !== parseInt(q.answer, 10)) opt.classList.add('wrong');
         });
-        var explain = document.querySelector('.el-q-explain[data-explain-for="' + qu.id + '"]');
-        if (explain) {
-          explain.textContent = '✅ 正确答案: ' + String.fromCharCode(65 + qu.answer) + '. ' + (qu.options[qu.answer] || '') + ' · ' + (qu.explain || '');
-          explain.style.display = '';
-        }
-      } else if (qu.type === 'cloze') {
-        qu.blanks.forEach(function(bk, bi) {
-          var sels = document.querySelectorAll('.el-blank-sel[data-qid="' + qu.id + '"][data-bi="' + bi + '"]');
-          sels.forEach(function(sel) {
-            sel.value = String(bk.answer);
-            sel.style.background = 'rgba(160, 220, 180, 0.4)';
-            sel.style.borderColor = 'rgba(66, 155, 122, 0.5)';
+        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' · ' + (q.explain || ''));
+      } else if (q.type === 'cloze') {
+        (q.blanks || []).forEach(function(blank, bi) {
+          document.querySelectorAll('.el-blank-sel[data-qid="' + q.id + '"][data-bi="' + bi + '"]').forEach(function(sel) {
+            sel.value = String(blank.answer);
+            sel.classList.add('correct');
           });
         });
-        var explain2 = document.querySelector('.el-q-explain[data-explain-for="' + qu.id + '"]');
-        if (explain2) {
-          var s = '✅ 答案: ';
-          qu.blanks.forEach(function(bk, bi) {
-            s += '空' + (bi + 1) + '=' + String.fromCharCode(65 + bk.answer) + '; ';
-          });
-          s += ' · ' + (qu.blanks[0] && qu.blanks[0].explain || '');
-          explain2.textContent = s;
-          explain2.style.display = '';
-        }
+        var parts = (q.blanks || []).map(function(blank, bi) { return '空' + (bi + 1) + ': ' + optionText(blank.options, blank.answer); });
+        revealExplain(q.id, '答案: ' + parts.join('；') + ' · ' + ((q.blanks && q.blanks[0] && q.blanks[0].explain) || ''));
       }
     });
-    var sb = $('elSubmitBtn');
-    if (sb) sb.disabled = true;
+    var submit = $('elSubmitBtn');
+    if (submit) submit.disabled = true;
   }
 
-  // ============= History =============
+  function revealExplain(id, text) {
+    var node = document.querySelector('.el-q-explain[data-explain-for="' + id + '"]');
+    if (!node) return;
+    node.textContent = text;
+    node.style.display = '';
+    node.classList.add('is-visible');
+  }
+
   function renderHistory() {
     var list = $('elHistoryList');
     if (!list) return;
     list.innerHTML = '';
-    if (!S.history || S.history.length === 0) {
+    if (!S.history.length) {
       list.appendChild(el('div', { class: 'el-empty-hint', text: '还没有练习记录' }));
       return;
     }
     S.history.forEach(function(h) {
-      var item = el('div', { class: 'el-history-item', 'data-id': h.id });
-      var scoreClass = h.pct >= 80 ? '' : (h.pct >= 60 ? 'mid' : 'low');
-      var score = el('div', { class: 'el-h-score ' + scoreClass, text: h.pct + '%' });
+      var correct = typeof h.correct === 'number' ? h.correct : (h.score || 0);
+      var item = el('article', { class: 'el-history-item' });
+      item.appendChild(el('div', { class: 'el-h-score ' + scoreClass(h.pct), text: (h.pct || 0) + '%' }));
       var info = el('div', { class: 'el-h-info' });
-      info.appendChild(el('div', { text: h.correct + '/' + h.total + ' · ' + (h.score || 0) + ' 分' }));
-      info.appendChild(el('div', { class: 'el-h-meta', text: ((h.level || 'cet4').toUpperCase()) + ' · ' + (h.types || []).join('/') }));
-      var time = el('div', { class: 'el-h-time', text: formatTime(h.time) });
-      item.appendChild(score);
+      info.appendChild(el('div', { class: 'el-h-title', text: correct + '/' + (h.total || 0) + ' · ' + ((h.level || 'cet4').toUpperCase()) }));
+      info.appendChild(el('div', { class: 'el-h-meta', text: (h.types || []).join(' / ') + (h.mistakeCount ? ' · 错题 ' + h.mistakeCount : '') }));
       item.appendChild(info);
-      item.appendChild(time);
+      item.appendChild(el('time', { class: 'el-h-time', text: formatTime(h.time || h.updatedAt) }));
+      list.appendChild(item);
+    });
+  }
+
+  function scoreClass(pct) {
+    pct = Number(pct) || 0;
+    return pct >= 80 ? 'high' : (pct >= 60 ? 'mid' : 'low');
+  }
+
+  function renderMistakes() {
+    var list = $('elMistakeList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!S.mistakes.length) {
+      list.appendChild(el('div', { class: 'el-empty-hint', text: '还没有错题。' }));
+      return;
+    }
+    S.mistakes.forEach(function(m) {
+      var item = el('article', { class: 'el-mistake-item' });
+      item.appendChild(el('div', { class: 'el-mistake-head', text: (m.type === 'cloze' ? '完形' : '单选') + ' · ' + (m.level || '').toUpperCase() }));
+      item.appendChild(el('div', { class: 'el-mistake-question', text: m.question || '题目' }));
+      if (m.context) item.appendChild(el('div', { class: 'el-mistake-context', text: m.context }));
+      item.appendChild(el('div', { class: 'el-mistake-answer', text: '你的答案: ' + (m.userAnswer || '未作答') }));
+      item.appendChild(el('div', { class: 'el-mistake-correct', text: '正确答案: ' + (m.correctAnswer || '') }));
+      if (m.explain) item.appendChild(el('div', { class: 'el-mistake-explain', text: m.explain }));
+      if (m.words && m.words.length) {
+        var words = el('div', { class: 'el-wordlist-inline' });
+        m.words.forEach(function(w) { words.appendChild(el('span', { class: 'el-word-tag', text: w })); });
+        item.appendChild(words);
+      }
       list.appendChild(item);
     });
   }
 
   function formatTime(ts) {
-    var d = new Date(ts);
+    var d = new Date(ts || now());
     var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-    var now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return '今天 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-    }
+    var today = new Date();
+    if (d.toDateString() === today.toDateString()) return '今天 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
-  // ============= Tabs =============
-  function switchTab(name) {
-    var tabs = document.querySelectorAll('.el-tab');
-    tabs.forEach(function(t) {
-      if (t.getAttribute('data-eltab') === name) t.classList.add('active');
-      else t.classList.remove('active');
-    });
-    var panes = ['library', 'practice', 'history'];
-    panes.forEach(function(p) {
-      var pn = $('elPane' + p.charAt(0).toUpperCase() + p.slice(1));
-      if (pn) {
-        if (p === name) pn.classList.add('active');
-        else pn.classList.remove('active');
-      }
-    });
-    if (name === 'history') renderHistory();
+  function renderAll() {
+    applySettingsToInputs();
+    renderStats();
+    renderWordList();
+    renderHistory();
+    renderMistakes();
+    updateGenInfo();
+    updateTabIndicator();
   }
 
-  // ============= Open/Close =============
+  function switchTab(name) {
+    ['library', 'practice', 'history', 'mistakes'].forEach(function(p) {
+      var pane = $('elPane' + p.charAt(0).toUpperCase() + p.slice(1));
+      if (pane) pane.classList.toggle('active', p === name);
+    });
+    document.querySelectorAll('.el-tab').forEach(function(t) {
+      t.classList.toggle('active', t.getAttribute('data-eltab') === name);
+    });
+    setTimeout(updateTabIndicator, 20);
+    if (name === 'history') renderHistory();
+    if (name === 'mistakes') renderMistakes();
+  }
+
+  function updateTabIndicator() {
+    var tabs = document.querySelector('.el-tabs');
+    var indicator = document.querySelector('.el-tab-indicator');
+    var active = document.querySelector('.el-tab.active');
+    if (!tabs || !indicator || !active) return;
+    var tr = tabs.getBoundingClientRect();
+    var ar = active.getBoundingClientRect();
+    indicator.style.width = ar.width + 'px';
+    indicator.style.transform = 'translateX(' + (ar.left - tr.left) + 'px)';
+  }
+
+  function refreshChipStates() {
+    document.querySelectorAll('.el-chip').forEach(function(label) {
+      var input = label.querySelector('input');
+      label.classList.toggle('selected', !!(input && input.checked));
+    });
+  }
+
   function setDockBarVisible(visible) {
     var dockBar = document.querySelector('.dock-bar');
     if (dockBar) dockBar.style.display = visible ? '' : 'none';
   }
 
-  function openPage() {
+  async function openPage() {
     var panel = $('panelEnglishLearning');
     if (!panel) return;
     panel.classList.remove('hidden');
-    setTimeout(function() { try { panel.classList.add('el-show'); } catch (e) {} }, 10);
+    setTimeout(function() { panel.classList.add('el-show'); }, 20);
     setDockBarVisible(false);
-    S.words = loadWords();
-    S.history = loadHistory();
-    renderWordList();
-    renderHistory();
-    updateGenInfo();
+    if (!S.initialized) {
+      S.initialized = true;
+      applyState(getLocalState());
+      renderAll();
+      initializeState();
+    } else {
+      renderAll();
+    }
   }
 
   function closePage() {
     var panel = $('panelEnglishLearning');
     if (!panel) return;
-    panel.classList.add('hidden');
     panel.classList.remove('el-show');
+    setTimeout(function() { panel.classList.add('hidden'); }, 180);
     setDockBarVisible(true);
   }
 
-  // ============= Event bindings =============
   function bindEvents() {
     var back = $('elBackBtn');
-    if (back) back.addEventListener('click', function() { closePage(); });
+    if (back) back.addEventListener('click', closePage);
 
-    var tabs = document.querySelectorAll('.el-tab');
-    tabs.forEach(function(t) {
-      t.addEventListener('click', function() { switchTab(t.getAttribute('data-eltab')); });
+    document.querySelectorAll('.el-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() { switchTab(tab.getAttribute('data-eltab')); });
     });
 
-    // Add single word
     var addBtn = $('elAddWordBtn');
-    if (addBtn) {
-      addBtn.addEventListener('click', function() {
-        var en = $('elWordInput').value.trim();
-        var cn = $('elMeaningInput').value.trim();
-        if (!en) { notify('请输入英文单词'); return; }
-        var w = addWord(en, cn);
-        if (w) {
-          notify('已添加: ' + w.en);
-          $('elWordInput').value = '';
-          $('elMeaningInput').value = '';
-          $('elWordInput').focus();
-          renderWordList();
-        }
-      });
-    }
-
-    // Enter to add
-    ['elWordInput', 'elMeaningInput'].forEach(function(id) {
-      var input = $(id);
-      if (input) {
-        input.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            $('elAddWordBtn').click();
-          }
-        });
+    if (addBtn) addBtn.addEventListener('click', function() {
+      var word = $('elWordInput');
+      var cn = $('elMeaningInput');
+      var w = addWord(word && word.value, cn && cn.value);
+      if (w) {
+        notify('已添加: ' + w.en);
+        if (word) word.value = '';
+        if (cn) cn.value = '';
+        renderAll();
+        if (word) word.focus();
       }
     });
 
-    // ★ U3: Autocomplete for word input
+    ['elWordInput', 'elMeaningInput'].forEach(function(id) {
+      var input = $(id);
+      if (!input) return;
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          var btn = $('elAddWordBtn');
+          if (btn) btn.click();
+        }
+      });
+    });
+
     var wordInput = $('elWordInput');
     if (wordInput) {
       var acTimer = null;
       wordInput.addEventListener('input', function() {
-        var q = wordInput.value.trim();
         if (acTimer) clearTimeout(acTimer);
-        if (q.length < 1) { hideAutocomplete(); return; }
-        acTimer = setTimeout(function() {
-          var matches = getDictMatches(q, 8);
-          showAutocomplete(wordInput, matches);
-        }, 200);
+        var q = wordInput.value.trim();
+        if (!q) { hideAutocomplete(); return; }
+        acTimer = setTimeout(function() { showAutocomplete(wordInput, getDictMatches(q, 8)); }, 160);
       });
       wordInput.addEventListener('focus', function() {
         var q = wordInput.value.trim();
-        if (q.length >= 1) {
-          var matches = getDictMatches(q, 8);
-          showAutocomplete(wordInput, matches);
-        }
+        if (q) showAutocomplete(wordInput, getDictMatches(q, 8));
       });
-      wordInput.addEventListener('blur', function() {
-        setTimeout(hideAutocomplete, 200);
-      });
+      wordInput.addEventListener('blur', function() { setTimeout(hideAutocomplete, 180); });
     }
 
-    // Batch add
     var batchBtn = $('elBatchAddBtn');
-    if (batchBtn) {
-      batchBtn.addEventListener('click', function() {
-        var text = $('elBatchInput').value;
-        var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
-        var added = 0;
-        var before = S.words.length;
-        lines.forEach(function(line) {
-          var parts = line.split(/\s+/);
-          var en = parts[0] || '';
-          var cn = parts.slice(1).join(' ').replace(/^\(|\)$/g, '').trim();
-          if (en) {
-            var w = addWord(en, cn);
-            if (w) added++;
-          }
-        });
-        var after = S.words.length;
-        if (added > 0) {
-          notify('批量添加完成: +' + (after - before) + ' 新词');
-          $('elBatchInput').value = '';
-          renderWordList();
-        } else {
-          notify('没有有效输入');
-        }
+    if (batchBtn) batchBtn.addEventListener('click', function() {
+      var text = String(($('elBatchInput') || {}).value || '');
+      var before = S.words.length;
+      text.split('\n').map(function(line) { return line.trim(); }).filter(Boolean).forEach(function(line) {
+        var parts = line.split(/\s+/);
+        addWord(parts[0], parts.slice(1).join(' '), true);
       });
-    }
-
-    var sa = $('elSelectAllCb');
-    if (sa) {
-      sa.addEventListener('change', function() {
-        var cbs = document.querySelectorAll('.el-word-cb');
-        cbs.forEach(function(cb) { cb.checked = sa.checked; cb.dispatchEvent(new Event('change')); });
-      });
-    }
-
-    var ds = $('elDeleteSelBtn');
-    if (ds) {
-      ds.addEventListener('click', function() {
-        var cbs = document.querySelectorAll('.el-word-cb:checked');
-        if (cbs.length === 0) { notify('请先勾选要删除的单词'); return; }
-        if (!confirm('确定删除选中的 ' + cbs.length + ' 个单词?')) return;
-        var ids = Array.from(cbs).map(function(cb) { return cb.getAttribute('data-id'); });
-        var n = deleteSelected(ids);
-        notify('已删除 ' + n + ' 个单词');
-        renderWordList();
-        $('elSelectAllCb').checked = false;
-      });
-    }
-
-    var genBtn = $('elGenBtn');
-    if (genBtn) genBtn.addEventListener('click', generateQuiz);
-
-    var subBtn = $('elSubmitBtn');
-    if (subBtn) subBtn.addEventListener('click', submitAnswers);
-
-    var showBtn = $('elShowAnswerBtn');
-    if (showBtn) showBtn.addEventListener('click', showAllAnswers);
-
-    var newBtn = $('elNewPracticeBtn');
-    if (newBtn) newBtn.addEventListener('click', function() {
-      hideResult(); hideArticle(); hideQuestions();
-      switchTab('practice');
-      $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      var added = S.words.length - before;
+      if ($('elBatchInput')) $('elBatchInput').value = '';
+      renderAll();
+      notify(added > 0 ? '批量导入完成: +' + added : '没有新增有效单词');
     });
 
-    var newTopBtn = $('elNewChatBtn');
-    if (newTopBtn) newTopBtn.addEventListener('click', function() {
-      hideResult(); hideArticle(); hideQuestions();
-      switchTab('practice');
-    });
-
-    var delBtn = $('elDeleteBtn');
-    if (delBtn) delBtn.addEventListener('click', function() {
-      if (!confirm('确定清空全部单词和练习记录?')) return;
-      clearAllWords();
-      S.history = [];
-      saveHistory();
+    var search = $('elSearchInput');
+    if (search) search.addEventListener('input', function() {
+      S.search = search.value || '';
       renderWordList();
-      renderHistory();
+    });
+
+    document.querySelectorAll('.el-filter').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        S.filter = btn.getAttribute('data-filter') || 'all';
+        document.querySelectorAll('.el-filter').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        renderWordList();
+      });
+    });
+
+    var selectAll = $('elSelectAllCb');
+    if (selectAll) selectAll.addEventListener('change', function() {
+      document.querySelectorAll('.el-word-cb').forEach(function(cb) {
+        cb.checked = selectAll.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+    });
+
+    var delSel = $('elDeleteSelBtn');
+    if (delSel) delSel.addEventListener('click', function() {
+      var ids = Array.from(document.querySelectorAll('.el-word-cb:checked')).map(function(cb) { return cb.getAttribute('data-id'); });
+      if (!ids.length) { notify('请先选择要删除的单词'); return; }
+      if (!confirm('确定删除选中的 ' + ids.length + ' 个单词?')) return;
+      deleteSelected(ids);
+      if (selectAll) selectAll.checked = false;
+      renderAll();
+    });
+
+    document.querySelectorAll('input[name="elType"], input[name="elLevel"]').forEach(function(input) {
+      input.addEventListener('change', function() {
+        refreshChipStates();
+        syncSettingsFromInputs();
+        scheduleSave();
+      });
+    });
+    ['elQuestionCount', 'elArticleLength', 'elFocusMode', 'elTopicInput'].forEach(function(id) {
+      var node = $(id);
+      if (node) node.addEventListener('change', function() {
+        syncSettingsFromInputs();
+        scheduleSave();
+        updateGenInfo();
+      });
+    });
+
+    var gen = $('elGenBtn');
+    if (gen) gen.addEventListener('click', generateQuiz);
+    var submit = $('elSubmitBtn');
+    if (submit) submit.addEventListener('click', submitAnswers);
+    var show = $('elShowAnswerBtn');
+    if (show) show.addEventListener('click', showAllAnswers);
+    var next = $('elNewPracticeBtn');
+    if (next) next.addEventListener('click', function() {
+      hideArticle(); hideQuestions(); hideResult();
+      switchTab('practice');
+      try { $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    });
+    var topNew = $('elNewChatBtn');
+    if (topNew) topNew.addEventListener('click', function() {
+      hideArticle(); hideQuestions(); hideResult();
+      switchTab('practice');
+    });
+    var clear = $('elDeleteBtn');
+    if (clear) clear.addEventListener('click', function() {
+      if (!confirm('确定清空全部单词、练习记录和错题吗?')) return;
+      clearAll();
+      renderAll();
       notify('已清空');
     });
+    var practiceMistakes = $('elPracticeMistakesBtn');
+    if (practiceMistakes) practiceMistakes.addEventListener('click', function() {
+      if (!S.mistakes.length) { notify('还没有错题'); return; }
+      S.settings.focus = 'weak';
+      applySettingsToInputs();
+      switchTab('practice');
+    });
+    var speakArticle = $('elSpeakArticleBtn');
+    if (speakArticle) speakArticle.addEventListener('click', function() {
+      if (S.currentQuiz && S.currentQuiz.article) speakText(S.currentQuiz.article, 'en-US');
+    });
+    window.addEventListener('resize', function() { setTimeout(updateTabIndicator, 80); });
+  }
+
+  function findWord(en) {
+    en = String(en || '').toLowerCase();
+    for (var i = 0; i < S.words.length; i++) if (S.words[i].en === en) return S.words[i];
+    return null;
+  }
+
+  function speakText(text, lang) {
+    try {
+      if (!window.speechSynthesis) {
+        notify('当前浏览器不支持朗读');
+        return;
+      }
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(String(text || '').slice(0, 1200));
+      u.lang = lang || 'en-US';
+      u.rate = 0.92;
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      notify('朗读失败');
+    }
   }
 
   function init() {
-    S.words = loadWords();
-    S.history = loadHistory();
     try { bindEvents(); } catch (e) { console.error('[EL] bindEvents error:', e); }
+    applyState(getLocalState());
+    renderAll();
   }
 
-  // Expose FIRST
   window.EnglishLearning = {
     open: openPage,
     close: closePage,
-    addWord: addWord,
-    getWords: function() { return S.words.slice(); }
+    addWord: function(en, cn) {
+      var w = addWord(en, cn);
+      renderAll();
+      return w;
+    },
+    getWords: function() { return S.words.slice(); },
+    sync: saveRemoteState
   };
-  try { console.log('[EL] English learning loaded'); } catch (e) {}
 
-  // Then init
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    try { init(); } catch (e) { console.error('[EL] init error:', e); }
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
