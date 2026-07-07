@@ -1,5 +1,5 @@
 /* ============================================================
- * XTJ 英语学习二级页面
+ * XTJ 英语学习二级页面 v3
  * 可爱、流畅、简约风格
  * ============================================================ */
 
@@ -22,8 +22,14 @@
   opacity: 1 !important;
   pointer-events: auto !important;
   transform: none !important;
+  animation: el-panel-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 #panelEnglishLearning.hidden { display: none !important; visibility: hidden !important; }
+
+@keyframes el-panel-fade-in {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 [data-theme="dark"] #panelEnglishLearning {
   background: linear-gradient(180deg, #1a1a1a 0%, #232323 100%);
@@ -205,6 +211,77 @@
   align-items: center;
   gap: 6px;
 }
+
+.el-card-tip {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(100, 120, 112, 0.6);
+  font-style: italic;
+}
+
+[data-theme="dark"] .el-card-tip { color: rgba(180, 190, 185, 0.5); }
+
+/* ★ U3: 单词输入自动补全 */
+.el-ac-wrap { position: relative; }
+.el-autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(140, 196, 158, 0.3);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(82, 138, 120, 0.12);
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 100;
+  animation: el-fade-in 0.2s ease;
+}
+
+[data-theme="dark"] .el-autocomplete {
+  background: rgba(38, 38, 40, 0.98);
+  border-color: rgba(140, 196, 158, 0.2);
+}
+
+.el-ac-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(140, 196, 158, 0.08);
+  transition: background 0.15s;
+}
+
+.el-ac-item:last-child { border-bottom: none; }
+.el-ac-item:hover { background: rgba(140, 196, 158, 0.12); }
+
+.el-ac-en {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(48, 138, 106);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.el-ac-cn {
+  font-size: 11px;
+  color: rgba(100, 110, 105, 0.8);
+  flex: 1;
+}
+
+[data-theme="dark"] .el-ac-en { color: rgb(140, 220, 180); }
+[data-theme="dark"] .el-ac-cn { color: rgba(200, 210, 205, 0.7); }
+
+@keyframes el-fade-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.el-fade-in { animation: el-fade-in 0.3s ease; }
 
 [data-theme="dark"] .el-card-title { color: #e8e8e8; }
 
