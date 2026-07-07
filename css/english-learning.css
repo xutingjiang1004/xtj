@@ -1000,6 +1000,13 @@ body.english-learning-open {
   border-radius: 10px;
   color: var(--el-text);
   background: var(--el-surface-solid);
+  transition: border-color 160ms var(--el-ease), background 160ms var(--el-ease), color 160ms var(--el-ease);
+}
+#panelEnglishLearning .el-blank-sel.selected {
+  border-color: rgba(20, 124, 90, 0.55);
+  background: rgba(232, 245, 239, 0.85);
+  color: var(--el-accent);
+  font-weight: 680;
 }
 
 #panelEnglishLearning .el-blank-sel.correct {
@@ -1007,13 +1014,27 @@ body.english-learning-open {
   border-color: rgba(20, 124, 90, 0.5);
 }
 
+#panelEnglishLearning .el-cloze-ref-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--el-muted);
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
 #panelEnglishLearning .el-cloze-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+  padding: 12px 12px 10px;
+  border: 1px dashed rgba(20, 124, 90, 0.25);
+  border-radius: 12px;
+  background: rgba(245, 250, 247, 0.45);
 }
-
 #panelEnglishLearning .el-cloze-group {
   padding: 10px;
   border: 1px solid var(--el-line);
@@ -1968,9 +1989,193 @@ body.english-learning-open {
   50%      { transform: scale(1.0); opacity: 1; }
 }
 
+/* ============================================================
+ * 蝴蝶飞舞加载动画 (替代 dot pulse, 绿色主题 + 花草装饰)
+ * el-loading 浮在 panel 级别, 切到任何 tab 都能看到
+ * ============================================================ */
+#panelEnglishLearning .el-loading {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 14px !important;
+  margin: 0 14px 14px !important;
+  padding: 28px 24px 22px !important;
+  min-height: 200px !important;
+  text-align: center !important;
+  overflow: visible !important;
+  background: linear-gradient(180deg, rgba(255,255,255,0.7), rgba(238,245,242,0.4)) !important;
+  border: 1px solid var(--el-line) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 18px 44px rgba(20, 124, 90, 0.08) !important;
+  animation: el-loading-fade-in 320ms var(--el-ease) both !important;
+}
+#panelEnglishLearning .el-loading[hidden] { display: none !important; }
+#panelEnglishLearning .el-loading::before { content: none !important; }
+@keyframes el-loading-fade-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+#panelEnglishLearning .el-loading-scene {
+  position: relative;
+  width: 160px;
+  height: 96px;
+  pointer-events: none;
+  overflow: visible;
+}
+#panelEnglishLearning .el-butterfly-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+
+/* 蝴蝶整体飞行路径 (绕八字形) */
+#panelEnglishLearning .el-butterfly {
+  transform-origin: center;
+  will-change: transform;
+}
+#panelEnglishLearning .el-butterfly-1 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: el-fly-path-1 5.6s ease-in-out infinite;
+}
+#panelEnglishLearning .el-butterfly-2 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: el-fly-path-2 7.2s ease-in-out infinite;
+  animation-delay: -1.4s;
+}
+#panelEnglishLearning .el-butterfly-3 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: el-fly-path-3 6.4s ease-in-out infinite;
+  animation-delay: -3s;
+}
+
+@keyframes el-fly-path-1 {
+  0%   { transform: translate(30px, 50px) rotate(-8deg); }
+  25%  { transform: translate(80px, 28px) rotate(6deg); }
+  50%  { transform: translate(60px, 12px) rotate(-4deg); }
+  75%  { transform: translate(20px, 32px) rotate(8deg); }
+  100% { transform: translate(30px, 50px) rotate(-8deg); }
+}
+@keyframes el-fly-path-2 {
+  0%   { transform: translate(110px, 60px) rotate(10deg); }
+  33%  { transform: translate(80px, 30px) rotate(-12deg); }
+  66%  { transform: translate(40px, 18px) rotate(8deg); }
+  100% { transform: translate(110px, 60px) rotate(10deg); }
+}
+@keyframes el-fly-path-3 {
+  0%   { transform: translate(70px, 70px) rotate(0deg); }
+  50%  { transform: translate(95px, 40px) rotate(14deg); }
+  100% { transform: translate(70px, 70px) rotate(0deg); }
+}
+
+/* 翅膀扇动 (翅膀 + 身体一起 0.16s 节奏) */
+#panelEnglishLearning .el-butterfly-flight {
+  transform-origin: center;
+  animation: el-wing-flap 220ms ease-in-out infinite;
+}
+#panelEnglishLearning .el-butterfly-2 .el-butterfly-flight {
+  animation-duration: 180ms;
+}
+#panelEnglishLearning .el-butterfly-3 .el-butterfly-flight {
+  animation-duration: 140ms;
+}
+@keyframes el-wing-flap {
+  0%, 100% { transform: scaleY(1); }
+  50%      { transform: scaleY(0.35); }
+}
+
+/* 装饰花草 */
+#panelEnglishLearning .el-scene-flower-1 {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: el-flower-sway 3.4s ease-in-out infinite;
+}
+#panelEnglishLearning .el-scene-flower-2 {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: el-flower-sway 3.8s ease-in-out infinite;
+  animation-delay: -1.6s;
+}
+#panelEnglishLearning .el-scene-leaf-1 {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: el-flower-sway 4.2s ease-in-out infinite;
+  animation-delay: -0.8s;
+}
+@keyframes el-flower-sway {
+  0%, 100% { transform: rotate(-3deg); }
+  50%      { transform: rotate(3deg); }
+}
+
+#panelEnglishLearning .el-loading-text {
+  font-size: 13px !important;
+  color: var(--el-muted) !important;
+  letter-spacing: 0.3px !important;
+  font-weight: 680 !important;
+}
+#panelEnglishLearning .el-loading-cancel {
+  appearance: none;
+  border: 1px solid var(--el-line);
+  background: var(--el-surface-soft);
+  color: var(--el-muted);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms var(--el-ease), color 160ms var(--el-ease), border-color 160ms var(--el-ease);
+}
+#panelEnglishLearning .el-loading-cancel:hover {
+  border-color: var(--el-line-strong);
+  color: var(--el-danger);
+  background: rgba(200, 77, 91, 0.08);
+}
+@keyframes el-pulse-dot {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.0); opacity: 1; }
+}
+
 /* page 滚动: 平滑 + 防 scroll snap 跳 */
 #panelEnglishLearning .el-page {
   scroll-behavior: auto !important;
   scrollbar-gutter: stable !important;
   overscroll-behavior-y: contain !important;
 }
+
+/* ============================================================
+ * tabs indicator 增强 (深阴影 + 描边) + 可拖动切换
+ * ============================================================ */
+#panelEnglishLearning .el-tabs {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#panelEnglishLearning .el-tab-indicator {
+  position: absolute !important;
+  z-index: 1 !important;
+  top: 3px !important;
+  bottom: 3px !important;
+  left: 0 !important;
+  border-radius: 11px !important;
+  background: var(--el-surface-solid) !important;
+  box-shadow:
+    0 6px 18px rgba(20, 124, 90, 0.10),
+    inset 0 0 0 1px var(--el-line) !important;
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1) !important;
+  pointer-events: none !important;
+  will-change: transform, width !important;
+}
+#panelEnglishLearning .el-tabs.is-dragging .el-tab-indicator {
+  transition: none !important;
+  box-shadow:
+    0 14px 32px rgba(20, 124, 90, 0.22),
+    inset 0 0 0 1px rgba(20, 124, 90, 0.35) !important;
+  background: var(--el-surface-solid) !important;
+}
+
