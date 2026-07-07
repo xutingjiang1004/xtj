@@ -940,7 +940,6 @@
     var text = $('elArticleText');
     var meta = $('elArticleMeta');
     var wordsBox = $('elArticleWords');
-    var lb = $('elLocaleBar');
     if (!card || !text) return;
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
@@ -952,8 +951,8 @@
         wordsBox.appendChild(tag);
       });
     }
-    card.style.display = '';
-    if (lb) lb.style.display = '';
+    // 用 removeProperty 清掉可能存在的 important inline display, 让 CSS 默认 (block) 生效
+    card.style.removeProperty('display');
   }
 
   function buildHighlightedArticle(article, words) {
@@ -1117,7 +1116,7 @@
       var cloze = (quiz.questions || []).filter(function(q) { return q.type === 'cloze'; }).length;
       meta.textContent = mc + ' 单选 · ' + cloze + ' 完形';
     }
-    card.style.display = '';
+    card.style.removeProperty('display');
     var submit = $('elSubmitBtn');
     if (submit) submit.disabled = false;
   }
@@ -1185,16 +1184,19 @@
   }
 
   function hideArticle() {
-    var c = $('elArticleCard'); if (c) c.style.display = 'none';
-    var lb = $('elLocaleBar'); if (lb) lb.style.display = 'none';
+    var c = $('elArticleCard'); if (c) c.style.setProperty('display', 'none', 'important');
+    // locale-bar 始终显示, 让"重新生成"按钮任何时候都可见
   }
-  function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.display = 'none'; }
-  function hideResult() { var c = $('elResultCard'); if (c) c.style.display = 'none'; }
+  function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
+  function hideResult() { var c = $('elResultCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
 
   function showLoading(on) {
     var l = $('elLoading');
     var g = $('elGenBtn');
-    if (l) l.style.display = on ? '' : 'none';
+    if (l) {
+      // 用 setProperty + important 强制覆盖 CSS 末尾的 !important
+      l.style.setProperty('display', on ? 'flex' : 'none', 'important');
+    }
     if (g) {
       g.disabled = on || getWordsForGeneration(false).length === 0;
       g.textContent = on ? '生成中...' : '生成专属练习';
@@ -1319,8 +1321,9 @@
         pct >= 60 ? '整体不错，多加练习会更稳。' :
         '建议再生成一组练习巩固薄弱词。';
     }
-    card.style.display = '';
-    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+    card.style.removeProperty('display');
+    // 不再自动 scrollIntoView, 避免页面跳动
+    try { /* card.scrollIntoView({ behavior: 'smooth', block: 'center' }); */ } catch (e) {}
   }
 
   function showAllAnswers() {
@@ -1381,11 +1384,7 @@
       t.classList.toggle('active', t.getAttribute('data-eltab') === name);
     });
     setTimeout(updateTabIndicator, 20);
-    // 切 tab 时重置页面滚动到顶部, 避免停留在旧 tab 位置
-    try {
-      var page = document.querySelector('#panelEnglishLearning .el-page');
-      if (page) page.scrollTop = 0;
-    } catch (e) {}
+    // 不再重置 page.scrollTop, 避免点击生成/重新生成时页面跳到顶部
   }
 
   function updateTabIndicator() {
@@ -1395,8 +1394,11 @@
     if (!tabs || !indicator || !active) return;
     var tr = tabs.getBoundingClientRect();
     var ar = active.getBoundingClientRect();
-    indicator.style.width = ar.width + 'px';
-    indicator.style.transform = 'translateX(' + (ar.left - tr.left) + 'px)';
+    // 视觉上让 indicator 比 cell 窄 8px (左右各 4px), 看起来像一个独立胶囊
+    var inset = 4;
+    var w = Math.max(40, ar.width - inset * 2);
+    indicator.style.width = w + 'px';
+    indicator.style.transform = 'translateX(' + (ar.left - tr.left + inset) + 'px)';
   }
 
   function refreshChipStates() {
@@ -1590,7 +1592,7 @@
     if (next) next.addEventListener('click', function() {
       hideArticle(); hideQuestions(); hideResult();
       switchTab('practice');
-      try { $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      // 不再 scrollIntoView, 避免页面跳到顶部
     });
     var topNew = $('elNewChatBtn');
     if (topNew) topNew.addEventListener('click', function() {
@@ -1740,7 +1742,7 @@
       hideQuestions();
       hideResult();
       switchTab('practice');
-      try { $('elGenCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      // 不再 scrollIntoView
     });
     safeBind('elNewChatBtn', 'click', function() {
       hideArticle();
