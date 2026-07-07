@@ -744,19 +744,6 @@
     if (!card || !text) return;
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
-    text.querySelectorAll('.el-word-highlight').forEach(function(span) {
-      span.addEventListener('click', function() {
-        var word = String(span.getAttribute('data-word') || span.textContent || '').toLowerCase();
-        var existing = findWord(word);
-        if (existing) notify(word + ': ' + (existing.cn || '已在单词库'));
-        else {
-          var dict = findDictWord(word);
-          addWord(word, dict && dict.cn || '', true);
-          renderAll();
-          notify('已加入单词库: ' + word);
-        }
-      });
-    });
     if (meta) meta.textContent = (quiz.words.length || 0) + ' words · ' + (quiz.level || '').toUpperCase();
     if (wordsBox) {
       wordsBox.innerHTML = '';
@@ -767,9 +754,6 @@
       });
     }
     card.style.display = '';
-    card.classList.remove('el-reveal');
-    void card.offsetWidth;
-    card.classList.add('el-reveal');
   }
 
   function buildHighlightedArticle(article, words) {
@@ -778,7 +762,7 @@
     (words || []).forEach(function(w) { wordSet[String(w || '').toLowerCase()] = true; });
     return tokens.map(function(t) {
       var low = t.toLowerCase();
-      if (wordSet[low]) return '<button type="button" class="el-word-highlight" data-word="' + escapeAttr(low) + '">' + escapeHtml(t) + '</button>';
+      if (wordSet[low]) return '<span class="el-word-highlight">' + escapeHtml(t) + '</span>';
       return escapeHtml(t);
     }).join('');
   }
@@ -814,9 +798,6 @@
       meta.textContent = mc + ' 单选 · ' + cloze + ' 完形';
     }
     card.style.display = '';
-    card.classList.remove('el-reveal');
-    void card.offsetWidth;
-    card.classList.add('el-reveal');
     var submit = $('elSubmitBtn');
     if (submit) submit.disabled = false;
   }
@@ -1011,14 +992,11 @@
     if (!card) return;
     if (score) score.textContent = correct + ' / ' + total + ' · ' + pct + '%';
     if (text) {
-      text.textContent = pct >= 80 ? '表现稳定，薄弱词会自动降低复习优先级。' :
-        pct >= 60 ? '整体不错，错题已进入复习队列。' :
-        '建议先用错题本和薄弱词再生成一组练习。';
+      text.textContent = pct >= 80 ? '表现稳定，继续保持。' :
+        pct >= 60 ? '整体不错，多加练习会更稳。' :
+        '建议再生成一组练习巩固薄弱词。';
     }
     card.style.display = '';
-    card.classList.remove('el-reveal');
-    void card.offsetWidth;
-    card.classList.add('el-reveal');
     try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
   }
 
