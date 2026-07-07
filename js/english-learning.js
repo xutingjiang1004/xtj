@@ -557,22 +557,25 @@
   }
 
   function openPage() {
+    try { console.log('[EL] openPage called'); } catch (e) {}
     var panel = $('panelEnglishLearning');
-    if (!panel) return;
-    if (!window.currentUser) {
-      if (typeof window.notify === 'function') {
-        try { window.notify('请先登录后再使用英语学习'); return; } catch (e) {}
-      }
+    if (!panel) {
+      try { console.warn('[EL] panel not found'); } catch (e) {}
       return;
     }
+    // 直接显示 panel (去掉登录检查, 用户能看到 UI 后再处理登录态)
     panel.classList.remove('hidden');
-    setTimeout(function() { panel.classList.add('el-show'); }, 10);
-    setDockBarVisible(false);
-    S.words = loadWords();
-    S.history = loadHistory();
-    renderWordList();
-    renderHistory();
-    updateGenInfo();
+    setTimeout(function() { try { panel.classList.add('el-show'); } catch (e) {} }, 10);
+    try { setDockBarVisible(false); } catch (e) {}
+    try {
+      S.words = loadWords();
+      S.history = loadHistory();
+      renderWordList();
+      renderHistory();
+      updateGenInfo();
+    } catch (e) {
+      try { console.error('[EL] init error:', e); } catch (e2) {}
+    }
   }
 
   function closePage() {
@@ -746,15 +749,13 @@
   }
 
   function init() {
-    S.words = loadWords();
-    S.history = loadHistory();
-    bindEvents();
-    console.log('[EL] English learning initialized. Words:', S.words.length, 'History:', S.history.length);
+    try { S.words = loadWords(); } catch (e) { S.words = []; console.warn('[EL] init loadWords:', e); }
+    try { S.history = loadHistory(); } catch (e) { S.history = []; console.warn('[EL] init loadHistory:', e); }
+    try { bindEvents(); } catch (e) { console.error('[EL] bindEvents error:', e); }
+    try { console.log('[EL] English learning initialized. Words:', S.words.length, 'History:', S.history.length); } catch (e) {}
   }
 
-  bootstrap();
-
-  // Expose for external usage
+  // Expose for external usage FIRST (so ai-agent.js can always find it)
   window.EnglishLearning = {
     open: openPage,
     close: closePage,
@@ -762,4 +763,7 @@
     getWords: function() { return S.words.slice(); }
   };
   try { console.log('[EL] English learning loaded, panel:', !!document.getElementById('panelEnglishLearning')); } catch (e) {}
+
+  // Then bootstrap (in case init throws)
+  try { bootstrap(); } catch (e) { console.error('[EL] bootstrap error:', e); }
 })();
