@@ -1586,3 +1586,327 @@ body.english-learning-open {
 #panelEnglishLearning .el-tab-indicator {
   transition: transform 320ms var(--el-ease), width 320ms var(--el-ease);
 }
+
+
+/* ============================================================
+ * 重新设计的动画 (替代原来的 conic + shimmer)
+ * 风格: 简洁的 fade + 弹性 indicator + 轻量 pulse
+ * ============================================================ */
+@keyframes el-pane-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes el-progress-ring {
+  0%   { stroke-dashoffset: 220; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes el-pulse-dot {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%      { transform: scale(1.0); opacity: 1; }
+}
+
+#panelEnglishLearning .el-pane {
+  animation: el-pane-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#panelEnglishLearning .el-pane > * {
+  animation: el-pane-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#panelEnglishLearning .el-pane > *:nth-child(1) { animation-delay: 0ms; }
+#panelEnglishLearning .el-pane > *:nth-child(2) { animation-delay: 60ms; }
+
+/* tab 切换: 弹性 indicator (320ms) */
+#panelEnglishLearning .el-tab-indicator {
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* 加载动画: 三个点 + 简洁的进度环 (替代 conic-gradient) */
+#panelEnglishLearning .el-loading {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 200px;
+  text-align: center;
+}
+#panelEnglishLearning .el-loader-orbit {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+#panelEnglishLearning .el-loader-orbit::before { content: none; }
+#panelEnglishLearning .el-loader-orbit > span {
+  display: inline-block !important;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-accent);
+  animation: el-pulse-dot 1.2s ease-in-out infinite;
+}
+#panelEnglishLearning .el-loader-orbit > span:nth-child(2) { animation-delay: 0.15s; }
+#panelEnglishLearning .el-loader-orbit > span:nth-child(3) { animation-delay: 0.30s; }
+#panelEnglishLearning .el-loading-text {
+  font-size: 13px;
+  color: var(--el-muted);
+  letter-spacing: 0.3px;
+}
+
+/* 重新生成按钮: 悬停淡入 + 加载时旋转 */
+#panelEnglishLearning .el-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--el-line);
+  background: var(--el-surface);
+  color: var(--el-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+#panelEnglishLearning .el-regen-btn:hover {
+  background: var(--el-accent-soft);
+  border-color: var(--el-line-strong);
+  color: var(--el-accent);
+}
+#panelEnglishLearning .el-regen-btn:active {
+  transform: scale(0.96);
+}
+#panelEnglishLearning .el-regen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+#panelEnglishLearning .el-regen-btn .el-regen-icon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 400ms ease;
+}
+#panelEnglishLearning .el-regen-btn:hover:not(:disabled) .el-regen-icon {
+  transform: rotate(-120deg);
+}
+#panelEnglishLearning .el-regen-btn.is-loading .el-regen-icon {
+  animation: el-regen-spin 0.8s linear infinite;
+}
+@keyframes el-regen-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ============================================================
+ * UI 对齐修复: 紧凑 hero + tabs + main 间距
+ * ============================================================ */
+#panelEnglishLearning .el-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 20px 10px;
+  box-sizing: border-box;
+}
+#panelEnglishLearning .el-hero h2 {
+  margin: 2px 0 4px;
+  font-size: clamp(18px, 2.6vw, 24px);
+  line-height: 1.2;
+}
+#panelEnglishLearning .el-hero p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--el-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+#panelEnglishLearning .el-kicker {
+  color: var(--el-accent);
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#panelEnglishLearning .el-stat {
+  min-height: 46px;
+  padding: 8px 16px;
+}
+#panelEnglishLearning .el-stat span {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--el-text);
+}
+#panelEnglishLearning .el-stat label {
+  display: block;
+  margin-top: 2px;
+  color: var(--el-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+/* tabs 紧凑 + 居中对齐 */
+#panelEnglishLearning .el-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  width: calc(100% - 28px);
+  margin: 0 14px 10px;
+  padding: 3px;
+  border: 1px solid var(--el-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+  height: 40px;
+  align-items: stretch;
+}
+#panelEnglishLearning .el-tab {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  height: 100%;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--el-muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 720;
+  transition: color 180ms ease;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#panelEnglishLearning .el-tab.active {
+  color: var(--el-text);
+}
+
+/* main 顶部 padding 0, 让 card 直接接 tabs */
+#panelEnglishLearning .el-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 14px calc(14px + env(safe-area-inset-bottom, 0px));
+}
+
+/* pane 间距 紧凑 */
+#panelEnglishLearning .el-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-height: 0;
+}
+#panelEnglishLearning .el-practice-grid {
+  grid-template-columns: 1fr;
+}
+#panelEnglishLearning .el-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+}
+#panelEnglishLearning .el-card-title {
+  font-size: 14px;
+  font-weight: 720;
+  margin-bottom: 12px;
+  color: var(--el-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* gen row 紧凑 */
+#panelEnglishLearning .el-gen-row {
+  margin-bottom: 12px;
+}
+#panelEnglishLearning .el-label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--el-muted);
+  margin-bottom: 6px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#panelEnglishLearning .el-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--el-line);
+  border-radius: 999px;
+  color: var(--el-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+#panelEnglishLearning .el-chip:hover,
+#panelEnglishLearning .el-chip.selected,
+#panelEnglishLearning .el-chip.is-checked {
+  color: var(--el-accent);
+  border-color: var(--el-line-strong);
+  background: var(--el-accent-soft);
+}
+#panelEnglishLearning .el-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+/* article 头部 locale bar 紧凑 */
+#panelEnglishLearning .el-locale-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: var(--el-surface);
+  border: 1px solid var(--el-line);
+}
+#panelEnglishLearning .el-locale-title {
+  font-size: 13px;
+  font-weight: 720;
+  color: var(--el-text);
+  letter-spacing: 0.2px;
+}
+#panelEnglishLearning .el-locale-meta {
+  font-size: 11px;
+  color: var(--el-muted);
+  margin-top: 2px;
+}
+#panelEnglishLearning .el-locale-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+#panelEnglishLearning .el-locale-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
