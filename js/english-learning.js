@@ -576,14 +576,6 @@
     });
   }
 
-  function masteryLabel(w) {
-    var m = w.mastery || 0;
-    if ((w.seen || 0) === 0) return '鏂拌瘝';
-    if (m >= 80) return '鎺屾彙';
-    if (m >= 60) return '鐔熸倝';
-    return '钖勫急';
-  }
-
   function renderStats() {
     setText('elWordCount', S.words.length);
     setText('elGenTotal', getWordsForGeneration(false).length);
@@ -627,12 +619,6 @@
       frag.appendChild(item);
     });
     list.appendChild(frag);
-  }
-
-  function masteryClass(w) {
-    if (isMasteredWord(w)) return 'is-mastered';
-    if (isWeakWord(w)) return 'is-weak';
-    return 'is-new';
   }
 
   function updateGenInfo() {
