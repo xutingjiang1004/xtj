@@ -9457,12 +9457,12 @@ function sanitizeEnglishLearningState(input) {
 }
 
 async function loadEnglishLearningRow(userName) {
-  var actorKey = 'english_learning_state:' + userName;
   var { data, error } = await supabase.from('posts')
     .select('id, content, created_at')
     .eq('user_name', userName)
     .eq('media_type', AI_ENGLISH_LEARNING_MARKER)
-    .eq('actor_key', actorKey)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return data || null;
