@@ -1110,7 +1110,7 @@
         [data-theme="dark"] .post-vis-toggle .vis-btn:not(.active):hover {
             background: rgba(255,255,255,0.08);
         }
-        /* Remove old select-based styles above �?now a custom toggle */
+        /* Remove old select-based styles above — now a custom toggle */
         /* Ensure the edit modal box doesn't block select interaction via backdrop-filter */
         /* High specificity to override .perf-balanced .glass and .perf-lite .glass */
         .modal-box.post-edit-modal,
@@ -1522,7 +1522,7 @@
             transition: transform 0.22s ease, background 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
         }
         .chat-img-btn:hover { background: rgba(255,255,255,0.92); transform: translateY(-1px); box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12); border-color: rgba(172, 211, 189, 0.95); }
-        /* iMessage 风格发送动�?*/
+        /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
             65%  { opacity: 1; transform: translateY(-1px) scale(1.003); }
@@ -2008,7 +2008,7 @@
         }
         .stat-two-col .stat-section-title { padding-top: 0; }
 
-        /* 点赞/评论弹窗：去�?stat-col 外层卡片边框和背景，保持与总动�?总浏览一�?*/
+        /* 点赞/评论弹窗：去掉 stat-col 外层卡片边框和背景，保持与总动态总浏览一致 */
         #statModal .stat-two-col .stat-col {
             padding: 0;
             border-radius: 0;
@@ -2124,7 +2124,7 @@
             padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
             background: var(--panel-bg);
         }
-        /* 照片墙页面面板样�?*/
+        /* 照片墙页面面板样式 */
         .dock-panel#panelAi {
             overflow-y: auto;
             padding: 0;
@@ -2638,13 +2638,13 @@
             height: 100%;
             display: block;
         }
-        /* AI花朵按钮：图标更�?28x28)无文字标签，垂直居中保持和其他按钮等�?*/
+        /* AI花朵按钮：图标更大(28x28)无文字标签，垂直居中保持和其他按钮等大 */
         .dock-tab[data-tab="ai"] {
             justify-content: center;
         }
         .dock-tab[data-tab="ai"] .dt-label { display: none; }
 
-        /* ========== 响应式适配：平�?桌面 ========== */
+        /* ========== 响应式适配：平板/桌面 ========== */
         @media (min-width: 768px) {
             .app-container { max-width: 100%; }
             .dock-panel { padding: 20px 24px 100px; padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
@@ -2708,7 +2708,7 @@
             .publish-box { padding: 34px; }
         }
 
-        /* ========== 超宽�?大屏显示器适配 ========== */
+        /* ========== 超宽屏/大屏显示器适配 ========== */
         @media (min-width: 1440px) {
             .app-container { max-width: 1280px; }
             .dock-panel { padding: 32px 64px 130px; padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px)); }
@@ -2936,7 +2936,7 @@
             100%    { transform: translate(8px, 10px) scale(0.9); opacity: 0; }
         }
 
-        /* Bubble 2 (Medium): Second message bubble - 右上方位�?*/
+        /* Bubble 2 (Medium): Second message bubble - 右上位置 */
         .dock-tab.anim-chat .al-bubble-2 {
             animation: bubble2Inflate 0.9s ease forwards;
         }
@@ -2952,7 +2952,7 @@
             100%    { transform: translate(56px, -3px) scale(0.85); opacity: 0; }
         }
 
-        /* Bubble 3 (Small): Third message bubble - 左上方位�?*/
+        /* Bubble 3 (Small): Third message bubble - 左上位置 */
         .dock-tab.anim-chat .al-bubble-3 {
             animation: bubble3Inflate 0.9s ease forwards;
         }
@@ -3006,7 +3006,7 @@
             12%  { opacity: 0; transform: scale(1.2); }
             100% { opacity: 0; }
         }
-        /* 花朵中心消失与重�?*/
+        /* 花朵中心消失与重现 */
         .dock-tab.anim-ai .al-flower-center {
             animation: centerPopNew 0.9s ease forwards;
         }
@@ -3119,7 +3119,7 @@
         }
 
         /* ========== 磨砂玻璃效果增强 ========== */
-        /* 导航�?*/
+        /* 导航栏 */
         nav {
             background: rgba(255, 255, 255, 0.25);
             backdrop-filter: blur(12px);
@@ -3131,7 +3131,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 发布�?*/
+        /* 发布区 */
         .publish-box {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.9);
@@ -3141,7 +3141,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 评论�?*/
+        /* 评论区 */
         .comment-item {
             background: rgba(255, 255, 255, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.6);
@@ -3188,7 +3188,7 @@
             background: linear-gradient(135deg, #047857, #059669);
         }
 
-        /* 好友聊天气泡 - 接收�?*/
+        /* 好友聊天气泡 - 接收方 */
         .chat-msg.received {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(0, 0, 0, 0.08);
@@ -3200,7 +3200,7 @@
 
         
 
-        /* 统计详情用户�?*/
+        /* 统计详情用户页 */
         .stat-user-group {
             background: rgba(255, 255, 255, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.6);
@@ -3236,7 +3236,7 @@
             box-shadow: 0 12px 28px rgba(0,0,0,0.22);
         }
 
-        /* 聊天入口�?*/
+        /* 聊天入口区 */
         .chat-entry-bar {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -3247,7 +3247,7 @@
         }
 
         /* ========== 统计详情弹窗内的帖子卡片去除磨砂 ========== */
-        /* stat模态框内的.feed容器中的帖子卡片不应用磨砂效�?*/
+        /* stat模态框内的.feed容器中的帖子卡片不应用磨砂效果 */
         .modal-box .feed .post,
         .stat-modal-content .feed .post,
         .stat-detail-body .feed .post,
@@ -3295,7 +3295,7 @@
         .announcement-content::-webkit-scrollbar { display: none; }
         .chat-messages, .chat-list, .announcement-content { scrollbar-width: none; -ms-overflow-style: none; }
 
-        /* ========== 切换按钮/欢迎�?花朵飞散动画 (CSS class方式) ========== */
+        /* ========== 切换按钮/欢迎页 花朵飞散动画 (CSS class方式) ========== */
         /* AI页面花朵飞散动画 - 复用导航按钮petalFly逐瓣飞散 */
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(1) { animation: petalFly0 1.4s ease forwards; }
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(2) { animation: petalFly1 1.4s ease forwards; }
@@ -3304,7 +3304,7 @@
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(5) { animation: petalFly4 1.4s ease forwards; }
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(6) { animation: petalFly5 1.4s ease forwards; }
 
-        /* ========== 切换按钮/欢迎�?闪电劈下动画 (CSS class方式) ========== */
+        /* ========== 切换按钮/欢迎页 闪电劈下动画 (CSS class方式) ========== */
         .amt-lightning-icon.amt-lightning-strike {
             animation: amtLightningStrikeAnim 0.5s ease forwards;
         }
@@ -3705,7 +3705,7 @@
             margin-bottom: 12px;
         }
 
-        /* 管理员发布公告样�?*/
+        /* 管理员发布公告样式 */
         .announcement-admin-area {
             padding: 0 20px 16px;
             border-bottom: 1px solid rgba(255,255,255,0.2);
@@ -4159,14 +4159,14 @@
             100% { opacity: 0; transform: scale(1); }
         }
 
-        /* 5条光波飞散动�?- 从脑袋周围散射，只向上和左右 */
+        /* 5条光波飞散动画 - 从脑袋周围散射，只向上和左右 */
         .dock-tab.anim-profile .al-wave-0 { animation: waveFly0 0.9s ease forwards; }
         .dock-tab.anim-profile .al-wave-1 { animation: waveFly1 0.9s ease forwards; }
         .dock-tab.anim-profile .al-wave-2 { animation: waveFly2 0.9s ease forwards; }
         .dock-tab.anim-profile .al-wave-3 { animation: waveFly3 0.9s ease forwards; }
         .dock-tab.anim-profile .al-wave-4 { animation: waveFly4 0.9s ease forwards; }
 
-        /* 上：向上�?*/
+        /* 上：向上方 */
         @keyframes waveFly0 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -4192,7 +4192,7 @@
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
-        /* �?*/
+
         @keyframes waveFly2 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -4205,7 +4205,7 @@
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
-        /* �?*/
+
         @keyframes waveFly3 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -4742,7 +4742,7 @@
             color: rgba(74, 110, 88, 0.42);
         }
 
-        /* 开关滑块样�?*/
+        /* 开关滑块样式 */
         .profile-switch {
             position: relative;
             display: inline-block;
@@ -4855,7 +4855,7 @@
         [data-theme="dark"] .profile-total-sep { color: rgba(229, 240, 233, 0.32); }
         [data-theme="dark"] .profile-slider { background: #4a4a5a !important; }
 
-        /* ========== 个人资料详情页样�?========== */
+        /* ========== 个人资料详情页样式 ========== */
         .profile-detail-modal {
             max-width: 420px;
             background: rgba(255,255,255,0.45) !important;
@@ -5175,7 +5175,7 @@
                 inset 0 -1px 0 rgba(0, 0, 0, 0.2);
         }
     
-        /* ========== 照片墙样�?========== */
+        /* ========== 照片墙样式 ========== */
         .photo-wall-container {
             display: flex;
             flex-direction: column;
@@ -5606,7 +5606,7 @@
             -webkit-backdrop-filter: blur(8px);
             pointer-events: none;
         }
-        /* 骨架屏加�?*/
+        /* 骨架屏加载 */
         .pw-skeleton {
             position: relative;
             aspect-ratio: 1 / 1;
@@ -5632,7 +5632,7 @@
             to { transform: translateX(100%); }
         }
 
-        /* 动画关键�?*/
+        /* 动画关键帧 */
         @keyframes fadeIn {
             0% { opacity: 0; }
             100% { opacity: 1; }
@@ -5832,7 +5832,7 @@
             overflow: hidden;
             touch-action: none;
         }
-        /* 滑动轨道：承�?张图的水平滑动容�?*/
+        /* 滑动轨道：承载多张图的水平滑动容器 */
         .pp-slide-track {
             display: flex;
             align-items: center;
@@ -6008,7 +6008,7 @@
             fill: none;
             flex: 0 0 auto;
         }
-        /* 预览页面指示�?*/
+        /* 预览页面指示器 */
         .pp-dots {
             position: absolute;
             top: calc(14px + env(safe-area-inset-top, 0px));
@@ -6175,7 +6175,7 @@
             transform: scale(0.98);
             box-shadow: 0 4px 12px rgba(59,130,246,0.35);
         }
-        /* 图片占位�?*/
+        /* 图片占位符 */
         .pp-placeholder {
             background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
             display: flex;
@@ -6488,7 +6488,7 @@
         .pp-delete-btn:active {
             transform: scale(.92);
         }
-        /* 信息模块视觉优化 - 外部透明，内�?0%白色磨砂 */
+        /* 信息模块视觉优化 - 外部透明，内部60%白色磨砂 */
         .pp-info-modal {
             background: transparent !important;
             backdrop-filter: none !important;
@@ -6658,7 +6658,7 @@
             opacity: .82;
         }
 
-        /* ========== 移动�?GPU 渲染降级 ========== */
+        /* ========== 移动端 GPU 渲染降级 ========== */
         @media (hover: none) and (pointer: coarse) {
             .glass, .publish-box, .post, .modal-box, .chat-panel,
             .chat-entry-bar, .photo-wall-header,
@@ -8695,7 +8695,7 @@
   100% { transform: translateX(130%); }
 }
 
-/* ===== 上传 Spinner + 进度�?===== */
+/* ===== 上传 Spinner + 进度条 ===== */
 @keyframes pwSpinRing {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -10683,7 +10683,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   max-width: 780px !important;
 }
 
-/* 内容�?flex 行容�?*/
+/* 内容 - flex 行容器 */
 .report-modal-content {
   display: flex !important;
   flex-direction: row !important;
@@ -10724,7 +10724,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   gap: 8px !important;
 }
 
-/* 记录项右面板内紧�?*/
+/* 记录项右面板内紧凑 */
 .report-records-panel.open .report-record-item {
   padding: 10px 12px !important;
   gap: 8px !important;
@@ -10742,7 +10742,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   color: #6ee7b7;
 }
 
-/* 手机端适配：堆叠显�?*/
+/* 手机端适配：堆叠显示 */
 @media (max-width: 720px) {
   .report-modal {
     max-width: 94vw !important;
@@ -11222,7 +11222,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   display: none !important;
 }
 
-/* 举报记录 panel 内部的头部（�?�?关闭按钮）�?显示并横�?*/
+/* 举报记录 panel 内部的头部（标题/关闭按钮）— 显示并横向 */
 .report-records-header--inline {
   display: flex !important;
   align-items: center !important;
@@ -12016,7 +12016,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-content-item.selected::after {
-  content: '�? !important;
+  content: '' !important;
   position: absolute !important;
   top: 10px !important;
   right: 12px !important;
@@ -12672,7 +12672,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   color: #fbbf24;
 }
 
-/* Pro 弹窗 - 顶部轻量状态条（已开通时显示�?*/
+/* Pro 弹窗 - 顶部轻量状态条（已开通时显示） */
 .vip-status-banner {
   display: flex;
   align-items: center;
@@ -12701,7 +12701,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   color: #fbbf24;
 }
 
-/* Pro 弹窗 - 空状�?*/
+/* Pro 弹窗 - 空状态 */
 .pro-gift-empty {
   display: flex;
   flex-direction: column;
@@ -12731,7 +12731,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   color: #e5e7eb;
 }
 
-/* VIP 已激活标识（简洁简约版：透明 + 描边�?*/
+/* VIP 已激活标识（简洁简约版：透明 + 描边） */
 .xtj-vip-badge {
   display: inline-flex;
   align-items: center;
@@ -12778,7 +12778,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   position: relative;
 }
 
-/* ========== Pro 庆祝动画�?========== */
+/* ========== Pro 庆祝动画 ========== */
 .pro-celebration-overlay {
   position: fixed;
   inset: 0;
@@ -12919,7 +12919,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   transform: translateY(0);
 }
 
-/* ========== Pro 主题（开通后界面焕新�?========== */
+/* ========== Pro 主题（开通后界面焕新） ========== */
 html.xtj-pro-active {
   --pro-accent: #f59e0b;
   --pro-accent-light: #fbbf24;
@@ -14034,7 +14034,7 @@ html[data-pro-chat-bubble="lavender"] .chat-msg.sent .msg-read-status {
   transform: scale(0.97);
 }
 
-/* ========== Pro 头像框（所有头像通用，简洁版：无旋转外圈�?========== */
+/* ========== Pro 头像框（所有头像通用，简洁版：无旋转外圈） ========== */
 .xtj-pro-avatar-ring {
   position: relative;
   display: inline-flex;
@@ -14066,7 +14066,7 @@ html.xtj-pro-active .action-btn.liked {
   text-shadow: 0 0 8px rgba(245,158,11,0.3);
 }
 
-/* ========== Pro 增强�?VIP 身份标识（已简化为与基础徽章一致） ========== */
+/* ========== Pro 增强 — VIP 身份标识（已简化为与基础徽章一致） ========== */
 .xtj-vip-badge.xtj-vip-enhanced {
   background: transparent !important;
   box-shadow: none;
@@ -15988,18 +15988,18 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* ============================================================
-   0.97d �?我的页视觉系统统一（v2�?
+ * 0.97d — 我的页视觉系统统一（v2）
    - 统一外层宽度 calc(100% - 32px), max-width 420px, auto margin
-   - 统一浅绿玻璃拟态背�?
-   - 设置项改为内嵌行（整体大卡片 + 内部�?+ border-bottom 分割�?
-   - XTJ Pro 卡片橙色只用�?icon + 按钮
+ *   - 统一浅绿玻璃拟态背景
+ *   - 设置项改为内嵌行（整体大卡片 + 内部行 + border-bottom 分割）
+ *   - XTJ Pro 卡片橙色只用于 icon + 按钮
    - Pro 装扮入口与其他卡片统一
    - 底部统计栏加 safe-area-inset-bottom
-   - Pro 装扮二级�?[hidden] 强制 display:none
+ *   - Pro 装扮二级页 [hidden] 强制 display:none
    - 保存按钮：总览隐藏 / 子面板内显示
    ============================================================ */
 
-/* 强制 [hidden] 始终隐藏（不被其�?display 规则覆盖�?*/
+/* 强制 [hidden] 始终隐藏（不被其他 display 规则覆盖） */
 [hidden] {
   display: none !important;
 }
@@ -16030,7 +16030,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   border-radius: 18px;
 }
 
-/* 3) 设置项：整体大卡�?+ 内部�?+ border-bottom 分割 */
+/* 3) 设置项：整体大卡片 + 内部行 + border-bottom 分割 */
 .dock-profile-container .profile-settings {
   background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
   border: 1px solid rgba(173, 221, 194, .55);
@@ -16120,7 +16120,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   padding: 8px 0 0;
 }
 
-/* 7) Pro 装扮二级页：主页面与子页面互斥显示（[hidden] 已在上面统一�?*/
+/* 7) Pro 装扮二级页：主页面与子页面互斥显示（[hidden] 已在上面统一） */
 .dock-profile-container .profile-main-view {
   display: block;
 }
@@ -16134,10 +16134,10 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   display: none !important;
 }
 
-/* 8) Pro 装扮保存按钮：总览隐藏，子面板内显�?*/
+/* 8) Pro 装扮保存按钮：总览隐藏，子面板内显示 */
 .dock-profile-container .profile-pro-style-panel[id="proStylePanelLanding"] ~ .profile-pro-style-actions,
 .dock-profile-container .profile-pro-style-page #proStylePanelActions {
-  /* 默认：总览页内隐藏（通过 JS 在子面板切换时控�?hidden�?*/
+  /* 默认：总览页内隐藏（通过 JS 在子面板切换时控制 hidden） */
 }
 .dock-profile-container .profile-pro-style-actions {
   display: flex;
@@ -16153,12 +16153,12 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* 当保存按钮在子面板内时（用户已点开 theme/bubble/post）才显示 */
-/* 总览页下隐藏（避免遮�?3 个分类入口） */
+/* 总览页下隐藏（避免遮住 3 个分类入口） */
 .dock-profile-container .profile-pro-style-actions[hidden] {
   display: none !important;
 }
 
-/* 子面板（theme/bubble/post）内的保存按�?- 永远显示在子面板底部 */
+/* 子面板（theme/bubble/post）内的保存按钮 - 永远显示在子面板底部 */
 .dock-profile-container #proStylePanelTheme .profile-pro-style-actions,
 .dock-profile-container #proStylePanelBubble .profile-pro-style-actions,
 .dock-profile-container #proStylePanelPost .profile-pro-style-actions {
@@ -16208,8 +16208,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* ========================================================
- * XTJ 统一视觉系统（浅�?+ 浅绿 + 奶白玻璃拟态）
- * 用于：首�?/ 聊天�?/ 我的�?/ Pro 装扮的卡片与容器
+ * XTJ 统一视觉系统（浅蓝 + 浅绿 + 奶白玻璃拟态）
+ * 用于：首页 / 聊天页 / 我的页 / Pro 装扮的卡片与容器
  * ======================================================== */
 :root {
   --xtj-bg-page: linear-gradient(180deg, #eef7f6 0%, #f5fbfa 48%, #edf6f4 100%);
@@ -16276,7 +16276,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-/* 设置列表：单卡片内含多行（深色模�?/ 通知 / 关于�?*/
+/* 设置列表：单卡片内含多行（深色模式 / 通知 / 关于页） */
 .glass-setting-list {
   background: var(--xtj-bg-card);
   border: 1px solid var(--xtj-border-soft);
@@ -16293,7 +16293,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* ========================================================
- * 首页 UI 收口（发布框 / 筛选栏 / 统计�?/ 帖子卡）
+ * 首页 UI 收口（发布框 / 筛选栏 / 统计卡 / 帖子卡）
  * ======================================================== */
 .publish-box,
 #postInput {
@@ -16316,7 +16316,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   border-radius: var(--xtj-radius-lg);
 }
 
-/* 筛选栏玻璃�?*/
+/* 筛选栏玻璃化 */
 .post-filter-bar,
 .post-search-input,
 .post-filter-input {
@@ -16328,7 +16328,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-/* 统计卡玻璃化（顶�?总动�?/ 总浏�?/ 点赞�?*/
+/* 统计卡玻璃化（顶部 总动态 / 总浏览 / 点赞评论） */
 .post-stats,
 .stats {
   background: var(--xtj-bg-card-strong);
@@ -16339,7 +16339,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-/* 帖子卡片玻璃化（保留原有阴影，但圆角统一 + 背景统一�?*/
+/* 帖子卡片玻璃化（保留原有阴影，但圆角统一 + 背景统一） */
 .post {
   background: var(--xtj-bg-card);
   border: 1px solid var(--xtj-border-soft);
@@ -16349,7 +16349,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(16px) saturate(142%);
 }
 
-/* 发布按钮：浅�?薄荷体系（替代突兀紫） */
+/* 发布按钮：浅蓝薄荷体系（替代突兀紫） */
 .btn.primary,
 .btn.btn-primary,
 .publish-box button.primary,
@@ -16372,7 +16372,7 @@ button.post-publish:hover {
 }
 
 /* ========================================================
- * 聊天�?UI 收口（柔和大�?�?玻璃容器�?
+ * 聊天页 UI 收口（柔和大气 → 玻璃容器）
  * ======================================================== */
 .dock-chat-container,
 .dock-chat-container .chat-list,
@@ -16427,7 +16427,7 @@ button.post-publish:hover {
 }
 
 /* ========================================================
- * 我的�?UI 收口（已部分�?0.97d 完成，此处补强）
+ * 我的页 UI 收口（已部分在 0.97d 完成，此处补强）
  * ======================================================== */
 .dock-profile-container .profile-user-card,
 .dock-profile-container .profile-activity-card,
@@ -16443,7 +16443,7 @@ button.post-publish:hover {
   -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
 }
 
-/* XTJ Pro 卡：橙色仅作局部点缀（icon + 按钮），整体保持玻璃�?*/
+/* XTJ Pro 卡：橙色仅作局部点缀（icon + 按钮），整体保持玻璃化 */
 .xtj-vip-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, .88), rgba(252, 248, 240, .78)) !important;
   border: 1px solid rgba(255, 215, 0, .22) !important;
@@ -16453,7 +16453,7 @@ button.post-publish:hover {
   border-color: rgba(255, 215, 0, .42) !important;
 }
 
-/* 互动记录卡（点赞/评论�?*/
+/* 互动记录卡（点赞/评论） */
 .dock-profile-container .profile-activity-card {
   background: var(--xtj-bg-card-strong) !important;
 }
