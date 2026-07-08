@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
  * XTJ English Learning Studio
  * - Account-synced vocabulary state
  * - DeepSeek reading/question generation
@@ -43,7 +43,9 @@
     lastRemoteUpdatedAt: 0,
     openTimer: null,
     closeTimer: null,
-    eventsBound: false
+    eventsBound: false,
+    batchMutating: false,
+    batchDirty: false
   };
 
   function $(id) { return document.getElementById(id); }
@@ -346,9 +348,9 @@
     }
     setSyncStatus('syncing', '同步中');
     var resp = await fetch(url, { method: 'GET', headers: headers });
-    if (!resp.ok) throw new Error('同步读取失败');
+    if (!resp.ok) throw new Error('鍚屾璇诲彇澶辫触');
     var json = await resp.json();
-    if (!json.ok) throw new Error(json.error || '同步读取失败');
+    if (!json.ok) throw new Error(json.error || '鍚屾璇诲彇澶辫触');
     setSyncStatus('synced', '已同步');
     return normalizeState(json.data || {});
   }
@@ -356,8 +358,24 @@
   function scheduleSave() {
     saveLocalState();
     setSyncStatus('dirty', '待同步');
+    if (S.batchMutating) {
+      S.batchDirty = true;
+      return;
+    }
     if (S.syncTimer) clearTimeout(S.syncTimer);
     S.syncTimer = setTimeout(saveRemoteState, SAVE_DEBOUNCE_MS);
+  }
+
+  function beginBatchMutation() {
+    S.batchMutating = true;
+  }
+
+  function endBatchMutation(options) {
+    S.batchMutating = false;
+    if (!S.batchDirty) return;
+    S.batchDirty = false;
+    if (!options || options.render !== false) renderAll();
+    scheduleSave();
   }
 
   async function saveRemoteState() {
@@ -384,10 +402,10 @@
       if (!resp.ok) {
         var err = '';
         try { var ej = await resp.json(); err = ej && ej.error || ''; } catch (e) {}
-        throw new Error(err || '同步保存失败');
+        throw new Error(err || '鍚屾淇濆瓨澶辫触');
       }
       var json = await resp.json();
-      if (!json.ok) throw new Error(json.error || '同步保存失败');
+      if (!json.ok) throw new Error(json.error || '鍚屾淇濆瓨澶辫触');
       setSyncStatus('synced', '已同步');
     } catch (e2) {
       setSyncStatus('error', '未同步');
@@ -455,7 +473,7 @@
   }
 
   /* ============================================================
-   * 添加单词: 用户手动填释义, 不再自动调 AI
+   * 娣诲姞鍗曡瘝: 鐢ㄦ埛鎵嬪姩濉噴涔? 涓嶅啀鑷姩璋?AI
    * ============================================================ */
   function handleAddWord() {
     var wordInput = $('elWordInput');
@@ -560,10 +578,10 @@
 
   function masteryLabel(w) {
     var m = w.mastery || 0;
-    if ((w.seen || 0) === 0) return '新词';
-    if (m >= 80) return '掌握';
-    if (m >= 60) return '熟悉';
-    return '薄弱';
+    if ((w.seen || 0) === 0) return '鏂拌瘝';
+    if (m >= 80) return '鎺屾彙';
+    if (m >= 60) return '鐔熸倝';
+    return '钖勫急';
   }
 
   function renderStats() {
@@ -582,31 +600,33 @@
     list.innerHTML = '';
     var words = getFilteredWords();
     if (!words.length) {
-      list.appendChild(el('div', { class: 'el-empty-hint', text: S.words.length ? '没有匹配的单词。' : '还没有单词，添加一个开始学习。' }));
+      list.appendChild(el('div', { class: 'el-empty-hint', text: S.words.length ? '????????' : '???????????????' }));
       return;
     }
+    var frag = document.createDocumentFragment();
     words.forEach(function(w, index) {
       var item = el('article', { class: 'el-word-item', 'data-id': w.id, style: '--el-i:' + Math.min(index, 16) });
-      var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id, 'aria-label': '选择 ' + w.en });
+      var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id, 'aria-label': '閫夋嫨 ' + w.en });
       cb.addEventListener('change', function() {
         item.classList.toggle('selected', cb.checked);
         updateGenInfo();
       });
       var main = el('div', { class: 'el-word-main' });
       main.appendChild(el('div', { class: 'el-word-en', text: w.en }));
-      main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '暂无释义' }));
-      var delBtn = el('button', { type: 'button', class: 'el-word-del', 'aria-label': '删除 ' + w.en, title: '删除', text: '×' });
+      main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '鏆傛棤閲婁箟' }));
+      var delBtn = el('button', { type: 'button', class: 'el-word-del', 'aria-label': '鍒犻櫎 ' + w.en, title: '鍒犻櫎', text: '脳' });
       delBtn.addEventListener('click', function() {
         deleteWord(w.id);
         renderAll();
-        notify('已删除: ' + w.en);
+        notify('已删除 ' + w.en);
       });
-      // 已删除: AI 按钮 (用户要求), 单词只保留 勾选 + 词义 + 删除
+      // 宸插垹闄? AI 鎸夐挳 (鐢ㄦ埛瑕佹眰), 鍗曡瘝鍙繚鐣?鍕鹃€?+ 璇嶄箟 + 鍒犻櫎
       item.appendChild(cb);
       item.appendChild(main);
       item.appendChild(delBtn);
-      list.appendChild(item);
+      frag.appendChild(item);
     });
+    list.appendChild(frag);
   }
 
   function masteryClass(w) {
@@ -619,7 +639,7 @@
     var total = getWordsForGeneration(false).length;
     setText('elGenTotal', total);
     var info = $('elGenInfo');
-    if (info) info.innerHTML = '将使用 <span id="elGenTotal">' + total + '</span> 个单词';
+    if (info) info.innerHTML = '??? <span id="elGenTotal">' + total + '</span> ???';
     var gen = $('elGenBtn');
     if (gen) gen.disabled = S.isGenerating || total === 0;
   }
@@ -645,7 +665,7 @@
       words = weak.concat(fresh).concat(rest);
     }
     words = words.slice(0, MAX_WORDS);
-    if (notifyIfEmpty && !words.length) notify('请先添加单词到单词库');
+    if (notifyIfEmpty && !words.length) notify('璇峰厛娣诲姞鍗曡瘝鍒板崟璇嶅簱');
     return words;
   }
 
@@ -680,13 +700,13 @@
   }
 
   /**
-   * 批量导入: 本地解析为主, AI 只补充释义
+   * 鎵归噺瀵煎叆: 鏈湴瑙ｆ瀽涓轰富, AI 鍙ˉ鍏呴噴涔?
    */
   function stripBatchNoise(line) {
     return String(line || '')
       .replace(/^[\s\-*•·]+/, '')
-      .replace(/^\s*\d+[\.\)、\)]\s*/, '')
-      .replace(/^\s*[①②③④⑤⑥⑦⑧⑨⑩]\s*/, '')
+      .replace(/^\s*\d+[\.\)銆乗)]\s*/, '')
+      .replace(/^\s*[鈶犫憽鈶⑩懀鈶も懃鈶︹懅鈶ㄢ懇]\s*/, '')
       .replace(/\/[^\/\n]{1,40}\//g, ' ')
       .replace(/\[[^\]\n]{1,40}\]/g, ' ')
       .trim();
@@ -703,7 +723,7 @@
 
   function cleanBatchMeaning(cn) {
     return String(cn || '')
-      .replace(/^[\s:：\-–—=,，;；|\/]+/, '')
+      .replace(/^[\s:锛歕-鈥撯€?,锛?锛泑\/]+/, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -748,9 +768,9 @@
     roughParts.forEach(function(line) {
       line = stripBatchNoise(line);
       if (!line) return;
-      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:：\-–—=|\/]+([\u4e00-\u9fa5].*)$/);
+      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:锛歕-鈥撯€?|\/]+([\u4e00-\u9fa5].*)$/);
       if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
-      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:：\-–—=|\/]+(.+)$/);
+      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:锛歕-鈥撯€?|\/]+(.+)$/);
       if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
       m = line.match(/[a-zA-Z][a-zA-Z\s\-']{0,59}/);
       if (m) { pushBatchParsed(parsed, seen, m[0], ''); }
@@ -760,17 +780,17 @@
 
   async function doBatchImport(btn) {
     var input = $('elBatchInput');
-    if (!input) { notify('批量导入输入框未找到', 'error'); return; }
+    if (!input) { notify('鎵归噺瀵煎叆杈撳叆妗嗘湭鎵惧埌', 'error'); return; }
     var text = String(input.value || '').trim();
-    if (!text) { notify('请先输入要导入的单词'); return; }
-    if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
+    if (!text) { notify('璇峰厛杈撳叆瑕佸鍏ョ殑鍗曡瘝'); return; }
+    if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '瑙ｆ瀽涓?..'; }
 
-    // 1) 本地确定性解析优先 — AI 只能补充释义
+    // 1) 鏈湴纭畾鎬цВ鏋愪紭鍏?鈥?AI 鍙兘琛ュ厖閲婁箟
     var localParsed = parseBatchWordsLocal(text);
     var parsedMap = {};
     localParsed.forEach(function(w) { parsedMap[w.en] = { en: w.en, cn: w.cn || '' }; });
 
-    // 2) AI 只用于补充释义，绝不覆盖本地识别数量
+    // 2) AI 鍙敤浜庤ˉ鍏呴噴涔夛紝缁濅笉瑕嗙洊鏈湴璇嗗埆鏁伴噺
     try {
       var headers = await getAuthHeaders();
       var resp = await fetch(apiBase() + '/english/parse-batch', {
@@ -794,40 +814,42 @@
           }
         });
       }
-    } catch (e) { /* AI 失败不影响导入 */ }
+    } catch (e) { /* AI 澶辫触涓嶅奖鍝嶅鍏?*/ }
 
     var parsed = Object.keys(parsedMap).map(function(k) { return parsedMap[k]; });
     if (!parsed.length) {
-      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '鎵归噺瀵煎叆'; }
       notify('没有提取到有效英文单词，请检查输入', 'error');
       return;
     }
 
     var before = S.words.length;
     var existed = 0;
+    beginBatchMutation();
     parsed.forEach(function(p) {
       if (!p || !p.en) return;
       var prev = S.words.some(function(w) { return w.en === p.en; }) ? 1 : 0;
       addWord(p.en, p.cn || '', true);
       existed += prev;
     });
+    S.batchDirty = true;
+    endBatchMutation({ render: true });
     var totalAdded = S.words.length - before;
     if (input) input.value = '';
-    renderAll();
-    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '鎵归噺瀵煎叆'; }
 
     notify(
-      '批量导入完成：识别 ' + parsed.length +
-      ' 个，新增 ' + totalAdded +
-      ' 个，已存在 ' + existed +
-      ' 个' + (totalAdded === 0 && existed > 0 ? ' (已在词库中)' : '')
+      '鎵归噺瀵煎叆瀹屾垚锛氳瘑鍒?' + parsed.length +
+      ' 涓紝鏂板 ' + totalAdded +
+      ' 涓紝宸插瓨鍦?' + existed +
+      ' ?' + (totalAdded === 0 && existed > 0 ? '???????' : '')
     );
   }
 
   async function generateQuiz(opts) {
     opts = opts || {};
     if (S.isGenerating) {
-      notify('正在生成中, 请稍候...');
+      notify('正在生成中，请稍候...');
       return;
     }
     syncSettingsFromInputs();
@@ -835,7 +857,7 @@
     if (!words.length) return;
     var types = getSelectedTypes();
     if (!types.length) {
-      notify('请至少选择一种题目类型');
+      notify('请至少选择一种题型');
       return;
     }
     var level = getSelectedLevel();
@@ -843,7 +865,7 @@
     updateGenInfo();
     showLoading(true);
     hideResult();
-    // 重新生成时只隐藏旧题/旧文章, 保留 scrollTop 体验更平滑
+    // 閲嶆柊鐢熸垚鏃跺彧闅愯棌鏃ч/鏃ф枃绔? 淇濈暀 scrollTop 浣撻獙鏇村钩婊?
     if (opts.regenArticle || opts.regenQuiz) {
       hideArticle();
       hideQuestions();
@@ -853,7 +875,7 @@
     }
     scheduleSave();
 
-    // AbortController: 用户点"取消" 或 切到单词库后想停止生成时可立即中止 fetch
+    // AbortController: 鐢ㄦ埛鐐?鍙栨秷" 鎴?鍒囧埌鍗曡瘝搴撳悗鎯冲仠姝㈢敓鎴愭椂鍙珛鍗充腑姝?fetch
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     S.currentController = controller;
     S.isCancelled = false;
@@ -866,7 +888,7 @@
       S.isGenerating = false;
       S.currentController = null;
       updateGenInfo();
-      notify('请先登录后再生成练习', 'error');
+      notify('璇峰厛鐧诲綍鍚庡啀鐢熸垚缁冧範', 'error');
       return;
     }
     try {
@@ -894,7 +916,7 @@
         throw new Error(err || ('HTTP ' + resp.status));
       }
       var json = await resp.json();
-      if (!json.ok || !json.data) throw new Error(json.error || '返回数据异常');
+      if (!json.ok || !json.data) throw new Error(json.error || '杩斿洖鏁版嵁寮傚父');
       var data = json.data;
       S.currentQuiz = {
         id: uid('quiz'),
@@ -911,13 +933,13 @@
       renderQuestions(S.currentQuiz);
       switchTab('practice');
     } catch (e2) {
-      // 用户主动取消: 静默关闭 loading
+      // 鐢ㄦ埛涓诲姩鍙栨秷: 闈欓粯鍏抽棴 loading
       if (S.isCancelled || (e2 && e2.name === 'AbortError')) {
         S.isCancelled = false;
         return;
       }
       try { console.error('[EL] generate error:', e2); } catch (e3) {}
-      // 后端不可用时, 用本地模板兜底, 用户不至于完全卡住
+      // 鍚庣涓嶅彲鐢ㄦ椂, 鐢ㄦ湰鍦版ā鏉垮厹搴? 鐢ㄦ埛涓嶈嚦浜庡畬鍏ㄥ崱浣?
       var emsg = String((e2 && e2.message) || '');
       var backendDown = /HTTP (501|404|502|503)|Failed to fetch|NetworkError|AbortError/i.test(emsg);
       if (backendDown) {
@@ -938,19 +960,19 @@
           renderArticle(S.currentQuiz);
           renderQuestions(S.currentQuiz);
           switchTab('practice');
-          notify('已使用本地模板生成 (后端不可用, 题目为示例格式)');
+          notify('已使用本地模板生成（后端不可用，题目为示例格式）');
           return;
         } catch (e4) {
           try { console.error('[EL] local fallback failed:', e4); } catch (_) {}
         }
       }
-      var hint = emsg || '未知错误';
+      var hint = emsg || '鏈煡閿欒';
       if (/HTTP 501|Unsupported method/i.test(hint)) {
-        hint = '本地服务不支持 POST, 已尝试本地模板失败';
+        hint = '??????? POST?????????';
       } else if (/HTTP 404|Not Found/i.test(hint)) {
-        hint = '本地服务未启动, 已尝试本地模板失败';
+        hint = '????????????????';
       }
-      notify('生成失败: ' + hint, 'error');
+      notify('鐢熸垚澶辫触: ' + hint, 'error');
     } finally {
       showLoading(false);
       S.isGenerating = false;
@@ -976,9 +998,9 @@
     var meta = $('elArticleMeta');
     var wordsBox = $('elArticleWords');
     if (!card || !text) return;
-    var article = String(quiz.article || '(本轮未生成文章)');
+    var article = String(quiz.article || '(鏈疆鏈敓鎴愭枃绔?');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
-    if (meta) meta.textContent = (quiz.words.length || 0) + ' words · ' + (quiz.level || '').toUpperCase();
+    if (meta) meta.textContent = (quiz.words.length || 0) + ' words 路 ' + (quiz.level || '').toUpperCase();
     if (wordsBox) {
       wordsBox.innerHTML = '';
       (quiz.words || []).slice(0, 24).forEach(function(w) {
@@ -986,7 +1008,7 @@
         wordsBox.appendChild(tag);
       });
     }
-    // 用 removeProperty 清掉可能存在的 important inline display, 让 CSS 默认 (block) 生效
+    // 鐢?removeProperty 娓呮帀鍙兘瀛樺湪鐨?important inline display, 璁?CSS 榛樿 (block) 鐢熸晥
     card.style.removeProperty('display');
   }
 
@@ -1006,11 +1028,11 @@
   }
 
   /**
-   * 本地兜底: 模板化生成文章 + 题目
-   * 真正的 AI 内容需要后端, 这里只是不让用户卡住
+   * 鏈湴鍏滃簳: 妯℃澘鍖栫敓鎴愭枃绔?+ 棰樼洰
+   * 鐪熸鐨?AI 鍐呭闇€瑕佸悗绔? 杩欓噷鍙槸涓嶈鐢ㄦ埛鍗′綇
    */
   function buildLocalQuiz(words, level, types, settings) {
-    // Fisher-Yates 洗牌, 每次生成不同的样本
+    // Fisher-Yates 娲楃墝, 姣忔鐢熸垚涓嶅悓鐨勬牱鏈?
     function shuffle(arr) {
       var out = arr.slice();
       for (var i = out.length - 1; i > 0; i--) {
@@ -1022,7 +1044,7 @@
     var sample = shuffle(words).slice(0, Math.min(8, words.length));
     var used = sample.map(function(w) { return w.en; });
     var cnList = sample.map(function(w) { return w.cn || ''; });
-    // 加入随机种子让 article 每次都不同
+    // 鍔犲叆闅忔満绉嶅瓙璁?article 姣忔閮戒笉鍚?
     var seed = ' (sample ' + Math.random().toString(36).slice(2, 6) + ')';
     var article = 'Local Practice (offline mode)' + seed + '\n\n'
       + 'This is a sample article for offline practice. '
@@ -1032,7 +1054,7 @@
     var topic = (settings && settings.topic) ? settings.topic : 'general';
     var levelLabel = (level || 'cet4').toUpperCase();
 
-    // 工具: 找到 opts 数组中正确项的位置 (answer 必须是数字索引, 与 renderMcQuestion 兼容)
+    // 宸ュ叿: 鎵惧埌 opts 鏁扮粍涓纭」鐨勪綅缃?(answer 蹇呴』鏄暟瀛楃储寮? 涓?renderMcQuestion 鍏煎)
     function indexOfAnswer(opts, ans) {
       for (var i = 0; i < opts.length; i++) {
         if (opts[i] === ans) return i;
@@ -1045,29 +1067,29 @@
     var qcount = Math.max(2, Math.min(8, (settings && settings.questionCount) || 6));
 
     if (types.indexOf('reading') >= 0 && sample.length) {
-      // 阅读理解: 匹配单词-释义 (mc 类型, 答案用索引)
+      // 闃呰鐞嗚В: 鍖归厤鍗曡瘝-閲婁箟 (mc 绫诲瀷, 绛旀鐢ㄧ储寮?
       var w0 = sample[0];
-      var correctOpt = w0.en + ' (' + (w0.cn || '主题词') + ')';
+      var correctOpt = w0.en + ' (' + (w0.cn || '???') + ')';
       var opts1 = sample.slice(0, Math.min(3, sample.length)).map(function(w) { return w.en + ' (' + (w.cn || '') + ')'; });
       opts1.push(correctOpt);
       opts1 = shuffle(opts1).slice(0, 4);
-      // 确保正确项在 opts 中
+      // 纭繚姝ｇ‘椤瑰湪 opts 涓?
       if (opts1.indexOf(correctOpt) < 0) opts1[0] = correctOpt;
       questions.push({
         id: 'q' + (qid++),
         type: 'mc',
-        question: '下列哪个单词与 "' + (w0.cn || '主题') + '" 对应?',
+        question: '涓嬪垪鍝釜鍗曡瘝涓?"' + (w0.cn || '涓婚') + '" 瀵瑰簲?',
         options: opts1,
         answer: indexOfAnswer(opts1, correctOpt),
-        explain: '答案来自单词库中 ' + w0.en + ' 的释义。'
+        explain: '???????? ' + w0.en + ' ????'
       });
     }
 
     if (types.indexOf('choice') >= 0) {
-      // 选择题: 每单词一道释义匹配 (mc 类型)
+      // 閫夋嫨棰? 姣忓崟璇嶄竴閬撻噴涔夊尮閰?(mc 绫诲瀷)
       var need = Math.max(1, qcount - questions.length);
       sample.slice(0, need).forEach(function(w) {
-        var correctOpt = w.cn || ('释义: ' + w.en);
+        var correctOpt = w.cn || ('閲婁箟: ' + w.en);
         var pool = [correctOpt];
         var distractors = sample.filter(function(x) { return x.en !== w.en; }).slice(0, 6);
         distractors.forEach(function(d) { pool.push((d.cn || d.en) + ' / ' + d.en); });
@@ -1077,48 +1099,48 @@
         questions.push({
           id: 'q' + (qid++),
           type: 'mc',
-          question: '"' + w.en + '" 的中文释义最接近:',
+          question: '"' + w.en + '" 鐨勪腑鏂囬噴涔夋渶鎺ヨ繎:',
           options: pool,
           answer: indexOfAnswer(pool, correctOpt),
-          explain: '该单词在单词库中释义为: ' + (w.cn || '暂无')
+          explain: '璇ュ崟璇嶅湪鍗曡瘝搴撲腑閲婁箟涓? ' + (w.cn || '鏆傛棤')
         });
       });
     }
 
     if (types.indexOf('cloze') >= 0 && sample.length) {
-      // 完形填空: 必须用 q.blanks 数组结构, renderClozeQuestion 才能渲染
+      // 瀹屽舰濉┖: 蹇呴』鐢?q.blanks 鏁扮粍缁撴瀯, renderClozeQuestion 鎵嶈兘娓叉煋
       var target = sample[0];
       var optTexts = [target.en].concat(sample.slice(1, 4).map(function(x) { return x.en; })).slice(0, 4);
       optTexts = shuffle(optTexts);
-      // 用 ___ 作为挖空标记, renderClozeQuestion 会按 ___ 切分并插入下拉框
+      // 鐢?___ 浣滀负鎸栫┖鏍囪, renderClozeQuestion 浼氭寜 ___ 鍒囧垎骞舵彃鍏ヤ笅鎷夋
       var clozeContext = 'In this example, please fill in the blank: ___ means ' + (target.cn || 'something') + '.';
       var blank = {
         options: optTexts,
         answer: indexOfAnswer(optTexts, target.en),
-        explain: '完形填空示例 (本地模式)。'
+        explain: '?????????????'
       };
       questions.push({
         id: 'q' + (qid++),
         type: 'cloze',
-        question: '完形填空 (本地模板)',
+        question: '瀹屽舰濉┖ (鏈湴妯℃澘)',
         context: clozeContext,
         blanks: [blank]
       });
     }
 
-    // 不足数量补选择题
+    // 涓嶈冻鏁伴噺琛ラ€夋嫨棰?
     while (questions.length < qcount && sample.length) {
       var w2 = sample[questions.length % sample.length];
-      var correctOpt2 = w2.cn || ('释义: ' + w2.en);
-      var pool2 = [correctOpt2, '其他含义', '不相关', '跳过'];
+      var correctOpt2 = w2.cn || ('閲婁箟: ' + w2.en);
+      var pool2 = [correctOpt2, '????', '???', '??'];
       pool2 = shuffle(pool2);
       questions.push({
         id: 'q' + (qid++),
         type: 'mc',
-        question: '"' + w2.en + '" 的中文释义是?',
+        question: '"' + w2.en + '" 鐨勪腑鏂囬噴涔夋槸?',
         options: pool2,
         answer: indexOfAnswer(pool2, correctOpt2),
-        explain: '本地模板示例题。'
+        explain: '????????'
       });
     }
 
@@ -1138,8 +1160,8 @@
     (quiz.questions || []).forEach(function(q, qi) {
       var qEl = el('article', { class: 'el-question', 'data-qid': q.id, style: '--el-i:' + Math.min(qi, 12) });
       var title = el('div', { class: 'el-q-title' });
-      title.appendChild(el('span', { class: 'el-q-type', text: q.type === 'cloze' ? '完形' : '单选' }));
-      title.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + (q.question || '题目')));
+      title.appendChild(el('span', { class: 'el-q-type', text: q.type === 'cloze' ? '??' : '??' }));
+      title.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + (q.question || '棰樼洰')));
       qEl.appendChild(title);
       if (q.type === 'mc') renderMcQuestion(qEl, q);
       else if (q.type === 'cloze') renderClozeQuestion(qEl, q);
@@ -1149,7 +1171,7 @@
     if (meta) {
       var mc = (quiz.questions || []).filter(function(q) { return q.type === 'mc'; }).length;
       var cloze = (quiz.questions || []).filter(function(q) { return q.type === 'cloze'; }).length;
-      meta.textContent = mc + ' 单选 · ' + cloze + ' 完形';
+      meta.textContent = mc + ' 鍗曢€?路 ' + cloze + ' 瀹屽舰';
     }
     card.style.removeProperty('display');
     var submit = $('elSubmitBtn');
@@ -1183,14 +1205,14 @@
         var currentBlankIndex = blankIndex;
         var blank = q.blanks && q.blanks[currentBlankIndex];
         if (blank) {
-          var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': currentBlankIndex, 'aria-label': '第 ' + (currentBlankIndex + 1) + ' 空' });
-          sel.appendChild(el('option', { value: '-1', text: '空' + (currentBlankIndex + 1) }));
+          var sel = el('select', { class: 'el-blank-sel', 'data-qid': q.id, 'data-bi': currentBlankIndex, 'aria-label': '? ' + (currentBlankIndex + 1) + ' ?' });
+          sel.appendChild(el('option', { value: '-1', text: '? ' + (currentBlankIndex + 1) }));
           (blank.options || []).forEach(function(opt, oi) {
             sel.appendChild(el('option', { value: String(oi), text: String.fromCharCode(65 + oi) }));
           });
           sel.addEventListener('change', function() {
             var v = parseInt(sel.value, 10);
-            // selected 视觉态: 选了真答案 (>=0) 后加 selected
+            // selected 瑙嗚鎬? 閫変簡鐪熺瓟妗?(>=0) 鍚庡姞 selected
             if (v >= 0) sel.classList.add('selected');
             else sel.classList.remove('selected');
             if (!S.currentQuiz.answers[q.id]) S.currentQuiz.answers[q.id] = {};
@@ -1204,10 +1226,10 @@
     });
     parent.appendChild(ctx);
     var optionPanel = el('div', { class: 'el-cloze-options' });
-    optionPanel.appendChild(el('div', { class: 'el-cloze-ref-label', text: '参考答案 · 提交后显示' }));
+    optionPanel.appendChild(el('div', { class: 'el-cloze-ref-label', text: '???? ? ?????' }));
     (q.blanks || []).forEach(function(blank, bi) {
       var group = el('div', { class: 'el-cloze-group' });
-      group.appendChild(el('div', { class: 'el-cloze-label', text: '空 ' + (bi + 1) }));
+      group.appendChild(el('div', { class: 'el-cloze-label', text: '绌?' + (bi + 1) }));
       (blank.options || []).forEach(function(opt, oi) {
         group.appendChild(el('div', { class: 'el-cloze-choice', text: String.fromCharCode(65 + oi) + '. ' + stripOptionPrefix(opt, oi) }));
       });
@@ -1219,21 +1241,21 @@
   function stripOptionPrefix(opt, index) {
     var text = String(opt || '');
     var letter = String.fromCharCode(65 + index);
-    return text.replace(new RegExp('^\\s*' + letter + '[\\.|、\\)]\\s*', 'i'), '');
+    return text.replace(new RegExp('^\\s*' + letter + '[\\.|銆乗\)]\\s*', 'i'), '');
   }
 
   function hideArticle() {
     var c = $('elArticleCard'); if (c) c.style.setProperty('display', 'none', 'important');
-    // locale-bar 始终显示, 让"重新生成"按钮任何时候都可见
+    // locale-bar 濮嬬粓鏄剧ず, 璁?閲嶆柊鐢熸垚"鎸夐挳浠讳綍鏃跺€欓兘鍙
   }
   function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
   function hideResult() { var c = $('elResultCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
 
-  /* ============ 边缘霓虹声波加载动画 (Siri 风格) ============
-   * 圆角矩形周长基准点 + 双 sine 干涉 + lighter 混合 + shadowBlur 泛光
-   * - canvas 透明浮层, 不阻挡页面交互
-   * - 入场: overlay 从底部 scaleY(0)→1, 声波同步从微弱到丰满
-   * - 退场: 加 leaving 类 scaleY 反向收缩, 停止 rAF
+  /* ============ 杈圭紭闇撹櫣澹版尝鍔犺浇鍔ㄧ敾 (Siri 椋庢牸) ============
+   * 鍦嗚鐭╁舰鍛ㄩ暱鍩哄噯鐐?+ 鍙?sine 骞叉秹 + lighter 娣峰悎 + shadowBlur 娉涘厜
+   * - canvas 閫忔槑娴眰, 涓嶉樆鎸￠〉闈氦浜?
+   * - 鍏ュ満: overlay 浠庡簳閮?scaleY(0)鈫?, 澹版尝鍚屾浠庡井寮卞埌涓版弧
+   * - 閫€鍦? 鍔?leaving 绫?scaleY 鍙嶅悜鏀剁缉, 鍋滄 rAF
    */
   var _neonRaf = 0;
   var _neonCtx = null;
@@ -1455,7 +1477,7 @@
     }
     if (g) {
       g.disabled = on || getWordsForGeneration(false).length === 0;
-      g.textContent = on ? '生成中...' : '生成专属练习';
+      g.textContent = on ? '鐢熸垚涓?..' : '鐢熸垚涓撳睘缁冧範';
     }
   }
 
@@ -1511,17 +1533,17 @@
     var userAnswer = '';
     if (q.type === 'mc') {
       correctAnswer = optionText(q.options, q.answer);
-      userAnswer = typeof answer === 'number' ? optionText(q.options, answer) : '未作答';
+      userAnswer = typeof answer === 'number' ? optionText(q.options, answer) : '???';
     } else {
       var blank = q.blanks && q.blanks[blankIndex];
       correctAnswer = blank ? optionText(blank.options, blank.answer) : '';
-      userAnswer = blank && typeof answer === 'number' ? optionText(blank.options, answer) : '未作答';
+      userAnswer = blank && typeof answer === 'number' ? optionText(blank.options, answer) : '???';
     }
     return {
       id: uid('m'),
       questionId: q.id,
       type: q.type,
-      question: q.question || (q.type === 'cloze' ? '完形填空' : '题目'),
+      question: q.question || (q.type === 'cloze' ? '瀹屽舰濉┖' : '棰樼洰'),
       context: q.context || '',
       blankIndex: typeof blankIndex === 'number' ? blankIndex : -1,
       userAnswer: userAnswer,
@@ -1571,14 +1593,14 @@
     var score = $('elResultScore');
     var text = $('elResultText');
     if (!card) return;
-    if (score) score.textContent = correct + ' / ' + total + ' · ' + pct + '%';
+    if (score) score.textContent = correct + ' / ' + total + ' 路 ' + pct + '%';
     if (text) {
-      text.textContent = pct >= 80 ? '表现稳定，继续保持。' :
-        pct >= 60 ? '整体不错，多加练习会更稳。' :
-        '建议再生成一组练习巩固薄弱词。';
+      text.textContent = pct >= 80 ? '??????????' :
+        pct >= 60 ? '?????????????' :
+        '???????????????';
     }
     card.style.removeProperty('display');
-    // 不再自动 scrollIntoView, 避免页面跳动
+    // 涓嶅啀鑷姩 scrollIntoView, 閬垮厤椤甸潰璺冲姩
     try { /* card.scrollIntoView({ behavior: 'smooth', block: 'center' }); */ } catch (e) {}
   }
 
@@ -1594,7 +1616,7 @@
           var ua = quiz.answers[q.id];
           if (typeof ua === 'number' && ua === oi && ua !== parseInt(q.answer, 10)) opt.classList.add('wrong');
         });
-        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' · ' + (q.explain || ''));
+        revealExplain(q.id, '姝ｇ‘绛旀: ' + optionText(q.options, q.answer) + ' 路 ' + (q.explain || ''));
       } else if (q.type === 'cloze') {
         (q.blanks || []).forEach(function(blank, bi) {
           document.querySelectorAll('.el-blank-sel[data-qid="' + q.id + '"][data-bi="' + bi + '"]').forEach(function(sel) {
@@ -1602,8 +1624,8 @@
             sel.classList.add('correct');
           });
         });
-        var parts = (q.blanks || []).map(function(blank, bi) { return '空' + (bi + 1) + ': ' + optionText(blank.options, blank.answer); });
-        revealExplain(q.id, '答案: ' + parts.join('；') + ' · ' + ((q.blanks && q.blanks[0] && q.blanks[0].explain) || ''));
+        var parts = (q.blanks || []).map(function(blank, bi) { return '? ' + (bi + 1) + ': ' + optionText(blank.options, blank.answer); });
+        revealExplain(q.id, '??: ' + parts.join('?') + ' ? ' + ((q.blanks && q.blanks[0] && q.blanks[0].explain) || ''));
       }
     });
     var submit = $('elSubmitBtn');
@@ -1619,7 +1641,7 @@
   }
 
   function renderAll() {
-    // 性能优化: 使用 rAF 合并多次 renderAll 调用, 避免连续触发 DOM 抖动
+    // 鎬ц兘浼樺寲: 浣跨敤 rAF 鍚堝苟澶氭 renderAll 璋冪敤, 閬垮厤杩炵画瑙﹀彂 DOM 鎶栧姩
     if (renderAll._rafId) return;
     renderAll._rafId = requestAnimationFrame(function() {
       renderAll._rafId = 0;
@@ -1640,7 +1662,7 @@
       t.classList.toggle('active', t.getAttribute('data-eltab') === name);
     });
     setTimeout(updateTabIndicator, 20);
-    // 不再重置 page.scrollTop, 避免点击生成/重新生成时页面跳到顶部
+    // 涓嶅啀閲嶇疆 page.scrollTop, 閬垮厤鐐瑰嚮鐢熸垚/閲嶆柊鐢熸垚鏃堕〉闈㈣烦鍒伴《閮?
   }
 
   function updateTabIndicator() {
@@ -1650,7 +1672,7 @@
     if (!tabs || !indicator || !active) return;
     var tr = tabs.getBoundingClientRect();
     var ar = active.getBoundingClientRect();
-    // 视觉上让 indicator 比 cell 窄 8px (左右各 4px), 看起来像一个独立胶囊
+    // 瑙嗚涓婅 indicator 姣?cell 绐?8px (宸﹀彸鍚?4px), 鐪嬭捣鏉ュ儚涓€涓嫭绔嬭兌鍥?
     var inset = 4;
     var w = Math.max(40, ar.width - inset * 2);
     indicator.style.width = w + 'px';
@@ -1811,7 +1833,7 @@
         return cb.getAttribute('data-id');
       });
       if (!ids.length) {
-        notify('请先选择要删除的单词');
+        notify('璇峰厛閫夋嫨瑕佸垹闄ょ殑鍗曡瘝');
         return;
       }
       if (!confirm('确定删除选中的 ' + ids.length + ' 个单词吗？')) return;
@@ -1846,7 +1868,7 @@
       hideQuestions();
       hideResult();
       switchTab('practice');
-      // 不再 scrollIntoView
+      // 涓嶅啀 scrollIntoView
     });
     safeBind('elNewChatBtn', 'click', function() {
       hideArticle();
@@ -1855,7 +1877,7 @@
       switchTab('practice');
     });
     safeBind('elDeleteBtn', 'click', function() {
-      if (!confirm('确定清空全部单词、练习记录和错题吗？')) return;
+      if (!confirm('纭畾娓呯┖鍏ㄩ儴鍗曡瘝銆佺粌涔犺褰曞拰閿欓鍚楋紵')) return;
       clearAll();
       renderAll();
       notify('已清空');
@@ -1867,14 +1889,14 @@
   }
 
   /* ============================================================
-   * Tabs 点击切换 + indicator 拖动切换 (iOS segmented control 风格)
+   * Tabs 鐐瑰嚮鍒囨崲 + indicator 鎷栧姩鍒囨崲 (iOS segmented control 椋庢牸)
    * ============================================================ */
   function initTabs() {
     var tabsContainer = document.querySelector('#panelEnglishLearning .el-tabs');
     if (!tabsContainer) return;
     var tabs = tabsContainer.querySelectorAll('.el-tab');
     tabs.forEach(function(tab) {
-      // 防止重复绑定 (兼容 init() 重复调用)
+      // 闃叉閲嶅缁戝畾 (鍏煎 init() 閲嶅璋冪敤)
       if (tab.dataset._elTabInited) return;
       tab.dataset._elTabInited = '1';
       tab.setAttribute('draggable', 'false');
@@ -1884,7 +1906,7 @@
       });
     });
 
-    // indicator 拖动切换 (借鉴 dock-bar drag 模式)
+    // indicator 鎷栧姩鍒囨崲 (鍊熼壌 dock-bar drag 妯″紡)
     if (!tabsContainer.dataset._elDragInited) {
       tabsContainer.dataset._elDragInited = '1';
       var indicator = tabsContainer.querySelector('.el-tab-indicator');
@@ -1926,7 +1948,7 @@
           var d = Math.abs(rects[i].center - center);
           if (d < bestDist) { bestDist = d; best = rects[i]; }
         }
-        // 恢复弹性过渡 + 切到对应 tab
+        // 鎭㈠寮规€ц繃娓?+ 鍒囧埌瀵瑰簲 tab
         tabsContainer.classList.remove('is-dragging');
         var tr = tabsContainer.getBoundingClientRect();
         var ar = best.tab.getBoundingClientRect();
@@ -1940,9 +1962,9 @@
       }
 
       tabsContainer.addEventListener('pointerdown', function(e) {
-        // 只在主指针/触摸
+        // 鍙湪涓绘寚閽?瑙︽懜
         if (e.pointerType === 'mouse' && e.button !== 0) return;
-        // 点击 tab 自己: 走 click, 不抢拖动
+        // 鐐瑰嚮 tab 鑷繁: 璧?click, 涓嶆姠鎷栧姩
         if (e.target.closest('.el-tab')) return;
         if (!indicator) return;
         dragStartX = e.clientX;
@@ -1955,7 +1977,7 @@
       tabsContainer.addEventListener('pointermove', function(e) {
         if (dragState == null) return;
         if (dragState === 'pending') {
-          if (Math.abs(e.clientX - dragStartX) < 4) return; // 4px 死区
+          if (Math.abs(e.clientX - dragStartX) < 4) return; // 4px 姝诲尯
           dragState = 'dragging';
           dragSuppressClick = true;
           tabsContainer.classList.add('is-dragging');
@@ -1970,7 +1992,7 @@
         if (dragState === 'dragging') {
           snapToNearestTab();
         } else {
-          // 没真正拖动: 解除 capturing, 让 click 走
+          // 娌＄湡姝ｆ嫋鍔? 瑙ｉ櫎 capturing, 璁?click 璧?
         }
         try { tabsContainer.releasePointerCapture(e.pointerId); } catch (_) {}
         dragState = null;
@@ -1978,7 +2000,7 @@
       tabsContainer.addEventListener('pointerup', endDrag);
       tabsContainer.addEventListener('pointercancel', endDrag);
 
-      // 拖动结束后短暂忽略 click 防止误触 (借鉴 dockBar 模式)
+      // 鎷栧姩缁撴潫鍚庣煭鏆傚拷鐣?click 闃叉璇Е (鍊熼壌 dockBar 妯″紡)
       tabsContainer.addEventListener('click', function(e) {
         if (dragSuppressClick) {
           dragSuppressClick = false;
@@ -1988,7 +2010,7 @@
       }, true);
     }
 
-    // 初始化 indicator 位置
+    // 鍒濆鍖?indicator 浣嶇疆
     setTimeout(updateTabIndicator, 30);
   }
 
@@ -2020,3 +2042,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
+
+
