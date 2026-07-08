@@ -601,9 +601,6 @@
     return '';
   }
 
-  function generateRequestId() {
-    return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  }
   
   function abortCurrentRequest() {
     clearStreamCleanup();
@@ -1288,34 +1285,6 @@
     maybeRestoreEmptyState(messagesEl);
   }
 
-  function buildLongReplySegments(text) {
-    var normalized = String(text || '').replace(/\r\n/g, '\n');
-    var blocks = normalized.split(/\n{2,}/);
-    var segments = [];
-    for (var i = 0; i < blocks.length; i++) {
-      var block = blocks[i];
-      if (!block) continue;
-      if (segments.length) segments.push('\n\n');
-      if (block.length <= 180) {
-        segments.push(block);
-        continue;
-      }
-      var parts = block.match(/[^銆傦紒锛??锛?\n]+[銆傦紒锛??锛?]?\s*/g) || [block];
-      var buf = '';
-      for (var j = 0; j < parts.length; j++) {
-        var next = parts[j];
-        if (buf && (buf + next).length > 150) {
-          segments.push(buf);
-          buf = next;
-        } else {
-          buf += next;
-        }
-      }
-      if (buf) segments.push(buf);
-    }
-    return segments.length ? segments : [normalized];
-  }
-
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
@@ -1681,14 +1650,6 @@
   var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
   var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
-
-  function prefersReducedMotion() {
-    try {
-      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch (e) {
-      return false;
-    }
-  }
 
   function isResearchCard(card) {
     return !!(card && card._researchState && card.classList && card.classList.contains('ai-research-card'));
@@ -4781,9 +4742,6 @@ function showChatMessages() {
     englishBtn.className = 'ai-english-toggle';
     englishBtn.setAttribute('aria-label', '英语学习');
     englishBtn.title = '英语学习 - 单词库与 AI 阅读练习';
-    // 涔︽湰鍥炬爣
-    var englishSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>';
-    // 鈽?瀹夊叏: 鐢?DOM API 鑰岄潪 innerHTML
     var englishSvgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     englishSvgEl.setAttribute('viewBox', '0 0 24 24');
     englishSvgEl.setAttribute('width', '14');
