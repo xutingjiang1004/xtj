@@ -639,7 +639,7 @@
     var total = getWordsForGeneration(false).length;
     setText('elGenTotal', total);
     var info = $('elGenInfo');
-    if (info) info.innerHTML = '??? <span id="elGenTotal">' + total + '</span> ???';
+    if (info) info.textContent = '??? ' + total + ' ???';
     var gen = $('elGenBtn');
     if (gen) gen.disabled = S.isGenerating || total === 0;
   }
@@ -1066,7 +1066,7 @@
     var qid = 1;
     var qcount = Math.max(2, Math.min(8, (settings && settings.questionCount) || 6));
 
-    if (types.indexOf('reading') >= 0 && sample.length) {
+    if (types.indexOf('article') >= 0 && sample.length) {
       // 闃呰鐞嗚В: 鍖归厤鍗曡瘝-閲婁箟 (mc 绫诲瀷, 绛旀鐢ㄧ储寮?
       var w0 = sample[0];
       var correctOpt = w0.en + ' (' + (w0.cn || '???') + ')';
@@ -1085,7 +1085,7 @@
       });
     }
 
-    if (types.indexOf('choice') >= 0) {
+    if (types.indexOf('mc') >= 0) {
       // 閫夋嫨棰? 姣忓崟璇嶄竴閬撻噴涔夊尮閰?(mc 绫诲瀷)
       var need = Math.max(1, qcount - questions.length);
       sample.slice(0, need).forEach(function(w) {
