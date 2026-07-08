@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
  * XTJ English Learning Studio
  * Scoped, responsive, cross-browser UI
  * ============================================================ */
@@ -842,7 +842,7 @@ body.english-learning-open {
   background: var(--el-accent-soft);
 }
 
-/* 加载动画: 见文件末尾"v2 加载动画"段, 这里不再重复 */
+/* 加载动画: 见文件末?v2 加载动画"? 这里不再重复 */
 #panelEnglishLearning .el-loading-text {
   color: var(--el-muted);
   font-size: 13px;
@@ -1115,7 +1115,7 @@ body.english-learning-open {
   line-height: 1.6;
 }
 
-/* 已移除 .el-history / .el-mistakes 相关样式 */
+/* 已移?.el-history / .el-mistakes 相关样式 */
 
 #panelEnglishLearning .el-meta {
   color: var(--el-muted);
@@ -1123,7 +1123,7 @@ body.english-learning-open {
   font-weight: 650;
 }
 
-/* 已移除 el-reveal / el-content-in / el-dropdown-in / el-list-in / el-expand-in 动画 */
+/* 已移?el-reveal / el-content-in / el-dropdown-in / el-list-in / el-expand-in 动画 */
 
 @keyframes el-orbit {
   to { transform: rotate(360deg); }
@@ -1309,7 +1309,7 @@ body.english-learning-open {
 
 
 /* ============================================================
- * 文章 locale bar (阅读文章头部 + 重新生成按钮组)
+ * 文章 locale bar (阅读文章头部 + 重新生成按钮?
  * ============================================================ */
 #panelEnglishLearning .el-locale-bar {
   display: flex;
@@ -1387,8 +1387,8 @@ body.english-learning-open {
 }
 
 /* ============================================================
- * 流光 shimmer + pane 切换动画 + 加载动画 (v2 在文件末尾)
- * 这里只保留 el-shimmer keyframes, 加载动画用 v2 dot pulse
+ * 流光 shimmer + pane 切换动画 + 加载动画 (v2 在文件末?
+ * 这里只保?el-shimmer keyframes, 加载动画?v2 dot pulse
  * ============================================================ */
 @keyframes el-shimmer {
   0% { background-position: -200% 0; }
@@ -1397,8 +1397,8 @@ body.english-learning-open {
 
 
 /* ============================================================
- * 重新设计的动画 (替代原来的 conic + shimmer)
- * 风格: 简洁的 fade + 弹性 indicator + 轻量 pulse
+ * 重新设计的动?(替代原来?conic + shimmer)
+ * 风格: 简洁的 fade + 弹?indicator + 轻量 pulse
  * ============================================================ */
 @keyframes el-pane-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -1422,12 +1422,12 @@ body.english-learning-open {
 #panelEnglishLearning .el-pane > *:nth-child(1) { animation-delay: 0ms; }
 #panelEnglishLearning .el-pane > *:nth-child(2) { animation-delay: 60ms; }
 
-/* tab 切换: 弹性 indicator (320ms) */
+/* tab 切换: 弹?indicator (320ms) */
 #panelEnglishLearning .el-tab-indicator {
   transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
-/* 加载动画: 三个点 + 简洁的进度环 (替代 conic-gradient) */
+/* 加载动画: 三个?+ 简洁的进度?(替代 conic-gradient) */
 #panelEnglishLearning .el-loading {
   position: relative;
   display: flex;
@@ -1470,7 +1470,7 @@ body.english-learning-open {
   letter-spacing: 0.3px;
 }
 
-/* 重新生成按钮: 悬停淡入 + 加载时旋转 */
+/* 重新生成按钮: 悬停淡入 + 加载时旋?*/
 #panelEnglishLearning .el-regen-btn {
   display: inline-flex;
   align-items: center;
@@ -1607,7 +1607,7 @@ body.english-learning-open {
   color: var(--el-text);
 }
 
-/* main 顶部 padding 0, 让 card 直接接 tabs */
+/* main 顶部 padding 0, ?card 直接?tabs */
 #panelEnglishLearning .el-main {
   flex: 1 1 auto;
   min-height: 0;
@@ -1721,15 +1721,15 @@ body.english-learning-open {
 
 
 /* ============================================================
- * 关键样式统一覆盖 (放在文件最末尾, 覆盖前面的所有重复定义)
+ * 关键样式统一覆盖 (放在文件最末尾, 覆盖前面的所有重复定?
  * - el-tabs: 严格 1fr 1fr + 高度 40px + align-items stretch
  * - el-loader-orbit: dot pulse 1.2s (替代 conic + shimmer)
- * - el-tab-indicator: 弹性 380ms + 视觉胶囊 (active cell 内缩 4px)
+ * - el-tab-indicator: 弹?380ms + 视觉胶囊 (active cell 内缩 4px)
  * - el-loading: flex 居中 + min-height 200px
- * - el-page: 滚动条样式 + 防 scroll snap
+ * - el-page: 滚动条样?+ ?scroll snap
  * ============================================================ */
 
-/* tabs 高度 + 居中对齐 + 防 nav 全局样式干扰 */
+/* tabs 高度 + 居中对齐 + ?nav 全局样式干扰 */
 #panelEnglishLearning.el-show .el-tabs,
 #panelEnglishLearning .el-tabs {
   position: sticky !important;
@@ -1791,7 +1791,7 @@ body.english-learning-open {
   font-weight: 800 !important;
 }
 
-/* indicator: 弹性过渡 + 视觉胶囊 (active cell 内缩 4px) */
+/* indicator: 弹性过?+ 视觉胶囊 (active cell 内缩 4px) */
 #panelEnglishLearning .el-tab-indicator {
   position: absolute !important;
   z-index: 1 !important;
@@ -1809,15 +1809,15 @@ body.english-learning-open {
 
 /* ============================================================
  * 边缘霓虹声波加载动画 (Siri 风格)
- * 视觉: Canvas 全屏浮层(不挡事件)+四边圆角矩形音浪(蓝/紫/粉/靛 发光叠加)+底部状态小胶囊
- * 入场: 从底部向上"呼出"展开(scaleY 0→1 从底锚点开始)
- * 退场: 反向收缩回底部消失
+ * 视觉: Canvas 全屏浮层(不挡事件)+四边圆角矩形音浪(????发光叠加)+底部状态小胶囊
+ * 入场: 从底部向?呼出"展开(scaleY 0? 从底锚点开?
+ * 退? 反向收缩回底部消?
  * ============================================================ */
 #panelEnglishLearning .el-loading-overlay {
   position: absolute;
   inset: 0;
   z-index: 60;
-  pointer-events: none; /* 默认穿透，让用户仍可滚动/操作页面 */
+  pointer-events: none; /* 默认穿透，让用户仍可滚?操作页面 */
   background: transparent;
   transform-origin: bottom center;
   transform: scaleY(0);
@@ -1846,7 +1846,7 @@ body.english-learning-open {
   pointer-events: none;
 }
 
-/* 中央底部小胶囊：显示"正在生成中"+取消按钮，唯一接收点击的元素 */
+/* 中央底部小胶囊：显示"正在生成?+取消按钮，唯一接收点击的元?*/
 #panelEnglishLearning .el-loading-pill {
   position: absolute;
   left: 50%;
@@ -1906,7 +1906,7 @@ body.english-learning-open {
   border-color: rgba(255, 90, 120, 0.5);
 }
 
-/* page 滚动: 平滑 + 防 scroll snap 跳 */
+/* page 滚动: 平滑 + ?scroll snap ?*/
 #panelEnglishLearning .el-page {
   scroll-behavior: auto !important;
   scrollbar-gutter: stable !important;
@@ -1914,7 +1914,7 @@ body.english-learning-open {
 }
 
 /* ============================================================
- * tabs indicator 增强 (深阴影 + 描边) + 可拖动切换
+ * tabs indicator 增强 (深阴?+ 描边) + 可拖动切?
  * ============================================================ */
 #panelEnglishLearning .el-tabs {
   -webkit-user-select: none;
