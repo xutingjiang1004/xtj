@@ -1791,213 +1791,104 @@ body.english-learning-open {
   will-change: transform, width !important;
 }
 
-/* 加载动画 v2: 三个 dot pulse (替代 conic + shimmer) */
-#panelEnglishLearning .el-loading {
-  position: relative !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 16px !important;
-  min-height: 200px !important;
-  text-align: center !important;
-  overflow: visible !important;
-  background: transparent !important;
-}
-#panelEnglishLearning .el-loading::before { content: none !important; }
-#panelEnglishLearning .el-loader-orbit {
-  position: relative !important;
-  width: 48px !important;
-  height: 48px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  -webkit-mask: none !important;
-  mask: none !important;
-  filter: none !important;
-  animation: none !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
-}
-#panelEnglishLearning .el-loader-orbit::before { content: none !important; }
-#panelEnglishLearning .el-loader-orbit > span {
-  display: inline-block !important;
-  position: relative !important;
-  left: auto !important;
-  top: auto !important;
-  width: 8px !important;
-  height: 8px !important;
-  border-radius: 50% !important;
-  background: var(--el-accent) !important;
-  box-shadow: none !important;
-  transform-origin: center !important;
-  animation: el-pulse-dot 1.2s ease-in-out infinite !important;
-  opacity: 1 !important;
-}
-#panelEnglishLearning .el-loader-orbit > span:nth-child(2) { animation-delay: 0.15s !important; }
-#panelEnglishLearning .el-loader-orbit > span:nth-child(3) { animation-delay: 0.30s !important; }
-#panelEnglishLearning .el-loading-text {
-  font-size: 13px !important;
-  color: var(--el-muted) !important;
-  letter-spacing: 0.3px !important;
-  font-weight: 680 !important;
-}
-@keyframes el-pulse-dot {
-  0%, 100% { transform: scale(0.7); opacity: 0.4; }
-  50%      { transform: scale(1.0); opacity: 1; }
-}
 
 /* ============================================================
- * 蝴蝶飞舞加载动画 (替代 dot pulse, 绿色主题 + 花草装饰)
- * el-loading 浮在 panel 级别, 切到任何 tab 都能看到
+ * 边缘霓虹声波加载动画 (Siri 风格)
+ * 视觉: Canvas 全屏浮层(不挡事件)+四边圆角矩形音浪(蓝/紫/粉/靛 发光叠加)+底部状态小胶囊
+ * 入场: 从底部向上"呼出"展开(scaleY 0→1 从底锚点开始)
+ * 退场: 反向收缩回底部消失
  * ============================================================ */
-#panelEnglishLearning .el-loading {
-  position: relative !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 14px !important;
-  margin: 0 14px 14px !important;
-  padding: 28px 24px 22px !important;
-  min-height: 200px !important;
-  text-align: center !important;
-  overflow: visible !important;
-  background: linear-gradient(180deg, rgba(255,255,255,0.7), rgba(238,245,242,0.4)) !important;
-  border: 1px solid var(--el-line) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 18px 44px rgba(20, 124, 90, 0.08) !important;
-  animation: el-loading-fade-in 320ms var(--el-ease) both !important;
+#panelEnglishLearning .el-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none; /* 默认穿透，让用户仍可滚动/操作页面 */
+  background: transparent;
+  transform-origin: bottom center;
+  transform: scaleY(0);
+  opacity: 0;
+  transition: transform 520ms cubic-bezier(0.2, 0.9, 0.25, 1),
+              opacity 320ms ease-out;
 }
-#panelEnglishLearning .el-loading[hidden] { display: none !important; }
-#panelEnglishLearning .el-loading::before { content: none !important; }
-@keyframes el-loading-fade-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+#panelEnglishLearning .el-loading-overlay:not([hidden]) {
+  transform: scaleY(1);
+  opacity: 1;
 }
+#panelEnglishLearning .el-loading-overlay.leaving {
+  transform: scaleY(0);
+  opacity: 0;
+  transition: transform 420ms cubic-bezier(0.5, 0, 0.8, 0.2),
+              opacity 260ms ease-in 100ms;
+}
+#panelEnglishLearning .el-loading-overlay[hidden] { display: none !important; }
 
-#panelEnglishLearning .el-loading-scene {
-  position: relative;
-  width: 160px;
-  height: 96px;
-  pointer-events: none;
-  overflow: visible;
-}
-#panelEnglishLearning .el-butterfly-svg {
+#panelEnglishLearning .el-loading-canvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  overflow: visible;
   display: block;
+  pointer-events: none;
 }
 
-/* 蝴蝶整体飞行路径 (绕八字形) */
-#panelEnglishLearning .el-butterfly {
-  transform-origin: center;
-  will-change: transform;
-}
-#panelEnglishLearning .el-butterfly-1 {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: el-fly-path-1 5.6s ease-in-out infinite;
-}
-#panelEnglishLearning .el-butterfly-2 {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: el-fly-path-2 7.2s ease-in-out infinite;
-  animation-delay: -1.4s;
-}
-#panelEnglishLearning .el-butterfly-3 {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: el-fly-path-3 6.4s ease-in-out infinite;
-  animation-delay: -3s;
-}
-
-@keyframes el-fly-path-1 {
-  0%   { transform: translate(30px, 50px) rotate(-8deg); }
-  25%  { transform: translate(80px, 28px) rotate(6deg); }
-  50%  { transform: translate(60px, 12px) rotate(-4deg); }
-  75%  { transform: translate(20px, 32px) rotate(8deg); }
-  100% { transform: translate(30px, 50px) rotate(-8deg); }
-}
-@keyframes el-fly-path-2 {
-  0%   { transform: translate(110px, 60px) rotate(10deg); }
-  33%  { transform: translate(80px, 30px) rotate(-12deg); }
-  66%  { transform: translate(40px, 18px) rotate(8deg); }
-  100% { transform: translate(110px, 60px) rotate(10deg); }
-}
-@keyframes el-fly-path-3 {
-  0%   { transform: translate(70px, 70px) rotate(0deg); }
-  50%  { transform: translate(95px, 40px) rotate(14deg); }
-  100% { transform: translate(70px, 70px) rotate(0deg); }
-}
-
-/* 翅膀扇动 (翅膀 + 身体一起 0.16s 节奏) */
-#panelEnglishLearning .el-butterfly-flight {
-  transform-origin: center;
-  animation: el-wing-flap 220ms ease-in-out infinite;
-}
-#panelEnglishLearning .el-butterfly-2 .el-butterfly-flight {
-  animation-duration: 180ms;
-}
-#panelEnglishLearning .el-butterfly-3 .el-butterfly-flight {
-  animation-duration: 140ms;
-}
-@keyframes el-wing-flap {
-  0%, 100% { transform: scaleY(1); }
-  50%      { transform: scaleY(0.35); }
-}
-
-/* 装饰花草 */
-#panelEnglishLearning .el-scene-flower-1 {
-  transform-box: fill-box;
-  transform-origin: bottom center;
-  animation: el-flower-sway 3.4s ease-in-out infinite;
-}
-#panelEnglishLearning .el-scene-flower-2 {
-  transform-box: fill-box;
-  transform-origin: bottom center;
-  animation: el-flower-sway 3.8s ease-in-out infinite;
-  animation-delay: -1.6s;
-}
-#panelEnglishLearning .el-scene-leaf-1 {
-  transform-box: fill-box;
-  transform-origin: bottom center;
-  animation: el-flower-sway 4.2s ease-in-out infinite;
-  animation-delay: -0.8s;
-}
-@keyframes el-flower-sway {
-  0%, 100% { transform: rotate(-3deg); }
-  50%      { transform: rotate(3deg); }
-}
-
-#panelEnglishLearning .el-loading-text {
-  font-size: 13px !important;
-  color: var(--el-muted) !important;
-  letter-spacing: 0.3px !important;
-  font-weight: 680 !important;
-}
-#panelEnglishLearning .el-loading-cancel {
-  appearance: none;
-  border: 1px solid var(--el-line);
-  background: var(--el-surface-soft);
-  color: var(--el-muted);
+/* 中央底部小胶囊：显示"正在生成中"+取消按钮，唯一接收点击的元素 */
+#panelEnglishLearning .el-loading-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  background: rgba(20, 14, 36, 0.62);
+  border: 1px solid rgba(180, 140, 255, 0.35);
   border-radius: 999px;
-  padding: 6px 14px;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 6px 28px rgba(80, 50, 180, 0.35),
+              0 0 22px rgba(120, 90, 255, 0.25) inset;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  z-index: 2;
+  animation: el-pill-in 420ms cubic-bezier(0.2, 0.9, 0.25, 1) 180ms both;
+}
+@keyframes el-pill-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.92); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1); }
+}
+#panelEnglishLearning .el-pill-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #7c5cff;
+  box-shadow: 0 0 10px #7c5cff, 0 0 22px #b088ff;
+  animation: el-pill-pulse 1.2s ease-in-out infinite;
+}
+@keyframes el-pill-pulse {
+  0%,100% { transform: scale(0.7); opacity: 0.7; }
+  50%     { transform: scale(1.15); opacity: 1; }
+}
+#panelEnglishLearning .el-pill-text {
+  user-select: none;
+  text-shadow: 0 0 10px rgba(180, 140, 255, 0.5);
+}
+#panelEnglishLearning .el-pill-cancel {
+  appearance: none;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.78);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 999px;
+  padding: 4px 12px;
   font-size: 12px;
-  font-weight: 700;
   cursor: pointer;
-  transition: background 160ms var(--el-ease), color 160ms var(--el-ease), border-color 160ms var(--el-ease);
+  transition: all 160ms ease;
 }
-#panelEnglishLearning .el-loading-cancel:hover {
-  border-color: var(--el-line-strong);
-  color: var(--el-danger);
-  background: rgba(200, 77, 91, 0.08);
-}
-@keyframes el-pulse-dot {
-  0%, 100% { transform: scale(0.7); opacity: 0.4; }
-  50%      { transform: scale(1.0); opacity: 1; }
+#panelEnglishLearning .el-pill-cancel:hover {
+  background: rgba(255, 80, 110, 0.18);
+  color: #fff;
+  border-color: rgba(255, 90, 120, 0.5);
 }
 
 /* page 滚动: 平滑 + 防 scroll snap 跳 */
