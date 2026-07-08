@@ -80,7 +80,7 @@
     ['涓婚', '主题'], ['棰滆壊', '颜色'], ['澶勭悊', '处理'], ['浜掑姩', '互动'], ['绉婚櫎', '移除'],
     ['璇█', '语言'], ['娴佺▼', '流程'], ['淇″彿', '信号'], ['寮傛', '异常'], ['璋冩暣', '调整'],
     ['浣撲細', '体验'], ['鍓嶇', '前端'], ['娓呯悊', '清理'], ['娈嬬暀', '残留'], ['涓婚', '主题'],
-    ['昨天', '昨天'], ['� �� ��', '昨天'], ['昨�?', '昨天'], ['荨天', '昨天'], ['荤�', '昨天'],
+    ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'],
 
     ['</div><div>', ''], ['鈾?', '❤️'],
     ['宸茶禐', '已赞'], ['宸茶援', '已赞'], ['娉ㄥ唽', '注册'], ['閲嶈瘯', '重试'], ['姝ｅ湪', '正在'],
@@ -105,7 +105,7 @@
   function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
   function waveTitle(v){var text=String(v||'加载中...');if(text==='加载中')text='加载中...';if(text!=='加载中...')return esc(text);return '<span class="xtj-loader-title-wave" aria-label="加载中...">'+Array.from(text).map(function(char,index){return '<span style="--wave-index:'+index+'" aria-hidden="true">'+esc(char)+'</span>';}).join('')+'</span>';}
   function fixText(v){var s=String(v==null?'':v);if(!_mjBuilt){_buildMjRegex();}s=s.replace(_mjRegex,function(m){return _mjMap[m]||m;});s=s.replace(/加载\s*中/g,'加载中');s=s.replace(/加载\s+(?:高清|预览)/g,'加载高清');s=s.replace(/加载中\s+/g,'加载中');s=s.replace(/(加载中)\.{2,}$/g,'$1...');s=s.replace(/已读/g,'已读');s=s.replace(/未读/g,'未读');return s;} window.xtjFixText=fixText;
-  function bad(v){var s=String(v||'');if(/(�|�|��|加载$|发�|确�|作�|已�?$|未�?$|修�|字�|开$|�?$|—)/.test(s)||/无效|未知错误|网络错误/.test(s))return true;for(var i=0;i<MOJIBAKE_PAIRS.length;i++){var p=MOJIBAKE_PAIRS[i];if(p[0]!==p[1]&&p[0].length>=2&&s.indexOf(p[0])>=0)return true;}return false;}
+  function bad(v){var s=String(v||'');if(/(断开|昨天|加载$|发出|确认|作者|已读$|未读$|修改|字数|开$|关闭$|—)/.test(s)||/无效|未知错误|网络错误/.test(s)){return true;}if(/^[\s\u4e00-\u9fa5]{1,3}$/.test(s)){return s.length<=3&&!/^(昨天|今天|明天|上午|下午|晚上|早上|中午|半夜|点赞|评论|回复|发布|删除|编辑)$/.test(s);}return false;}
 
   function addStyle(){var old=document.getElementById('xtjSafeFeatureFixStyle');if(old)old.remove();var st=document.createElement('style');st.id='xtjSafeFeatureFixStyle';st.textContent=`
   .toast-container{z-index:12000!important;gap:10px!important;max-width:min(92vw,520px)!important}.toast{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:78px!important;min-height:38px!important;max-width:min(88vw,420px)!important;padding:10px 18px!important;border-radius:999px!important;background:rgba(18,24,32,.88)!important;color:rgba(255,255,255,.97)!important;border:1px solid rgba(255,255,255,.15)!important;box-shadow:0 14px 40px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.16)!important;backdrop-filter:blur(18px) saturate(160%)!important;-webkit-backdrop-filter:blur(18px) saturate(160%)!important;font-size:14px!important;font-weight:650!important;line-height:1.35!important;text-align:center!important}.toast:empty{display:none!important}
