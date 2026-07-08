@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node render-api/server.js",
     "build": "node scripts/build.js",
-    "test": "node --check render-api/server.js && node --check scripts/build.js && echo \"ALL SYNTAX CHECKS PASSED\"",
+    "test": "node --check render-api/server.js && node --check scripts/build.js && node --check js/core.js && node --check js/login-device.js && node --check js/ai-agent.js && node --check js/english-learning.js && node --check js/english-dict.js && echo \"ALL SYNTAX CHECKS PASSED\"",
     "test:smoke": "node --check render-api/server.js && node --check scripts/build.js"
   },
   "repository": {

@@ -1672,143 +1672,11 @@
     setDockBarVisible(true);
   }
 
-  function bindEvents() {
-    var back = $('elBackBtn');
-    if (back) back.addEventListener('click', closePage);
-
-    document.querySelectorAll('.el-tab').forEach(function(tab) {
-      tab.addEventListener('click', function() { switchTab(tab.getAttribute('data-eltab')); });
-    });
-
-    var addBtn = $('elAddWordBtn');
-    if (addBtn) addBtn.addEventListener('click', function() {
-      var word = $('elWordInput');
-      var cn = $('elMeaningInput');
-      var w = addWord(word && word.value, cn && cn.value);
-      if (w) {
-        notify('已添加: ' + w.en);
-        if (word) word.value = '';
-        if (cn) cn.value = '';
-        renderAll();
-        if (word) word.focus();
-      }
-    });
-
-    ['elWordInput', 'elMeaningInput'].forEach(function(id) {
-      var input = $(id);
-      if (!input) return;
-      input.addEventListener('keydown', function(ev) {
-        if (ev.key === 'Enter' && !ev.shiftKey) {
-          ev.preventDefault();
-          var btn = $('elAddWordBtn');
-          if (btn) btn.click();
-        }
-      });
-    });
-
-    var wordInput = $('elWordInput');
-    if (wordInput) {
-      var acTimer = null;
-      wordInput.addEventListener('input', function() {
-        if (acTimer) clearTimeout(acTimer);
-        var q = wordInput.value.trim();
-        if (!q) { hideAutocomplete(); return; }
-        acTimer = setTimeout(function() { showAutocomplete(wordInput, getDictMatches(q, 8)); }, 160);
-      });
-      wordInput.addEventListener('focus', function() {
-        var q = wordInput.value.trim();
-        if (q) showAutocomplete(wordInput, getDictMatches(q, 8));
-      });
-      wordInput.addEventListener('blur', function() { setTimeout(hideAutocomplete, 180); });
-    }
-
-    var search = $('elSearchInput');
-    if (search) search.addEventListener('input', function() {
-      S.search = search.value || '';
-      renderWordList();
-    });
-
-    document.querySelectorAll('.el-filter').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        S.filter = btn.getAttribute('data-filter') || 'all';
-        document.querySelectorAll('.el-filter').forEach(function(b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        renderWordList();
-      });
-    });
-
-    var selectAll = $('elSelectAllCb');
-    if (selectAll) selectAll.addEventListener('change', function() {
-      document.querySelectorAll('.el-word-cb').forEach(function(cb) {
-        cb.checked = selectAll.checked;
-        cb.dispatchEvent(new Event('change'));
-      });
-    });
-
-    var delSel = $('elDeleteSelBtn');
-    if (delSel) delSel.addEventListener('click', function() {
-      var ids = Array.from(document.querySelectorAll('.el-word-cb:checked')).map(function(cb) { return cb.getAttribute('data-id'); });
-      if (!ids.length) { notify('请先选择要删除的单词'); return; }
-      if (!confirm('确定删除选中的 ' + ids.length + ' 个单词?')) return;
-      deleteSelected(ids);
-      if (selectAll) selectAll.checked = false;
-      renderAll();
-    });
-
-    document.querySelectorAll('input[name="elType"], input[name="elLevel"]').forEach(function(input) {
-      input.addEventListener('change', function() {
-        refreshChipStates();
-        syncSettingsFromInputs();
-        scheduleSave();
-      });
-    });
-    ['elQuestionCount', 'elArticleLength', 'elFocusMode', 'elTopicInput'].forEach(function(id) {
-      var node = $(id);
-      if (node) node.addEventListener('change', function() {
-        syncSettingsFromInputs();
-        scheduleSave();
-        updateGenInfo();
-      });
-    });
-
-    var gen = $('elGenBtn');
-    if (gen) gen.addEventListener('click', generateQuiz);
-    var submit = $('elSubmitBtn');
-    if (submit) submit.addEventListener('click', submitAnswers);
-    var show = $('elShowAnswerBtn');
-    if (show) show.addEventListener('click', showAllAnswers);
-    var next = $('elNewPracticeBtn');
-    if (next) next.addEventListener('click', function() {
-      hideArticle(); hideQuestions(); hideResult();
-      switchTab('practice');
-      // 不再 scrollIntoView, 避免页面跳到顶部
-    });
-    var topNew = $('elNewChatBtn');
-    if (topNew) topNew.addEventListener('click', function() {
-      hideArticle(); hideQuestions(); hideResult();
-      switchTab('practice');
-    });
-    var clear = $('elDeleteBtn');
-    if (clear) clear.addEventListener('click', function() {
-      if (!confirm('确定清空全部单词吗?')) return;
-      clearAll();
-      renderAll();
-      notify('已清空');
-    });
-    window.addEventListener('resize', function() { setTimeout(updateTabIndicator, 80); });
-  }
-
   function bindEventsSafe() {
     if (S.eventsBound) return;
     S.eventsBound = true;
 
     safeBind('elBackBtn', 'click', closePage);
-
-    safeForEach('.el-tab', function(tab) {
-      safeBindNode(tab, 'click', function() {
-        switchTab(tab.getAttribute('data-eltab'));
-      }, 'el-tab');
-    });
 
     safeBind('elAddWordBtn', 'click', function() {
       handleAddWord();
@@ -1932,8 +1800,6 @@
       setTimeout(updateTabIndicator, 80);
     }, 'window:resize');
 
-    // 初始化 tabs 点击切换 (拖拽调换顺序已禁用, 单词库和练习题位置固定)
-    initTabs();
   }
 
   /* ============================================================
