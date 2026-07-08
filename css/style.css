@@ -16135,7 +16135,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* 8) Pro 装扮保存按钮：总览隐藏，子面板内显示 */
-.dock-profile-container .profile-pro-style-panel[id="proStylePanelLanding"] ~ .profile-pro-style-actions,
 .dock-profile-container .profile-pro-style-page #proStylePanelActions {
   /* 默认：总览页内隐藏（通过 JS 在子面板切换时控制 hidden） */
 }
