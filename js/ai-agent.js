@@ -4,7 +4,8 @@
   var ROOT_API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
   ROOT_API_BASE = (ROOT_API_BASE || '').replace(/\/$/, '');
   var API_BASE = ROOT_API_BASE + '/api/agent';
-  try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {}
+  var AI_DEBUG = (function() { try { return localStorage.getItem('xtj_ai_debug') === '1'; } catch (e) { return false; } })();
+  if (AI_DEBUG) { try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {} }
 
   var HISTORY_PAGE_SIZE = 30;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
@@ -606,18 +607,8 @@
   
   function abortCurrentRequest() {
     clearStreamCleanup();
-    // ★ U3 修复: 通知后端停止 SSE 任务, 避免继续计费
-    if (S.conversationId) {
-      try {
-        var cancelUrl = API_BASE + '/chat/cancel';
-        var cancelBody = JSON.stringify({ conversation_id: S.conversationId });
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon(cancelUrl, new Blob([cancelBody], { type: 'application/json' }));
-        } else {
-          fetch(cancelUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: cancelBody, keepalive: true }).catch(function() {});
-        }
-      } catch (e) {}
-    }
+    // ★ U3 修复: 不再裸 sendBeacon /chat/cancel (无 auth 导致 401)
+    // 直接前端 AbortController abort 即可, 后端 req.on('close') 会自感知
     if (S.abortController) {
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
@@ -792,12 +783,12 @@
   }
 
   async function apiRequest(method, path, body) {
-    try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {}
+    if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
     var first = await sendOnce(method, path, body, { forceNoToken: false });
-    try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {}
+    if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
     if (first && (first.status === 401 || first.status === 403)) {
       var hasPw = hasLocalPasswordHash();
-      try { console.warn('[AI] auth failed, hasLocalPasswordHash =', hasPw); } catch (e3) {}
+      if (AI_DEBUG) { try { console.warn('[AI] auth failed, hasLocalPasswordHash =', hasPw); } catch (e3) {} }
       if (hasPw) {
         clearAiUserToken();
         var second = await sendOnce(method, path, body, { forceNoToken: true, retry: true });
@@ -4272,56 +4263,24 @@ function showChatMessages() {
     // ★ U3: 用 inline onclick 属性, 完全避开 addEventListener 任何问题
     englishBtn.setAttribute('onclick', 'window.__aiEnglishClick && window.__aiEnglishClick(event)');
     header.appendChild(englishBtn);
-    try { console.log('[AI] English button appended'); } catch (e) {}
+    try { if (AI_DEBUG) console.log('[AI] English button appended'); } catch (e) {}
 
-    // ★ U3: 暴露全局 click handler (确保按钮 onclick 一定能找到)
+    // ★ U3: 只负责调用 window.EnglishLearning.open(), 不直接操作 panelEnglishLearning
     window.__aiEnglishClick = function(ev) {
       try {
-        ev = ev || window.event;
         if (ev && ev.preventDefault) ev.preventDefault();
         if (ev && ev.stopPropagation) ev.stopPropagation();
-        console.log('[EnglishBtn] click fired');
-        var panel = document.getElementById('panelEnglishLearning');
-        if (!panel) {
-          try { notify('panelEnglishLearning 元素不存在'); } catch (e) {}
-          return;
-        }
-        panel.classList.remove('hidden');
-        console.log('[EnglishBtn] panel shown');
-        // 延迟调用英语学习模块
-        setTimeout(function() {
-          try {
-            if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-              window.EnglishLearning.open();
-            } else {
-              try { notify('英语学习模块加载中...'); } catch (e) {}
-            }
-          } catch (e) {
-            try { console.error('[EnglishBtn] module error:', e); } catch (e2) {}
-          }
-        }, 50);
-      } catch (e) {
-        try { console.error('[EnglishBtn] fatal error:', e); } catch (e2) {}
-      }
-    };
-
-    // 深度思考 toggle 按钮 (M: 在历史按钮左边)
-    window.__aiEnglishClick = function(ev) {
-      try {
-        ev = ev || window.event;
-        if (ev && ev.preventDefault) ev.preventDefault();
-        if (ev && ev.stopPropagation) ev.stopPropagation();
-        console.log('[EnglishBtn] click fired');
         if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
           window.EnglishLearning.open();
         } else {
           try { notify('英语学习模块加载中，请稍后再试'); } catch (e) {}
         }
       } catch (e) {
-        try { console.error('[EnglishBtn] fatal error:', e); } catch (e2) {}
+        try { if (AI_DEBUG) console.error('[EnglishBtn] error:', e); } catch (e2) {}
       }
     };
 
+    // 深度思考 toggle 按钮
     var deepThinkBtn = el('button', {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
