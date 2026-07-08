@@ -1165,13 +1165,229 @@
   function hideQuestions() { var c = $('elQuestionsCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
   function hideResult() { var c = $('elResultCard'); if (c) c.style.setProperty('display', 'none', 'important'); }
 
+  /* ============ 边缘霓虹声波加载动画 (Siri 风格) ============
+   * 圆角矩形周长基准点 + 双 sine 干涉 + lighter 混合 + shadowBlur 泛光
+   * - canvas 透明浮层, 不阻挡页面交互
+   * - 入场: overlay 从底部 scaleY(0)→1, 声波同步从微弱到丰满
+   * - 退场: 加 leaving 类 scaleY 反向收缩, 停止 rAF
+   */
+  var _neonRaf = 0;
+  var _neonCtx = null;
+  var _neonCanvas = null;
+  var _neonStart = 0;
+  var _neonDPR = 1;
+  var _neonBasePts = [];
+  var _neonLines = [];
+  var _neonW = 0, _neonH = 0;
+  var _neonState = 'idle';
+
+  var NEON_PADDING = 3;
+  var NEON_RADIUS  = 22;
+  var NEON_POINTS  = 600;
+  var NEON_LINES   = 26;
+  var NEON_AMP     = 12;
+
+  function neonBuildBase(w, h) {
+    var pad = NEON_PADDING, r = NEON_RADIUS;
+    var wLine = Math.max(0, w - 2 * pad - 2 * r);
+    var hLine = Math.max(0, h - 2 * pad - 2 * r);
+    var arc = Math.PI / 2 * r;
+    var total = 2 * wLine + 2 * hLine + 4 * arc;
+    var pts = [];
+    for (var i = 0; i < NEON_POINTS; i++) {
+      var d = (i / NEON_POINTS) * total;
+      var x, y, nx, ny;
+      if (d < wLine) {
+        x = pad + r + d; y = pad; nx = 0; ny = 1;
+      } else if (d < wLine + arc) {
+        var a = (d - wLine) / arc * (Math.PI / 2) - Math.PI / 2;
+        x = w - pad - r + Math.cos(a) * r; y = pad + r + Math.sin(a) * r;
+        nx = -Math.cos(a); ny = -Math.sin(a);
+      } else if (d < wLine + arc + hLine) {
+        var cd = d - (wLine + arc);
+        x = w - pad; y = pad + r + cd; nx = -1; ny = 0;
+      } else if (d < wLine + 2 * arc + hLine) {
+        var a = (d - (wLine + arc + hLine)) / arc * (Math.PI / 2);
+        x = w - pad - r + Math.cos(a) * r; y = h - pad - r + Math.sin(a) * r;
+        nx = -Math.cos(a); ny = -Math.sin(a);
+      } else if (d < 2 * wLine + 2 * arc + hLine) {
+        var cd = d - (wLine + 2 * arc + hLine);
+        x = w - pad - r - cd; y = h - pad; nx = 0; ny = -1;
+      } else if (d < 2 * wLine + 3 * arc + hLine) {
+        var a = (d - (2 * wLine + 2 * arc + hLine)) / arc * (Math.PI / 2) + Math.PI / 2;
+        x = pad + r + Math.cos(a) * r; y = h - pad - r + Math.sin(a) * r;
+        nx = -Math.cos(a); ny = -Math.sin(a);
+      } else if (d < 2 * wLine + 3 * arc + 2 * hLine) {
+        var cd = d - (2 * wLine + 3 * arc + hLine);
+        x = pad; y = h - pad - r - cd; nx = 1; ny = 0;
+      } else {
+        var a = (d - (2 * wLine + 3 * arc + 2 * hLine)) / arc * (Math.PI / 2) + Math.PI;
+        x = pad + r + Math.cos(a) * r; y = pad + r + Math.sin(a) * r;
+        nx = -Math.cos(a); ny = -Math.sin(a);
+      }
+      pts.push({x: x, y: y, nx: nx, ny: ny, t: i / NEON_POINTS});
+    }
+    _neonBasePts = pts;
+    _neonW = w; _neonH = h;
+  }
+
+  function neonBuildLines() {
+    var palette = [
+      [10, 132, 255],
+      [191, 90, 242],
+      [255, 55, 95],
+      [94, 92, 230],
+      [255, 149, 0]
+    ];
+    var lines = [];
+    for (var i = 0; i < NEON_LINES; i++) {
+      var c = palette[i % palette.length];
+      lines.push({
+        r: c[0], g: c[1], b: c[2],
+        freq1: Math.floor(3 + Math.random() * 5),
+        freq2: Math.floor(5 + Math.random() * 7),
+        speed1: (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.4),
+        speed2: (Math.random() > 0.5 ? 1 : -1) * (1.1 + Math.random() * 1.8),
+        phase1: Math.random() * Math.PI * 2,
+        phase2: Math.random() * Math.PI * 2,
+        amp: 5 + Math.random() * NEON_AMP,
+        thick: Math.random() < 0.22 ? 2.2 : 1.1,
+        pulseSpeed: 0.5 + Math.random() * 1.4,
+        alpha: 0.55 - (i / NEON_LINES) * 0.35
+      });
+    }
+    _neonLines = lines;
+  }
+
+  function neonResize() {
+    if (!_neonCanvas) return;
+    var parent = _neonCanvas.parentElement;
+    if (!parent) return;
+    var w = parent.clientWidth;
+    var h = parent.clientHeight;
+    if (w === 0 || h === 0) return;
+    _neonDPR = Math.min(window.devicePixelRatio || 1, 2);
+    _neonCanvas.width  = Math.floor(w * _neonDPR);
+    _neonCanvas.height = Math.floor(h * _neonDPR);
+    _neonCanvas.style.width  = w + 'px';
+    _neonCanvas.style.height = h + 'px';
+    _neonCtx.setTransform(_neonDPR, 0, 0, _neonDPR, 0, 0);
+    neonBuildBase(w, h);
+    if (!_neonLines.length) neonBuildLines();
+  }
+
+  function neonEase(x) { return x < 0.5 ? 2*x*x : 1-Math.pow(-2*x+2,2)/2; }
+
+  function neonDrawFrame(ts) {
+    if (!_neonCtx || _neonState === 'idle') return;
+    var ctx = _neonCtx;
+    var w = _neonW, h = _neonH;
+    var elapsed = (ts - _neonStart) / 1000;
+
+    var intensity;
+    if (_neonState === 'enter') {
+      intensity = Math.min(1, elapsed / 0.55);
+      intensity = neonEase(intensity);
+      if (elapsed >= 0.55) _neonState = 'live';
+    } else if (_neonState === 'leaving') {
+      intensity = Math.max(0, 1 - elapsed / 0.42);
+      intensity = 1 - neonEase(1 - intensity);
+      if (elapsed >= 0.42) {
+        _neonState = 'idle';
+        ctx.clearRect(0, 0, w, h);
+        _neonRaf = 0;
+        return;
+      }
+    } else {
+      intensity = 1;
+    }
+
+    var breath = 0.88 + Math.sin(elapsed * 1.8) * 0.12;
+    var globalAmp = intensity * breath;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    var time = elapsed * 0.9;
+    for (var li = 0; li < _neonLines.length; li++) {
+      var L = _neonLines[li];
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(' + L.r + ',' + L.g + ',' + L.b + ',' + (L.alpha * intensity).toFixed(3) + ')';
+      ctx.lineWidth = L.thick;
+      ctx.shadowColor = 'rgba(' + L.r + ',' + L.g + ',' + L.b + ',0.9)';
+      ctx.shadowBlur = 10 * intensity;
+
+      for (var i = 0; i < _neonBasePts.length; i++) {
+        var pt = _neonBasePts[i];
+        var ang1 = pt.t * Math.PI * 2 * L.freq1 + time * L.speed1 + L.phase1;
+        var ang2 = pt.t * Math.PI * 2 * L.freq2 + time * L.speed2 + L.phase2;
+        var wave = (Math.sin(ang1) + Math.sin(ang2)) * 0.5;
+        var pAng = pt.t * Math.PI * 2 - time * L.pulseSpeed;
+        var pulse = (Math.sin(pAng) + 1.2) * 0.5;
+        var off = wave * L.amp * pulse * globalAmp;
+        var px = pt.x + pt.nx * off;
+        var py = pt.y + pt.ny * off;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+
+    _neonRaf = requestAnimationFrame(neonDrawFrame);
+  }
+
+  function neonStart() {
+    _neonCanvas = document.getElementById('elLoadingCanvas');
+    if (!_neonCanvas) return;
+    _neonCtx = _neonCanvas.getContext('2d');
+    if (!_neonCtx) return;
+    _neonLines = [];
+    neonResize();
+    if (_neonW === 0 || _neonH === 0) return;
+    neonBuildLines();
+    _neonStart = performance.now();
+    _neonState = 'enter';
+    cancelAnimationFrame(_neonRaf);
+    _neonRaf = requestAnimationFrame(neonDrawFrame);
+    window.removeEventListener('resize', neonResize);
+    window.addEventListener('resize', neonResize);
+  }
+  function neonStop() {
+    if (_neonState === 'idle' || !_neonCanvas) {
+      cancelAnimationFrame(_neonRaf);
+      _neonRaf = 0;
+      window.removeEventListener('resize', neonResize);
+      return;
+    }
+    var overlay = _neonCanvas.parentElement;
+    if (overlay) overlay.classList.add('leaving');
+    _neonState = 'leaving';
+    _neonStart = performance.now();
+    setTimeout(function() {
+      if (overlay) overlay.classList.remove('leaving');
+      window.removeEventListener('resize', neonResize);
+    }, 500);
+  }
+
   function showLoading(on) {
     var l = $('elLoading');
     var g = $('elGenBtn');
     if (l) {
-      // 用 hidden 属性控制可见性 (el-loading 浮在 panel 级别, 切任何 tab 都能看到)
-      l.hidden = !on;
-      l.setAttribute('aria-busy', on ? 'true' : 'false');
+      if (on) {
+        l.classList.remove('leaving');
+        l.hidden = false;
+        l.setAttribute('aria-busy', 'true');
+        requestAnimationFrame(function() { requestAnimationFrame(function() { neonStart(); }); });
+      } else {
+        l.setAttribute('aria-busy', 'false');
+        neonStop();
+        setTimeout(function() { if (l) l.hidden = true; }, 520);
+      }
     }
     if (g) {
       g.disabled = on || getWordsForGeneration(false).length === 0;
