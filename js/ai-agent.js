@@ -29,20 +29,20 @@
     loading: false,
     loadingMore: false,
     // 鈽?M: thinking_mode 榛樿浠?low 鏀规垚 max
-    //   鐢ㄦ埛瑕佹眰: 鏅€氳亰澶╅粯璁ゅ氨鐢?max 娣卞害鎬濊€?
+    //   鐢ㄦ埛瑕佹眰: 鏅€氳亰澶╅粯璁ゅ氨鐢?max 深度思考?
     //   绠＄悊鍛樺彲鍦ㄥ悗鍙?/admin/ai-agent/config 鍒囨崲涓?low/medium/high/max
     //   鏅€氱敤鎴蜂笉鑳藉湪 UI 鍒囨崲 (allow_user_thinking_switch: false)
     thinkingMode: 'max',
-    // 鈽?P 鏂板: 娣卞害鎬濊€冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
+    // 鈽?P 鏂板: 深度思考冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
     deepThinkEffort: 'max',
     deepThinkEnabled: true,    // 鍚庣 config.deep_think.enabled
-    // 鈽?M: 娣卞害鎬濊€冩ā寮?toggle 鐘舵€?
+    // 鈽?M: 深度思考冩ā寮?toggle 鐘舵€?
     //   寮€鍚悗鏈細璇濇墍鏈夋秷鎭蛋 Planner鈫扺orkers鈫扴ynthesizer 澶?agent 娴佺▼
     //   鎸佷箙鍖栧埌 localStorage, 閲嶅紑瀵硅瘽妗嗗悗鎭㈠
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
     deepThinkProgressCard: null, // DOM node for progress card
-    dtConversationId: null,      // 娣卞害鎬濊€冧簩绾ч〉闈㈠綋鍓嶄細璇?ID锛堜笌鏅€氳亰澶╁垎寮€锛?
+    dtConversationId: null,      // 深度思考冧簩绾ч〉闈㈠綋鍓嶄細璇?ID锛堜笌鏅€氳亰澶╁垎寮€锛?
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -1612,14 +1612,14 @@
     };
   }
 
-  // ===================== M: 娣卞害鎬濊€冩ā寮?鈥?杩涘害鍗?/ toggle / cancel =====================
-  // 鍒囨崲娣卞害鎬濊€冩ā寮忥細鏀逛负鎵撳紑鐙珛浜岀骇椤甸潰锛屼笉鍐嶅垏鎹㈡櫘閫氳亰澶╃殑 S.deepThink
+  // ===================== M: 深度思考冩ā寮?鈥?杩涘害鍗?/ toggle / cancel =====================
+  // 鍒囨崲深度思考冩ā寮忥細鏀逛负鎵撳紑鐙珛浜岀骇椤甸潰锛屼笉鍐嶅垏鎹㈡櫘閫氳亰澶╃殑 S.deepThink
   function toggleDeepThink() {
     if (!S.deepThinkEnabled) {
-      notify('娣卞害鎬濊€冩ā寮忓凡琚鐞嗗憳鍏抽棴');
+      notify('深度思考冩ā寮忓凡琚鐞嗗憳鍏抽棴');
       return;
     }
-    // 鏅€氳亰澶╀腑娣卞害鎬濊€冨叆鍙ｇ粺涓€璧颁簩绾ч〉闈紝閬垮厤涓庢櫘閫氳亰澶╁叡鐢ㄦ皵娉￠潰鏉?
+    // 鏅€氳亰澶╀腑深度思考冨叆鍙ｇ粺涓€璧颁簩绾ч〉闈紝閬垮厤涓庢櫘閫氳亰澶╁叡鐢ㄦ皵娉￠潰鏉?
     openDeepThinkPage();
   }
 
@@ -1631,7 +1631,7 @@
       // 鈽?P 鏂板: 鍚庣绂佺敤鏃舵樉绀虹鐢ㄦ牱寮?
       if (!S.deepThinkEnabled) {
         btn.classList.add('disabled');
-        btn.setAttribute('title', '娣卞害鎬濊€冩ā寮忓凡琚鐞嗗憳鍏抽棴');
+        btn.setAttribute('title', '深度思考冩ā寮忓凡琚鐞嗗憳鍏抽棴');
       } else {
         btn.classList.remove('disabled');
         btn.removeAttribute('title');
@@ -1639,7 +1639,7 @@
     }
   }
 
-  // 娣卞害鎬濊€冨凡鏀逛负鐙珛浜岀骇椤甸潰锛屾櫘閫氳亰澶╀笉鍐嶆仮澶?deepThink 鐘舵€?
+  // 深度思考冨凡鏀逛负鐙珛浜岀骇椤甸潰锛屾櫘閫氳亰澶╀笉鍐嶆仮澶?deepThink 鐘舵€?
   function restoreDeepThinkState() {
     S.deepThink = false;
   }
@@ -2158,7 +2158,7 @@
     }
   }
 
-  // 鍙栨秷娣卞害鎬濊€冿紙convId 鍙€夛紝浜岀骇椤甸潰浣跨敤 S.dtConversationId锛?
+  // 鍙栨秷深度思考冿紙convId 鍙€夛紝浜岀骇椤甸潰浣跨敤 S.dtConversationId锛?
   function cancelDeepThink(convId) {
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
@@ -2580,7 +2580,7 @@
     };
   }
 
-  // ===================== M: 娣卞害鎬濊€冩ā寮忓彂閫?=====================
+  // ===================== M: 深度思考冩ā寮忓彂閫?=====================
   // 鐙珛娴佺▼: 璧?/api/agent/chat (deep_think=true) SSE 闀胯繛鎺?
   //   杩涘害鍗″疄鏃舵洿鏂?(1-10 涓?agent 鐘舵€?
   //   done 鍚庢覆鏌撴渶缁堢瓟妗?+ [鏉ユ簮N] 鏍囨敞 + 鎼滅储寰界珷
@@ -2955,7 +2955,7 @@
     scrollToBottom(messagesEl, false);
   }
 
-  // ===================== 娣卞害鎬濊€冧簩绾ч〉闈?=====================
+  // ===================== 深度思考冧簩绾ч〉闈?=====================
 
   function resetDeepThinkPageEmpty() {
     var msgs = document.getElementById('dtMessages');
@@ -3703,7 +3703,7 @@
     // 鈽?绔嬪嵆鏍囪鍙戦€佷腑锛岄槻姝㈠苟鍙戠珵鎬?
     S.sending = true;
 
-    // 鈽?U3: 娣卞害鎬濊€冨凡杩佽嚦鐙珛浜岀骇椤甸潰, 鏅€氳亰澶╀笉鍐嶆湁 deepThink 鍒嗘敮
+    // 鈽?U3: 深度思考冨凡杩佽嚦鐙珛浜岀骇椤甸潰, 鏅€氳亰澶╀笉鍐嶆湁 deepThink 鍒嗘敮
     // (鍒犻櫎 S.deepThink 姝讳唬鐮? 淇濈暀 S.sending=true 闃叉骞跺彂)
 
     var originalText = text;
@@ -4734,7 +4734,7 @@ function showChatMessages() {
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
-    // 鈽?U3: 鑻辫瀛︿範鎸夐挳 (鍦ㄦ繁搴︽€濊€冨乏杈? AI 鑱婂ぉ鍐呭叆鍙?
+    // 鈽?U3: 英语瀛︿範鎸夐挳 (鍦ㄦ繁搴︽€濊€冨乏杈? AI 鑱婂ぉ鍐呭叆鍙?
     // 鈽?鏋佺畝瀹炵幇: 鐢ㄥ師鐢?DOM + 鍐呰仈 onclick, 閬垮紑 el() helper 浠讳綍娼滃湪闂
     var englishBtn = document.createElement('button');
     englishBtn.type = 'button';
@@ -4767,7 +4767,7 @@ function showChatMessages() {
     englishBtn.appendChild(englishSvgEl);
     var englishLabel = document.createElement('span');
     englishLabel.className = 'ai-english-label';
-    englishLabel.textContent = '鑻辫';
+    englishLabel.textContent = '英语';
     englishBtn.appendChild(englishLabel);
     // 鈽?U3: 鐢?inline onclick 灞炴€? 瀹屽叏閬垮紑 addEventListener 浠讳綍闂
     englishBtn.setAttribute('onclick', 'window.__aiEnglishClick && window.__aiEnglishClick(event)');
@@ -4799,7 +4799,7 @@ function showChatMessages() {
       }
     };
 
-    // 娣卞害鎬濊€?toggle 鎸夐挳
+    // 深度思考?toggle 鎸夐挳
     var deepThinkBtn = el('button', {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
@@ -5097,7 +5097,7 @@ function showChatMessages() {
       notify('请先登录后再和徐旭泽聊天');
       return;
     }
-    // 鈽?M: 鎭㈠娣卞害鎬濊€冩ā寮忕姸鎬?
+    // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
     restoreDeepThinkState();
     S.active = true;
     window.__xtjAiChatActive = true;
@@ -5213,7 +5213,7 @@ function showChatMessages() {
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
 
-    // 鈽?P 鏂板: 鍚屾鍚庣娣卞害鎬濊€冨瓙閰嶇疆 (鎬濊€冪▼搴?+ 鍚敤寮€鍏?
+    // 鈽?P 鏂板: 鍚屾鍚庣深度思考冨瓙閰嶇疆 (鎬濊€冪▼搴?+ 鍚敤寮€鍏?
     try {
       if (cfg.deep_think) {
         if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
@@ -5241,7 +5241,7 @@ function showChatMessages() {
     window.__xtjAiChatActive = false;
     clearReplyTimer();
     abortCurrentRequest(); // 鍐呴儴宸茶皟鐢?clearStreamCleanup
-    // 鍏抽棴娣卞害鎬濊€冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
+    // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
     try { closeDeepThinkPage(); } catch (e) {}
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
