@@ -680,9 +680,84 @@
   }
 
   /**
-   * 批量导入: 默认调 deepseek 解析 (后端 /english/parse-batch)
-   * AI 失败时回退到本地规则解析
+   * 批量导入: 本地解析为主, AI 只补充释义
    */
+  function stripBatchNoise(line) {
+    return String(line || '')
+      .replace(/^[\s\-*•·]+/, '')
+      .replace(/^\s*\d+[\.\)、\)]\s*/, '')
+      .replace(/^\s*[①②③④⑤⑥⑦⑧⑨⑩]\s*/, '')
+      .replace(/\/[^\/\n]{1,40}\//g, ' ')
+      .replace(/\[[^\]\n]{1,40}\]/g, ' ')
+      .trim();
+  }
+
+  function cleanBatchWord(en) {
+    return String(en || '')
+      .replace(/^[^a-zA-Z]+/, '')
+      .replace(/[^a-zA-Z\s\-']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function cleanBatchMeaning(cn) {
+    return String(cn || '')
+      .replace(/^[\s:：\-–—=,，;；|\/]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function pushBatchParsed(list, seen, en, cn) {
+    en = cleanBatchWord(en);
+    cn = cleanBatchMeaning(cn);
+    if (!en || !/^[a-zA-Z][a-zA-Z\s\-']{0,59}$/.test(en)) return false;
+    var key = en.toLowerCase();
+    if (seen[key]) {
+      if (cn && !seen[key].cn) seen[key].cn = cn;
+      return false;
+    }
+    var item = { en: key, cn: cn || '' };
+    seen[key] = item;
+    list.push(item);
+    return true;
+  }
+
+  function parseBatchWordsLocal(text) {
+    var parsed = [];
+    var seen = {};
+    text = String(text || '')
+      .replace(/\r/g, '\n')
+      .replace(/[，、]/g, ',')
+      .replace(/[；;]/g, '\n');
+
+    var roughParts = [];
+    text.split('\n').forEach(function(line) {
+      line = stripBatchNoise(line);
+      if (!line) return;
+      if (line.indexOf(',') >= 0 && !/[\u4e00-\u9fa5]/.test(line)) {
+        line.split(',').forEach(function(p) {
+          p = stripBatchNoise(p);
+          if (p) roughParts.push(p);
+        });
+      } else {
+        roughParts.push(line);
+      }
+    });
+
+    roughParts.forEach(function(line) {
+      line = stripBatchNoise(line);
+      if (!line) return;
+      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:：\-–—=|\/]+([\u4e00-\u9fa5].*)$/);
+      if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
+      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:：\-–—=|\/]+(.+)$/);
+      if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
+      m = line.match(/[a-zA-Z][a-zA-Z\s\-']{0,59}/);
+      if (m) { pushBatchParsed(parsed, seen, m[0], ''); }
+    });
+    return parsed;
+  }
+
   async function doBatchImport(btn) {
     var input = $('elBatchInput');
     if (!input) { notify('批量导入输入框未找到', 'error'); return; }
@@ -690,74 +765,63 @@
     if (!text) { notify('请先输入要导入的单词'); return; }
     if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
 
-    var parsed = null;
-    var aiMode = 'deepseek';
+    // 1) 本地确定性解析优先 — AI 只能补充释义
+    var localParsed = parseBatchWordsLocal(text);
+    var parsedMap = {};
+    localParsed.forEach(function(w) { parsedMap[w.en] = { en: w.en, cn: w.cn || '' }; });
 
-    // 1) 首选: 调 deepseek 解析 (用户要求 AI 自动识别)
+    // 2) AI 只用于补充释义，绝不覆盖本地识别数量
     try {
       var headers = await getAuthHeaders();
       var resp = await fetch(apiBase() + '/english/parse-batch', {
-        method: 'POST',
-        headers: headers,
+        method: 'POST', headers: headers,
         body: JSON.stringify({ text: text, max_count: 120 })
       });
       if (resp.ok) {
         var json = await resp.json();
-        if (json.ok && json.data && Array.isArray(json.data.words) && json.data.words.length) {
-          parsed = json.data.words;
-        }
+        var aiWords = json && json.ok && json.data && Array.isArray(json.data.words) ? json.data.words : [];
+        aiWords.forEach(function(p) {
+          if (!p || !p.en) return;
+          var en = cleanBatchWord(p.en);
+          if (!en) return;
+          if (parsedMap[en]) {
+            if (!parsedMap[en].cn && p.cn) parsedMap[en].cn = cleanBatchMeaning(p.cn);
+          } else {
+            var tmp = []; var seen2 = {};
+            Object.keys(parsedMap).forEach(function(k) { seen2[k] = true; });
+            pushBatchParsed(tmp, seen2, en, p.cn || '');
+            if (tmp.length) parsedMap[en] = tmp[0];
+          }
+        });
       }
-    } catch (e) {
-      // 静默回退
-    }
+    } catch (e) { /* AI 失败不影响导入 */ }
 
-    // 2) 兜底: 本地规则解析 (服务端不可用时)
-    if (!parsed || !parsed.length) {
-      aiMode = 'local';
-      parsed = [];
-      var lines = text.split(/[\n\r,，;；]+/);
-      lines.forEach(function(line) {
-        line = line.trim();
-        if (!line) return;
-        // 优先按 "en cn" 切分 (第一个空白)
-        var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']*?)\s+(.+)$/);
-        if (m) {
-          parsed.push({ en: m[1].trim(), cn: m[2].trim() });
-        } else if (/^[a-zA-Z]/.test(line)) {
-          // 纯英文单词
-          var en = line.replace(/[^a-zA-Z\s\-']/g, '').trim();
-          if (en) parsed.push({ en: en, cn: '' });
-        } else if (/[\u4e00-\u9fa5]/.test(line)) {
-          // 纯中文 -> 单词留空, 由用户后续补
-          parsed.push({ en: '__pending_' + Date.now() + '_' + parsed.length, cn: line });
-        }
-      });
-    }
-
-    if (!parsed || !parsed.length) {
+    var parsed = Object.keys(parsedMap).map(function(k) { return parsedMap[k]; });
+    if (!parsed.length) {
       if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-      notify('没有提取到有效单词, 请检查输入', 'error');
+      notify('没有提取到有效英文单词，请检查输入', 'error');
       return;
     }
 
     var before = S.words.length;
-    var added = 0;
-    var skipped = 0;
+    var existed = 0;
     parsed.forEach(function(p) {
       if (!p || !p.en) return;
-      if (p.en.indexOf('__pending_') === 0) { skipped++; return; }
-      if (addWord(p.en, p.cn || '', true)) added++;
+      var prev = S.words.some(function(w) { return w.en === p.en; }) ? 1 : 0;
+      addWord(p.en, p.cn || '', true);
+      existed += prev;
     });
     var totalAdded = S.words.length - before;
     if (input) input.value = '';
     renderAll();
     if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-    var tip = '';
-    if (aiMode === 'deepseek') tip = '(deepseek 解析) ';
-    else tip = '(本地解析 · 服务端未响应) ';
-    if (totalAdded > 0) notify('批量导入完成 ' + tip + '+' + totalAdded + ' 词' + (skipped ? ' · 跳过' + skipped + '条中文' : ''));
-    else if (skipped) notify('输入是中文, 请直接用 "英文 释义" 格式 ' + tip + '跳过' + skipped + '条');
-    else notify('这些词已经在单词库了 ' + tip);
+
+    notify(
+      '批量导入完成：识别 ' + parsed.length +
+      ' 个，新增 ' + totalAdded +
+      ' 个，已存在 ' + existed +
+      ' 个' + (totalAdded === 0 && existed > 0 ? ' (已在词库中)' : '')
+    );
   }
 
   async function generateQuiz(opts) {
