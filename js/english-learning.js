@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
  * XTJ English Learning Studio
  * - Account-synced vocabulary state
  * - DeepSeek reading/question generation
@@ -331,7 +331,7 @@
       status === 'syncing' ? '同步中' :
       status === 'dirty' ? '待同步' :
       status === 'error' ? '未同步' :
-      '本机模式'
+      '离线模式'
     );
   }
 
@@ -339,7 +339,7 @@
     var headers = await getAuthHeaders();
     var body = addLegacyAuth({}, headers);
     if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
-      setSyncStatus('local', '本机模式');
+      setSyncStatus('local', '离线模式');
       return null;
     }
     var url = apiBase() + '/english/state';
@@ -390,7 +390,7 @@
       var payload = buildStatePayload();
       var body = addLegacyAuth({ data: payload }, headers);
       if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
-        setSyncStatus('local', '本机模式');
+        setSyncStatus('local', '离线模式');
         return;
       }
       setSyncStatus('syncing', '同步中');
@@ -704,7 +704,7 @@
    */
   function stripBatchNoise(line) {
     return String(line || '')
-      .replace(/^[\s\-*•·]+/, '')
+      .replace(/^[\s\-*?·]+/, '')
       .replace(/^\s*\d+[\.\)銆乗)]\s*/, '')
       .replace(/^\s*[鈶犫憽鈶⑩懀鈶も懃鈶︹懅鈶ㄢ懇]\s*/, '')
       .replace(/\/[^\/\n]{1,40}\//g, ' ')
