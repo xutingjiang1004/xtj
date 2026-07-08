@@ -760,27 +760,6 @@ body.english-learning-open {
   margin-top: 7px;
 }
 
-#panelEnglishLearning .el-word-meta span,
-#panelEnglishLearning .el-mastery {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  color: var(--el-muted);
-  background: rgba(0, 0, 0, 0.04);
-  font-size: 11px;
-  font-weight: 680;
-}
-
-[data-theme="dark"] #panelEnglishLearning .el-word-meta span,
-[data-theme="dark"] #panelEnglishLearning .el-mastery {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-#panelEnglishLearning .el-mastery.is-mastered { color: var(--el-accent); background: var(--el-accent-soft); }
-#panelEnglishLearning .el-mastery.is-weak { color: var(--el-danger); background: rgba(200, 77, 91, 0.12); }
-
 #panelEnglishLearning .el-word-del {
   width: 30px;
   height: 30px;
@@ -1413,7 +1392,7 @@ body.english-learning-open {
   50%      { transform: scale(1.0); opacity: 1; }
 }
 
-#panelEnglishLearning .el-pane {
+#panelEnglishLearning .el-pane.active {
   animation: el-pane-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 #panelEnglishLearning .el-pane > * {
