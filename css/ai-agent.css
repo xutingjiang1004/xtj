@@ -3228,3 +3228,369 @@
   color: rgba(60, 140, 110, .9);
 }
 
+/* ===================== Deep Think Neural Constellation ===================== */
+#panelDeepThink .ai-research-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid rgba(124, 208, 190, .24);
+  background:
+    linear-gradient(160deg, rgba(18, 33, 42, .86), rgba(22, 48, 54, .76) 58%, rgba(229, 247, 244, .18)),
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+  box-shadow: 0 18px 44px rgba(30, 65, 60, .16), inset 0 1px 0 rgba(255,255,255,.12);
+  color: rgba(235, 248, 246, .94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+#panelDeepThink .ai-research-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(104, 232, 205, .16), transparent 30%),
+    radial-gradient(circle at 82% 12%, rgba(125, 190, 255, .14), transparent 28%),
+    radial-gradient(circle at 50% 62%, rgba(255,255,255,.08), transparent 42%);
+  pointer-events: none;
+}
+
+#panelDeepThink .ai-research-card .ai-research-header,
+#panelDeepThink .ai-research-card .ai-think-header.ai-research-header {
+  position: relative;
+  z-index: 2;
+  padding: 16px 20px 10px;
+  min-height: 0;
+  background: transparent;
+}
+
+#panelDeepThink .ai-research-card .ai-research-icon {
+  width: 20px;
+  height: 20px;
+  color: rgba(148, 246, 221, .96);
+}
+
+#panelDeepThink .ai-research-card .ai-research-title {
+  color: rgba(246, 252, 251, .98);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#panelDeepThink .ai-research-card .ai-research-meta {
+  color: rgba(196, 236, 229, .92);
+  background: rgba(126, 205, 190, .12);
+  border: 1px solid rgba(126, 205, 190, .18);
+}
+
+#panelDeepThink .ai-research-card .ai-research-chevron {
+  color: rgba(210, 240, 235, .74);
+}
+
+#panelDeepThink .ai-research-card .ai-research-visual {
+  position: relative;
+  z-index: 1;
+  min-height: 180px;
+  padding: 10px 20px 18px;
+}
+
+#panelDeepThink .ai-research-card .ai-research-particles {
+  position: absolute;
+  inset: 4px 14px 10px;
+  width: calc(100% - 28px);
+  height: calc(100% - 14px);
+  border-radius: 20px;
+  pointer-events: none;
+  opacity: .92;
+}
+
+#panelDeepThink .ai-research-card .ai-research-orbit {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 136px;
+  height: 136px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(135, 255, 230, .22) 0, rgba(135, 255, 230, .06) 34%, transparent 72%);
+  filter: blur(2px);
+  opacity: .85;
+  animation: aiResearchPulse 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+#panelDeepThink .ai-research-card .ai-research-status,
+#panelDeepThink .ai-research-card .ai-research-scan,
+#panelDeepThink .ai-research-card .ai-research-steps,
+#panelDeepThink .ai-research-card .ai-research-stop {
+  position: relative;
+  z-index: 2;
+}
+
+#panelDeepThink .ai-research-card .ai-research-status {
+  margin-top: 82px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(229, 246, 242, .9);
+}
+
+#panelDeepThink .ai-research-card .ai-research-scan {
+  margin-top: 14px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(154, 220, 208, .12);
+}
+
+#panelDeepThink .ai-research-card .ai-research-scan i {
+  display: block;
+  width: 34%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(124, 255, 229, 0), rgba(124, 255, 229, .92), rgba(141, 197, 255, .18));
+  box-shadow: 0 0 16px rgba(124, 255, 229, .4);
+  animation: aiResearchScan 1.8s linear infinite;
+}
+
+#panelDeepThink .ai-research-card .ai-research-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#panelDeepThink .ai-research-card .ai-research-steps span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(174, 228, 219, .16);
+  background: rgba(255,255,255,.05);
+  color: rgba(213, 237, 232, .76);
+  font-size: 12px;
+  transition: transform .22s ease, background .22s ease, color .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+
+#panelDeepThink .ai-research-card .ai-research-steps span.active {
+  color: rgba(251, 255, 255, .98);
+  background: linear-gradient(135deg, rgba(103, 224, 202, .24), rgba(125, 184, 255, .18));
+  border-color: rgba(138, 230, 212, .42);
+  box-shadow: 0 10px 24px rgba(82, 190, 170, .14);
+  transform: translateY(-1px);
+}
+
+#panelDeepThink .ai-research-card .ai-research-steps span.done {
+  color: rgba(214, 246, 235, .94);
+  background: rgba(110, 216, 189, .18);
+  border-color: rgba(122, 222, 198, .28);
+}
+
+#panelDeepThink .ai-research-card .ai-research-stop {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 171, 171, .22);
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: rgba(255, 225, 225, .94);
+  cursor: pointer;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease;
+}
+
+#panelDeepThink .ai-research-card .ai-research-stop:hover {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255, 186, 186, .34);
+}
+
+#panelDeepThink .ai-research-card .ai-research-stop:active {
+  transform: scale(.98);
+}
+
+#panelDeepThink .ai-research-card .ai-think-body {
+  position: relative;
+  z-index: 2;
+  padding: 0 20px 18px;
+  max-height: none;
+  opacity: 1;
+  overflow: visible;
+  border-top: none;
+}
+
+#panelDeepThink .ai-research-card.collapsed .ai-think-body,
+#panelDeepThink .ai-research-card.expanded .ai-think-body,
+#panelDeepThink .ai-research-card.generating .ai-think-body {
+  padding: 0 20px 18px;
+  max-height: none;
+  opacity: 1;
+  border-top: none;
+}
+
+#panelDeepThink .ai-research-card .ai-think-thinking {
+  margin: 12px 0 10px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(170, 224, 215, .12);
+}
+
+#panelDeepThink .ai-research-card .ai-think-thinking summary {
+  color: rgba(225, 242, 238, .88);
+  padding: 10px 14px 10px 34px;
+}
+
+#panelDeepThink .ai-research-card .ai-think-thinking summary::before {
+  background: rgba(131, 240, 214, .92);
+}
+
+#panelDeepThink .ai-research-card .ai-thinking-chevron {
+  color: rgba(212, 240, 236, .72);
+}
+
+#panelDeepThink .ai-research-card .ai-think-thinking-body,
+#panelDeepThink .ai-research-card .ai-thought-chunk {
+  background: transparent;
+  color: rgba(222, 240, 236, .88);
+}
+
+#panelDeepThink .ai-research-card .ai-thought-role {
+  background: rgba(120, 220, 198, .14);
+  color: rgba(221, 248, 240, .96);
+}
+
+#panelDeepThink .ai-research-card .ai-think-answer {
+  padding: 4px 0 8px;
+  color: rgba(243, 249, 248, .96);
+}
+
+#panelDeepThink .ai-research-card .ai-msg-footer {
+  padding: 0 0 4px;
+}
+
+#panelDeepThink .ai-research-card .ai-msg-footer span {
+  color: rgba(210, 234, 228, .84);
+}
+
+#panelDeepThink .ai-research-card .ai-search-supplement {
+  margin: 10px 0 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(166, 223, 213, .12);
+  color: rgba(228, 246, 241, .9);
+}
+
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-visual,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-visual,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-visual,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-visual,
+#panelDeepThink .ai-research-card.collapsed .ai-research-visual {
+  min-height: 0;
+  padding-bottom: 2px;
+}
+
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-particles,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-particles,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-particles,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-particles,
+#panelDeepThink .ai-research-card.collapsed .ai-research-particles,
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-orbit,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-orbit,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-orbit,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-orbit,
+#panelDeepThink .ai-research-card.collapsed .ai-research-orbit {
+  opacity: 0;
+}
+
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-status,
+#panelDeepThink .ai-research-card.collapsed .ai-research-status {
+  margin-top: 0;
+}
+
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-scan,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-scan,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-scan,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-scan,
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-steps,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-steps,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-steps,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-steps,
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-stop,
+#panelDeepThink .ai-research-card.ai-research-done .ai-research-stop,
+#panelDeepThink .ai-research-card.ai-research-cancelled .ai-research-stop,
+#panelDeepThink .ai-research-card.ai-research-error .ai-research-stop {
+  display: none;
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card {
+  border-color: rgba(114, 200, 184, .28);
+  background:
+    linear-gradient(160deg, rgba(12, 24, 30, .9), rgba(18, 36, 42, .82) 58%, rgba(226, 244, 241, .12)),
+    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+}
+
+@keyframes aiResearchPulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(.94); opacity: .56; }
+  50% { transform: translate(-50%, -50%) scale(1.06); opacity: .94; }
+}
+
+@keyframes aiResearchScan {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+@media (max-width: 640px) {
+  #panelDeepThink .ai-research-card {
+    border-radius: 22px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-header,
+  #panelDeepThink .ai-research-card .ai-think-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-visual {
+    min-height: 160px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-status {
+    margin-top: 74px;
+    font-size: 13px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-steps {
+    gap: 6px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-steps span {
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panelDeepThink .ai-research-card,
+  #panelDeepThink .ai-research-card * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-particles,
+  #panelDeepThink .ai-research-card .ai-research-orbit {
+    display: none;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-scan i {
+    width: 100%;
+    transform: none;
+    background: linear-gradient(90deg, rgba(124,255,229,.35), rgba(141,197,255,.22));
+  }
+}
+
