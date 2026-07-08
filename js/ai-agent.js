@@ -4779,17 +4779,7 @@ function showChatMessages() {
       try {
         if (ev && ev.preventDefault) ev.preventDefault();
         if (ev && ev.stopPropagation) ev.stopPropagation();
-        if (typeof window.__xtjEnsureEnglishLearningLoaded === 'function') {
-          window.__xtjEnsureEnglishLearningLoaded().then(function() {
-            if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-              window.EnglishLearning.open();
-              return;
-            }
-            try { notify('英语学习模块加载中，请稍后再试'); } catch (e2) {}
-          }).catch(function() {
-            try { notify('英语学习模块加载失败，请稍后再试'); } catch (e2) {}
-          });
-        } else if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
           window.EnglishLearning.open();
         } else {
           try { notify('英语学习模块加载中，请稍后再试'); } catch (e) {}
