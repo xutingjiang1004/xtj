@@ -267,18 +267,25 @@ const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度研究模式的任务规�
 - legal: 法律/法规/合同/维权 → 必须精确引用法条, agent 必搜
 - general: 其他通用问题
 
-**关键决策规则:**
+**关键决策规则 (★ U3 优化: 按需拆分, 别烧token):**
 
-1. **所有问题 (哪怕只有几个字)**: **至少拆 2-3 个 agent**, complexity 不低于 medium
-   - 不要因为用户问题短就跳过多角度分析
-   - 短问题可以从不同解读角度切入（意图猜测、隐含需求、多个可能性方向）
-   - 代码问题: 拆成 语法/逻辑/最佳实践/安全性 角度
-   - 科学问题: 拆成 原理/数据/应用/前沿 角度
-   - 生活决策: 拆成 优缺点/成本/风险/替代方案 角度
-   - 时事/商业: 拆成 背景/数据/影响/趋势 角度
+1. **极简单/闲聊问题 (1+1, 你好, 天气, 时间)**: **agents = [], complexity: low**
+   - 直接给答案, 不需要 agent, 不需要搜索
+   - 这是纯浪费 token, 直接回答最快
 
-2. **复杂研究/方案对比/跨学科问题**: {minComplex}-{maxWorkers} 个 agent, complexity: high
-   - 最多 {maxWorkers} 个, 每个独立方面, 互不重叠
+2. **普通/常识问题 (定义解释, 生活常识, 短知识)**: **0-1 个 agent, complexity: low**
+   - 不需要搜索, 基于已有知识回答
+   - 最多 1 个 agent 找相关数据
+
+3. **稍微复杂的单一主题问题**: **1-2 个 agent, complexity: medium**
+   - 代码审查/调试/优化: 拆成 语法+逻辑 两个方向
+   - 需要实时数据/最新信息: agent 配搜索
+
+4. **复杂研究/方案对比/跨学科**: **2-{maxWorkers} 个 agent, complexity: high**
+   - 每个 agent 独立方面, 不重叠
+   - 需要事实/数据时, agent 配搜索
+
+**核心原则: 能少拆就少拆。每个 agent 都在烧 token 和钱。简单问题别装专业。**
 
 **自我校验:**
 - 代码相关: 确保 agent 会检查语法正确性、边界条件、安全性
@@ -7177,15 +7184,18 @@ app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (re
   }
 });
 
-// ===================== 客户端错误监控 =====================
-app.post('/api/client-error-log', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+// ===================== 客户端错误监控 (允许匿名, IP 限流) =====================
+app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
   try {
     var { type, message, stack, url, line, col, user_agent, timestamp } = req.body;
-    var errorType = (type || 'unknown').slice(0, 50);
-    var errorMsg = (message || '').slice(0, 500);
-    var errorStack = (stack || '').slice(0, 1000);
-    var pageUrl = (url || '').slice(0, 500);
-    var ua = (user_agent || '').slice(0, 500);
+    var errorType = String(type || 'unknown').slice(0, 50);
+    var errorMsg = String(message || '').slice(0, 500);
+    var errorStack = String(stack || '').slice(0, 1000);
+    var pageUrl = String(url || '').slice(0, 500);
+    var ua = String(user_agent || '').slice(0, 500);
+    // 不保存敏感信息
+    if (/token|password|cookie|authorization|secret/i.test(errorMsg)) errorMsg = '[filtered: sensitive]';
+    if (/token|password|cookie|authorization|secret/i.test(errorStack)) errorStack = '[filtered: sensitive]';
 
     await supabase.from('posts').insert([{
       user_name: 'system',

@@ -716,17 +716,15 @@
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
 
+    // ★ U3: 只用于 POST body, 不允许 password_hash 出现在 GET URL
     var un = readUserName();
     var pw = readPwHash();
     var body = {};
-    var query = {};
     if (!token && un && pw) {
       body.user_name = un;
       body.password_hash = pw;
-      query.user_name = un;
-      query.password_hash = pw;
     }
-    return { token: token, headers: headers, body: body, query: query, userName: un, passwordHash: pw };
+    return { token: token, headers: headers, body: body, query: {}, userName: un, passwordHash: pw };
   }
 
   async function sendOnce(method, path, body, options) {
@@ -792,7 +790,7 @@
       if (hasPw) {
         clearAiUserToken();
         var second = await sendOnce(method, path, body, { forceNoToken: true, retry: true });
-        try { console.warn('[AI] retry result (pw_hash)', { status: second && second.status, ok: second && second.ok, url: second && second.url }); } catch (e4) {}
+        try { if (AI_DEBUG) console.warn('[AI] retry result (pw_hash)', { status: second && second.status, ok: second && second.ok, url: second && second.url }); } catch (e4) {}
         return second;
       }
       if (typeof window.refreshUserToken === 'function') {
@@ -800,7 +798,7 @@
           var refreshed = await window.refreshUserToken(true);
           if (refreshed) {
             var third = await sendOnce(method, path, body, { forceNoToken: false, retry: true });
-            try { console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e5) {}
+            try { if (AI_DEBUG) console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e5) {}
             return third;
           }
         } catch (e6) {}
@@ -1513,7 +1511,7 @@
           rendered = '（AI 暂无回复，请重试）';
           targetEl.classList.add('ai-empty-fallback');
         }
-        try { console.log('[AI-RENDER] finish len:', rendered.length, 'preview:', String(rendered).slice(0,50), 'el:', targetEl.tagName, targetEl.className, 'inDOM:', !!targetEl.closest('body')); } catch(_) {}
+        try { if (AI_DEBUG) console.log('[AI-RENDER] finish len:', rendered.length, 'el:', targetEl.tagName, targetEl.className); } catch(_) {}
         targetEl.innerHTML = renderMarkdown(rendered);
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
