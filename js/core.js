@@ -1,4 +1,4 @@
-﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -11772,22 +11772,6 @@ function renderProfileActivityList(kind) {
                 openPostDetail.__xtjMagicLoaderV4 = true;
             }
 
-            if (false && typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV4) {
-                var origSd = openStatDetail;
-                openStatDetail = window.openStatDetail = function(type) {
-                    var r = origSd.apply(this, arguments);
-                    var body = document.getElementById('statModalBody');
-                    if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml();
-                        if (window.initAllSpringLoaders) {
-                            window.initAllSpringLoaders(body);
-                        }
-                    }
-                    return r;
-                };
-                openStatDetail.__xtjMagicLoaderV4 = true;
-            }
-
             function patchNode(root) {
                 // spring canvas loader removed — dead code
                 return;
@@ -12529,41 +12513,6 @@ function renderProfileActivityList(kind) {
                 var modal = document.getElementById('statModal');
                 if (!modal || !modal.classList.contains('active') || !statCurrentType) return;
                 renderStatByType(statCurrentType);
-            };
-
-            window.openStatDetail = async function(type) {
-                var modal = document.getElementById('statModal');
-                var title = document.getElementById('statModalTitle');
-                var body = document.getElementById('statModalBody');
-                if (!modal || !body) return;
-                statCurrentType = type;
-                window.__xtjStatRequestId = (window.__xtjStatRequestId || 0) + 1;
-                var requestId = window.__xtjStatRequestId;
-                if (title) {
-                    title.textContent = type === 'posts' ? '总动态' : (type === 'views' ? '总浏览' : '点赞和评论');
-                }
-                modal.classList.add('active');
-                setBodyLockFromVisibleModals();
-                body.innerHTML = getXtjLoadingHtml('加载中..', '', 'feed');
-                try {
-                    if (Array.isArray(feedAllPosts) && feedAllPosts.length) {
-                        applySimpleStatSnapshot({
-                            posts: feedAllPosts,
-                            comments: feedAllComments || [],
-                            likes: feedAllLikes || []
-                        });
-                    } else if (!(Array.isArray(statAllPosts) && statAllPosts.length)) {
-                        var snapshot = await fetchSimpleStatSnapshot();
-                        if (requestId !== window.__xtjStatRequestId) return;
-                        applySimpleStatSnapshot(snapshot);
-                    }
-                    if (requestId !== window.__xtjStatRequestId) return;
-                    renderStatByType(type);
-                } catch (e) {
-                    if (requestId !== window.__xtjStatRequestId) return;
-                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">加载失败，请重试</div>';
-                    console.error('openStatDetail rescue error:', e);
-                }
             };
 
             window.openAnnouncementModal = function() {
