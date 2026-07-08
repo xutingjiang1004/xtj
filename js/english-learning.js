@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
  * XTJ English Learning Studio
  * - Account-synced vocabulary state
  * - DeepSeek reading/question generation
@@ -331,7 +331,7 @@
       status === 'syncing' ? '同步中' :
       status === 'dirty' ? '待同步' :
       status === 'error' ? '未同步' :
-      '本机模式'
+      '离线模式'
     );
   }
 
@@ -339,7 +339,7 @@
     var headers = await getAuthHeaders();
     var body = addLegacyAuth({}, headers);
     if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
-      setSyncStatus('local', '本机模式');
+      setSyncStatus('local', '离线模式');
       return null;
     }
     var url = apiBase() + '/english/state';
@@ -390,7 +390,7 @@
       var payload = buildStatePayload();
       var body = addLegacyAuth({ data: payload }, headers);
       if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
-        setSyncStatus('local', '本机模式');
+        setSyncStatus('local', '离线模式');
         return;
       }
       setSyncStatus('syncing', '同步中');
@@ -576,14 +576,6 @@
     });
   }
 
-  function masteryLabel(w) {
-    var m = w.mastery || 0;
-    if ((w.seen || 0) === 0) return '鏂拌瘝';
-    if (m >= 80) return '鎺屾彙';
-    if (m >= 60) return '鐔熸倝';
-    return '钖勫急';
-  }
-
   function renderStats() {
     setText('elWordCount', S.words.length);
     setText('elGenTotal', getWordsForGeneration(false).length);
@@ -629,17 +621,11 @@
     list.appendChild(frag);
   }
 
-  function masteryClass(w) {
-    if (isMasteredWord(w)) return 'is-mastered';
-    if (isWeakWord(w)) return 'is-weak';
-    return 'is-new';
-  }
-
   function updateGenInfo() {
     var total = getWordsForGeneration(false).length;
     setText('elGenTotal', total);
     var info = $('elGenInfo');
-    if (info) info.innerHTML = '??? <span id="elGenTotal">' + total + '</span> ???';
+    if (info) info.textContent = '??? ' + total + ' ???';
     var gen = $('elGenBtn');
     if (gen) gen.disabled = S.isGenerating || total === 0;
   }
@@ -704,7 +690,7 @@
    */
   function stripBatchNoise(line) {
     return String(line || '')
-      .replace(/^[\s\-*•·]+/, '')
+      .replace(/^[\s\-*?·]+/, '')
       .replace(/^\s*\d+[\.\)銆乗)]\s*/, '')
       .replace(/^\s*[鈶犫憽鈶⑩懀鈶も懃鈶︹懅鈶ㄢ懇]\s*/, '')
       .replace(/\/[^\/\n]{1,40}\//g, ' ')
@@ -1066,7 +1052,7 @@
     var qid = 1;
     var qcount = Math.max(2, Math.min(8, (settings && settings.questionCount) || 6));
 
-    if (types.indexOf('reading') >= 0 && sample.length) {
+    if (types.indexOf('article') >= 0 && sample.length) {
       // 闃呰鐞嗚В: 鍖归厤鍗曡瘝-閲婁箟 (mc 绫诲瀷, 绛旀鐢ㄧ储寮?
       var w0 = sample[0];
       var correctOpt = w0.en + ' (' + (w0.cn || '???') + ')';
@@ -1085,7 +1071,7 @@
       });
     }
 
-    if (types.indexOf('choice') >= 0) {
+    if (types.indexOf('mc') >= 0) {
       // 閫夋嫨棰? 姣忓崟璇嶄竴閬撻噴涔夊尮閰?(mc 绫诲瀷)
       var need = Math.max(1, qcount - questions.length);
       sample.slice(0, need).forEach(function(w) {
