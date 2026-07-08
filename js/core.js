@@ -535,7 +535,7 @@ const ADMIN_NAME = "xxz";
                 getPostDwellObserver().observe(post);
             });
         }
-        const CACHE_KEY = "xtj_feed_cache_v5";
+        const CACHE_KEY = "xtj_feed_cache_v6";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
@@ -1707,54 +1707,264 @@ const ADMIN_NAME = "xxz";
         }
         window.clearFeedCache = clearFeedCache;
 
+        var __xtjScriptLoadRegistry = Object.create(null);
+        function xtjLoadScriptOnce(src, key) {
+            var loadKey = String(key || src || '').trim();
+            if (!src || !loadKey) return Promise.reject(new Error('script_src_required'));
+            if (__xtjScriptLoadRegistry[loadKey]) return __xtjScriptLoadRegistry[loadKey];
+            __xtjScriptLoadRegistry[loadKey] = new Promise(function(resolve, reject) {
+                var selector = 'script[data-xtj-script-key="' + loadKey.replace(/"/g, '\\"') + '"]';
+                var existing = document.querySelector(selector);
+                function handleLoaded(node) {
+                    try {
+                        node.dataset.xtjLoaded = '1';
+                        node.dataset.xtjScriptKey = loadKey;
+                    } catch (e) {}
+                    resolve(node);
+                }
+                function handleFailed(err) {
+                    delete __xtjScriptLoadRegistry[loadKey];
+                    reject(err instanceof Error ? err : new Error(String(err || ('Failed to load ' + src))));
+                }
+                if (existing) {
+                    if (existing.dataset.xtjLoaded === '1') {
+                        resolve(existing);
+                        return;
+                    }
+                    existing.addEventListener('load', function onLoad() {
+                        existing.removeEventListener('load', onLoad);
+                        handleLoaded(existing);
+                    }, { once: true });
+                    existing.addEventListener('error', function onError() {
+                        existing.removeEventListener('error', onError);
+                        handleFailed(new Error('Failed to load ' + src));
+                    }, { once: true });
+                    return;
+                }
+                var node = document.createElement('script');
+                node.src = src;
+                node.defer = true;
+                node.dataset.xtjScriptKey = loadKey;
+                node.onload = function() { handleLoaded(node); };
+                node.onerror = function() { handleFailed(new Error('Failed to load ' + src)); };
+                (document.body || document.head || document.documentElement).appendChild(node);
+            });
+            return __xtjScriptLoadRegistry[loadKey];
+        }
+        window.xtjLoadScriptOnce = xtjLoadScriptOnce;
+
+        function xtjLoadScriptSequence(items) {
+            return (items || []).reduce(function(chain, item) {
+                return chain.then(function() {
+                    return xtjLoadScriptOnce(item.src, item.key);
+                });
+            }, Promise.resolve());
+        }
+
         var _photoWallLoaded = false;
         var _photoWallLoading = null;
+        var _photoWallPreviewLoaded = false;
+        var _photoWallPreviewLoading = null;
+        var _photoWallUploadLoaded = false;
+        var _photoWallUploadLoading = null;
+        var _aiAgentLoaded = false;
+        var _aiAgentLoading = null;
+        var _englishLearningLoaded = false;
+        var _englishLearningLoading = null;
+        var _interactiveEnhancementsBooted = false;
+        var _coreAnimationsLoaded = false;
+        var _coreAnimationsLoading = null;
+
         function ensurePhotoWallLoaded() {
             if (_photoWallLoaded) return Promise.resolve();
             if (_photoWallLoading) return _photoWallLoading;
-            var scripts = [
-                'js/photo-wall/data.min.js?v=20260618_2',
-                'js/photo-wall/render.min.js?v=20260618_2',
-                'js/photo-wall/photo-wall.min.js?v=20260618_2'
-            ];
-            _photoWallLoading = new Promise(function(resolve, reject) {
-                function safeReject(err) {
-                    _photoWallLoading = null;
-                    reject(err);
-                }
-                function loadNext(idx) {
-                    if (idx >= scripts.length) {
-                        _photoWallLoaded = true;
-                        _photoWallLoading = null;
-                        resolve();
-                        return;
-                    }
-                    var existing = document.querySelector('script[src="' + scripts[idx] + '"]');
-                    if (existing) {
-                        if (existing.dataset.xtjLoaded === '1') {
-                            loadNext(idx + 1);
-                            return;
-                        }
-                        existing.addEventListener('load', function onLoad() {
-                            existing.removeEventListener('load', onLoad);
-                            existing.dataset.xtjLoaded = '1';
-                            loadNext(idx + 1);
-                        });
-                        existing.addEventListener('error', function onError() {
-                            existing.removeEventListener('error', onError);
-                            safeReject(new Error('Failed to load ' + scripts[idx]));
-                        });
-                        return;
-                    }
-                    var s = document.createElement('script');
-                    s.src = scripts[idx];
-                    s.onload = function() { s.dataset.xtjLoaded = '1'; loadNext(idx + 1); };
-                    s.onerror = function() { safeReject(new Error('Failed to load ' + scripts[idx])); };
-                    document.body.appendChild(s);
-                }
-                loadNext(0);
+            _photoWallLoading = xtjLoadScriptSequence([
+                { src: 'js/photo-wall/data.min.js?v=20260618_2', key: 'photo-wall-data' },
+                { src: 'js/photo-wall/render.min.js?v=20260618_2', key: 'photo-wall-render' },
+                { src: 'js/photo-wall/photo-wall.min.js?v=20260618_2', key: 'photo-wall-main' }
+            ]).then(function() {
+                _photoWallLoaded = true;
+            }).finally(function() {
+                if (!_photoWallLoaded) _photoWallLoading = null;
             });
             return _photoWallLoading;
+        }
+
+        function ensurePhotoWallPreviewLoaded() {
+            if (_photoWallPreviewLoaded && typeof window.openPhotoPreview === 'function') return Promise.resolve();
+            if (_photoWallPreviewLoading) return _photoWallPreviewLoading;
+            _photoWallPreviewLoading = xtjLoadScriptSequence([
+                { src: 'js/photo-wall/preview.min.js?v=20260627_hotfix_v22', key: 'photo-wall-preview' },
+                { src: 'js/photo-wall/preview-hotfix.js?v=20260627_hotfix_v22', key: 'photo-wall-preview-hotfix' }
+            ]).then(function() {
+                _photoWallPreviewLoaded = true;
+            }).finally(function() {
+                if (!_photoWallPreviewLoaded) _photoWallPreviewLoading = null;
+            });
+            return _photoWallPreviewLoading;
+        }
+
+        function ensurePhotoWallUploadLoaded() {
+            if (_photoWallUploadLoaded && typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) return Promise.resolve();
+            if (_photoWallUploadLoading) return _photoWallUploadLoading;
+            _photoWallUploadLoading = xtjLoadScriptOnce('js/photo-wall/upload-ui.min.js?v=20260623_v2', 'photo-wall-upload-ui').then(function() {
+                _photoWallUploadLoaded = true;
+            }).finally(function() {
+                if (!_photoWallUploadLoaded) _photoWallUploadLoading = null;
+            });
+            return _photoWallUploadLoading;
+        }
+
+        function ensureAiAgentLoaded() {
+            if (_aiAgentLoaded && typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher) return Promise.resolve();
+            if (_aiAgentLoading) return _aiAgentLoading;
+            _aiAgentLoading = xtjLoadScriptOnce('js/ai-agent.js?v=20260708_perf_v1', 'ai-agent').then(function() {
+                _aiAgentLoaded = true;
+            }).finally(function() {
+                if (!_aiAgentLoaded) _aiAgentLoading = null;
+            });
+            return _aiAgentLoading;
+        }
+        window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
+
+        function ensureEnglishLearningLoaded() {
+            if (_englishLearningLoaded && window.EnglishLearning && typeof window.EnglishLearning.open === 'function') return Promise.resolve();
+            if (_englishLearningLoading) return _englishLearningLoading;
+            _englishLearningLoading = xtjLoadScriptSequence([
+                { src: 'js/english-dict.js?v=20260708_perf_v1', key: 'english-dict' },
+                { src: 'js/english-learning.js?v=20260708_perf_v1', key: 'english-learning' }
+            ]).then(function() {
+                _englishLearningLoaded = true;
+            }).finally(function() {
+                if (!_englishLearningLoaded) _englishLearningLoading = null;
+            });
+            return _englishLearningLoading;
+        }
+        window.__xtjEnsureEnglishLearningLoaded = ensureEnglishLearningLoaded;
+
+        function ensureCoreAnimationsLoaded() {
+            if (_coreAnimationsLoaded) return Promise.resolve();
+            if (_coreAnimationsLoading) return _coreAnimationsLoading;
+            _coreAnimationsLoading = Promise.all([
+                xtjLoadScriptOnce('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', 'gsap'),
+                xtjLoadScriptOnce('js/core-animations.js?v=20260708_perf_v1', 'core-animations')
+            ]).then(function() {
+                _coreAnimationsLoaded = true;
+            }).finally(function() {
+                if (!_coreAnimationsLoaded) _coreAnimationsLoading = null;
+            });
+            return _coreAnimationsLoading;
+        }
+        window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
+
+        function scheduleInteractiveEnhancements() {
+            if (_interactiveEnhancementsBooted) return;
+            _interactiveEnhancementsBooted = true;
+            var run = function() {
+                xtjLoadScriptSequence([
+                    { src: 'js/login-device.js?v=20260629_abortfix_v1', key: 'login-device' },
+                    { src: 'js/features.js?v=20260623_1', key: 'features' },
+                    { src: 'js/ui-effects.js?v=20260708_perf_v1', key: 'ui-effects' },
+                    { src: 'js/pro-upgrade.js?v=20260627_profile_v3', key: 'pro-upgrade' },
+                    { src: 'js/pro-style.js?v=20260708_perf_v1', key: 'pro-style' }
+                ]).catch(function(err) {
+                    console.warn('[XTJ] deferred enhancement load failed:', err && err.message ? err.message : err);
+                });
+            };
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(run, { timeout: 2200 });
+            } else {
+                setTimeout(run, 1200);
+            }
+        }
+
+        function armCoreAnimationLoader() {
+            var fired = false;
+            function trigger() {
+                if (fired) return;
+                fired = true;
+                document.removeEventListener('pointerdown', trigger, true);
+                document.removeEventListener('keydown', trigger, true);
+                if (typeof window.requestIdleCallback === 'function') {
+                    window.requestIdleCallback(function() {
+                        ensureCoreAnimationsLoaded().catch(function() {});
+                    }, { timeout: 2500 });
+                } else {
+                    setTimeout(function() { ensureCoreAnimationsLoaded().catch(function() {}); }, 1500);
+                }
+            }
+            document.addEventListener('pointerdown', trigger, true);
+            document.addEventListener('keydown', trigger, true);
+            setTimeout(trigger, 3500);
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', scheduleInteractiveEnhancements, { once: true });
+        } else {
+            scheduleInteractiveEnhancements();
+        }
+        armCoreAnimationLoader();
+
+        function lazyAiChatLauncher() {
+            ensureAiAgentLoaded().then(function() {
+                if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher) {
+                    window.__xtjOpenAiChat();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
+                console.error('[XTJ] ai-agent lazy load failed:', err);
+            });
+        }
+        window.__xtjOpenAiChat = lazyAiChatLauncher;
+
+        function lazyEnglishLearningLauncher() {
+            ensureEnglishLearningLoaded().then(function() {
+                if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+                    window.EnglishLearning.open();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('英语学习模块加载失败，请稍后重试');
+                console.error('[XTJ] english-learning lazy load failed:', err);
+            });
+        }
+        window.__xtjOpenEnglishLearning = lazyEnglishLearningLauncher;
+
+        function lazyPhotoUploadLauncher() {
+            ensurePhotoWallUploadLoaded().then(function() {
+                if (typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) {
+                    window.xtjUploadBtn();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
+                console.error('[XTJ] photo upload lazy load failed:', err);
+            });
+        }
+        function lazyPhotoWallSubmitLauncher() {
+            ensurePhotoWallUploadLoaded().then(function() {
+                if (typeof window.triggerPhotoWallUpload === 'function' && window.triggerPhotoWallUpload !== lazyPhotoWallSubmitLauncher) {
+                    window.triggerPhotoWallUpload();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
+                console.error('[XTJ] photo upload submit lazy load failed:', err);
+            });
+        }
+        window.xtjUploadBtn = lazyPhotoUploadLauncher;
+        window.triggerPhotoUpload = lazyPhotoUploadLauncher;
+        window.triggerPhotoWallUpload = lazyPhotoWallSubmitLauncher;
+
+        function lazyOpenPhotoPreview() {
+            var args = Array.prototype.slice.call(arguments);
+            return ensurePhotoWallPreviewLoaded().then(function() {
+                if (typeof window.openPhotoPreview === 'function' && window.openPhotoPreview !== lazyOpenPhotoPreview) {
+                    return window.openPhotoPreview.apply(window, args);
+                }
+            }).catch(function(err) {
+                console.error('[XTJ] photo preview lazy load failed:', err);
+            });
+        }
+        if (typeof window.openPhotoPreview !== 'function') {
+            window.openPhotoPreview = lazyOpenPhotoPreview;
         }
 
         function parsePostContent(post) {
@@ -4653,8 +4863,8 @@ function renderProfileActivityList(kind) {
                     viewer.classList.add('active');
                     document.body.style.overflow = 'hidden';
                 }
-                if (typeof window.openPhotoPreview !== 'function' && typeof ensurePhotoWallLoaded === 'function') {
-                    ensurePhotoWallLoaded().then(function() {
+                if ((typeof window.openPhotoPreview !== 'function' || window.openPhotoPreview === lazyOpenPhotoPreview) && typeof ensurePhotoWallPreviewLoaded === 'function') {
+                    ensurePhotoWallPreviewLoaded().then(function() {
                         if (!openPostImagePreview(src, triggerEl)) fallbackOpen();
                     }).catch(function() {
                         fallbackOpen();
@@ -6105,26 +6315,72 @@ function renderProfileActivityList(kind) {
                     }
                 }
             };
-            function writeFeedCacheSnapshot() {
+            var feedCacheWriteTimer = null;
+            function shouldPersistMediaUrl(url) {
+                url = String(url || '');
+                if (!url) return false;
+                if (/^(data:|blob:)/i.test(url)) return false;
+                if (url.length > 900) return false;
+                return true;
+            }
+
+            function toLightweightFeedPost(post) {
+                if (!post || typeof post !== 'object') return post;
+                var snapshot = Object.assign({}, post);
+                if (!shouldPersistMediaUrl(snapshot.media_url)) snapshot.media_url = '';
+                return snapshot;
+            }
+
+            function persistFeedCacheSnapshotNow() {
                 try {
+                    var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
+                    var firstPageIds = new Set((firstPage && Array.isArray(firstPage.postIds) ? firstPage.postIds : (feedAllPosts || []).slice(0, FEED_PAGE_SIZE).map(function(post) {
+                        return String(post && post.id || '');
+                    })).filter(Boolean));
                     var cachePosts = (feedAllPosts || []).filter(function(post) {
-                        return post && post.media_type !== '__avatar__' && post.media_type !== '__user_info__' && post.media_type !== '__photo_wall__' && post.media_type !== ADMIN_META_MARKER;
+                        return post &&
+                            firstPageIds.has(String(post.id || '')) &&
+                            post.media_type !== '__avatar__' &&
+                            post.media_type !== '__user_info__' &&
+                            post.media_type !== '__photo_wall__' &&
+                            post.media_type !== ADMIN_META_MARKER;
+                    }).map(toLightweightFeedPost);
+                    var cacheComments = (feedAllComments || []).filter(function(comment) {
+                        return comment && firstPageIds.has(String(comment.post_id || ''));
+                    });
+                    var cacheLikes = (feedAllLikes || []).filter(function(like) {
+                        return like && firstPageIds.has(String(like.post_id || ''));
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        version: 4,
+                        version: 6,
                         data: {
                             posts: cachePosts,
-                            comments: feedAllComments || [],
-                            likes: feedAllLikes || [],
-                            pages: feedLoadedPages || [],
-                            nextOffset: feedNextOffset || cachePosts.length,
-                            endReached: !!feedEndReached,
+                            comments: cacheComments,
+                            likes: cacheLikes,
+                            pages: cachePosts.length ? [{
+                                offset: 0,
+                                postIds: cachePosts.map(function(post) { return String(post.id); })
+                            }] : [],
+                            nextOffset: cachePosts.length,
+                            endReached: cachePosts.length < FEED_PAGE_SIZE,
                             pageSize: FEED_PAGE_SIZE
                         },
                         timestamp: Date.now()
                     }));
                 } catch (e) {
-                    console.warn('[pin] failed to persist feed cache', e);
+                    console.warn('[feed-cache] failed to persist feed cache', e);
+                }
+            }
+
+            function writeFeedCacheSnapshot() {
+                try {
+                    if (feedCacheWriteTimer) clearTimeout(feedCacheWriteTimer);
+                    feedCacheWriteTimer = setTimeout(function() {
+                        feedCacheWriteTimer = null;
+                        persistFeedCacheSnapshotNow();
+                    }, 900);
+                } catch (e) {
+                    console.warn('[feed-cache] failed to schedule feed cache write', e);
                 }
             }
 
@@ -6172,7 +6428,7 @@ function renderProfileActivityList(kind) {
                         likes: Array.isArray(data.likes) ? data.likes : [],
                         pages: pages,
                         nextOffset: typeof data.nextOffset === "number" ? data.nextOffset : posts.length,
-                        endReached: typeof data.endReached === "boolean" ? data.endReached : false,
+                        endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
                         pageSize: data.pageSize || FEED_PAGE_SIZE
                     }
                 };
@@ -6356,7 +6612,6 @@ function renderProfileActivityList(kind) {
 
             async function rebuildFeedFromCurrentState() {
                 feedPage = 0;
-                feedEndReached = false;
                 var noMore = document.getElementById('feedNoMore');
                 if (noMore) noMore.remove();
                 await renderFeedFromMemoryState();
@@ -6413,35 +6668,8 @@ function renderProfileActivityList(kind) {
             }
 
             async function syncFeedDataInBackground() {
-                var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await applyVisiblePostQueryFilters(
-                        sb.from("posts").select("*")
-                    ).order("created_at", { ascending: false });
-                    if (requestId !== feedLoadRequestId) return false;
-                    if (postRes.error) throw postRes.error;
-                    feedAllPosts = normalizePosts(postRes.data || []);
-                    writeFeedCacheSnapshot();
-                    if (currentDockTab === 'posts') {
-                        await rebuildFeedFromCurrentState();
-                    }
-
-                    var results = await Promise.all([
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*")
-                    ]);
-                    if (requestId !== feedLoadRequestId) return false;
-                    var commRes = results[0];
-                    var likeRes = results[1];
-                    if (commRes.error || likeRes.error) {
-                        throw (commRes.error || likeRes.error);
-                    }
-                    feedAllComments = commRes.data || [];
-                    feedAllLikes = likeRes.data || [];
-                    writeFeedCacheSnapshot();
-                    if (currentDockTab === 'posts') {
-                        await rebuildFeedFromCurrentState();
-                    }
+                    await loadFeed(true);
                     return true;
                 } finally {
                     isRefreshing.posts = false;
@@ -6661,90 +6889,55 @@ function renderProfileActivityList(kind) {
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
-                    // P0 修复: 不在这里清 localStorage cache, 否则 forceRefresh 失败后没数据回退
-                    // clearFeedCache() 改为在 Supabase 查询成功 + 写入新 cache 之后由正常流程覆盖
+                    feedNextOffset = 0;
+                    feedLoadedPages = [];
+                    feedPageFetchPending = false;
                     feedAllPosts = [];
                     feedAllComments = [];
                     feedAllLikes = [];
+                    feedVisiblePostsCache = null;
+                    feedMapsCache = null;
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
-                    var cached = localStorage.getItem(CACHE_KEY);
-                    if (cached) {
-                        try {
+                    try {
+                        var cached = localStorage.getItem(CACHE_KEY);
+                        if (cached) {
                             var parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION) {
+                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
                                 if (requestId !== feedLoadRequestId) return;
-                                feedAllPosts = normalizePosts(parsed.data.posts || []);
-                                feedAllComments = parsed.data.comments || [];
-                                feedAllLikes = parsed.data.likes || [];
-                                await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
+                                if (requestId !== feedLoadRequestId) return;
+                                await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
                                 return;
                             }
-                        } catch (e) {}
-                    }
+                        }
+                    } catch (e) {}
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
                     feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
                 try {
-                    // Supabase 查询加 12s 兜底超时，避免永久 hang
-                    const queries = [
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }).limit(200),
-                        sb.from("comments").select("*").order("created_at").limit(500),
-                        sb.from("likes").select("*").limit(1000)
-                    ];
-                    const fetchTimeout = new Promise(function(_, reject) { setTimeout(function() { reject(new Error('feed_fetch_timeout')); }, 12000); });
-                    var results;
-                    try {
-                        results = await Promise.race([Promise.all(queries), fetchTimeout]);
-                    } catch (fetchErr) {
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载超时，正在用旧数据...</div>';
-                        console.error('[loadFeed] 查询超时:', fetchErr);
-                        // P0 修复: 超时时回退到旧 cache, 不让用户看白屏
-                        try {
-                            var fallbackRaw = localStorage.getItem(CACHE_KEY);
-                            if (fallbackRaw) {
-                                var fallbackParsed = JSON.parse(fallbackRaw);
-                                if (fallbackParsed && fallbackParsed.data) {
-                                    feedAllPosts = normalizePosts(fallbackParsed.data.posts || []);
-                                    feedAllComments = fallbackParsed.data.comments || [];
-                                    feedAllLikes = fallbackParsed.data.likes || [];
-                                    await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-                                    setupFeedInfiniteScroll();
-                                    console.warn('[loadFeed] 已回退到旧 cache, posts=' + feedAllPosts.length);
-                                }
-                            }
-                        } catch (fbErr) {
-                            console.error('[loadFeed] cache 回退失败:', fbErr);
-                        }
-                        return;
-                    }
-                    var postRes = results[0];
-                    var commRes = results[1];
-                    var likeRes = results[2];
-                    if (postRes.error || commRes.error || likeRes.error) {
-                        if (requestId !== feedLoadRequestId) return;
-                        var err = postRes.error || commRes.error || likeRes.error;
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
-                        return;
-                    }
+                    feedPageFetchPending = true;
+                    var chunk = await fetchFeedPageChunk(0, requestId);
+                    if (!chunk) return;
                     if (requestId !== feedLoadRequestId) return;
-                    feedAllPosts = normalizePosts(postRes.data || []);
-                    feedAllComments = commRes.data || [];
-                    feedAllLikes = likeRes.data || [];
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        data: {
-                            posts: feedAllPosts,
-                            comments: feedAllComments,
-                            likes: feedAllLikes
-                        },
-                        timestamp: now
-                    }));
+                    feedAllPosts = [];
+                    feedAllComments = [];
+                    feedAllLikes = [];
+                    feedLoadedPages = [];
+                    feedNextOffset = 0;
+                    feedEndReached = false;
+                    feedVisiblePostsCache = null;
+                    feedMapsCache = null;
+                    if (chunk.posts.length) mergeFeedPageIntoState(chunk);
+                    else feedEndReached = true;
+                    await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
+                    if (requestId !== feedLoadRequestId) return;
+                    writeFeedCacheSnapshot();
                     // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
-                    // 不阻塞 render：fire-and-forget + 5s 兜底超时，VIP 历史晚一点查完会触发 reRender
                     try {
                         if (typeof window.__xtjBatchLoadVipHistory === 'function') {
                             var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
@@ -6763,21 +6956,47 @@ function renderProfileActivityList(kind) {
                             }).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
-                    await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                    await renderFeedFromMemoryState();
                     setupFeedInfiniteScroll();
                 } catch (e) {
                     if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
+                    try {
+                        var fallbackRaw = localStorage.getItem(CACHE_KEY);
+                        if (fallbackRaw) {
+                            var fallbackParsed = JSON.parse(fallbackRaw);
+                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
+                                await renderFeedFromMemoryState();
+                                setupFeedInfiniteScroll();
+                            }
+                        }
+                    } catch (fbErr) {
+                        console.error('[loadFeed] cache fallback failed:', fbErr);
+                    }
+                } finally {
+                    feedPageFetchPending = false;
                 }
             };
             window.loadFeed = loadFeed;
 
-            loadMoreFeedPosts = function() {
-                if (feedEndReached) return;
+            loadMoreFeedPosts = async function() {
+                if (feedEndReached || feedPageFetchPending) return;
                 var feed = document.getElementById("feed");
                 var startIdx = feedPage * FEED_PAGE_SIZE;
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                if (filteredPosts.length < endIdx && !feedEndReached) {
+                    try {
+                        feedPageFetchPending = true;
+                        await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
+                        writeFeedCacheSnapshot();
+                    } catch (e) {
+                        console.error('[feed] loadMore ensure coverage failed:', e);
+                    } finally {
+                        feedPageFetchPending = false;
+                    }
+                    filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                }
                 if (startIdx >= filteredPosts.length) {
                     feedEndReached = true;
                     var noMore = document.getElementById("feedNoMore");
@@ -6858,8 +7077,8 @@ function renderProfileActivityList(kind) {
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
-                feedPage = 1;
-                feedEndReached = firstPage.length >= filteredPosts.length;
+                feedPage = firstPage.length ? 1 : 0;
+                feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
 
@@ -8643,10 +8862,19 @@ function renderProfileActivityList(kind) {
                 var row = template.content.firstElementChild;
                 row.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    if (typeof window.__xtjOpenAiChat === 'function') {
+                    if (typeof window.__xtjEnsureAiAgentLoaded === 'function') {
+                        window.__xtjEnsureAiAgentLoaded().then(function() {
+                            if (typeof window.__xtjOpenAiChat === 'function') {
+                                window.__xtjOpenAiChat();
+                            } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
+                                window.__xtjAiAgent.open();
+                            }
+                        }).catch(function(err) {
+                            console.error('[XTJ] failed to open AI chat:', err);
+                            if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
+                        });
+                    } else if (typeof window.__xtjOpenAiChat === 'function') {
                         window.__xtjOpenAiChat();
-                    } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
-                        window.__xtjAiAgent.open();
                     }
                 });
                 el.insertBefore(row, el.firstChild);
