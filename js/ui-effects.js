@@ -10,8 +10,20 @@
     return el && (el.classList.contains('dock-tab') || el.closest('.dock-tab'));
   };
 
-  var rippleButtonSelector = '.btn, .af-btn, .send-btn, .photo-wall-upload-btn, .publish-btn, .filter-btn, .view-all-btn, .load-more-btn, .report-submit-btn, .auth-btn, .profile-action-btn, .post-action-btn, .chat-action-btn, .close-modal-btn, .modal-close-btn';
+  var rippleButtonSelector = '.btn-primary, .send-btn, .publish-btn, .auth-btn, .photo-wall-upload-btn, .load-more-btn, .view-all-btn';
   var rippleSkipSelector = '.announcement-btn, .report-btn';
+
+  function getPerfMode() {
+    var root = document.documentElement;
+    if (!root) return 'full';
+    if (root.classList.contains('perf-lite')) return 'lite';
+    if (root.classList.contains('perf-balanced')) return 'balanced';
+    return 'full';
+  }
+
+  function motionReduced() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+  }
 
   function ensureRippleLayer(btn) {
     if (!btn || !btn.ownerDocument) return null;
@@ -39,6 +51,7 @@
   }
 
   function spawnRipple(btn, clientX, clientY) {
+    if (getPerfMode() === 'lite' || motionReduced()) return;
     if (!btn || !btn.getBoundingClientRect) return;
     var rect;
     try { rect = btn.getBoundingClientRect(); } catch (e) { return; }
@@ -66,6 +79,7 @@
      1. Click Ripple Effect (excludes dock-tab buttons)
      ========================================================== */
   document.addEventListener('click', function (e) {
+    if (getPerfMode() === 'lite' || motionReduced()) return;
     var target = e.target;
     if (isDockTab(target)) return;
     if (target.closest('#themeToggle, .theme-toggle-btn')) return;
@@ -81,6 +95,9 @@
      3. Particle Burst on Primary Buttons
      ========================================================== */
   function createParticleBurst(clientX, clientY, colorSet) {
+    if (motionReduced()) return;
+    var perfMode = getPerfMode();
+    if (perfMode === 'lite' || perfMode === 'balanced') return;
     var container = document.createElement('div');
     container.className = 'xtj-particle-burst';
     container.style.left = clientX + 'px';
@@ -89,7 +106,7 @@
 
     var colors = colorSet || ['#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171'];
 
-    for (var i = 0; i < 10; i++) {
+    for (var i = 0; i < 6; i++) {
       var p = document.createElement('div');
       p.className = 'xtj-particle';
       var angle = Math.random() * Math.PI * 2;
@@ -102,17 +119,18 @@
       container.appendChild(p);
     }
 
-    setTimeout(function () {
+    var removeBurst = function () {
       if (container.parentNode) container.parentNode.removeChild(container);
-    }, 1000);
+    };
+    container.addEventListener('animationend', removeBurst, { once: true });
+    setTimeout(removeBurst, 1000);
   }
 
   document.addEventListener('click', function (e) {
     var target = e.target;
     if (isDockTab(target)) return;
-    var btn = target.closest('.btn-primary, .report-submit-btn, .send-btn, .auth-btn');
+    var btn = target.closest('.btn-primary, .send-btn');
     if (!btn) return;
-    // spawn burst
     createParticleBurst(e.clientX, e.clientY);
   }, true);
 
