@@ -2616,7 +2616,7 @@
         if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
       }
     }
-    S.sending = true;
+    
     if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     clearReplyTimer();
 
@@ -3089,19 +3089,12 @@
       panel.classList.add('hidden');
       panel.classList.remove('active');
     }
-
-    // 鎭㈠搴曢儴 dock
     setDockBarVisible(true);
-
-    // 鈽?涓嶅啀鍋滄姝ｅ湪杩涜鐨勮姹傦紝璁?AI 缁х画鍦ㄥ悗鍙板畬鎴愶紝鐢ㄦ埛鍥炴潵鍚庡彲瑙?
-    // 鎸佷箙鍖?dtConversationId锛堥〉闈㈠埛鏂板悗涔熻兘鎭㈠锛?
+    // 标记 panel 为已关闭, SSE 回调可检测此标志避免写旧 DOM
+    if (panel) panel._dtClosed = true;
     saveDtConvId();
-
-    // 鍙竻绌鸿緭鍏ワ紝淇濈暀 dtConversationId 浠ヤ究鍐嶆鎵撳紑鏃舵仮澶嶅巻鍙?
     var input = document.getElementById('dtInput');
     if (input) { input.value = ''; input.style.height = 'auto'; }
-    // 鈽?涓嶆竻绌?sending/activeRenderers/abortController 绛夌姸鎬侊紝
-    //   淇濈暀 SSE 杩炴帴鍜屾覆鏌撶姸鎬侊紝鐢ㄦ埛鍥炴潵鍚庣户缁睍绀?
   }
 
   // 鏂囦欢涓婁紶鐘舵€?(dt 椤甸潰)
