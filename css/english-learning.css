@@ -74,6 +74,21 @@ body.english-learning-open {
   overflow: hidden !important;
 }
 
+.perf-lite #panelEnglishLearning .el-panel,
+.perf-lite #panelEnglishLearning .el-card,
+.perf-lite #panelEnglishLearning .el-shell,
+.perf-lite #panelEnglishLearning .el-word-item {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.perf-lite #panelEnglishLearning .el-word-list,
+.perf-balanced #panelEnglishLearning .el-word-list {
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
+}
+
 #panelEnglishLearning::before {
   content: "";
   position: absolute;
@@ -1928,4 +1943,3 @@ body.english-learning-open {
     inset 0 0 0 1px rgba(20, 124, 90, 0.35) !important;
   background: var(--el-surface-solid) !important;
 }
-

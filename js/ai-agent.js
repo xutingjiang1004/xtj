@@ -601,9 +601,6 @@
     return '';
   }
 
-  function generateRequestId() {
-    return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  }
   
   function abortCurrentRequest() {
     clearStreamCleanup();
@@ -894,16 +891,19 @@
   function scrollToBottom(container, force) {
     if (!container) return;
     if (!force && !S.autoScrollPinned) return;
-    // V5: 姣忓抚鏈€澶氫竴娆★紝rAF 鍚堝苟锛岄伩鍏嶉珮棰戝啓鍏ヨЕ鍙?reflow
+    var now = Date.now();
+    if (!force && container._dtLastScrollTs && (now - container._dtLastScrollTs) < 80) return;
     if (container._dtScrollRaf) return;
     container._dtScrollRaf = true;
     try {
       requestAnimationFrame(function() {
         container._dtScrollRaf = false;
+        container._dtLastScrollTs = Date.now();
         try { container.scrollTop = container.scrollHeight; } catch (e) {}
       });
     } catch (e2) {
       container._dtScrollRaf = false;
+      container._dtLastScrollTs = Date.now();
       try { container.scrollTop = container.scrollHeight; } catch (e3) {}
     }
   }
@@ -1285,34 +1285,6 @@
     maybeRestoreEmptyState(messagesEl);
   }
 
-  function buildLongReplySegments(text) {
-    var normalized = String(text || '').replace(/\r\n/g, '\n');
-    var blocks = normalized.split(/\n{2,}/);
-    var segments = [];
-    for (var i = 0; i < blocks.length; i++) {
-      var block = blocks[i];
-      if (!block) continue;
-      if (segments.length) segments.push('\n\n');
-      if (block.length <= 180) {
-        segments.push(block);
-        continue;
-      }
-      var parts = block.match(/[^銆傦紒锛??锛?\n]+[銆傦紒锛??锛?]?\s*/g) || [block];
-      var buf = '';
-      for (var j = 0; j < parts.length; j++) {
-        var next = parts[j];
-        if (buf && (buf + next).length > 150) {
-          segments.push(buf);
-          buf = next;
-        } else {
-          buf += next;
-        }
-      }
-      if (buf) segments.push(buf);
-    }
-    return segments.length ? segments : [normalized];
-  }
-
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
@@ -1679,14 +1651,6 @@
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
   var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
 
-  function prefersReducedMotion() {
-    try {
-      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch (e) {
-      return false;
-    }
-  }
-
   function isResearchCard(card) {
     return !!(card && card._researchState && card.classList && card.classList.contains('ai-research-card'));
   }
@@ -1723,6 +1687,13 @@
     if (refs && refs.details) refs.details.open = !!expanded && canToggle;
   }
 
+  function updateResearchProgress(card, ratio) {
+    if (!isResearchCard(card)) return;
+    var safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+    card.style.setProperty('--ai-research-progress', (safeRatio * 100).toFixed(2) + '%');
+    if (card._researchState) card._researchState.progress = safeRatio;
+  }
+
   function setResearchSteps(card, activeIndex, doneCount) {
     var refs = ensureResearchCardRefs(card);
     if (!refs || !refs.steps) return;
@@ -1757,7 +1728,7 @@
       refs.meta.textContent = '';
       return;
     }
-      refs.meta.textContent = '已思考 ' + formatThinkDuration(state.elapsedMs);
+    refs.meta.textContent = '已思考 ' + formatThinkDuration(state.elapsedMs);
   }
 
   function setResearchCardState(card, nextState, opts) {
@@ -1772,7 +1743,11 @@
     if (typeof opts.allowToggle === 'boolean') state.canToggle = opts.allowToggle;
     if (typeof opts.stepCount === 'number') state.stepCount = opts.stepCount;
     if (typeof opts.searchCount === 'number') state.searchCount = opts.searchCount;
+    if (typeof opts.persistExpanded === 'boolean') state.persistExpanded = opts.persistExpanded;
+    if (typeof opts.progress === 'number') state.progress = opts.progress;
     state.state = nextState || state.state || 'preparing';
+
+    if (state.stepCount > 0) state.canToggle = true;
 
     card.setAttribute('data-research-state', state.state);
     card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-cancelled', 'ai-research-error');
@@ -1781,11 +1756,11 @@
     if (state.state === 'responding' || state.state === 'done' || state.state === 'cancelled' || state.state === 'error') {
       card.classList.remove('generating');
       state.canToggle = true;
-      setResearchDisclosure(card, !!opts.expanded);
+      setResearchDisclosure(card, state.persistExpanded ? true : !!opts.expanded);
       stopResearchCardAnimation(card);
     } else {
       card.classList.add('generating');
-      setResearchDisclosure(card, false);
+      setResearchDisclosure(card, state.persistExpanded ? true : false);
     }
 
     if (state.state === 'preparing') {
@@ -1793,6 +1768,7 @@
       refs.status.textContent = '正在进入深度思考...';
       syncResearchElapsed(card, state.elapsedMs || 0);
       setResearchSteps(card, 0, 0);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : 0.08);
     } else if (state.state === 'thinking') {
       refs.title.textContent = '深入研究中';
       refs.status.textContent = opts.statusText || AI_RESEARCH_THINKING_TEXTS[state.thinkingTick % AI_RESEARCH_THINKING_TEXTS.length];
@@ -1801,6 +1777,7 @@
       if (state.thinkingTick <= 1) setResearchSteps(card, 0, 0);
       else if (state.thinkingTick === 2) setResearchSteps(card, 1, 1);
       else setResearchSteps(card, 2, 2);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : Math.min(0.62, 0.18 + state.stepCount * 0.06));
     } else if (state.state === 'researching') {
       refs.title.textContent = '深入研究中';
       refs.status.textContent = opts.statusText || AI_RESEARCH_RESEARCH_TEXTS[state.researchTick % AI_RESEARCH_RESEARCH_TEXTS.length];
@@ -1808,24 +1785,29 @@
       syncResearchElapsed(card, state.elapsedMs || 0);
       if (state.researchTick <= 1) setResearchSteps(card, 1, 1);
       else setResearchSteps(card, 2, 2);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : Math.min(0.9, 0.68 + Math.max(state.searchCount || 0, state.researchTick) * 0.04));
     } else if (state.state === 'responding') {
       refs.title.textContent = '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
       refs.status.textContent = '正在生成回答...';
       refs.meta.textContent = '';
       setResearchSteps(card, 3, 3);
+      updateResearchProgress(card, 0.96);
     } else if (state.state === 'done') {
       refs.title.textContent = '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
       refs.status.textContent = '研究摘要已生成，可展开查看思考过程。';
       refs.meta.textContent = '';
       setResearchSteps(card, -1, 4);
+      updateResearchProgress(card, 1);
     } else if (state.state === 'cancelled') {
       refs.title.textContent = '思考已停止';
       refs.status.textContent = '已停止本次深入研究。';
       refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.18, state.progress || 0));
     } else if (state.state === 'error') {
       refs.title.textContent = '研究失败，请重试';
       refs.status.textContent = opts.statusText || '本次深入研究未能完成。';
       refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     }
 
     if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
@@ -1981,6 +1963,8 @@
       researchTick: 0,
       stepCount: options.stepCount || 0,
       searchCount: options.searchCount || 0,
+      persistExpanded: !!options.expanded,
+      progress: typeof options.progress === 'number' ? options.progress : 0.08,
       elapsedTimer: null,
       animator: null
     };
@@ -1999,7 +1983,17 @@
         var target = ev.target;
         if (target && target.closest && target.closest('.ai-research-stop')) return;
         if (!card._researchState.canToggle) return;
-        setResearchDisclosure(card, card.classList.contains('collapsed'));
+        var nextExpanded = card.classList.contains('collapsed');
+        card._researchState.persistExpanded = nextExpanded;
+        setResearchDisclosure(card, nextExpanded);
+      });
+    }
+    if (refs && refs.details) {
+      refs.details.addEventListener('toggle', function() {
+        if (!card._researchState.canToggle) return;
+        card._researchState.persistExpanded = !!refs.details.open;
+        card.classList.toggle('expanded', !!refs.details.open);
+        card.classList.toggle('collapsed', !refs.details.open);
       });
     }
     setResearchDisclosure(card, !!options.expanded && !!options.canToggle);
@@ -2068,29 +2062,45 @@
         return;
       }
       if (evt.type === 'deep_think_stage') {
-        if (evt.stage === 'init') setResearchCardState(card, 'preparing', { elapsedMs: research.elapsedMs || 0 });
-        else if (evt.stage === 'agent') setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0 });
-        else if (evt.stage === 'searching') setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0 });
-        else if (evt.stage === 'done') setResearchCardState(card, 'done', { durationMs: research.durationMs || research.elapsedMs || 0, expanded: false });
-        else if (evt.stage === 'error') setResearchCardState(card, 'error', { statusText: '鐮旂┒澶辫触锛岃閲嶈瘯', expanded: false });
+        if (evt.stage === 'init') setResearchCardState(card, 'preparing', { elapsedMs: research.elapsedMs || 0, progress: 0.08 });
+        else if (evt.stage === 'agent') setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.12, 0.22) });
+        else if (evt.stage === 'searching') setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.66, 0.72) });
+        else if (evt.stage === 'done') setResearchCardState(card, 'done', { durationMs: research.durationMs || research.elapsedMs || 0, expanded: false, progress: 1 });
+        else if (evt.stage === 'error') setResearchCardState(card, 'error', { statusText: '研究失败，请重试', expanded: false });
         return;
       }
       if (evt.type === 'deep_think_tool') {
-        setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0 });
+        var nextSearchCount = Math.max((research.searchCount || 0) + 1, 1);
+        setResearchCardState(card, 'researching', {
+          elapsedMs: research.elapsedMs || 0,
+          searchCount: nextSearchCount,
+          progress: Math.min(0.9, Math.max(research.progress || 0.68, 0.68 + nextSearchCount * 0.05))
+        });
         return;
       }
       if (evt.type === 'thinking_chunk') {
         if (!card._thinkingLog) card._thinkingLog = [];
         card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
-        setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0 });
+        setResearchCardState(card, 'thinking', {
+          elapsedMs: research.elapsedMs || 0,
+          stepCount: card._thinkingLog.length,
+          allowToggle: card._thinkingLog.length > 0,
+          progress: Math.min(0.62, 0.18 + card._thinkingLog.length * 0.06)
+        });
         return;
       }
       if (evt.type === 'done') {
-        setResearchCardState(card, 'done', { durationMs: evt.think_duration_ms || research.elapsedMs || 0, expanded: false, agentCount: evt.agent_count || research.agentCount || 0, searchCount: evt.search_count || 0 });
+        setResearchCardState(card, 'done', {
+          durationMs: evt.think_duration_ms || research.elapsedMs || 0,
+          expanded: false,
+          agentCount: evt.agent_count || research.agentCount || 0,
+          searchCount: evt.search_count || 0,
+          progress: 1
+        });
         return;
       }
       if (evt.type === 'error') {
-        setResearchCardState(card, 'error', { statusText: evt.error || '鐮旂┒澶辫触锛岃閲嶈瘯', expanded: false });
+        setResearchCardState(card, 'error', { statusText: evt.error || '研究失败，请重试', expanded: false });
         return;
       }
     }
@@ -4732,9 +4742,6 @@ function showChatMessages() {
     englishBtn.className = 'ai-english-toggle';
     englishBtn.setAttribute('aria-label', '英语学习');
     englishBtn.title = '英语学习 - 单词库与 AI 阅读练习';
-    // 涔︽湰鍥炬爣
-    var englishSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>';
-    // 鈽?瀹夊叏: 鐢?DOM API 鑰岄潪 innerHTML
     var englishSvgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     englishSvgEl.setAttribute('viewBox', '0 0 24 24');
     englishSvgEl.setAttribute('width', '14');
@@ -4772,7 +4779,17 @@ function showChatMessages() {
       try {
         if (ev && ev.preventDefault) ev.preventDefault();
         if (ev && ev.stopPropagation) ev.stopPropagation();
-        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+        if (typeof window.__xtjEnsureEnglishLearningLoaded === 'function') {
+          window.__xtjEnsureEnglishLearningLoaded().then(function() {
+            if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
+              window.EnglishLearning.open();
+              return;
+            }
+            try { notify('英语学习模块加载中，请稍后再试'); } catch (e2) {}
+          }).catch(function() {
+            try { notify('英语学习模块加载失败，请稍后再试'); } catch (e2) {}
+          });
+        } else if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
           window.EnglishLearning.open();
         } else {
           try { notify('英语学习模块加载中，请稍后再试'); } catch (e) {}
