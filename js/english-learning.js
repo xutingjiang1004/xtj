@@ -680,9 +680,84 @@
   }
 
   /**
-   * 批量导入: 默认调 deepseek 解析 (后端 /english/parse-batch)
-   * AI 失败时回退到本地规则解析
+   * 批量导入: 本地解析为主, AI 只补充释义
    */
+  function stripBatchNoise(line) {
+    return String(line || '')
+      .replace(/^[\s\-*•·]+/, '')
+      .replace(/^\s*\d+[\.\)、\)]\s*/, '')
+      .replace(/^\s*[①②③④⑤⑥⑦⑧⑨⑩]\s*/, '')
+      .replace(/\/[^\/\n]{1,40}\//g, ' ')
+      .replace(/\[[^\]\n]{1,40}\]/g, ' ')
+      .trim();
+  }
+
+  function cleanBatchWord(en) {
+    return String(en || '')
+      .replace(/^[^a-zA-Z]+/, '')
+      .replace(/[^a-zA-Z\s\-']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function cleanBatchMeaning(cn) {
+    return String(cn || '')
+      .replace(/^[\s:：\-–—=,，;；|\/]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function pushBatchParsed(list, seen, en, cn) {
+    en = cleanBatchWord(en);
+    cn = cleanBatchMeaning(cn);
+    if (!en || !/^[a-zA-Z][a-zA-Z\s\-']{0,59}$/.test(en)) return false;
+    var key = en.toLowerCase();
+    if (seen[key]) {
+      if (cn && !seen[key].cn) seen[key].cn = cn;
+      return false;
+    }
+    var item = { en: key, cn: cn || '' };
+    seen[key] = item;
+    list.push(item);
+    return true;
+  }
+
+  function parseBatchWordsLocal(text) {
+    var parsed = [];
+    var seen = {};
+    text = String(text || '')
+      .replace(/\r/g, '\n')
+      .replace(/[，、]/g, ',')
+      .replace(/[；;]/g, '\n');
+
+    var roughParts = [];
+    text.split('\n').forEach(function(line) {
+      line = stripBatchNoise(line);
+      if (!line) return;
+      if (line.indexOf(',') >= 0 && !/[\u4e00-\u9fa5]/.test(line)) {
+        line.split(',').forEach(function(p) {
+          p = stripBatchNoise(p);
+          if (p) roughParts.push(p);
+        });
+      } else {
+        roughParts.push(line);
+      }
+    });
+
+    roughParts.forEach(function(line) {
+      line = stripBatchNoise(line);
+      if (!line) return;
+      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:：\-–—=|\/]+([\u4e00-\u9fa5].*)$/);
+      if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
+      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:：\-–—=|\/]+(.+)$/);
+      if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
+      m = line.match(/[a-zA-Z][a-zA-Z\s\-']{0,59}/);
+      if (m) { pushBatchParsed(parsed, seen, m[0], ''); }
+    });
+    return parsed;
+  }
+
   async function doBatchImport(btn) {
     var input = $('elBatchInput');
     if (!input) { notify('批量导入输入框未找到', 'error'); return; }
@@ -690,74 +765,63 @@
     if (!text) { notify('请先输入要导入的单词'); return; }
     if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
 
-    var parsed = null;
-    var aiMode = 'deepseek';
+    // 1) 本地确定性解析优先 — AI 只能补充释义
+    var localParsed = parseBatchWordsLocal(text);
+    var parsedMap = {};
+    localParsed.forEach(function(w) { parsedMap[w.en] = { en: w.en, cn: w.cn || '' }; });
 
-    // 1) 首选: 调 deepseek 解析 (用户要求 AI 自动识别)
+    // 2) AI 只用于补充释义，绝不覆盖本地识别数量
     try {
       var headers = await getAuthHeaders();
       var resp = await fetch(apiBase() + '/english/parse-batch', {
-        method: 'POST',
-        headers: headers,
+        method: 'POST', headers: headers,
         body: JSON.stringify({ text: text, max_count: 120 })
       });
       if (resp.ok) {
         var json = await resp.json();
-        if (json.ok && json.data && Array.isArray(json.data.words) && json.data.words.length) {
-          parsed = json.data.words;
-        }
+        var aiWords = json && json.ok && json.data && Array.isArray(json.data.words) ? json.data.words : [];
+        aiWords.forEach(function(p) {
+          if (!p || !p.en) return;
+          var en = cleanBatchWord(p.en);
+          if (!en) return;
+          if (parsedMap[en]) {
+            if (!parsedMap[en].cn && p.cn) parsedMap[en].cn = cleanBatchMeaning(p.cn);
+          } else {
+            var tmp = []; var seen2 = {};
+            Object.keys(parsedMap).forEach(function(k) { seen2[k] = true; });
+            pushBatchParsed(tmp, seen2, en, p.cn || '');
+            if (tmp.length) parsedMap[en] = tmp[0];
+          }
+        });
       }
-    } catch (e) {
-      // 静默回退
-    }
+    } catch (e) { /* AI 失败不影响导入 */ }
 
-    // 2) 兜底: 本地规则解析 (服务端不可用时)
-    if (!parsed || !parsed.length) {
-      aiMode = 'local';
-      parsed = [];
-      var lines = text.split(/[\n\r,，;；]+/);
-      lines.forEach(function(line) {
-        line = line.trim();
-        if (!line) return;
-        // 优先按 "en cn" 切分 (第一个空白)
-        var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']*?)\s+(.+)$/);
-        if (m) {
-          parsed.push({ en: m[1].trim(), cn: m[2].trim() });
-        } else if (/^[a-zA-Z]/.test(line)) {
-          // 纯英文单词
-          var en = line.replace(/[^a-zA-Z\s\-']/g, '').trim();
-          if (en) parsed.push({ en: en, cn: '' });
-        } else if (/[\u4e00-\u9fa5]/.test(line)) {
-          // 纯中文 -> 单词留空, 由用户后续补
-          parsed.push({ en: '__pending_' + Date.now() + '_' + parsed.length, cn: line });
-        }
-      });
-    }
-
-    if (!parsed || !parsed.length) {
+    var parsed = Object.keys(parsedMap).map(function(k) { return parsedMap[k]; });
+    if (!parsed.length) {
       if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-      notify('没有提取到有效单词, 请检查输入', 'error');
+      notify('没有提取到有效英文单词，请检查输入', 'error');
       return;
     }
 
     var before = S.words.length;
-    var added = 0;
-    var skipped = 0;
+    var existed = 0;
     parsed.forEach(function(p) {
       if (!p || !p.en) return;
-      if (p.en.indexOf('__pending_') === 0) { skipped++; return; }
-      if (addWord(p.en, p.cn || '', true)) added++;
+      var prev = S.words.some(function(w) { return w.en === p.en; }) ? 1 : 0;
+      addWord(p.en, p.cn || '', true);
+      existed += prev;
     });
     var totalAdded = S.words.length - before;
     if (input) input.value = '';
     renderAll();
     if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-    var tip = '';
-    if (aiMode === 'deepseek') tip = '(deepseek 解析) ';
-    else tip = '(本地解析 · 服务端未响应) ';
-    if (totalAdded > 0) notify('批量导入完成 ' + tip + '+' + totalAdded + ' 词' + (skipped ? ' · 跳过' + skipped + '条中文' : ''));
-    else if (skipped) notify('输入是中文, 请直接用 "英文 释义" 格式 ' + tip + '跳过' + skipped + '条');
-    else notify('这些词已经在单词库了 ' + tip);
+
+    notify(
+      '批量导入完成：识别 ' + parsed.length +
+      ' 个，新增 ' + totalAdded +
+      ' 个，已存在 ' + existed +
+      ' 个' + (totalAdded === 0 && existed > 0 ? ' (已在词库中)' : '')
+    );
   }
 
   async function generateQuiz(opts) {
@@ -1672,143 +1736,11 @@
     setDockBarVisible(true);
   }
 
-  function bindEvents() {
-    var back = $('elBackBtn');
-    if (back) back.addEventListener('click', closePage);
-
-    document.querySelectorAll('.el-tab').forEach(function(tab) {
-      tab.addEventListener('click', function() { switchTab(tab.getAttribute('data-eltab')); });
-    });
-
-    var addBtn = $('elAddWordBtn');
-    if (addBtn) addBtn.addEventListener('click', function() {
-      var word = $('elWordInput');
-      var cn = $('elMeaningInput');
-      var w = addWord(word && word.value, cn && cn.value);
-      if (w) {
-        notify('已添加: ' + w.en);
-        if (word) word.value = '';
-        if (cn) cn.value = '';
-        renderAll();
-        if (word) word.focus();
-      }
-    });
-
-    ['elWordInput', 'elMeaningInput'].forEach(function(id) {
-      var input = $(id);
-      if (!input) return;
-      input.addEventListener('keydown', function(ev) {
-        if (ev.key === 'Enter' && !ev.shiftKey) {
-          ev.preventDefault();
-          var btn = $('elAddWordBtn');
-          if (btn) btn.click();
-        }
-      });
-    });
-
-    var wordInput = $('elWordInput');
-    if (wordInput) {
-      var acTimer = null;
-      wordInput.addEventListener('input', function() {
-        if (acTimer) clearTimeout(acTimer);
-        var q = wordInput.value.trim();
-        if (!q) { hideAutocomplete(); return; }
-        acTimer = setTimeout(function() { showAutocomplete(wordInput, getDictMatches(q, 8)); }, 160);
-      });
-      wordInput.addEventListener('focus', function() {
-        var q = wordInput.value.trim();
-        if (q) showAutocomplete(wordInput, getDictMatches(q, 8));
-      });
-      wordInput.addEventListener('blur', function() { setTimeout(hideAutocomplete, 180); });
-    }
-
-    var search = $('elSearchInput');
-    if (search) search.addEventListener('input', function() {
-      S.search = search.value || '';
-      renderWordList();
-    });
-
-    document.querySelectorAll('.el-filter').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        S.filter = btn.getAttribute('data-filter') || 'all';
-        document.querySelectorAll('.el-filter').forEach(function(b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        renderWordList();
-      });
-    });
-
-    var selectAll = $('elSelectAllCb');
-    if (selectAll) selectAll.addEventListener('change', function() {
-      document.querySelectorAll('.el-word-cb').forEach(function(cb) {
-        cb.checked = selectAll.checked;
-        cb.dispatchEvent(new Event('change'));
-      });
-    });
-
-    var delSel = $('elDeleteSelBtn');
-    if (delSel) delSel.addEventListener('click', function() {
-      var ids = Array.from(document.querySelectorAll('.el-word-cb:checked')).map(function(cb) { return cb.getAttribute('data-id'); });
-      if (!ids.length) { notify('请先选择要删除的单词'); return; }
-      if (!confirm('确定删除选中的 ' + ids.length + ' 个单词?')) return;
-      deleteSelected(ids);
-      if (selectAll) selectAll.checked = false;
-      renderAll();
-    });
-
-    document.querySelectorAll('input[name="elType"], input[name="elLevel"]').forEach(function(input) {
-      input.addEventListener('change', function() {
-        refreshChipStates();
-        syncSettingsFromInputs();
-        scheduleSave();
-      });
-    });
-    ['elQuestionCount', 'elArticleLength', 'elFocusMode', 'elTopicInput'].forEach(function(id) {
-      var node = $(id);
-      if (node) node.addEventListener('change', function() {
-        syncSettingsFromInputs();
-        scheduleSave();
-        updateGenInfo();
-      });
-    });
-
-    var gen = $('elGenBtn');
-    if (gen) gen.addEventListener('click', generateQuiz);
-    var submit = $('elSubmitBtn');
-    if (submit) submit.addEventListener('click', submitAnswers);
-    var show = $('elShowAnswerBtn');
-    if (show) show.addEventListener('click', showAllAnswers);
-    var next = $('elNewPracticeBtn');
-    if (next) next.addEventListener('click', function() {
-      hideArticle(); hideQuestions(); hideResult();
-      switchTab('practice');
-      // 不再 scrollIntoView, 避免页面跳到顶部
-    });
-    var topNew = $('elNewChatBtn');
-    if (topNew) topNew.addEventListener('click', function() {
-      hideArticle(); hideQuestions(); hideResult();
-      switchTab('practice');
-    });
-    var clear = $('elDeleteBtn');
-    if (clear) clear.addEventListener('click', function() {
-      if (!confirm('确定清空全部单词吗?')) return;
-      clearAll();
-      renderAll();
-      notify('已清空');
-    });
-    window.addEventListener('resize', function() { setTimeout(updateTabIndicator, 80); });
-  }
-
   function bindEventsSafe() {
     if (S.eventsBound) return;
     S.eventsBound = true;
 
     safeBind('elBackBtn', 'click', closePage);
-
-    safeForEach('.el-tab', function(tab) {
-      safeBindNode(tab, 'click', function() {
-        switchTab(tab.getAttribute('data-eltab'));
-      }, 'el-tab');
-    });
 
     safeBind('elAddWordBtn', 'click', function() {
       handleAddWord();
@@ -1932,8 +1864,6 @@
       setTimeout(updateTabIndicator, 80);
     }, 'window:resize');
 
-    // 初始化 tabs 点击切换 (拖拽调换顺序已禁用, 单词库和练习题位置固定)
-    initTabs();
   }
 
   /* ============================================================
