@@ -1294,6 +1294,7 @@ const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const USER_STYLE_MARKER = '__user_style__';
 const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';
+const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -3811,8 +3812,6 @@ function _getTokenFromRequest(req) {
 }
 
 // ===== 吊销 token 持久化 =====
-const REVOKED_TOKEN_MARKER = '__revoked_token__';
-
 async function persistRevokedToken(token, expiresAt) {
   try {
     await supabase.from('posts').insert([{
@@ -7721,7 +7720,7 @@ async function handleDeepThinkChat(req, res) {
     cancelToken.cancelled = true;
     try { console.log('[DEEP-THINK] client disconnected, reqId:', clientReqId || '?', 'convId:', convId); } catch (e) {}
     try { clearInterval(_heartbeatTimer); } catch (e) {}
-    setTimeout(function() { activeDeepThinkJobs.delete(convId); }, 5000);
+    activeDeepThinkJobs.delete(convId);
   });
 
   try {
@@ -9457,12 +9456,12 @@ function sanitizeEnglishLearningState(input) {
 }
 
 async function loadEnglishLearningRow(userName) {
-  var actorKey = 'english_learning_state:' + userName;
   var { data, error } = await supabase.from('posts')
     .select('id, content, created_at')
     .eq('user_name', userName)
     .eq('media_type', AI_ENGLISH_LEARNING_MARKER)
-    .eq('actor_key', actorKey)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return data || null;
