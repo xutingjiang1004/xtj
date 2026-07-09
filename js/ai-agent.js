@@ -1,4 +1,4 @@
-﻿(function() {
+(function() {
   'use strict';
 
   var ROOT_API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
@@ -28,21 +28,21 @@
     sending: false,
     loading: false,
     loadingMore: false,
-    // 鈽?M: thinking_mode 榛樿浠?low 鏀规垚 max
-    //   鐢ㄦ埛瑕佹眰: 鏅€氳亰澶╅粯璁ゅ氨鐢?max 深度思考?
+    // 鈽?M: thinking_mode 榛樿浠?low 改成 max
+    //   鐢ㄦ埛瑕佹眰: 鏅€氳亰澶╅粯璁ゅ氨鐢?max 深度思考?
     //   绠＄悊鍛樺彲鍦ㄥ悗鍙?/admin/ai-agent/config 鍒囨崲涓?low/medium/high/max
-    //   鏅€氱敤鎴蜂笉鑳藉湪 UI 鍒囨崲 (allow_user_thinking_switch: false)
+    //   鏅€氱敤鎴蜂笉鑳藉湪 UI 切换 (allow_user_thinking_switch: false)
     thinkingMode: 'max',
-    // 鈽?P 鏂板: 深度思考冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
+    // 鈽?P 鏂板: 深度思考冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
     deepThinkEffort: 'max',
-    deepThinkEnabled: true,    // 鍚庣 config.deep_think.enabled
+    deepThinkEnabled: true,    // 后端 config.deep_think.enabled
     // 鈽?M: 深度思考冩ā寮?toggle 鐘舵€?
-    //   寮€鍚悗鏈細璇濇墍鏈夋秷鎭蛋 Planner鈫扺orkers鈫扴ynthesizer 澶?agent 娴佺▼
-    //   鎸佷箙鍖栧埌 localStorage, 閲嶅紑瀵硅瘽妗嗗悗鎭㈠
+    //   寮€鍚悗鏈細璇濇墍鏈夋秷鎭蛋 Planner鈫扺orkers鈫扴ynthesizer 澶?agent 流程
+    //   持久化到 localStorage, 重开对话框后恢复
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
     deepThinkProgressCard: null, // DOM node for progress card
-    dtConversationId: null,      // 深度思考冧簩绾ч〉闈㈠綋鍓嶄細璇?ID锛堜笌鏅€氳亰澶╁垎寮€锛?
+    dtConversationId: null,      // 深度思考冧簩绾ч〉闈㈠綋鍓嶄細璇?ID锛堜笌鏅€氳亰澶╁垎寮€锛?
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -77,7 +77,7 @@
   };
 
   function getAiStatusText() {
-    return '鍦ㄧ嚎';
+    return '在线';
   }
 
   function updateAiStatus() {
@@ -99,7 +99,7 @@
         if (v === undefined || v === null) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
-        else if (k === 'html') node.textContent = v; // 鈽?瀹夊叏: 绂佹 innerHTML, 鏀圭敤 textContent
+        else if (k === 'html') node.textContent = v; // 鈽?瀹夊叏: 绂佹 innerHTML, 改用 textContent
         else if (k === 'style') node.style.cssText = v;
         else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
         else node.setAttribute(k, v);
@@ -145,20 +145,20 @@
       } catch (e) {}
       _copyMenuActive = null;
     }
-    // 鈽?U3: 鍏抽棴鑿滃崟鏃剁珛鍗冲彇娑?pending 鐨?document 鐩戝惉鍣? 閬垮厤绱Н
+    // 鈽?U3: 鍏抽棴鑿滃崟鏃剁珛鍗冲彇娑?pending 鐨?document 鐩戝惉鍣? 閬垮厤绱Н
     if (_menuAbort) {
       try { _menuAbort.abort(); } catch (e) {}
       _menuAbort = null;
     }
   }
 
-  // 娓呯悊妯″瀷 reasoning 鍐呭閲屽父瑙佺殑鏁存鎷彿鍖呰９锛屾彁鍗囧彲璇绘€?
+  // 清理模型 reasoning 鍐呭閲屽父瑙佺殑鏁存鎷彿鍖呰９锛屾彁鍗囧彲璇绘€?
   function cleanReasoningText(txt) {
     if (!txt) return '';
     return String(txt).split('\n').map(function(line) {
       var trimmed = line.trim();
       if (!trimmed) return line;
-      // 浠呭綋鏁磋浠?( 寮€澶淬€佷互 ) 缁撳熬鏃跺幓鎺夋渶澶栧眰鎷彿
+      // 浠呭綋鏁磋浠?( 寮€澶淬€佷互 ) 缁撳熬鏃跺幓鎺夋渶澶栧眰鎷彿
       if (trimmed.charAt(0) === '(' && trimmed.charAt(trimmed.length - 1) === ')') {
         return trimmed.slice(1, -1);
       }
@@ -166,7 +166,7 @@
     }).join('\n');
   }
 
-  // 绠€鍗?Markdown 鈫?HTML 娓叉煋
+  // 绠€鍗?Markdown 鈫?HTML 渲染
   function escapeAttr(val) {
     if (!val) return '';
     return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -185,11 +185,11 @@
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // 鍥剧墖: 鍙厑璁?data:image/ 鍗忚
+    // 鍥剧墖: 鍙厑璁?data:image/ 协议
     s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
       return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
     });
-    // 閾炬帴: 浣跨敤 DOM API 闃?XSS, 鐧藉悕鍗曞崗璁? http:, https:, mailto:
+    // 链接: 使用 DOM API 闃?XSS, 鐧藉悕鍗曞崗璁? http:, https:, mailto:
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
       var cleanHref = String(href).trim();
       var lowerHref = cleanHref.toLowerCase();
@@ -232,7 +232,7 @@
     if (!bubbleEl || !bubbleEl.parentNode) return;
     var _longPressTimer = null;
     var _longPressStarted = false;
-    // 鈽?U3: AbortController 绠＄悊鎵€鏈夌洃鍚櫒, 杞垹闄ゆ椂鍙粺涓€娓呯悊
+    // 鈽?U3: AbortController 绠＄悊鎵€鏈夌洃鍚櫒, 杞垹闄ゆ椂鍙粺涓€娓呯悊
     var _bubbleAbort = new AbortController();
 
     function getBubbleText() {
@@ -252,7 +252,7 @@
       var btn = el('button', {
         type: 'button',
         class: 'ai-copy-btn',
-        text: '澶嶅埗'
+        text: '复制'
       });
       btn.addEventListener('mouseenter', function() { btn.style.background = 'rgba(46,148,101,0.06)'; });
       btn.addEventListener('mouseleave', function() { btn.style.background = ''; });
@@ -270,7 +270,7 @@
       if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
       menu.style.left = Math.max(8, left) + 'px';
       menu.style.top = Math.max(8, top) + 'px';
-      // 鈽?U3: 鐢?AbortController 鍏抽棴鏃х殑 document 鐩戝惉鍣?
+      // 鈽?U3: 鐢?AbortController 关闭旧的 document 鐩戝惉鍣?
       if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
       _menuAbort = new AbortController();
       setTimeout(function() {
@@ -305,7 +305,7 @@
       }
     }
 
-    // 鈽?U3: 鎵€鏈変簨浠剁洃鍚粺涓€閫氳繃 AbortController 绠＄悊
+    // 鈽?U3: 鎵€鏈変簨浠剁洃鍚粺涓€閫氳繃 AbortController 管理
     bubbleEl.addEventListener('pointerdown', startLongPress, { signal: _bubbleAbort.signal });
     bubbleEl.addEventListener('pointerup', cancelLongPress, { signal: _bubbleAbort.signal });
     bubbleEl.addEventListener('pointercancel', cancelLongPress, { signal: _bubbleAbort.signal });
@@ -320,7 +320,7 @@
       if (text) showCopyMenu(ev);
     }, { signal: _bubbleAbort.signal });
 
-    // 鏆撮湶 cleanup 閽╁瓙渚涜蒋鍒犻櫎鏃惰皟鐢?
+    // 暴露 cleanup 閽╁瓙渚涜蒋删除鏃惰皟鐢?
     bubbleEl._aiCleanupBubble = function() {
       try { _bubbleAbort.abort(); } catch (e) {}
       if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
@@ -358,7 +358,7 @@
       document.body.removeChild(ta);
       try { notify('已复制'); } catch (e) {}
     } catch (e) {
-      try { notify('澶嶅埗澶辫触锛岃鎵嬪姩閫夋嫨鏂囨湰'); } catch (e2) {}
+      try { notify('复制失败，请手动选择文本'); } catch (e2) {}
     }
   }
 
@@ -438,7 +438,7 @@
 
   function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
-    // 鈽?U3: 濡傛灉 version 鐩稿悓涓斿凡鏈夊唴瀹? 璺宠繃閲嶅缓 (閬垮厤姣忓垎閽熼噸鏂颁笅杞藉ご鍍?
+    // 鈽?U3: 如果 version 鐩稿悓涓斿凡鏈夊唴瀹? 璺宠繃閲嶅缓 (閬垮厤姣忓垎閽熼噸鏂颁笅杞藉ご鍍?
     if (target._aiAvatarVersion === avatarVersion && target._aiAvatarUrl === avatarUrl && target.children.length > 0) {
       return;
     }
@@ -533,18 +533,18 @@
 
   function getConversationGroupLabel(dateValue) {
     var d = new Date(dateValue || 0);
-    if (isNaN(d.getTime())) return '鏇存棭';
+    if (isNaN(d.getTime())) return '更早';
     var now = new Date();
     var todayKey = normalizeDateKey(now);
     var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     var dateKey = normalizeDateKey(d);
-    if (dateKey === todayKey) return '浠婂ぉ';
-    if (dateKey === normalizeDateKey(yesterday)) return '鏄ㄥぉ';
-    return '鏇存棭';
+    if (dateKey === todayKey) return '今天';
+    if (dateKey === normalizeDateKey(yesterday)) return '昨天';
+    return '更早';
   }
 
   function getConversationPreview(conv) {
-    if (!conv) return '缁х画杩欐瀵硅瘽';
+    if (!conv) return '继续这段对话';
     var preview = conv.summary || conv.preview || conv.last_message || conv.last_message_preview || '';
     preview = String(preview || '').replace(/\s+/g, ' ').trim();
     return preview || '继续这段对话';
@@ -604,8 +604,8 @@
   
   function abortCurrentRequest() {
     clearStreamCleanup();
-    // 鈽?U3 淇: 涓嶅啀瑁?sendBeacon /chat/cancel (鏃?auth 瀵艰嚧 401)
-    // 鐩存帴鍓嶇 AbortController abort 鍗冲彲, 鍚庣 req.on('close') 浼氳嚜鎰熺煡
+    // 鈽?U3 淇: 涓嶅啀瑁?sendBeacon /chat/cancel (鏃?auth 导致 401)
+    // 直接前端 AbortController abort 即可, 后端 req.on('close') 会自感知
     if (S.abortController) {
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
@@ -623,7 +623,7 @@
     S.sending = false;
     S.paused = false;
     S.activeRenderers = [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
   
   function isAdminUser() {
@@ -713,7 +713,7 @@
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
 
-    // 鈽?U3: 鍙敤浜?POST body, 涓嶅厑璁?password_hash 鍑虹幇鍦?GET URL
+    // 鈽?U3: 鍙敤浜?POST body, 涓嶅厑璁?password_hash 鍑虹幇鍦?GET URL
     var un = readUserName();
     var pw = readPwHash();
     var body = {};
@@ -771,7 +771,7 @@
         rawText: rawText ? String(rawText).slice(0, 300) : ''
       };
     } catch (e) {
-      var errMsg = (e && e.message) || '缃戠粶寮傚父';
+      var errMsg = (e && e.message) || '网络异常';
       try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg }); } catch (e5) {}
       return { ok: false, status: 0, data: null, error: errMsg, url: url, rawText: '' };
     }
@@ -805,7 +805,7 @@
   }
 
   function describeError(r, fallback) {
-    if (!r) return fallback || '璇锋眰澶辫触';
+    if (!r) return fallback || '请求失败';
     if (r.status === 401 || r.status === 403) {
       var hasPw = false;
       var hasTok = false;
@@ -814,16 +814,16 @@
       if (!hasPw && !hasTok && window.currentUser && typeof window.refreshUserToken === 'function') {
         try { window.refreshUserToken(true).catch(function() {}); } catch (e3) {}
       }
-      return '鍑嵁寮傚父锛岃閲嶆柊鐧诲綍鍚庡啀浣跨敤 AI 鑱婂ぉ';
+      return '凭据异常，请重新登录后再使用 AI 聊天';
     }
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
-    if (r.status === 429) return 'AI 鑱婂ぉ娆℃暟宸茶揪涓婇檺锛岃绋嶅悗鍐嶈瘯';
-    if (r.status === 502) return 'AI 鏈嶅姟璋冪敤澶辫触锛岃妫€鏌ラ厤缃垨鏈嶅姟鏃ュ織';
+    if (r.status === 429) return 'AI 聊天次数已达上限，请稍后再试';
+    if (r.status === 502) return 'AI 鏈嶅姟璋冪敤失败锛岃妫€鏌ラ厤缃垨鏈嶅姟鏃ュ織';
     if (r.status === 500) return '服务端错误，请稍后再试';
     if (r.status === 0) return '网络异常，请检查连接';
     if (r.error) return r.error;
-    return fallback || '璇锋眰澶辫触';
+    return fallback || '请求失败';
   }
 
   async function ensureConfig() {
@@ -857,12 +857,12 @@
     var parts = [];
     var isAdmin = isAdminUser();
     if (isAdmin) {
-      if (typeof usage.prompt_tokens === 'number') parts.push('杈撳叆 ' + usage.prompt_tokens);
-      if (typeof usage.completion_tokens === 'number') parts.push('杈撳嚭 ' + usage.completion_tokens);
-      if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('鍛戒腑 ' + usage.prompt_cache_hit_tokens);
-      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + usage.prompt_cache_miss_tokens);
+      if (typeof usage.prompt_tokens === 'number') parts.push('输入 ' + usage.prompt_tokens);
+      if (typeof usage.completion_tokens === 'number') parts.push('输出 ' + usage.completion_tokens);
+      if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
+      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) {
-        // 鈽?U3: 鍔ㄦ€?currency 绗﹀彿
+        // 鈽?U3: 鍔ㄦ€?currency 符号
         var currency = usage.currency || 'CNY';
         var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '楼' : '';
         parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
@@ -966,10 +966,10 @@
       start: function() {
         if (stopped || intervalId) return;
         startedAt = Date.now();
-        update('姝ｅ湪鎬濊€冧腑', 0);
+        update('步ｅ湪思考中', 0);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
-          update('姝ｅ湪鎬濊€冧腑', Date.now() - startedAt);
+          update('步ｅ湪思考中', Date.now() - startedAt);
         }, 500);
       },
       stop: function() {
@@ -994,7 +994,7 @@
         }
         stopped = true;
         if (reasoningNode && reasoningNode.isConnected) {
-          setThinkingStatus(reasoningNode, '宸叉€濊€?' + formatThinkingElapsed(ms));
+          setThinkingStatus(reasoningNode, '已思考?' + formatThinkingElapsed(ms));
         }
       }
     };
@@ -1024,8 +1024,8 @@
     return container;
   }
 
-  // 鈽?O 淇 Bug 4: 浠?history 鎭㈠ think-card
-  //   閫€鍑哄璇濇閲嶈繘鍚? deep_think=true 鐨勬秷鎭覆鏌撴垚 think-card
+  // 鈽?O 修复 Bug 4: 浠?history 恢复 think-card
+  //   閫€鍑哄璇濇閲嶈繘鍚? deep_think=true 的消息渲染成 think-card
   // 鈽?Q 閲嶅仛: 鏋佺畝鐗?(涓?handleSendDeepThink 涓€鑷寸粨鏋?
   function buildThinkCardFromHistory(msg, messagesEl, simpleMode) {
     var thinkingLog = Array.isArray(msg.thinking_log) ? msg.thinking_log : [];
@@ -1052,14 +1052,14 @@
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-title">宸叉€濊€?' + formatThinkDuration(thinkDurationMs) + '</span>' +
+          '<span class="ai-think-title">已思考?' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
           '<span class="ai-think-chevron">鈻?/span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           (thinkingLog.length > 0 ?
             '<details class="ai-think-thinking">' +
-              '<summary><span>鏌ョ湅鎬濊€冭繃绋?(' + thinkingLog.length + ' 姝?</span></summary>' +
+              '<summary><span>查看思考过程?(' + thinkingLog.length + ' 步?</span></summary>' +
               '<div class="ai-think-thinking-body"></div>' +
             '</details>' : '') +
           (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
@@ -1067,7 +1067,7 @@
           '<div class="ai-msg-footer"></div>' +
         '</div>';
 
-      // header 鏁磋鍙偣鍑诲睍寮€/鎶樺彔
+      // header 鏁磋鍙偣鍑诲睍寮€/鎶樺彔
       var headerEl = node.querySelector('.ai-think-header');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
@@ -1117,9 +1117,9 @@
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
-        // 鏇存柊 summary 鏄剧ず鍚堝苟鍚庣殑姝ユ暟锛堜袱绉嶆ā寮忛兘鏇存柊锛?
+        // 更新 summary 鏄剧ず鍚堝苟鍚庣殑步ユ暟锛堜袱绉嶆ā寮忛兘鏇存柊锛?
         var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
-        if (summaryTextEl) summaryTextEl.textContent = '鏌ョ湅鎬濊€冭繃绋?(' + mergedLog.length + ' 姝?';
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程?(' + mergedLog.length + ' 步?';
       }
     }
 
@@ -1132,7 +1132,7 @@
       badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
-      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '宸叉悳绱?' + (msg.search_count || 0) }));
+      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索?' + (msg.search_count || 0) }));
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
         if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -1142,7 +1142,7 @@
     return node;
   }
 
-  // 鈽?O 淇 Bug 4: 鏍煎紡鍖?think_duration_ms
+  // 鈽?O 修复 Bug 4: 鏍煎紡鍖?think_duration_ms
   function formatThinkDuration(ms) {
     if (!ms || ms <= 0) return '0s';
     var sec = Math.round(ms / 1000);
@@ -1153,7 +1153,7 @@
 
   function buildMessageNode(msg, messagesEl) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
-    // 鈽?O 淇 Bug 4: deep_think 娑堟伅娓叉煋鎴?ai-think-card (浠?history 鎭㈠)
+    // 鈽?O 修复 Bug 4: deep_think 娑堟伅娓叉煋鎴?ai-think-card (浠?history 恢复)
     if (role === 'assistant' && msg.deep_think === true) {
       return buildThinkCardFromHistory(msg, messagesEl);
     }
@@ -1176,10 +1176,10 @@
       footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
     }
     if (role === 'assistant') {
-      // 鈽?P1 鍏抽敭淇锛氭悳绱㈠窘绔?
-      //   - 1 澶╁唴锛坰earch_expires_at > now锛夛細瀹屾暣鏄剧ず"宸茶仈缃戞悳绱?路 N 鏉＄粨鏋?+ 鍙睍寮€缁撴灉鍒楄〃
+      // 鈽?P1 鍏抽敭淇锛氭悳绱㈠窘绔?
+      //   - 1 天内（search_expires_at > now锛夛細瀹屾暣鏄剧ず"宸茶仈缃戞悳绱?路 N 鏉＄粨鏋?+ 鍙睍寮€缁撴灉鍒楄〃
       //   - 1 澶╁悗锛氬窘绔犱繚鎸佹樉绀猴紝浣嗘爣璁?缁撴灉宸茶繃鏈?
-      //   - 姘歌繙鏄剧ず寰界珷锛堢敤鎴峰師璇?閲嶆柊杩涘璇濇鏄剧ず宸茶仈缃戞悳绱?鎼滃埌澶氬皯鏉′俊鎭?锛?
+      //   - 姘歌繙鏄剧ず寰界珷锛堢敤鎴峰師璇?閲嶆柊杩涘璇濇鏄剧ず宸茶仈缃戞悳绱?鎼滃埌澶氬皯鏉′俊鎭?锛?
       if (msg.search_count > 0) {
         var nowMs = Date.now();
         var expiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
@@ -1192,9 +1192,9 @@
           searchLabel += ' · 搜索：' + queryStr;
         }
         searchBar.textContent = searchLabel;
-        // 1 澶╁唴 + 鏈?results 鏁扮粍 鈫?鍙偣鍑诲睍寮€
+        // 1 澶╁唴 + 鏈?results 鏁扮粍 鈫?鍙偣鍑诲睍寮€
         if (!isExpired && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
-          var expandBtn = el('span', { class: 'ai-search-toggle', text: '灞曞紑' });
+          var expandBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
           searchBar.appendChild(expandBtn);
           var listEl = el('div', { class: 'ai-search-detail', style: 'display:none;' });
           for (var si = 0; si < msg.search_results.length; si++) {
@@ -1224,7 +1224,7 @@
         }
         node.appendChild(searchBar);
       }
-      // 鎼滅储鍒版澶勭粨鏉?
+      // 鎼滅储鍒版澶勭粨鏉?
       var thinkingMode = getMessageThinkingMode(msg);
       if (thinkingMode && thinkingMode !== 'off') {
         var badgeText = msg.thinking_elapsed_ms > 0 ? ('思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms)) : ('思考 ' + thinkingMode);
@@ -1232,10 +1232,10 @@
       }
       if (msg.usage && isAdminUser()) {
         var parts = [];
-        if (msg.usage.prompt_tokens) parts.push('杈撳叆 ' + msg.usage.prompt_tokens);
-        if (msg.usage.completion_tokens) parts.push('杈撳嚭 ' + msg.usage.completion_tokens);
-        if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('鍛戒腑 ' + msg.usage.prompt_cache_hit_tokens);
-        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + msg.usage.prompt_cache_miss_tokens);
+        if (msg.usage.prompt_tokens) parts.push('输入 ' + msg.usage.prompt_tokens);
+        if (msg.usage.completion_tokens) parts.push('输出 ' + msg.usage.completion_tokens);
+        if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
+        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + msg.usage.prompt_cache_miss_tokens);
         if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('楼' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
         if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' 路 ') }));
       }
@@ -1288,7 +1288,7 @@
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
-    // V2: 鏇村揩鑺傚, minChunk=3/maxChunk=12 閰嶅悎 8-20瀛?甯? 娴佺晠涓嶅崱
+    // V2: 更快节奏, minChunk=3/maxChunk=12 配合 8-20瀛?甯? 娴佺晠涓嶅崱
     var minChunk = Math.max(1, options && options.minChunk || 3);
     var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
     if (pending.length <= maxChunk) return pending;
@@ -1320,13 +1320,13 @@
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
-    // V5: 鍩轰簬鏃堕棿鎺ㄨ繘锛岄€傞厤涓嶅悓鍒锋柊鐜囷紱plainStream 鍗曟枃鏈妭鐐?+ 寰壒娆★紝閬垮厤姣忓抚寤鸿妭鐐瑰崱椤?
+    // V5: 鍩轰簬鏃堕棿鎺ㄨ繘锛岄€傞厤涓嶅悓鍒锋柊鐜囷紱plainStream 鍗曟枃鏈妭鐐?+ 寰壒娆★紝閬垮厤姣忓抚寤鸿妭鐐瑰崱椤?
     var lastFrameTime = 0;
     var charsPerMs = options.plainStream ? 0.55 : 0.7;
-    // plainStream 妯″紡锛氬崟鏂囨湰鑺傜偣澶嶇敤锛岄伩鍏嶆瘡甯?createTextNode 瑙﹀彂 reflow
+    // plainStream 妯″紡锛氬崟鏂囨湰鑺傜偣澶嶇敤锛岄伩鍏嶆瘡甯?createTextNode 触发 reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
-    // V3: 鏈熬鍛煎惛绔栫嚎鍏夋爣 (鏇夸唬闂厜鍏夌偣)
+    // V3: 末尾呼吸竖线光标 (替代闪光光点)
     var cursor = null;
     function ensureCursor() {
       if (cursor || finished || cancelled) return;
@@ -1335,7 +1335,7 @@
         cursor.className = 'ai-stream-cursor';
         cursor.setAttribute('aria-hidden', 'true');
         if (options.plainStream && plainTextNode && plainTextNode.parentNode === targetEl) {
-          // 鎻掑湪 plainTextNode 涔嬪悗
+          // 插在 plainTextNode 之后
           if (plainTextNode.nextSibling) targetEl.insertBefore(cursor, plainTextNode.nextSibling);
           else targetEl.appendChild(cursor);
         } else {
@@ -1356,7 +1356,7 @@
 
     function ensurePlainTextNode() {
       if (plainTextNode && plainTextNode.parentNode === targetEl) return plainTextNode;
-      // 鍒濆鍖栨椂鎻掑叆鏂版枃鏈妭鐐癸紙鏀惧湪鍏夋爣鍓嶉潰锛屽厜鏍囧彲鑳藉皻鏈瓨鍦級
+      // 初始化时插入新文本节点（放在光标前面，光标可能尚未存在）
       plainTextNode = document.createTextNode('');
       targetEl.insertBefore(plainTextNode, cursor || null);
       return plainTextNode;
@@ -1374,7 +1374,7 @@
         next = pending;
         pending = '';
       } else {
-        // V5: 鍩轰簬鏃堕棿 budget 鎺ㄨ繘锛屽抚鐜囨棤鍏筹紱plainStream 绱Н鍒扮紦鍐插尯涓€甯у彧鍐欎竴娆?
+        // V5: 基于时间 budget 推进，帧率无关；plainStream 绱Н鍒扮紦鍐插尯涓€甯у彧鍐欎竴娆?
         var frameBudget = Math.max(1, Math.floor(budget || 16));
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 16, frameBudget - next.length) }));
@@ -1386,7 +1386,7 @@
       if (!next) return;
       rendered += next;
       if (options.plainStream) {
-        // 娴佹按妯″紡锛氱疮绉埌 plainTextBuffer锛屼竴娆″啓鍏ュ崟鏂囨湰鑺傜偣锛堜笉姣忓抚寤鸿妭鐐癸級
+        // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
         plainTextBuffer += next;
         var node = ensurePlainTextNode();
         // 鐢?data 璁剧疆鏂囨湰锛岄珮鏁?
@@ -1456,11 +1456,11 @@
         clearFrame();
         finished = true;
         paused = false;
-        // 鍙敤鏈夋晥鍐呭瑕嗙洊, 閬垮厤绌哄瓧绗︿覆娓呮帀宸叉祦寮忔覆鏌撶殑鏂囧瓧
+        // 只用有效内容覆盖, 避免空字符串清掉已流式渲染的文字
         if (typeof finalText === 'string' && finalText.length > 0) rendered = finalText;
         pending = '';
         removeCursor();
-        // 鍏滃簳: 濡傛灉娓叉煋瀹岃繕鏄┖鐨? 鏄剧ず鎻愮ず
+        // 鍏滃簳: 濡傛灉娓叉煋瀹岃繕鏄┖鐨? 鏄剧ず鎻愮ず
         if (!rendered || rendered.trim().length === 0) {
           rendered = 'AI 暂无回复，请重试。';
           targetEl.classList.add('ai-empty-fallback');
@@ -1489,7 +1489,7 @@
         removeCursor();
         pending = '';
         rendered = '';
-        // 濡傛灉宸茬粡 finish锛堟甯稿畬鎴愶級锛屼笉瑕佹竻绌虹洰鏍囧厓绱狅紝閬垮厤鎶婃渶缁堝唴瀹规姽鎺?
+        // 如果已经 finish锛堟甯稿畬鎴愶級锛屼笉瑕佹竻空虹洰鏍囧厓绱狅紝閬垮厤鎶婃渶缁堝唴瀹规姽鎺?
         if (!finished) {
           try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
         }
@@ -1512,13 +1512,13 @@
         keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
-      // 鈽?U3: clamp keyboardHeight 闃叉鏌愪簺娴忚鍣ㄧ畻鍑哄紓甯稿€?
+      // 鈽?U3: clamp keyboardHeight 闃叉鏌愪簺娴忚鍣ㄧ畻鍑哄紓甯稿€?
       var maxKb = Math.round(window.innerHeight * 0.6);
       if (keyboardHeight > maxKb) keyboardHeight = maxKb;
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
 
       if (_isTouchMobile) {
-        // 绉诲姩绔細杈撳叆鏍?position:fixed 娴湪閿洏涓婃柟锛屽鍣ㄤ笉缂╂斁
+        // 绉诲姩绔細杈撳叆鏍?position:fixed 浮在键盘上方，容器不缩放
         if (keyboardHeight > 0) {
           var barRect = inputBar.getBoundingClientRect();
           var rootRect = root.getBoundingClientRect();
@@ -1537,7 +1537,7 @@
           messagesEl.style.paddingBottom = '';
         }
       } else {
-        // 妗岄潰绔細淇濇寔鍘熸湁琛屼负锛堢缉鏀鹃珮搴︼級
+        // 桌面端：保持原有行为（缩放高度）
         updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
         updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
       }
@@ -1613,13 +1613,13 @@
   }
 
   // ===================== M: 深度思考冩ā寮?鈥?杩涘害鍗?/ toggle / cancel =====================
-  // 鍒囨崲深度思考冩ā寮忥細鏀逛负鎵撳紑鐙珛浜岀骇椤甸潰锛屼笉鍐嶅垏鎹㈡櫘閫氳亰澶╃殑 S.deepThink
+  // 鍒囨崲深度思考冩ā寮忥細鏀逛负鎵撳紑鐙珛浜岀骇椤甸潰锛屼笉鍐嶅垏鎹㈡櫘閫氳亰澶╃殑 S.deepThink
   function toggleDeepThink() {
     if (!S.deepThinkEnabled) {
-      notify('深度思考冩ā寮忓凡琚鐞嗗憳鍏抽棴');
+      notify('深度思考模式已被管理员关闭');
       return;
     }
-    // 鏅€氳亰澶╀腑深度思考冨叆鍙ｇ粺涓€璧颁簩绾ч〉闈紝閬垮厤涓庢櫘閫氳亰澶╁叡鐢ㄦ皵娉￠潰鏉?
+    // 鏅€氳亰澶╀腑深度思考冨叆鍙ｇ粺涓€璧颁簩绾ч〉闈紝閬垮厤涓庢櫘閫氳亰澶╁叡鐢ㄦ皵娉￠潰鏉?
     openDeepThinkPage();
   }
 
@@ -1628,10 +1628,10 @@
     if (btn) {
       if (S.deepThink) btn.classList.add('on');
       else btn.classList.remove('on');
-      // 鈽?P 鏂板: 鍚庣绂佺敤鏃舵樉绀虹鐢ㄦ牱寮?
+      // 鈽?P 鏂板: 鍚庣绂佺敤鏃舵樉绀虹鐢ㄦ牱寮?
       if (!S.deepThinkEnabled) {
         btn.classList.add('disabled');
-        btn.setAttribute('title', '深度思考冩ā寮忓凡琚鐞嗗憳鍏抽棴');
+        btn.setAttribute('title', '深度思考模式已被管理员关闭');
       } else {
         btn.classList.remove('disabled');
         btn.removeAttribute('title');
@@ -1639,13 +1639,13 @@
     }
   }
 
-  // 深度思考冨凡鏀逛负鐙珛浜岀骇椤甸潰锛屾櫘閫氳亰澶╀笉鍐嶆仮澶?deepThink 鐘舵€?
+  // 深度思考冨凡鏀逛负鐙珛浜岀骇椤甸潰锛屾櫘閫氳亰澶╀笉鍐嶆仮澶?deepThink 鐘舵€?
   function restoreDeepThinkState() {
     S.deepThink = false;
   }
 
   // 鏋勯€犳繁搴︽€濊€冭繘搴﹀崱鐗?(鏋佺畝椋庢牸)
-  // 鈽?U2 閲嶅仛: 4 瑙掑嚬鏄?sparkle (ChatGPT/Claude 椋庢牸, 鏇夸唬鑿卞舰)
+  // 鈽?U2 重做: 4 瑙掑嚬鏄?sparkle (ChatGPT/Claude 风格, 替代菱形)
   var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
   var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
@@ -2025,11 +2025,11 @@
     card.innerHTML =
       '<div class="ai-progress-header">' +
         '<span class="ai-progress-icon">' + AI_THINK_ICON + '</span>' +
-        '<span class="ai-progress-title">鎬濊€冧腑...</span>' +
+        '<span class="ai-progress-title">思考中...</span>' +
         '<span class="ai-progress-elapsed">0s</span>' +
       '</div>' +
       '<div class="ai-progress-thinking-log" style="display:none"></div>' +
-      '<button type="button" class="ai-progress-stop">鍋滄鎬濊€?/button>';
+      '<button type="button" class="ai-progress-stop">鍋滄鎬濊€?/button>';
     card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -2104,7 +2104,7 @@
         return;
       }
     }
-    // 鈽?U3: 缂撳瓨 querySelector 缁撴灉, 閬垮厤姣忎釜浜嬩欢閮藉仛 DOM 鏌ヨ
+    // 鈽?U3: 缓存 querySelector 结果, 避免每个事件都做 DOM 查询
     if (!card._cached) {
       card._cached = {
         titleText: card.querySelector('.ai-progress-title'),
@@ -2116,10 +2116,10 @@
     var titleText = cached.titleText;
 
     if (evt.type === 'deep_think_stage') {
-      var stageMap = { init: '鍑嗗涓?..', agent: '鎬濊€冧腑...', searching: '鎼滅储涓?..', error: '澶辫触' };
+      var stageMap = { init: '准备中...', agent: '思考中...', searching: '搜索中...', error: '失败' };
       if (titleText) titleText.textContent = stageMap[evt.stage] || evt.stage;
     } else if (evt.type === 'deep_think_tool') {
-      if (titleText) titleText.textContent = '鎼滅储涓?..';
+      if (titleText) titleText.textContent = '搜索中...';
     } else if (evt.type === 'thinking_chunk') {
       if (!card._thinkingLog) card._thinkingLog = [];
       card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
@@ -2127,7 +2127,7 @@
       if (logBox) {
         if (logBox.style.display === 'none') logBox.style.display = '';
         var roleLabel = escapeHtml(evt.agent_role || 'AI');
-        // 鈽?U3: 鍚岃鑹茬疮绉埌鏈€鍚庝竴涓潯鐩?(缂撳瓨 lastEntry 鍔犻€?
+        // 鈽?U3: 鍚岃鑹茬疮绉埌鏈€鍚庝竴涓潯鐩?(缂撳瓨 lastEntry 鍔犻€?
         if (cached.lastEntry && cached.lastEntry._role === roleLabel && cached.lastEntry.parentNode === logBox) {
           var lastChunk = cached.lastEntry.querySelector('.ai-thought-chunk');
           if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
@@ -2158,7 +2158,7 @@
     }
   }
 
-  // 鍙栨秷深度思考冿紙convId 鍙€夛紝浜岀骇椤甸潰浣跨敤 S.dtConversationId锛?
+  // 鍙栨秷深度思考冿紙convId 鍙€夛紝浜岀骇椤甸潰浣跨敤 S.dtConversationId锛?
   function cancelDeepThink(convId) {
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
@@ -2187,7 +2187,7 @@
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     S.abortController = null;
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     // Fire-and-forget cancel to server
     try {
       var token = localStorage.getItem('xtj_user_token');
@@ -2209,28 +2209,28 @@
       if (auth && auth.ok) return true;
       var reason = auth && auth.reason;
       if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
-        notify('閴存潈鍑嵁缂哄け锛岃閫€鍑哄悗閲嶆柊鐧诲綍鍐嶄娇鐢?AI 鑱婂ぉ');
+        notify('鉴权凭证缺失，请退出后重新登录再使用 AI 聊天');
         return false;
       }
       if (reason === 'no_user') {
-        notify('璇峰厛鐧诲綍鍚庡啀浣跨敤 AI 鑱婂ぉ');
+        notify('请先登录后再使用 AI 聊天');
         return false;
       }
     } catch (e) {
       try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
     }
-    notify('鐧诲綍鐘舵€佸紓甯革紝璇峰皾璇曞埛鏂伴〉闈㈠悗閲嶆柊鐧诲綍');
+    notify('登录状态异常，请尝试刷新页面后重新登录');
     return false;
   }
 
-  // ===================== 鍏变韩 SSE 澶勭悊寰幆 =====================
-  // 琚?handleSendDeepThink 鍜?handleDeepThinkPageSend 鍏辩敤
+  // ===================== 共享 SSE 处理循环 =====================
+  // 琚?handleSendDeepThink 鍜?handleDeepThinkPageSend 共用
   async function processDeepThinkSSE(opts) {
     var reader = opts.reader;
     var controller = opts.controller;
     var progressCard = opts.progressCard;
     var reqId = opts.reqId;
-    var aiNodeRef = opts.aiNodeRef;       // { value: null } 寮曠敤, 鍐呴儴鏇存柊
+    var aiNodeRef = opts.aiNodeRef;       // { value: null } 引用, 内部更新
     var aiContentRef = opts.aiContentRef;   // { value: '' }
     var finalMetaRef = opts.finalMetaRef;
     var finalModelRef = opts.finalModelRef;
@@ -2553,7 +2553,7 @@
         if (evt.type === 'done') {
           safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
           S.sending = false; S.paused = false; S.activeRenderers = []; S.abortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
-          if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+          if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
             finalModelRef.value = evt.model || 'deepseek-v4-flash';
@@ -2581,9 +2581,9 @@
   }
 
   // ===================== M: 深度思考冩ā寮忓彂閫?=====================
-  // 鐙珛娴佺▼: 璧?/api/agent/chat (deep_think=true) SSE 闀胯繛鎺?
+  // 鐙珛娴佺▼: 璧?/api/agent/chat (deep_think=true) SSE 闀胯繛鎺?
   //   杩涘害鍗″疄鏃舵洿鏂?(1-10 涓?agent 鐘舵€?
-  //   done 鍚庢覆鏌撴渶缁堢瓟妗?+ [鏉ユ簮N] 鏍囨敞 + 鎼滅储寰界珷
+  //   done 鍚庢覆鏌撴渶缁堢瓟妗?+ [鏉ユ簮N] 标注 + 搜索徽章
   async function handleSendDeepThink(text, input, sendBtn, messagesEl) {
     var originalText = text;
     function restoreInputText() {
@@ -2596,7 +2596,7 @@
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
 
-    // 鈽?U3 P0-3 淇: 鍙湁瀛樺湪鐪熷疄鐨勬棫璇锋眰鏃舵墠 abort, 閬垮厤璇潃鑷繁
+    // 鈽?U3 P0-3 修复: 只有存在真实的旧请求时才 abort, 避免误杀自己
     if (S.abortController || S.deepThinkJob) {
       abortCurrentRequest();
       try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
@@ -2613,14 +2613,14 @@
         S.abortController = null;
         S.paused = false;
         S.activeRenderers = [];
-        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
     
     if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     clearReplyTimer();
 
-    // 1. 杩藉姞 user 娑堟伅
+    // 1. 追加 user 消息
     var nowIso = new Date().toISOString();
     var userMsg = { role: 'user', content: text, created_at: nowIso };
     S.messages.push(userMsg);
@@ -2642,7 +2642,7 @@
     if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
     else { try { input.focus(); } catch (e2) {} }
 
-    // 4. 鍒涘缓 AbortController
+    // 4. 创建 AbortController
     var controller = new AbortController();
     S.abortController = controller;
     S.deepThinkJob = controller;
@@ -2657,7 +2657,7 @@
       client_request_id: reqId,
       deep_think: true,
       chat_mode: 'normal',
-      // 鈽?P 鏂板: 浼犳€濊€冪▼搴︾粰鍚庣 runMultiAgentFlow (鍚庣浼氱敤杩欎釜, 涓嶇敤 config)
+      // 鈽?P 鏂板: 浼犳€濊€冪▼搴︾粰鍚庣 runMultiAgentFlow (后端会用这个, 不用 config)
       thinking_mode: S.deepThinkEffort || 'max'
     });
 
@@ -2665,14 +2665,14 @@
     var aiContent = '';
     var finalMeta = null;
     var finalModel = '';
-    // 鈽?P 鏀? 鐢?S.deepThinkEffort (浠庡悗绔?config 鍚屾) 鏇夸唬鍐欐 'high'
+    // 鈽?P 鏀? 鐢?S.deepThinkEffort (浠庡悗绔?config 同步) 替代写死 'high'
     var finalThinkingMode = S.deepThinkEffort || 'max';
     var streamConvId = null;
     var aiNode = null;
     var aiBubble = null;
     var contentRenderer = null;
-    var answerRenderer = null;  // V2: 娴佸紡绛旀娓叉煋鍣?answer_chunk鐢?
-    var answerStarted = false; // V2: 鏄惁宸茶繘鍏ュ洖绛旈樁娈?
+    var answerRenderer = null;  // V2: 娴佸紡绛旀娓叉煋鍣?answer_chunk鐢?
+    var answerStarted = false; // V2: 鏄惁宸茶繘鍏ュ洖绛旈樁娈?
     var doneReceived = false;
     var evtHandled = false;
 
@@ -2691,7 +2691,7 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-title">鎬濊€冧腑鈥?/span>' +
+          '<span class="ai-think-title">思考中鈥?/span>' +
           '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">鈻?/span>' +
         '</div>' +
@@ -2726,10 +2726,10 @@
       return node;
     }
 
-    // 鈽?O 淇 Bug 4: 鏋勯€?think-card (鍙栦唬鏅€?ai-msg 鑺傜偣)
-    //   鎶樺彔鎬? 澶撮儴鏄剧ず "鈿?宸叉€濊€?38s 路 5 涓?agent" + 鎶樺彔鎸夐挳
+    // 鈽?O 修复 Bug 4: 鏋勯€?think-card (鍙栦唬鏅€?ai-msg 节点)
+    //   鎶樺彔鎬? 澶撮儴鏄剧ず "鈿?已思考?38s 路 5 涓?agent" + 折叠按钮
     //   灞曞紑鎬? 椤堕儴鎬濊€冭繃绋嬫棩蹇?+ 搴曢儴鏈€缁堢瓟妗?(markdown)
-    //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 鎭㈠
+    //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
     function finishThinkCard(node, content, evt) {
       if (node) node.classList.remove('generating');
       if (node) node.classList.add('done');
@@ -2750,7 +2750,7 @@
         content: content,
         reasoning: '',
         created_at: new Date().toISOString(),
-        // 鈽?P 鏀? 鐢?finalThinkingMode (鍚庣鍔ㄦ€? 鏇夸唬鍐欐 'max'
+        // 鈽?P 鏀? 鐢?finalThinkingMode (鍚庣鍔ㄦ€? 鏇夸唬鍐欐 'max'
         thinking_mode: finalThinkingMode,
         deep_think: true,
         agent_count: agentCount,
@@ -2762,7 +2762,7 @@
         search_query: searchQuery,
         search_results: searchResults,
         search_expires_at: searchExpiresAt,
-        // 鈽?P 鏀? usage.thinking_mode 鍚屾瀹為檯鍊?
+        // 鈽?P 鏀? usage.thinking_mode 鍚屾瀹為檯鍊?
         usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount })
       };
       S.messages.push(aiMsg);
@@ -2777,7 +2777,7 @@
         }
         if (answerEl) {
           if (answerRenderer) {
-            // V2: 娴佸紡娓叉煋宸插湪 answer_chunk 涓繘琛? done 鏃跺彧 finish 鎴?markdown
+            // V2: 流式渲染已在 answer_chunk 涓繘琛? done 时只 finish 鎴?markdown
             answerRenderer.finish(contentForRender);
             answerRenderer = null;
             finalizeAnswer();
@@ -2798,7 +2798,7 @@
         var thinkLogBox = node.querySelector('.ai-think-thinking-body');
         if (thinkLogBox && thinkingLog.length > 0) {
           thinkLogBox.innerHTML = '';
-          // 鍚堝苟鍚岃鑹茶繛缁潯鐩?
+          // 鍚堝苟鍚岃鑹茶繛缁潯鐩?
           var mergedLog = [];
           for (var tli = 0; tli < thinkingLog.length; tli++) {
             var mtl = thinkingLog[tli];
@@ -2820,7 +2820,7 @@
           var summaryEl = node.querySelector('.ai-think-thinking summary');
           if (summaryEl) {
             var sumSpan = summaryEl.querySelector('span:last-child');
-            if (sumSpan) sumSpan.textContent = '鏌ョ湅鎬濊€冭繃绋?(' + mergedLog.length + ' 姝?';
+            if (sumSpan) sumSpan.textContent = '查看思考过程?(' + mergedLog.length + ' 步?';
           }
         } else {
           // 娌℃湁鎬濊€冭繃绋? 闅愯棌 details
@@ -2832,7 +2832,7 @@
         if (footer) {
           footer.innerHTML = '';
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          // V2: 绠€娲佹ā寮忔爣绛? 鍘绘帀閲嶅 sparkle
+          // V2: 绠€娲佹ā寮忔爣绛? 鍘绘帀閲嶅 sparkle
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
           if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + searchCount + ' 个来源' }));
@@ -2842,12 +2842,12 @@
           }
         }
 
-        // 鏍囬 + 鏃堕棿 (鏀?header)
+        // 鏍囬 + 鏃堕棿 (鏀?header)
         // Show search sources in think-card
         if (searchResults && searchResults.length > 0 && searchQuery) {
           var searchBox = document.createElement('div');
           searchBox.className = 'ai-search-supplement';
-          var searchHtml = '馃攳 鎼滅储鏉ユ簮: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 鏉＄粨鏋?<br>';
+          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 鏉＄粨鏋?<br>';
           var shownResults = searchResults.slice(0, 5);
           for (var si = 0; si < shownResults.length; si++) {
             var sr = shownResults[si];
@@ -2858,7 +2858,7 @@
             }
           }
           if (searchResults.length > 5) {
-            searchHtml += '<span style="font-size:10px;color:#999">... 杩樻湁 ' + (searchResults.length - 5) + ' 鏉℃潵婧?/span>';
+            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 鏉℃潵婧?/span>';
           }
           searchBox.innerHTML = searchHtml;
           var thinkBody = node.querySelector('.ai-think-body');
@@ -2878,9 +2878,9 @@
         var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
         var titleEl = node.querySelector('.ai-think-title');
         var metaEl = node.querySelector('.ai-think-meta');
-        // V2: 鍘绘帀閲嶅 sparkle (footer 宸叉湁妯″紡鏍囩), header 鍙斁绾枃瀛?宸叉€濊€?Xs"
-        if (titleEl) titleEl.textContent = '宸叉€濊€?' + durationStr;
-        // V2: 鍘绘帀閲嶅 1 agent (footer 宸叉湁 agent-badge), header meta 鐣欑┖
+        // V2: 去掉重复 sparkle (footer 已有模式标签), header 鍙斁绾枃瀛?已思考?Xs"
+        if (titleEl) titleEl.textContent = '已思考?' + durationStr;
+        // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
         if (metaEl) metaEl.textContent = '';
 
         if (node.classList.contains('collapsed')) {
@@ -2898,7 +2898,7 @@
         signal: controller.signal
       });
       if (!resp.ok) {
-        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 澶辫触 ('+resp.status+')'))); } catch(e){}
+        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
         resetSendingIfCurrent(); return;
       }
       if (!resp.body) {
@@ -2935,15 +2935,15 @@
       if (!eh.value) {
         if (r.value && c.value) { finishThinkCard(r.value, c.value, fm.value); }
         else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
-        else if (!dr.value) { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('AI 鏆傛椂娌℃湁鍥炲簲'); }
+        else if (!dr.value) { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('AI 暂时没有回应'); }
       }
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
       safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
       S.paused = false; S.activeRenderers = [];
       if (fetchErr && fetchErr.name !== 'AbortError') {
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'杩炴帴涓柇')); finishThinkCard(r.value, c.value, fm.value); }
-        else { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('缃戠粶寮傚父'); }
+        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
+        else { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('网络异常'); }
       } else {
         if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else { S.messages.pop(); removeLastUserMessage(messagesEl); }
@@ -2962,7 +2962,7 @@
     if (!msgs) return;
     msgs.innerHTML = '';
     msgs.appendChild(el('div', { class: 'dt-empty' }, [
-      el('div', { class: 'dt-empty-icon', text: '馃惥' }),
+      el('div', { class: 'dt-empty-icon', text: '🐾' }),
       el('div', { class: 'dt-empty-title', text: '深度思考' }),
       el('div', { class: 'dt-empty-desc', text: '输入复杂问题，AI 会调用多阶段分析、检索和整理流程来生成回答。' })
     ]));
@@ -2991,17 +2991,17 @@
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
 
-    // 鍏堜粠 localStorage 鎭㈠浼氳瘽 ID锛堝埛鏂伴〉闈㈠悗涔熻兘鎭㈠锛?
+    // 先从 localStorage 恢复会话 ID锛堝埛鏂伴〉闈㈠悗涔熻兘鎭㈠锛?
     if (!S.dtConversationId) {
       try { var saved = localStorage.getItem(DT_CONV_KEY); if (saved) S.dtConversationId = saved; } catch (e) {}
     }
 
-    // 闅愯棌搴曢儴 dock锛岄槻姝簩绾ч〉闈㈠悗闈㈤€忓嚭
+    // 隐藏底部 dock锛岄槻步簩绾ч〉闈㈠悗闈㈤€忓嚭
     setDockBarVisible(false);
 
-    // 宸叉湁浼氳瘽 鈫?濡傛灉娑堟伅鍖轰笉涓虹┖涓斾笉鏄〉闈㈠埛鏂帮紝鐩存帴鏄剧ず缂撳瓨鍐呭
+    // 宸叉湁浼氳瘽 鈫?濡傛灉娑堟伅鍖轰笉涓虹┖涓斾笉鏄〉闈㈠埛鏂帮紝鐩存帴鏄剧ず缂撳瓨鍐呭
     if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading')) {
-      // 宸叉湁缂撳瓨鐨?DOM 鍐呭锛岀洿鎺ユ樉绀?
+      // 宸叉湁缂撳瓨鐨?DOM 鍐呭锛岀洿鎺ユ樉绀?
     } else if (S.dtConversationId) {
       msgs.innerHTML = '';
       var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '鍔犺浇涓?..' });
@@ -3040,7 +3040,7 @@
         if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
       }
     } else {
-      // 棣栨鎵撳紑锛屽垱寤烘柊浼氳瘽
+      // 首次打开，创建新会话
       resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
@@ -3054,17 +3054,17 @@
     panel.classList.remove('hidden');
     panel.classList.add('active');
 
-    // 绛夊緟涓ゅ抚 + 涓€涓皬寤舵椂锛岀‘淇濇墍鏈夊瓙鍏冪礌甯冨眬瀹屾垚锛坢arkdown 娓叉煋銆佸浘鐗囩瓑锛?
-    // 鐒跺悗鐢?scrollIntoView 瀹氫綅鍒版渶鍚庝竴鏉℃秷鎭紝scrollIntoView 鍏煎鎬ф瘮 scrollTop=scrollHeight 鏇村ソ
+    // 绛夊緟涓ゅ抚 + 涓€涓皬寤舵椂锛岀‘淇濇墍鏈夊瓙鍏冪礌甯冨眬瀹屾垚锛坢arkdown 娓叉煋銆佸浘鐗囩瓑锛?
+    // 鐒跺悗鐢?scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
     if (msgs) {
       var scrollToEnd = function() {
         try {
-          // 鎵炬渶鍚庝竴鏉＄敤鎴锋秷鎭垨鍔╂墜娑堟伅
+          // 找最后一条用户消息或助手消息
           var last = msgs.lastElementChild;
           if (last && last !== msgs) {
             try { last.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
           }
-          // 鍏滃簳锛氱洿鎺ヨ scrollTop
+          // 兜底：直接设 scrollTop
           try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
         } catch (e) {}
       };
@@ -3097,7 +3097,7 @@
     if (input) { input.value = ''; input.style.height = 'auto'; }
   }
 
-  // 鏂囦欢涓婁紶鐘舵€?(dt 椤甸潰)
+  // 鏂囦欢涓婁紶鐘舵€?(dt 页面)
   var _dtFileData = null;
 
   async function handleDeepThinkPageSend(text, fileData) {
@@ -3108,21 +3108,21 @@
     var originalUserText = text || '';
     var displayText = text;
 
-    // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
+    // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
     if (fileData) {
       var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
       var isImage2 = fileData.type.startsWith('image/');
       var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
-      // UI 鏄剧ず
+      // UI 显示
       if (isImage2) {
         displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
       } else {
-        displayText = (text ? text + '\n' : '') + '[馃搫 ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
       }
-      // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁?
+      // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁?
       var serverTag2 = isImage2
-        ? '[鍥剧墖: ' + safeName + ' 路 ' + sizeKB2 + 'KB]'
-        : '[鏂囦欢: ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
+        ? '[图片: ' + safeName + ' 路 ' + sizeKB2 + 'KB]'
+        : '[文件: ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
       text = text ? text + '\n' + serverTag2 : serverTag2;
     }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); S.sending = false; return; }
@@ -3134,10 +3134,10 @@
       try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
     }
 
-    // 鈽?蹇€熷弻鍑诲幓閲嶏細鍚屼竴绉掑唴鐩稿悓鏂囨湰鐨勮姹傚拷鐣?
+    // 鈽?蹇€熷弻鍑诲幓閲嶏細鍚屼竴绉掑唴鐩稿悓鏂囨湰鐨勮姹傚拷鐣?
     var dedupKey = text + Math.floor(Date.now() / 1000);
     if (S._lastDtDedupKey === dedupKey) {
-      try { notify('宸插彂閫侊紝璇峰嬁閲嶅鐐瑰嚮'); } catch (e) {}
+      try { notify('已发送，请勿重复点击'); } catch (e) {}
       S.sending = false;
       return;
     }
@@ -3165,23 +3165,23 @@
         S.paused = false;
         S.activeRenderers = [];
         var dtPB = document.getElementById('dtPauseBtn');
-        if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '鏆傚仠'; }
+        if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
       }
     }
     S.sending = true;
     clearReplyTimer();
 
-    // 鏄剧ず鏆傚仠鎸夐挳
+    // 显示暂停按钮
     var dtPauseBtn = document.getElementById('dtPauseBtn');
-    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '鏆傚仠'; }
+    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '暂停'; }
 
-    // 1. 杩藉姞 user 娑堟伅锛堟墜鍔ㄥ垱寤?.dt-msg.user锛屼笉浣跨敤姘旀场锛?
+    // 1. 追加 user 娑堟伅锛堟墜鍔ㄥ垱寤?.dt-msg.user锛屼笉浣跨敤姘旀场锛?
     var empty = dtMessagesEl.querySelector('.dt-empty');
     if (empty) { try { empty.remove(); } catch (e) {} }
     var userNode = el('div', { class: 'dt-msg user' });
     userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
     var userContent = el('div', { class: 'dt-msg-content' });
-    // 娓叉煋 markdown (鍖呭惈鍥剧墖 data URL 鎴栨枃浠跺崰浣?
+    // 渲染 markdown (包含图片 data URL 鎴栨枃浠跺崰浣?
     var renderFn = window.renderMarkdown || renderMarkdown;
     userContent.innerHTML = renderFn(displayText);
     userNode.appendChild(userContent);
@@ -3204,7 +3204,7 @@
     if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
     else { try { input.focus(); } catch (e2) {} }
 
-    // 4. 鍒涘缓 AbortController
+    // 4. 创建 AbortController
     var controller = new AbortController();
     S.abortController = controller;
     S.deepThinkJob = controller;
@@ -3422,10 +3422,10 @@
         signal: controller.signal
       });
       if (!resp.ok) {
-        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 澶辫触 ('+resp.status+')'))); } catch(e){}
+        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
         resetSendingIfCurrent(); return;
       }
-      if (!resp.body) { safeRemoveProgressCard(); notify('AI 娌℃湁鍝嶅簲'); resetSendingIfCurrent(); return; }
+      if (!resp.body) { safeRemoveProgressCard(); notify('AI 没有响应'); resetSendingIfCurrent(); return; }
 
       var reader = resp.body.getReader();
       var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
@@ -3498,7 +3498,7 @@
     scrollToBottom(dtMessagesEl, false);
   }
 
-  var _dtListeners = []; // 瀛樺偍浜嬩欢鐩戝惉寮曠敤鐢ㄤ簬娓呴櫎
+  var _dtListeners = []; // 存储事件监听引用用于清除
 
   function bindDeepThinkPageEvents() {
     var backBtn = document.getElementById('dtBackBtn');
@@ -3511,7 +3511,7 @@
     var fileInput = document.getElementById('dtFileInp');
     var filePreview = document.getElementById('dtFilePreview');
 
-    // 娓呴櫎涔嬪墠鐨勭洃鍚櫒锛堥槻姝㈤噸澶嶇粦瀹氭硠婕忥級
+    // 清除之前的监听器（防止重复绑定泄漏）
     _dtListeners.forEach(function(fn) { try { fn(); } catch (e) {} });
     _dtListeners = [];
 
@@ -3533,13 +3533,13 @@
       handleDeepThinkPageSend(text, fData);
     }
 
-    // 鏂囦欢涓婁紶
+    // 文件上传
     if (fileBtn && fileInput) {
       fileBtn.addEventListener('click', function() { fileInput.click(); });
       fileInput.addEventListener('change', function() {
         var f = this.files && this.files[0];
         if (!f) return;
-        if (f.size > 7 * 1024 * 1024) { notify('鏂囦欢涓嶈兘瓒呰繃 7MB (data URL 缂栫爜鍚?'); return; }
+        if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB（data URL 编码后）?'); return; }
         var reader = new FileReader();
         reader.onload = function(e) {
           _dtFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
@@ -3547,7 +3547,7 @@
             filePreview.innerHTML = '';
             var thumb = f.type.startsWith('image/')
               ? el('img', { src: e.target.result, class: 'ai-file-thumb' })
-              : el('div', { class: 'ai-file-icon' }, '馃搫');
+              : el('div', { class: 'ai-file-icon' }, '📄');
             var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
             var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
             removeBtn.addEventListener('click', function() {
@@ -3609,10 +3609,10 @@
             saveDtConvId();
           }
         } else {
-          notify('鍒犻櫎澶辫触');
+          notify('删除失败');
         }
       } catch (e) {
-        notify('鍒犻櫎澶辫触');
+        notify('删除失败');
       } finally {
         delBtn.disabled = false;
       }
@@ -3620,7 +3620,7 @@
 
     if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
 
-    // 鏆傚仠鎸夐挳锛氱湡姝ｄ腑姝?SSE 璇锋眰 + 鏆傚仠娓叉煋
+    // 鏆傚仠鎸夐挳锛氱湡步ｄ腑步?SSE 请求 + 暂停渲染
     if (pauseBtn) {
       pauseBtn.addEventListener('click', function(ev) {
         ev.preventDefault();
@@ -3630,13 +3630,13 @@
         if (anyPaused) {
           if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
           S.paused = false;
-          pauseBtn.textContent = '鏆傚仠';
+          pauseBtn.textContent = '暂停';
         } else {
           try { if (S.abortController) S.abortController.abort(); } catch (e) {}
           try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
           if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
           S.paused = true;
-          pauseBtn.textContent = '缁х画';
+          pauseBtn.textContent = '继续';
         }
       });
     }
@@ -3656,7 +3656,7 @@
       });
     }
 
-    // 娣卞害鐮旂┒椤甸潰婊氬姩鐩戝惉锛氱敤鎴峰悜涓婄炕鏃跺仠姝㈣嚜鍔ㄦ粴鍔?
+    // 娣卞害鐮旂┒椤甸潰婊氬姩鐩戝惉锛氱敤鎴峰悜涓婄炕鏃跺仠步㈣嚜鍔ㄦ粴鍔?
     var dtMessagesEl = document.getElementById('dtMessages');
     if (dtMessagesEl) {
       addDtListener(dtMessagesEl, 'scroll', function() {
@@ -3668,22 +3668,22 @@
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
     var displayText = text;
-    // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
+    // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
     if (fileData) {
       var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
       var isImage = fileData.type.startsWith('image/');
-      // 浼扮畻鏂囦欢澶у皬锛坉ata URL 绾?4/3 鍊嶅師濮嬪ぇ灏忥級
+      // 估算文件大小（data URL 绾?4/3 倍原始大小）
       var sizeKB = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
-      // UI 鏄剧ず
+      // UI 显示
       if (isImage) {
         displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
       } else {
-        displayText = (text ? text + '\n' : '') + '[馃搫 ' + safeName + ' 路 ' + sizeKB + 'KB]';
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' 路 ' + sizeKB + 'KB]';
       }
-      // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁帮紝涓嶅惈澶?data URL
+      // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁帮紝涓嶅惈澶?data URL
       var serverTag = isImage
-        ? '[鍥剧墖: ' + safeName + ' 路 ' + sizeKB + 'KB]'
-        : '[鏂囦欢: ' + safeName + ' 路 ' + sizeKB + 'KB]';
+        ? '[图片: ' + safeName + ' 路 ' + sizeKB + 'KB]'
+        : '[文件: ' + safeName + ' 路 ' + sizeKB + 'KB]';
       text = text ? text + '\n' + serverTag : serverTag;
     }
     if (!text) { S.sending = false; return; }
@@ -3693,11 +3693,11 @@
       return;
     }
 
-    // 鈽?绔嬪嵆鏍囪鍙戦€佷腑锛岄槻姝㈠苟鍙戠珵鎬?
+    // 鈽?绔嬪嵆鏍囪鍙戦€佷腑锛岄槻步㈠苟鍙戠珵鎬?
     S.sending = true;
 
-    // 鈽?U3: 深度思考冨凡杩佽嚦鐙珛浜岀骇椤甸潰, 鏅€氳亰澶╀笉鍐嶆湁 deepThink 鍒嗘敮
-    // (鍒犻櫎 S.deepThink 姝讳唬鐮? 淇濈暀 S.sending=true 闃叉骞跺彂)
+    // 鈽?U3: 深度思考冨凡杩佽嚦鐙珛浜岀骇椤甸潰, 鏅€氳亰澶╀笉鍐嶆湁 deepThink 分支
+    // (删除 S.deepThink 步讳唬鐮? 淇濈暀 S.sending=true 防止并发)
 
     var originalText = text;
     
@@ -3714,17 +3714,17 @@
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
     
-    // 蹇€熷弻鍑诲幓閲嶏細鍚屼竴绉掑唴鐩稿悓鏂囨湰鐨勮姹傚拷鐣?
+    // 蹇€熷弻鍑诲幓閲嶏細鍚屼竴绉掑唴鐩稿悓鏂囨湰鐨勮姹傚拷鐣?
     var msgDedupKey = text + Math.floor(Date.now() / 1000);
     if (S._lastMsgDedupKey === msgDedupKey) {
-      // 鈽?U3: 缁熶竴琛屼负, 鎻愮ず鐢ㄦ埛閬垮厤鍥版儜
-      try { notify('宸插彂閫侊紝璇峰嬁閲嶅鐐瑰嚮'); } catch (e) {}
+      // 鈽?U3: 统一行为, 提示用户避免困惑
+      try { notify('已发送，请勿重复点击'); } catch (e) {}
       S.sending = false;
       return;
     }
     S._lastMsgDedupKey = msgDedupKey;
     
-    // 濡傛灉鏈夋鍦ㄨ繘琛岀殑璇锋眰锛屼腑鏂畠
+    // 如果有正在进行的请求，中断它
     if (S.sending && S.abortController) {
       abortCurrentRequest();
       try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
@@ -3739,7 +3739,7 @@
         S.abortController = null;
         S.paused = false;
         S.activeRenderers = [];
-        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
     S.sending = true;
@@ -3769,7 +3769,7 @@
     
     var aborted = false;
     
-    // 鍒涘缓 AbortController
+    // 创建 AbortController
     var controller = new AbortController();
     S.abortController = controller;
     S.currentStreamAborted = false;
@@ -3808,12 +3808,12 @@
       
       if (!resp.body) {
         try { typingNode.remove(); } catch (e) {}
-        notify('AI 娌℃湁鍝嶅簲');
+        notify('AI 没有响应');
         resetSendingIfCurrent();
         return;
       }
       
-      // 璇诲彇 SSE 娴?
+      // 读取 SSE 娴?
       var reader = resp.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
@@ -3841,7 +3841,7 @@
         }
         if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
 
-        // 鍒ゆ柇鏄惁鏈夋湁鏁堟鏂囷紱娌℃湁鏃剁粰鍑哄厹搴曟彁绀猴紝閬垮厤姘旀场瀹屽叏绌虹櫧
+        // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
         var hasContent = !!(content && String(content).trim().length > 0);
         var hasThinking = !!(thinking && String(thinking).trim().length > 0);
         var fallbackText = hasThinking ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复，请重试。';
@@ -3850,11 +3850,11 @@
           if (hasContent) {
             contentRenderer.finish(content);
           } else {
-            // 绌哄唴瀹规椂浠嶈皟鐢?finish锛岃娓叉煋鍣ㄥ唴閮ㄥ厹搴曟樉绀烘彁绀?
+            // 空哄唴瀹规椂浠嶈皟鐢?finish锛岃娓叉煋鍣ㄥ唴閮ㄥ厹搴曟樉绀烘彁绀?
             contentRenderer.finish(fallbackText);
           }
         }
-        // 鍏滃簳: 鏃犺娓叉煋鍣ㄧ姸鎬佸浣? 鐩存帴寰€姘旀场鍐欏唴瀹癸紙淇濈暀 markdown 鏍煎紡锛?
+        // 鍏滃簳: 鏃犺娓叉煋鍣ㄧ姸鎬佸浣? 鐩存帴寰€姘旀场鍐欏唴瀹癸紙淇濈暀 markdown 鏍煎紡锛?
         if (aiBubble) {
           aiBubble.innerHTML = renderMarkdown(hasContent ? content : fallbackText);
         }
@@ -3886,7 +3886,7 @@
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
             } else {
-              setThinkingStatus(rNode, '宸叉€濊€?' + formatThinkingElapsed(finalThinkingElapsedMs));
+              setThinkingStatus(rNode, '已思考?' + formatThinkingElapsed(finalThinkingElapsedMs));
             }
           }
         } else if (reasoningContainer) {
@@ -3917,7 +3917,7 @@
         S.messages.push(aiMsg);
         
         if (node) {
-          // 濡傛灉鏈夋悳绱㈢粨鏋滐紝鎶婂凡鏈夌殑鎼滅储鏉＄Щ鍏ユ秷鎭妭鐐癸紙鑰岄潪鍗曠嫭鍦?container 閲岋級
+          // 濡傛灉鏈夋悳绱㈢粨鏋滐紝鎶婂凡鏈夌殑鎼滅储鏉＄Щ鍏ユ秷鎭妭鐐癸紙鑰岄潪鍗曠嫭鍦?container 里）
           var liveSearchBar = null;
           if (searchCount > 0) {
             liveSearchBar = messagesEl.querySelector('.ai-search-status');
@@ -3925,7 +3925,7 @@
           if (liveSearchBar) {
             node.appendChild(liveSearchBar);
           } else if (searchCount > 0) {
-            // 娌℃湁鐩存挱鎼滅储鏉★紙濡傚巻鍙查噸寤猴級锛屽垱寤轰竴涓畝鐗?
+            // 娌℃湁鐩存挱鎼滅储鏉★紙濡傚巻鍙查噸寤猴級锛屽垱寤轰竴涓畝鐗?
             var sb = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + searchCount + ' 条结果' });
             var sq = searchQuery || '';
             if (sq) {
@@ -3993,7 +3993,7 @@
           reasoningContainer = aiNode.querySelector('.ai-thinking');
         }
         if (!reasoningContainer) {
-          reasoningContainer = buildReasoningNode('鎬濊€冧腑...', messagesEl);
+          reasoningContainer = buildReasoningNode('思考中...', messagesEl);
           aiNode.insertBefore(reasoningContainer, aiNode.firstChild);
           setThinkingExpanded(reasoningContainer, true, messagesEl);
         }
@@ -4057,7 +4057,7 @@
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
           if (!evt) continue;
           
-          // 妫€鏌ユ槸鍚﹁鏂拌姹傚彇浠?
+          // 妫€鏌ユ槸鍚﹁鏂拌姹傚彇浠?
           if (S._currentReqId !== reqId) { aborted = true; break; }
           
           if (evt.type === 'meta') {
@@ -4081,11 +4081,11 @@
             }
           }
 
-          // 鎬濊€冨悗琛ュ厖鎼滅储锛氶噸缃唴瀹圭姸鎬佷互鎺ユ敹鏂颁竴杞?stream锛屼繚鐣欏凡鏄剧ず鐨勬€濊€冭繃绋?
+          // 鎬濊€冨悗琛ュ厖鎼滅储锛氶噸缃唴瀹圭姸鎬佷互鎺ユ敹鏂颁竴杞?stream锛屼繚鐣欏凡鏄剧ず鐨勬€濊€冭繃绋?
           if (evt.type === 'search_supplement') {
             var searchNote = el('div', { class: 'ai-search-supplement', text: '正在联网补充信息...' });
             if (aiNode && aiNode.parentElement) aiNode.parentElement.appendChild(searchNote);
-            // 娓呯┖鏃у唴瀹癸紝璁╃浜岃疆 stream 閲嶆柊鐢熸垚
+            // 清空旧内容，让第二轮 stream 重新生成
             cleanupRenderers();
             try { typingNode.remove(); } catch (e) {}
             if (aiBubble) try { aiBubble.innerHTML = ''; } catch (e) {}
@@ -4120,7 +4120,7 @@
                 summaryText += ' (' + firstProv.provider + ')';
               }
             }
-            // 娓呯┖骞堕噸寤猴紙閬垮厤閲嶅 append锛?
+            // 清空并重建（避免重复 append锛?
             searchBar.innerHTML = '';
             searchBar.textContent = summaryText;
             var resultsArr = evt.results;
@@ -4135,7 +4135,7 @@
               if (queryStr) {
                 detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
               }
-              // 鍒楄〃
+              // 列表
               for (var ri = 0; ri < resultsArr.length; ri++) {
                 var r = resultsArr[ri];
                 var itemEl = el('div', { class: 'ai-search-detail-item' });
@@ -4167,8 +4167,8 @@
               searchBar2 = el('div', { class: 'ai-search-status' });
               messagesEl.appendChild(searchBar2);
             }
-            searchBar2.textContent = evt.error || '鑱旂綉鎼滅储澶辫触';
-            // 鏄剧ず璇︾粏澶辫触鍘熷洜锛堝彲灞曞紑锛?
+            searchBar2.textContent = evt.error || '联网搜索失败';
+            // 鏄剧ず璇︾粏失败鍘熷洜锛堝彲灞曞紑锛?
             if (searchDiag2) {
               var errorDetail = el('div', { style: 'font-size:10px;color:#999;margin-top:2px;max-height:60px;overflow:hidden;text-overflow:ellipsis;line-height:1.3;' });
               if (searchDiag2.provider_errors && searchDiag2.provider_errors.length) {
@@ -4259,16 +4259,16 @@
           
           if (evt.type === 'error') {
             try { typingNode.remove(); } catch (e) {}
-            var errMsg = evt.error || 'AI 璋冪敤澶辫触';
+            var errMsg = evt.error || 'AI 调用失败';
             
             if (aiContent) {
-              // 宸叉湁閮ㄥ垎鍥炲锛屼繚鐣欏唴瀹瑰苟杩藉姞閿欒鎻愮ず
+              // 已有部分回复，保留内容并追加错误提示
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
               try { aiNode.appendChild(errNote); } catch (e) {}
               ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else {
-              // 娌℃湁鍐呭锛屽洖婊?
+              // 娌℃湁鍐呭锛屽洖婊?
               notify(errMsg);
               S.messages.pop();
               removeLastUserMessage(messagesEl);
@@ -4281,10 +4281,10 @@
             break;
           }
           
-          // 鍏煎鏃ч敊璇牸寮忥紙鏃?type 浣嗘湁 error锛?
+          // 鍏煎鏃ч敊璇牸寮忥紙鏃?type 但有 error锛?
           if (evt.error && !evt.type) {
             try { typingNode.remove(); } catch (e) {}
-            var errMsg2 = evt.error || 'AI 璋冪敤澶辫触';
+            var errMsg2 = evt.error || 'AI 调用失败';
             
             if (aiContent) {
               var errNote2 = el('div', { class: 'ai-error-note' }, errMsg2);
@@ -4310,7 +4310,7 @@
           
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
-            // 濡傛灉 reasoning_start 浜嬩欢涓㈠け锛岄娆℃敹鍒?reasoning 涔熷惎鍔ㄨ鏃跺櫒
+            // 如果 reasoning_start 浜嬩欢涓㈠け锛岄娆℃敹鍒?reasoning 也启动计时器
             if (!reasoningStarted) {
               reasoningStarted = true;
               ensureReasoningNode();
@@ -4347,18 +4347,18 @@
             S.paused = false;
             S.activeRenderers = [];
             S.abortController = null;
-            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
             }
             
-            // 鏇存柊 usage / done 鏁版嵁
+            // 更新 usage / done 数据
             try {
               usageResult = evt.usage || null;
               finalModel = evt.model || '';
               finalThinkingMode = evt.thinking_mode || S.thinkingMode;
-              // sanitized_content 浼樺厛锛氬悗绔竻娲楀悗鐨勬鏂?
+              // sanitized_content 浼樺厛锛氬悗绔竻娲楀悗鐨勬鏂?
               if (evt.sanitized_content) {
                 aiContent = evt.sanitized_content;
               } else if (evt.content) {
@@ -4366,9 +4366,9 @@
               }
             } catch (e) {}
             
-            // 濡傛灉鍚庣鍋氫簡娓呮礂锛屾浛鎹㈠凡娴佸紡杈撳嚭鐨勬皵娉″唴瀹?
+            // 濡傛灉鍚庣鍋氫簡娓呮礂锛屾浛鎹㈠凡娴佸紡杈撳嚭鐨勬皵娉″唴瀹?
             if (evt.sanitized_content && evt.sanitized_content.length > 0 && aiBubble) {
-              // 鏇挎崲姘旀场涓凡杈撳嚭鐨勫師濮嬪唴瀹逛负娓呮礂鍚庢鏂?
+              // 鏇挎崲姘旀场涓凡杈撳嚭鐨勫師濮嬪唴瀹逛负娓呮礂鍚庢鏂?
               if (contentRenderer) {
                 try { contentRenderer.cancel(); } catch (e) {}
                 contentRenderer = null;
@@ -4377,7 +4377,7 @@
               aiBubble.innerHTML = renderMarkdown(evt.sanitized_content);
             }
             
-            // 鏍囪娴佹槸鍚﹀畬鎴?
+            // 鏍囪娴佹槸鍚﹀畬鎴?
             var streamInterrupted = evt.interrupted === true;
             var streamComplete = evt.complete === true;
             var streamSaved = evt.saved === true;
@@ -4390,9 +4390,9 @@
               finishAiMessage(aiNode, '', aiReasoning, evt);
             }
             
-            // 涓柇/鏈繚瀛樻彁绀?
+            // 涓柇/鏈繚瀛樻彁绀?
             if (streamInterrupted && aiContent) {
-              var interrNote = el('div', { class: 'ai-interrupt-note' }, '鍥炲涓柇锛屽唴瀹瑰彲鑳戒笉瀹屾暣');
+              var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
               if (aiNode) aiNode.appendChild(interrNote);
             }
             if (!streamSaved && aiContent) {
@@ -4400,7 +4400,7 @@
               if (aiNode) aiNode.appendChild(saveNote);
             }
             
-            // 鏄剧ず娓呮礂鎻愮ず
+            // 显示清洗提示
             if (evt.filtered && aiContent) {
               var filteredNote = el('div', { class: 'ai-filtered-note' }, '已自动清理动作描述');
               if (aiNode) aiNode.appendChild(filteredNote);
@@ -4416,7 +4416,7 @@
       }
       
       if (S._currentReqId !== reqId || aborted) {
-        // 琚柊璇锋眰鍙栦唬锛屽垹闄ゅ綋鍓嶅垱寤虹殑浠讳綍鑺傜偣
+        // 被新请求取代，删除当前创建的任何节点
         cleanupRenderers();
         if (aiNode) try { aiNode.remove(); } catch (e) {}
         try { typingNode.remove(); } catch (e) {}
@@ -4424,11 +4424,11 @@
         return;
       }
       
-      // 瀹屾垚澶勭悊
+      // 完成处理
       try { typingNode.remove(); } catch (e) {}
       
       if (evtHandled) {
-        // 宸插湪 done/error 浜嬩欢涓畬鎴愭覆鏌?
+        // 已在 done/error 浜嬩欢涓畬鎴愭覆鏌?
       } else if (aiNode && (aiContent || aiReasoning)) {
         finishAiMessage(aiNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
@@ -4437,26 +4437,26 @@
         cleanupRenderers();
         S.messages.pop();
         removeLastUserMessage(messagesEl);
-        notify('AI 鏆傛椂娌℃湁鍥炲簲锛岃绋嶅悗鍐嶈瘯');
+        notify('AI 暂时没有回应，请稍后再试');
       }
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) return;
-      // 缃戠粶閿欒鎴?abort
+      // 缃戠粶閿欒鎴?abort
       if (fetchErr && fetchErr.name !== 'AbortError') {
         try { typingNode.remove(); } catch (e) {}
         if (aiContent) {
-          // 宸叉湁閮ㄥ垎鍥炲锛屼繚鐣欏苟鎻愮ず杩炴帴涓柇
-          var connNote = el('div', { class: 'ai-error-note' }, '杩炴帴涓柇锛屽凡淇濈暀閮ㄥ垎鍥炲');
+          // 已有部分回复，保留并提示连接中断
+          var connNote = el('div', { class: 'ai-error-note' }, '连接中断，已保留部分回复');
           try { aiNode.appendChild(connNote); } catch (e) {}
           finishAiMessage(aiNode, aiContent, aiReasoning, null);
         } else {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
           restoreInputText();
-          notify('缃戠粶寮傚父锛岃妫€鏌ヨ繛鎺ュ悗閲嶈瘯');
+          notify('缃戠粶寮傚父锛岃妫€鏌ヨ繛鎺ュ悗閲嶈瘯');
         }
       } else {
-        // AbortError: 鐢ㄦ埛涓诲姩鍋滄
+        // AbortError: 用户主动停止
         if (aiContent) {
           finishAiMessage(aiNode, aiContent, aiReasoning, null);
         } else {
@@ -4540,7 +4540,7 @@
     }
   }
 
-  // 鑾峰彇浼氳瘽鍒楄〃锛堟櫘閫氳亰澶╁彧鏄剧ず鏅€氫細璇濓紝娣卞害鐮旂┒浼氳瘽鍒嗗紑绠＄悊锛?
+  // 鑾峰彇浼氳瘽鍒楄〃锛堟櫘閫氳亰澶╁彧鏄剧ず鏅€氫細璇濓紝娣卞害鐮旂┒浼氳瘽鍒嗗紑绠＄悊锛?
   async function fetchConversations() {
     try {
       var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal');
@@ -4552,11 +4552,11 @@
     }
   }
   
-  // 鍒囨崲浼氳瘽
+  // 切换会话
   function renderConversationListStyled(container) {
     container.innerHTML = '';
     if (!S.conversations.length) {
-      container.appendChild(el('div', { class: 'ai-no-history', text: '鏆傛棤鑱婂ぉ璁板綍' }));
+      container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
       return;
     }
     var groups = {};
@@ -4583,7 +4583,7 @@
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
-        // 鍒犻櫎鎸夐挳
+        // 删除按钮
         var delBtn = el('span', { class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
         (function(cid, elRef) {
           delBtn.addEventListener('click', function(ev) {
@@ -4611,9 +4611,9 @@
       var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
       if (r && r.ok) {
         if (itemEl && itemEl.parentElement) itemEl.remove();
-        // 浠?S.conversations 涓Щ闄?
+        // 浠?S.conversations 涓Щ闄?
         S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
-        // 濡傛灉鍒犻櫎鐨勬槸褰撳墠瀵硅瘽锛岄噸缃?
+        // 濡傛灉删除鐨勬槸褰撳墠瀵硅瘽锛岄噸缃?
         if (cid === S.conversationId) {
           S.conversationId = null;
           S.messages = [];
@@ -4624,10 +4624,10 @@
         }
         showConversationList();
       } else {
-        notify('鍒犻櫎澶辫触');
+        notify('删除失败');
       }
     } catch (e) {
-      notify('鍒犻櫎澶辫触');
+      notify('删除失败');
     }
   }
 
@@ -4655,7 +4655,7 @@
       }
     } catch (e) {
       try { console.warn('[AI-CONV] switchConversation error:', e && e.message); } catch(ee) {}
-      notify('鍔犺浇瀵硅瘽鍘嗗彶澶辫触');
+      notify('加载对话历史失败');
     }
     
     if (S.messagesEl) {
@@ -4728,7 +4728,7 @@ function showChatMessages() {
     header.appendChild(info);
 
     // 鈽?U3: 英语瀛︿範鎸夐挳 (鍦ㄦ繁搴︽€濊€冨乏杈? AI 鑱婂ぉ鍐呭叆鍙?
-    // 鈽?鏋佺畝瀹炵幇: 鐢ㄥ師鐢?DOM + 鍐呰仈 onclick, 閬垮紑 el() helper 浠讳綍娼滃湪闂
+    // 鈽?鏋佺畝瀹炵幇: 鐢ㄥ師鐢?DOM + 内联 onclick, 避开 el() helper 任何潜在问题
     var englishBtn = document.createElement('button');
     englishBtn.type = 'button';
     englishBtn.id = 'aiEnglishToggle';
@@ -4762,12 +4762,12 @@ function showChatMessages() {
     englishLabel.className = 'ai-english-label';
     englishLabel.textContent = '英语';
     englishBtn.appendChild(englishLabel);
-    // 鈽?U3: 鐢?inline onclick 灞炴€? 瀹屽叏閬垮紑 addEventListener 浠讳綍闂
+    // 鈽?U3: 鐢?inline onclick 灞炴€? 瀹屽叏閬垮紑 addEventListener 任何问题
     englishBtn.setAttribute('onclick', 'window.__aiEnglishClick && window.__aiEnglishClick(event)');
     header.appendChild(englishBtn);
     try { if (AI_DEBUG) console.log('[AI] English button appended'); } catch (e) {}
 
-    // 鈽?U3: 鍙礋璐ｈ皟鐢?window.EnglishLearning.open(), 涓嶇洿鎺ユ搷浣?panelEnglishLearning
+    // 鈽?U3: 鍙礋璐ｈ皟鐢?window.EnglishLearning.open(), 涓嶇洿鎺ユ搷浣?panelEnglishLearning
     window.__aiEnglishClick = function(ev) {
       try {
         if (ev && ev.preventDefault) ev.preventDefault();
@@ -4782,7 +4782,7 @@ function showChatMessages() {
       }
     };
 
-    // 深度思考?toggle 鎸夐挳
+    // 深度思考?toggle 按钮
     var deepThinkBtn = el('button', {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
@@ -4801,7 +4801,7 @@ function showChatMessages() {
     });
     header.appendChild(deepThinkBtn);
 
-    // 鍘嗗彶浼氳瘽鎸夐挳
+    // 历史会话按钮
     var histBtn = el('button', {
       type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
       title: '历史会话'
@@ -4822,7 +4822,7 @@ function showChatMessages() {
 
 
 
-    // 鍒犻櫎褰撳墠瀵硅瘽鎸夐挳
+    // 删除当前对话按钮
     var delBtn = el('button', {
       type: 'button',
       class: 'ai-chat-del-btn',
@@ -4844,12 +4844,12 @@ function showChatMessages() {
           S.conversationId = null;
           if (S.messagesEl) S.messagesEl.innerHTML = '';
           setAiRootState('ai-empty');
-          // 寮€鍚柊瀵硅瘽
+          // 寮€鍚柊瀵硅瘽
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
             writeConvId(r2.data.conversation_id);
-            // 鎭㈠ empty state锛堝厛娓?loading 鍐嶈拷鍔狅級
+            // 恢复 empty state锛堝厛娓?loading 再追加）
             if (S.messagesEl) {
               S.messagesEl.innerHTML = '';
               if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
@@ -4861,10 +4861,10 @@ function showChatMessages() {
             }
           }
         } else {
-          notify('鍒犻櫎澶辫触');
+          notify('删除失败');
         }
       } catch (e) {
-        notify('鍒犻櫎澶辫触');
+        notify('删除失败');
       } finally {
         delBtn.disabled = false;
       }
@@ -4926,14 +4926,14 @@ function showChatMessages() {
     histInfo.style.cssText = 'display:none';
     root.appendChild(histInfo);
     
-    // 浼氳瘽鍒楄〃
+    // 会话列表
     var convList = el('div', { class: 'ai-conversation-list', style: 'display:none' });
     root.appendChild(convList);
     S.conversationsEl = convList;
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
-    // 鏂囦欢涓婁紶鎸夐挳 (宸﹁竟)
+    // 文件上传按钮 (左边)
     var fileBtn = el('button', {
       type: 'button',
       class: 'ai-chat-file-btn',
@@ -4943,7 +4943,7 @@ function showChatMessages() {
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
     var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx', style: 'display:none' });
-    // 鏂囦欢棰勮鍖哄煙
+    // 文件预览区域
     var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
       class: 'ai-chat-input',
@@ -4967,9 +4967,9 @@ function showChatMessages() {
       type: 'button',
       class: 'ai-chat-pause',
       id: 'aiChatPauseBtn',
-      'aria-label': '鏆傚仠',
+      'aria-label': '暂停',
       style: 'display:none'
-    }, '鏆傚仠');
+    }, '暂停');
 
     function autoresize() {
       try {
@@ -4996,17 +4996,17 @@ function showChatMessages() {
       if (!S.sending) return;
       var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
       if (anyPaused) {
-        // 鎭㈠
+        // 恢复
         if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
         S.paused = false;
-        pauseBtn.textContent = '鏆傚仠';
+        pauseBtn.textContent = '暂停';
       } else {
-        // 鐪熸涓 SSE 璇锋眰 + 鏆傚仠娓叉煋
+        // 真正中止 SSE 请求 + 暂停渲染
         try { if (S.abortController) S.abortController.abort(); } catch (e) {}
         try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
         if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
-        pauseBtn.textContent = '缁х画';
+        pauseBtn.textContent = '继续';
       }
     });
     input.addEventListener('keydown', function(e) {
@@ -5017,7 +5017,7 @@ function showChatMessages() {
     });
     input.addEventListener('input', autoresize);
 
-    // 鏂囦欢涓婁紶閫昏緫
+    // 文件上传逻辑
     var _aiChatFileData = null; // { name, type, dataUrl }
     fileBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function() {
@@ -5032,7 +5032,7 @@ function showChatMessages() {
         if (f.type.startsWith('image/')) {
           thumb = el('img', { src: e.target.result, class: 'ai-file-thumb' });
         } else {
-          thumb = el('div', { class: 'ai-file-icon' }, '馃搫');
+          thumb = el('div', { class: 'ai-file-icon' }, '📄');
         }
         var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
         var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
@@ -5060,7 +5060,7 @@ function showChatMessages() {
 
     S.resizeTimer = setTimeout(autoresize, 0);
 
-    // 鈽?M: 娓叉煋鍚庣珛鍒诲悓姝ユ繁搴︽€濊€?toggle 瑙嗚
+    // 鈽?M: 娓叉煋鍚庣珛鍒诲悓步ユ繁搴︽€濊€?toggle 视觉
     refreshDeepThinkToggle();
 
     S.pauseBtnEl = pauseBtn;
@@ -5080,7 +5080,7 @@ function showChatMessages() {
       notify('请先登录后再和徐旭泽聊天');
       return;
     }
-    // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
+    // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
     restoreDeepThinkState();
     S.active = true;
     window.__xtjAiChatActive = true;
@@ -5104,7 +5104,7 @@ function showChatMessages() {
     if (detailView) {
       detailView.classList.remove('hidden');
       detailView.classList.add('ai-mode');
-      // 娓呯悊鍘熸湁鐨勮亰澶╁唴瀹癸紝閬垮厤涓嶢I鏍硅妭鐐瑰啿绐?
+      // 清理原有的聊天内容，避免与AI鏍硅妭鐐瑰啿绐?
       var oldMsg = document.getElementById('dockChatMessages');
       if (oldMsg) oldMsg.style.display = 'none';
     }
@@ -5141,7 +5141,7 @@ function showChatMessages() {
 
     await loadHistory(r.messagesEl, null);
 
-    // fallback: localStorage 鐨?convId 鏃犳晥锛堟病鏈夊巻鍙叉秷鎭級锛屽皾璇曞姞杞芥渶杩戜細璇?
+    // fallback: localStorage 鐨?convId 鏃犳晥锛堟病鏈夊巻鍙叉秷鎭級锛屽皾璇曞姞杞芥渶杩戜細璇?
     if (!S.messages.length && S.conversationId) {
       try {
         var convR = await apiRequest('GET', '/chat/conversations?limit=1');
@@ -5196,7 +5196,7 @@ function showChatMessages() {
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
 
-    // 鈽?P 鏂板: 鍚屾鍚庣深度思考冨瓙閰嶇疆 (鎬濊€冪▼搴?+ 鍚敤寮€鍏?
+    // 鈽?P 鏂板: 鍚屾鍚庣深度思考冨瓙閰嶇疆 (鎬濊€冪▼搴?+ 鍚敤寮€鍏?
     try {
       if (cfg.deep_think) {
         if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
@@ -5204,13 +5204,13 @@ function showChatMessages() {
         }
         S.deepThinkEnabled = cfg.deep_think.enabled !== false;
       }
-      // 鏅€氳亰澶╃殑 thinkingMode 涔熷悓姝?(浠?model.default_thinking_mode 璇?
+      // 鏅€氳亰澶╃殑 thinkingMode 涔熷悓步?(浠?model.default_thinking_mode 璇?
       if (cfg.model && ['low', 'medium', 'high', 'max', 'off'].indexOf(cfg.model.default_thinking_mode) >= 0) {
         S.thinkingMode = cfg.model.default_thinking_mode;
       }
-    } catch (e) { /* 瀹归敊 */ }
+    } catch (e) { /* 容错 */ }
 
-    // 鈽?P 鏂板: 濡傛灉鍚庣绂佺敤浜嗘繁搴︽€濊€? 寮哄埗鍏抽棴 toggle
+    // 鈽?P 鏂板: 濡傛灉鍚庣绂佺敤浜嗘繁搴︽€濊€? 寮哄埗鍏抽棴 toggle
     if (!S.deepThinkEnabled && S.deepThink) {
     S.deepThink = false;
     try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
@@ -5224,20 +5224,20 @@ function showChatMessages() {
     window.__xtjAiChatActive = false;
     clearReplyTimer();
     abortCurrentRequest(); // 鍐呴儴宸茶皟鐢?clearStreamCleanup
-    // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
+    // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
     try { closeDeepThinkPage(); } catch (e) {}
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
     }
-    // 鈽?U3 Bug 4 淇: 涓嶅啀閲嶇疆 S.deepThink, 淇濇寔鐢ㄦ埛鐨?toggle 鍋忓ソ
+    // 鈽?U3 Bug 4 修复: 不再重置 S.deepThink, 淇濇寔鐢ㄦ埛鐨?toggle 偏好
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     // 閲嶇疆鎵€鏈夌姸鎬侊紝閬垮厤閲嶅紑鍚庢畫鐣?
     S.sending = false;
     S.paused = false;
     S.activeRenderers = [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '鏆傚仠'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     S.messages = [];
     S.conversations = [];
     S.oldestCursor = null;
@@ -5348,7 +5348,7 @@ function showChatMessages() {
       'data-chat-user': '__ai_agent__',
       role: 'button',
       tabindex: '0',
-      'aria-label': '鎵撳紑 ' + name
+      'aria-label': '打开 ' + name
     });
     var listAvatar = el('span', { class: 'cli-avatar' });
     renderCatAvatarNode(listAvatar, '', cfg.avatar_url, cfg.avatar_version);
@@ -5363,7 +5363,7 @@ function showChatMessages() {
 
     function onActivate() {
       if (!window.currentUser) {
-        notify('璇峰厛鐧诲綍鍚庡啀鍜?' + name + ' 鑱婂ぉ');
+        notify('请先登录后再和' + name + ' 聊天');
         return;
       }
       openAiChat();
@@ -5417,7 +5417,7 @@ function showChatMessages() {
       if (tab !== 'chat' && S.active) {
         try { closeAiChat(); } catch (e) {}
       }
-      // 鍒囨崲鍑鸿亰澶?tab 鏃朵竴骞跺叧闂繁搴︽€濊€冧簩绾ч〉闈?
+      // 鍒囨崲鍑鸿亰澶?tab 鏃朵竴骞跺叧闂繁搴︽€濊€冧簩绾ч〉闈?
       if (tab !== 'chat') {
         try { closeDeepThinkPage(); } catch (e) {}
       }
