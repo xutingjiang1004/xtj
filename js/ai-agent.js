@@ -966,10 +966,10 @@
       start: function() {
         if (stopped || intervalId) return;
         startedAt = Date.now();
-        update('步ｅ湪思考中', 0);
+        update('正在思考中', 0);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
-          update('步ｅ湪思考中', Date.now() - startedAt);
+          update('正在思考中', Date.now() - startedAt);
         }, 500);
       },
       stop: function() {
@@ -994,7 +994,7 @@
         }
         stopped = true;
         if (reasoningNode && reasoningNode.isConnected) {
-          setThinkingStatus(reasoningNode, '已思考?' + formatThinkingElapsed(ms));
+          setThinkingStatus(reasoningNode, '已思考 ' + formatThinkingElapsed(ms));
         }
       }
     };
@@ -1052,7 +1052,7 @@
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-title">已思考?' + formatThinkDuration(thinkDurationMs) + '</span>' +
+          '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
           '<span class="ai-think-chevron">鈻?/span>' +
         '</div>' +
@@ -2732,7 +2732,7 @@
     }
 
     // 鈽?O 修复 Bug 4: 鏋勯€?think-card (鍙栦唬鏅€?ai-msg 节点)
-    //   鎶樺彔鎬? 澶撮儴鏄剧ず "鈿?已思考?38s 路 5 涓?agent" + 折叠按钮
+    //   鎶樺彔鎬? 澶撮儴鏄剧ず "鈿?已思考 38s 路 5 涓?agent" + 折叠按钮
     //   灞曞紑鎬? 椤堕儴鎬濊€冭繃绋嬫棩蹇?+ 搴曢儴鏈€缁堢瓟妗?(markdown)
     //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
     function finishThinkCard(node, content, evt) {
@@ -2883,8 +2883,8 @@
         var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
         var titleEl = node.querySelector('.ai-think-title');
         var metaEl = node.querySelector('.ai-think-meta');
-        // V2: 去掉重复 sparkle (footer 已有模式标签), header 鍙斁绾枃瀛?已思考?Xs"
-        if (titleEl) titleEl.textContent = '已思考?' + durationStr;
+        // V2: 去掉重复 sparkle (footer 已有模式标签), header 鍙斁绾枃瀛?已思考 Xs"
+        if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
         // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
         if (metaEl) metaEl.textContent = '';
 
@@ -3891,7 +3891,7 @@
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
             } else {
-              setThinkingStatus(rNode, '已思考?' + formatThinkingElapsed(finalThinkingElapsedMs));
+              setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
             }
           }
         } else if (reasoningContainer) {
