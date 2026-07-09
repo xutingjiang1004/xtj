@@ -118,34 +118,80 @@
     overlay.id = 'proCelebrationOverlay';
     overlay.className = 'pro-celebration-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
-    overlay.innerHTML = [
-      '<canvas id="proCelebrationCanvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>',
-      '<div class="pro-celebration-card" style="position:relative;background:linear-gradient(145deg,#1a1a2e,#16213e);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 0 60px rgba(245,158,11,0.15),0 20px 60px rgba(0,0,0,0.5);color:#fff;overflow:hidden;">',
-      '  <div style="position:absolute;top:-80px;right:-80px;width:200px;height:200px;background:radial-gradient(circle,rgba(245,158,11,0.15),transparent 70%);border-radius:50%;pointer-events:none;"></div>',
-      '  <div style="position:absolute;bottom:-60px;left:-60px;width:160px;height:160px;background:radial-gradient(circle,rgba(245,158,11,0.1),transparent 70%);border-radius:50%;pointer-events:none;"></div>',
-      '  <div class="pro-celebration-icon" style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 30px rgba(245,158,11,0.4);margin-bottom:12px;">',
-      '    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#fff"/></svg>',
-      '  </div>',
-      '  <div class="pro-celebration-title" style="font-size:22px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">🎉 恭喜升级 Pro！</div>',
-      '  <div class="pro-celebration-sub" style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;">您已成功开启 XTJ Pro 视觉权益</div>',
-      '  <div class="pro-celebration-info" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:16px;">',
-      '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;">',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">会员</div><div style="font-size:13px;font-weight:600;text-align:right;">XTJ Pro</div>',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">来源</div><div style="font-size:13px;font-weight:600;text-align:right;">' + sourceIcon + ' ' + sourceLabel + '</div>',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">有效期至</div><div style="font-size:13px;font-weight:600;text-align:right;">' + (vipInfo.expire_at ? new Date(vipInfo.expire_at).toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric'}) : '30天') + '</div>',
-      '    </div>',
-      '  </div>',
-      '  <div class="pro-celebration-features" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:16px;">',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🎨 专属主题</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">💬 聊天气泡</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🪴 帖子卡片装饰</div>',
-      '  </div>',
-      '  <button class="pro-celebration-btn" id="proCelebrationBtn" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);">开始体验 Pro</button>',
-      '</div>'
-    ].join('');
+
+    var canvas = document.createElement('canvas');
+    canvas.id = 'proCelebrationCanvas';
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;';
+    overlay.appendChild(canvas);
+
+    var card = document.createElement('div');
+    card.className = 'pro-celebration-card';
+    card.style.cssText = 'position:relative;background:linear-gradient(145deg,#1a1a2e,#16213e);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 0 60px rgba(245,158,11,0.15),0 20px 60px rgba(0,0,0,0.5);color:#fff;overflow:hidden;';
+
+    var glow1 = document.createElement('div');
+    glow1.style.cssText = 'position:absolute;top:-80px;right:-80px;width:200px;height:200px;background:radial-gradient(circle,rgba(245,158,11,0.15),transparent 70%);border-radius:50%;pointer-events:none;';
+    card.appendChild(glow1);
+
+    var glow2 = document.createElement('div');
+    glow2.style.cssText = 'position:absolute;bottom:-60px;left:-60px;width:160px;height:160px;background:radial-gradient(circle,rgba(245,158,11,0.1),transparent 70%);border-radius:50%;pointer-events:none;';
+    card.appendChild(glow2);
+
+    var iconWrap = document.createElement('div');
+    iconWrap.className = 'pro-celebration-icon';
+    iconWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 30px rgba(245,158,11,0.4);margin-bottom:12px;';
+    iconWrap.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#fff"/></svg>';
+    card.appendChild(iconWrap);
+
+    var title = document.createElement('div');
+    title.className = 'pro-celebration-title';
+    title.textContent = '🎉 恭喜升级 Pro！';
+    title.style.cssText = 'font-size:22px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+    card.appendChild(title);
+
+    var sub = document.createElement('div');
+    sub.className = 'pro-celebration-sub';
+    sub.textContent = '您已成功开启 XTJ Pro 视觉权益';
+    sub.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;';
+    card.appendChild(sub);
+
+    var info = document.createElement('div');
+    info.className = 'pro-celebration-info';
+    info.style.cssText = 'background:rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:16px;';
+    var infoGrid = document.createElement('div');
+    infoGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;';
+
+    function addInfoRow(label, value) {
+      var lbl = document.createElement('div'); lbl.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.4);'; lbl.textContent = label; infoGrid.appendChild(lbl);
+      var val = document.createElement('div'); val.style.cssText = 'font-size:13px;font-weight:600;text-align:right;'; val.textContent = value; infoGrid.appendChild(val);
+    }
+    addInfoRow('会员', 'XTJ Pro');
+    addInfoRow('来源', sourceIcon + ' ' + sourceLabel);
+    var expireText = vipInfo.expire_at ? new Date(vipInfo.expire_at).toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric'}) : '30天';
+    addInfoRow('有效期至', expireText);
+
+    info.appendChild(infoGrid);
+    card.appendChild(info);
+    overlay.appendChild(card);
+
+    var features = document.createElement('div');
+    features.className = 'pro-celebration-features';
+    features.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:16px;';
+    ['🎨 专属主题', '💬 聊天气泡', '🪴 帖子卡片装饰'].forEach(function(t) {
+      var f = document.createElement('div');
+      f.style.cssText = 'background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;';
+      f.textContent = t;
+      features.appendChild(f);
+    });
+    card.appendChild(features);
+
+    var btn = document.createElement('button');
+    btn.className = 'pro-celebration-btn';
+    btn.id = 'proCelebrationBtn';
+    btn.textContent = '开始体验 Pro';
+    btn.style.cssText = 'width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);';
+    card.appendChild(btn);
     document.body.appendChild(overlay);
 
-    var btn = document.getElementById('proCelebrationBtn');
     btn.onclick = function() {
       overlay.style.transition = 'opacity 0.4s,transform 0.4s';
       overlay.style.opacity = '0';
