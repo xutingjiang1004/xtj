@@ -46,7 +46,8 @@
     eventsBound: false,
     batchMutating: false,
     batchDirty: false,
-    batchFeedback: null
+    batchFeedback: null,
+    syncVisualTimer: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -326,6 +327,10 @@
     S.syncStatus = status;
     var node = $('elSyncStatus');
     if (!node) return;
+    if (S.syncVisualTimer) {
+      clearTimeout(S.syncVisualTimer);
+      S.syncVisualTimer = null;
+    }
     node.className = 'el-sync ' + 'is-' + status;
     node.textContent = label || (
       status === 'synced' ? '已同步' :
@@ -334,6 +339,16 @@
       status === 'error' ? '未同步' :
       '离线模式'
     );
+    node.setAttribute('data-status', status);
+    node.setAttribute('data-label', node.textContent);
+    node.classList.toggle('is-pulse', status === 'syncing');
+    node.classList.remove('is-settled');
+    if (status === 'synced' || status === 'error' || status === 'local') {
+      S.syncVisualTimer = setTimeout(function() {
+        node.classList.add('is-settled');
+        S.syncVisualTimer = null;
+      }, 420);
+    }
   }
 
   async function loadRemoteState() {
@@ -914,6 +929,8 @@
       if (!btn.dataset._oldText) btn.dataset._oldText = btn.textContent;
       btn.textContent = '解析中...';
       btn.classList.remove('is-complete');
+      btn.classList.remove('is-warning');
+      btn.classList.remove('is-error');
       btn.classList.add('is-loading');
       btn.setAttribute('aria-busy', 'true');
       return;
@@ -977,6 +994,10 @@
     var parsed = Object.keys(parsedMap).map(function(k) { return parsedMap[k]; });
     if (!parsed.length) {
       setBatchImportButtonState(btn, false);
+      if (btn) {
+        btn.classList.remove('is-complete');
+        btn.classList.add('is-error');
+      }
       S.batchFeedback = buildBatchFeedback(detail, {
         state: 'error',
         status: '未识别到可导入内容',
@@ -1003,6 +1024,10 @@
     endBatchMutation({ render: true });
     input.value = '';
     setBatchImportButtonState(btn, false);
+    if (btn) {
+      btn.classList.remove('is-error');
+      btn.classList.toggle('is-warning', !!detail.failed.length);
+    }
     S.batchFeedback = buildBatchFeedback(detail, {
       state: detail.failed.length ? 'warning' : 'success',
       status: detail.failed.length ? '导入完成，存在未识别行' : '导入完成',
@@ -1135,8 +1160,10 @@
           renderArticle(S.currentQuiz);
           renderQuestions(S.currentQuiz);
           switchTab('practice');
+          var oldBanner = document.querySelector('#panelEnglishLearning .el-offline-banner');
+          if (oldBanner) oldBanner.remove();
           var localBanner = document.createElement('div');
-          localBanner.style.cssText = 'padding:10px 14px;margin:12px 0;background:rgba(255,193,7,.12);border:1px solid rgba(255,193,7,.3);border-radius:10px;font-size:12px;color:#b8860b;text-align:center;';
+          localBanner.className = 'el-offline-banner';
           localBanner.textContent = '⚠ 离线示例模式 — 后端接口不可用，下方为本地模板示例，非 AI 生成';
           var practicePane = document.getElementById('elPanePractice');
           if (practicePane) practicePane.insertBefore(localBanner, practicePane.firstChild);
@@ -1648,9 +1675,11 @@
         l.classList.remove('leaving');
         l.hidden = false;
         l.setAttribute('aria-busy', 'true');
+        l.setAttribute('data-state', 'loading');
         requestAnimationFrame(function() { requestAnimationFrame(function() { neonStart(); }); });
       } else {
         l.setAttribute('aria-busy', 'false');
+        l.setAttribute('data-state', 'idle');
         neonStop();
         setTimeout(function() { if (l) l.hidden = true; }, 520);
       }
