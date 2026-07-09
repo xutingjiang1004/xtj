@@ -4445,6 +4445,48 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
   }
 });
 
+// ===================== P0: 帖子编辑/删除 API (替代前端直接 Supabase UPDATE) =====================
+app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var postId = parseInt(req.body && req.body.post_id);
+    if (!postId || isNaN(postId)) return res.status(400).json({ error: '缺少 post_id' });
+    var { data: post } = await supabase.from('posts').select('user_name').eq('id', postId).maybeSingle();
+    if (!post) return res.status(404).json({ error: '帖子不存在' });
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权修改' });
+    var updates = {};
+    if (Object.prototype.hasOwnProperty.call(req.body, 'visibility')) {
+      var v = String(req.body.visibility);
+      if (['public', 'private'].indexOf(v) >= 0) updates.visibility = v;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'is_pinned')) {
+      updates.is_pinned = !!req.body.is_pinned;
+      updates.pinned_at = req.body.is_pinned ? new Date().toISOString() : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
+      updates.content = String(req.body.content).slice(0, 50000);
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
+    var { error } = await supabase.from('posts').update(updates).eq('id', postId);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch (e) { console.error('[API] post update:', e.message); return res.status(500).json({ error: '更新失败' }); }
+});
+
+app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var postId = parseInt(req.body && req.body.post_id);
+    if (!postId || isNaN(postId)) return res.status(400).json({ error: '缺少 post_id' });
+    var { data: post } = await supabase.from('posts').select('user_name').eq('id', postId).maybeSingle();
+    if (!post) return res.status(404).json({ error: '帖子不存在' });
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
+    var { error } = await supabase.from('posts').delete().eq('id', postId);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
+});
+
 // ===================== 封禁管理 ======================
 app.get('/admin/bans', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
