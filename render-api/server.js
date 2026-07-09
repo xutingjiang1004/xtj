@@ -4466,10 +4466,16 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
       updates.content = String(req.body.content).slice(0, 50000);
     }
+    // 允许前端传 updated_at（编辑/置顶/公开切私有都需要同步）
+    if (Object.prototype.hasOwnProperty.call(req.body, 'updated_at')) {
+      var ua = req.body.updated_at;
+      try { if (ua && !isNaN(new Date(ua).getTime())) updates.updated_at = ua; else updates.updated_at = new Date().toISOString(); } catch(e) { updates.updated_at = new Date().toISOString(); }
+    }
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
-    var { error } = await supabase.from('posts').update(updates).eq('id', postId);
+    var { data: updatedPost, error } = await supabase.from('posts').update(updates).eq('id', postId).select('*').maybeSingle();
     if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true });
+    if (!updatedPost) return res.status(500).json({ error: '更新失败：未返回数据' });
+    return res.json({ ok: true, data: updatedPost });
   } catch (e) { console.error('[API] post update:', e.message); return res.status(500).json({ error: '更新失败' }); }
 });
 

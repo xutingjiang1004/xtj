@@ -5893,21 +5893,29 @@ function renderProfileActivityList(kind) {
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 };
-                // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
+                // 获取认证头
+                var headers = (typeof window.getUserAuthHeaders === 'function')
+                    ? await window.getUserAuthHeaders()
+                    : null;
+                if (!headers) return { ok: false, error: new Error('登录已失效，请重新登录') };
+
                 var resp = await fetch((window.API_BASE || '') + '/api/post/update', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify(updatePayload)
                 });
                 var result = await resp.json();
                 if (!resp.ok || !result.ok) return { ok: false, error: new Error(result.error || '更新失败') };
-                // 重新查询验证
-                var verifyRes = await sb.from('posts').select('*').eq('id', post.id).maybeSingle();
-                if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
-                var verified = normalizePost(verifyRes.data);
-                var verifiedMeta = parsePostContent(result.data).meta || {};
+                // 优先使用后端返回的 data，否则重新查询
+                var verified = result.data ? normalizePost(result.data) : null;
+                if (!verified) {
+                    var verifyRes = await sb.from('posts').select('*').eq('id', post.id).maybeSingle();
+                    if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
+                    verified = normalizePost(verifyRes.data);
+                }
+                var verifiedMeta = parsePostContent(verified._rawContent || verified.content || '').meta || {};
                 if (String(verified.visibility || "public") !== String(nextVisibility)) {
-                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
+                    return { ok: false, error: new Error("更新失败：visibility 未实际生效") };
                 }
                 if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
                     return { ok: false, error: new Error("更新失败：content.meta.visibility 未同步") };
@@ -5921,7 +5929,7 @@ function renderProfileActivityList(kind) {
                 if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
                     return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
                 }
-                return { ok: true, data: result.data };
+                return { ok: true, data: verified };
             }
 
             function getRenderableComments(comments, visiblePosts) {
@@ -6265,9 +6273,12 @@ function renderProfileActivityList(kind) {
                     nextPinned = !dbPost.is_pinned;
                     btn.textContent = nextPinned ? '置顶中..' : '取消中..';
                     // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
+                    var updHeaders = (typeof window.getUserAuthHeaders === 'function')
+                        ? await window.getUserAuthHeaders() : null;
+                    if (!updHeaders) { showToast('登录已失效'); if (btn) { btn.disabled = false; btn.textContent = originalText; } return; }
                     var updResp = await fetch((window.API_BASE || '') + '/api/post/update', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: updHeaders,
                         body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
                     });
                     var updResult = await updResp.json();
