@@ -819,7 +819,7 @@
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
     if (r.status === 429) return 'AI 聊天次数已达上限，请稍后再试';
-    if (r.status === 502) return 'AI 鏈嶅姟璋冪敤失败锛岃妫€鏌ラ厤缃垨鏈嶅姟鏃ュ織';
+    if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
     if (r.status === 500) return '服务端错误，请稍后再试';
     if (r.status === 0) return '网络异常，请检查连接';
     if (r.error) return r.error;
@@ -860,11 +860,11 @@
       if (typeof usage.prompt_tokens === 'number') parts.push('输入 ' + usage.prompt_tokens);
       if (typeof usage.completion_tokens === 'number') parts.push('输出 ' + usage.completion_tokens);
       if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
-      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + usage.prompt_cache_miss_tokens);
+      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) {
         // 鈽?U3: 鍔ㄦ€?currency 符号
         var currency = usage.currency || 'CNY';
-        var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '楼' : '';
+        var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : '';
         parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
       }
     }
@@ -1235,8 +1235,8 @@
         if (msg.usage.prompt_tokens) parts.push('输入 ' + msg.usage.prompt_tokens);
         if (msg.usage.completion_tokens) parts.push('输出 ' + msg.usage.completion_tokens);
         if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
-        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('鏈懡涓?' + msg.usage.prompt_cache_miss_tokens);
-        if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('楼' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
+        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + msg.usage.prompt_cache_miss_tokens);
+        if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('¥' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
         if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' 路 ') }));
       }
     }
@@ -4116,7 +4116,7 @@
             if (searchCount > 0) {
               summaryText = '已联网搜索 · ' + searchCount + ' 条结果';
             } else {
-              summaryText = '鑱旂綉鎼滅储瀹屾垚 路 娌℃湁鎵惧埌鐩稿叧缁撴灉';
+              summaryText = '联网搜索完成 · 没有找到相关结果';
             }
             // 鏄剧ず浣跨敤鐨?provider
             if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
