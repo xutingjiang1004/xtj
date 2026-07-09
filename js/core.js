@@ -94,6 +94,15 @@ const ADMIN_NAME = "xxz";
 
             function getUserToken() {
                 var token = sessionStorage.getItem(USER_TOKEN_KEY) || localStorage.getItem(USER_TOKEN_KEY);
+                // 校验 localStorage token 是否过期（30天）
+                if (token && localStorage.getItem(USER_TOKEN_KEY)) {
+                    var ts = parseInt(localStorage.getItem(USER_TOKEN_TS_KEY), 10);
+                    if (ts && (Date.now() - ts > 30 * 24 * 60 * 60 * 1000)) {
+                        localStorage.removeItem(USER_TOKEN_KEY);
+                        localStorage.removeItem(USER_TOKEN_TS_KEY);
+                        token = null;
+                    }
+                }
                 return token || '';
             }
 
@@ -269,8 +278,8 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             return next;
         }
 
-        // 一次性迁移：将 localStorage 的 xtj_pw_hash 复制到 sessionStorage（CRIT-4 安全修复）
-        try { if (localStorage.getItem('xtj_pw_hash') && !sessionStorage.getItem('xtj_pw_hash')) sessionStorage.setItem('xtj_pw_hash', localStorage.getItem('xtj_pw_hash')); } catch(e) {}
+        // 一次性迁移：将 localStorage 的 xtj_pw_hash 复制到 sessionStorage 后立刻删除旧值
+        try { if (localStorage.getItem('xtj_pw_hash')) { if (!sessionStorage.getItem('xtj_pw_hash')) sessionStorage.setItem('xtj_pw_hash', localStorage.getItem('xtj_pw_hash')); localStorage.removeItem('xtj_pw_hash'); } } catch(e) {}
 
         function clearUserSessionStorage() {
             try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
