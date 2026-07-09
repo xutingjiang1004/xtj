@@ -45,15 +45,16 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.css?v=20260709_ui_v2" />
+    <link rel="stylesheet" href="css/style.css?v=20260709_ui_v3" />
     <link rel="stylesheet" href="css/visual-refinements.css?v=20260627_v1" />
     <link rel="stylesheet" href="css/ai-agent.css?v=20260709_ui_v2" />
-    <link rel="stylesheet" href="css/english-learning.css?v=20260709_ui_v2" />
+    <link rel="stylesheet" href="css/english-learning.css?v=20260709_ui_v3" />
     <noscript><link rel="stylesheet" href="css/style.css" /><link rel="stylesheet" href="css/visual-refinements.css" /><link rel="stylesheet" href="css/ai-agent.css" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=20260627_b1" />
     <link rel="stylesheet" href="css/ui-enhance.css?v=20260708_perf_v1">
     <link rel="stylesheet" href="css/pro-style.css?v=20260708_perf_v1">
-    <link rel="stylesheet" href="css/ui-shell.css?v=20260709_ui_v1">
+    <link rel="stylesheet" href="css/ui-shell.css?v=20260709_ui_v2">
+    <link rel="stylesheet" href="css/photo-preview.css?v=20260709_ui_v2">
 </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -327,7 +328,30 @@
                     </div>
                 </div>
                 <input type="file" id="photoFileInput" accept="image/*" multiple style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
-                <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay"></div>
+                <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay" aria-hidden="true">
+                    <div class="pw-upload-progress-container" role="status" aria-live="polite">
+                        <div class="pw-upload-progress-hero">
+                            <div class="pw-upload-local-spinner" aria-hidden="true">
+                                <div class="pw-upload-liquid-shell"></div>
+                                <div class="pw-upload-liquid-glow"></div>
+                                <div class="pw-upload-liquid-core"></div>
+                                <div class="pw-upload-local-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                        <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="pw-upload-progress-copy">
+                                <div class="pw-upload-progress-title">上传中</div>
+                                <div class="pw-upload-progress-text" id="pwUploadProgressText">准备上传</div>
+                                <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在整理本次上传任务。</div>
+                            </div>
+                        </div>
+                        <div class="pw-upload-progress-bar-track" id="pwUploadProgressTrack" hidden>
+                            <div class="pw-upload-progress-bar-fill" id="pwUploadProgressFill"></div>
+                        </div>
+                    </div>
+                </div>
 
             </div>
         </div>
@@ -1375,14 +1399,14 @@
     <script defer src="js/features.js?v=20260623_1"></script>
     <script defer src="js/theme-toggle.js?v=20260620_1"></script>
     <script defer data-xtj-loaded="1" src="js/photo-wall/preview.min.js?v=20260627_hotfix_v22"></script>
-    <script defer data-xtj-loaded="1" src="js/photo-wall/preview-hotfix.js?v=20260627_hotfix_v22"></script>
+    <script defer data-xtj-loaded="1" src="js/photo-wall/preview-hotfix.js?v=20260709_ui_v2"></script>
     <script defer src="js/ui-effects.js?v=20260623_1"></script>
     <script defer src="js/pro-upgrade.js?v=20260627_profile_v3"></script>
     <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
     <script defer src="js/ai-agent.js?v=20260709_ui_v2"></script>
 <script defer src="js/english-dict.js?v=20260708_ai_fix_v1"></script>
 <script defer src="js/english-learning.js?v=20260709_ui_v2"></script>
-<script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
+    <script defer src="js/photo-wall/upload-ui.js?v=20260709_ui_v2"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

@@ -48,47 +48,49 @@
   pointer-events: none;
 }
 
+/* Dock shell */
 .dock-bar {
   position: fixed;
   overflow: visible;
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  pointer-events: none !important;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
 }
 
 .dock-bar::before,
 .dock-bar::after,
 [data-theme="dark"] .dock-bar::before,
 [data-theme="dark"] .dock-bar::after {
-  content: none !important;
-  display: none !important;
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  pointer-events: none !important;
+  content: none;
+  display: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
 }
 
+/* Dock indicator */
 .dock-bar > .dock-indicator {
-  display: block !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  z-index: 0 !important;
-  overflow: hidden !important;
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  overflow: hidden;
   isolation: isolate;
-  border-radius: 999px !important;
+  border-radius: 999px;
   opacity: 0;
-  pointer-events: none !important;
+  pointer-events: none;
   background:
     radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.06) 46%, rgba(255, 255, 255, 0.18) 74%, rgba(255, 255, 255, 0.32) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(76, 200, 190, 0.12) 100%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.28) !important;
-  outline: none !important;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(76, 200, 190, 0.12) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  outline: none;
   box-shadow:
     0 14px 30px rgba(38, 113, 135, 0.12),
     0 4px 10px rgba(38, 113, 135, 0.07),
@@ -96,9 +98,9 @@
     inset 0 -1px 2px rgba(24, 88, 110, 0.16),
     inset 12px 0 20px rgba(210, 255, 246, 0.16),
     inset -12px 0 20px rgba(170, 220, 255, 0.13),
-    inset 0 -13px 22px rgba(42, 168, 172, 0.12) !important;
-  backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
+    inset 0 -13px 22px rgba(42, 168, 172, 0.12);
+  backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05);
+  -webkit-backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05);
   transition:
     transform 0.32s var(--xtj-ease-standard),
     width 0.32s var(--xtj-ease-standard),
@@ -108,8 +110,8 @@
 
 .dock-bar > .dock-indicator::before,
 .dock-bar > .dock-indicator::after {
-  content: none !important;
-  display: none !important;
+  content: none;
+  display: none;
 }
 
 .dock-bar > .dock-indicator .dock-liquid-lens,
@@ -140,16 +142,17 @@
 }
 
 .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
-  width: 36px !important;
-  height: 36px !important;
-  max-width: none !important;
-  max-height: none !important;
+  width: 36px;
+  height: 36px;
+  max-width: none;
+  max-height: none;
 }
 
+/* Dock tab layer */
 .dock-bar .dock-tab {
   position: relative;
-  z-index: 1;
-  pointer-events: auto !important;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .dock-bar .dock-tab .dt-icon {
@@ -169,20 +172,20 @@
 .dock-bar .dock-tab .dt-icon::after,
 .dock-bar .dock-tab .dt-svg,
 .dock-bar .dock-tab .anim-layer {
-  background: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
-  border-color: transparent !important;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  border-color: transparent;
 }
 
 .dock-bar .dock-tab.active::before {
-  opacity: 0 !important;
-  border: 0 !important;
+  opacity: 0;
+  border: 0;
 }
 
 .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile):not(.anim-brain) .anim-layer {
-  opacity: 0 !important;
-  visibility: hidden !important;
+  opacity: 0;
+  visibility: hidden;
 }
 
 .dock-bar .dock-tab.anim-post .anim-layer,
@@ -190,13 +193,10 @@
 .dock-bar .dock-tab.anim-ai .anim-layer,
 .dock-bar .dock-tab.anim-brain .anim-layer,
 .dock-bar .dock-tab.anim-profile .anim-layer {
-  visibility: visible !important;
+  visibility: visible;
 }
 
-.dock-bar > .dock-indicator {
-  pointer-events: none !important;
-}
-
+/* Dark mode surface cleanup */
 [data-theme="dark"] .publish-box,
 [data-theme="dark"] .post,
 [data-theme="dark"] .comment-item,
@@ -239,8 +239,8 @@
 
 @media (min-width: 1024px) {
   .app-container {
-    max-width: min(1520px, calc(100vw - 32px));
-    padding: 16px;
+    max-width: min(1720px, calc(100vw - 24px));
+    padding: 18px 18px 18px 112px;
   }
 
   .dock-panels {
@@ -256,40 +256,46 @@
     border-color: rgba(164, 216, 205, 0.10);
   }
 
+  .dock-panel.active {
+    padding: 26px 28px 32px;
+  }
+
+  #panelChat .dock-chat-container,
+  #panelAi .photo-wall-container,
+  #panelProfile .dock-profile-container,
+  #panelDeepThink .dt-page,
+  #panelEnglishLearning .el-page {
+    width: min(1220px, 100%);
+    margin: 0 auto;
+    border-radius: 28px;
+  }
+
+  #panelChat .dock-chat-container,
+  #panelAi .photo-wall-container,
+  #panelProfile .dock-profile-container,
+  #panelDeepThink .dt-page {
+    background: linear-gradient(180deg, rgba(250, 253, 252, 0.72), rgba(243, 249, 247, 0.62));
+    border: 1px solid var(--xtj-line-soft);
+    box-shadow: var(--xtj-shadow-card);
+  }
+
+  [data-theme="dark"] #panelChat .dock-chat-container,
+  [data-theme="dark"] #panelAi .photo-wall-container,
+  [data-theme="dark"] #panelProfile .dock-profile-container,
+  [data-theme="dark"] #panelDeepThink .dt-page {
+    background: linear-gradient(180deg, rgba(12, 24, 28, 0.88), rgba(15, 30, 34, 0.78));
+    border-color: rgba(164, 216, 205, 0.10);
+  }
+
   #panelPosts.active {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 26px;
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 22px;
     align-items: start;
-    padding: 28px 28px 44px;
-  }
-
-  #panelPosts.active nav {
-    position: sticky;
-    top: 28px;
-    grid-column: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 18px;
-    border-radius: 24px;
-    background: var(--xtj-glass-bg-soft);
-    border: 1px solid var(--xtj-line-soft);
-    box-shadow: var(--xtj-shadow-soft);
-  }
-
-  #panelPosts.active nav > div,
-  #panelPosts.active nav .nav-auth {
-    display: flex;
-    width: 100%;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
   }
 
   #panelPosts.active .wrap {
-    grid-column: 2;
+    grid-column: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 270px;
     gap: 22px;
@@ -325,33 +331,53 @@
   }
 
   .dock-bar {
-    left: 50%;
+    top: 50%;
+    left: 24px;
     right: auto;
-    bottom: 18px;
-    transform: translate(-50%, calc(100% - 26px));
-    width: auto;
-    padding: 8px 10px 10px;
-    border-radius: 999px;
-    opacity: 0.22;
-    transition: transform var(--xtj-dur-base) var(--xtj-ease-standard), opacity var(--xtj-dur-fast) ease;
+    bottom: auto;
+    transform: translate3d(0, -50%, 0);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 72px;
+    padding: 10px 8px;
+    border-radius: 28px;
+    opacity: 0.78;
+    pointer-events: auto;
+    transition: opacity var(--xtj-dur-fast) ease, transform var(--xtj-dur-base) var(--xtj-ease-standard);
   }
 
   .dock-bar:hover,
   .dock-bar:focus-within {
-    transform: translate(-50%, 0);
-    opacity: 0.92;
+    opacity: 1;
+  }
+
+  .dock-bar .dock-tab {
+    width: 56px;
+    min-height: 58px;
   }
 
   .dock-bar .dock-tab .dt-label {
-    opacity: 0.58;
+    opacity: 0.62;
+  }
+
+  .dock-bar > .dock-indicator {
+    box-shadow:
+      0 12px 28px rgba(38, 113, 135, 0.10),
+      0 4px 8px rgba(38, 113, 135, 0.06),
+      inset 0 1px 1px rgba(255, 255, 255, 0.52),
+      inset 0 -1px 2px rgba(24, 88, 110, 0.14);
+  }
+
+  [data-theme="dark"] .dock-bar > .dock-indicator {
+    border-color: rgba(201, 233, 225, 0.12);
+    background:
+      radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 42%, rgba(146, 223, 207, 0.14) 100%),
+      linear-gradient(180deg, rgba(20, 54, 57, 0.84) 0%, rgba(16, 38, 43, 0.92) 100%);
   }
 }
 
 @media (min-width: 1280px) {
-  #panelPosts.active {
-    grid-template-columns: 236px minmax(0, 1fr);
-  }
-
   #panelPosts.active .wrap {
     grid-template-columns: minmax(0, 1fr) 292px;
     gap: 24px;
@@ -362,6 +388,11 @@
   .dock-bar {
     opacity: 1;
     transform: none;
+    pointer-events: none;
+  }
+
+  .dock-bar .dock-tab {
+    pointer-events: auto;
   }
 }
 
