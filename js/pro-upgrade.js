@@ -117,52 +117,46 @@
     var overlay = document.createElement('div');
     overlay.id = 'proCelebrationOverlay';
     overlay.className = 'pro-celebration-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
 
     var canvas = document.createElement('canvas');
     canvas.id = 'proCelebrationCanvas';
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;';
+    canvas.className = 'pro-celebration-canvas';
     overlay.appendChild(canvas);
 
     var card = document.createElement('div');
     card.className = 'pro-celebration-card';
-    card.style.cssText = 'position:relative;background:linear-gradient(145deg,#1a1a2e,#16213e);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 0 60px rgba(245,158,11,0.15),0 20px 60px rgba(0,0,0,0.5);color:#fff;overflow:hidden;';
 
     var glow1 = document.createElement('div');
-    glow1.style.cssText = 'position:absolute;top:-80px;right:-80px;width:200px;height:200px;background:radial-gradient(circle,rgba(245,158,11,0.15),transparent 70%);border-radius:50%;pointer-events:none;';
+    glow1.className = 'pro-celebration-glow pro-celebration-glow-top';
     card.appendChild(glow1);
 
     var glow2 = document.createElement('div');
-    glow2.style.cssText = 'position:absolute;bottom:-60px;left:-60px;width:160px;height:160px;background:radial-gradient(circle,rgba(245,158,11,0.1),transparent 70%);border-radius:50%;pointer-events:none;';
+    glow2.className = 'pro-celebration-glow pro-celebration-glow-bottom';
     card.appendChild(glow2);
 
     var iconWrap = document.createElement('div');
     iconWrap.className = 'pro-celebration-icon';
-    iconWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 30px rgba(245,158,11,0.4);margin-bottom:12px;';
     iconWrap.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#fff"/></svg>';
     card.appendChild(iconWrap);
 
     var title = document.createElement('div');
     title.className = 'pro-celebration-title';
     title.textContent = '🎉 恭喜升级 Pro！';
-    title.style.cssText = 'font-size:22px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
     card.appendChild(title);
 
     var sub = document.createElement('div');
     sub.className = 'pro-celebration-sub';
     sub.textContent = '您已成功开启 XTJ Pro 视觉权益';
-    sub.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;';
     card.appendChild(sub);
 
     var info = document.createElement('div');
     info.className = 'pro-celebration-info';
-    info.style.cssText = 'background:rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:16px;';
     var infoGrid = document.createElement('div');
-    infoGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;';
+    infoGrid.className = 'pro-celebration-info-grid';
 
     function addInfoRow(label, value) {
-      var lbl = document.createElement('div'); lbl.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.4);'; lbl.textContent = label; infoGrid.appendChild(lbl);
-      var val = document.createElement('div'); val.style.cssText = 'font-size:13px;font-weight:600;text-align:right;'; val.textContent = value; infoGrid.appendChild(val);
+      var lbl = document.createElement('div'); lbl.className = 'pro-celebration-info-label'; lbl.textContent = label; infoGrid.appendChild(lbl);
+      var val = document.createElement('div'); val.className = 'pro-celebration-info-value'; val.textContent = value; infoGrid.appendChild(val);
     }
     addInfoRow('会员', 'XTJ Pro');
     addInfoRow('来源', sourceIcon + ' ' + sourceLabel);
@@ -175,10 +169,9 @@
 
     var features = document.createElement('div');
     features.className = 'pro-celebration-features';
-    features.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:16px;';
     ['🎨 专属主题', '💬 聊天气泡', '🪴 帖子卡片装饰'].forEach(function(t) {
       var f = document.createElement('div');
-      f.style.cssText = 'background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;';
+      f.className = 'pro-celebration-feature';
       f.textContent = t;
       features.appendChild(f);
     });
@@ -188,26 +181,19 @@
     btn.className = 'pro-celebration-btn';
     btn.id = 'proCelebrationBtn';
     btn.textContent = '开始体验 Pro';
-    btn.style.cssText = 'width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);';
     card.appendChild(btn);
     document.body.appendChild(overlay);
 
-    btn.onclick = function() {
-      overlay.style.transition = 'opacity 0.4s,transform 0.4s';
-      overlay.style.opacity = '0';
-      overlay.style.transform = 'scale(0.95)';
+    function closeOverlay() {
+      if (overlay.classList.contains('is-closing')) return;
+      overlay.classList.add('is-closing');
       setTimeout(function() { overlay.remove(); }, 450);
-    };
-    btn.onmouseenter = function() { btn.style.transform = 'translateY(-2px)'; btn.style.boxShadow = '0 6px 20px rgba(245,158,11,0.4)'; };
-    btn.onmouseleave = function() { btn.style.transform = ''; btn.style.boxShadow = '0 4px 15px rgba(245,158,11,0.3)'; };
+    }
+
+    btn.onclick = closeOverlay;
 
     overlay.addEventListener('click', function(e) {
-      if (e.target === overlay) {
-        overlay.style.transition = 'opacity 0.4s,transform 0.4s';
-        overlay.style.opacity = '0';
-        overlay.style.transform = 'scale(0.95)';
-        setTimeout(function() { overlay.remove(); }, 450);
-      }
+      if (e.target === overlay) closeOverlay();
     });
 
     var card = overlay.querySelector('.pro-celebration-card');
@@ -219,12 +205,11 @@
       tl.fromTo('.pro-celebration-title', { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.35);
       tl.fromTo('.pro-celebration-sub', { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.42);
       tl.fromTo('.pro-celebration-info', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.5);
-      tl.fromTo('.pro-celebration-features > div', { y: 10, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.3, stagger: 0.04 }, 0.52);
+      tl.fromTo('.pro-celebration-feature', { y: 10, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.3, stagger: 0.04 }, 0.52);
       tl.fromTo('.pro-celebration-btn', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.6);
     } else {
-      overlay.style.opacity = '1';
-      card.style.opacity = '1';
-      card.style.transform = 'none';
+      overlay.classList.add('is-ready');
+      card.classList.add('is-ready');
     }
 
     window.__xtjStartProParticles('proCelebrationCanvas', 5000);
