@@ -558,6 +558,145 @@ body.english-learning-open {
   line-height: 1.55;
 }
 
+#panelEnglishLearning .el-batch-feedback {
+  margin-top: 12px;
+}
+
+#panelEnglishLearning .el-batch-summary {
+  border: 1px solid var(--el-line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.52), rgba(255,255,255,0.28));
+  box-shadow: 0 10px 26px rgba(20, 40, 34, 0.08);
+  padding: 14px;
+  transition: border-color 180ms var(--el-ease), background 180ms var(--el-ease), box-shadow 180ms var(--el-ease);
+}
+
+#panelEnglishLearning .el-batch-summary.is-empty {
+  box-shadow: none;
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="loading"] {
+  border-color: var(--el-line-strong);
+  background: linear-gradient(180deg, rgba(20,124,90,0.10), rgba(255,255,255,0.26));
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="success"] {
+  border-color: rgba(20,124,90,0.22);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="warning"],
+#panelEnglishLearning .el-batch-summary[data-state="error"] {
+  border-color: rgba(200, 77, 91, 0.18);
+}
+
+#panelEnglishLearning .el-batch-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#panelEnglishLearning .el-batch-summary-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--el-text);
+}
+
+#panelEnglishLearning .el-batch-summary-status {
+  color: var(--el-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#panelEnglishLearning .el-batch-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#panelEnglishLearning .el-batch-stat {
+  padding: 10px 10px 9px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.36);
+  border: 1px solid rgba(43, 74, 63, 0.08);
+}
+
+#panelEnglishLearning .el-batch-stat-label {
+  display: block;
+  color: var(--el-faint);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+#panelEnglishLearning .el-batch-stat-value {
+  color: var(--el-text);
+  font-size: 16px;
+}
+
+#panelEnglishLearning .el-batch-preview-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#panelEnglishLearning .el-batch-preview-item,
+#panelEnglishLearning .el-batch-preview-empty,
+#panelEnglishLearning .el-batch-failed-item {
+  border-radius: 12px;
+  border: 1px solid rgba(43, 74, 63, 0.08);
+  background: rgba(255,255,255,0.34);
+  padding: 10px 12px;
+}
+
+#panelEnglishLearning .el-batch-preview-item {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.34fr) minmax(0, 0.66fr);
+  gap: 10px;
+}
+
+#panelEnglishLearning .el-batch-preview-en {
+  color: var(--el-accent);
+  font-weight: 800;
+}
+
+#panelEnglishLearning .el-batch-preview-cn,
+#panelEnglishLearning .el-batch-preview-empty,
+#panelEnglishLearning .el-batch-failed-text {
+  color: var(--el-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#panelEnglishLearning .el-batch-failed {
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(200, 77, 91, 0.10);
+  background: rgba(255,255,255,0.28);
+}
+
+#panelEnglishLearning .el-batch-failed summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--el-text);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+#panelEnglishLearning .el-batch-failed-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+#panelEnglishLearning .el-batch-failed-line {
+  color: var(--el-danger);
+  font-size: 11px;
+  font-weight: 760;
+  margin-bottom: 4px;
+}
+
 #panelEnglishLearning .el-label {
   display: block;
   margin-bottom: 7px;
@@ -616,11 +755,30 @@ body.english-learning-open {
   box-shadow: 0 18px 42px rgba(20, 124, 90, 0.28);
 }
 
+#panelEnglishLearning .el-btn.is-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+#panelEnglishLearning .el-btn.is-loading::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.34);
+  border-top-color: currentColor;
+  animation: elSpin 0.9s linear infinite;
+}
+
 #panelEnglishLearning .el-btn:disabled,
 #panelEnglishLearning .el-btn-mini:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
+}
+
+@keyframes elSpin {
+  to { transform: rotate(360deg); }
 }
 
 #panelEnglishLearning .el-btn-big {
@@ -1165,6 +1323,14 @@ body.english-learning-open {
 }
 
 @media (max-width: 640px) {
+  #panelEnglishLearning .el-batch-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #panelEnglishLearning .el-batch-preview-item {
+    grid-template-columns: 1fr;
+  }
+
   #panelEnglishLearning .el-header {
     gap: 8px;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 10px 10px;
