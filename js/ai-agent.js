@@ -1680,7 +1680,9 @@
   function setResearchDisclosure(card, expanded) {
     if (!isResearchCard(card)) return;
     var refs = ensureResearchCardRefs(card);
-    var canToggle = !!card._researchState.canToggle;
+    var state = card._researchState || {};
+    var canToggle = !!state.canToggle;
+    if (state.userPinnedOpen && canToggle) expanded = true;
     if (!canToggle) expanded = false;
     card.classList.toggle('expanded', !!expanded && canToggle);
     card.classList.toggle('collapsed', !expanded || !canToggle);
@@ -1964,6 +1966,7 @@
       stepCount: options.stepCount || 0,
       searchCount: options.searchCount || 0,
       persistExpanded: !!options.expanded,
+      userPinnedOpen: !!options.expanded,
       progress: typeof options.progress === 'number' ? options.progress : 0.08,
       elapsedTimer: null,
       animator: null
@@ -1985,6 +1988,7 @@
         if (!card._researchState.canToggle) return;
         var nextExpanded = card.classList.contains('collapsed');
         card._researchState.persistExpanded = nextExpanded;
+        card._researchState.userPinnedOpen = nextExpanded;
         setResearchDisclosure(card, nextExpanded);
       });
     }
@@ -1992,6 +1996,7 @@
       refs.details.addEventListener('toggle', function() {
         if (!card._researchState.canToggle) return;
         card._researchState.persistExpanded = !!refs.details.open;
+        card._researchState.userPinnedOpen = !!refs.details.open;
         card.classList.toggle('expanded', !!refs.details.open);
         card.classList.toggle('collapsed', !refs.details.open);
       });
