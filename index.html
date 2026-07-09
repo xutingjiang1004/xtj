@@ -45,248 +45,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1" />
+    <link rel="stylesheet" href="css/style.css?v=20260709_ui_v2" />
     <link rel="stylesheet" href="css/visual-refinements.css?v=20260627_v1" />
-    <link rel="stylesheet" href="css/ai-agent.css?v=20260708_perf_v1" />
-    <link rel="stylesheet" href="css/english-learning.css?v=20260708_perf_v1" />
+    <link rel="stylesheet" href="css/ai-agent.css?v=20260709_ui_v2" />
+    <link rel="stylesheet" href="css/english-learning.css?v=20260709_ui_v2" />
     <noscript><link rel="stylesheet" href="css/style.css" /><link rel="stylesheet" href="css/visual-refinements.css" /><link rel="stylesheet" href="css/ai-agent.css" /></noscript>
-    <style id="xtj-inline-hotfix-20260612">
-        .hidden { display: none !important; }
-        .dock-bar {
-            position: fixed;
-            overflow: visible;
-        }
-
-        .xtj-svg-filters {
-            position: absolute;
-            width: 0;
-            height: 0;
-            overflow: hidden;
-            pointer-events: none;
-        }
-
-        .dock-bar > .dock-indicator {
-            display: block !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            border-radius: 999px !important;
-            pointer-events: none !important;
-            opacity: 0;
-            z-index: 0 !important;
-            overflow: hidden !important;
-            isolation: isolate;
-
-            background:
-                radial-gradient(
-                    ellipse at 50% 50%,
-                    rgba(255, 255, 255, 0.08) 0%,
-                    rgba(255, 255, 255, 0.06) 46%,
-                    rgba(255, 255, 255, 0.18) 74%,
-                    rgba(255, 255, 255, 0.32) 100%
-                ),
-                linear-gradient(
-                    180deg,
-                    rgba(255, 255, 255, 0.20) 0%,
-                    rgba(255, 255, 255, 0.08) 48%,
-                    rgba(76, 200, 190, 0.12) 100%
-                ) !important;
-
-            border: 1px solid rgba(255, 255, 255, 0.28) !important;
-            outline: none !important;
-
-            box-shadow:
-                0 14px 30px rgba(38, 113, 135, 0.12),
-                0 4px 10px rgba(38, 113, 135, 0.07),
-                inset 0 1px 1px rgba(255, 255, 255, 0.62),
-                inset 0 -1px 2px rgba(24, 88, 110, 0.16),
-                inset 12px 0 20px rgba(210, 255, 246, 0.16),
-                inset -12px 0 20px rgba(170, 220, 255, 0.13),
-                inset 0 -13px 22px rgba(42, 168, 172, 0.12) !important;
-
-            backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
-            -webkit-backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
-
-            transition:
-                transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-                width 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-                height 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-                opacity 0.2s ease;
-        }
-
-        .dock-bar > .dock-indicator::before,
-        .dock-bar > .dock-indicator::after {
-            content: none !important;
-            display: none !important;
-        }
-
-        .dock-bar > .dock-indicator .dock-liquid-lens,
-        .dock-bar > .dock-indicator .dock-liquid-shine {
-            position: absolute;
-            border-radius: inherit;
-            pointer-events: none;
-        }
-
-        .dock-bar > .dock-indicator .dock-liquid-lens {
-            inset: 0;
-
-            background:
-                radial-gradient(
-                    ellipse at 4% 50%,
-                    rgba(255, 255, 255, 0.82) 0%,
-                    rgba(196, 255, 244, 0.42) 14%,
-                    rgba(196, 255, 244, 0.08) 34%,
-                    transparent 56%
-                ),
-                radial-gradient(
-                    ellipse at 96% 50%,
-                    rgba(255, 255, 255, 0.72) 0%,
-                    rgba(164, 218, 255, 0.38) 16%,
-                    rgba(164, 218, 255, 0.08) 36%,
-                    transparent 58%
-                ),
-                radial-gradient(
-                    ellipse at 50% 112%,
-                    rgba(42, 170, 170, 0.20) 0%,
-                    rgba(42, 170, 170, 0.08) 34%,
-                    transparent 68%
-                );
-
-            filter: none;
-            opacity: 0.76;
-            mix-blend-mode: screen;
-        }
-
-        .dock-bar > .dock-indicator .dock-liquid-shine {
-            left: 23%;
-            right: 23%;
-            top: 5px;
-            height: 15%;
-
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255, 255, 255, 0.72) 0%,
-                    rgba(255, 255, 255, 0.30) 44%,
-                    rgba(255, 255, 255, 0.00) 100%
-                );
-
-            filter: blur(0.55px);
-            opacity: 0.58;
-        }
-
-        .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
-            width: 36px !important;
-            height: 36px !important;
-            max-width: none !important;
-            max-height: none !important;
-        }
-
-        .dock-bar .dock-tab {
-            position: relative;
-            z-index: 1;
-        }
-
-        .dock-bar .dock-tab .dt-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 24px;
-        }
-
-        .dock-bar .dock-tab.active {
-            background: transparent !important;
-            box-shadow: none !important;
-            border-color: transparent !important;
-        }
-
-        .dock-bar .dock-tab.active::before {
-            content: none !important;
-            display: none !important;
-            opacity: 0 !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            border: 0 !important;
-        }
-
-        .dock-bar .dock-tab,
-        .dock-bar .dock-tab::before,
-        .dock-bar .dock-tab::after,
-        .dock-bar .dock-tab .dt-icon,
-        .dock-bar .dock-tab .dt-icon::before,
-        .dock-bar .dock-tab .dt-icon::after,
-        .dock-bar .dock-tab .dt-svg,
-        .dock-bar .dock-tab .anim-layer {
-            background: transparent !important;
-            background-image: none !important;
-            box-shadow: none !important;
-            border-color: transparent !important;
-        }
-
-        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile):not(.anim-brain) .anim-layer {
-            opacity: 0 !important;
-            visibility: hidden !important;
-        }
-
-        .dock-bar .dock-tab.anim-post .anim-layer,
-        .dock-bar .dock-tab.anim-chat .anim-layer,
-        .dock-bar .dock-tab.anim-ai .anim-layer,
-        .dock-bar .dock-tab.anim-brain .anim-layer,
-        .dock-bar .dock-tab.anim-profile .anim-layer {
-            visibility: visible !important;
-        }
-
-        .dock-bar {
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            pointer-events: none !important;
-        }
-
-        .dock-bar::before,
-        .dock-bar::after {
-            content: none !important;
-            display: none !important;
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            pointer-events: none !important;
-        }
-
-        .dock-bar .dock-tab {
-            pointer-events: auto !important;
-        }
-
-        .dock-bar > .dock-indicator {
-            pointer-events: none !important;
-        }
-
-        [data-theme="dark"] .dock-bar {
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
-
-        [data-theme="dark"] .dock-bar::before,
-        [data-theme="dark"] .dock-bar::after {
-            content: none !important;
-            display: none !important;
-            background: transparent !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
-    </style>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=20260627_b1" />
     <link rel="stylesheet" href="css/ui-enhance.css?v=20260708_perf_v1">
     <link rel="stylesheet" href="css/pro-style.css?v=20260708_perf_v1">
+    <link rel="stylesheet" href="css/ui-shell.css?v=20260709_ui_v1">
 </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1612,9 +1379,9 @@
     <script defer src="js/ui-effects.js?v=20260623_1"></script>
     <script defer src="js/pro-upgrade.js?v=20260627_profile_v3"></script>
     <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
-    <script defer src="js/ai-agent.js?v=20260708_ai_fix_v1"></script>
+    <script defer src="js/ai-agent.js?v=20260709_ui_v2"></script>
 <script defer src="js/english-dict.js?v=20260708_ai_fix_v1"></script>
-<script defer src="js/english-learning.js?v=20260708_ai_fix_v1"></script>
+<script defer src="js/english-learning.js?v=20260709_ui_v2"></script>
 <script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
@@ -1697,6 +1464,20 @@
                         <div class="el-add-row">
                             <textarea class="el-input el-textarea" id="elBatchInput" placeholder="批量添加：一行一词，格式为 单词 释义" rows="3" maxlength="2000"></textarea>
                             <button type="button" class="el-btn" id="elBatchAddBtn">批量导入</button>
+                        </div>
+                        <div class="el-batch-feedback" id="elBatchFeedback" aria-live="polite">
+                            <div class="el-batch-summary is-empty" id="elBatchSummary" data-state="idle">
+                                <div class="el-batch-summary-head">
+                                    <span class="el-batch-summary-title">批量导入预览</span>
+                                    <span class="el-batch-summary-status" id="elBatchStatus">等待输入</span>
+                                </div>
+                                <div class="el-batch-stats" id="elBatchStats"></div>
+                                <div class="el-batch-preview-list" id="elBatchPreviewList"></div>
+                                <details class="el-batch-failed" id="elBatchFailedBox" hidden>
+                                    <summary>失败行 <span id="elBatchFailedCount">0</span></summary>
+                                    <div class="el-batch-failed-list" id="elBatchFailedList"></div>
+                                </details>
+                            </div>
                         </div>
                     </div>
 
