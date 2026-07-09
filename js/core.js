@@ -362,7 +362,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                     if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
                     var body = { user_name: userName };
                     if (!userToken) {
-                        body.password_hash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
+                        body.password_hash = sessionStorage.getItem("xtj_pw_hash") || "";
                     }
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
@@ -2732,7 +2732,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                     // ★ 关键修复：拿不到 token 时也要继续登录流程，但 console.warn 提示
                     //   AI 模块会用 ensureRealUserAuth 主动补救
                     try {
-                        var _pwHash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
+                        var _pwHash = sessionStorage.getItem("xtj_pw_hash") || "";
                         if (_pwHash && API_BASE) {
                             var tokenRes = await fetch(API_BASE + '/api/user/login', {
                                 method: 'POST', headers: {'Content-Type':'application/json'},
