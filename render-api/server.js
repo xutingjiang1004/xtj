@@ -777,6 +777,7 @@ async function searchBingHtml(query, maxResults) {
   try {
     var url = 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5) + '&mkt=zh-CN';
     var resp = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -983,7 +984,7 @@ async function queryWeather(query) {
     var lon = matchedCity.coords.lon;
     var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
 
-    var resp = await fetch(weatherUrl);
+    var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return null;
     var data = await resp.json();
     if (!data || !data.current) return null;
