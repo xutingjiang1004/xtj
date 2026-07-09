@@ -239,8 +239,8 @@
 
 @media (min-width: 1024px) {
   .app-container {
-    max-width: min(1720px, calc(100vw - 24px));
-    padding: 18px 18px 18px 112px;
+    max-width: min(1520px, calc(100vw - 32px));
+    padding: 16px;
   }
 
   .dock-panels {
@@ -257,7 +257,7 @@
   }
 
   .dock-panel.active {
-    padding: 26px 28px 32px;
+    padding: 28px 28px 36px;
   }
 
   #panelChat .dock-chat-container,
@@ -265,7 +265,7 @@
   #panelProfile .dock-profile-container,
   #panelDeepThink .dt-page,
   #panelEnglishLearning .el-page {
-    width: min(1220px, 100%);
+    width: min(1240px, 100%);
     margin: 0 auto;
     border-radius: 28px;
   }
@@ -285,6 +285,27 @@
   [data-theme="dark"] #panelDeepThink .dt-page {
     background: linear-gradient(180deg, rgba(12, 24, 28, 0.88), rgba(15, 30, 34, 0.78));
     border-color: rgba(164, 216, 205, 0.10);
+  }
+
+  #panelChat .dock-chat-container {
+    min-height: calc(100dvh - 172px);
+    overflow: clip;
+  }
+
+  #panelAi .photo-wall-container {
+    padding: 22px 24px 30px;
+  }
+
+  #panelProfile .dock-profile-container {
+    padding: 24px;
+  }
+
+  #panelDeepThink .dt-page {
+    min-height: calc(100dvh - 172px);
+  }
+
+  #panelEnglishLearning .el-page {
+    max-width: min(1280px, 100%);
   }
 
   #panelPosts.active {
@@ -331,49 +352,25 @@
   }
 
   .dock-bar {
-    top: 50%;
-    left: 24px;
+    left: 50%;
     right: auto;
-    bottom: auto;
-    transform: translate3d(0, -50%, 0);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 72px;
-    padding: 10px 8px;
-    border-radius: 28px;
-    opacity: 0.78;
-    pointer-events: auto;
-    transition: opacity var(--xtj-dur-fast) ease, transform var(--xtj-dur-base) var(--xtj-ease-standard);
+    bottom: 18px;
+    transform: translate(-50%, calc(100% - 26px));
+    width: auto;
+    padding: 8px 10px 10px;
+    border-radius: 999px;
+    opacity: 0.22;
+    transition: transform var(--xtj-dur-base) var(--xtj-ease-standard), opacity var(--xtj-dur-fast) ease;
   }
 
   .dock-bar:hover,
   .dock-bar:focus-within {
-    opacity: 1;
-  }
-
-  .dock-bar .dock-tab {
-    width: 56px;
-    min-height: 58px;
+    transform: translate(-50%, 0);
+    opacity: 0.92;
   }
 
   .dock-bar .dock-tab .dt-label {
-    opacity: 0.62;
-  }
-
-  .dock-bar > .dock-indicator {
-    box-shadow:
-      0 12px 28px rgba(38, 113, 135, 0.10),
-      0 4px 8px rgba(38, 113, 135, 0.06),
-      inset 0 1px 1px rgba(255, 255, 255, 0.52),
-      inset 0 -1px 2px rgba(24, 88, 110, 0.14);
-  }
-
-  [data-theme="dark"] .dock-bar > .dock-indicator {
-    border-color: rgba(201, 233, 225, 0.12);
-    background:
-      radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 42%, rgba(146, 223, 207, 0.14) 100%),
-      linear-gradient(180deg, rgba(20, 54, 57, 0.84) 0%, rgba(16, 38, 43, 0.92) 100%);
+    opacity: 0.58;
   }
 }
 
@@ -388,11 +385,6 @@
   .dock-bar {
     opacity: 1;
     transform: none;
-    pointer-events: none;
-  }
-
-  .dock-bar .dock-tab {
-    pointer-events: auto;
   }
 }
 
