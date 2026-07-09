@@ -36,11 +36,6 @@ const JS_FILES = [
   'js/theme-toggle.js',
   'js/config.js',
   'js/photo-wall/upload-ui.js',
-  'js/photo-wall/data.js',
-  'js/photo-wall/render.js',
-  'js/photo-wall/upload.js',
-  'js/photo-wall/preview.js',
-  'js/photo-wall/photo-wall.js',
   'js/photo-wall/preview-hotfix.js',
   'js/admin/admin.js'
 ];
