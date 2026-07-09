@@ -1160,13 +1160,7 @@
           renderArticle(S.currentQuiz);
           renderQuestions(S.currentQuiz);
           switchTab('practice');
-          var oldBanner = document.querySelector('#panelEnglishLearning .el-offline-banner');
-          if (oldBanner) oldBanner.remove();
-          var localBanner = document.createElement('div');
-          localBanner.className = 'el-offline-banner';
-          localBanner.textContent = '⚠ 离线示例模式 — 后端接口不可用，下方为本地模板示例，非 AI 生成';
-          var practicePane = document.getElementById('elPanePractice');
-          if (practicePane) practicePane.insertBefore(localBanner, practicePane.firstChild);
+          updateOfflinePracticeState(S.currentQuiz);
           notify('后端接口不可用，已加载离线示例');
           return;
         } catch (e4) {
@@ -1199,12 +1193,42 @@
     notify('已取消生成');
   }
 
+  function updateOfflinePracticeState(quiz) {
+    var isLocal = !!(quiz && quiz.local);
+    var articleCard = $('elArticleCard');
+    var questionsCard = $('elQuestionsCard');
+    var localeBar = $('elLocaleBar');
+    var practicePane = $('elPanePractice');
+    var banner = document.querySelector('#panelEnglishLearning .el-offline-banner');
+
+    [articleCard, questionsCard, localeBar].forEach(function(node) {
+      if (!node) return;
+      if (isLocal) node.setAttribute('data-local', 'true');
+      else node.removeAttribute('data-local');
+    });
+
+    if (!isLocal) {
+      if (banner) banner.remove();
+      return;
+    }
+
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'el-offline-banner';
+      banner.innerHTML =
+        '<div class=\"el-offline-banner-title\">离线示例</div>' +
+        '<div class=\"el-offline-banner-meta\">当前内容为本地模板示例，非 AI 生成；后端恢复后可重新生成正式练习。</div>';
+      if (practicePane) practicePane.insertBefore(banner, practicePane.firstChild);
+    }
+  }
+
   function renderArticle(quiz) {
     var card = $('elArticleCard');
     var text = $('elArticleText');
     var meta = $('elArticleMeta');
     var wordsBox = $('elArticleWords');
     if (!card || !text) return;
+    updateOfflinePracticeState(quiz);
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
     if (meta) meta.textContent = (quiz.words.length || 0) + ' words 路 ' + (quiz.level || '').toUpperCase();
@@ -1363,6 +1387,7 @@
     var list = $('elQuestionsList');
     var meta = $('elQuestionsMeta');
     if (!card || !list) return;
+    updateOfflinePracticeState(quiz);
     list.innerHTML = '';
     (quiz.questions || []).forEach(function(q, qi) {
       var qEl = el('article', { class: 'el-question', 'data-qid': q.id, style: '--el-i:' + Math.min(qi, 12) });
