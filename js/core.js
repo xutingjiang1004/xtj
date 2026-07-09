@@ -178,7 +178,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                         try { userName = localStorage.getItem('xtj_user') || sessionStorage.getItem('xtj_user') || ''; } catch (e) {}
                     }
                     var pwHash = '';
-                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
+                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
                     if (!userName || !pwHash) return '';
                     clearUserToken();
                     var tokenRes = await fetch(API_BASE + '/api/user/login', {
@@ -225,7 +225,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
                     // 没 token，看是否有 password_hash
                     var pwHash = '';
-                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
+                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
                     if (pwHash && typeof window.refreshUserToken === 'function') {
                         var newToken = await window.refreshUserToken(true);
                         if (newToken) return { ok: true, reason: 'ok_refreshed', token: newToken, user_name: userName };
@@ -313,7 +313,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             // ★ 关键修复：检查真实鉴权凭据
             try {
                 var _rt = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
-                var _rp = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
+                var _rp = !!(sessionStorage.getItem('xtj_pw_hash'));
                 if (!_rt && !_rp) {
                     try { console.warn('[AUTH] restore: 假登录态（token + pwHash 缺失），自动登出'); } catch (e) {}
                     clearUserSessionStorage();
@@ -1406,7 +1406,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             function isFakeLogin() {
                 if (getUserToken()) return false;
                 try {
-                    var pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
+                    var pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                     if (pwHash) return false;
                 } catch (e) {}
                 return true;
