@@ -98,7 +98,10 @@
     if (!vipInfo) return;
 
     var existing = document.getElementById('proCelebrationOverlay');
-    if (existing) existing.remove();
+    if (existing) {
+      if (typeof existing._xtjParticleStop === 'function') existing._xtjParticleStop();
+      existing.remove();
+    }
 
     // Determine source label
     var sourceLabel = '活动领取';
@@ -184,8 +187,11 @@
     card.appendChild(btn);
     document.body.appendChild(overlay);
 
+    var particleStop = null;
+
     function closeOverlay() {
       if (overlay.classList.contains('is-closing')) return;
+      if (typeof particleStop === 'function') particleStop();
       overlay.classList.add('is-closing');
       setTimeout(function() { overlay.remove(); }, 450);
     }
@@ -212,7 +218,8 @@
       card.classList.add('is-ready');
     }
 
-    window.__xtjStartProParticles('proCelebrationCanvas', 5000);
+    particleStop = window.__xtjStartProParticles('proCelebrationCanvas', 5000);
+    overlay._xtjParticleStop = particleStop;
   };
 
   window.__xtjStartProParticles = function(canvasId, duration) {
@@ -221,14 +228,29 @@
     var ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    var reduceMotion = false;
+    try {
+      reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) {}
+    if (reduceMotion) {
+      ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+      return function stopReduced() {};
+    }
+
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
     var particles = [];
-    var numParticles = 80;
+    var viewportMin = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+    var cpuCores = (navigator && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 0;
+    var dpr = window.devicePixelRatio || 1;
+    var isMobileLike = viewportMin < 640 || window.innerWidth < 900;
+    var isLowPower = (cpuCores && cpuCores <= 4) || dpr > 2.2;
+    var numParticles = isMobileLike ? 32 : (isLowPower ? 42 : (window.innerWidth >= 1440 ? 56 : 48));
     var colors = ['#f59e0b', '#d97706', '#fbbf24', '#fcd34d', '#fef3c7', '#fffbeb'];
     var startTime = Date.now();
     var animId = null;
+    var stopped = false;
 
     function randomRange(min, max) { return Math.random() * (max - min) + min; }
 
@@ -263,6 +285,7 @@
     }
 
     function animate() {
+      if (stopped) return;
       var elapsed = Date.now() - startTime;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -298,7 +321,7 @@
       }
 
       if (particles.length > 0 && elapsed < duration) {
-        if (particles.length < numParticles * 0.3 && Math.random() > 0.7) {
+        if (particles.length < numParticles * 0.3 && Math.random() > 0.72) {
           particles.push({
             x: canvas.width / 2 + (Math.random() - 0.5) * 150,
             y: canvas.height / 2,
@@ -315,20 +338,30 @@
         }
         animId = requestAnimationFrame(animate);
       } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        stop();
       }
     }
 
-    animate();
-
-    window.addEventListener('resize', function() {
+    function onResize() {
+      if (stopped) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-    });
+    }
+    window.addEventListener('resize', onResize);
 
-    return function stop() {
+    function stop() {
+      if (stopped) return;
+      stopped = true;
       if (animId) cancelAnimationFrame(animId);
-    };
+      window.removeEventListener('resize', onResize);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (canvas && canvas.parentNode && canvas.parentNode._xtjParticleStop === stop) {
+        canvas.parentNode._xtjParticleStop = null;
+      }
+    }
+
+    animId = requestAnimationFrame(animate);
+    return stop;
   };
 
   window.__xtjApplyProTheme = function(isPro) {
