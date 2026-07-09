@@ -692,8 +692,8 @@
   function stripBatchNoise(line) {
     return String(line || '')
       .replace(/^[\s\-*?·]+/, '')
-      .replace(/^\s*\d+[\.\)銆乗)]\s*/, '')
-      .replace(/^\s*[鈶犫憽鈶⑩懀鈶も懃鈶︹懅鈶ㄢ懇]\s*/, '')
+      .replace(/^\s*\d+[\.\)、\u3001]\s*/, '')
+      .replace(/^\s*[\u2460-\u2473\u2474-\u247F]\s*/, '') // ①-⑳ / ⑴-⒇
       .replace(/\/[^\/\n]{1,40}\//g, ' ')
       .replace(/\[[^\]\n]{1,40}\]/g, ' ')
       .trim();
@@ -710,7 +710,7 @@
 
   function cleanBatchMeaning(cn) {
     return String(cn || '')
-      .replace(/^[\s:锛歕-鈥撯€?,锛?锛泑\/]+/, '')
+      .replace(/^[\s:：\-\u2014\u2013\u2018\u2019\u201C\u201D\u2022\u2026,\u3001\uff0c\u3002\u00b7\/]+/, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -1135,7 +1135,12 @@
           renderArticle(S.currentQuiz);
           renderQuestions(S.currentQuiz);
           switchTab('practice');
-          notify('已使用本地模板生成（后端不可用，题目为示例格式）');
+          var localBanner = document.createElement('div');
+          localBanner.style.cssText = 'padding:10px 14px;margin:12px 0;background:rgba(255,193,7,.12);border:1px solid rgba(255,193,7,.3);border-radius:10px;font-size:12px;color:#b8860b;text-align:center;';
+          localBanner.textContent = '⚠ 离线示例模式 — 后端接口不可用，下方为本地模板示例，非 AI 生成';
+          var practicePane = document.getElementById('elPanePractice');
+          if (practicePane) practicePane.insertBefore(localBanner, practicePane.firstChild);
+          notify('后端接口不可用，已加载离线示例');
           return;
         } catch (e4) {
           try { console.error('[EL] local fallback failed:', e4); } catch (_) {}
@@ -1683,6 +1688,7 @@
     showResult(correct, total, pct);
     updateMasteryFromQuiz(quiz, correct, total);
     S.mistakes = missed.concat(S.mistakes).slice(0, MAX_MISTAKES);
+    if (quiz.local) return; // 本地模板示例不写入历史
     S.history.unshift({
       id: uid('h'),
       correct: correct,
