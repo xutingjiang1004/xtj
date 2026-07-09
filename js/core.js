@@ -5886,17 +5886,25 @@ function renderProfileActivityList(kind) {
                     edited_at: nextEditedAt
                 });
                 var updatePayload = {
+                    post_id: post.id,
                     content: newContent,
                     visibility: nextVisibility,
                     is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
                 };
-                var result = await sb.from("posts").update(updatePayload).eq("id", post.id).select("*").maybeSingle();
-                if (result.error) return { ok: false, error: result.error };
-                if (!result.data) {
-                    return { ok: false, error: new Error("更新失败：数据库没有实际修改任何行，可能是RLS权限阻止") };
-                }
-                var verified = normalizePost(result.data);
+                // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
+                var resp = await fetch((window.API_BASE || '') + '/api/post/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatePayload)
+                });
+                var result = await resp.json();
+                if (!resp.ok || !result.ok) return { ok: false, error: new Error(result.error || '更新失败') };
+                // 重新查询验证
+                var verifyRes = await sb.from('posts').select('*').eq('id', post.id).maybeSingle();
+                if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
+                var verified = normalizePost(verifyRes.data);
                 var verifiedMeta = parsePostContent(result.data).meta || {};
                 if (String(verified.visibility || "public") !== String(nextVisibility)) {
                     return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
@@ -6256,12 +6264,14 @@ function renderProfileActivityList(kind) {
                     }
                     nextPinned = !dbPost.is_pinned;
                     btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-                    // Update via Supabase directly
-                    var updateRes = await sb.from('posts').update({
-                        is_pinned: nextPinned,
-                        pinned_at: nextPinned ? new Date().toISOString() : null
-                    }).eq('id', postId);
-                    if (updateRes.error) { alert('更新失败: ' + updateRes.error.message); throw updateRes.error; }
+                    // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
+                    var updResp = await fetch((window.API_BASE || '') + '/api/post/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
+                    });
+                    var updResult = await updResp.json();
+                    if (!updResp.ok || !updResult.ok) { alert('更新失败: ' + (updResult.error || '服务器错误')); throw new Error(updResult.error); }
                     clearFeedCache();
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                     await loadFeed(true);

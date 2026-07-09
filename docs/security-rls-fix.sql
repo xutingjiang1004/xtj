@@ -186,3 +186,19 @@ ALTER TABLE posts REPLICA IDENTITY FULL;
 -- 所有 Storage 文件删除操作必须通过后端 RPC / service_role key
 -- ============================================================
 DROP POLICY IF EXISTS "anon_delete_uploads" ON storage.objects;
+
+-- ============================================================
+-- P1: 补充 posts 表缺失字段 (更新 / 置顶 / 编辑依赖这些列)
+-- ============================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='is_pinned') THEN
+    ALTER TABLE posts ADD COLUMN is_pinned boolean DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='pinned_at') THEN
+    ALTER TABLE posts ADD COLUMN pinned_at timestamptz;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='updated_at') THEN
+    ALTER TABLE posts ADD COLUMN updated_at timestamptz;
+  END IF;
+END $$;
