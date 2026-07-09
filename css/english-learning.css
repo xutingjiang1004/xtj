@@ -594,6 +594,7 @@ body.english-learning-open {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 
@@ -673,6 +674,7 @@ body.english-learning-open {
   text-align: center;
   color: var(--el-accent);
   font-weight: 700;
+  background: rgba(20, 124, 90, 0.10);
 }
 
 #panelEnglishLearning .el-batch-failed {
@@ -680,9 +682,11 @@ body.english-learning-open {
   border-radius: 12px;
   border: 1px solid rgba(200, 77, 91, 0.10);
   background: rgba(255,255,255,0.28);
+  overflow: clip;
 }
 
 #panelEnglishLearning .el-batch-failed summary {
+  list-style: none;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -691,6 +695,37 @@ body.english-learning-open {
   color: var(--el-danger);
   font-size: 12px;
   font-weight: 760;
+  gap: 10px;
+}
+
+#panelEnglishLearning .el-batch-failed summary::-webkit-details-marker {
+  display: none;
+}
+
+#panelEnglishLearning .el-batch-failed summary::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 180ms var(--el-ease);
+  flex: 0 0 auto;
+}
+
+#panelEnglishLearning .el-batch-failed[open] summary::after {
+  transform: rotate(225deg);
+}
+
+#panelEnglishLearning .el-batch-failed summary span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(200, 77, 91, 0.14);
 }
 
 #panelEnglishLearning .el-batch-failed-list {
@@ -767,6 +802,7 @@ body.english-learning-open {
 #panelEnglishLearning .el-btn.is-loading {
   position: relative;
   pointer-events: none;
+  gap: 8px;
 }
 
 #panelEnglishLearning .el-btn.is-loading::after {
@@ -780,6 +816,7 @@ body.english-learning-open {
 }
 
 #panelEnglishLearning .el-btn.is-complete {
+  transform: translateY(-1px);
   box-shadow: 0 0 0 4px rgba(20, 124, 90, 0.08);
 }
 
@@ -788,6 +825,44 @@ body.english-learning-open {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
+}
+
+@media (min-width: 1024px) {
+  #panelEnglishLearning .el-page {
+    padding: 28px 30px 34px;
+    border: 1px solid rgba(118, 176, 166, 0.14);
+    background:
+      linear-gradient(180deg, rgba(250, 253, 252, 0.88), rgba(244, 250, 248, 0.80)),
+      radial-gradient(circle at top right, rgba(104, 188, 174, 0.08), transparent 32%);
+    box-shadow: 0 22px 54px rgba(64, 122, 126, 0.10);
+  }
+
+  #panelEnglishLearning .el-main {
+    gap: 22px;
+  }
+
+  #panelEnglishLearning .el-dashboard-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+    align-items: start;
+  }
+
+  #panelEnglishLearning .el-practice-grid {
+    grid-template-columns: minmax(0, 1.06fr) minmax(330px, 0.94fr);
+  }
+
+  #panelEnglishLearning .el-library-card,
+  #panelEnglishLearning .el-gen-card,
+  #panelEnglishLearning .el-result-card {
+    min-height: 100%;
+  }
+
+  [data-theme="dark"] #panelEnglishLearning .el-page {
+    border-color: rgba(164, 216, 205, 0.10);
+    background:
+      linear-gradient(180deg, rgba(12, 24, 28, 0.92), rgba(15, 31, 35, 0.84)),
+      radial-gradient(circle at top right, rgba(83, 173, 162, 0.12), transparent 34%);
+    box-shadow: 0 22px 54px rgba(3, 11, 14, 0.28);
+  }
 }
 
 @keyframes elSpin {
