@@ -85,7 +85,11 @@
       state.photoUrls.push(url);
       var item = document.createElement('div');
       item.className = 'pw-upload-sheet-thumb';
-      item.innerHTML = '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      item.appendChild(img);
       grid.appendChild(item);
     });
     if (title) title.textContent = '选择完成，准备上传';
@@ -311,9 +315,19 @@
       state.postPreviewUrls.push(url);
       var node = document.createElement('div');
       node.className = 'post-media-preview-thumb';
-      node.innerHTML = isVideo(file)
-        ? '<video src="' + url + '" muted playsinline></video><span class="post-media-preview-tag">视频</span>'
-        : '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
+      if (isVideo(file)) {
+        var vid = document.createElement('video');
+        vid.src = url; vid.muted = true; vid.playsInline = true;
+        node.appendChild(vid);
+        var tag = document.createElement('span');
+        tag.className = 'post-media-preview-tag'; tag.textContent = '视频';
+        node.appendChild(tag);
+      } else {
+        var img2 = document.createElement('img');
+        img2.src = url; img2.alt = '';
+        img2.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+        node.appendChild(img2);
+      }
       grid.appendChild(node);
     });
     if (count) count.textContent = '已选择 ' + list.length + ' 个文件';

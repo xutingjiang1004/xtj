@@ -14,6 +14,38 @@ html.xtj-photo-preview-ready #photoPreviewImage {
   overscroll-behavior: contain;
 }
 
+html.xtj-photo-preview-ready #photoPreviewOverlay {
+  --pp-overlay-opacity: 1;
+  --pp-track-x: 0px;
+  --pp-img-x: 0px;
+  --pp-img-y: 0px;
+  --pp-scale: 1;
+  --pp-rotate: 0deg;
+  opacity: var(--pp-overlay-opacity);
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-root {
+  transition: opacity 220ms cubic-bezier(.16,1,.3,1);
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack {
+  transform: translate3d(var(--pp-track-x), 0, 0);
+  will-change: transform;
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-track #ppSlideTrack {
+  transition: transform 220ms cubic-bezier(.16,1,.3,1);
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage {
+  transform: translate3d(var(--pp-img-x), var(--pp-img-y), 0) scale(var(--pp-scale)) rotate(var(--pp-rotate));
+  will-change: transform;
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage {
+  transition: transform 220ms cubic-bezier(.16,1,.3,1);
+}
+
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-info-open #ppImageWrapper,
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-info-open #ppSlideTrack,
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-info-open #photoPreviewImage {
@@ -173,6 +205,21 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal {
 
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
   pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale(1);
+  opacity: 1;
+  transition: transform 280ms cubic-bezier(.16,1,.3,1), opacity 220ms ease;
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.pp-info-prep .pp-info-modal-content {
+  transform: translate3d(0, 18px, 0) scale(.94);
+  opacity: 0;
+  transition: none;
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.closing .pp-info-modal-content {
+  transform: translate3d(0, 14px, 0) scale(.94);
+  opacity: 0;
+  transition: transform 220ms cubic-bezier(.55,0,.85,.4), opacity 180ms ease;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-img-error {
@@ -222,12 +269,16 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-img-error .pp-slide-track {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-root,
+  html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-track #ppSlideTrack,
+  html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage,
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar,
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,
-  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn {
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
     transition: none;
   }
 }

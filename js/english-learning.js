@@ -137,7 +137,7 @@
   }
 
   function readPwHash() {
-    try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
+    try { return sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
   }
 
   function readUserToken() {
@@ -931,74 +931,6 @@
   }
 
   async function doBatchImport(btn) {
-    var input = $('elBatchInput');
-    if (!input) { notify('批量导入输入框未找到', 'error'); return; }
-    var text = String(input.value || '').trim();
-    if (!text) { notify('请先输入要导入的单词'); return; }
-    if (btn) { btn.disabled = true; btn.dataset._oldText = btn.textContent; btn.textContent = '解析中...'; }
-
-    // 1) 本地确定性解析优先?鈥?AI 只能补充释义
-    var localParsed = parseBatchWordsLocal(text);
-    var parsedMap = {};
-    localParsed.forEach(function(w) { parsedMap[w.en] = { en: w.en, cn: w.cn || '' }; });
-
-    // 2) AI 只用于补充释义，绝不覆盖本地识别数量
-    try {
-      var headers = await getAuthHeaders();
-      var resp = await fetch(apiBase() + '/english/parse-batch', {
-        method: 'POST', headers: headers,
-        body: JSON.stringify({ text: text, max_count: 120 })
-      });
-      if (resp.ok) {
-        var json = await resp.json();
-        var aiWords = json && json.ok && json.data && Array.isArray(json.data.words) ? json.data.words : [];
-        aiWords.forEach(function(p) {
-          if (!p || !p.en) return;
-          var en = cleanBatchWord(p.en);
-          if (!en) return;
-          if (parsedMap[en]) {
-            if (!parsedMap[en].cn && p.cn) parsedMap[en].cn = cleanBatchMeaning(p.cn);
-          } else {
-            var tmp = []; var seen2 = {};
-            Object.keys(parsedMap).forEach(function(k) { seen2[k] = true; });
-            pushBatchParsed(tmp, seen2, en, p.cn || '');
-            if (tmp.length) parsedMap[en] = tmp[0];
-          }
-        });
-      }
-    } catch (e) { /* AI 失败不影响导入?*/ }
-
-    var parsed = Object.keys(parsedMap).map(function(k) { return parsedMap[k]; });
-    if (!parsed.length) {
-      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-      notify('没有提取到有效英文单词，请检查输入', 'error');
-      return;
-    }
-
-    var before = S.words.length;
-    var existed = 0;
-    beginBatchMutation();
-    parsed.forEach(function(p) {
-      if (!p || !p.en) return;
-      var prev = S.words.some(function(w) { return w.en === p.en; }) ? 1 : 0;
-      addWord(p.en, p.cn || '', true);
-      existed += prev;
-    });
-    S.batchDirty = true;
-    endBatchMutation({ render: true });
-    var totalAdded = S.words.length - before;
-    if (input) input.value = '';
-    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._oldText || '批量导入'; }
-
-    notify(
-      '批量导入完成：识别 ' + parsed.length +
-      ' 个，新增 ' + totalAdded +
-      ' 个，已存在 ' + existed +
-      ' 个' + (totalAdded === 0 && existed > 0 ? '（均为已存在的单词）' : '')
-    );
-  }
-
-  doBatchImport = async function(btn) {
     var input = $('elBatchInput');
     if (!input) { notify('批量导入输入框未找到', 'error'); return; }
     var text = String(input.value || '').trim();

@@ -2501,6 +2501,10 @@ async function extractEmbeddedFiles(text) {
     fileIndex++;
     var extractedText = '';
       try {
+        // 估算文件大小：base64 长度 × 0.75 ≈ 实际字节数
+        var estimatedBytes = Math.ceil(base64Data.length * 0.75);
+        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; continue; }
+        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; break; }
         var buffer = Buffer.from(base64Data, 'base64');
         if (mimeType === 'application/pdf' && pdfParser) {
           var pdfData = await pdfParser(buffer);
