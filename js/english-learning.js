@@ -755,9 +755,9 @@
     roughParts.forEach(function(line) {
       line = stripBatchNoise(line);
       if (!line) return;
-      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:锛歕-鈥撯€?|\/]+([\u4e00-\u9fa5].*)$/);
+      var m = line.match(/^([a-zA-Z][a-zA-Z\s\-']{0,59}?)[\s:：\u2014\u2013\u2018\u2019\u201C\u201D\u2022\u2026,\u3001\uff0c\u3002\u00b7\/\|]+([\u4e00-\u9fa5].*)$/);
       if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
-      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:锛歕-鈥撯€?|\/]+(.+)$/);
+      m = line.match(/^([a-zA-Z][a-zA-Z\-']{0,59})[\s:：\u2014\u2013\u2018\u2019\u201C\u201D\u2022\u2026,\u3001\uff0c\u3002\u00b7\/\|]+(.+)$/);
       if (m) { pushBatchParsed(parsed, seen, m[1], m[2]); return; }
       m = line.match(/[a-zA-Z][a-zA-Z\s\-']{0,59}/);
       if (m) { pushBatchParsed(parsed, seen, m[0], ''); }
