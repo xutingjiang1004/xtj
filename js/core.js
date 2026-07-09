@@ -117,7 +117,7 @@ const ADMIN_NAME = "xxz";
                 if (!currentUser || !API_BASE) return '';
                 var pwHash = '';
                 try {
-                    pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
+pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 } catch (e) {
                     pwHash = '';
                 }
@@ -2702,8 +2702,8 @@ const ADMIN_NAME = "xxz";
                             try {
                                 var adminAuthRec = await findAuthRecord(name);
                                 if (adminAuthRec && adminAuthRec.media_url) {
-                                    localStorage.setItem("xtj_pw_hash", adminAuthRec.media_url);
-                                    try { sessionStorage.setItem("xtj_pw_hash", adminAuthRec.media_url); } catch(e) {}
+            try { sessionStorage.setItem("xtj_pw_hash", adminAuthRec.media_url); } catch(e) {}
+            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
                                 }
                             } catch(e) { console.warn('[Admin] 写入 xtj_pw_hash 失败:', e); }
                         } catch (apiErr) {
@@ -2724,9 +2724,8 @@ const ADMIN_NAME = "xxz";
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
-                        localStorage.setItem("xtj_pw_hash", authRec.media_url);
-                        // 用户登录时同步 xtj_pw_hash 到 sessionStorage（安全迁移）
-                        try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
+            try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
+            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
                     }
 
                     // 获取 JWT token（替代 password_hash 认证）
@@ -2848,8 +2847,8 @@ const ADMIN_NAME = "xxz";
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    localStorage.setItem("xtj_pw_hash", pwHash);
-                    try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
+            try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
+            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
                     // 获取 JWT token（替代 password_hash 认证）
                     // ★ 关键修复：拿不到 token 时也要继续注册流程，但 console.warn 提示
                     try {

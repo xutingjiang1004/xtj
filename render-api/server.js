@@ -1697,7 +1697,7 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '5mb' }));
 
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
 app.use((req, res, next) => {
