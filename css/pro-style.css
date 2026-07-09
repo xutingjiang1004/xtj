@@ -1655,3 +1655,199 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   box-shadow: 0 8px 18px rgba(40, 80, 60, 0.08) !important;
 }
 
+.pro-celebration-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(7, 11, 18, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: scale(0.985);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.pro-celebration-overlay.is-ready {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pro-celebration-overlay.is-closing {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.pro-celebration-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.pro-celebration-card {
+  position: relative;
+  width: min(100%, 380px);
+  padding: 32px 28px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 20px;
+  overflow: hidden;
+  text-align: center;
+  color: #fff;
+  background: linear-gradient(145deg, #1a1a2e, #16213e);
+  box-shadow: 0 0 60px rgba(245, 158, 11, 0.15), 0 20px 60px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(24px) scale(0.94);
+  transition: opacity 0.42s ease, transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pro-celebration-card.is-ready {
+  opacity: 1;
+  transform: none;
+}
+
+.pro-celebration-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.pro-celebration-glow-top {
+  top: -80px;
+  right: -80px;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.15), transparent 70%);
+}
+
+.pro-celebration-glow-bottom {
+  bottom: -60px;
+  left: -60px;
+  width: 160px;
+  height: 160px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.1), transparent 70%);
+}
+
+.pro-celebration-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.4);
+}
+
+.pro-celebration-title {
+  margin-bottom: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.pro-celebration-sub {
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.pro-celebration-info {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pro-celebration-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  text-align: left;
+}
+
+.pro-celebration-info-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.pro-celebration-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.pro-celebration-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.pro-celebration-feature {
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  font-size: 11px;
+}
+
+.pro-celebration-btn {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.pro-celebration-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+}
+
+.pro-celebration-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+  filter: saturate(0.96);
+}
+
+@media (max-width: 640px) {
+  .pro-celebration-overlay {
+    padding: 18px;
+  }
+
+  .pro-celebration-card {
+    width: min(100%, 360px);
+    padding: 28px 20px 22px;
+    border-radius: 18px;
+  }
+
+  .pro-celebration-features {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pro-celebration-overlay,
+  .pro-celebration-card,
+  .pro-celebration-btn {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
