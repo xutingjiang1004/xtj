@@ -98,28 +98,33 @@
   function setProgress(text, pct){
     var overlay = byId('pwUploadProgressOverlay');
     if (!overlay) return;
+    var textEl = byId('pwUploadProgressText');
+    var statusEl = byId('pwUploadProgressStatus');
+    var trackEl = byId('pwUploadProgressTrack');
+    var fillEl = byId('pwUploadProgressFill');
     if (!text) {
       overlay.style.display = 'none';
       overlay.classList.remove('upload-overlay-visible');
-      overlay.innerHTML = '';
+      overlay.setAttribute('aria-hidden', 'true');
+      if (trackEl) trackEl.hidden = true;
+      if (fillEl) fillEl.style.width = '0%';
       return;
-    }
-    var barHtml = '';
-    if (typeof pct === 'number' && pct >= 0 && pct <= 100) {
-      barHtml = '<div class="pw-upload-progress-bar-track"><div class="pw-upload-progress-bar-fill" style="width:' + Math.round(pct) + '%"></div></div>';
     }
     overlay.style.display = 'flex';
     overlay.classList.add('upload-overlay-visible');
-    overlay.innerHTML = '<div class="pw-upload-progress-container">'
-      + '<div class="pw-upload-progress-hero" style="display:flex;align-items:center;justify-content:center;gap:10px;">'
-      + '<div class="pw-spinner-ring" style="width:44px;height:44px;border:3.5px solid rgba(88,139,108,0.12);border-top-color:rgba(88,139,108,0.65);border-radius:50%;animation:pwSpinRing 0.75s linear infinite;"></div>'
-      + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(88,139,108,0.5)" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;animation:pwPulseFade 1.2s ease-in-out infinite alternate;">'
-      + '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>'
-      + '</svg>'
-      + '</div>'
-      + '<div class="pw-upload-progress-text">' + (text || '') + '</div>'
-      + barHtml
-      + '</div>';
+    overlay.setAttribute('aria-hidden', 'false');
+    if (textEl) textEl.textContent = text || '';
+    if (statusEl) {
+      if (typeof pct === 'number' && pct >= 0 && pct <= 100) {
+        statusEl.textContent = '当前进度 ' + Math.round(pct) + '%';
+      } else {
+        statusEl.textContent = '正在准备上传任务。';
+      }
+    }
+    if (trackEl) trackEl.hidden = !(typeof pct === 'number' && pct >= 0 && pct <= 100);
+    if (fillEl && typeof pct === 'number' && pct >= 0 && pct <= 100) {
+      fillEl.style.width = Math.round(pct) + '%';
+    }
   }
 
   function handlePhotoSelection(event){
