@@ -257,67 +257,40 @@
     border-color: rgba(164, 216, 205, 0.10);
   }
 
-  .dock-panel.active {
-    padding: 28px 28px 36px;
-  }
-
-  #panelChat .dock-chat-container,
-  #panelAi .photo-wall-container,
-  #panelProfile .dock-profile-container,
-  #panelDeepThink .dt-page,
-  #panelEnglishLearning .el-page {
-    width: min(1240px, 100%);
-    margin: 0 auto;
-    border-radius: 28px;
-  }
-
-  #panelChat .dock-chat-container,
-  #panelAi .photo-wall-container,
-  #panelProfile .dock-profile-container,
-  #panelDeepThink .dt-page {
-    background: linear-gradient(180deg, rgba(250, 253, 252, 0.72), rgba(243, 249, 247, 0.62));
-    border: 1px solid var(--xtj-line-soft);
-    box-shadow: var(--xtj-shadow-card);
-  }
-
-  [data-theme="dark"] #panelChat .dock-chat-container,
-  [data-theme="dark"] #panelAi .photo-wall-container,
-  [data-theme="dark"] #panelProfile .dock-profile-container,
-  [data-theme="dark"] #panelDeepThink .dt-page {
-    background: linear-gradient(180deg, rgba(12, 24, 28, 0.88), rgba(15, 30, 34, 0.78));
-    border-color: rgba(164, 216, 205, 0.10);
-  }
-
-  #panelChat .dock-chat-container {
-    min-height: calc(100dvh - 172px);
-    overflow: clip;
-  }
-
-  #panelAi .photo-wall-container {
-    padding: 22px 24px 30px;
-  }
-
-  #panelProfile .dock-profile-container {
-    padding: 24px;
-  }
-
-  #panelDeepThink .dt-page {
-    min-height: calc(100dvh - 172px);
-  }
-
-  #panelEnglishLearning .el-page {
-    max-width: min(1280px, 100%);
-  }
-
   #panelPosts.active {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 270px;
-    gap: 22px;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 26px;
     align-items: start;
+    padding: 28px 28px 44px;
+  }
+
+  #panelPosts.active nav {
+    position: sticky;
+    top: 28px;
+    grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 18px;
+    border-radius: 24px;
+    background: var(--xtj-glass-bg-soft);
+    border: 1px solid var(--xtj-line-soft);
+    box-shadow: var(--xtj-shadow-soft);
+  }
+
+  #panelPosts.active nav > div,
+  #panelPosts.active nav .nav-auth {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
   }
 
   #panelPosts.active .wrap {
-    grid-column: 1;
+    grid-column: 2;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 270px;
     gap: 22px;
@@ -376,6 +349,10 @@
 }
 
 @media (min-width: 1280px) {
+  #panelPosts.active {
+    grid-template-columns: 236px minmax(0, 1fr);
+  }
+
   #panelPosts.active .wrap {
     grid-template-columns: minmax(0, 1fr) 292px;
     gap: 24px;
@@ -393,5 +370,170 @@
   .dock-bar,
   .dock-bar > .dock-indicator {
     transition: none !important;
+  }
+}
+
+/* Non-dock shell unification */
+:root {
+  --xtj-panel-shell-light:
+    linear-gradient(180deg, rgba(250, 253, 252, 0.84), rgba(243, 249, 247, 0.74));
+  --xtj-panel-shell-dark:
+    linear-gradient(180deg, rgba(12, 24, 28, 0.92), rgba(15, 30, 35, 0.84));
+  --xtj-panel-card-light: rgba(255, 255, 255, 0.72);
+  --xtj-panel-card-dark: rgba(19, 35, 40, 0.78);
+}
+
+@media (min-width: 1024px) {
+  .dock-panel:not(#panelPosts).active {
+    padding: 26px 28px 34px;
+  }
+
+  #panelChat .dock-chat-container,
+  #panelAi .photo-wall-container,
+  #panelProfile .dock-profile-container,
+  #panelDeepThink .dt-page,
+  #panelEnglishLearning .el-page {
+    width: min(1220px, 100%);
+    margin: 0 auto;
+    border-radius: 28px;
+  }
+
+  #panelChat .dock-chat-container,
+  #panelAi .photo-wall-container,
+  #panelProfile .dock-profile-container,
+  #panelDeepThink .dt-page {
+    background: var(--xtj-panel-shell-light) !important;
+    border: 1px solid var(--xtj-line-soft) !important;
+    box-shadow: var(--xtj-shadow-card) !important;
+    overflow: clip;
+  }
+
+  [data-theme="dark"] #panelChat .dock-chat-container,
+  [data-theme="dark"] #panelAi .photo-wall-container,
+  [data-theme="dark"] #panelProfile .dock-profile-container,
+  [data-theme="dark"] #panelDeepThink .dt-page,
+  [data-theme="dark"] #panelEnglishLearning .el-page {
+    background: var(--xtj-panel-shell-dark) !important;
+    border-color: rgba(164, 216, 205, 0.12) !important;
+    box-shadow: var(--xtj-glass-shadow) !important;
+  }
+
+  #panelChat .dock-chat-container {
+    min-height: calc(100dvh - 172px);
+  }
+
+  #panelChat #dockChatDetailView,
+  #panelChat #dockChatListView {
+    background: transparent;
+  }
+
+  #panelChat .chat-header,
+  #panelChat .chat-input-area {
+    background: rgba(255, 255, 255, 0.52) !important;
+    border-color: rgba(120, 177, 170, 0.14) !important;
+  }
+
+  [data-theme="dark"] #panelChat .chat-header,
+  [data-theme="dark"] #panelChat .chat-input-area {
+    background: rgba(18, 35, 39, 0.72) !important;
+    border-color: rgba(164, 216, 205, 0.10) !important;
+  }
+
+  #panelAi .photo-wall-container {
+    padding: 22px 24px 30px;
+  }
+
+  #panelAi .photo-wall-header {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    margin-bottom: 18px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.62) !important;
+    border: 1px solid rgba(120, 177, 170, 0.14) !important;
+    box-shadow: var(--xtj-shadow-soft) !important;
+  }
+
+  [data-theme="dark"] #panelAi .photo-wall-header {
+    background: rgba(20, 39, 43, 0.78) !important;
+    border-color: rgba(164, 216, 205, 0.12) !important;
+  }
+
+  #panelAi .photo-wall-grid {
+    align-content: start;
+  }
+
+  #panelProfile .dock-profile-container {
+    padding: 24px;
+  }
+
+  #panelProfile .profile-main-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  #panelProfile .profile-user-card,
+  #panelProfile .profile-totals-bar {
+    grid-column: 1 / -1;
+  }
+
+  #panelProfile .profile-activity-board {
+    grid-column: 1;
+  }
+
+  #panelProfile .xtj-vip-card,
+  #panelProfile .profile-pro-style-entry-wrap,
+  #panelProfile .profile-settings {
+    grid-column: 2;
+  }
+
+  #panelProfile .profile-user-card,
+  #panelProfile .profile-activity-card,
+  #panelProfile .xtj-vip-card,
+  #panelProfile .profile-pro-style-entry,
+  #panelProfile .profile-settings {
+    background: var(--xtj-panel-card-light) !important;
+    border: 1px solid rgba(120, 177, 170, 0.14) !important;
+    box-shadow: var(--xtj-shadow-soft) !important;
+  }
+
+  [data-theme="dark"] #panelProfile .profile-user-card,
+  [data-theme="dark"] #panelProfile .profile-activity-card,
+  [data-theme="dark"] #panelProfile .xtj-vip-card,
+  [data-theme="dark"] #panelProfile .profile-pro-style-entry,
+  [data-theme="dark"] #panelProfile .profile-settings {
+    background: var(--xtj-panel-card-dark) !important;
+    border-color: rgba(164, 216, 205, 0.10) !important;
+  }
+
+  #panelDeepThink .dt-page {
+    width: min(1180px, 100%);
+    min-height: calc(100dvh - 172px);
+  }
+
+  #panelDeepThink .dt-header,
+  #panelDeepThink .dt-input-bar {
+    background: rgba(255, 255, 255, 0.58) !important;
+    border-color: rgba(120, 177, 170, 0.14) !important;
+  }
+
+  [data-theme="dark"] #panelDeepThink .dt-header,
+  [data-theme="dark"] #panelDeepThink .dt-input-bar {
+    background: rgba(19, 37, 41, 0.76) !important;
+    border-color: rgba(164, 216, 205, 0.10) !important;
+  }
+
+  #panelDeepThink .dt-messages {
+    padding: 22px 24px 28px;
+  }
+}
+
+@media (min-width: 1280px) {
+  #panelChat .dock-chat-container,
+  #panelAi .photo-wall-container,
+  #panelProfile .dock-profile-container {
+    width: min(1280px, 100%);
   }
 }
