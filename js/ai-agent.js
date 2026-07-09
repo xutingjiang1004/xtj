@@ -1059,7 +1059,7 @@
         '<div class="ai-think-body">' +
           (thinkingLog.length > 0 ?
             '<details class="ai-think-thinking">' +
-              '<summary><span>查看思考过程?(' + thinkingLog.length + ' 步?</span></summary>' +
+              '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
               '<div class="ai-think-thinking-body"></div>' +
             '</details>' : '') +
           (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
@@ -1119,7 +1119,7 @@
         });
         // 更新 summary 鏄剧ず鍚堝苟鍚庣殑步ユ暟锛堜袱绉嶆ā寮忛兘鏇存柊锛?
         var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
-        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程?(' + mergedLog.length + ' 步?';
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
       }
     }
 
@@ -2825,7 +2825,7 @@
           var summaryEl = node.querySelector('.ai-think-thinking summary');
           if (summaryEl) {
             var sumSpan = summaryEl.querySelector('span:last-child');
-            if (sumSpan) sumSpan.textContent = '查看思考过程?(' + mergedLog.length + ' 步?';
+            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
           }
         } else {
           // 娌℃湁鎬濊€冭繃绋? 闅愯棌 details
@@ -3625,7 +3625,7 @@
 
     if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
 
-    // 鏆傚仠鎸夐挳锛氱湡步ｄ腑步?SSE 请求 + 暂停渲染
+    // 鏆傚仠鎸夐挳锛氱湡步ｄ腑步)SSE 请求 + 暂停渲染
     if (pauseBtn) {
       pauseBtn.addEventListener('click', function(ev) {
         ev.preventDefault();
@@ -5209,7 +5209,7 @@ function showChatMessages() {
         }
         S.deepThinkEnabled = cfg.deep_think.enabled !== false;
       }
-      // 鏅€氳亰澶╃殑 thinkingMode 涔熷悓步?(浠?model.default_thinking_mode 璇?
+      // 鏅€氳亰澶╃殑 thinkingMode 涔熷悓步)(浠?model.default_thinking_mode 璇?
       if (cfg.model && ['low', 'medium', 'high', 'max', 'off'].indexOf(cfg.model.default_thinking_mode) >= 0) {
         S.thinkingMode = cfg.model.default_thinking_mode;
       }
