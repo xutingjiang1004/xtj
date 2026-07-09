@@ -865,6 +865,145 @@ body.english-learning-open {
   }
 }
 
+#panelEnglishLearning .el-sync {
+  position: relative;
+  gap: 6px;
+  transition: color 180ms var(--el-ease), background 180ms var(--el-ease), border-color 180ms var(--el-ease), box-shadow 180ms var(--el-ease);
+}
+
+#panelEnglishLearning .el-sync::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 rgba(96, 155, 128, 0.2);
+  flex: 0 0 7px;
+}
+
+#panelEnglishLearning .el-sync.is-syncing {
+  border-color: rgba(47, 107, 215, 0.26);
+  background: rgba(67, 126, 228, 0.08);
+  box-shadow: 0 10px 22px rgba(47, 107, 215, 0.08);
+}
+
+#panelEnglishLearning .el-sync.is-dirty {
+  border-color: rgba(211, 141, 36, 0.28);
+  background: rgba(211, 141, 36, 0.08);
+}
+
+#panelEnglishLearning .el-sync.is-error {
+  border-color: rgba(214, 91, 90, 0.28);
+  background: rgba(214, 91, 90, 0.08);
+}
+
+#panelEnglishLearning .el-sync.is-local {
+  border-color: rgba(104, 126, 148, 0.22);
+  background: rgba(104, 126, 148, 0.08);
+}
+
+#panelEnglishLearning .el-sync.is-pulse::before {
+  animation: el-sync-pulse 1.18s ease-in-out infinite;
+}
+
+#panelEnglishLearning .el-sync.is-settled::before {
+  animation: none;
+  box-shadow: 0 0 0 4px rgba(96, 155, 128, 0.1);
+}
+
+@keyframes el-sync-pulse {
+  0%, 100% { transform: scale(0.82); box-shadow: 0 0 0 0 rgba(47, 107, 215, 0.08); }
+  50% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(47, 107, 215, 0.16); }
+}
+
+#panelEnglishLearning .el-loading-overlay[data-state="idle"] .el-loading-pill {
+  opacity: 0;
+}
+
+#panelEnglishLearning .el-loading-overlay[data-state="loading"] .el-loading-pill {
+  opacity: 1;
+}
+
+#panelEnglishLearning .el-offline-banner {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(222, 170, 49, 0.26);
+  background: linear-gradient(180deg, rgba(255, 241, 205, 0.62), rgba(255, 248, 229, 0.82));
+  color: #9e6f14;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 10px 24px rgba(176, 134, 37, 0.08);
+}
+
+#panelEnglishLearning #elBatchAddBtn.is-warning {
+  color: #9e6f14;
+  border-color: rgba(211, 141, 36, 0.26);
+  background: rgba(211, 141, 36, 0.1);
+}
+
+#panelEnglishLearning #elBatchAddBtn.is-error {
+  color: #b04b4a;
+  border-color: rgba(214, 91, 90, 0.28);
+  background: rgba(214, 91, 90, 0.1);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="success"] {
+  box-shadow: 0 14px 28px rgba(54, 129, 102, 0.08);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="warning"] {
+  box-shadow: 0 14px 28px rgba(181, 137, 53, 0.08);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="error"] {
+  box-shadow: 0 14px 28px rgba(181, 82, 80, 0.08);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-sync.is-syncing {
+  background: rgba(76, 125, 212, 0.18);
+  border-color: rgba(95, 145, 232, 0.28);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-sync.is-dirty {
+  background: rgba(192, 143, 49, 0.16);
+  border-color: rgba(208, 162, 74, 0.26);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-sync.is-error {
+  background: rgba(173, 77, 75, 0.18);
+  border-color: rgba(204, 101, 99, 0.24);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-sync.is-local {
+  background: rgba(86, 104, 122, 0.18);
+  border-color: rgba(112, 135, 160, 0.22);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-offline-banner {
+  background: linear-gradient(180deg, rgba(110, 84, 24, 0.26), rgba(78, 60, 17, 0.34));
+  border-color: rgba(210, 168, 73, 0.2);
+  color: #f0d17f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panelEnglishLearning .el-sync,
+  #panelEnglishLearning .el-loading-overlay,
+  #panelEnglishLearning .el-loading-pill,
+  #panelEnglishLearning .el-pill-dot,
+  #panelEnglishLearning #elBatchAddBtn {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  #panelEnglishLearning .el-sync.is-pulse::before,
+  #panelEnglishLearning .el-sync.is-settled::before {
+    animation: none !important;
+    box-shadow: none !important;
+  }
+}
+
 @keyframes elSpin {
   to { transform: rotate(360deg); }
 }
