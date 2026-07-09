@@ -669,6 +669,12 @@ body.english-learning-open {
   overflow-wrap: anywhere;
 }
 
+#panelEnglishLearning .el-batch-preview-empty.is-more {
+  text-align: center;
+  color: var(--el-accent);
+  font-weight: 700;
+}
+
 #panelEnglishLearning .el-batch-failed {
   margin-top: 10px;
   border-radius: 12px;
@@ -678,8 +684,11 @@ body.english-learning-open {
 
 #panelEnglishLearning .el-batch-failed summary {
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 12px;
-  color: var(--el-text);
+  color: var(--el-danger);
   font-size: 12px;
   font-weight: 760;
 }
@@ -768,6 +777,10 @@ body.english-learning-open {
   border: 2px solid rgba(255,255,255,0.34);
   border-top-color: currentColor;
   animation: elSpin 0.9s linear infinite;
+}
+
+#panelEnglishLearning .el-btn.is-complete {
+  box-shadow: 0 0 0 4px rgba(20, 124, 90, 0.08);
 }
 
 #panelEnglishLearning .el-btn:disabled,
