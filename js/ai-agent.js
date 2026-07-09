@@ -2440,8 +2440,17 @@
       }
     }
 
+    var _lastDataTime = Date.now();
+    var _idleCheckTimer = setInterval(function() {
+      if (Date.now() - _lastDataTime > 45000) {
+        try { reader.cancel(); } catch (e) {}
+        if (abortedRef) abortedRef.value = true;
+      }
+    }, 5000);
+    function _resetIdle() { _lastDataTime = Date.now(); }
+
     while (true) {
-      if (S._currentReqId !== reqId || controller.signal.aborted) {
+      if (S._currentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
         if (abortedRef) abortedRef.value = true;
         if (reader) try { reader.cancel(); } catch (e) {}
         break;
@@ -2449,6 +2458,7 @@
       var readResult;
       try { readResult = await reader.read(); } catch (e) { break; }
       if (readResult.done) break;
+      _resetIdle();
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -2577,6 +2587,7 @@
       if (doneReceivedRef && doneReceivedRef.value) break;
       if (abortedRef && abortedRef.value) break;
     }
+    try { clearInterval(_idleCheckTimer); } catch (e) {}
     return {
       aborted: abortedRef ? abortedRef.value : false,
       aiContent: aiContentRef.value,
