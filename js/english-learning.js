@@ -862,6 +862,12 @@
         row.appendChild(el('span', { class: 'el-batch-preview-cn', text: item.cn || '待补充释义' }));
         previewList.appendChild(row);
       });
+      if ((model.recognized || 0) > model.previewWords.length) {
+        previewList.appendChild(el('div', {
+          class: 'el-batch-preview-empty is-more',
+          text: '还有 ' + ((model.recognized || 0) - model.previewWords.length) + ' 个'
+        }));
+      }
     } else {
       previewList.appendChild(el('div', {
         class: 'el-batch-preview-empty',
@@ -907,6 +913,7 @@
       btn.disabled = true;
       if (!btn.dataset._oldText) btn.dataset._oldText = btn.textContent;
       btn.textContent = '解析中...';
+      btn.classList.remove('is-complete');
       btn.classList.add('is-loading');
       btn.setAttribute('aria-busy', 'true');
       return;
@@ -914,6 +921,12 @@
     btn.disabled = false;
     btn.textContent = btn.dataset._oldText || '批量导入';
     btn.classList.remove('is-loading');
+    btn.classList.add('is-complete');
+    if (btn._completeTimer) clearTimeout(btn._completeTimer);
+    btn._completeTimer = setTimeout(function() {
+      btn.classList.remove('is-complete');
+      btn._completeTimer = null;
+    }, 720);
     btn.removeAttribute('aria-busy');
   }
 
