@@ -1,13 +1,13 @@
-﻿/* ============================================================
-   desktop.css 鈥?PC 绔闈㈠竷灞€
+/* ============================================================
+   desktop.css 鈥?PC 绔闈㈠竷灞€
    ============================================================
-   鍙湪灞忓箷瀹藉害 >= 1024px 鏃剁敓鏁堛€?
-   绉诲姩绔紙< 1024px锛塪esktop.css 瀹屽叏涓嶅姞杞姐€?
+   只在屏幕宽度 >= 1024px 鏃剁敓鏁堛€?
+   移动端（< 1024px锛塪esktop.css 瀹屽叏涓嶅姞杞姐€?
 
-   璁捐鍘熷垯锛?
+   璁捐鍘熷垯锛?
    - 浠呴€氳繃 CSS 璋冩暣甯冨眬锛屼笉鍔?HTML / JS
-   - 涓嶆柊澧?pointer-events: none锛屼笉閬尅鎸夐挳
-   - 涓嶄慨鏀?id / class / data-* / 琛ㄥ崟 / 浜嬩欢缁戝畾
+   - 涓嶆柊澧?pointer-events: none，不遮挡按钮
+   - 涓嶄慨鏀?id / class / data-* / 表单 / 事件绑定
    - 涓嶆敼鍙?Supabase / 鍙戝竷 / 鑱婂ぉ / 绛涢€?/ 寮圭獥 / 鐧诲綍
    ============================================================ */
 
@@ -20,11 +20,11 @@
 
   /* ==============================================================
      P2: 甯栧瓙闈㈡澘 鈥?鍗曞垪甯冨眬锛堢畝娲侀槄璇绘祦锛?
-     宸︿晶 (1fr, max 720px 灞呬腑) 锛歱ublish / filter / feed锛坒eed 鍐?1 鍒楋級
-     鍙充晶 (300px) 锛歴tats 绠€娲佸崱鐗?
+     左侧 (1fr, max 720px 居中) ：publish / filter / feed锛坒eed 鍐?1 列）
+     右侧 (300px) 锛歴tats 绠€娲佸崱鐗?
      ============================================================== */
 
-  /* 鏁翠綋甯冨眬锛? 鍒楃綉鏍硷紙content + stats锛夛紝宸﹀垪鍐呬富鍐呭灞呬腑 720px */
+  /* 鏁翠綋甯冨眬锛? 鍒楃綉鏍硷紙content + stats），左列内主内容居中 720px */
   #panelPosts .wrap {
     max-width: min(1200px, calc(100vw - 56px - 48px));
     margin: 0 auto;
@@ -40,7 +40,7 @@
     align-items: start;
   }
 
-  /* 宸︿晶涓夊潡锛坧ublish / filter / feed锛夋暣浣撳眳涓?720px */
+  /* 左侧三块（publish / filter / feed锛夋暣浣撳眳涓?720px */
   #panelPosts .wrap > #publishBox,
   #panelPosts .wrap > #postFilterBar,
   #panelPosts .wrap > #feed {
@@ -50,12 +50,12 @@
     margin-right: auto;
   }
 
-  /* publish / filter / feed 鍗犲乏鍒楀悇鑷竴琛?*/
+  /* publish / filter / feed 鍗犲乏鍒楀悇鑷竴琛?*/
   #panelPosts .wrap > #publishBox    { grid-area: publish; min-width: 0; }
   #panelPosts .wrap > #postFilterBar { grid-area: filter; min-width: 0; }
   #panelPosts .wrap > #feed          { grid-area: feed; min-width: 0; }
 
-  /* stats 寮哄埗鍗犲彸鍒楋紝璺?3 琛岋紝sticky 璺熼殢婊氬姩 鈥?绠€娲佹棤鐜荤拑 */
+  /* stats 寮哄埗鍗犲彸鍒楋紝璺?3 行，sticky 璺熼殢婊氬姩 鈥?绠€娲佹棤鐜荤拑 */
   #panelPosts .wrap > .stats {
     grid-area: stats;
     position: -webkit-sticky;
@@ -74,12 +74,12 @@
     z-index: 2;
   }
 
-  /* feed 鍐呴儴鍗曞垪锛堜笉寮哄埗 grid锛岃甯栧瓙鍧楄嚜鐒跺爢鍙狅級 */
+  /* feed 内部单列（不强制 grid，让帖子块自然堆叠） */
   #panelPosts .wrap > #feed {
     display: block;
   }
 
-  /* 甯栧瓙涔嬮棿淇濇寔璺濈锛岄伩鍏嶈瑙夐粡杩?*/
+  /* 甯栧瓙涔嬮棿淇濇寔璺濈锛岄伩鍏嶈瑙夐粡杩?*/
   #panelPosts .wrap > #feed > .post {
     margin-bottom: 18px;
   }
@@ -87,14 +87,14 @@
     margin-bottom: 0;
   }
 
-  /* 2.1 PC 绔寜閽鏍硷細鏂硅銆佷笉閫忔槑銆佺函鑹茶儗鏅?鈥?璺熸墜鏈哄渾褰㈣兌鍥婂舰鎴愬尯鍒?*/
+  /* 2.1 PC 绔寜閽鏍硷細鏂硅銆佷笉閫忔槑銆佺函鑹茶儗鏅?鈥?璺熸墜鏈哄渾褰㈣兌鍥婂舰鎴愬尯鍒?*/
   #panelPosts .post > .actions {
     display: flex;
     gap: 6px;
     margin-top: 10px;
   }
 
-  /* 2.1.5 澶村儚鐐瑰嚮淇锛氱‘淇?.avatar.clickable銆?avatar-wrap銆亁tj-pro-avatar-ring 鍏ㄩ儴鍙偣鍑?*/
+  /* 2.1.5 澶村儚鐐瑰嚮淇锛氱‘淇?.avatar.clickable銆?avatar-wrap銆亁tj-pro-avatar-ring 鍏ㄩ儴鍙偣鍑?*/
   .avatar.clickable,
   #panelPosts .post .avatar.clickable,
   #panelAi .post .avatar.clickable,
@@ -140,7 +140,7 @@
   #panelPosts .post > .actions .action-btn.edit {
     background: transparent;
   }
-  /* 鏆楄壊涓婚鎸夐挳 */
+  /* 暗色主题按钮 */
   [data-theme="dark"] #panelPosts .post > .actions .action-btn {
     background: #1f2622;
     border-color: rgba(255, 255, 255, 0.08);
@@ -173,7 +173,7 @@
     margin-bottom: 12px;
   }
 
-  /* 甯栧瓙鏂囨湰鍐呭 鈥?鍗曞垪鏄剧ず鏇村琛?*/
+  /* 甯栧瓙鏂囨湰鍐呭 鈥?鍗曞垪鏄剧ず鏇村琛?*/
   #panelPosts .post > .content {
     font-size: 14.5px;
     line-height: 1.7;
@@ -184,9 +184,9 @@
     overflow: hidden;
   }
 
-  /* 濯掍綋锛氬崟鍒楁洿鑸掑睍 */
+  /* 媒体：单列更舒展 */
   #panelPosts .post > .media {
-    margin: 0 -18px 12px;       /* 鎾戞弧鍗＄墖 */
+    margin: 0 -18px 12px;       /* 撑满卡片 */
   }
   #panelPosts .post > .media img,
   #panelPosts .post > .media video {
@@ -242,16 +242,16 @@
   }
 
   /* ==============================================================
-     P3: 鑱婂ぉ闈㈡澘 鈥?鍙屽垪甯冨眬锛坙ist 宸?+ detail 鍙筹級
-     鍏抽敭鐐癸細
-     - .dock-chat-container 鏀逛负 grid 2 鍒?
-     - 瑕嗙洊 .chat-view.hidden 鍦?PC 绔笉闅愯棌锛坙ist 涓?detail 濮嬬粓骞舵帓锛?
-       杩欐牱 JS 鍒囨崲 .hidden 绫讳笉褰卞搷 PC 绔殑骞舵帓鏄剧ず
-     - chat-header 璺?2 鍒楋紝PC 绔殣钘?鈫?杩斿洖鎸夐挳锛堜笉闇€瑕侊級
-     - 绉诲姩绔?(< 1024px) 琛屼负瀹屽叏涓嶅彉锛歭ist 涓?detail 浜掓枼鍒囨崲
+     P3: 鑱婂ぉ闈㈡澘 鈥?鍙屽垪甯冨眬锛坙ist 宸?+ detail 右）
+     关键点：
+     - .dock-chat-container 改为 grid 2 鍒?
+     - 覆盖 .chat-view.hidden 鍦?PC 端不隐藏（list 涓?detail 濮嬬粓骞舵帓锛?
+       这样 JS 切换 .hidden 类不影响 PC 端的并排显示
+     - chat-header 璺?2 列，PC 绔殣钘?鈫?杩斿洖鎸夐挳锛堜笉闇€瑕侊級
+     - 绉诲姩绔?(< 1024px) 行为完全不变：list 涓?detail 互斥切换
      ============================================================== */
 
-  /* 瀹瑰櫒锛歡rid 2 鍒?*/
+  /* 容器：grid 2 鍒?*/
   #panelChat .dock-chat-container {
     display: grid;
     grid-template-columns: 340px minmax(0, 1fr);
@@ -262,7 +262,7 @@
     gap: 0;
   }
 
-  /* header 璺?2 鍒楋紝缃《 */
+  /* header 璺?2 列，置顶 */
   #panelChat .chat-header {
     grid-column: 1 / -1;
     grid-row: 1;
@@ -271,12 +271,12 @@
     background: #fff;
   }
 
-  /* PC 绔殣钘忋€屸啇銆嶈繑鍥炴寜閽紙绉诲姩绔繚鐣欙級 */
+  /* PC 绔殣钘忋€屸啇銆嶈繑鍥炴寜閽紙绉诲姩绔繚鐣欙級 */
   #panelChat #dockChatBackBtn {
     display: none;
   }
 
-  /* list 鍥哄畾鍦ㄥ乏鍒楋紝姘歌繙鍙 */
+  /* list 固定在左列，永远可见 */
   #panelChat #dockChatListView {
     grid-column: 1;
     grid-row: 2;
@@ -289,11 +289,11 @@
     overflow: hidden;
     min-height: 0;
   }
-  /* 瑕嗙洊 .hidden 鍦?PC 绔笉闅愯棌锛坙ist 濮嬬粓鏄剧ず锛?*/
+  /* 覆盖 .hidden 鍦?PC 端不隐藏（list 濮嬬粓鏄剧ず锛?*/
   #panelChat #dockChatListView.chat-view.hidden {
     display: flex;
   }
-  /* list 鑷韩鍙粴鍔?*/
+  /* list 鑷韩鍙粴鍔?*/
   #panelChat #dockChatList {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
@@ -302,7 +302,7 @@
     filter: none;
   }
 
-  /* detail 鍗犲彸鍒楋紝姘歌繙鍙锛堣鐩栫Щ鍔ㄧ榛樿 hidden锛?*/
+  /* detail 占右列，永远可见（覆盖移动端默认 hidden锛?*/
   #panelChat #dockChatDetailView {
     grid-column: 2;
     grid-row: 2;
@@ -310,12 +310,12 @@
     min-height: 0;
     background: var(--glass-bg, rgba(255, 255, 255, 0.35));
   }
-  /* 瑕嗙洊 .hidden 鍦?PC 绔笉闅愯棌锛坉etail 濮嬬粓鏄剧ず锛?*/
+  /* 覆盖 .hidden 鍦?PC 端不隐藏（detail 濮嬬粓鏄剧ず锛?*/
   #panelChat #dockChatDetailView.chat-view.hidden {
     display: flex;
   }
 
-  /* detail 鍐呯殑娑堟伅鍖哄彲婊氬姩 */
+  /* detail 内的消息区可滚动 */
   #panelChat #dockChatMessages {
     overflow-y: auto;
     padding: 20px 28px;
@@ -339,7 +339,7 @@
     filter: none;
   }
 
-  /* 鏆楄壊涓婚閫傞厤 */
+  /* 暗色主题适配 */
   [data-theme="dark"] #panelChat #dockChatListView {
     background: transparent;
     box-shadow: none;
@@ -357,10 +357,10 @@
   }
 
   /* ==============================================================
-     P4: 鐓х墖澧欓潰鏉?鈥?header 妯悜 sticky + 缃戞牸鍔犲鍒?5-6 鍒?
-     - 鏁翠綋 max-width 1400px 灞呬腑
-     - 鏍囬宸?/ 鎺т欢鍙筹紝鍚搁《
-     - 绉诲姩绔?(< 1024px) 琛屼负瀹屽叏涓嶅彉
+     P4: 鐓х墖澧欓潰鏉?鈥?header 横向 sticky + 缃戞牸鍔犲鍒?5-6 鍒?
+     - 整体 max-width 1400px 居中
+     - 鏍囬宸?/ 鎺т欢鍙筹紝鍚搁《
+     - 绉诲姩绔?(< 1024px) 行为完全不变
      ============================================================== */
 
   #panelAi .photo-wall-container {
@@ -369,7 +369,7 @@
     padding: 24px 32px 60px;
   }
 
-  /* header 妯悜甯冨眬锛氭爣棰樺乏銆佺姸鎬?鎺т欢鍙?*/
+  /* header 妯悜甯冨眬锛氭爣棰樺乏銆佺姸鎬?鎺т欢鍙?*/
   #panelAi .photo-wall-header {
     display: flex;
     align-items: center;
@@ -388,13 +388,13 @@
     z-index: 10;
   }
 
-  /* 鏍囬鍦ㄥ乏 */
+  /* 标题在左 */
   #panelAi .photo-wall-title {
     flex: 1 1 auto;
     min-width: 0;
   }
 
-  /* 鍚屾鐘舵€佸湪涓棿锛屾帶浠跺湪鍙?*/
+  /* 鍚屾鐘舵€佸湪涓棿锛屾帶浠跺湪鍙?*/
   #panelAi .photo-wall-sync-status {
     flex: 0 0 auto;
   }
@@ -436,7 +436,7 @@
     color: var(--text-muted, #777);
   }
 
-  /* 鐩稿唽鍒嗙粍鍗＄墖锛坧w-album-card锛夆€?缁熶竴绠€娲侀鏍硷細鐭╁舰 + 灏侀潰 + 鏂囧瓧 */
+  /* 相册分组卡片（pw-album-card锛夆€?缁熶竴绠€娲侀鏍硷細鐭╁舰 + 灏侀潰 + 鏂囧瓧 */
   #panelAi .pw-album-card {
     background: var(--panel-bg, #fafafa);
     border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06));
@@ -467,7 +467,7 @@
     color: var(--text-muted, #777);
   }
 
-  /* 鏆楄壊涓婚锛氱収鐗囧 */
+  /* 暗色主题：照片墙 */
   [data-theme="dark"] #panelAi .photo-wall-item,
   [data-theme="dark"] #panelAi .pw-album-card {
     background: rgba(25, 30, 38, 0.86);
@@ -482,7 +482,7 @@
     color: rgba(230, 235, 232, 0.55);
   }
 
-  /* 瓒呭灞忥細5 鍒?*/
+  /* 超宽屏：5 鍒?*/
   @media (min-width: 1600px) {
     #panelAi .photo-wall-grid {
       grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
@@ -490,7 +490,7 @@
     }
   }
 
-  /* 涓婁紶寮圭獥 PC 绔眳涓姞瀹?*/
+  /* 上传弹窗 PC 绔眳涓姞瀹?*/
   #panelAi .pw-upload-sheet {
     align-items: center;
     justify-content: center;
@@ -504,12 +504,12 @@
   }
 
   /* ==============================================================
-     P5: 鎴戠殑闈㈡澘 鈥?2 鍒?grid 甯冨眬
-     宸︿晶 (340px) 锛氱敤鎴峰崱 + VIP 鍗?+ 璁剧疆
-     鍙充晶 (1fr) 锛氭椿鍔ㄦ澘锛堢偣璧?+ 璇勮 涓婁笅鍫嗗彔锛?
-     椤堕儴 header 妯法涓ゅ垪
-     搴曢儴 totals 妯法涓ゅ垪
-     - 绉诲姩绔?(< 1024px) 琛屼负瀹屽叏涓嶅彉
+     P5: 鎴戠殑闈㈡澘 鈥?2 鍒?grid 布局
+     左侧 (340px) ：用户卡 + VIP 鍗?+ 璁剧疆
+     右侧 (1fr) 锛氭椿鍔ㄦ澘锛堢偣璧?+ 璇勮 涓婁笅鍫嗗彔锛?
+     顶部 header 横跨两列
+     底部 totals 横跨两列
+     - 绉诲姩绔?(< 1024px) 行为完全不变
      ============================================================== */
 
   #panelProfile .dock-profile-container {
@@ -529,7 +529,7 @@
     height: auto;
   }
 
-  /* 鍖哄煙鍒嗛厤 */
+  /* 区域分配 */
   #panelProfile .profile-header { grid-area: header; padding: 0; border: 0; margin: 0 0 4px; }
   #panelProfile .profile-user-card { grid-area: user; margin-bottom: 0; }
   #panelProfile .xtj-vip-card { grid-area: vip; margin-bottom: 0; }
@@ -537,7 +537,7 @@
   #panelProfile .profile-activity-board { grid-area: activity; }
   #panelProfile .profile-totals-bar { grid-area: totals; margin: 8px 0 0; }
 
-  /* 鐢ㄦ埛鍗″湪 PC 绔◢寰簿鑷?*/
+  /* 用户卡在 PC 绔◢寰簿鑷?*/
   #panelProfile .profile-user-card {
     padding: 18px 20px;
   }
@@ -561,7 +561,7 @@
     font-weight: 700;
   }
 
-  /* 璁剧疆鍗★細绱у噾 */
+  /* 设置卡：紧凑 */
   #panelProfile .profile-setting-item {
     min-height: 56px;
     padding: 14px 16px;
@@ -575,20 +575,20 @@
     height: 16px;
   }
 
-  /* VIP 鍗★細绋嶅鏇寸獊鍑?*/
+  /* VIP 鍗★細绋嶅鏇寸獊鍑?*/
   #panelProfile .xtj-vip-card {
     padding: 16px 18px;
   }
 
-  /* P5 鍔犲浐锛氱‘淇濇椿鍔?modal 鍦?PC 绔笉琚?dock-bar 閬尅 */
+  /* P5 鍔犲浐锛氱‘淇濇椿鍔?modal 鍦?PC 绔笉琚?dock-bar 遮挡 */
   #profileActivityModal {
     z-index: 250;
   }
 
-  /* P5 鍔犲浐 #2锛氭椿鍔ㄨ褰?modal 鍦?PC 绔姞瀹?+ 璁板綍鍗＄墖鍨傜洿鍫嗗彔甯冨眬
-     鏍瑰洜锛歮obile 绔?stat-row 鏄?3 鍒?grid (62+1fr+auto) + align-items:center锛?
-     modal 瀹藉害鍙湁 560px 鏃?1fr 鍒楄鍘嬫墎锛宻tat-row-main 鍐呯殑 title+copy 涓婁笅鎸ゅ湪涓€璧?
-     瑙ｅ喅锛歅C 绔?modal 鍔犲鍒?760px锛宻tat-row 鏀?flex column 璁╁獟浣?涓诲唴瀹?鎸夐挳鍨傜洿鍫嗗彔
+  /* P5 加固 #2锛氭椿鍔ㄨ褰?modal 鍦?PC 绔姞瀹?+ 璁板綍鍗＄墖鍨傜洿鍫嗗彔甯冨眬
+     根因：mobile 绔?stat-row 鏄?3 鍒?grid (62+1fr+auto) + align-items:center锛?
+     modal 宽度只有 560px 鏃?1fr 列被压扁，stat-row-main 内的 title+copy 涓婁笅鎸ゅ湪涓€璧?
+     解决：PC 绔?modal 鍔犲鍒?760px锛宻tat-row 鏀?flex column 璁╁獟浣?涓诲唴瀹?鎸夐挳鍨傜洿鍫嗗彔
      ============================================================== */
 
   #profileActivityModal .profile-activity-modal {
@@ -597,12 +597,12 @@
     max-height: min(82vh, 800px);
   }
 
-  /* 鍒楄〃鍖哄煙鍏佽鍏呭垎婊氬姩 */
+  /* 列表区域允许充分滚动 */
   #profileActivityModal .profile-activity-list {
     max-height: none;
   }
 
-  /* stat-row 鏀?flex column 甯冨眬锛坢obile 鏄?3 鍒?grid锛?*/
+  /* stat-row 鏀?flex column 布局（mobile 鏄?3 鍒?grid锛?*/
   #profileActivityModal .stat-row {
     display: flex;
     flex-direction: column;
@@ -611,7 +611,7 @@
     padding: 14px 16px;
     border-bottom: 1px solid rgba(196, 224, 206, 0.72);
   }
-  /* 濯掍綋缂╃暐鍥撅紙鐙珛涓€琛岋紝宸﹀榻愶級 */
+  /* 濯掍綋缂╃暐鍥撅紙鐙珛涓€琛岋紝宸﹀榻愶級 */
   #profileActivityModal .stat-row-media {
     margin-top: 0;
     width: auto;
@@ -624,12 +624,12 @@
     object-fit: cover;
     border-radius: 12px;
   }
-  /* 涓诲唴瀹瑰尯鍗犳弧瀹藉害 */
+  /* 主内容区占满宽度 */
   #profileActivityModal .stat-row-main {
     width: 100%;
     min-width: 0;
   }
-  /* 鎸夐挳鍗曠嫭涓€琛岋紝宸﹀榻?*/
+  /* 鎸夐挳鍗曠嫭涓€琛岋紝宸﹀榻?*/
   #profileActivityModal .stat-record-action {
     align-self: flex-start;
     min-height: 32px;
@@ -642,7 +642,7 @@
     cursor: pointer;
     pointer-events: auto;
   }
-  /* 鍙栨秷鐐硅禐 / 鍒犻櫎璇勮 绾㈣壊鎸夐挳 */
+  /* 取消点赞 / 删除评论 红色按钮 */
   #profileActivityModal .stat-record-action.is-danger {
     border-color: rgba(220, 132, 132, 0.5);
     background: rgba(254, 246, 246, 0.78);
@@ -652,22 +652,22 @@
   #profileActivityModal .stat-record-entry {
     min-height: 96px;
   }
-  /* 澶嶅埗璇勮璁板綍 modal锛堝鏋滄湁锛変竴骞堕€傞厤 */
+  /* 复制评论记录 modal锛堝鏋滄湁锛変竴骞堕€傞厤 */
   #statRecordsModal .stat-records-modal {
     max-width: 760px;
     width: min(760px, calc(100vw - 80px));
   }
 
   /* ==============================================================
-     P6: 鍏ㄥ眬妯℃€佹 PC 绔昂瀵搁€傞厤
-     - 閫氱敤 modal-box锛氬眳涓€佸姞瀹藉埌鍚堢悊灏哄銆乥ackdrop 鍔犳繁
-     - 闀垮唴瀹?modal锛堝笘瀛愯鎯?鐢ㄦ埛璧勬枡/缁熻锛夛細760px
-     - 涓瓑 modal锛堢紪杈?璇勮/鍏憡锛夛細600px
-     - 鐭?modal锛堢櫥褰?娉ㄥ唽/鍒犻櫎/涓炬姤锛夛細480px
-     - 绉诲姩绔?(< 1024px) 琛屼负瀹屽叏涓嶅彉
+     P6: 鍏ㄥ眬妯℃€佹 PC 绔昂瀵搁€傞厤
+     - 通用 modal-box锛氬眳涓€佸姞瀹藉埌鍚堢悊灏哄銆乥ackdrop 加深
+     - 闀垮唴瀹?modal锛堝笘瀛愯鎯?鐢ㄦ埛璧勬枡/缁熻锛夛細760px
+     - 中等 modal锛堢紪杈?璇勮/鍏憡锛夛細600px
+     - 鐭?modal锛堢櫥褰?娉ㄥ唽/删除/涓炬姤锛夛細480px
+     - 绉诲姩绔?(< 1024px) 行为完全不变
      ============================================================== */
 
-  /* 閫氱敤 modal-box 鍦?PC 绔眳涓洿濂界湅 */
+  /* 通用 modal-box 鍦?PC 端居中更好看 */
   .modal-overlay {
     padding: 24px !important;
   }
@@ -683,7 +683,7 @@
     max-height: min(86vh, 820px);
   }
 
-  /* 涓瓑 modal 600px */
+  /* 中等 modal 600px */
   #editPostModal .modal-box,
   #commentModal .modal-box,
   #announcementModal .modal-box {
@@ -692,7 +692,7 @@
     max-height: min(82vh, 760px);
   }
 
-  /* 鐭?modal 480px锛堟敞鎰忥細#reportModal 鏄伄缃?.report-modal-overlay锛宮ax-width 闄愬埗鐨勬槸寮圭獥 box .report-modal锛屼笉鏄伄缃╋級 */
+  /* 鐭?modal 480px（注意：#reportModal 鏄伄缃?.report-modal-overlay锛宮ax-width 限制的是弹窗 box .report-modal，不是遮罩） */
   #loginModal .modal-box,
   #registerModal .modal-box,
   #delModal .modal-box {
@@ -700,13 +700,13 @@
     width: min(480px, calc(100vw - 80px));
   }
 
-  /* VIP modal 鐗规畩锛氬唴瀹瑰锛岀粰 820px */
+  /* VIP modal 特殊：内容多，给 820px */
   #vipModal .modal-box {
     max-width: 820px;
     width: min(820px, calc(100vw - 80px));
   }
 
-  /* VIP modal 绱у噾甯冨眬锛歠eatures 2 鍒?+ pay-btn 璐村簳 + body 鍐呴儴婊氬姩 */
+  /* VIP modal 紧凑布局：features 2 鍒?+ pay-btn 贴底 + body 内部滚动 */
   #vipModal .vip-modal-body {
     padding: 20px 24px;
     overflow-y: auto;
@@ -717,7 +717,7 @@
     flex-direction: column;
     max-height: min(86vh, 820px);
   }
-  /* features 鏀?2 鍒楀竷灞€锛? 涓彉 3 琛?*/
+  /* features 鏀?2 鍒楀竷灞€锛? 涓彉 3 琛?*/
   #vipModal .vip-plan-features {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -733,7 +733,7 @@
   [data-theme="dark"] #vipModal .vip-plan-feature {
     background: rgba(255, 255, 255, 0.05);
   }
-  /* pay-btn 鍦?features 涔嬪悗锛宻ticky 璐?features 搴曢儴 */
+  /* pay-btn 鍦?features 之后，sticky 璐?features 底部 */
   #vipModal .vip-pay-btn {
     margin-top: 18px;
     padding: 14px 24px;
@@ -741,7 +741,7 @@
     font-size: 15px;
     font-weight: 700;
   }
-  /* footer 姘歌繙璐?modal 搴曢儴 */
+  /* footer 姘歌繙璐?modal 底部 */
   #vipModal .vip-modal-footer {
     padding: 12px 24px;
     border-top: 1px solid rgba(0, 0, 0, 0.06);
@@ -750,7 +750,7 @@
   [data-theme="dark"] #vipModal .vip-modal-footer {
     border-top-color: rgba(255, 255, 255, 0.06);
   }
-  /* VIP 鏍囬鍖虹揣鍑?*/
+  /* VIP 鏍囬鍖虹揣鍑?*/
   #vipModal .vip-modal-head {
     padding: 14px 20px;
     flex-shrink: 0;
@@ -762,21 +762,21 @@
     font-size: 40px;
   }
 
-  /* 澶村儚涓婁紶 info modal锛氬浐瀹?360px */
+  /* 头像上传 info modal锛氬浐瀹?360px */
   #ppInfoModal {
     max-width: 360px;
   }
 
   /* ==============================================================
-     P7: 鍏ㄥ眬 PC 绔墦纾?
+     P7: 全局 PC 绔墦纾?
      - 鍏ㄥ眬婊氬姩鏉＄編鍖栵紙缁嗐€佸渾瑙掋€佹殫鑹查€傞厤锛?
-     - 鐒︾偣鏍峰紡锛堥敭鐩?tab 鍙锛?
-     - 鏆楄壊涓婚閫傞厤
-     - 瀛椾綋寰皟
-     - iPad 妯睆 1024-1280 閫傞厤
+     - 鐒︾偣鏍峰紡锛堥敭鐩?tab 鍙锛?
+     - 暗色主题适配
+     - 字体微调
+     - iPad 横屏 1024-1280 适配
      ============================================================== */
 
-  /* 1. 鍏ㄥ眬婊氬姩鏉★紙PC 绔級 */
+  /* 1. 全局滚动条（PC 端） */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -799,7 +799,7 @@
     scrollbar-color: rgba(120, 140, 130, 0.32) transparent;
   }
 
-  /* 2. 鏆楄壊涓婚婊氬姩鏉?*/
+  /* 2. 鏆楄壊涓婚婊氬姩鏉?*/
   [data-theme="dark"] ::-webkit-scrollbar-thumb {
     background: rgba(180, 200, 195, 0.22);
     background-clip: padding-box;
@@ -812,7 +812,7 @@
     scrollbar-color: rgba(180, 200, 195, 0.28) transparent;
   }
 
-  /* 3. 鐒︾偣鏍峰紡锛氶敭鐩?tab 瀵艰埅鍙锛堜笉鑳藉奖鍝嶇偣鍑伙級 */
+  /* 3. 鐒︾偣鏍峰紡锛氶敭鐩?tab 导航可见（不能影响点击） */
   button:focus-visible,
   a:focus-visible,
   [tabindex]:focus-visible,
@@ -825,7 +825,7 @@
     border-radius: 8px;
   }
 
-  /* 4. 鏂囨湰閫夋嫨棰滆壊 */
+  /* 4. 文本选择颜色 */
   ::selection {
     background: rgba(116, 180, 141, 0.32);
     color: inherit;
@@ -835,12 +835,12 @@
     color: inherit;
   }
 
-  /* 6. 鏆楄壊涓婚涓?panel 鍐呭鍖洪€傞厤 */
+  /* 6. 鏆楄壊涓婚涓?panel 鍐呭鍖洪€傞厤 */
   [data-theme="dark"] .dock-panels {
     background: var(--bg, #0a0e0c);
   }
 
-  /* 7. 鏆楄壊涓婚涓嬬殑鐜荤拑鎬侀潰鏉跨◢寰寒涓€鐐癸紙閬垮厤澶粦锛?*/
+  /* 7. 鏆楄壊涓婚涓嬬殑鐜荤拑鎬侀潰鏉跨◢寰寒涓€鐐癸紙閬垮厤澶粦锛?*/
 
   /* Block 1 removed - superseded by Final True Dark Desktop Override below */
   [data-theme="dark"] .photo-wall-header,
@@ -882,7 +882,7 @@
   [data-theme="dark"] .post-author-name {
     color: #e6ebe8 !important;
   }
-  /* 浜岀骇鏂囧瓧 / 寮卞寲鏂囧瓧 */
+  /* 二级文字 / 弱化文字 */
   [data-theme="dark"] .msg-time,
   [data-theme="dark"] .post-time,
   [data-theme="dark"] .profile-user-status,
@@ -904,7 +904,7 @@
   [data-theme="dark"] input::placeholder {
     color: rgba(230, 235, 232, 0.4) !important;
   }
-  /* 鎸夐挳 */
+  /* 按钮 */
   [data-theme="dark"] .btn-primary,
   [data-theme="dark"] .publish-box button,
   [data-theme="dark"] .stat-card-toggle,
@@ -912,19 +912,19 @@
   [data-theme="dark"] .profile-totals-bar > * {
     color: #e6ebe8 !important;
   }
-  /* stats 鏁板瓧 */
+  /* stats 数字 */
   [data-theme="dark"] .stat-card b,
   [data-theme="dark"] .profile-activity-count {
     color: #b8e6c6 !important;
   }
-  /* dock-panels 鏁翠綋娣辫壊 */
+  /* dock-panels 整体深色 */
   [data-theme="dark"] .dock-panels,
   [data-theme="dark"] body {
     background: #0a0e0c !important;
     color: #e6ebe8 !important;
   }
 
-  /* 8. PC 绔?body 瀛椾綋鐣ュぇ锛岃楂樻洿鑸掗€?*/
+  /* 8. PC 绔?body 瀛椾綋鐣ュぇ锛岃楂樻洿鑸掗€?*/
   body {
     font-size: 15px;
     line-height: 1.6;
@@ -932,7 +932,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* 10. 瓒呭灞忥紙> 1920px锛夋斁瀹藉垪鏁?鈥?feed 淇濇寔鍗曞垪 */
+  /* 10. 超宽屏（> 1920px锛夋斁瀹藉垪鏁?鈥?feed 保持单列 */
   @media (min-width: 1920px) {
     #panelPosts .wrap {
       max-width: 1400px !important;
