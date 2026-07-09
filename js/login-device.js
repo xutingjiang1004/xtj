@@ -19,12 +19,12 @@
         return fetch(API_BASE + '/api/security-settings')
             .then(function(res) { return res.json(); })
             .then(function(data) {
-                cachedSecuritySettings = (data && data.settings) || { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
+                cachedSecuritySettings = (data && data.settings) || { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
                 settingsLastFetch = now;
                 return cachedSecuritySettings;
             })
             .catch(function() {
-                return { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
+                return { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
             });
     }
 
@@ -496,7 +496,7 @@
             if (sessionStorage.getItem(sentKey)) return;
         } catch(e) {}
         var pwHash;
-        try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
+        try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
         var userToken = '';
         if (typeof getUserToken === 'function') {
             userToken = getUserToken();
@@ -517,7 +517,7 @@
             var userName, passwordHash, deviceId;
             try {
                 userName = localStorage.getItem('xtj_user');
-                passwordHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash');
+                passwordHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 deviceId = localStorage.getItem('xtj_device_id');
             } catch(e) { return; }
 
