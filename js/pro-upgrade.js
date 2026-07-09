@@ -212,7 +212,12 @@
       card.classList.add('is-ready');
     }
 
-    window.__xtjStartProParticles('proCelebrationCanvas', 5000);
+    var _particleStop = window.__xtjStartProParticles('proCelebrationCanvas', 5000);
+    var origClose = closeOverlay;
+    closeOverlay = function() {
+      if (typeof _particleStop === 'function') _particleStop();
+      origClose();
+    };
   };
 
   window.__xtjStartProParticles = function(canvasId, duration) {
@@ -321,13 +326,15 @@
 
     animate();
 
-    window.addEventListener('resize', function() {
+    function onResize() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-    });
+    }
+    window.addEventListener('resize', onResize);
 
     return function stop() {
       if (animId) cancelAnimationFrame(animId);
+      window.removeEventListener('resize', onResize);
     };
   };
 
