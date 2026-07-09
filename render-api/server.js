@@ -777,6 +777,7 @@ async function searchBingHtml(query, maxResults) {
   try {
     var url = 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5) + '&mkt=zh-CN';
     var resp = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -983,7 +984,7 @@ async function queryWeather(query) {
     var lon = matchedCity.coords.lon;
     var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
 
-    var resp = await fetch(weatherUrl);
+    var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return null;
     var data = await resp.json();
     if (!data || !data.current) return null;
@@ -1697,7 +1698,7 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '5mb' }));
 
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
 app.use((req, res, next) => {
@@ -4466,10 +4467,16 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
       updates.content = String(req.body.content).slice(0, 50000);
     }
+    // 允许前端传 updated_at（编辑/置顶/公开切私有都需要同步）
+    if (Object.prototype.hasOwnProperty.call(req.body, 'updated_at')) {
+      var ua = req.body.updated_at;
+      try { if (ua && !isNaN(new Date(ua).getTime())) updates.updated_at = ua; else updates.updated_at = new Date().toISOString(); } catch(e) { updates.updated_at = new Date().toISOString(); }
+    }
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
-    var { error } = await supabase.from('posts').update(updates).eq('id', postId);
+    var { data: updatedPost, error } = await supabase.from('posts').update(updates).eq('id', postId).select('*').maybeSingle();
     if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true });
+    if (!updatedPost) return res.status(500).json({ error: '更新失败：未返回数据' });
+    return res.json({ ok: true, data: updatedPost });
   } catch (e) { console.error('[API] post update:', e.message); return res.status(500).json({ error: '更新失败' }); }
 });
 
