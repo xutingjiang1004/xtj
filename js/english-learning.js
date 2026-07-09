@@ -137,7 +137,7 @@
   }
 
   function readPwHash() {
-    try { return sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
+    try { return sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
   }
 
   function readUserToken() {
