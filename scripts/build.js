@@ -51,11 +51,15 @@ const CSS_FILES = [
   'css/english-learning.css'
 ];
 
-function minifyJS(filePath) {
+function minifyJS(filePath, optional) {
   const fullPath = path.resolve(ROOT, filePath);
   if (!fs.existsSync(fullPath)) {
-    console.log(`[SKIP] ${filePath} not found`);
-    return null;
+    if (optional) {
+      console.log(`[SKIP] ${filePath} not found (optional)`);
+      return null;
+    }
+    console.error(`[FAIL] ${filePath} not found (core file)`);
+    return false;
   }
   const outPath = fullPath.replace(/\.js$/, '.min.js');
   const statsBefore = fs.statSync(fullPath).size;
@@ -75,11 +79,15 @@ function minifyJS(filePath) {
   }
 }
 
-function minifyCSS(filePath) {
+function minifyCSS(filePath, optional) {
   const fullPath = path.resolve(ROOT, filePath);
   if (!fs.existsSync(fullPath)) {
-    console.log(`[SKIP] ${filePath} not found`);
-    return null;
+    if (optional) {
+      console.log(`[SKIP] ${filePath} not found (optional)`);
+      return null;
+    }
+    console.error(`[FAIL] ${filePath} not found (core file)`);
+    return false;
   }
   const outPath = fullPath.replace(/\.css$/, '.min.css');
   const statsBefore = fs.statSync(fullPath).size;
@@ -116,15 +124,19 @@ function minifyCSS(filePath) {
 console.log('=== xtj Build Script ===\n');
 console.log(`Source: ${ROOT}\n`);
 
+// 可选文件（缺失不报错）
+const OPTIONAL_JS = ['js/photo-wall/upload-ui.js', 'js/photo-wall/preview-hotfix.js'];
+const OPTIONAL_CSS = [];
+
 // Minify JS
 console.log('--- Minifying JS ---');
-const jsResults = JS_FILES.map(minifyJS);
+const jsResults = JS_FILES.map(function(f) { return minifyJS(f, OPTIONAL_JS.indexOf(f) >= 0); });
 
 // Minify CSS
 console.log('\n--- Minifying CSS ---');
-const cssResults = CSS_FILES.map(minifyCSS);
+const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
 
-const failed = jsResults.concat(cssResults).filter((result) => result === false).length;
+const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length;
 
 if (failed > 0) {
   console.error(`\n=== Build Complete with ${failed} failed/skipped item(s) ===`);
