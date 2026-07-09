@@ -2176,3 +2176,164 @@ body.english-learning-open {
     inset 0 0 0 1px rgba(20, 124, 90, 0.35) !important;
   background: var(--el-surface-solid) !important;
 }
+
+/* Final non-dock polish */
+#panelEnglishLearning .el-batch-summary {
+  position: relative;
+  overflow: clip;
+}
+
+#panelEnglishLearning .el-batch-summary::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: transparent;
+  transition: background-color 180ms var(--el-ease);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="loading"]::before {
+  background: linear-gradient(180deg, #35a59b, #5c93df);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="success"]::before {
+  background: linear-gradient(180deg, #1f9b73, #49c39a);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="warning"]::before {
+  background: linear-gradient(180deg, #f0b34d, #e58e35);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="error"]::before {
+  background: linear-gradient(180deg, #ea6c7c, #d94b62);
+}
+
+#panelEnglishLearning .el-batch-summary-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.46);
+  border: 1px solid rgba(43, 74, 63, 0.08);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="success"] .el-batch-summary-status {
+  color: var(--el-accent);
+  background: rgba(20, 124, 90, 0.10);
+  border-color: rgba(20, 124, 90, 0.18);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="warning"] .el-batch-summary-status {
+  color: #9b6a1e;
+  background: rgba(185, 134, 34, 0.12);
+  border-color: rgba(185, 134, 34, 0.22);
+}
+
+#panelEnglishLearning .el-batch-summary[data-state="error"] .el-batch-summary-status {
+  color: var(--el-danger);
+  background: rgba(200, 77, 91, 0.12);
+  border-color: rgba(200, 77, 91, 0.20);
+}
+
+#panelEnglishLearning #elBatchAddBtn {
+  min-width: 120px;
+  align-self: stretch;
+}
+
+#panelEnglishLearning #elBatchAddBtn.is-loading,
+#panelEnglishLearning #elBatchAddBtn.is-complete {
+  transform: none;
+}
+
+#panelEnglishLearning .el-btn.is-loading::after {
+  flex: 0 0 14px;
+}
+
+#panelEnglishLearning .el-batch-failed summary {
+  background: linear-gradient(180deg, rgba(255,255,255,0.36), rgba(255,255,255,0.22));
+}
+
+#panelEnglishLearning .el-batch-failed[open] summary {
+  border-bottom: 1px solid rgba(200, 77, 91, 0.10);
+}
+
+#panelEnglishLearning .el-batch-failed:not([open]) summary:hover {
+  background: rgba(200, 77, 91, 0.08);
+}
+
+#panelEnglishLearning .el-batch-failed-item {
+  background: rgba(255,255,255,0.42);
+}
+
+#panelEnglishLearning .el-batch-failed-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#panelEnglishLearning .el-batch-failed-line::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+@media (min-width: 1024px) {
+  #panelEnglishLearning .el-page {
+    width: min(1220px, 100%);
+    margin: 0 auto;
+    padding: 28px 30px 34px;
+    border-radius: 28px;
+    border: 1px solid rgba(118, 176, 166, 0.14);
+    background:
+      linear-gradient(180deg, rgba(250, 253, 252, 0.90), rgba(244, 250, 248, 0.82)),
+      radial-gradient(circle at top right, rgba(104, 188, 174, 0.08), transparent 32%);
+    box-shadow: 0 22px 54px rgba(64, 122, 126, 0.10);
+  }
+
+  #panelEnglishLearning .el-header {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    margin: -28px -30px 0;
+    padding-left: 24px;
+    padding-right: 24px;
+    border-radius: 28px 28px 0 0;
+  }
+
+  #panelEnglishLearning .el-main {
+    gap: 22px;
+    padding: 0 0 18px;
+  }
+
+  #panelEnglishLearning .el-dashboard-grid {
+    grid-template-columns: minmax(380px, 0.9fr) minmax(0, 1.1fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  #panelEnglishLearning .el-practice-grid {
+    grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  }
+
+  #panelEnglishLearning .el-library-card,
+  #panelEnglishLearning .el-result-card {
+    min-height: 100%;
+  }
+
+  #panelEnglishLearning .el-add-card {
+    position: sticky;
+    top: 96px;
+  }
+
+  [data-theme="dark"] #panelEnglishLearning .el-page {
+    border-color: rgba(164, 216, 205, 0.10);
+    background:
+      linear-gradient(180deg, rgba(12, 24, 28, 0.92), rgba(15, 31, 35, 0.84)),
+      radial-gradient(circle at top right, rgba(83, 173, 162, 0.12), transparent 34%);
+    box-shadow: 0 22px 54px rgba(3, 11, 14, 0.28);
+  }
+}
