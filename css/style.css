@@ -8739,6 +8739,18 @@
   box-shadow: 0 2px 8px rgba(90, 179, 166, 0.2);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .pw-upload-liquid-shell,
+  .pw-upload-liquid-glow,
+  .pw-upload-progress-bar,
+  .pw-upload-progress-bar::after,
+  .pw-upload-progress-bar-fill,
+  .pw-upload-local-icon {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .pw-upload-queue-head {
   justify-content: space-between;
   font-size: 11px;
