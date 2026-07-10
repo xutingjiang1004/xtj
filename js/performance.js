@@ -7,8 +7,12 @@
     var root = document.documentElement;
     var refreshFrameId = null;
     var mediaQueries = [];
+    var currentProfile = null;
+    var resizeApplyFrameId = null;
 
     function setProfile(profile) {
+        if (profile === currentProfile) return;
+        currentProfile = profile;
         root.classList.remove('perf-lite', 'perf-balanced', 'perf-full');
         root.classList.add('perf-' + profile);
         root.dataset.xtjPerfProfile = profile;
@@ -95,6 +99,10 @@
     });
 
     window.addEventListener('resize', function() {
-        applyProfile();
+        if (resizeApplyFrameId) return;
+        resizeApplyFrameId = requestAnimationFrame(function() {
+            resizeApplyFrameId = null;
+            applyProfile();
+        });
     }, { passive: true });
 })();

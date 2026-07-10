@@ -20,7 +20,7 @@ function updateIndexAssetVersions() {
   if (!fs.existsSync(indexPath)) return false;
   let html = fs.readFileSync(indexPath, 'utf8');
   let changed = false;
-  html = html.replace(/\b(href|src)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(match, attr, assetPath) {
+  html = html.replace(/\b(href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(match, attr, assetPath) {
     const hash = contentHash(assetPath);
     if (!hash) return match;
     const next = attr + '="' + assetPath + '?v=' + hash + '"';
