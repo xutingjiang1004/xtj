@@ -1110,7 +1110,7 @@
       return;
     }
     try {
-      var body = addLegacyAuth({
+      var body = {
         words: words.map(function(w) { return { en: w.en, cn: w.cn || '', mastery: w.mastery || 0 }; }),
         level: level,
         types: types,
@@ -1120,7 +1120,7 @@
         focus: S.settings.focus || 'weak',
         regen_article: !!opts.regenArticle,
         regen_quiz: !!opts.regenQuiz
-      }, headers);
+      };
       var fetchOpts = {
         method: 'POST',
         headers: headers,
