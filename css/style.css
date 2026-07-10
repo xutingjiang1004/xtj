@@ -2269,7 +2269,7 @@
             transition: background-color 0.28s ease-in-out;
         }
 
-        .pp-info-modal-content {
+        #photoPreviewOverlay .pp-info-modal-content {
             position: relative;
             width: 92%;
             max-width: 360px;
@@ -2283,7 +2283,7 @@
             -webkit-backface-visibility: hidden;
         }
 
-        [data-theme="dark"] .pp-info-modal-content {
+        [data-theme="dark"] #photoPreviewOverlay .pp-info-modal-content {
             background: rgba(20, 20, 30, 0.25);
             border-color: rgba(255, 255, 255, 0.15);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
@@ -6513,17 +6513,17 @@
         .pp-info-modal::before {
             display: none !important;
         }
-        .pp-info-modal-content {
+        #photoPreviewOverlay .pp-info-modal-content {
             background: rgba(15, 23, 42, 0.85) !important;
             backdrop-filter: blur(28px) saturate(160%) !important;
             -webkit-backdrop-filter: blur(28px) saturate(160%) !important;
             border: 1px solid rgba(255, 255, 255, 0.18) !important;
             color: rgba(255, 255, 255, 0.95) !important;
         }
-        .pp-info-modal-content * {
+        #photoPreviewOverlay .pp-info-modal-content * {
             color: rgba(255, 255, 255, 0.92) !important;
         }
-        .pp-info-modal-content .pp-info-label {
+        #photoPreviewOverlay .pp-info-modal-content .pp-info-label {
             color: rgba(255, 255, 255, 0.55) !important;
         }
         /* 预览分享按钮 */
@@ -7466,27 +7466,33 @@
 .perf-balanced .photo-wall-header,
 .perf-balanced .profile-user-card,
 .perf-balanced .toast,
-.perf-balanced .photo-wall-item,
-.perf-balanced .pp-preview-toolbar {
+.perf-balanced .photo-wall-item {
+  backdrop-filter: blur(10px) saturate(118%);
+  -webkit-backdrop-filter: blur(10px) saturate(118%);
+}
+
+#photoPreviewOverlay .pp-preview-toolbar {
   position: absolute;
   left: 50%;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  z-index: 30;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  z-index: 10000;
   transform: translateX(-50%);
+  inline-size: max-content;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 8px 10px;
   background: rgba(0,0,0,0.45);
   border-radius: 16px;
-  backdrop-filter: blur(10px) saturate(118%) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(118%) !important;
-  max-width: calc(100vw - 20px);
+  backdrop-filter: blur(10px) saturate(118%);
+  -webkit-backdrop-filter: blur(10px) saturate(118%);
+  max-width: min(calc(100vw - 24px), calc(100% - 24px));
   flex-wrap: nowrap;
   overflow: visible;
   box-sizing: border-box;
 }
-.pp-preview-toolbar button {
+#photoPreviewOverlay .pp-preview-toolbar > button {
   width: 42px;
   height: 42px;
   min-width: 42px;
@@ -7503,19 +7509,20 @@
   transition: background 0.2s;
   padding: 0;
 }
-.pp-preview-toolbar button:hover {
+#photoPreviewOverlay .pp-preview-toolbar > button:hover {
   background: rgba(255,255,255,0.2);
 }
-.pp-preview-toolbar button:active {
+#photoPreviewOverlay .pp-preview-toolbar > button:active {
   background: rgba(255,255,255,0.3);
 }
 @media (max-width: 480px) {
-  .pp-preview-toolbar {
+  #photoPreviewOverlay .pp-preview-toolbar {
     gap: 7px;
     padding: 6px 7px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    max-width: calc(100vw - 16px);
   }
-  .pp-preview-toolbar button {
+  #photoPreviewOverlay .pp-preview-toolbar > button {
     width: 38px;
     height: 38px;
     min-width: 38px;
@@ -7540,7 +7547,8 @@
 .perf-lite .profile-user-card,
 .perf-lite .toast,
 .perf-lite .photo-wall-item,
-.perf-lite .pp-preview-toolbar,
+#photoPreviewOverlay.perf-lite .pp-preview-toolbar,
+.perf-lite #photoPreviewOverlay .pp-preview-toolbar,
 .perf-lite .dock-bar {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -9523,7 +9531,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   background: transparent !important;
 }
 
-.pp-info-modal-content {
+#photoPreviewOverlay .pp-info-modal-content {
   background: rgba(248, 252, 249, 0.96) !important;
   border: 1px solid rgba(203, 228, 212, 0.9) !important;
   box-shadow: 0 24px 64px rgba(56, 97, 73, 0.12) !important;
@@ -9605,7 +9613,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 [data-theme="dark"] #profileActivityModal .profile-activity-modal,
 [data-theme="dark"] #profileDetailModal .profile-detail-modal,
 [data-theme="dark"] #userProfileModal .modal-box,
-[data-theme="dark"] .pp-info-modal-content {
+[data-theme="dark"] #photoPreviewOverlay .pp-info-modal-content {
   background: rgba(24, 31, 26, 0.96) !important;
   border-color: rgba(104, 123, 111, 0.34) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3) !important;
@@ -10186,8 +10194,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 
-#photoPreviewOverlay .pp-info-modal-content,
-.pp-info-modal-content {
+#photoPreviewOverlay .pp-info-modal-content {
   background: rgba(15, 25, 38, 0.72) !important;
   border: 1px solid rgba(183, 214, 198, 0.28) !important;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34) !important;
@@ -10196,30 +10203,25 @@ body.ios-chat-keyboard-open .chat-input-area {
   -webkit-backdrop-filter: blur(18px) saturate(122%) !important;
 }
 
-#photoPreviewOverlay .pp-info-modal-header,
-.pp-info-modal-header {
+#photoPreviewOverlay .pp-info-modal-header {
   border-bottom: 1px solid rgba(212, 236, 222, 0.18) !important;
   background: transparent !important;
 }
 
-#photoPreviewOverlay .pp-info-modal-title,
-.pp-info-modal-title {
+#photoPreviewOverlay .pp-info-modal-title {
   color: rgba(248, 255, 250, 0.98) !important;
 }
 
-#photoPreviewOverlay .pp-info-modal-body,
-.pp-info-modal-body {
+#photoPreviewOverlay .pp-info-modal-body {
   color: rgba(232, 246, 238, 0.92) !important;
 }
 
-#photoPreviewOverlay .pp-info-modal-body *,
-.pp-info-modal-body * {
+#photoPreviewOverlay .pp-info-modal-body * {
   color: inherit !important;
   border-color: rgba(212, 236, 222, 0.14) !important;
 }
 
-#photoPreviewOverlay .pp-info-modal-close,
-.pp-info-modal-close {
+#photoPreviewOverlay .pp-info-modal-close {
   background: rgba(255, 255, 255, 0.11) !important;
   color: rgba(248, 255, 250, 0.96) !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
@@ -15150,7 +15152,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   gap: 10px !important;
   padding: 8px 10px !important;
   width: auto !important;
-  max-width: calc(100vw - 28px) !important;
+  max-width: min(calc(100vw - 28px), calc(100% - 24px)) !important;
+  pointer-events: auto !important;
 }
 
 #photoPreviewOverlay .pp-zoom-btn,
@@ -15247,8 +15250,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 [data-theme="dark"] .profile-totals-bar,
 [data-theme="dark"] .modal-box,
 [data-theme="dark"] .profile-activity-modal,
-[data-theme="dark"] .stat-records-modal,
-[data-theme="dark"] .pp-info-modal-content {
+[data-theme="dark"] .stat-records-modal {
   background: rgba(18, 18, 26, 0.96) !important;
   border-color: rgba(255, 255, 255, 0.09) !important;
   color: #f3f4f8 !important;
@@ -15305,6 +15307,79 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   background: rgba(16, 18, 27, 0.88) !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: #f8fafc !important;
+}
+
+[data-theme="dark"] #photoPreviewOverlay .pp-info-modal-content {
+  background: rgba(18, 18, 26, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  color: #f3f4f8 !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42) !important;
+}
+
+@media (max-width: 375px) {
+  #photoPreviewOverlay .pp-preview-toolbar {
+    gap: 6px !important;
+    padding: 6px !important;
+    max-width: calc(100vw - 14px) !important;
+  }
+
+  #photoPreviewOverlay .pp-preview-toolbar > button,
+  #photoPreviewOverlay .pp-zoom-btn,
+  #photoPreviewOverlay .pp-info-btn,
+  #photoPreviewOverlay .pp-share-btn,
+  #photoPreviewOverlay .pp-rotate-btn,
+  #photoPreviewOverlay .pp-delete-btn {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    flex-basis: 36px !important;
+  }
+}
+
+@media (max-width: 320px) {
+  #photoPreviewOverlay .pp-preview-toolbar {
+    gap: 5px !important;
+    padding: 5px !important;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    max-width: calc(100vw - 10px) !important;
+  }
+
+  #photoPreviewOverlay .pp-preview-toolbar > button,
+  #photoPreviewOverlay .pp-zoom-btn,
+  #photoPreviewOverlay .pp-info-btn,
+  #photoPreviewOverlay .pp-share-btn,
+  #photoPreviewOverlay .pp-rotate-btn,
+  #photoPreviewOverlay .pp-delete-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+    flex-basis: 34px !important;
+  }
+
+  #photoPreviewOverlay .pp-preview-toolbar .ui-icon,
+  #photoPreviewOverlay .pp-preview-toolbar svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #photoPreviewOverlay .pp-preview-toolbar,
+  #photoPreviewOverlay .pp-preview-toolbar > button,
+  #photoPreviewOverlay .pp-zoom-btn,
+  #photoPreviewOverlay .pp-info-btn,
+  #photoPreviewOverlay .pp-share-btn,
+  #photoPreviewOverlay .pp-rotate-btn,
+  #photoPreviewOverlay .pp-delete-btn {
+    transition-property: opacity, background-color, border-color, color !important;
+  }
+
+  #photoPreviewOverlay .pp-preview-toolbar,
+  #photoPreviewOverlay.active .pp-preview-toolbar {
+    transform: translate3d(-50%, 0, 0) !important;
+  }
 }
 
 /* ========== Final Post Action Modal Override ========== */
