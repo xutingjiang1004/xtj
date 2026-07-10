@@ -869,12 +869,21 @@ body.english-learning-open {
 
 #panelEnglishLearning .el-sync {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(100%, 240px);
   gap: 6px;
+  padding-right: 8px;
   transition: color 180ms var(--el-ease), background 180ms var(--el-ease), border-color 180ms var(--el-ease), box-shadow 180ms var(--el-ease);
 }
 
 #panelEnglishLearning .el-sync-main {
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #panelEnglishLearning .el-sync::before {
@@ -918,11 +927,12 @@ body.english-learning-open {
   appearance: none;
   border: 0;
   padding: 0;
-  margin: 0 0 0 2px;
+  margin: 0 0 0 4px;
   background: transparent;
   color: inherit;
   font: inherit;
   line-height: 1;
+  flex: 0 0 auto;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -1433,6 +1443,10 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 }
 
 #panelEnglishLearning .el-q-title {
+  display: grid;
+  grid-template-columns: minmax(48px, auto) minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
   margin-bottom: 12px;
   color: var(--el-text);
   font-size: 13px;
@@ -1443,14 +1457,18 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 #panelEnglishLearning .el-q-type {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 22px;
-  margin-right: 8px;
+  min-width: 48px;
+  margin-right: 0;
   padding: 0 8px;
   border-radius: 999px;
   color: var(--el-accent);
   background: var(--el-accent-soft);
   font-size: 11px;
   font-weight: 760;
+  white-space: nowrap;
+  align-self: start;
 }
 
 #panelEnglishLearning .el-q-options {
@@ -1486,11 +1504,13 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 #panelEnglishLearning .el-q-option.correct {
   border-color: rgba(20, 124, 90, 0.48);
   background: rgba(20, 124, 90, 0.13);
+  color: #155e43;
 }
 
 #panelEnglishLearning .el-q-option.wrong {
   border-color: rgba(200, 77, 91, 0.48);
   background: rgba(200, 77, 91, 0.12);
+  color: #8c2131;
 }
 
 #panelEnglishLearning .el-option-letter {
@@ -1501,6 +1521,7 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 #panelEnglishLearning .el-option-text {
   min-width: 0;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 #panelEnglishLearning .el-q-context {
@@ -1510,6 +1531,7 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   background: rgba(255, 255, 255, 0.34);
   line-height: 1.85;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 #panelEnglishLearning .el-blank-sel {
@@ -1532,6 +1554,7 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 #panelEnglishLearning .el-blank-sel.correct {
   color: var(--el-accent);
   border-color: rgba(20, 124, 90, 0.5);
+  background: rgba(227, 244, 236, 0.95);
 }
 
 #panelEnglishLearning .el-cloze-ref-label {
@@ -1556,6 +1579,8 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   background: rgba(245, 250, 247, 0.45);
 }
 #panelEnglishLearning .el-cloze-group {
+  display: grid;
+  gap: 6px;
   padding: 10px;
   border: 1px solid var(--el-line);
   border-radius: 12px;
@@ -1563,16 +1588,22 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
 }
 
 #panelEnglishLearning .el-cloze-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   margin-bottom: 6px;
   color: var(--el-accent);
   font-size: 11px;
   font-weight: 780;
+  letter-spacing: 0.02em;
 }
 
 #panelEnglishLearning .el-cloze-choice {
   color: var(--el-muted);
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 #panelEnglishLearning .el-q-explain {
@@ -1584,7 +1615,42 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   background: var(--el-accent-soft);
   font-size: 12px;
   line-height: 1.65;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   /* 移除展开动画 */
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-q-option.correct {
+  border-color: rgba(74, 222, 128, 0.44);
+  background: rgba(22, 101, 52, 0.34);
+  color: rgba(220, 252, 231, 0.96);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-q-option.wrong {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(127, 29, 29, 0.34);
+  color: rgba(255, 228, 230, 0.96);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-blank-sel.correct {
+  border-color: rgba(74, 222, 128, 0.46);
+  background: rgba(20, 83, 45, 0.8);
+  color: rgba(220, 252, 231, 0.96);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-q-explain {
+  border-left-color: rgba(110, 231, 183, 0.84);
+  background: rgba(19, 78, 74, 0.34);
+  color: rgba(226, 232, 240, 0.94);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-cloze-options {
+  border-color: rgba(110, 231, 183, 0.22);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 #panelEnglishLearning .el-actions-row {
@@ -1674,9 +1740,6 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   #panelEnglishLearning .el-header {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  #panelEnglishLearning .el-sync {
-    display: none;
-  }
   #panelEnglishLearning .el-hero {
     padding: 14px 14px 10px;
   }
@@ -1695,6 +1758,12 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   #panelEnglishLearning .el-cloze-options {
     grid-template-columns: 1fr;
   }
+
+  #panelEnglishLearning .el-sync {
+    grid-column: 1 / -1;
+    justify-self: start;
+    max-width: min(100%, 100%);
+  }
 }
 
 @media (max-width: 640px) {
@@ -1709,6 +1778,20 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   #panelEnglishLearning .el-header {
     gap: 8px;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 10px 10px;
+  }
+
+  #panelEnglishLearning .el-sync {
+    max-width: 100%;
+    font-size: 10.5px;
+  }
+
+  #panelEnglishLearning .el-sync-main {
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  #panelEnglishLearning .el-sync-retry {
+    align-self: center;
   }
   #panelEnglishLearning .el-title {
     font-size: 16px;
@@ -1748,6 +1831,16 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   #panelEnglishLearning .el-card {
     padding: 13px;
     border-radius: 14px;
+  }
+
+  #panelEnglishLearning .el-q-title {
+    grid-template-columns: minmax(44px, auto) minmax(0, 1fr);
+    column-gap: 6px;
+  }
+
+  #panelEnglishLearning .el-q-type {
+    min-width: 44px;
+    padding: 0 7px;
   }
   #panelEnglishLearning .el-card-title.el-flex {
     align-items: flex-start;
@@ -1804,6 +1897,10 @@ html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
   }
   #panelEnglishLearning .el-word-item {
     grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  #panelEnglishLearning .el-sync {
+    padding-right: 6px;
   }
 }
 
