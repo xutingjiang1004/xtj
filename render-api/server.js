@@ -9060,8 +9060,29 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         return safeEnd();
       }
-      var readResult = await reader.read();
-      if (readResult.done) break;
+      var readResult;
+      try {
+        readResult = await Promise.race([
+          reader.read(),
+          new Promise(function(_, reject) { setTimeout(function() { reject(new Error('chunk_timeout')); }, 60000); })
+        ]);
+      } catch (e) {
+        if (e && e.message === 'chunk_timeout') {
+          try { reader.cancel(); } catch (e2) {}
+          controller.abort();
+          if (!aborted) {
+            var pc = contentBuffer && contentBuffer.length > 0;
+            if (pc) {
+              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt });
+            } else {
+              writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
+            }
+          }
+          return safeEnd();
+        }
+        break;
+      }
+      if (readResult && readResult.done) break;
       lastChunkTime = Date.now();
       
       buffer += decoder.decode(readResult.value, { stream: true });
