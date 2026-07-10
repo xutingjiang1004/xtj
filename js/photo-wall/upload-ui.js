@@ -80,7 +80,7 @@
     }
     revoke('photoUrls');
     grid.innerHTML = '';
-    files.forEach(function(file){
+    files.forEach(function(file, index){
       var url = URL.createObjectURL(file);
       state.photoUrls.push(url);
       var item = document.createElement('div');
@@ -88,6 +88,8 @@
       var img = document.createElement('img');
       img.src = url;
       img.alt = '';
+      img.decoding = 'async';
+      if (index > 3) img.loading = 'lazy';
       img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
       item.appendChild(img);
       grid.appendChild(item);
@@ -310,7 +312,7 @@
     if (!list.length || !wrap || !grid) return;
     wrap.style.display = '';
     requestAnimationFrame(function(){ wrap.classList.add('is-active'); });
-    list.slice(0, 6).forEach(function(file){
+    list.slice(0, 6).forEach(function(file, index){
       var url = URL.createObjectURL(file);
       state.postPreviewUrls.push(url);
       var node = document.createElement('div');
@@ -324,7 +326,7 @@
         node.appendChild(tag);
       } else {
         var img2 = document.createElement('img');
-        img2.src = url; img2.alt = '';
+        img2.src = url; img2.alt = ''; img2.decoding = 'async'; if (index > 3) img2.loading = 'lazy';
         img2.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
         node.appendChild(img2);
       }
