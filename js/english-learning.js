@@ -310,6 +310,7 @@
     S.mistakes = state.mistakes;
     S.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings || {});
     S.lastRemoteUpdatedAt = state.updatedAt || 0;
+    S.serverRevision = state.revision || 0;
   }
 
   function buildStatePayload() {
@@ -405,18 +406,33 @@
         return;
       }
       setSyncStatus('syncing', '同步中');
+      payload.base_revision = S.serverRevision || 0;
       var resp = await fetch(apiBase() + '/english/state', {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify({ data: payload, base_revision: S.serverRevision || 0 })
       });
+      if (resp.status === 409) {
+        // 版本冲突：重新拉取服务端数据，合并后重试
+        var conflict = await resp.json().catch(function(){});
+        if (conflict && conflict.server) {
+          var merged = mergeStates(payload, conflict.server);
+          S.serverRevision = conflict.server.revision || 0;
+          payload.base_revision = S.serverRevision;
+          resp = await fetch(apiBase() + '/english/state', {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: merged, base_revision: S.serverRevision })
+          });
+        }
+      }
       if (!resp.ok) {
-        var err = '';
-        try { var ej = await resp.json(); err = ej && ej.error || ''; } catch (e) {}
-        throw new Error(err || '同步保存失败');
+        var errMsg = '';
+        try { var ej2 = await resp.json(); errMsg = ej2 && ej2.error || ''; } catch (e) {}
+        throw new Error(errMsg || '同步保存失败');
       }
       var json = await resp.json();
       if (!json.ok) throw new Error(json.error || '同步保存失败');
+      if (json.data && json.data.revision) S.serverRevision = json.data.revision;
       setSyncStatus('synced', '已同步');
     } catch (e2) {
       setSyncStatus('error', '未同步');

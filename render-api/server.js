@@ -6998,6 +6998,9 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
         .eq('media_url', giftId);
       if (claimCount && claimCount >= claimLimit) { delete claimLocks[lockKey]; return res.status(400).json({ error: '活动名额已满' }); }
     }
+    // 检查是否已领取（使用 actor_key 去重，actor_key = 'pro_claim_' + giftId + '_' + userNameVal）
+    // 注意：actor_key 不加时间戳，确保同用户+同活动只能领取一次
+    var claimActorKey = 'pro_claim_' + giftId + '_' + userNameVal;
     var { data: existingClaim } = await supabase.from('posts')
       .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userNameVal)
@@ -7017,23 +7020,20 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
       features: features,
       duration_days: durationDays
     });
+    // 使用固定 actor_key（不加时间戳）作为数据库级去重：同用户+同活动只能 insert 成功一次
+    var claimActorKey = 'pro_claim_' + giftId + '_' + userNameVal;
     var { data: claimData, error: claimErr } = await supabase.from('posts').insert([{
       user_name: userNameVal,
       media_type: PRO_GIFT_CLAIM_MARKER,
       media_url: giftId,
       content: claimContent,
-      actor_key: 'pro_claim_' + giftId + '_' + userNameVal + '_' + Date.now()
+      actor_key: claimActorKey
     }]).select('id').maybeSingle();
-    if (claimErr) { delete claimLocks[lockKey]; return res.status(400).json({ error: sanitizeError(claimErr) }); }
-
-    // 事后重检：如果查到两条以上，说明有并发竞态，滚掉本条
-    var { data: dupCheck } = await supabase.from('posts')
-      .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .eq('user_name', userNameVal).eq('media_url', giftId);
-    if (dupCheck && dupCheck.length > 1) {
-      await supabase.from('posts').delete().eq('id', claimData.id).maybeSingle();
+    // actor_key 有唯一约束，重复会报错
+    if (claimErr) {
       delete claimLocks[lockKey];
-      return res.status(400).json({ error: '你已经领取过该活动' });
+      if (claimErr.code === '23505') return res.status(400).json({ error: '你已经领取过该活动' });
+      return res.status(400).json({ error: sanitizeError(claimErr) });
     }
     // 写入 VIP 激活记录
     var vipContent = JSON.stringify({
@@ -9538,7 +9538,9 @@ app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), asyn
     var row = await loadEnglishLearningRow(req.userName);
     if (!row || !row.content) return res.json({ ok: true, data: sanitizeEnglishLearningState({}) });
     var parsed = safeJsonParse(row.content) || {};
-    return res.json({ ok: true, data: sanitizeEnglishLearningState(parsed) });
+    var state = sanitizeEnglishLearningState(parsed);
+    state.revision = parsed.revision || 0;
+    return res.json({ ok: true, data: state });
   } catch (e) {
     console.error('[ENGLISH-STATE] load failed:', e && e.message);
     return res.status(500).json({ error: '同步读取失败' });
@@ -9548,11 +9550,22 @@ app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), asyn
 app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var userName = req.userName;
+    var baseRevision = req.body && req.body.base_revision;
     var payload = sanitizeEnglishLearningState((req.body && req.body.data) || req.body || {});
     var actorKey = 'english_learning_state:' + userName;
     payload.server_updated_at = Date.now();
+    payload.revision = (baseRevision || 0) + 1;
     var content = JSON.stringify(payload);
     var existing = await loadEnglishLearningRow(userName);
+
+    // 版本冲突检测：如果提供了 base_revision 且与服务器不匹配，返回 409
+    if (existing && existing.id && baseRevision) {
+      var cur = safeJsonParse(existing.content) || {};
+      if (cur.revision && cur.revision !== baseRevision) {
+        return res.status(409).json({ ok: false, error: '版本冲突', server: sanitizeEnglishLearningState(cur) });
+      }
+    }
+
     if (existing && existing.id) {
       var upd = await supabase.from('posts').update({
         content: content,
@@ -9574,7 +9587,7 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
       ok: true,
       saved: true,
       data: {
-        version: 1,
+        revision: payload.revision,
         words_count: payload.words.length,
         history_count: payload.history.length,
         mistakes_count: payload.mistakes.length,
