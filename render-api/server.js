@@ -1773,8 +1773,15 @@ app.use(function(req, res, next) {
 
 // 阻止敏感路径被静态文件服务泄露
 app.use(function(req, res, next) {
-  var blocked = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/fix-', '/scan-', '/check-', '.bak', '.md', 'CHANGELOG', 'README'];
-  for (var i = 0; i < blocked.length; i++) { if (req.path.indexOf(blocked[i]) === 0) return res.status(404).end(); }
+  var p = req.path;
+  // 精确文件匹配
+  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/bug_audit_report.md', '/security_best_practices_report.md'];
+  if (exact.indexOf(p) >= 0) return res.status(404).end();
+  // 目录前缀匹配
+  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/.git/'];
+  for (var i = 0; i < dirs.length; i++) { if (p.indexOf(dirs[i]) === 0) return res.status(404).end(); }
+  // 后缀匹配
+  if (p.endsWith('.bak') || p.endsWith('.md') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0) return res.status(404).end();
   next();
 });
 
