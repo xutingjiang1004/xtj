@@ -1838,18 +1838,18 @@
       setResearchSteps(card, -1, 4);
       updateResearchProgress(card, 1);
     } else if (state.state === 'timeout') {
-      refs.title.textContent = '\u7814\u7a76\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5';
+      refs.title.textContent = '\u8fde\u63a5\u8d85\u65f6';
       refs.status.textContent = opts.statusText || '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     } else if (state.state === 'interrupted') {
-      refs.title.textContent = '\u7814\u7a76\u4e2d\u65ad\uff0c\u8bf7\u91cd\u8bd5';
+      refs.title.textContent = '\u8fde\u63a5\u4e2d\u65ad';
       refs.status.textContent = opts.statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     } else if (state.state === 'cancelled') {
-      refs.title.textContent = '思考已停止';
-      refs.status.textContent = '已停止本次深入研究。';
+      refs.title.textContent = '已取消';
+      refs.status.textContent = '已取消本次深入研究。';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.18, state.progress || 0));
     } else if (state.state === 'error') {
@@ -2937,7 +2937,7 @@
         if (searchResults && searchResults.length > 0 && searchQuery) {
           var searchBox = document.createElement('div');
           searchBox.className = 'ai-search-supplement';
-          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果<br>';
+          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
           var shownResults = searchResults.slice(0, 5);
           for (var si = 0; si < shownResults.length; si++) {
             var sr = shownResults[si];
@@ -3554,6 +3554,7 @@
       if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
       if (sseResult && sseResult.timedOut && isResearchCard(progressCard)) {
         safeRemoveProgressCard(false);
+        preserveResearchAnswer(progressCard, c.value);
         resetSendingIfCurrent();
         return;
       }
