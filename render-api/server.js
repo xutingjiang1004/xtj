@@ -9035,7 +9035,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         
         if (finish === 'stop' || finish === 'length') {
-
+          finishReason = finish;
+          break;
+        }
       }
       if (finishReason === 'tool_calls') break;
     }
@@ -9131,38 +9133,19 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     return safeEnd();
 
     }
+
+
     // toolRound 超限兜底
     if (!aborted) {
       writeSse(res, { type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
     }
     return safeEnd();
-    } catch (streamErr) {
-      if (aborted) return safeEnd();
-      console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
-      // 如果已有 content，尝试保存并标记中断
-      if (contentBuffer && contentBuffer.length > 0 && !aborted) {
-        await finishStream(res, {
-          contentBuffer: contentBuffer,
-          reasoningBuffer: persistentReasoning || reasoningBuffer,
-          thinkingMode: thinkingMode,
-          useThinking: useThinking,
-          usedModel: usedModel,
-          searchMeta: _toolSearchMeta || _sharedSearchMeta,
-          finishReason: 'upstream_read_error',
-          userName: userName,
-          convId: convId,
-          message: message,
-          streamSeq: streamSeq,
-          ctx: ctx,
-          reasoningStartedAt: reasoningStartedAt
-        });
-      } else if (reasoningBuffer && reasoningBuffer.length > 0 && !aborted) {
-        writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
-      } else if (!aborted) {
-        writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
-      }
-      return safeEnd();
-    }
+  } catch (streamErr) {
+    if (aborted) return safeEnd();
+    console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
+    writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
+    return safeEnd();
+  }
 });
 
 // GET /api/agent/chat/conversations - 获取用户会话列表
@@ -9332,33 +9315,6 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
   }
 });
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
-      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%');
-
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return res.json({ ok: true, deleted: 0 });
-    }
-
-    // 逐条标记 deleted: true
-    var updated = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var meta = parseMsgMeta(rows[i]);
-      if (meta.deleted) continue; // 已删除
-      meta.deleted = true;
-      meta.deleted_at = new Date().toISOString();
-      var { error: upErr } = await supabase.from('posts')
-        .update({ media_url: JSON.stringify(meta) })
-        .eq('id', rows[i].id);
-      if (!upErr) updated++;
-    }
-
-    console.log('[AGENT-CONV] user=' + userName + ' deleted conv=' + convId + ' messages=' + updated);
-    return res.json({ ok: true, deleted: updated });
-  } catch (e) {
-    console.error('[AGENT-CONV] delete error:', e && e.message);
-    return res.status(500).json({ error: '删除失败' });
-  }
-});
-// POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
@@ -9415,6 +9371,15 @@ function sanitizeEnglishLearningState(input) {
   var tombstones = (Array.isArray(input.tombstones) ? input.tombstones : []).slice(0, 500).map(function(t) {
     return { en: String(t && t.en || '').trim().toLowerCase().slice(0, 60), id: String(t && t.id || '').slice(0, 80), deletedAt: Math.max(0, Number(t && t.deletedAt) || 0), updatedAt: Math.max(0, Number(t && t.updatedAt) || 0) };
   }).filter(function(t) { return t.en && /^[a-zA-Z\s\-']+$/.test(t.en); });
+  var mistakes = (Array.isArray(input.mistakes) ? input.mistakes : []).slice(0, 200).map(function(m) {
+    return { en: String(m && m.en || '').trim().toLowerCase().slice(0, 60), cn: String(m && m.cn || '').trim().slice(0, 80), count: Math.max(0, Math.min(999, parseInt(m && m.count, 10) || 0)), updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(m && m.updatedAt) || 0)) };
+  }).filter(function(m) { return m.en && /^[a-zA-Z\s\-']+$/.test(m.en); });
+  var settingsIn = input.settings && typeof input.settings === 'object' ? input.settings : {};
+  var levelDefault = String(settingsIn.defaultLevel || 'cet4').toLowerCase();
+  if (!allowedLevels[levelDefault]) levelDefault = 'cet4';
+  var len = String(settingsIn.articleLength || 'medium').toLowerCase();
+  if (['short', 'medium', 'long'].indexOf(len) < 0) len = 'medium';
+  var focus = cleanTypes(settingsIn.focus);
   var settingsUpdatedAt = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(settingsIn.updatedAt) || 0));
   return {
     version: 1,
@@ -9432,6 +9397,9 @@ function sanitizeEnglishLearningState(input) {
     },
     updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input.updatedAt) || Date.now())),
     server_updated_at: Date.now()
+  };
+}
+
 async function loadEnglishLearningRow(userName) {
   var { data, error } = await supabase.from('posts')
     .select('id, content, created_at')
@@ -9442,9 +9410,8 @@ async function loadEnglishLearningRow(userName) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
-    var parsed = safeJsonParse(row.content) || {};
-    var state = sanitizeEnglishLearningState(parsed);
-    state.revision = parsed.revision || 0;
+}
+
 app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var userName = req.userName;
@@ -9497,6 +9464,9 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
     console.error('[ENGLISH-STATE] save failed:', e && e.message);
     return res.status(500).json({ error: '同步保存失败' });
   }
+});
+
+/*
   try {
     }).filter(function(s) { return s && /^[a-zA-Z\s\-']+$/.test(s); });
     if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
@@ -9616,6 +9586,7 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
     try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
   }
 });
+*/
 
 // POST /api/agent/english/parse-batch - 英语学习: AI 智能解析批量输入
 // 接收任意格式文本 (单词/句子/短语混合), 返回 [{en, cn}] 列表
@@ -10446,110 +10417,6 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
   }
-});
-
-// POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
-// older_than_days: 默认 30 天
-app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
-  try {
-    var olderThanDays = parseInt(req.body && req.body.older_than_days, 10);
-    if (isNaN(olderThanDays) || olderThanDays < 7) olderThanDays = 30;
-    if (olderThanDays > 365) olderThanDays = 365;
-    var cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
-
-    var { count, error: countErr } = await supabase.from('posts')
-      .select('id', { count: 'exact', head: true })
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .lt('created_at', cutoff);
-    if (countErr) return res.status(500).json({ error: '计数失败: ' + sanitizeError(countErr) });
-
-    if (!count) return res.json({ ok: true, deleted: 0, message: '没有需要清理的记录' });
-
-    var deleted = 0;
-    var batchSize = 500;
-    while (deleted < count) {
-      var { error: delErr } = await supabase.from('posts')
-        .delete()
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .lt('created_at', cutoff)
-        .limit(batchSize);
-      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
-      deleted += batchSize;
-      await new Promise(function(r) { setTimeout(r, 200); });
-    }
-
-    console.warn('[ADMIN-CLEANUP] 清理完成: 删除 ' + deleted + ' 条 ' + olderThanDays + ' 天前的 AI 消息');
-    return res.json({ ok: true, deleted: deleted, older_than_days: olderThanDays, cutoff: cutoff });
-  } catch (e) {
-    console.error('[ADMIN-CLEANUP] exception:', e && e.message);
-    return res.status(500).json({ error: '清理异常: ' + (e && e.message || '') });
-  }
-});
-
-
-// 自动清理旧日志（每24小时执行一次）
-setInterval(function() {
-  cleanupOldLogs('login').catch(function() {});
-  cleanupOldLogs('security').catch(function() {});
-  cleanupOldLogs('error').catch(function() {});
-}, 24 * 60 * 60 * 1000);
-
-// 自动清理 AI 聊天记录 (每天一次)
-var _aiCleanupLock = false;
-async function autoCleanupAiMessages() {
-  if (_aiCleanupLock) return;
-  _aiCleanupLock = true;
-  try {
-    var cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
-    var { count, error: countErr } = await supabase.from('posts')
-      .select('id', { count: 'exact', head: true })
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .lt('created_at', cutoff);
-    if (countErr || !count) { _aiCleanupLock = false; return; }
-
-    // 安全阀：如果待删除占比超过 50%，说明窗口变更过大，跳过本轮避免误删
-    var { count: totalAll } = await supabase.from('posts')
-      .select('id', { count: 'exact', head: true })
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER);
-    if (totalAll && count > totalAll * 0.5) {
-      console.warn('[AUTO-CLEANUP] 跳过本轮：待删除 ' + count + ' 条/共 ' + totalAll + ' 条，占比过高避免误删');
-      _aiCleanupLock = false;
-      return;
-    }
-
-    var deleted = 0;
-    while (deleted < count) {
-      var { error: delErr } = await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
-      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
-      deleted += 500;
-      await new Promise(function(r) { setTimeout(r, 300); });
-    }
-    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 7 天前的 AI 消息');
-  } catch (e) { console.warn('[AUTO-CLEANUP] cleanup failed:', e && e.message); }
-  _aiCleanupLock = false;
-}
-setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
-// 服务启动 30s 后执行首次清理
-setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
-
-// ===================== 全局错误处理 =====================
-process.on('uncaughtException', function(err) {
-  console.error('[FATAL] uncaughtException:', err && err.message || err);
-});
-process.on('unhandledRejection', function(reason) {
-  console.error('[FATAL] unhandledRejection:', reason && reason.message || reason);
-});
-
-// ===================== 启动 =====================
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`[xtj-admin-api] running on port ${port}`);
-  console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
-  console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
-  console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
-  console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
-  console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
-  console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
 });
 
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
