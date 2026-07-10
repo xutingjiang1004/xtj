@@ -9055,7 +9055,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   reasoningStartedAt: reasoningStartedAt
             });
           } else {
-            writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
+            writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
           }
         }
         return safeEnd();
@@ -9521,9 +9521,14 @@ function sanitizeEnglishLearningState(input) {
   if (['short', 'medium', 'long'].indexOf(len) < 0) len = 'medium';
   var focus = String(settingsIn.focus || 'weak').toLowerCase();
   if (['all', 'weak', 'selected'].indexOf(focus) < 0) focus = 'weak';
+  var tombstones = (Array.isArray(input.tombstones) ? input.tombstones : []).slice(0, 500).map(function(t) {
+    return { en: String(t && t.en || '').trim().toLowerCase().slice(0, 60), id: String(t && t.id || '').slice(0, 80), deletedAt: Math.max(0, Number(t && t.deletedAt) || 0), updatedAt: Math.max(0, Number(t && t.updatedAt) || 0) };
+  }).filter(function(t) { return t.en && /^[a-zA-Z\s\-']+$/.test(t.en); });
+  var settingsUpdatedAt = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(settingsIn.updatedAt) || 0));
   return {
     version: 1,
     words: words,
+    tombstones: tombstones,
     history: history,
     mistakes: mistakes,
     settings: {
@@ -9531,7 +9536,8 @@ function sanitizeEnglishLearningState(input) {
       articleLength: len,
       questionCount: Math.max(4, Math.min(10, parseInt(settingsIn.questionCount, 10) || 6)),
       focus: focus,
-      topic: String(settingsIn.topic || '').slice(0, 80)
+      topic: String(settingsIn.topic || '').slice(0, 80),
+      updatedAt: settingsUpdatedAt
     },
     updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input.updatedAt) || Date.now())),
     server_updated_at: Date.now()
