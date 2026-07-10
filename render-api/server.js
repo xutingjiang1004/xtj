@@ -77,11 +77,24 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
-// 文件解析库（预先 require，避免每次调用时重复加载）
+// 文件解析库按需加载，避免服务启动阶段加载大体积解析依赖
 let pdfParser = null, mammothParser = null, xlsxParser = null;
-try { pdfParser = require('pdf-parse'); } catch(e) { console.warn('[FILE] pdf-parse not available'); }
-try { mammothParser = require('mammoth'); } catch(e) { console.warn('[FILE] mammoth not available'); }
-try { xlsxParser = require('xlsx'); } catch(e) { console.warn('[FILE] xlsx not available'); }
+let pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
+function loadFileParser(name) {
+  try { return require(name); } catch(e) { console.warn('[FILE] ' + name + ' not available'); return null; }
+}
+function getPdfParser() {
+  if (!pdfParserLoaded) { pdfParser = loadFileParser('pdf-parse'); pdfParserLoaded = true; }
+  return pdfParser;
+}
+function getMammothParser() {
+  if (!mammothParserLoaded) { mammothParser = loadFileParser('mammoth'); mammothParserLoaded = true; }
+  return mammothParser;
+}
+function getXlsxParser() {
+  if (!xlsxParserLoaded) { xlsxParser = loadFileParser('xlsx'); xlsxParserLoaded = true; }
+  return xlsxParser;
+}
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
@@ -2523,13 +2536,13 @@ async function extractEmbeddedFiles(text) {
         extractedText = '\n\n【文件: ' + fileName + ' 超过大小限制，跳过解析】\n\n';
       } else {
         var buffer = Buffer.from(base64Data, 'base64');
-        if (mimeType === 'application/pdf' && pdfParser) {
+        if (mimeType === 'application/pdf' && getPdfParser()) {
           var pdfData = await pdfParser(buffer);
           extractedText = pdfData.text || '';
-        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && mammothParser) {
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()) {
           var mammothResult = await mammothParser.extractRawText({ buffer: buffer });
           extractedText = mammothResult.value || '';
-        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && xlsxParser) {
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && getXlsxParser()) {
           var workbook = xlsxParser.read(buffer, { type: 'buffer' });
           var sheets = [];
           workbook.SheetNames.forEach(function(sName) {
