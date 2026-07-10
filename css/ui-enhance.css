@@ -156,14 +156,25 @@
   border-radius: inherit;
   background: linear-gradient(135deg, var(--primary), #34d399, #60a5fa, var(--primary));
   background-size: 300% 300%;
-  animation: xtjBtnShimmer 4s ease-in-out infinite;
+  animation: none;
   z-index: -1;
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
 }
-.btn-primary:hover::before {
+.btn-primary:hover::before,
+.btn-primary:focus-visible::before {
   opacity: 0.45;
+  animation: xtjBtnShimmer 4s ease-in-out infinite;
+}
+.perf-balanced .btn-primary::before,
+.perf-lite .btn-primary::before {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce), (hover: none) {
+  .btn-primary::before {
+    animation: none !important;
+  }
 }
 @keyframes xtjBtnShimmer {
   0%, 100% { background-position: 0% 50%; }
@@ -265,6 +276,19 @@
   opacity: 0;
   transform: translate3d(0, 8px, 0) scale(0.98);
   pointer-events: none;
+}
+.perf-balanced .dock-panel {
+  transition: opacity 160ms ease;
+}
+.perf-balanced .dock-panel:not(.active) {
+  transform: none;
+}
+.perf-lite .dock-panel {
+  transition: none;
+  transform: none;
+}
+.perf-lite .dock-panel:not(.active) {
+  transform: none;
 }
 
 /* ========== 22. Chat Send Button Ripple ========== */

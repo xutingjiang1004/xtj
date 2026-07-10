@@ -620,6 +620,33 @@
     scheduleSave();
   }
 
+
+  var englishDictionaryPromise = null;
+
+  function englishDictionarySrc() {
+    var meta = document.querySelector('meta[name="xtj-english-dict-src"]');
+    var src = meta && meta.getAttribute('content');
+    return src || 'js/english-dict.min.js';
+  }
+
+  function ensureEnglishDictionary() {
+    if (window.ENGLISH_WORD_DICT) return Promise.resolve(window.ENGLISH_WORD_DICT);
+    if (englishDictionaryPromise) return englishDictionaryPromise;
+    englishDictionaryPromise = new Promise(function(resolve) {
+      var script = document.createElement('script');
+      script.src = englishDictionarySrc();
+      script.async = true;
+      script.onload = function() { resolve(window.ENGLISH_WORD_DICT || null); };
+      script.onerror = function() {
+        englishDictionaryPromise = null;
+        try { console.warn('[EL] English dictionary failed to load'); } catch (e) {}
+        resolve(null);
+      };
+      (document.head || document.documentElement).appendChild(script);
+    });
+    return englishDictionaryPromise;
+  }
+
   function getDictMatches(query, maxResults) {
     maxResults = maxResults || 8;
     query = String(query || '').trim().toLowerCase();
@@ -1605,9 +1632,15 @@
 
   var NEON_PADDING = 3;
   var NEON_RADIUS  = 22;
-  var NEON_POINTS  = 600;
-  var NEON_LINES   = 26;
   var NEON_AMP     = 12;
+  var NEON_CONFIGS = {
+    full: { points: 360, lines: 14, dpr: 1.5, fps: 60, canvas: true },
+    balanced: { points: 220, lines: 8, dpr: 1.25, fps: 30, canvas: true },
+    lite: { points: 80, lines: 0, dpr: 1, fps: 0, canvas: false }
+  };
+  var _neonConfig = NEON_CONFIGS.full;
+  var _neonListenersBound = false;
+  var _neonLastFrameTs = 0;
 
   function neonBuildBase(w, h) {
     var pad = NEON_PADDING, r = NEON_RADIUS;
@@ -1616,8 +1649,8 @@
     var arc = Math.PI / 2 * r;
     var total = 2 * wLine + 2 * hLine + 4 * arc;
     var pts = [];
-    for (var i = 0; i < NEON_POINTS; i++) {
-      var d = (i / NEON_POINTS) * total;
+    for (var i = 0; i < _neonConfig.points; i++) {
+      var d = (i / _neonConfig.points) * total;
       var x, y, nx, ny;
       if (d < wLine) {
         x = pad + r + d; y = pad; nx = 0; ny = 1;
@@ -1647,7 +1680,7 @@
         x = pad + r + Math.cos(a) * r; y = pad + r + Math.sin(a) * r;
         nx = -Math.cos(a); ny = -Math.sin(a);
       }
-      pts.push({x: x, y: y, nx: nx, ny: ny, t: i / NEON_POINTS});
+      pts.push({x: x, y: y, nx: nx, ny: ny, t: i / _neonConfig.points});
     }
     _neonBasePts = pts;
     _neonW = w; _neonH = h;
@@ -1662,7 +1695,7 @@
       [255, 149, 0]
     ];
     var lines = [];
-    for (var i = 0; i < NEON_LINES; i++) {
+    for (var i = 0; i < _neonConfig.lines; i++) {
       var c = palette[i % palette.length];
       lines.push({
         r: c[0], g: c[1], b: c[2],
@@ -1675,7 +1708,7 @@
         amp: 5 + Math.random() * NEON_AMP,
         thick: Math.random() < 0.22 ? 2.2 : 1.1,
         pulseSpeed: 0.5 + Math.random() * 1.4,
-        alpha: 0.55 - (i / NEON_LINES) * 0.35
+        alpha: 0.55 - (i / _neonConfig.lines) * 0.35
       });
     }
     _neonLines = lines;
@@ -1688,7 +1721,7 @@
     var w = parent.clientWidth;
     var h = parent.clientHeight;
     if (w === 0 || h === 0) return;
-    _neonDPR = Math.min(window.devicePixelRatio || 1, 2);
+    _neonDPR = Math.min(window.devicePixelRatio || 1, _neonConfig.dpr);
     _neonCanvas.width  = Math.floor(w * _neonDPR);
     _neonCanvas.height = Math.floor(h * _neonDPR);
     _neonCanvas.style.width  = w + 'px';
@@ -1702,6 +1735,12 @@
 
   function neonDrawFrame(ts) {
     if (!_neonCtx || _neonState === 'idle') return;
+    if (document.hidden) { _neonRaf = 0; return; }
+    if (_neonConfig.fps && _neonConfig.fps < 60 && _neonLastFrameTs && ts - _neonLastFrameTs < (1000 / _neonConfig.fps - 1)) {
+      _neonRaf = requestAnimationFrame(neonDrawFrame);
+      return;
+    }
+    _neonLastFrameTs = ts;
     var ctx = _neonCtx;
     var w = _neonW, h = _neonH;
     var elapsed = (ts - _neonStart) / 1000;
@@ -1763,7 +1802,66 @@
     _neonRaf = requestAnimationFrame(neonDrawFrame);
   }
 
+  function neonProfile() {
+    var cls = document.documentElement && document.documentElement.classList;
+    if (cls && cls.contains('perf-lite')) return 'lite';
+    if (cls && cls.contains('perf-balanced')) return 'balanced';
+    return 'full';
+  }
+
+  function neonDrawStatic() {
+    if (!_neonCtx || !_neonCanvas) return;
+    neonResize();
+    var ctx = _neonCtx, w = _neonW, h = _neonH;
+    if (!w || !h) return;
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(10,132,255,0.42)';
+    ctx.lineWidth = 1.2;
+    ctx.shadowColor = 'rgba(10,132,255,0.55)';
+    ctx.shadowBlur = 4;
+    neonBuildBase(w, h);
+    ctx.beginPath();
+    for (var i = 0; i < _neonBasePts.length; i++) {
+      var pt = _neonBasePts[i];
+      var off = Math.sin(pt.t * Math.PI * 8) * 2.2;
+      var px = pt.x + pt.nx * off;
+      var py = pt.y + pt.ny * off;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function neonVisibilityChange() {
+    if (document.hidden) {
+      cancelAnimationFrame(_neonRaf);
+      _neonRaf = 0;
+    } else if (_neonState !== 'idle' && _neonCanvas && _neonConfig.canvas && !_neonRaf) {
+      _neonStart = performance.now();
+      _neonLastFrameTs = 0;
+      _neonRaf = requestAnimationFrame(neonDrawFrame);
+    }
+  }
+
+  function neonBindListeners() {
+    if (_neonListenersBound) return;
+    _neonListenersBound = true;
+    window.addEventListener('resize', neonResize);
+    document.addEventListener('visibilitychange', neonVisibilityChange);
+  }
+
+  function neonUnbindListeners() {
+    if (!_neonListenersBound) return;
+    _neonListenersBound = false;
+    window.removeEventListener('resize', neonResize);
+    document.removeEventListener('visibilitychange', neonVisibilityChange);
+  }
+
   function neonStart() {
+    _neonConfig = NEON_CONFIGS[neonProfile()] || NEON_CONFIGS.full;
     _neonCanvas = document.getElementById('elLoadingCanvas');
     if (!_neonCanvas) return;
     _neonCtx = _neonCanvas.getContext('2d');
@@ -1771,19 +1869,24 @@
     _neonLines = [];
     neonResize();
     if (_neonW === 0 || _neonH === 0) return;
-    neonBuildLines();
-    _neonStart = performance.now();
     _neonState = 'enter';
     cancelAnimationFrame(_neonRaf);
-    _neonRaf = requestAnimationFrame(neonDrawFrame);
-    window.removeEventListener('resize', neonResize);
-    window.addEventListener('resize', neonResize);
+    _neonRaf = 0;
+    neonBindListeners();
+    if (!_neonConfig.canvas) {
+      neonDrawStatic();
+      return;
+    }
+    neonBuildLines();
+    _neonStart = performance.now();
+    _neonLastFrameTs = 0;
+    if (!document.hidden) _neonRaf = requestAnimationFrame(neonDrawFrame);
   }
   function neonStop() {
     if (_neonState === 'idle' || !_neonCanvas) {
       cancelAnimationFrame(_neonRaf);
       _neonRaf = 0;
-      window.removeEventListener('resize', neonResize);
+      neonUnbindListeners();
       return;
     }
     var overlay = _neonCanvas.parentElement;
@@ -1792,7 +1895,7 @@
     _neonStart = performance.now();
     setTimeout(function() {
       if (overlay) overlay.classList.remove('leaving');
-      window.removeEventListener('resize', neonResize);
+      neonUnbindListeners();
     }, 500);
   }
 
@@ -2060,6 +2163,12 @@
       S.openTimer = null;
     }, 180);
     updateSecondaryPageState(true);
+    ensureEnglishDictionary().then(function() {
+      var wordInput = $('elWordInput');
+      if (wordInput && document.activeElement === wordInput && wordInput.value.trim()) {
+        showAutocomplete(wordInput, getDictMatches(wordInput.value.trim(), 8));
+      }
+    });
     if (!S.initialized) {
       S.initialized = true;
       applyState(getLocalState());
@@ -2392,7 +2501,8 @@
       return w;
     },
     getWords: function() { return S.words.slice(); },
-    sync: saveRemoteState
+    sync: saveRemoteState,
+    ensureDictionary: ensureEnglishDictionary
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
