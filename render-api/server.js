@@ -7033,6 +7033,18 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
       if (claimErr.code === '23505') return res.status(400).json({ error: '你已经领取过该活动' });
       return res.status(400).json({ error: sanitizeError(claimErr) });
     }
+    // 事后反查：如果并发导致超过 claim_limit，删除本条并返回错误
+    if (claimLimit > 0) {
+      var { count: postClaimCount } = await supabase.from('posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .eq('media_url', giftId);
+      if (postClaimCount && postClaimCount > claimLimit) {
+        await supabase.from('posts').delete().eq('id', claimData.id).maybeSingle();
+        delete claimLocks[lockKey];
+        return res.status(400).json({ error: '活动名额已满' });
+      }
+    }
     // 写入 VIP 激活记录
     var vipContent = JSON.stringify({
       plan_id: 'pro_gift_' + giftId,
@@ -9556,11 +9568,13 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
     var content = JSON.stringify(payload);
     var existing = await loadEnglishLearningRow(userName);
 
-    // 版本冲突检测：如果提供了 base_revision 且与服务器不匹配，返回 409
-    if (existing && existing.id && baseRevision) {
+    // 版本冲突检测：base_revision 为 0 或 undefined 时跳过检查，否则必须匹配
+    if (existing && existing.id && typeof baseRevision !== 'undefined' && baseRevision !== null) {
       var cur = safeJsonParse(existing.content) || {};
-      if (cur.revision && cur.revision !== baseRevision) {
-        return res.status(409).json({ ok: false, error: '版本冲突', server: sanitizeEnglishLearningState(cur) });
+      if (cur.revision !== undefined && cur.revision !== baseRevision) {
+        var serverState = sanitizeEnglishLearningState(cur);
+        serverState.revision = cur.revision || 0;
+        return res.status(409).json({ ok: false, error: '版本冲突', server: serverState });
       }
     }
 
