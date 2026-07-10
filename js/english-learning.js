@@ -211,9 +211,14 @@
     var list = Object.keys(byEn).map(function(k) { return byEn[k]; })
       .sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); })
       .slice(0, MAX_WORDS);
+    var tombstones = Array.isArray(raw.tombstones) ? raw.tombstones : [];
+    // 清理过期 tombstone (超过 90 天的自动清理)
+    var now2 = Date.now();
+    tombstones = tombstones.filter(function(t) { return t && t.deletedAt && (now2 - t.deletedAt < 90 * 86400000); });
     return {
       version: 1,
       words: list,
+      tombstones: tombstones,
       history: Array.isArray(raw.history) ? raw.history.slice(0, MAX_HISTORY) : [],
       mistakes: Array.isArray(raw.mistakes) ? raw.mistakes.slice(0, MAX_MISTAKES) : [],
       settings: Object.assign({}, DEFAULT_SETTINGS, raw.settings || {}),
@@ -255,27 +260,40 @@
   function mergeStates(local, remote) {
     local = normalizeState(local);
     remote = normalizeState(remote);
+    // 合并 tombstones
+    var tombstoneMap = {};
+    (local.tombstones || []).concat(remote.tombstones || []).forEach(function(t) {
+      if (!t || !t.en) return;
+      var ek = t.en.toLowerCase().trim();
+      var prev = tombstoneMap[ek];
+      if (!prev || (t.deletedAt || 0) >= (prev.deletedAt || 0)) tombstoneMap[ek] = t;
+    });
+    var tombstones = Object.keys(tombstoneMap).map(function(k) { return tombstoneMap[k]; }).slice(0, 500);
+    // 合并 words：删除晚于 updatedAt 的 tombstone 对应的词
     var map = {};
-    // 以 normalize(en) 为唯一键，deletedAt 标记的视为已删除
     local.words.concat(remote.words).forEach(function(w) {
       if (!w || !w.en) return;
       var enKey = w.en.toLowerCase().trim();
       var prev = map[enKey];
-      if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) {
-        map[enKey] = w;
-      }
+      if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) map[enKey] = w;
+    });
+    // 应用 tombstone：如果 tombstone.deletedAt 晚于或等于 word.updatedAt，排除该词
+    Object.keys(tombstoneMap).forEach(function(k) {
+      var t = tombstoneMap[k];
+      var w = map[k];
+      if (w && t.deletedAt && (w.updatedAt || 0) <= t.deletedAt) delete map[k];
     });
     var words = [];
     Object.keys(map).forEach(function(k) {
       var w = map[k];
       if (!w) return;
-      if (w.deletedAt) return; // tombstone: 已删单词不加入结果
       words.push(w);
     });
     words.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
     return {
       version: 1,
       words: words.slice(0, MAX_WORDS),
+      tombstones: tombstones,
       history: mergeById(local.history, remote.history, MAX_HISTORY),
       mistakes: mergeById(local.mistakes, remote.mistakes, MAX_MISTAKES),
       settings: (function() {
@@ -303,6 +321,7 @@
   function applyState(state) {
     state = normalizeState(state);
     S.words = state.words;
+    S.tombstones = state.tombstones || [];
     S.history = state.history;
     S.mistakes = state.mistakes;
     S.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings || {});
@@ -314,6 +333,7 @@
     return {
       version: 1,
       words: S.words.slice(0, MAX_WORDS),
+      tombstones: (S.tombstones || []).slice(0, 500),
       history: S.history.slice(0, MAX_HISTORY),
       mistakes: S.mistakes.slice(0, MAX_MISTAKES),
       settings: Object.assign({}, DEFAULT_SETTINGS, S.settings || {}),
@@ -508,10 +528,13 @@
       if (S.words[i].en === normalized.en) {
         if (normalized.cn && normalized.cn !== S.words[i].cn) S.words[i].cn = normalized.cn;
         S.words[i].updatedAt = now();
+        delete S.words[i].deletedAt;
         scheduleSave();
         return S.words[i];
       }
     }
+    // 清除 tombstone（如果之前删除过同单词）
+    if (S.tombstones) S.tombstones = S.tombstones.filter(function(t) { return t.en !== normalized.en; });
     if (S.words.length >= MAX_WORDS) {
       if (!silent) notify('单词库已满 (' + MAX_WORDS + ' 词)');
       return null;
@@ -527,9 +550,9 @@
       if (w.id === id) { word = w; return false; }
       return true;
     });
-    // 写入 tombstone 让跨设备同步知道这个词已被删除
     if (word) {
-      S.words.push({ en: word.en, id: word.id, cn: word.cn || '', mastery: word.mastery || 0, addedAt: word.addedAt || Date.now(), updatedAt: Date.now(), deletedAt: Date.now() });
+      if (!S.tombstones) S.tombstones = [];
+      S.tombstones.push({ en: word.en, id: word.id, deletedAt: Date.now(), updatedAt: Date.now() });
     }
     scheduleSave();
   }
@@ -560,8 +583,9 @@
       if (ids.indexOf(w.id) >= 0) { deleted.push(w); return false; }
       return true;
     });
+    if (!S.tombstones) S.tombstones = [];
     deleted.forEach(function(w) {
-      S.words.push({ en: w.en, id: w.id, cn: w.cn || '', mastery: w.mastery || 0, addedAt: w.addedAt || Date.now(), updatedAt: Date.now(), deletedAt: Date.now() });
+      S.tombstones.push({ en: w.en, id: w.id, deletedAt: Date.now(), updatedAt: Date.now() });
     });
     scheduleSave();
     return ids.length;
@@ -569,10 +593,11 @@
 
   function clearAll() {
     var now2 = Date.now();
-    var tombstones = S.words.map(function(w) {
-      return { en: w.en, id: w.id, cn: w.cn || '', mastery: w.mastery || 0, addedAt: w.addedAt || now2, updatedAt: now2, deletedAt: now2 };
+    if (!S.tombstones) S.tombstones = [];
+    S.words.forEach(function(w) {
+      S.tombstones.push({ en: w.en, id: w.id, deletedAt: now2, updatedAt: now2 });
     });
-    S.words = tombstones;
+    S.words = [];
     S.history = [];
     S.mistakes = [];
     S.currentQuiz = null;
