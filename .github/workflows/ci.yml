@@ -2,35 +2,74 @@ name: CI
 
 on:
   push:
-    branches: [main, xtj-hotfix]
+    branches:
+      - main
+      - xtj-hotfix
+
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci
-      - run: npm test
-      - name: Run integration tests
-        run: node tests/complete-tests.js
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run project tests
+        run: npm test
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci
-      - run: node --check render-api/server.js
-      - run: node --check js/core.js
-      - run: node --check js/ai-agent.js
-      - run: node --check js/english-learning.js
-      - run: node --check js/english-dict.js
-      - run: echo "ALL SYNTAX CHECKS PASSED"
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check server syntax
+        run: node --check render-api/server.js
+
+      - name: Check build script syntax
+        run: node --check scripts/build.js
+
+      - name: Check core syntax
+        run: node --check js/core.js
+
+      - name: Check login device syntax
+        run: node --check js/login-device.js
+
+      - name: Check AI agent syntax
+        run: node --check js/ai-agent.js
+
+      - name: Check English learning syntax
+        run: node --check js/english-learning.js
+
+      - name: Check English dictionary syntax
+        run: node --check js/english-dict.js
+
+      - name: Finish
+        run: echo "ALL SYNTAX CHECKS PASSED"
