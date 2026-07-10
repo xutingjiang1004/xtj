@@ -108,6 +108,49 @@ test('ui-effects keeps only deprecated compatibility object', function(){
   ['rippleButtonSelector','getPerfMode','motionReduced'].forEach(function(x){ assert.ok(s.indexOf(x)<0, x+' remains'); });
 });
 
+
+
+console.log('\n=== Targeted Performance Optimization Static Checks ===');
+test('english neon points and lines are performance-profiled', function(){
+  var s = read('js/english-learning.js');
+  assert.ok(s.indexOf('points: 360') >= 0 && s.indexOf('lines: 14') >= 0, 'missing perf-full neon config');
+  assert.ok(s.indexOf('points: 220') >= 0 && s.indexOf('lines: 8') >= 0, 'missing perf-balanced neon config');
+  assert.ok(s.indexOf('NEON_POINTS  = 600') < 0 && s.indexOf('NEON_LINES   = 26') < 0, 'old fixed neon constants remain');
+});
+test('perf-lite english neon does not start canvas rAF', function(){
+  var s = read('js/english-learning.js');
+  assert.ok(/lite:\s*\{[^}]*canvas:\s*false/.test(s), 'lite canvas flag missing');
+  assert.ok(/if \(!_neonConfig\.canvas\) \{[\s\S]*?neonDrawStatic\(\);[\s\S]*?return;[\s\S]*?\}/.test(s), 'lite static path missing');
+});
+test('photo preview pointermove visual work is coalesced with rAF', function(){
+  var s = read('js/photo-wall/preview-hotfix.js');
+  assert.ok(s.indexOf('schedulePointerMoveVisual') >= 0, 'missing scheduler');
+  assert.ok(s.indexOf('requestAnimationFrame(flushPendingMoveFrame)') >= 0, 'missing rAF flush');
+  assert.ok(s.indexOf('cancelPendingMoveFrame') >= 0, 'missing pending rAF cleanup');
+});
+test('btn-primary hidden shimmer has no infinite animation', function(){
+  var css = read('css/ui-enhance.css');
+  var i = css.indexOf('.btn-primary::before');
+  var block = css.slice(i, css.indexOf('}', i));
+  assert.ok(/animation:\s*none/.test(block), 'base shimmer still animates');
+  assert.ok(/\.btn-primary:hover::before,[\s\S]*\.btn-primary:focus-visible::before[\s\S]*xtjBtnShimmer/.test(css), 'interaction shimmer gate missing');
+});
+test('index no longer statically loads english-dict.js', function(){
+  var html = read('index.html');
+  assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'static english-dict.js script remains');
+  assert.ok(/meta name="xtj-english-dict-src" content="js\/english-dict\.min\.js\?v=/.test(html), 'dynamic dictionary source meta missing');
+});
+test('performance profile skips duplicate class mutations', function(){
+  var s = read('js/performance.js');
+  assert.ok(s.indexOf('var currentProfile = null') >= 0, 'missing current profile cache');
+  assert.ok(s.indexOf('if (profile === currentProfile) return;') >= 0, 'missing no-op same-profile guard');
+  assert.ok(s.indexOf('resizeApplyFrameId = requestAnimationFrame') >= 0, 'missing resize rAF coalescing');
+});
+test('dock tab and indicator selectors were not edited by this optimization', function(){
+  var diff = cp.execSync('git diff -- css/ui-enhance.css css/ai-agent.css js/english-learning.js js/photo-wall/preview-hotfix.js js/performance.js index.html scripts/build.js tests/complete-tests.js', {encoding:'utf8'});
+  assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
