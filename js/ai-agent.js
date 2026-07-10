@@ -1670,6 +1670,7 @@
         thinkingBody: card.querySelector('.ai-think-thinking-body'),
         answer: card.querySelector('.ai-think-answer'),
         footer: card.querySelector('.ai-msg-footer'),
+        retry: card.querySelector('.ai-research-retry'),
         canvas: card.querySelector('.ai-research-particles'),
         searchBox: null
       };
@@ -1687,6 +1688,39 @@
     card.classList.toggle('expanded', !!expanded && canToggle);
     card.classList.toggle('collapsed', !expanded || !canToggle);
     if (refs && refs.details) refs.details.open = !!expanded && canToggle;
+  }
+
+  function resetResearchCardDisclosure(root) {
+    if (!root || !root.querySelectorAll) return;
+    var cards = root.querySelectorAll('.ai-research-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      if (!isResearchCard(card)) continue;
+      if (card._researchState) {
+        card._researchState.persistExpanded = false;
+        card._researchState.userPinnedOpen = false;
+      }
+      setResearchDisclosure(card, false);
+    }
+  }
+
+  function preserveResearchAnswer(card, content) {
+    if (!isResearchCard(card) || !content) return;
+    var answer = card.querySelector('.ai-think-answer');
+    if (!answer || String(answer.textContent || '').trim()) return;
+    try { answer.innerHTML = renderMarkdown(String(content)); } catch (e) {}
+  }
+
+  function markResearchCardOutcome(card, nextState, statusText) {
+    if (!isResearchCard(card)) return;
+    setResearchCardState(card, nextState, { statusText: statusText });
+    var body = card.querySelector('.ai-think-body');
+    if (!body || body.querySelector('.ai-research-failure-note')) return;
+    var note = el('div', { class: 'ai-error-note ai-research-failure-note' });
+    note.textContent = statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
+    var footer = body.querySelector('.ai-msg-footer');
+    if (footer) body.insertBefore(note, footer);
+    else body.appendChild(note);
   }
 
   function updateResearchProgress(card, ratio) {
@@ -1726,7 +1760,7 @@
     var state = card._researchState;
     if (!refs || !refs.meta || !state) return;
     state.elapsedMs = Math.max(0, ms || 0);
-    if (state.state === 'responding' || state.state === 'done' || state.state === 'cancelled' || state.state === 'error') {
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       refs.meta.textContent = '';
       return;
     }
@@ -1739,6 +1773,8 @@
     var refs = ensureResearchCardRefs(card);
     var state = card._researchState;
     if (!refs || !state) return;
+    if (nextState === 'error') nextState = 'interrupted';
+    if ((state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') && nextState === 'done') return;
     if (typeof opts.elapsedMs === 'number') state.elapsedMs = opts.elapsedMs;
     if (typeof opts.durationMs === 'number' && opts.durationMs >= 0) state.durationMs = opts.durationMs;
     if (typeof opts.agentCount === 'number') state.agentCount = opts.agentCount;
@@ -1752,10 +1788,11 @@
     if (state.stepCount > 0) state.canToggle = true;
 
     card.setAttribute('data-research-state', state.state);
-    card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-cancelled', 'ai-research-error');
+    card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-timeout', 'ai-research-interrupted', 'ai-research-cancelled', 'ai-research-error');
     card.classList.add('ai-research-' + state.state);
+    if (state.state === 'interrupted') card.classList.add('ai-research-error');
 
-    if (state.state === 'responding' || state.state === 'done' || state.state === 'cancelled' || state.state === 'error') {
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       card.classList.remove('generating');
       state.canToggle = true;
       setResearchDisclosure(card, state.persistExpanded ? true : !!opts.expanded);
@@ -1800,6 +1837,16 @@
       refs.meta.textContent = '';
       setResearchSteps(card, -1, 4);
       updateResearchProgress(card, 1);
+    } else if (state.state === 'timeout') {
+      refs.title.textContent = '\u7814\u7a76\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5';
+      refs.status.textContent = opts.statusText || '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+    } else if (state.state === 'interrupted') {
+      refs.title.textContent = '\u7814\u7a76\u4e2d\u65ad\uff0c\u8bf7\u91cd\u8bd5';
+      refs.status.textContent = opts.statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     } else if (state.state === 'cancelled') {
       refs.title.textContent = '思考已停止';
       refs.status.textContent = '已停止本次深入研究。';
@@ -1813,6 +1860,7 @@
     }
 
     if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
+    if (refs.retry) refs.retry.style.display = (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') ? '' : 'none';
   }
 
   function createResearchCardAnimator(card) {
@@ -1946,6 +1994,7 @@
           AI_RESEARCH_STEPS.map(function(step) { return '<span>' + step + '</span>'; }).join('') +
         '</div>' +
         '<button type="button" class="ai-research-stop">停止思考</button>' +
+        '<button type="button" class="ai-progress-stop ai-research-retry" style="display:none">\u91cd\u8bd5</button>' +
       '</div>' +
       '<div class="ai-think-body">' +
         '<details class="ai-think-thinking">' +
@@ -1992,6 +2041,13 @@
         setResearchDisclosure(card, nextExpanded);
       });
     }
+    if (refs && refs.retry) {
+      refs.retry.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof options.retryFn === 'function') options.retryFn();
+      });
+    }
     if (refs && refs.details) {
       refs.details.addEventListener('toggle', function() {
         if (!card._researchState.canToggle) return;
@@ -2013,7 +2069,8 @@
         state: 'preparing',
         canToggle: false,
         extraClass: 'ai-research-card--loading',
-        cancelFn: options.cancelFn
+        cancelFn: options.cancelFn,
+        retryFn: options.retryFn
       });
       researchCard._researchState.startedAt = Date.now();
       researchCard._researchState.elapsedTimer = setInterval(function() {
