@@ -6955,149 +6955,42 @@ app.get('/api/pro-gifts/available', rateLimit(60000, 30), authenticateUser, asyn
   }
 });
 
-// 用户：领取 Pro 赠送活动（强校验：身份、发布状态、时间、限定用户、名额、重复领取）
-var claimLocks = {};
+// 用户：领取 Pro 赠送活动（由数据库 RPC 在单事务内完成校验、名额检查、领取与 VIP 激活）
 app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (req, res) => {
-  var lockKey, userNameVal, giftId;
   try {
-    var { user_name, gift_id } = req.body;
-    userNameVal = String(user_name || req.userName || '').trim();
-    // 强制以 req.userName 为准（认证中间件写入），避免 body 传任意 user_name 替别人领
-    if (req.userName) userNameVal = String(req.userName).trim();
-    giftId = String(gift_id || '').trim();
+    var giftId = String((req.body && req.body.gift_id) || '').trim();
+    var userNameVal = String(req.userName || '').trim();
     if (!userNameVal) return res.status(401).json({ error: '请先登录' });
     if (!giftId) return res.status(400).json({ error: '缺少活动ID' });
-    var now = new Date();
-    var nowISO = now.toISOString();
-    // 1. 活动存在 + media_type 正确
-    var { data: gift } = await supabase.from('posts')
-      .select('content').eq('id', giftId).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
-    if (!gift) return res.status(404).json({ error: '活动不存在' });
-    var giftInfo = {};
-    try { giftInfo = JSON.parse(gift.content || '{}'); } catch(e) {}
-    // 2. 已发布
-    if (!giftInfo.is_published) return res.status(400).json({ error: '活动未发布' });
-    // 3. 未禁用
-    if (giftInfo.is_active === false) return res.status(400).json({ error: '活动已禁用' });
-    // 4. 时间窗口
-    if (giftInfo.start_at && new Date(giftInfo.start_at) > now) return res.status(400).json({ error: '活动未开始' });
-    if (giftInfo.end_at && new Date(giftInfo.end_at) < now) return res.status(400).json({ error: '活动已结束' });
-    if (giftInfo.claim_expire_at && new Date(giftInfo.claim_expire_at) < now) return res.status(400).json({ error: '活动已过期' });
-    // 5. 限定用户白名单
-    var allowedArr = [];
-    if (Array.isArray(giftInfo.allowed_users)) allowedArr = allowedArr.concat(giftInfo.allowed_users);
-    if (Array.isArray(giftInfo.exclusive_users)) allowedArr = allowedArr.concat(giftInfo.exclusive_users);
-    if (Array.isArray(giftInfo.target_users)) allowedArr = allowedArr.concat(giftInfo.target_users);
-    allowedArr = allowedArr.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
-    var hasAllowList = giftInfo.exclusive === true || allowedArr.length > 0;
-    if (hasAllowList && allowedArr.indexOf(userNameVal) === -1) {
-      return res.status(403).json({ error: '你不在本次活动领取名单中' });
-    }
-    // 防并发重复领取（进程内锁 + DB 事后重检，双保险）
-    var lockKey = 'claim_' + giftId + '_' + userNameVal;
-    if (claimLocks[lockKey]) return res.status(429).json({ error: '领取请求正在处理中' });
-    claimLocks[lockKey] = true;
+    if (!/^\d+$/.test(giftId)) return res.status(400).json({ error: '活动ID格式错误' });
 
-    var claimLimit = parseInt(giftInfo.claim_limit || giftInfo.limit || giftInfo.max_claims) || 0;
-    if (claimLimit > 0) {
-      var { count: claimCount } = await supabase.from('posts')
-        .select('id', { count: 'exact', head: true })
-        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-        .eq('media_url', giftId);
-      if (claimCount && claimCount >= claimLimit) { delete claimLocks[lockKey]; return res.status(400).json({ error: '活动名额已满' }); }
-    }
-    var { data: existingClaim } = await supabase.from('posts')
-      .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .eq('user_name', userNameVal)
-      .eq('media_url', giftId)
-      .maybeSingle();
-    if (existingClaim) { delete claimLocks[lockKey]; return res.status(400).json({ error: '你已经领取过该活动' }); }
-
-    var durationDays = giftInfo.duration_days || 30;
-    var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-    var features = normalizeVisualProFeatures(giftInfo.features);
-    var claimContent = JSON.stringify({
-      campaign_id: giftId,
-      campaign_title: giftInfo.title || '',
-      user_name: userNameVal,
-      claimed_at: nowISO,
-      vip_expire_at: expireAt,
-      features: features,
-      duration_days: durationDays
+    var rpcResult = await supabase.rpc('claim_pro_gift', {
+      p_user_name: userNameVal,
+      p_gift_id: giftId
     });
-    // 使用固定 actor_key（不加时间戳）作为数据库级去重：同用户+同活动只能 insert 成功一次
-    var claimActorKey = 'pro_claim_' + giftId + '_' + userNameVal;
-    var { data: claimData, error: claimErr } = await supabase.from('posts').insert([{
-      user_name: userNameVal,
-      media_type: PRO_GIFT_CLAIM_MARKER,
-      media_url: giftId,
-      content: claimContent,
-      actor_key: claimActorKey
-    }]).select('id').maybeSingle();
-    // actor_key 有唯一约束，重复会报错
-    if (claimErr) {
-      delete claimLocks[lockKey];
-      if (claimErr.code === '23505') return res.status(400).json({ error: '你已经领取过该活动' });
-      return res.status(400).json({ error: sanitizeError(claimErr) });
+    if (rpcResult.error) {
+      console.error('[ProGift] RPC领取失败:', rpcResult.error.message);
+      return res.status(500).json({ error: '领取失败' });
     }
-    // 事后反查：如果并发导致超过 claim_limit，删除本条并返回错误
-    if (claimLimit > 0) {
-      var { count: postClaimCount } = await supabase.from('posts')
-        .select('id', { count: 'exact', head: true })
-        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-        .eq('media_url', giftId);
-      if (postClaimCount && postClaimCount > claimLimit) {
-        await supabase.from('posts').delete().eq('id', claimData.id).maybeSingle();
-        delete claimLocks[lockKey];
-        return res.status(400).json({ error: '活动名额已满' });
-      }
-    }
-    // 写入 VIP 激活记录
-    var vipContent = JSON.stringify({
-      plan_id: 'pro_gift_' + giftId,
-      plan_name: 'XTJ Pro (' + (giftInfo.title || '赠送') + ')',
-      price: 0,
-      is_active: true,
-      order_no: 'GIFT_' + Date.now(),
-      start_at: nowISO,
-      expire_at: expireAt,
-      features: features,
-      activated_at: nowISO,
-      source: 'pro_gift'
-    });
-    var { error: vipErr } = await supabase.from('posts').insert([{
-      user_name: userNameVal,
-      media_type: VIP_MARKER,
-      media_url: 'pro_monthly',
-      content: vipContent,
-      actor_key: 'vip_' + Date.now()
-    }]);
-    if (vipErr) {
-      // VIP 写入失败时回滚领取记录
-      console.warn('[ProGift] VIP记录写入失败，回滚领取记录:', vipErr.message);
-      try {
-        if (claimData && claimData.id) {
-          await supabase.from('posts').delete().eq('id', claimData.id);
-        }
-      } catch (rollbackErr) {
-        console.error('[ProGift] 回滚领取记录失败:', rollbackErr.message);
-      }
-      return res.status(500).json({ error: 'VIP激活失败，请重试' });
+    var data = rpcResult.data || {};
+    if (!data.ok) {
+      var msg = data.error || '领取失败';
+      var status = msg === '活动不存在' ? 404 : (msg.indexOf('名单') >= 0 ? 403 : 400);
+      return res.status(status).json({ error: msg });
     }
     return res.json({
       ok: true,
       user_name: userNameVal,
-      plan_name: 'XTJ Pro (' + (giftInfo.title || '赠送') + ')',
-      expire_at: expireAt,
+      claim_id: data.claim_id,
+      plan_name: data.plan_name,
+      expire_at: data.expire_at,
       is_active: true,
-      features: features,
+      features: Array.isArray(data.features) ? data.features : normalizeVisualProFeatures(data.features),
       source: 'pro_gift'
     });
   } catch(e) {
     console.error('[ProGift] 领取失败:', e.message);
     return res.status(500).json({ error: '领取失败' });
-  } finally {
-    delete claimLocks[lockKey];
   }
 });
 
@@ -9140,32 +9033,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           finishReason = 'tool_calls';
           break;
         }
-                if (finish === 'stop' || finish === 'length') {
-          finishReason = finish;
-          // 直接收尾，不重新搜索不重新生成
-          if (!aborted) {
-            // 搜索结果已在思考前注入，此处直接用 _sharedSearchMeta
-            var _searchMeta = _sharedSearchMeta || _toolSearchMeta;
-            var finishOpt = {
-              contentBuffer: contentBuffer,
-              reasoningBuffer: persistentReasoning || reasoningBuffer,
-              thinkingMode: thinkingMode,
-              useThinking: useThinking,
-              usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
-              usage: usageInStream || null,
-              searchMeta: _searchMeta,
-              finishReason: finish,
-              userName: userName,
-              convId: convId,
-              message: message,
-              streamSeq: streamSeq,
-              ctx: ctx,
-              reasoningStartedAt: reasoningStartedAt
-            };
-            await finishStream(res, finishOpt);
-          }
-          return safeEnd();
-        }
+        
+        if (finish === 'stop' || finish === 'length') {
 
       }
       if (finishReason === 'tool_calls') break;
@@ -9218,7 +9087,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // 将包含 tool_calls 的助理消息加入 roundMessages（缺少会导致下一轮上下文丢失）
       roundMessages.push({ role: 'assistant', content: contentBuffer || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
       toolRound++;
-        // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
        if (useThinking) {
          var freshMsgs = roundMessages.slice();
          apiBody = {
@@ -9464,6 +9332,33 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
   }
 });
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
+      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%');
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.json({ ok: true, deleted: 0 });
+    }
+
+    // 逐条标记 deleted: true
+    var updated = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var meta = parseMsgMeta(rows[i]);
+      if (meta.deleted) continue; // 已删除
+      meta.deleted = true;
+      meta.deleted_at = new Date().toISOString();
+      var { error: upErr } = await supabase.from('posts')
+        .update({ media_url: JSON.stringify(meta) })
+        .eq('id', rows[i].id);
+      if (!upErr) updated++;
+    }
+
+    console.log('[AGENT-CONV] user=' + userName + ' deleted conv=' + convId + ' messages=' + updated);
+    return res.json({ ok: true, deleted: updated });
+  } catch (e) {
+    console.error('[AGENT-CONV] delete error:', e && e.message);
+    return res.status(500).json({ error: '删除失败' });
+  }
+});
+// POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
@@ -9517,31 +9412,6 @@ function sanitizeEnglishLearningState(input) {
       time: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(h && h.time) || Date.now()))
     };
   });
-  var mistakes = (Array.isArray(input.mistakes) ? input.mistakes : []).slice(0, 120).map(function(m) {
-    var level = String(m && m.level || 'cet4').toLowerCase();
-    if (!allowedLevels[level]) level = 'cet4';
-    return {
-      id: String(m && m.id || ('m_' + Date.now())).slice(0, 80),
-      questionId: String(m && m.questionId || '').slice(0, 80),
-      type: allowedTypes[String(m && m.type || 'mc')] ? String(m.type) : 'mc',
-      question: String(m && m.question || '').slice(0, 500),
-      context: String(m && m.context || '').slice(0, 2000),
-      blankIndex: Math.max(-1, Math.min(20, parseInt(m && m.blankIndex, 10) || -1)),
-      userAnswer: String(m && m.userAnswer || '').slice(0, 240),
-      correctAnswer: String(m && m.correctAnswer || '').slice(0, 240),
-      explain: String(m && m.explain || '').slice(0, 400),
-      words: (Array.isArray(m && m.words) ? m.words : []).map(String).slice(0, 20),
-      level: level,
-      time: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(m && m.time) || Date.now()))
-    };
-  });
-  var settingsIn = input.settings || {};
-  var levelDefault = String(settingsIn.defaultLevel || 'cet4').toLowerCase();
-  if (!allowedLevels[levelDefault]) levelDefault = 'cet4';
-  var len = String(settingsIn.articleLength || 'medium').toLowerCase();
-  if (['short', 'medium', 'long'].indexOf(len) < 0) len = 'medium';
-  var focus = String(settingsIn.focus || 'weak').toLowerCase();
-  if (['all', 'weak', 'selected'].indexOf(focus) < 0) focus = 'weak';
   var tombstones = (Array.isArray(input.tombstones) ? input.tombstones : []).slice(0, 500).map(function(t) {
     return { en: String(t && t.en || '').trim().toLowerCase().slice(0, 60), id: String(t && t.id || '').slice(0, 80), deletedAt: Math.max(0, Number(t && t.deletedAt) || 0), updatedAt: Math.max(0, Number(t && t.updatedAt) || 0) };
   }).filter(function(t) { return t.en && /^[a-zA-Z\s\-']+$/.test(t.en); });
@@ -9562,9 +9432,6 @@ function sanitizeEnglishLearningState(input) {
     },
     updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input.updatedAt) || Date.now())),
     server_updated_at: Date.now()
-  };
-}
-
 async function loadEnglishLearningRow(userName) {
   var { data, error } = await supabase.from('posts')
     .select('id, content, created_at')
@@ -9575,22 +9442,9 @@ async function loadEnglishLearningRow(userName) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
-}
-
-app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), async (req, res) => {
-  try {
-    var row = await loadEnglishLearningRow(req.userName);
-    if (!row || !row.content) return res.json({ ok: true, data: sanitizeEnglishLearningState({}) });
     var parsed = safeJsonParse(row.content) || {};
     var state = sanitizeEnglishLearningState(parsed);
     state.revision = parsed.revision || 0;
-    return res.json({ ok: true, data: state });
-  } catch (e) {
-    console.error('[ENGLISH-STATE] load failed:', e && e.message);
-    return res.status(500).json({ error: '同步读取失败' });
-  }
-});
-
 app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var userName = req.userName;
@@ -9610,8 +9464,19 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
 
     if (!rpcResult.data || rpcResult.data.ok === false) {
       if (rpcResult.data && rpcResult.data.error === '版本冲突') {
-        var conflictState = sanitizeEnglishLearningState(JSON.parse(content));
-        conflictState.revision = rpcResult.data.server_revision || 0;
+        var conflictState = null;
+        var serverContent = rpcResult.data.server_content;
+        if (typeof serverContent === 'string' && serverContent) {
+          try { conflictState = sanitizeEnglishLearningState(JSON.parse(serverContent)); } catch (parseErr) { conflictState = null; }
+        } else if (serverContent && typeof serverContent === 'object') {
+          conflictState = sanitizeEnglishLearningState(serverContent);
+        }
+        if (!conflictState) {
+          var latestRow = await loadEnglishLearningRow(userName);
+          var latestParsed = latestRow && latestRow.content ? safeJsonParse(latestRow.content) : {};
+          conflictState = sanitizeEnglishLearningState(latestParsed || {});
+        }
+        conflictState.revision = rpcResult.data.server_revision || conflictState.revision || 0;
         return res.status(409).json({ ok: false, error: '版本冲突', server: conflictState });
       }
       return res.status(500).json({ error: (rpcResult.data && rpcResult.data.error) || '同步保存失败' });
@@ -9632,35 +9497,9 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
     console.error('[ENGLISH-STATE] save failed:', e && e.message);
     return res.status(500).json({ error: '同步保存失败' });
   }
-});
-
-// POST /api/agent/english/generate - 英语学习: 基于单词库生成阅读文章+题目
-app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), async (req, res) => {
   try {
-    var words = Array.isArray(req.body && req.body.words) ? req.body.words : [];
-    var level = String((req.body && req.body.level) || 'cet4').toLowerCase();
-    var types = Array.isArray(req.body && req.body.types) ? req.body.types : ['article', 'mc'];
-    var questionCount = Math.max(4, Math.min(10, parseInt(req.body && req.body.question_count, 10) || 6));
-    var articleLength = String((req.body && req.body.article_length) || 'medium').toLowerCase();
-    var topic = String((req.body && req.body.topic) || '').trim().slice(0, 80);
-    var focus = String((req.body && req.body.focus) || 'all').toLowerCase();
-    if (['cet4', 'cet6', 'ielts'].indexOf(level) < 0) level = 'cet4';
-    if (['short', 'medium', 'long'].indexOf(articleLength) < 0) articleLength = 'medium';
-    if (['all', 'weak', 'selected'].indexOf(focus) < 0) focus = 'all';
-    if (words.length === 0) return res.status(400).json({ error: '单词库为空' });
-    if (words.length > 200) return res.status(400).json({ error: '单词过多 (上限 200)' });
-
-    var sanitized = words.slice(0, 200).map(function(w) {
-      return String(w.en || '').slice(0, 60).toLowerCase();
     }).filter(function(s) { return s && /^[a-zA-Z\s\-']+$/.test(s); });
     if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
-
-    var levelDesc = level === 'cet6' ? 'CET-6 (大学英语六级)' : level === 'ielts' ? '雅思 (IELTS)' : 'CET-4 (大学英语四级)';
-    var lengthDesc = articleLength === 'short' ? '120-180 词' : articleLength === 'long' ? '350-520 词' : '220-350 词';
-    var wantsArticle = types.indexOf('article') >= 0;
-    var wantsMC = types.indexOf('mc') >= 0;
-    var wantsCloze = types.indexOf('cloze') >= 0;
-    if (!wantsArticle && !wantsMC && !wantsCloze) wantsMC = true;
 
     // 按 en 建立索引，避免 sanitized 过滤后索引错位
     var wordsByEn = {};
@@ -9670,31 +9509,6 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
       var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
       var mastery = orig && orig.mastery != null ? (' mastery=' + Math.max(0, Math.min(100, parseInt(orig.mastery, 10) || 0))) : '';
       return en + (cn ? ' (' + cn + ')' : '') + mastery;
-    }).join(', ');
-
-    var mcCount = wantsMC ? Math.max(2, Math.min(8, questionCount - (wantsCloze ? 1 : 0))) : 0;
-    var clozeBlankCount = wantsCloze ? Math.max(2, Math.min(5, Math.ceil(questionCount / 3))) : 0;
-    var parts = [
-      '你是一个专业的英语教学老师。请基于以下用户单词库, 生成 ' + levelDesc + ' 难度的英语练习。',
-      '',
-      '【用户单词库】',
-      wordList,
-      '',
-      '【要求】',
-      '1. 优先使用用户单词库中的单词 (覆盖率 >= 60%), 不够的部分用同难度其他常用词。',
-      '2. 生成风格要自然, 不要机械堆砌单词。',
-      '3. 文章篇幅: ' + lengthDesc + '。' + (topic ? ('主题: ' + topic + '。') : ''),
-      '4. 选词策略: ' + (focus === 'weak' ? '优先照顾 mastery 较低的薄弱词。' : focus === 'selected' ? '尽量只使用用户本次选中的单词。' : '均衡覆盖用户单词。'),
-      '5. 严格输出 JSON, 严禁任何额外文字、严禁 markdown 代码块、严禁中文说明。',
-      '',
-      'JSON 结构:',
-      '{',
-      '  "article": "完整的阅读文章 (' + lengthDesc + (wantsArticle ? ', 必填' : ', 可省略') + ')",',
-      '  "words_used": ["在文章中实际用到的单词 (用户单词库优先)"],',
-      '  "questions": ['
-    ];
-    var qId = 1;
-    if (wantsMC) {
       for (var mi = 0; mi < mcCount; mi++) {
         if (mi > 0) parts.push('    ,');
         parts.push('    {');
@@ -9707,18 +9521,6 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
         parts.push('    }');
       }
     }
-    if (wantsCloze) {
-      if (wantsMC) parts.push('    ,');
-      parts.push('    {');
-      parts.push('      "id": ' + qId++ + ',');
-      parts.push('      "type": "cloze",');
-      parts.push('      "question": "完形填空: 一段 100-180 词文章, 挖空 ' + clozeBlankCount + ' 个单词 (用 ___ 标记)",');
-      parts.push('      "context": "完整段落 (含 ___ 挖空)",');
-      parts.push('      "blanks": [');
-      for (var ci = 0; ci < clozeBlankCount; ci++) {
-        if (ci > 0) parts.push('        ,');
-        parts.push('        {"options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": 0, "explain": "解析 30 字"}');
-      }
       parts.push('      ]');
       parts.push('    }');
     }
@@ -10644,6 +10446,110 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
   }
+});
+
+// POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
+// older_than_days: 默认 30 天
+app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
+  try {
+    var olderThanDays = parseInt(req.body && req.body.older_than_days, 10);
+    if (isNaN(olderThanDays) || olderThanDays < 7) olderThanDays = 30;
+    if (olderThanDays > 365) olderThanDays = 365;
+    var cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
+
+    var { count, error: countErr } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .lt('created_at', cutoff);
+    if (countErr) return res.status(500).json({ error: '计数失败: ' + sanitizeError(countErr) });
+
+    if (!count) return res.json({ ok: true, deleted: 0, message: '没有需要清理的记录' });
+
+    var deleted = 0;
+    var batchSize = 500;
+    while (deleted < count) {
+      var { error: delErr } = await supabase.from('posts')
+        .delete()
+        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+        .lt('created_at', cutoff)
+        .limit(batchSize);
+      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
+      deleted += batchSize;
+      await new Promise(function(r) { setTimeout(r, 200); });
+    }
+
+    console.warn('[ADMIN-CLEANUP] 清理完成: 删除 ' + deleted + ' 条 ' + olderThanDays + ' 天前的 AI 消息');
+    return res.json({ ok: true, deleted: deleted, older_than_days: olderThanDays, cutoff: cutoff });
+  } catch (e) {
+    console.error('[ADMIN-CLEANUP] exception:', e && e.message);
+    return res.status(500).json({ error: '清理异常: ' + (e && e.message || '') });
+  }
+});
+
+
+// 自动清理旧日志（每24小时执行一次）
+setInterval(function() {
+  cleanupOldLogs('login').catch(function() {});
+  cleanupOldLogs('security').catch(function() {});
+  cleanupOldLogs('error').catch(function() {});
+}, 24 * 60 * 60 * 1000);
+
+// 自动清理 AI 聊天记录 (每天一次)
+var _aiCleanupLock = false;
+async function autoCleanupAiMessages() {
+  if (_aiCleanupLock) return;
+  _aiCleanupLock = true;
+  try {
+    var cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+    var { count, error: countErr } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .lt('created_at', cutoff);
+    if (countErr || !count) { _aiCleanupLock = false; return; }
+
+    // 安全阀：如果待删除占比超过 50%，说明窗口变更过大，跳过本轮避免误删
+    var { count: totalAll } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER);
+    if (totalAll && count > totalAll * 0.5) {
+      console.warn('[AUTO-CLEANUP] 跳过本轮：待删除 ' + count + ' 条/共 ' + totalAll + ' 条，占比过高避免误删');
+      _aiCleanupLock = false;
+      return;
+    }
+
+    var deleted = 0;
+    while (deleted < count) {
+      var { error: delErr } = await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
+      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
+      deleted += 500;
+      await new Promise(function(r) { setTimeout(r, 300); });
+    }
+    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 7 天前的 AI 消息');
+  } catch (e) { console.warn('[AUTO-CLEANUP] cleanup failed:', e && e.message); }
+  _aiCleanupLock = false;
+}
+setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
+// 服务启动 30s 后执行首次清理
+setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
+
+// ===================== 全局错误处理 =====================
+process.on('uncaughtException', function(err) {
+  console.error('[FATAL] uncaughtException:', err && err.message || err);
+});
+process.on('unhandledRejection', function(reason) {
+  console.error('[FATAL] unhandledRejection:', reason && reason.message || reason);
+});
+
+// ===================== 启动 =====================
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`[xtj-admin-api] running on port ${port}`);
+  console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
+  console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
+  console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
+  console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
+  console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
 });
 
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录

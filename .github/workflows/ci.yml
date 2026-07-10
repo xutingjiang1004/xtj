@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build assets
+        run: npm run build
+
+      - name: Verify generated assets are committed
+        run: git diff --exit-code
+
       - name: Run project tests
         run: npm test
 

@@ -7,21 +7,18 @@
 /* ========== 4. Post Card Enhanced Entry ========== */
 .post {
   --post-enter-scale: 0.97;
-  --post-enter-blur: 6px;
 }
 .post.visible {
-  animation: xtjPostReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: xtjPostReveal 0.16s ease forwards;
 }
 @keyframes xtjPostReveal {
   0% {
     opacity: 0;
-    transform: translateY(16px) scale(0.97);
-    filter: blur(6px);
+    transform: none;
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
+    transform: none;
   }
 }
 
