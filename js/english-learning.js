@@ -21,7 +21,8 @@
     articleLength: 'medium',
     questionCount: 6,
     focus: 'weak',
-    topic: ''
+    topic: '',
+    updatedAt: 0
   };
 
   var S = {
@@ -765,11 +766,13 @@
   }
 
   function syncSettingsFromInputs() {
+    var old = JSON.stringify(S.settings);
     S.settings.defaultLevel = getSelectedLevel();
     S.settings.questionCount = parseInt(($('elQuestionCount') || {}).value, 10) || 6;
     S.settings.articleLength = (($('elArticleLength') || {}).value || 'medium');
     S.settings.focus = (($('elFocusMode') || {}).value || 'weak');
     S.settings.topic = String((($('elTopicInput') || {}).value || '')).trim().slice(0, 80);
+    if (JSON.stringify(S.settings) !== old) S.settings.updatedAt = Date.now();
   }
 
   function applySettingsToInputs() {
@@ -1478,7 +1481,7 @@
     (quiz.questions || []).forEach(function(q, qi) {
       var qEl = el('article', { class: 'el-question', 'data-qid': q.id, style: '--el-i:' + Math.min(qi, 12) });
       var title = el('div', { class: 'el-q-title' });
-      title.appendChild(el('span', { class: 'el-q-type', text: q.type === 'cloze' ? '??' : '??' }));
+      title.appendChild(el('span', { class: 'el-q-type', text: q.type === 'cloze' ? '完形' : '单选' }));
       title.appendChild(document.createTextNode('Q' + (qi + 1) + '. ' + (q.question || '题目')));
       qEl.appendChild(title);
       if (q.type === 'mc') renderMcQuestion(qEl, q);
@@ -1559,7 +1562,7 @@
   function stripOptionPrefix(opt, index) {
     var text = String(opt || '');
     var letter = String.fromCharCode(65 + index);
-    return text.replace(new RegExp('^\\s*' + letter + '[\\.|銆乗\)]\\s*', 'i'), '');
+    return text.replace(new RegExp('^\\s*' + letter + '[\\.\\)\\u3001\\uFF0E]\\s*', 'i'), '');
   }
 
   function hideArticle() {
@@ -1945,8 +1948,8 @@
             sel.classList.add('correct');
           });
         });
-        var parts = (q.blanks || []).map(function(blank, bi) { return '? ' + (bi + 1) + ': ' + optionText(blank.options, blank.answer); });
-        revealExplain(q.id, '??: ' + parts.join('?') + ' ? ' + ((q.blanks && q.blanks[0] && q.blanks[0].explain) || ''));
+        var parts = (q.blanks || []).map(function(blank, bi) { return '第 ' + (bi + 1) + ' 空: ' + optionText(blank.options, blank.answer); });
+        revealExplain(q.id, '答案: ' + parts.join(' · ') + ((q.blanks && q.blanks[0] && q.blanks[0].explain) ? (' | ' + q.blanks[0].explain) : ''));
       }
     });
     var submit = $('elSubmitBtn');

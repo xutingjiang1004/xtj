@@ -9577,42 +9577,30 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
     var payload = sanitizeEnglishLearningState((req.body && req.body.data) || req.body || {});
     var actorKey = 'english_learning_state:' + userName;
     payload.server_updated_at = Date.now();
-    payload.revision = (baseRevision || 0) + 1;
     var content = JSON.stringify(payload);
-    var existing = await loadEnglishLearningRow(userName);
 
-    // 版本冲突检测：base_revision 为 0 或 undefined 时跳过检查，否则必须匹配
-    if (existing && existing.id && typeof baseRevision !== 'undefined' && baseRevision !== null) {
-      var cur = safeJsonParse(existing.content) || {};
-      if (cur.revision !== undefined && cur.revision !== baseRevision) {
-        var serverState = sanitizeEnglishLearningState(cur);
-        serverState.revision = cur.revision || 0;
-        return res.status(409).json({ ok: false, error: '版本冲突', server: serverState });
+    // 使用数据库 RPC 原子 compare-and-swap
+    var rpcResult = await supabase.rpc('save_english_state', {
+      p_user_name: userName,
+      p_content: content,
+      p_base_revision: typeof baseRevision !== 'undefined' && baseRevision !== null ? baseRevision : null,
+      p_actor_key: actorKey
+    });
+
+    if (!rpcResult.data || rpcResult.data.ok === false) {
+      if (rpcResult.data && rpcResult.data.error === '版本冲突') {
+        var conflictState = sanitizeEnglishLearningState(JSON.parse(content));
+        conflictState.revision = rpcResult.data.server_revision || 0;
+        return res.status(409).json({ ok: false, error: '版本冲突', server: conflictState });
       }
+      return res.status(500).json({ error: (rpcResult.data && rpcResult.data.error) || '同步保存失败' });
     }
 
-    if (existing && existing.id) {
-      var upd = await supabase.from('posts').update({
-        content: content,
-        media_url: 'state:v1',
-        actor_key: actorKey
-      }).eq('id', existing.id);
-      if (upd.error) throw upd.error;
-    } else {
-      var ins = await supabase.from('posts').insert([{
-        user_name: userName,
-        content: content,
-        media_type: AI_ENGLISH_LEARNING_MARKER,
-        media_url: 'state:v1',
-        actor_key: actorKey
-      }]);
-      if (ins.error) throw ins.error;
-    }
     return res.json({
       ok: true,
       saved: true,
       data: {
-        revision: payload.revision,
+        revision: rpcResult.data.revision || 1,
         words_count: payload.words.length,
         history_count: payload.history.length,
         mistakes_count: payload.mistakes.length,
