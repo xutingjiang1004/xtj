@@ -3079,9 +3079,15 @@
     ]));
   }
 
-  function setDockBarVisible(visible) {
-    var dockBar = document.querySelector('.dock-bar');
-    if (dockBar) dockBar.style.display = visible ? '' : 'none';
+  function updateSecondaryPageState(open) {
+    try {
+      if (window.XTJSecondaryPageState) {
+        if (open) window.XTJSecondaryPageState.open('deep-think');
+        else window.XTJSecondaryPageState.close('deep-think');
+      } else if (window.restoreMainNavigationState) {
+        window.restoreMainNavigationState();
+      }
+    } catch (e) {}
   }
 
   function saveDtConvId() {
@@ -3106,9 +3112,6 @@
     if (!S.dtConversationId) {
       try { var saved = localStorage.getItem(DT_CONV_KEY); if (saved) S.dtConversationId = saved; } catch (e) {}
     }
-
-    // 隐藏底部 dock锛岄槻步簩绾ч〉闈㈠悗闈㈤€忓嚭
-    setDockBarVisible(false);
 
     // 宸叉湁浼氳瘽 鈫?濡傛灉娑堟伅鍖轰笉涓虹┖涓斾笉鏄〉闈㈠埛鏂帮紝鐩存帴鏄剧ず缂撳瓨鍐呭
     if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading')) {
@@ -3164,6 +3167,7 @@
 
     panel.classList.remove('hidden');
     panel.classList.add('active');
+    updateSecondaryPageState(true);
 
     // 绛夊緟涓ゅ抚 + 涓€涓皬寤舵椂锛岀‘淇濇墍鏈夊瓙鍏冪礌甯冨眬瀹屾垚锛坢arkdown 娓叉煋銆佸浘鐗囩瓑锛?
     // 鐒跺悗鐢?scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
@@ -3196,17 +3200,21 @@
 
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
-    resetResearchCardDisclosure(document.getElementById('dtMessages'));
-    if (panel) {
-      panel.classList.add('hidden');
-      panel.classList.remove('active');
+    try {
+      resetResearchCardDisclosure(document.getElementById('dtMessages'));
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.classList.remove('active');
+      }
+      // 标记 panel 为已关闭, SSE 回调可检测此标志避免写旧 DOM
+      if (panel) panel._dtClosed = true;
+      saveDtConvId();
+      var input = document.getElementById('dtInput');
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+    } finally {
+      updateSecondaryPageState(false);
+      if (window.restoreMainNavigationState) window.restoreMainNavigationState();
     }
-    setDockBarVisible(true);
-    // 标记 panel 为已关闭, SSE 回调可检测此标志避免写旧 DOM
-    if (panel) panel._dtClosed = true;
-    saveDtConvId();
-    var input = document.getElementById('dtInput');
-    if (input) { input.value = ''; input.style.height = 'auto'; }
   }
 
   // 鏂囦欢涓婁紶鐘舵€?(dt 页面)

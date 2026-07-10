@@ -24,6 +24,104 @@
                 });
             }
             window.sb = sb;
+
+
+(function() {
+    if (window.XTJSecondaryPageState && window.restoreMainNavigationState) return;
+
+    function isVisiblePanel(id, activeClass) {
+        var panel = document.getElementById(id);
+        if (!panel) return false;
+        if (panel.hidden || panel.classList.contains('hidden')) return false;
+        if (panel.getAttribute('aria-hidden') === 'true') return false;
+        if (activeClass && !panel.classList.contains(activeClass)) return false;
+        return true;
+    }
+
+    function hasVisibleSecondaryPage() {
+        return isVisiblePanel('panelEnglishLearning', 'el-show') || isVisiblePanel('panelDeepThink', 'active');
+    }
+
+    function clearStaleDockDisplay() {
+        var dockBar = document.getElementById('dockBar') || document.querySelector('.dock-bar');
+        if (dockBar && dockBar.style && dockBar.style.display === 'none') {
+            dockBar.style.display = '';
+        }
+    }
+
+    function applySecondaryPageState(locked) {
+        try {
+            document.body.classList.toggle('secondary-page-open', !!locked);
+            document.body.classList.toggle('english-learning-open', isVisiblePanel('panelEnglishLearning', 'el-show'));
+            if (locked) {
+                document.documentElement.style.overflow = 'hidden';
+                document.body.style.overflow = 'hidden';
+                document.body.style.touchAction = 'none';
+            } else {
+                document.documentElement.style.overflow = '';
+                document.body.style.overflow = '';
+                document.body.style.touchAction = '';
+                document.body.classList.remove('secondary-page-open');
+                document.body.classList.remove('english-learning-open');
+                clearStaleDockDisplay();
+            }
+        } catch (e) {}
+    }
+
+    var openPanels = new Set();
+
+    function reconcile() {
+        if (hasVisibleSecondaryPage()) {
+            if (isVisiblePanel('panelEnglishLearning', 'el-show')) openPanels.add('english-learning');
+            else openPanels.delete('english-learning');
+            if (isVisiblePanel('panelDeepThink', 'active')) openPanels.add('deep-think');
+            else openPanels.delete('deep-think');
+            applySecondaryPageState(true);
+            return true;
+        }
+        openPanels.clear();
+        applySecondaryPageState(false);
+        return false;
+    }
+
+    window.XTJSecondaryPageState = {
+        open: function(panelName) {
+            if (panelName) openPanels.add(String(panelName));
+            reconcile();
+        },
+        close: function(panelName) {
+            if (panelName) openPanels.delete(String(panelName));
+            reconcile();
+        },
+        reset: function() {
+            reconcile();
+        },
+        hasVisibleSecondaryPage: hasVisibleSecondaryPage
+    };
+
+    window.restoreMainNavigationState = function() {
+        return reconcile();
+    };
+
+    function scheduleRestore() {
+        setTimeout(function() {
+            try { window.restoreMainNavigationState(); } catch (e) {}
+        }, 0);
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
+    else scheduleRestore();
+    window.addEventListener('pageshow', scheduleRestore);
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') scheduleRestore();
+    });
+    window.addEventListener('error', function() {
+        setTimeout(function() {
+            try { window.restoreMainNavigationState(); } catch (e) {}
+        }, 80);
+    });
+})();
+
 window.safeLocalStorageGetJSON = function(key, fallback) {
     try {
         var v = localStorage.getItem(key);
