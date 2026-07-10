@@ -839,11 +839,8 @@
             --post-enter-delay: 0ms;
             opacity: 0;
             transform: translateY(14px) scale(0.992);
-            filter: blur(5px);
             transition:
-                opacity 0.42s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
-                transform 0.42s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
-                filter 0.34s ease-out var(--post-enter-delay);
+                opacity 0.16s ease var(--post-enter-delay);
             background: rgba(255,255,255,0.92);
             border: 1px solid rgba(255,255,255,0.7);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
@@ -858,7 +855,6 @@
         .post.visible { 
             opacity: 1; 
             transform: translateY(0) scale(1);
-            filter: blur(0);
         }
 
         .post.xtj-expanded {
@@ -3156,14 +3152,14 @@
         /* 模态框 */
         .modal-box {
             background: rgba(255, 255, 255, 0.55);
-            backdrop-filter: blur(18px) saturate(1.2);
-            -webkit-backdrop-filter: blur(18px) saturate(1.2);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
             border: 1px solid rgba(255, 255, 255, 0.6);
         }
         [data-theme="dark"] .modal-box {
             background: rgba(25, 25, 42, 0.20);
-            backdrop-filter: blur(18px) saturate(1.2);
-            -webkit-backdrop-filter: blur(18px) saturate(1.2);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
             border: 1px solid rgba(255, 255, 255, 0.08);
         }
 
@@ -4297,7 +4293,7 @@
             backdrop-filter: var(--profile-glass-filter);
             -webkit-backdrop-filter: var(--profile-glass-filter);
             box-shadow: var(--profile-glass-shadow);
-            animation: xtjFloatIn 0.32s cubic-bezier(0.16,1,0.3,1) both;
+            animation: xtjFadeIn 0.16s ease both;
         }
         .profile-activity-card--summary {
             cursor: pointer;
@@ -4388,7 +4384,7 @@
             background: transparent;
             box-shadow: none;
             cursor: pointer;
-            animation: xtjFloatIn 0.28s cubic-bezier(0.16,1,.3,1) both;
+            animation: xtjFadeIn 0.16s ease both;
             animation-delay: var(--xtj-enter-delay, 0ms);
             transition:
                 transform 0.24s cubic-bezier(0.16,1,0.3,1),
@@ -4555,7 +4551,7 @@
         }
         .profile-activity-report-reply {
             margin: -4px 0 8px 0;
-            animation: xtjFloatIn 0.2s ease both;
+            animation: xtjFadeIn 0.16s ease both;
         }
         .profile-activity-admin-reply-inner {
             padding: 10px 14px;
@@ -5429,12 +5425,10 @@
         .photo-wall-item.pw-stagger-enter {
             opacity: 0;
             transform: translateY(12px) scale(0.988);
-            filter: blur(5px);
-        }
+                }
         .photo-wall-item.pw-stagger-done {
             opacity: 1;
             transform: translateY(0) scale(1);
-            filter: blur(0);
             transition: opacity 320ms cubic-bezier(0.16,1,0.3,1), transform 320ms cubic-bezier(0.16,1,0.3,1), filter 300ms cubic-bezier(0.16,1,0.3,1);
         }
         .photo-wall-item::before {
@@ -5469,8 +5463,7 @@
             z-index: 0;
             box-shadow: none;
             transition: transform .45s cubic-bezier(0.16,1,0.3,1), filter .35s ease, opacity .36s ease;
-            filter: blur(0);
-            opacity: 0;
+                    opacity: 0;
         }
         .photo-wall-item img.pw-blur-in {
             filter: blur(16px);
@@ -5478,8 +5471,7 @@
             opacity: .25;
         }
         .photo-wall-item img.pw-blur-done {
-            filter: blur(0);
-            transform: scale(1);
+                    transform: scale(1);
             opacity: 1;
         }
         .photo-wall-item .pw-item-info {
@@ -8216,16 +8208,12 @@
   color: #28513b;
 }
 
-@keyframes xtjFloatIn {
+@keyframes xtjFadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.992);
-    filter: blur(5px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -8238,7 +8226,7 @@
 #profileActivityModal .stat-view-item,
 #profileActivityModal .stat-comment-item,
 .chat-list-item {
-  animation: xtjFloatIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: xtjFadeIn 0.16s ease both;
   animation-delay: var(--xtj-enter-delay, 0ms);
 }
 
@@ -9126,7 +9114,6 @@ body.ios-chat-keyboard-open .chat-input-area {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -9138,7 +9125,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   background: rgba(248, 252, 249, 0.96) !important;
   border: 1px solid rgba(203, 228, 212, 0.9) !important;
   box-shadow: 0 24px 64px rgba(56, 97, 73, 0.12) !important;
-  backdrop-filter: blur(18px) saturate(128%) !important;
+  backdrop-filter: none !important;
   -webkit-backdrop-filter: blur(18px) saturate(128%) !important;
 }
 
@@ -9508,7 +9495,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   background: rgba(248, 252, 249, 0.96) !important;
   border: 1px solid rgba(203, 228, 212, 0.9) !important;
   box-shadow: 0 24px 64px rgba(56, 97, 73, 0.12) !important;
-  backdrop-filter: blur(18px) saturate(128%) !important;
+  backdrop-filter: none !important;
   -webkit-backdrop-filter: blur(18px) saturate(128%) !important;
 }
 
@@ -9556,12 +9543,10 @@ body.ios-chat-keyboard-open .chat-input-area {
   from {
     opacity: 0;
     transform: translateY(8px) scale(0.99);
-    filter: blur(5px);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
