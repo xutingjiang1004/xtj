@@ -1771,6 +1771,13 @@ app.use(function(req, res, next) {
   next();
 });
 
+// 阻止敏感路径被静态文件服务泄露
+app.use(function(req, res, next) {
+  var blocked = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/node_modules/', '/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/fix-', '/scan-', '/check-'];
+  for (var i = 0; i < blocked.length; i++) { if (req.path.indexOf(blocked[i]) === 0) return res.status(404).end(); }
+  next();
+});
+
 // 托管前端静态文件（index.html, admin.html, js/ 等）
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
@@ -2503,8 +2510,9 @@ async function extractEmbeddedFiles(text) {
       try {
         // 估算文件大小：base64 长度 × 0.75 ≈ 实际字节数
         var estimatedBytes = Math.ceil(base64Data.length * 0.75);
-        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; continue; }
-        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; break; }
+        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; }
+        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; fileIndex = 999; }
+        if (!extractedText) {
         var buffer = Buffer.from(base64Data, 'base64');
         if (mimeType === 'application/pdf' && pdfParser) {
           var pdfData = await pdfParser(buffer);
@@ -2521,6 +2529,7 @@ async function extractEmbeddedFiles(text) {
             sheets.push('【工作表: ' + sName + '】\n' + csv);
           });
           extractedText = sheets.join('\n\n');
+        }
       } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
         extractedText = buffer.toString('utf-8');
       } else if (mimeType.startsWith('image/')) {
@@ -7008,23 +7017,20 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
       features: features,
       duration_days: durationDays
     });
+    // 使用固定 actor_key（不加时间戳）作为数据库级去重：同用户+同活动只能 insert 成功一次
+    var claimActorKey = 'pro_claim_' + giftId + '_' + userNameVal;
     var { data: claimData, error: claimErr } = await supabase.from('posts').insert([{
       user_name: userNameVal,
       media_type: PRO_GIFT_CLAIM_MARKER,
       media_url: giftId,
       content: claimContent,
-      actor_key: 'pro_claim_' + giftId + '_' + userNameVal + '_' + Date.now()
+      actor_key: claimActorKey
     }]).select('id').maybeSingle();
-    if (claimErr) { delete claimLocks[lockKey]; return res.status(400).json({ error: sanitizeError(claimErr) }); }
-
-    // 事后重检：如果查到两条以上，说明有并发竞态，滚掉本条
-    var { data: dupCheck } = await supabase.from('posts')
-      .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .eq('user_name', userNameVal).eq('media_url', giftId);
-    if (dupCheck && dupCheck.length > 1) {
-      await supabase.from('posts').delete().eq('id', claimData.id).maybeSingle();
+    // actor_key 有唯一约束，重复会报错
+    if (claimErr) {
       delete claimLocks[lockKey];
-      return res.status(400).json({ error: '你已经领取过该活动' });
+      if (claimErr.code === '23505') return res.status(400).json({ error: '你已经领取过该活动' });
+      return res.status(400).json({ error: sanitizeError(claimErr) });
     }
     // 写入 VIP 激活记录
     var vipContent = JSON.stringify({
@@ -8784,11 +8790,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         { role: 'user', content: message }
       ];
       try {
+        var daCtrl = new AbortController();
+        var daTimer = setTimeout(function() { daCtrl.abort(); }, 10000);
         var daResp = await fetch(DEEPSEEK_API_URL, {
           method: 'POST',
+          signal: daCtrl.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
           body: JSON.stringify({ model: usedModel, messages: daMsg, stream: false, temperature: 0.3, max_tokens: 200 })
         });
+        clearTimeout(daTimer);
         if (daResp.ok) {
           var daJson = await daResp.json();
           var daText = (daJson && daJson.choices && daJson.choices[0] && daJson.choices[0].message && daJson.choices[0].message.content) || '';
@@ -9525,7 +9535,9 @@ app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), asyn
     var row = await loadEnglishLearningRow(req.userName);
     if (!row || !row.content) return res.json({ ok: true, data: sanitizeEnglishLearningState({}) });
     var parsed = safeJsonParse(row.content) || {};
-    return res.json({ ok: true, data: sanitizeEnglishLearningState(parsed) });
+    var state = sanitizeEnglishLearningState(parsed);
+    state.revision = parsed.revision || 0;
+    return res.json({ ok: true, data: state });
   } catch (e) {
     console.error('[ENGLISH-STATE] load failed:', e && e.message);
     return res.status(500).json({ error: '同步读取失败' });
@@ -9535,11 +9547,22 @@ app.get('/api/agent/english/state', authenticateUser, rateLimit(60000, 60), asyn
 app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var userName = req.userName;
+    var baseRevision = req.body && req.body.base_revision;
     var payload = sanitizeEnglishLearningState((req.body && req.body.data) || req.body || {});
     var actorKey = 'english_learning_state:' + userName;
     payload.server_updated_at = Date.now();
+    payload.revision = (baseRevision || 0) + 1;
     var content = JSON.stringify(payload);
     var existing = await loadEnglishLearningRow(userName);
+
+    // 版本冲突检测：如果提供了 base_revision 且与服务器不匹配，返回 409
+    if (existing && existing.id && baseRevision) {
+      var cur = safeJsonParse(existing.content) || {};
+      if (cur.revision && cur.revision !== baseRevision) {
+        return res.status(409).json({ ok: false, error: '版本冲突', server: sanitizeEnglishLearningState(cur) });
+      }
+    }
+
     if (existing && existing.id) {
       var upd = await supabase.from('posts').update({
         content: content,
@@ -9561,7 +9584,7 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
       ok: true,
       saved: true,
       data: {
-        version: 1,
+        revision: payload.revision,
         words_count: payload.words.length,
         history_count: payload.history.length,
         mistakes_count: payload.mistakes.length,
@@ -9602,8 +9625,11 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
     var wantsCloze = types.indexOf('cloze') >= 0;
     if (!wantsArticle && !wantsMC && !wantsCloze) wantsMC = true;
 
-    var wordList = sanitized.map(function(en, i) {
-      var orig = words[i];
+    // 按 en 建立索引，避免 sanitized 过滤后索引错位
+    var wordsByEn = {};
+    (words || []).forEach(function(w) { if (w && w.en) wordsByEn[String(w.en).toLowerCase()] = w; });
+    var wordList = sanitized.map(function(en) {
+      var orig = wordsByEn[en];
       var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
       var mastery = orig && orig.mastery != null ? (' mastery=' + Math.max(0, Math.min(100, parseInt(orig.mastery, 10) || 0))) : '';
       return en + (cn ? ' (' + cn + ')' : '') + mastery;
@@ -9958,6 +9984,10 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return !(meta && meta.deleted);
     });
 
+    // 判断是否还有更多（filteredRows 超过 limit 表示有下一页）
+    var hasMore = filteredRows.length > limit;
+    var pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows;
+
     // 内存中稳定排序（created_at > seq > roleWeight）
     function getMsgSortKey(row) {
       var meta = parseMsgMeta(row);
@@ -9966,19 +9996,13 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       var roleWeight = meta.role === 'user' ? 1 : 2;
       return { created: created, seq: seq, roleWeight: roleWeight };
     }
-    var sortedRows = (filteredRows || []).slice().sort(function(a, b) {
+    var sortedRows = pageRows.slice().sort(function(a, b) {
       var A = getMsgSortKey(a);
       var B = getMsgSortKey(b);
       if (A.created !== B.created) return A.created - B.created;
       if (A.seq !== B.seq) return A.seq - B.seq;
       return A.roleWeight - B.roleWeight;
     });
-
-    // ★ U3: 多取的那一条用于判断是否还有更多, 然后去掉
-    var hasMore = (rows || []).length > limit;
-    if (hasMore) {
-      filteredRows = filteredRows.slice(0, limit);
-    }
 
     return res.json({
       ok: true,
