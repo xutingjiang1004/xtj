@@ -1773,7 +1773,7 @@ app.use(function(req, res, next) {
 
 // 阻止敏感路径被静态文件服务泄露
 app.use(function(req, res, next) {
-  var blocked = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/node_modules/', '/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/fix-', '/scan-', '/check-'];
+  var blocked = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/fix-', '/scan-', '/check-', '.bak', '.md', 'CHANGELOG', 'README'];
   for (var i = 0; i < blocked.length; i++) { if (req.path.indexOf(blocked[i]) === 0) return res.status(404).end(); }
   next();
 });
@@ -2500,19 +2500,21 @@ async function extractEmbeddedFiles(text) {
   var fileRegex = /(!?)\[([^\]]*)\]\(data:([^,;]+);?[^,]*?(?:;base64)?,(.+?)\)/g;
   var match;
   var fileIndex = 0;
+  var totalBytes = 0;
   while ((match = fileRegex.exec(text)) !== null) {
-    var isImage = match[1] === '!';
-    var fileName = match[2] || ('file_' + (++fileIndex));
+    var fileName = match[2] || ('file_' + (fileIndex + 1));
     var mimeType = match[3];
     var base64Data = match[4];
     fileIndex++;
     var extractedText = '';
-      try {
-        // 估算文件大小：base64 长度 × 0.75 ≈ 实际字节数
-        var estimatedBytes = Math.ceil(base64Data.length * 0.75);
-        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; }
-        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; fileIndex = 999; }
-        if (!extractedText) {
+    var estimatedBytes = Math.ceil(base64Data.length * 0.75);
+    totalBytes += estimatedBytes;
+    try {
+      if (fileIndex > 10) {
+        extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n';
+      } else if (estimatedBytes > 10 * 1024 * 1024 || totalBytes > 50 * 1024 * 1024) {
+        extractedText = '\n\n【文件: ' + fileName + ' 超过大小限制，跳过解析】\n\n';
+      } else {
         var buffer = Buffer.from(base64Data, 'base64');
         if (mimeType === 'application/pdf' && pdfParser) {
           var pdfData = await pdfParser(buffer);
@@ -2529,27 +2531,26 @@ async function extractEmbeddedFiles(text) {
             sheets.push('【工作表: ' + sName + '】\n' + csv);
           });
           extractedText = sheets.join('\n\n');
+        } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
+          extractedText = buffer.toString('utf-8');
+        } else if (mimeType.startsWith('image/')) {
+          extractedText = '[用户上传了一张图片: ' + fileName + ' (' + mimeType + '), 当前暂不支持图片识别]';
+        } else {
+          try {
+            extractedText = buffer.toString('utf-8').slice(0, 5000);
+            if (!extractedText.trim()) extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法提取可读内容]';
+          } catch (e) {
+            extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法解析内容]';
+          }
         }
-      } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
-        extractedText = buffer.toString('utf-8');
-      } else if (mimeType.startsWith('image/')) {
-        extractedText = '[用户上传了一张图片: ' + fileName + ' (' + mimeType + '), 当前暂不支持图片识别, 请根据文件名和上下文推测]';
-      } else {
-        // 其他文件类型尝试 utf-8 解码
-        try {
-          extractedText = buffer.toString('utf-8').slice(0, 5000);
-          if (!extractedText.trim()) extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法提取可读内容]';
-        } catch (e) {
-          extractedText = '[文件: ' + fileName + ' (' + mimeType + '), 无法解析内容]';
-        }
+        if (extractedText.length > 10000) extractedText = extractedText.slice(0, 10000) + '\n\n[内容过长, 已截断]';
+        extractedText = '\n\n【用户上传文件: ' + fileName + '】\n' + extractedText + '\n【文件结束】\n\n';
       }
-      // 截取过长内容 (最大 10000 字)
-      if (extractedText.length > 10000) extractedText = extractedText.slice(0, 10000) + '\n\n[内容过长, 已截断]';
-      extractedText = '\n\n【用户上传文件: ' + fileName + '】\n' + extractedText + '\n【文件结束】\n\n';
     } catch (e) {
       extractedText = '\n\n【用户上传文件: ' + fileName + '】\n[文件解析失败: ' + (e.message || '') + ']\n【文件结束】\n\n';
     }
-    result = result.replace(match[0], extractedText);
+    // 所有分支都替换，不保留原始 Base64
+    result = result.replace(match[0], extractedText || '\n\n【文件解析跳过】\n\n');
   }
   return result;
 }
