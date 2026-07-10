@@ -1231,7 +1231,7 @@
     updateOfflinePracticeState(quiz);
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
-    if (meta) meta.textContent = (quiz.words.length || 0) + ' words 路 ' + (quiz.level || '').toUpperCase();
+    if (meta) meta.textContent = (quiz.words.length || 0) + ' words · ' + (quiz.level || '').toUpperCase();
     if (wordsBox) {
       wordsBox.innerHTML = '';
       (quiz.words || []).slice(0, 24).forEach(function(w) {
@@ -1828,7 +1828,7 @@
     var score = $('elResultScore');
     var text = $('elResultText');
     if (!card) return;
-    if (score) score.textContent = correct + ' / ' + total + ' 路 ' + pct + '%';
+    if (score) score.textContent = correct + ' / ' + total + ' · ' + pct + '%';
     if (text) {
       text.textContent = pct >= 80 ? '太棒了，掌握得很好！' :
         pct >= 60 ? '不错哦，继续加油！' :
@@ -1851,7 +1851,7 @@
           var ua = quiz.answers[q.id];
           if (typeof ua === 'number' && ua === oi && ua !== parseInt(q.answer, 10)) opt.classList.add('wrong');
         });
-        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' 路 ' + (q.explain || ''));
+        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' · ' + (q.explain || ''));
       } else if (q.type === 'cloze') {
         (q.blanks || []).forEach(function(blank, bi) {
           document.querySelectorAll('.el-blank-sel[data-qid="' + q.id + '"][data-bi="' + bi + '"]').forEach(function(sel) {
