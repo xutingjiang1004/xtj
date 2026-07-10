@@ -258,26 +258,25 @@
   }
 
   #panelPosts.active {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 26px;
-    align-items: start;
-    padding: 28px 28px 44px;
+    display: block;
+    padding: 26px 28px 36px;
   }
 
   #panelPosts.active nav {
     position: sticky;
-    top: 28px;
-    grid-column: 1;
+    top: 0;
+    z-index: 8;
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 18px;
-    border-radius: 24px;
-    background: var(--xtj-glass-bg-soft);
-    border: 1px solid var(--xtj-line-soft);
-    box-shadow: var(--xtj-shadow-soft);
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    margin: -26px -28px 20px;
+    border-bottom: 1px solid var(--xtj-line-soft);
+    background: rgba(250, 253, 252, 0.84);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    box-shadow: none;
   }
 
   #panelPosts.active nav > div,
@@ -290,10 +289,11 @@
   }
 
   #panelPosts.active .wrap {
-    grid-column: 2;
+    width: min(1220px, 100%);
+    margin: 0 auto;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 270px;
-    gap: 22px;
+    grid-template-columns: minmax(0, 1fr) 272px;
+    gap: 20px;
     padding: 0;
   }
 
@@ -307,7 +307,7 @@
     grid-column: 2;
     grid-row: 1 / span 3;
     position: sticky;
-    top: 28px;
+    top: 94px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -321,7 +321,8 @@
 
   #panelPosts.active .post,
   #panelPosts.active .publish-box,
-  #panelPosts.active .post-filter-bar {
+  #panelPosts.active .post-filter-bar,
+  #panelPosts.active .stats {
     max-width: none;
   }
 
@@ -349,10 +350,6 @@
 }
 
 @media (min-width: 1280px) {
-  #panelPosts.active {
-    grid-template-columns: 236px minmax(0, 1fr);
-  }
-
   #panelPosts.active .wrap {
     grid-template-columns: minmax(0, 1fr) 292px;
     gap: 24px;
@@ -384,10 +381,11 @@
 }
 
 @media (min-width: 1024px) {
-  .dock-panel:not(#panelPosts).active {
+  .dock-panel.active {
     padding: 26px 28px 34px;
   }
 
+  #panelPosts .wrap,
   #panelChat .dock-chat-container,
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container,
@@ -398,6 +396,7 @@
     border-radius: 28px;
   }
 
+  #panelPosts .wrap,
   #panelChat .dock-chat-container,
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container,
@@ -408,6 +407,7 @@
     overflow: clip;
   }
 
+  [data-theme="dark"] #panelPosts .wrap,
   [data-theme="dark"] #panelChat .dock-chat-container,
   [data-theme="dark"] #panelAi .photo-wall-container,
   [data-theme="dark"] #panelProfile .dock-profile-container,
@@ -416,6 +416,10 @@
     background: var(--xtj-panel-shell-dark) !important;
     border-color: rgba(164, 216, 205, 0.12) !important;
     box-shadow: var(--xtj-glass-shadow) !important;
+  }
+
+  #panelPosts .wrap {
+    padding: 22px;
   }
 
   #panelChat .dock-chat-container {
@@ -531,6 +535,7 @@
 }
 
 @media (min-width: 1280px) {
+  #panelPosts .wrap,
   #panelChat .dock-chat-container,
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container {
