@@ -1363,7 +1363,10 @@
     while (questions.length < qcount && sample.length) {
       var w2 = sample[questions.length % sample.length];
       var correctOpt2 = w2.cn || ('释义: ' + w2.en);
-      var pool2 = [correctOpt2, '错误', '???', '??'];
+      var pool2 = [correctOpt2];
+      // 用其他单词的释义做干扰项
+      sample.forEach(function(x) { if (x.en !== w2.en && pool2.length < 4) pool2.push(x.cn || ('释义: ' + x.en)); });
+      while (pool2.length < 2) pool2.push('(暂无释义)');
       pool2 = shuffle(pool2);
       questions.push({
         id: 'q' + (qid++),
@@ -1371,7 +1374,7 @@
         question: '"' + w2.en + '" 的中文释义是?',
         options: pool2,
         answer: indexOfAnswer(pool2, correctOpt2),
-        explain: '错误错误'
+        explain: '正确答案: ' + (w2.cn || '暂无释义')
       });
     }
 
