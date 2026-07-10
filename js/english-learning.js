@@ -193,7 +193,8 @@
       wrong: clampNumber(base.wrong, 0, 9999, 0),
       lastReviewedAt: clampNumber(base.lastReviewedAt, 0, Number.MAX_SAFE_INTEGER, 0),
       addedAt: clampNumber(base.addedAt, 0, Number.MAX_SAFE_INTEGER, now()),
-      updatedAt: clampNumber(base.updatedAt, 0, Number.MAX_SAFE_INTEGER, now())
+      updatedAt: clampNumber(base.updatedAt, 0, Number.MAX_SAFE_INTEGER, now()),
+      deletedAt: base.deletedAt || undefined
     };
   }
 
@@ -283,7 +284,11 @@
       words: words.slice(0, MAX_WORDS),
       history: mergeById(local.history, remote.history, MAX_HISTORY),
       mistakes: mergeById(local.mistakes, remote.mistakes, MAX_MISTAKES),
-      settings: Object.assign({}, DEFAULT_SETTINGS, remote.settings || {}, local.settings || {}),
+      settings: (function() {
+        var rSet = remote.settings || {}, lSet = local.settings || {};
+        if (rSet.updatedAt && lSet.updatedAt) return rSet.updatedAt > lSet.updatedAt ? Object.assign({}, DEFAULT_SETTINGS, rSet) : Object.assign({}, DEFAULT_SETTINGS, lSet);
+        return Object.assign({}, DEFAULT_SETTINGS, rSet, lSet);
+      })(),
       updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0)
     };
   }
@@ -493,7 +498,15 @@
   }
 
   function deleteWord(id) {
-    S.words = S.words.filter(function(w) { return w.id !== id; });
+    var word = null;
+    S.words = S.words.filter(function(w) {
+      if (w.id === id) { word = w; return false; }
+      return true;
+    });
+    // 写入 tombstone 让跨设备同步知道这个词已被删除
+    if (word) {
+      S.words.push({ en: word.en, id: word.id, cn: word.cn || '', mastery: word.mastery || 0, addedAt: word.addedAt || Date.now(), updatedAt: Date.now(), deletedAt: Date.now() });
+    }
     scheduleSave();
   }
 
@@ -518,13 +531,24 @@
 
   function deleteSelected(ids) {
     ids = ids || [];
-    S.words = S.words.filter(function(w) { return ids.indexOf(w.id) < 0; });
+    var deleted = [];
+    S.words = S.words.filter(function(w) {
+      if (ids.indexOf(w.id) >= 0) { deleted.push(w); return false; }
+      return true;
+    });
+    deleted.forEach(function(w) {
+      S.words.push({ en: w.en, id: w.id, cn: w.cn || '', mastery: w.mastery || 0, addedAt: w.addedAt || Date.now(), updatedAt: Date.now(), deletedAt: Date.now() });
+    });
     scheduleSave();
     return ids.length;
   }
 
   function clearAll() {
-    S.words = [];
+    var now2 = Date.now();
+    var tombstones = S.words.map(function(w) {
+      return { en: w.en, id: w.id, cn: w.cn || '', mastery: w.mastery || 0, addedAt: w.addedAt || now2, updatedAt: now2, deletedAt: now2 };
+    });
+    S.words = tombstones;
     S.history = [];
     S.mistakes = [];
     S.currentQuiz = null;
