@@ -11,7 +11,7 @@ services:
     region: singapore
     branch: main
     rootDir: .
-    buildCommand: npm install
+    buildCommand: npm ci && npm test
     startCommand: node render-api/server.js
     autoDeploy: true
     
