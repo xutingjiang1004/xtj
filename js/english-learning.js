@@ -60,6 +60,13 @@
     error: { label: '同步失败', settled: true, retryable: true }
   };
 
+  SYNC_STATUS_META.synced.label = '已同步';
+  SYNC_STATUS_META.syncing.label = '同步中';
+  SYNC_STATUS_META.dirty.label = '待同步';
+  SYNC_STATUS_META.merging.label = '冲突合并中';
+  SYNC_STATUS_META.local.label = '本机模式';
+  SYNC_STATUS_META.error.label = '同步失败';
+
   function $(id) { return document.getElementById(id); }
 
   function el(tag, attrs, children) {
@@ -360,6 +367,11 @@
       });
       node.appendChild(retry);
     }
+    if (retry) {
+      retry.textContent = '重试';
+      retry.title = '重试同步';
+      retry.setAttribute('aria-label', '重试同步');
+    }
     return { main: main, retry: retry };
   }
 
@@ -378,6 +390,7 @@
     if (parts && parts.retry) parts.retry.hidden = !meta.retryable;
     node.setAttribute('data-status', status);
     node.setAttribute('data-label', label || meta.label);
+    node.setAttribute('data-tone', status === 'error' || status === 'merging' ? 'strong' : 'soft');
     node.setAttribute('aria-busy', meta.busy ? 'true' : 'false');
     node.classList.toggle('is-pulse', !!meta.busy);
     node.classList.toggle('is-retryable', !!meta.retryable);
@@ -402,7 +415,7 @@
   async   function loadRemoteState() {
     var headers = await getAuthHeaders();
     if (!headers || !headers.Authorization) {
-      setSyncStatus('local', '离线模式');
+      setSyncStatus('local', '本机模式');
       return null;
     }
     var url = apiBase() + '/english/state';
@@ -449,7 +462,7 @@
       var headers = await getAuthHeaders();
       var payload = buildStatePayload();
       if (!headers || !headers.Authorization) {
-        setSyncStatus('local', '离线模式');
+        setSyncStatus('local', '本机模式');
         return;
       }
       setSyncStatus('syncing', '同步中');
