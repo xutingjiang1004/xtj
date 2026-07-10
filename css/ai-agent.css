@@ -3625,7 +3625,7 @@
 
 #panelDeepThink .ai-research-card .ai-research-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
@@ -3640,6 +3640,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.28;
 }
 
 #panelDeepThink .ai-research-card .ai-research-meta {
@@ -3649,6 +3650,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-top: 2px;
 }
 
 #panelDeepThink .ai-research-card .ai-research-visual,
@@ -3741,6 +3743,11 @@
   visibility: visible;
 }
 
+#panelDeepThink .ai-research-card:is(.ai-research-timeout, .ai-research-interrupted, .ai-research-error, .ai-research-cancelled, [data-research-state="timeout"], [data-research-state="interrupted"], [data-research-state="cancelled"]) .ai-research-visual {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
 #panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-particles,
 #panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-orbit,
 #panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-scan i {
@@ -3785,6 +3792,23 @@
   visibility: visible;
 }
 
+#panelDeepThink .ai-research-card:is(.ai-research-timeout, .ai-research-interrupted, .ai-research-error, .ai-research-cancelled, [data-research-state="timeout"], [data-research-state="interrupted"], [data-research-state="cancelled"]) .ai-research-status {
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: .84;
+}
+
+#panelDeepThink .ai-research-card .ai-research-failure-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(142, 182, 175, .16);
+  background: rgba(245, 250, 249, .68);
+  color: rgba(71, 94, 94, .82);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 /* Retry is intentionally a scoped hook so an error view can add it without changing chat buttons. */
 #panelDeepThink .ai-research-card .ai-research-retry {
   display: inline-flex;
@@ -3792,9 +3816,10 @@
   justify-content: center;
   min-height: 36px;
   max-width: 100%;
-  margin-top: 12px;
+  align-self: flex-start;
+  margin-top: 8px;
   padding: 7px 14px;
-  border: 1px solid rgba(214, 132, 112, .38);
+  border: 1px solid rgba(120, 181, 196, .34);
   border-radius: 10px;
   background: var(--ai-research-state-surface);
   color: var(--ai-research-state-text);
@@ -3808,8 +3833,8 @@
 }
 
 #panelDeepThink .ai-research-card .ai-research-retry:hover {
-  border-color: var(--ai-research-state-border);
-  background: rgba(255, 255, 255, .28);
+  border-color: rgba(112, 170, 186, .42);
+  background: rgba(255, 255, 255, .34);
 }
 
 #panelDeepThink .ai-research-card .ai-research-retry:active {
@@ -3838,9 +3863,9 @@
 }
 
 [data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-retry {
-  border-color: rgba(255, 170, 151, .42);
-  color: rgba(255, 211, 201, .96);
-  background: rgba(214, 132, 112, .16);
+  border-color: rgba(120, 193, 213, .34);
+  color: rgba(208, 236, 244, .96);
+  background: rgba(79, 134, 153, .18);
 }
 
 [data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-preparing, .ai-research-thinking, .ai-research-analysis, .ai-research-researching, .ai-research-searching, .ai-research-connecting, [data-research-state="analysis"], [data-research-state="searching"], [data-research-state="connecting"]) {
@@ -3862,15 +3887,21 @@
 }
 
 [data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-error, .ai-research-timeout, .ai-research-disconnected, [data-research-state="timeout"], [data-research-state="disconnected"]) {
-  --ai-research-state-border: rgba(255, 154, 135, .46);
-  --ai-research-state-text: rgba(255, 216, 207, .98);
-  --ai-research-state-surface: rgba(214, 112, 94, .18);
+  --ai-research-state-border: rgba(133, 198, 190, .34);
+  --ai-research-state-text: rgba(220, 239, 236, .96);
+  --ai-research-state-surface: rgba(79, 126, 122, .18);
 }
 
 [data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-cancelled, [data-research-state="cancelled"]) {
   --ai-research-state-border: rgba(174, 191, 199, .42);
   --ai-research-state-text: rgba(220, 231, 235, .96);
   --ai-research-state-surface: rgba(145, 163, 172, .16);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-failure-note {
+  border-color: rgba(118, 168, 162, .18);
+  background: rgba(18, 33, 38, .56);
+  color: rgba(213, 231, 228, .84);
 }
 
 @media (max-width: 640px) {
