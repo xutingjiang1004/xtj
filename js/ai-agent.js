@@ -2128,7 +2128,7 @@
         else if (evt.stage === 'agent') setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.12, 0.22) });
         else if (evt.stage === 'searching') setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.66, 0.72) });
         else if (evt.stage === 'done') setResearchCardState(card, 'done', { durationMs: research.durationMs || research.elapsedMs || 0, expanded: false, progress: 1 });
-        else if (evt.stage === 'error') setResearchCardState(card, 'error', { statusText: '研究失败，请重试', expanded: false });
+        else if (evt.stage === 'error') setResearchCardState(card, 'interrupted', { statusText: '研究失败，请重试', expanded: false });
         return;
       }
       if (evt.type === 'deep_think_tool') {
@@ -2162,7 +2162,7 @@
         return;
       }
       if (evt.type === 'error') {
-        setResearchCardState(card, 'error', { statusText: evt.error || '研究失败，请重试', expanded: false });
+        setResearchCardState(card, 'interrupted', { statusText: evt.error || '研究失败，请重试', expanded: false });
         return;
       }
     }
@@ -2309,6 +2309,7 @@
 
     var decoder = new TextDecoder();
     var buffer = '';
+    var timedOut = false;
 
     function safeRemoveProgressCard(removeNode) {
       if (!progressCard) return;
@@ -2375,6 +2376,8 @@
 
     function finishThinkCard(node, content, evt) {
       if (!node) return;
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       node.classList.remove('generating');
       node.classList.add('done');
 
@@ -2500,6 +2503,10 @@
     var _lastDataTime = Date.now();
     var _idleCheckTimer = setInterval(function() {
       if (Date.now() - _lastDataTime > 45000) {
+        timedOut = true;
+        if (isResearchCard(progressCard)) {
+          markResearchCardOutcome(progressCard, 'timeout', '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002');
+        }
         try { reader.cancel(); } catch (e) {}
         if (abortedRef) abortedRef.value = true;
       }
@@ -2513,7 +2520,12 @@
         break;
       }
       var readResult;
-      try { readResult = await reader.read(); } catch (e) { break; }
+      try { readResult = await reader.read(); } catch (e) {
+        if (!timedOut && isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u4e2d\u65ad\u3002');
+        }
+        break;
+      }
       if (readResult.done) break;
       _resetIdle();
       buffer += decoder.decode(readResult.value, { stream: true });
@@ -2604,11 +2616,13 @@
         if (evt.type === 'error') {
           if (isResearchCard(progressCard)) {
             safeRemoveProgressCard(false);
-            setResearchCardState(progressCard, 'error', { statusText: evt.error || '研究失败，请重试', expanded: false });
+            if (!aiNodeRef.value) ensureThinkCardNode();
+            preserveResearchAnswer(progressCard, aiContentRef.value);
+            markResearchCardOutcome(progressCard, 'interrupted', evt.error || '研究失败，请重试');
           } else {
             safeRemoveProgressCard();
           }
-          if (aiContentRef.value) {
+          if (aiContentRef.value && !isResearchCard(progressCard)) {
             ensureThinkCardNode();
             aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, evt.error || 'AI 调用失败'));
             finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
@@ -2647,6 +2661,7 @@
     try { clearInterval(_idleCheckTimer); } catch (e) {}
     return {
       aborted: abortedRef ? abortedRef.value : false,
+      timedOut: timedOut,
       aiContent: aiContentRef.value,
       doneReceived: doneReceivedRef ? doneReceivedRef.value : false,
       evtHandled: evtHandledRef ? evtHandledRef.value : false
@@ -2804,6 +2819,8 @@
     //   灞曞紑鎬? 椤堕儴鎬濊€冭繃绋嬫棩蹇?+ 搴曢儴鏈€缁堢瓟妗?(markdown)
     //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
     function finishThinkCard(node, content, evt) {
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       if (node) node.classList.remove('generating');
       if (node) node.classList.add('done');
 
@@ -3158,6 +3175,7 @@
 
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
+    resetResearchCardDisclosure(document.getElementById('dtMessages'));
     if (panel) {
       panel.classList.add('hidden');
       panel.classList.remove('active');
@@ -3264,7 +3282,8 @@
     // 2. 鍒涘缓杩涘害鍗?
     var progressCard = buildDeepThinkProgressCard({
       variant: 'research',
-      cancelFn: function() { cancelDeepThink(S.dtConversationId); }
+      cancelFn: function() { cancelDeepThink(S.dtConversationId); },
+      retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
     });
     progressCard.classList.add('dt-animate-in');
     S.deepThinkProgressCard = progressCard;
@@ -3362,6 +3381,8 @@
     }
 
     function finishThinkCard(node, content, evt) {
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       if (node) node.classList.remove('generating');
       if (node) node.classList.add('done');
 
@@ -3495,10 +3516,19 @@
         signal: controller.signal
       });
       if (!resp.ok) {
-        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
+        try {
+          var ej = await resp.json().catch(function(){});
+          if (S._currentReqId !== reqId) return;
+          if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', String((ej&&ej.error) || ('AI 失败 (' + resp.status + ')')));
+          else { safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); }
+        } catch(e){}
         resetSendingIfCurrent(); return;
       }
-      if (!resp.body) { safeRemoveProgressCard(); notify('AI 没有响应'); resetSendingIfCurrent(); return; }
+      if (!resp.body) {
+        if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', 'AI 没有响应');
+        else { safeRemoveProgressCard(); notify('AI 没有响应'); }
+        resetSendingIfCurrent(); return;
+      }
 
       var reader = resp.body.getReader();
       var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
@@ -3522,6 +3552,11 @@
         onResetSending: resetSendingIfCurrent
       });
       if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
+      if (sseResult && sseResult.timedOut && isResearchCard(progressCard)) {
+        safeRemoveProgressCard(false);
+        resetSendingIfCurrent();
+        return;
+      }
       if (S._currentReqId !== reqId || ab.value) {
         if (ab.value && isResearchCard(progressCard)) {
           safeRemoveProgressCard(false);
@@ -3542,7 +3577,8 @@
         else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else if (!dr.value) {
           if (isResearchCard(progressCard)) {
-            setResearchCardState(progressCard, 'error', { statusText: '研究失败，请重试', expanded: false });
+            preserveResearchAnswer(progressCard, c.value);
+            markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
           } else {
             removeLastDtUserMessage();
             restoreInputText();
@@ -3556,12 +3592,16 @@
       if (progressCard) try { progressCard._done = true; } catch(e){}
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (isResearchCard(progressCard)) {
-          setResearchCardState(progressCard, 'error', { statusText: '研究失败，请重试', expanded: false });
+          preserveResearchAnswer(progressCard, c.value);
+          markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
         }
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
+        if (c && c.value && !isResearchCard(progressCard)) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); restoreInputText(); notify('网络异常'); }
       } else {
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        if (isResearchCard(progressCard)) {
+          preserveResearchAnswer(progressCard, c.value);
+          if (progressCard._researchState.state !== 'cancelled') markResearchCardOutcome(progressCard, 'interrupted', '本次研究已中断，请重试');
+        } else if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); }
       }
     }
@@ -3651,6 +3691,7 @@
       if (S.sending) return;
       newBtn.disabled = true;
       try {
+        resetResearchCardDisclosure(document.getElementById('dtMessages'));
         resetDeepThinkPageEmpty();
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
@@ -3675,6 +3716,7 @@
         if (dr && dr.ok) {
           S.dtConversationId = null;
           saveDtConvId();
+          resetResearchCardDisclosure(document.getElementById('dtMessages'));
           resetDeepThinkPageEmpty();
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
