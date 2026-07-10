@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, xtj-hotfix]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+      - name: Check for garbled visible strings
+        run: |
+          for f in js/ai-agent.js js/english-learning.js; do
+            if grep -qP '思考中鈥?/span>|鈻?/span>|鏉＄粨鏋?|鏉ユ簮|鍔犺浇涓|錯誤|错误错误' "$f" 2>/dev/null; then
+              echo "FAIL: Garbled text found in $f"
+              exit 1
+            fi
+          done
+          echo "OK: No garbled visible strings"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: node --check render-api/server.js
+      - run: node --check js/core.js
+      - run: node --check js/ai-agent.js
+      - run: node --check js/english-learning.js
+      - run: node --check js/english-dict.js
+      - run: echo "ALL SYNTAX CHECKS PASSED"
