@@ -223,6 +223,7 @@
     // 清理过期 tombstone (超过 90 天的自动清理)
     var now2 = Date.now();
     tombstones = tombstones.filter(function(t) { return t && t.deletedAt && (now2 - t.deletedAt < 90 * 86400000); });
+    var rev = parseInt(raw.revision, 10);
     return {
       version: 1,
       words: list,
@@ -230,7 +231,8 @@
       history: Array.isArray(raw.history) ? raw.history.slice(0, MAX_HISTORY) : [],
       mistakes: Array.isArray(raw.mistakes) ? raw.mistakes.slice(0, MAX_MISTAKES) : [],
       settings: Object.assign({}, DEFAULT_SETTINGS, raw.settings || {}),
-      updatedAt: clampNumber(raw.updatedAt, 0, Number.MAX_SAFE_INTEGER, 0)
+      updatedAt: clampNumber(raw.updatedAt, 0, Number.MAX_SAFE_INTEGER, 0),
+      revision: isFinite(rev) && rev > 0 ? rev : 0
     };
   }
 
