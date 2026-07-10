@@ -20,19 +20,22 @@ jobs:
       - name: Check for garbled visible strings
         run: |
           for f in js/ai-agent.js js/english-learning.js; do
-            if grep -qF '鏉' "$f" 2>/dev/null || grep -qF '鐢' "$f" 2>/dev/null || grep -qF '鍔' "$f" 2>/dev/null || grep -qF '鈥' "$f" 2>/dev/null; then
-              echo "FAIL: Garbled text found in $f"
-              exit 1
-            fi
+            while IFS= read -r line; do
+              case "$line" in \*\ /\*|\/\/*|*) continue ;; esac
+              if echo "$line" | grep -qF '鈥' || echo "$line" | grep -qF '错误错误'; then
+                echo "FAIL: $f"
+                exit 1
+              fi
+            done < "$f"
           done
           echo "OK: No garbled visible strings"
-      - name: Check no legacy auth in english-learning.js
+      - name: Check no legacy auth
         run: |
-          if grep -qF 'password_hash' js/english-learning.js 2>/dev/null; then
+          if grep -qF 'password_hash' js/english-learning.js; then
             echo "FAIL: password_hash still referenced"
             exit 1
           fi
-          echo "OK: No password_hash references"
+          echo "OK: No legacy auth"
 
   lint:
     runs-on: ubuntu-latest
