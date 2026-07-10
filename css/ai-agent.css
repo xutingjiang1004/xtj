@@ -3614,3 +3614,294 @@
   opacity: .34 !important;
 }
 
+/* Deep research state convergence: keep the card readable while its visual layer settles. */
+#panelDeepThink .ai-research-card {
+  --ai-research-state-border: rgba(124, 208, 190, .18);
+  --ai-research-state-text: rgba(41, 69, 68, .9);
+  --ai-research-state-surface: rgba(126, 205, 190, .08);
+  border-color: var(--ai-research-state-border);
+  transition: border-color .24s ease, background-color .24s ease, box-shadow .24s ease, color .24s ease;
+}
+
+#panelDeepThink .ai-research-card .ai-research-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#panelDeepThink .ai-research-card .ai-research-icon,
+#panelDeepThink .ai-research-card .ai-research-chevron {
+  flex: 0 0 auto;
+}
+
+#panelDeepThink .ai-research-card .ai-research-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panelDeepThink .ai-research-card .ai-research-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panelDeepThink .ai-research-card .ai-research-visual,
+#panelDeepThink .ai-research-card .ai-research-status,
+#panelDeepThink .ai-research-card .ai-research-scan,
+#panelDeepThink .ai-research-card .ai-research-steps,
+#panelDeepThink .ai-research-card .ai-research-stop,
+#panelDeepThink .ai-research-card .ai-think-body {
+  transition: opacity .24s ease, max-height .28s ease, min-height .28s ease, padding .28s ease, margin .28s ease, color .24s ease, border-color .24s ease, background-color .24s ease;
+}
+
+#panelDeepThink .ai-research-card .ai-research-status,
+#panelDeepThink .ai-research-card .ai-think-answer,
+#panelDeepThink .ai-research-card .ai-think-thinking-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Active states: analysis, search, answer and connection setup share one calm treatment. */
+#panelDeepThink .ai-research-card.ai-research-preparing,
+#panelDeepThink .ai-research-card.ai-research-thinking,
+#panelDeepThink .ai-research-card.ai-research-analysis,
+#panelDeepThink .ai-research-card.ai-research-researching,
+#panelDeepThink .ai-research-card.ai-research-searching,
+#panelDeepThink .ai-research-card.ai-research-connecting,
+#panelDeepThink .ai-research-card[data-research-state="analysis"],
+#panelDeepThink .ai-research-card[data-research-state="searching"],
+#panelDeepThink .ai-research-card[data-research-state="connecting"] {
+  --ai-research-state-border: rgba(86, 190, 166, .34);
+  --ai-research-state-text: rgba(36, 91, 80, .96);
+  --ai-research-state-surface: rgba(103, 224, 202, .12);
+}
+
+#panelDeepThink .ai-research-card.ai-research-responding,
+#panelDeepThink .ai-research-card.ai-research-answering,
+#panelDeepThink .ai-research-card[data-research-state="answering"] {
+  --ai-research-state-border: rgba(100, 175, 224, .34);
+  --ai-research-state-text: rgba(38, 76, 111, .96);
+  --ai-research-state-surface: rgba(125, 184, 255, .12);
+}
+
+#panelDeepThink .ai-research-card.ai-research-preparing .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-thinking .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-analysis .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-researching .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-searching .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-connecting .ai-research-status,
+#panelDeepThink .ai-research-card[data-research-state="analysis"] .ai-research-status,
+#panelDeepThink .ai-research-card[data-research-state="searching"] .ai-research-status,
+#panelDeepThink .ai-research-card[data-research-state="connecting"] .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-responding .ai-research-status,
+#panelDeepThink .ai-research-card.ai-research-answering .ai-research-status,
+#panelDeepThink .ai-research-card[data-research-state="answering"] .ai-research-status {
+  color: var(--ai-research-state-text);
+}
+
+/* Terminal states retain the answer and stop decorative motion without collapsing the card. */
+#panelDeepThink .ai-research-card.ai-research-done,
+#panelDeepThink .ai-research-card.ai-research-completed,
+#panelDeepThink .ai-research-card[data-research-state="done"],
+#panelDeepThink .ai-research-card[data-research-state="completed"] {
+  --ai-research-state-border: rgba(82, 178, 133, .38);
+  --ai-research-state-text: rgba(35, 105, 75, .98);
+  --ai-research-state-surface: rgba(95, 199, 143, .12);
+}
+
+#panelDeepThink .ai-research-card.ai-research-error,
+#panelDeepThink .ai-research-card.ai-research-timeout,
+#panelDeepThink .ai-research-card.ai-research-disconnected,
+#panelDeepThink .ai-research-card[data-research-state="timeout"],
+#panelDeepThink .ai-research-card[data-research-state="disconnected"] {
+  --ai-research-state-border: rgba(214, 132, 112, .42);
+  --ai-research-state-text: rgba(142, 70, 58, .98);
+  --ai-research-state-surface: rgba(226, 151, 128, .12);
+}
+
+#panelDeepThink .ai-research-card.ai-research-cancelled,
+#panelDeepThink .ai-research-card[data-research-state="cancelled"] {
+  --ai-research-state-border: rgba(126, 143, 151, .34);
+  --ai-research-state-text: rgba(77, 92, 99, .96);
+  --ai-research-state-surface: rgba(145, 157, 164, .12);
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-think-body {
+  display: block;
+  max-height: none;
+  min-height: 0;
+  opacity: 1;
+  overflow: visible;
+  visibility: visible;
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-particles,
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-orbit,
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-scan i {
+  animation: none !important;
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-particles,
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-orbit {
+  opacity: 0;
+  visibility: hidden;
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-scan {
+  display: block;
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  border-color: transparent;
+  pointer-events: none;
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-steps,
+#panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, .ai-research-error, .ai-research-timeout, .ai-research-disconnected, .ai-research-cancelled, [data-research-state="done"], [data-research-state="completed"], [data-research-state="timeout"], [data-research-state="disconnected"], [data-research-state="cancelled"]) .ai-research-stop {
+  display: inline-flex;
+  max-height: 0;
+  min-height: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: transparent;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+#panelDeepThink .ai-research-card:is(.ai-research-error, .ai-research-timeout, .ai-research-disconnected) .ai-think-answer,
+#panelDeepThink .ai-research-card:is(.ai-research-error, .ai-research-timeout, .ai-research-disconnected, [data-research-state="timeout"], [data-research-state="disconnected"]) .ai-think-answer,
+#panelDeepThink .ai-research-card:is(.ai-research-error, .ai-research-timeout, .ai-research-disconnected, [data-research-state="timeout"], [data-research-state="disconnected"]) .ai-msg-footer {
+  display: block;
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Retry is intentionally a scoped hook so an error view can add it without changing chat buttons. */
+#panelDeepThink .ai-research-card .ai-research-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 7px 14px;
+  border: 1px solid rgba(214, 132, 112, .38);
+  border-radius: 10px;
+  background: var(--ai-research-state-surface);
+  color: var(--ai-research-state-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: normal;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+#panelDeepThink .ai-research-card .ai-research-retry:hover {
+  border-color: var(--ai-research-state-border);
+  background: rgba(255, 255, 255, .28);
+}
+
+#panelDeepThink .ai-research-card .ai-research-retry:active {
+  transform: translateY(1px);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card {
+  --ai-research-state-border: rgba(126, 222, 202, .28);
+  --ai-research-state-text: rgba(221, 243, 238, .94);
+  --ai-research-state-surface: rgba(108, 214, 190, .14);
+  color: rgba(229, 242, 241, .94);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-title,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-status,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-think-answer,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-think-thinking-body,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-thought-chunk {
+  color: rgba(229, 242, 241, .94);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-meta,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-steps span,
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-msg-footer span {
+  color: rgba(191, 222, 216, .86);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card .ai-research-retry {
+  border-color: rgba(255, 170, 151, .42);
+  color: rgba(255, 211, 201, .96);
+  background: rgba(214, 132, 112, .16);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-preparing, .ai-research-thinking, .ai-research-analysis, .ai-research-researching, .ai-research-searching, .ai-research-connecting, [data-research-state="analysis"], [data-research-state="searching"], [data-research-state="connecting"]) {
+  --ai-research-state-border: rgba(112, 226, 202, .36);
+  --ai-research-state-text: rgba(204, 246, 235, .96);
+  --ai-research-state-surface: rgba(83, 204, 178, .16);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-responding, .ai-research-answering, [data-research-state="answering"]) {
+  --ai-research-state-border: rgba(128, 190, 239, .38);
+  --ai-research-state-text: rgba(211, 232, 255, .96);
+  --ai-research-state-surface: rgba(111, 170, 232, .16);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-done, .ai-research-completed, [data-research-state="done"], [data-research-state="completed"]) {
+  --ai-research-state-border: rgba(105, 218, 153, .42);
+  --ai-research-state-text: rgba(200, 247, 216, .98);
+  --ai-research-state-surface: rgba(86, 190, 128, .16);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-error, .ai-research-timeout, .ai-research-disconnected, [data-research-state="timeout"], [data-research-state="disconnected"]) {
+  --ai-research-state-border: rgba(255, 154, 135, .46);
+  --ai-research-state-text: rgba(255, 216, 207, .98);
+  --ai-research-state-surface: rgba(214, 112, 94, .18);
+}
+
+[data-theme="dark"] #panelDeepThink .ai-research-card:is(.ai-research-cancelled, [data-research-state="cancelled"]) {
+  --ai-research-state-border: rgba(174, 191, 199, .42);
+  --ai-research-state-text: rgba(220, 231, 235, .96);
+  --ai-research-state-surface: rgba(145, 163, 172, .16);
+}
+
+@media (max-width: 640px) {
+  #panelDeepThink .ai-research-card .ai-research-header {
+    gap: 6px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-meta {
+    max-width: 42%;
+    font-size: 10px;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-status {
+    line-height: 1.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panelDeepThink .ai-research-card,
+  #panelDeepThink .ai-research-card * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-particles,
+  #panelDeepThink .ai-research-card .ai-research-orbit {
+    display: none !important;
+  }
+
+  #panelDeepThink .ai-research-card .ai-research-scan i {
+    transition: none !important;
+  }
+}
+
