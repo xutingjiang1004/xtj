@@ -868,7 +868,7 @@
         parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
       }
     }
-    return parts.length ? parts.join(' 路 ') : null;
+    return parts.length ? parts.join(' · ') : null;
   }
 
   function getMessageThinkingMode(msg) {
@@ -1054,7 +1054,7 @@
         '<div class="ai-think-header">' +
           '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
           '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
-          '<span class="ai-think-chevron">鈻?/span>' +
+          '<span class="ai-think-chevron">▾</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           (thinkingLog.length > 0 ?
@@ -1177,7 +1177,7 @@
     }
     if (role === 'assistant') {
       // 鈽?P1 鍏抽敭淇锛氭悳绱㈠窘绔?
-      //   - 1 天内（search_expires_at > now锛夛細瀹屾暣鏄剧ず"宸茶仈缃戞悳绱?路 N 鏉＄粨鏋?+ 鍙睍寮€缁撴灉鍒楄〃
+      //   - 1 天内（search_expires_at > now锛夛細瀹屾暣鏄剧ず"宸茶仈缃戞悳绱?路 N 条结果+ 鍙睍寮€缁撴灉鍒楄〃
       //   - 1 澶╁悗锛氬窘绔犱繚鎸佹樉绀猴紝浣嗘爣璁?缁撴灉宸茶繃鏈?
       //   - 姘歌繙鏄剧ず寰界珷锛堢敤鎴峰師璇?閲嶆柊杩涘璇濇鏄剧ず宸茶仈缃戞悳绱?鎼滃埌澶氬皯鏉′俊鎭?锛?
       if (msg.search_count > 0) {
@@ -1209,7 +1209,7 @@
             var snippet = sr.snippet || '';
             if (snippet.length > 140) snippet = snippet.slice(0, 140) + '...';
             if (snippet) item.appendChild(el('span', { class: 'ai-search-detail-snippet', text: snippet }));
-            var meta = (sr.source ? sr.source : '') + (sr.published_at ? ' 路 ' + sr.published_at : '');
+            var meta = (sr.source ? sr.source : '') + (sr.published_at ? ' · ' + sr.published_at : '');
             if (meta) item.appendChild(el('span', { class: 'ai-search-detail-source', text: meta }));
             listEl.appendChild(item);
           }
@@ -1237,7 +1237,7 @@
         if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
         if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + msg.usage.prompt_cache_miss_tokens);
         if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('¥' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
-        if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' 路 ') }));
+        if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' · ') }));
       }
     }
     if (footer.children.length > 0) node.appendChild(footer);
@@ -2599,7 +2599,7 @@
   // ===================== M: 深度思考冩ā寮忓彂閫?=====================
   // 鐙珛娴佺▼: 璧?/api/agent/chat (deep_think=true) SSE 闀胯繛鎺?
   //   杩涘害鍗″疄鏃舵洿鏂?(1-10 涓?agent 鐘舵€?
-  //   done 鍚庢覆鏌撴渶缁堢瓟妗?+ [鏉ユ簮N] 标注 + 搜索徽章
+  //   done 鍚庢覆鏌撴渶缁堢瓟妗?+ [来源N] 标注 + 搜索徽章
   async function handleSendDeepThink(text, input, sendBtn, messagesEl) {
     var originalText = text;
     function restoreInputText() {
@@ -2707,9 +2707,9 @@
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-title">思考中鈥?/span>' +
+          '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
-          '<span class="ai-think-chevron">鈻?/span>' +
+          '<span class="ai-think-chevron">▾</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           '<details class="ai-think-thinking">' +
@@ -2863,7 +2863,7 @@
         if (searchResults && searchResults.length > 0 && searchQuery) {
           var searchBox = document.createElement('div');
           searchBox.className = 'ai-search-supplement';
-          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 鏉＄粨鏋?<br>';
+          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果<br>';
           var shownResults = searchResults.slice(0, 5);
           for (var si = 0; si < shownResults.length; si++) {
             var sr = shownResults[si];
@@ -3020,7 +3020,7 @@
       // 宸叉湁缂撳瓨鐨?DOM 鍐呭锛岀洿鎺ユ樉绀?
     } else if (S.dtConversationId) {
       msgs.innerHTML = '';
-      var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '鍔犺浇涓?..' });
+      var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
       msgs.appendChild(loadHint);
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30');
@@ -3133,12 +3133,12 @@
       if (isImage2) {
         displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
       } else {
-        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB2 + 'KB]';
       }
       // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁?
       var serverTag2 = isImage2
-        ? '[图片: ' + safeName + ' 路 ' + sizeKB2 + 'KB]'
-        : '[文件: ' + safeName + ' 路 ' + sizeKB2 + 'KB]';
+        ? '[图片: ' + safeName + ' · ' + sizeKB2 + 'KB]'
+        : '[文件: ' + safeName + ' · ' + sizeKB2 + 'KB]';
       text = text ? text + '\n' + serverTag2 : serverTag2;
     }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); S.sending = false; return; }
@@ -3694,12 +3694,12 @@
       if (isImage) {
         displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
       } else {
-        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' 路 ' + sizeKB + 'KB]';
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB + 'KB]';
       }
       // 鍙戦€佺粰鏈嶅姟鍣? 绠€鐭爣璁帮紝涓嶅惈澶?data URL
       var serverTag = isImage
-        ? '[图片: ' + safeName + ' 路 ' + sizeKB + 'KB]'
-        : '[文件: ' + safeName + ' 路 ' + sizeKB + 'KB]';
+        ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]'
+        : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]';
       text = text ? text + '\n' + serverTag : serverTag;
     }
     if (!text) { S.sending = false; return; }
@@ -4160,7 +4160,7 @@
                 if (r.snippet) {
                   itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
                 }
-                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' 路 ' + (r.published_at || '') }));
+                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' · ' + (r.published_at || '') }));
                 detailPanel.appendChild(itemEl);
               }
               searchBar.toggleFn = function() {
@@ -4257,7 +4257,7 @@
                 if (r2.snippet) {
                   itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
                 }
-                itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' 路 ' + (r2.published_at || '') }));
+                itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' · ' + (r2.published_at || '') }));
                 detailPanel2.appendChild(itemEl2);
               }
               toolBar2.toggleFn = function() {
