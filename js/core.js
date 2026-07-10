@@ -1881,6 +1881,21 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         var _interactiveEnhancementsBooted = false;
         var _coreAnimationsLoaded = false;
         var _coreAnimationsLoading = null;
+        var _gsapLoading = null;
+
+        function ensureGsap() {
+            if (typeof window.gsap !== 'undefined') return Promise.resolve(window.gsap);
+            if (_gsapLoading) return _gsapLoading;
+            _gsapLoading = xtjLoadScriptOnce('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', 'gsap').then(function() {
+                return window.gsap || null;
+            }).catch(function(err) {
+                console.warn('[XTJ] GSAP lazy load failed, using CSS fallback:', err);
+                return null;
+            });
+            return _gsapLoading;
+        }
+        window.ensureGsap = ensureGsap;
+        window.__xtjEnsureGsap = ensureGsap;
 
         function ensurePhotoWallLoaded() {
             if (_photoWallLoaded) return Promise.resolve();
@@ -1952,10 +1967,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         function ensureCoreAnimationsLoaded() {
             if (_coreAnimationsLoaded) return Promise.resolve();
             if (_coreAnimationsLoading) return _coreAnimationsLoading;
-            _coreAnimationsLoading = Promise.all([
-                xtjLoadScriptOnce('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', 'gsap'),
-                xtjLoadScriptOnce('js/core-animations.js?v=20260708_perf_v1', 'core-animations')
-            ]).then(function() {
+            _coreAnimationsLoading = xtjLoadScriptOnce('js/core-animations.min.js?v=20260708_perf_v1', 'core-animations').then(function() {
                 _coreAnimationsLoaded = true;
             }).finally(function() {
                 if (!_coreAnimationsLoaded) _coreAnimationsLoading = null;
@@ -13168,7 +13180,7 @@ function renderProfileActivityList(kind) {
                 }
 
                 document.addEventListener('click', function(event) {
-                    if (gsapCache === false) gsapCache = typeof gsap !== 'undefined';
+                    if (gsapCache === false) gsapCache = typeof window.gsap !== 'undefined';
                     var target = event.target;
                     if (!target) return;
                     var btn = target.closest(selector);

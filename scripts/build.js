@@ -77,7 +77,9 @@ const CSS_FILES = [
   'css/visual-refinements.css',
   'css/admin.css',
   'css/ai-agent.css',
-  'css/english-learning.css'
+  'css/english-learning.css',
+  'css/ui-shell.css',
+  'css/photo-preview.css'
 ];
 
 function minifyJS(filePath, optional) {
