@@ -1670,6 +1670,7 @@
         thinkingBody: card.querySelector('.ai-think-thinking-body'),
         answer: card.querySelector('.ai-think-answer'),
         footer: card.querySelector('.ai-msg-footer'),
+        retry: card.querySelector('.ai-research-retry'),
         canvas: card.querySelector('.ai-research-particles'),
         searchBox: null
       };
@@ -1687,6 +1688,39 @@
     card.classList.toggle('expanded', !!expanded && canToggle);
     card.classList.toggle('collapsed', !expanded || !canToggle);
     if (refs && refs.details) refs.details.open = !!expanded && canToggle;
+  }
+
+  function resetResearchCardDisclosure(root) {
+    if (!root || !root.querySelectorAll) return;
+    var cards = root.querySelectorAll('.ai-research-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      if (!isResearchCard(card)) continue;
+      if (card._researchState) {
+        card._researchState.persistExpanded = false;
+        card._researchState.userPinnedOpen = false;
+      }
+      setResearchDisclosure(card, false);
+    }
+  }
+
+  function preserveResearchAnswer(card, content) {
+    if (!isResearchCard(card) || !content) return;
+    var answer = card.querySelector('.ai-think-answer');
+    if (!answer || String(answer.textContent || '').trim()) return;
+    try { answer.innerHTML = renderMarkdown(String(content)); } catch (e) {}
+  }
+
+  function markResearchCardOutcome(card, nextState, statusText) {
+    if (!isResearchCard(card)) return;
+    setResearchCardState(card, nextState, { statusText: statusText });
+    var body = card.querySelector('.ai-think-body');
+    if (!body || body.querySelector('.ai-research-failure-note')) return;
+    var note = el('div', { class: 'ai-error-note ai-research-failure-note' });
+    note.textContent = statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
+    var footer = body.querySelector('.ai-msg-footer');
+    if (footer) body.insertBefore(note, footer);
+    else body.appendChild(note);
   }
 
   function updateResearchProgress(card, ratio) {
@@ -1726,7 +1760,7 @@
     var state = card._researchState;
     if (!refs || !refs.meta || !state) return;
     state.elapsedMs = Math.max(0, ms || 0);
-    if (state.state === 'responding' || state.state === 'done' || state.state === 'cancelled' || state.state === 'error') {
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       refs.meta.textContent = '';
       return;
     }
@@ -1739,6 +1773,8 @@
     var refs = ensureResearchCardRefs(card);
     var state = card._researchState;
     if (!refs || !state) return;
+    if (nextState === 'error') nextState = 'interrupted';
+    if ((state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') && nextState === 'done') return;
     if (typeof opts.elapsedMs === 'number') state.elapsedMs = opts.elapsedMs;
     if (typeof opts.durationMs === 'number' && opts.durationMs >= 0) state.durationMs = opts.durationMs;
     if (typeof opts.agentCount === 'number') state.agentCount = opts.agentCount;
@@ -1752,10 +1788,11 @@
     if (state.stepCount > 0) state.canToggle = true;
 
     card.setAttribute('data-research-state', state.state);
-    card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-cancelled', 'ai-research-error');
+    card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-timeout', 'ai-research-interrupted', 'ai-research-cancelled', 'ai-research-error');
     card.classList.add('ai-research-' + state.state);
+    if (state.state === 'interrupted') card.classList.add('ai-research-error');
 
-    if (state.state === 'responding' || state.state === 'done' || state.state === 'cancelled' || state.state === 'error') {
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       card.classList.remove('generating');
       state.canToggle = true;
       setResearchDisclosure(card, state.persistExpanded ? true : !!opts.expanded);
@@ -1800,6 +1837,16 @@
       refs.meta.textContent = '';
       setResearchSteps(card, -1, 4);
       updateResearchProgress(card, 1);
+    } else if (state.state === 'timeout') {
+      refs.title.textContent = '\u7814\u7a76\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5';
+      refs.status.textContent = opts.statusText || '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+    } else if (state.state === 'interrupted') {
+      refs.title.textContent = '\u7814\u7a76\u4e2d\u65ad\uff0c\u8bf7\u91cd\u8bd5';
+      refs.status.textContent = opts.statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     } else if (state.state === 'cancelled') {
       refs.title.textContent = '思考已停止';
       refs.status.textContent = '已停止本次深入研究。';
@@ -1813,6 +1860,7 @@
     }
 
     if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
+    if (refs.retry) refs.retry.style.display = (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') ? '' : 'none';
   }
 
   function createResearchCardAnimator(card) {
@@ -1946,6 +1994,7 @@
           AI_RESEARCH_STEPS.map(function(step) { return '<span>' + step + '</span>'; }).join('') +
         '</div>' +
         '<button type="button" class="ai-research-stop">停止思考</button>' +
+        '<button type="button" class="ai-progress-stop ai-research-retry" style="display:none">\u91cd\u8bd5</button>' +
       '</div>' +
       '<div class="ai-think-body">' +
         '<details class="ai-think-thinking">' +
@@ -1992,6 +2041,13 @@
         setResearchDisclosure(card, nextExpanded);
       });
     }
+    if (refs && refs.retry) {
+      refs.retry.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof options.retryFn === 'function') options.retryFn();
+      });
+    }
     if (refs && refs.details) {
       refs.details.addEventListener('toggle', function() {
         if (!card._researchState.canToggle) return;
@@ -2013,7 +2069,8 @@
         state: 'preparing',
         canToggle: false,
         extraClass: 'ai-research-card--loading',
-        cancelFn: options.cancelFn
+        cancelFn: options.cancelFn,
+        retryFn: options.retryFn
       });
       researchCard._researchState.startedAt = Date.now();
       researchCard._researchState.elapsedTimer = setInterval(function() {
@@ -2071,7 +2128,7 @@
         else if (evt.stage === 'agent') setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.12, 0.22) });
         else if (evt.stage === 'searching') setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.66, 0.72) });
         else if (evt.stage === 'done') setResearchCardState(card, 'done', { durationMs: research.durationMs || research.elapsedMs || 0, expanded: false, progress: 1 });
-        else if (evt.stage === 'error') setResearchCardState(card, 'error', { statusText: '研究失败，请重试', expanded: false });
+        else if (evt.stage === 'error') setResearchCardState(card, 'interrupted', { statusText: '研究失败，请重试', expanded: false });
         return;
       }
       if (evt.type === 'deep_think_tool') {
@@ -2105,7 +2162,7 @@
         return;
       }
       if (evt.type === 'error') {
-        setResearchCardState(card, 'error', { statusText: evt.error || '研究失败，请重试', expanded: false });
+        setResearchCardState(card, 'interrupted', { statusText: evt.error || '研究失败，请重试', expanded: false });
         return;
       }
     }
@@ -2252,6 +2309,7 @@
 
     var decoder = new TextDecoder();
     var buffer = '';
+    var timedOut = false;
 
     function safeRemoveProgressCard(removeNode) {
       if (!progressCard) return;
@@ -2318,6 +2376,8 @@
 
     function finishThinkCard(node, content, evt) {
       if (!node) return;
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       node.classList.remove('generating');
       node.classList.add('done');
 
@@ -2443,6 +2503,10 @@
     var _lastDataTime = Date.now();
     var _idleCheckTimer = setInterval(function() {
       if (Date.now() - _lastDataTime > 45000) {
+        timedOut = true;
+        if (isResearchCard(progressCard)) {
+          markResearchCardOutcome(progressCard, 'timeout', '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002');
+        }
         try { reader.cancel(); } catch (e) {}
         if (abortedRef) abortedRef.value = true;
       }
@@ -2456,7 +2520,12 @@
         break;
       }
       var readResult;
-      try { readResult = await reader.read(); } catch (e) { break; }
+      try { readResult = await reader.read(); } catch (e) {
+        if (!timedOut && isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u4e2d\u65ad\u3002');
+        }
+        break;
+      }
       if (readResult.done) break;
       _resetIdle();
       buffer += decoder.decode(readResult.value, { stream: true });
@@ -2547,11 +2616,13 @@
         if (evt.type === 'error') {
           if (isResearchCard(progressCard)) {
             safeRemoveProgressCard(false);
-            setResearchCardState(progressCard, 'error', { statusText: evt.error || '研究失败，请重试', expanded: false });
+            if (!aiNodeRef.value) ensureThinkCardNode();
+            preserveResearchAnswer(progressCard, aiContentRef.value);
+            markResearchCardOutcome(progressCard, 'interrupted', evt.error || '研究失败，请重试');
           } else {
             safeRemoveProgressCard();
           }
-          if (aiContentRef.value) {
+          if (aiContentRef.value && !isResearchCard(progressCard)) {
             ensureThinkCardNode();
             aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, evt.error || 'AI 调用失败'));
             finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
@@ -2590,6 +2661,7 @@
     try { clearInterval(_idleCheckTimer); } catch (e) {}
     return {
       aborted: abortedRef ? abortedRef.value : false,
+      timedOut: timedOut,
       aiContent: aiContentRef.value,
       doneReceived: doneReceivedRef ? doneReceivedRef.value : false,
       evtHandled: evtHandledRef ? evtHandledRef.value : false
@@ -2747,6 +2819,8 @@
     //   灞曞紑鎬? 椤堕儴鎬濊€冭繃绋嬫棩蹇?+ 搴曢儴鏈€缁堢瓟妗?(markdown)
     //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
     function finishThinkCard(node, content, evt) {
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       if (node) node.classList.remove('generating');
       if (node) node.classList.add('done');
 
@@ -3101,6 +3175,7 @@
 
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
+    resetResearchCardDisclosure(document.getElementById('dtMessages'));
     if (panel) {
       panel.classList.add('hidden');
       panel.classList.remove('active');
@@ -3207,7 +3282,8 @@
     // 2. 鍒涘缓杩涘害鍗?
     var progressCard = buildDeepThinkProgressCard({
       variant: 'research',
-      cancelFn: function() { cancelDeepThink(S.dtConversationId); }
+      cancelFn: function() { cancelDeepThink(S.dtConversationId); },
+      retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
     });
     progressCard.classList.add('dt-animate-in');
     S.deepThinkProgressCard = progressCard;
@@ -3305,6 +3381,8 @@
     }
 
     function finishThinkCard(node, content, evt) {
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
       if (node) node.classList.remove('generating');
       if (node) node.classList.add('done');
 
@@ -3438,10 +3516,19 @@
         signal: controller.signal
       });
       if (!resp.ok) {
-        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
+        try {
+          var ej = await resp.json().catch(function(){});
+          if (S._currentReqId !== reqId) return;
+          if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', String((ej&&ej.error) || ('AI 失败 (' + resp.status + ')')));
+          else { safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); }
+        } catch(e){}
         resetSendingIfCurrent(); return;
       }
-      if (!resp.body) { safeRemoveProgressCard(); notify('AI 没有响应'); resetSendingIfCurrent(); return; }
+      if (!resp.body) {
+        if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', 'AI 没有响应');
+        else { safeRemoveProgressCard(); notify('AI 没有响应'); }
+        resetSendingIfCurrent(); return;
+      }
 
       var reader = resp.body.getReader();
       var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
@@ -3465,6 +3552,11 @@
         onResetSending: resetSendingIfCurrent
       });
       if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
+      if (sseResult && sseResult.timedOut && isResearchCard(progressCard)) {
+        safeRemoveProgressCard(false);
+        resetSendingIfCurrent();
+        return;
+      }
       if (S._currentReqId !== reqId || ab.value) {
         if (ab.value && isResearchCard(progressCard)) {
           safeRemoveProgressCard(false);
@@ -3485,7 +3577,8 @@
         else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else if (!dr.value) {
           if (isResearchCard(progressCard)) {
-            setResearchCardState(progressCard, 'error', { statusText: '研究失败，请重试', expanded: false });
+            preserveResearchAnswer(progressCard, c.value);
+            markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
           } else {
             removeLastDtUserMessage();
             restoreInputText();
@@ -3499,12 +3592,16 @@
       if (progressCard) try { progressCard._done = true; } catch(e){}
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (isResearchCard(progressCard)) {
-          setResearchCardState(progressCard, 'error', { statusText: '研究失败，请重试', expanded: false });
+          preserveResearchAnswer(progressCard, c.value);
+          markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
         }
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
+        if (c && c.value && !isResearchCard(progressCard)) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); restoreInputText(); notify('网络异常'); }
       } else {
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        if (isResearchCard(progressCard)) {
+          preserveResearchAnswer(progressCard, c.value);
+          if (progressCard._researchState.state !== 'cancelled') markResearchCardOutcome(progressCard, 'interrupted', '本次研究已中断，请重试');
+        } else if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); }
       }
     }
@@ -3594,6 +3691,7 @@
       if (S.sending) return;
       newBtn.disabled = true;
       try {
+        resetResearchCardDisclosure(document.getElementById('dtMessages'));
         resetDeepThinkPageEmpty();
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
@@ -3618,6 +3716,7 @@
         if (dr && dr.ok) {
           S.dtConversationId = null;
           saveDtConvId();
+          resetResearchCardDisclosure(document.getElementById('dtMessages'));
           resetDeepThinkPageEmpty();
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {

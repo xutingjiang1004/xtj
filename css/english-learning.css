@@ -969,9 +969,11 @@ body.english-learning-open {
 #panelEnglishLearning #elArticleCard[data-local="true"]::before,
 #panelEnglishLearning #elQuestionsCard[data-local="true"]::before {
   content: "离线示例";
-  position: absolute;
-  top: 12px;
-  right: 14px;
+  position: static;
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 10px auto;
   padding: 4px 9px;
   border-radius: 999px;
   border: 1px solid rgba(214, 168, 62, 0.24);
@@ -981,18 +983,19 @@ body.english-learning-open {
   font-weight: 720;
   letter-spacing: 0.02em;
   pointer-events: none;
+  animation: none;
 }
 
 #panelEnglishLearning #elBatchAddBtn.is-warning {
   color: #9e6f14;
-  border-color: rgba(211, 141, 36, 0.26);
-  background: rgba(211, 141, 36, 0.1);
+  border-color: rgba(185, 134, 34, 0.22);
+  background: rgba(185, 134, 34, 0.08);
 }
 
 #panelEnglishLearning #elBatchAddBtn.is-error {
   color: #b04b4a;
-  border-color: rgba(214, 91, 90, 0.28);
-  background: rgba(214, 91, 90, 0.1);
+  border-color: rgba(200, 77, 91, 0.22);
+  background: rgba(200, 77, 91, 0.08);
 }
 
 #panelEnglishLearning .el-batch-summary[data-state="success"] {
@@ -1062,6 +1065,24 @@ html[data-theme="dark"] #panelEnglishLearning #elQuestionsCard[data-local="true"
   border-color: rgba(202, 163, 76, 0.2);
   background: rgba(68, 54, 20, 0.72);
   color: #f3d995;
+  animation: none;
+}
+
+#panelEnglishLearning .el-sync.is-local::before,
+#panelEnglishLearning .el-offline-banner {
+  animation: none;
+}
+
+html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-warning {
+  color: #e5bd6b;
+  border-color: rgba(229, 189, 107, 0.2);
+  background: rgba(229, 189, 107, 0.08);
+}
+
+html[data-theme="dark"] #panelEnglishLearning #elBatchAddBtn.is-error {
+  color: #f08a8c;
+  border-color: rgba(240, 138, 140, 0.2);
+  background: rgba(240, 138, 140, 0.08);
 }
 
 @media (prefers-reduced-motion: reduce) {
