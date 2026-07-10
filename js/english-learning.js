@@ -261,22 +261,20 @@
     local = normalizeState(local);
     remote = normalizeState(remote);
     var map = {};
+    // 以 normalize(en) 为唯一键，deletedAt 标记的视为已删除
     local.words.concat(remote.words).forEach(function(w) {
       if (!w || !w.en) return;
-      var key = w.id || w.en;
-      var enKey = 'en:' + w.en;
-      var prev = map[key] || map[enKey];
+      var enKey = w.en.toLowerCase().trim();
+      var prev = map[enKey];
       if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) {
-        map[key] = w;
         map[enKey] = w;
       }
     });
-    var seenIds = {};
     var words = [];
     Object.keys(map).forEach(function(k) {
       var w = map[k];
-      if (!w || seenIds[w.id]) return;
-      seenIds[w.id] = true;
+      if (!w) return;
+      if (w.deletedAt) return; // tombstone: 已删单词不加入结果
       words.push(w);
     });
     words.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
