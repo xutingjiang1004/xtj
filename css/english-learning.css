@@ -2727,8 +2727,8 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: calc(100dvh - 152px);
 }
+
 
 #panelEnglishLearning .el-header {
   gap: 12px;
@@ -2928,7 +2928,6 @@ html[data-theme="dark"] #panelEnglishLearning .el-q-explain {
 @media (min-width: 1024px) {
   #panelEnglishLearning .el-page {
     gap: 16px;
-    min-height: calc(100dvh - 170px);
   }
 
   #panelEnglishLearning .el-header {
@@ -2963,7 +2962,6 @@ html[data-theme="dark"] #panelEnglishLearning .el-q-explain {
 @media (max-width: 767px) {
   #panelEnglishLearning .el-page {
     gap: 12px;
-    min-height: calc(100dvh - 128px);
   }
 
   #panelEnglishLearning .el-header {
