@@ -50,6 +50,15 @@
     syncVisualTimer: null
   };
 
+  var SYNC_STATUS_META = {
+    synced: { label: '已同步', settled: true },
+    syncing: { label: '同步中', busy: true },
+    dirty: { label: '待同步' },
+    merging: { label: '冲突合并中', busy: true },
+    local: { label: '离线模式', settled: true },
+    error: { label: '同步失败', settled: true, retryable: true }
+  };
+
   function $(id) { return document.getElementById(id); }
 
   function el(tag, attrs, children) {
@@ -312,32 +321,61 @@
     };
   }
 
+  function ensureSyncStatusStructure(node) {
+    if (!node) return null;
+    var main = node.querySelector('.el-sync-main');
+    if (!main) {
+      main = el('span', { class: 'el-sync-main' });
+      node.appendChild(main);
+    }
+    var retry = node.querySelector('.el-sync-retry');
+    if (!retry) {
+      retry = el('button', {
+        type: 'button',
+        class: 'el-sync-retry',
+        text: '重试',
+        title: '重试同步',
+        'aria-label': '重试同步'
+      });
+      node.appendChild(retry);
+    }
+    return { main: main, retry: retry };
+  }
+
   function setSyncStatus(status, label) {
     S.syncStatus = status;
     var node = $('elSyncStatus');
     if (!node) return;
+    var meta = SYNC_STATUS_META[status] || SYNC_STATUS_META.local;
+    var parts = ensureSyncStatusStructure(node);
     if (S.syncVisualTimer) {
       clearTimeout(S.syncVisualTimer);
       S.syncVisualTimer = null;
     }
     node.className = 'el-sync ' + 'is-' + status;
-    node.textContent = label || (
-      status === 'synced' ? '已同步' :
-      status === 'syncing' ? '同步中' :
-      status === 'dirty' ? '待同步' :
-      status === 'error' ? '未同步' :
-      '离线模式'
-    );
+    if (parts && parts.main) parts.main.textContent = label || meta.label;
+    if (parts && parts.retry) parts.retry.hidden = !meta.retryable;
     node.setAttribute('data-status', status);
-    node.setAttribute('data-label', node.textContent);
-    node.classList.toggle('is-pulse', status === 'syncing');
+    node.setAttribute('data-label', label || meta.label);
+    node.setAttribute('aria-busy', meta.busy ? 'true' : 'false');
+    node.classList.toggle('is-pulse', !!meta.busy);
+    node.classList.toggle('is-retryable', !!meta.retryable);
     node.classList.remove('is-settled');
-    if (status === 'synced' || status === 'error' || status === 'local') {
+    if (meta.settled) {
       S.syncVisualTimer = setTimeout(function() {
         node.classList.add('is-settled');
         S.syncVisualTimer = null;
       }, 420);
     }
+  }
+
+  function retrySyncFromStatus() {
+    if (S.saveInFlight) return;
+    if (S.syncTimer) {
+      clearTimeout(S.syncTimer);
+      S.syncTimer = null;
+    }
+    saveRemoteState();
   }
 
   async   function loadRemoteState() {
@@ -401,6 +439,7 @@
         body: JSON.stringify({ data: payload, base_revision: S.serverRevision || 0 })
       });
       if (resp.status === 409) {
+        setSyncStatus('merging', '冲突合并中');
         // 版本冲突：重新拉取服务端数据，合并后重试
         var conflict = await resp.json().catch(function(){});
         if (conflict && conflict.server) {
@@ -423,7 +462,7 @@
       if (json.data && json.data.revision) S.serverRevision = json.data.revision;
       setSyncStatus('synced', '已同步');
     } catch (e2) {
-      setSyncStatus('error', '未同步');
+      setSyncStatus('error', '同步失败');
       try { console.warn('[EL] sync failed:', e2 && e2.message); } catch (e3) {}
     } finally {
       S.saveInFlight = false;
@@ -444,7 +483,7 @@
         if ((merged.updatedAt || 0) > (remote.updatedAt || 0) || local.words.length) scheduleSave();
       }
     } catch (e) {
-      setSyncStatus('error', '未同步');
+      setSyncStatus('error', '同步失败');
     }
     renderAll();
   }
@@ -2021,6 +2060,16 @@
     S.eventsBound = true;
 
     safeBind('elBackBtn', 'click', closePage);
+
+    var syncStatusNode = $('elSyncStatus');
+    if (syncStatusNode) {
+      safeBindNode(syncStatusNode, 'click', function(ev) {
+        var target = ev.target;
+        if (!target || !target.closest || !target.closest('.el-sync-retry')) return;
+        ev.preventDefault();
+        retrySyncFromStatus();
+      }, 'elSyncStatus:retry');
+    }
 
     safeBind('elAddWordBtn', 'click', function() {
       handleAddWord();
