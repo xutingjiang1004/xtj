@@ -2026,17 +2026,14 @@
     });
   }
 
-  function setDockBarVisible(visible) {
-    var dockBar = document.querySelector('.dock-bar');
-    if (dockBar) dockBar.style.display = visible ? '' : 'none';
-  }
-
-  function setPageScrollLocked(locked) {
+  function updateSecondaryPageState(open) {
     try {
-      document.body.classList.toggle('english-learning-open', !!locked);
-      document.documentElement.style.overflow = locked ? 'hidden' : '';
-      document.body.style.overflow = locked ? 'hidden' : '';
-      document.body.style.touchAction = locked ? 'none' : '';
+      if (window.XTJSecondaryPageState) {
+        if (open) window.XTJSecondaryPageState.open('english-learning');
+        else window.XTJSecondaryPageState.close('english-learning');
+      } else if (window.restoreMainNavigationState) {
+        window.restoreMainNavigationState();
+      }
     } catch (e) {}
   }
 
@@ -2062,8 +2059,7 @@
       panel.classList.remove('el-opening');
       S.openTimer = null;
     }, 180);
-    setPageScrollLocked(true);
-    setDockBarVisible(false);
+    updateSecondaryPageState(true);
     if (!S.initialized) {
       S.initialized = true;
       applyState(getLocalState());
@@ -2076,26 +2072,32 @@
 
   function closePage() {
     var panel = $('panelEnglishLearning');
-    if (!panel) return;
-    if (S.openTimer) {
-      clearTimeout(S.openTimer);
-      S.openTimer = null;
+    try {
+      if (!panel) return;
+      if (S.openTimer) {
+        clearTimeout(S.openTimer);
+        S.openTimer = null;
+      }
+      if (S.closeTimer) {
+        clearTimeout(S.closeTimer);
+        S.closeTimer = null;
+      }
+      panel.classList.remove('el-opening');
+      panel.classList.add('el-closing');
+      panel.classList.remove('el-show');
+      panel.setAttribute('aria-hidden', 'true');
+      S.closeTimer = setTimeout(function() {
+        try {
+          panel.classList.add('hidden');
+          panel.classList.remove('el-closing');
+        } finally {
+          S.closeTimer = null;
+          if (window.restoreMainNavigationState) window.restoreMainNavigationState();
+        }
+      }, 180);
+    } finally {
+      updateSecondaryPageState(false);
     }
-    if (S.closeTimer) {
-      clearTimeout(S.closeTimer);
-      S.closeTimer = null;
-    }
-    panel.classList.remove('el-opening');
-    panel.classList.add('el-closing');
-    panel.classList.remove('el-show');
-    panel.setAttribute('aria-hidden', 'true');
-    S.closeTimer = setTimeout(function() {
-      panel.classList.add('hidden');
-      panel.classList.remove('el-closing');
-      S.closeTimer = null;
-    }, 180);
-    setPageScrollLocked(false);
-    setDockBarVisible(true);
   }
 
   function bindEventsSafe() {
