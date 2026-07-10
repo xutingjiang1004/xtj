@@ -1771,6 +1771,13 @@ app.use(function(req, res, next) {
   next();
 });
 
+// 阻止敏感路径被静态文件服务泄露
+app.use(function(req, res, next) {
+  var blocked = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/node_modules/', '/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/fix-', '/scan-', '/check-'];
+  for (var i = 0; i < blocked.length; i++) { if (req.path.indexOf(blocked[i]) === 0) return res.status(404).end(); }
+  next();
+});
+
 // 托管前端静态文件（index.html, admin.html, js/ 等）
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
@@ -2503,8 +2510,9 @@ async function extractEmbeddedFiles(text) {
       try {
         // 估算文件大小：base64 长度 × 0.75 ≈ 实际字节数
         var estimatedBytes = Math.ceil(base64Data.length * 0.75);
-        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; continue; }
-        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; break; }
+        if (estimatedBytes > 10 * 1024 * 1024) { extractedText = '\n\n【文件: ' + fileName + ' 超过 10MB 限制，跳过解析】\n\n'; }
+        if (fileIndex > 10) { extractedText = '\n\n【文件数量超过 10 个，跳过剩余文件】\n\n'; fileIndex = 999; }
+        if (!extractedText) {
         var buffer = Buffer.from(base64Data, 'base64');
         if (mimeType === 'application/pdf' && pdfParser) {
           var pdfData = await pdfParser(buffer);
@@ -2521,6 +2529,7 @@ async function extractEmbeddedFiles(text) {
             sheets.push('【工作表: ' + sName + '】\n' + csv);
           });
           extractedText = sheets.join('\n\n');
+        }
       } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
         extractedText = buffer.toString('utf-8');
       } else if (mimeType.startsWith('image/')) {
@@ -8784,11 +8793,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         { role: 'user', content: message }
       ];
       try {
+        var daCtrl = new AbortController();
+        var daTimer = setTimeout(function() { daCtrl.abort(); }, 10000);
         var daResp = await fetch(DEEPSEEK_API_URL, {
           method: 'POST',
+          signal: daCtrl.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
           body: JSON.stringify({ model: usedModel, messages: daMsg, stream: false, temperature: 0.3, max_tokens: 200 })
         });
+        clearTimeout(daTimer);
         if (daResp.ok) {
           var daJson = await daResp.json();
           var daText = (daJson && daJson.choices && daJson.choices[0] && daJson.choices[0].message && daJson.choices[0].message.content) || '';
@@ -9602,8 +9615,11 @@ app.post('/api/agent/english/generate', authenticateUser, rateLimit(60000, 10), 
     var wantsCloze = types.indexOf('cloze') >= 0;
     if (!wantsArticle && !wantsMC && !wantsCloze) wantsMC = true;
 
-    var wordList = sanitized.map(function(en, i) {
-      var orig = words[i];
+    // 按 en 建立索引，避免 sanitized 过滤后索引错位
+    var wordsByEn = {};
+    (words || []).forEach(function(w) { if (w && w.en) wordsByEn[String(w.en).toLowerCase()] = w; });
+    var wordList = sanitized.map(function(en) {
+      var orig = wordsByEn[en];
       var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
       var mastery = orig && orig.mastery != null ? (' mastery=' + Math.max(0, Math.min(100, parseInt(orig.mastery, 10) || 0))) : '';
       return en + (cn ? ' (' + cn + ')' : '') + mastery;
@@ -9958,6 +9974,10 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return !(meta && meta.deleted);
     });
 
+    // 判断是否还有更多（filteredRows 超过 limit 表示有下一页）
+    var hasMore = filteredRows.length > limit;
+    var pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows;
+
     // 内存中稳定排序（created_at > seq > roleWeight）
     function getMsgSortKey(row) {
       var meta = parseMsgMeta(row);
@@ -9966,19 +9986,13 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       var roleWeight = meta.role === 'user' ? 1 : 2;
       return { created: created, seq: seq, roleWeight: roleWeight };
     }
-    var sortedRows = (filteredRows || []).slice().sort(function(a, b) {
+    var sortedRows = pageRows.slice().sort(function(a, b) {
       var A = getMsgSortKey(a);
       var B = getMsgSortKey(b);
       if (A.created !== B.created) return A.created - B.created;
       if (A.seq !== B.seq) return A.seq - B.seq;
       return A.roleWeight - B.roleWeight;
     });
-
-    // ★ U3: 多取的那一条用于判断是否还有更多, 然后去掉
-    var hasMore = (rows || []).length > limit;
-    if (hasMore) {
-      filteredRows = filteredRows.slice(0, limit);
-    }
 
     return res.json({
       ok: true,
