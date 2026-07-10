@@ -50,10 +50,57 @@
     closeFallbackTimer: 0,
     forceClosing: false,
     callingOriginalClose: false,
-    infoOpen: false
+    infoOpen: false,
+    moveRaf: 0,
+    pendingMove: null
   };
 
   var photoSizeCache = Object.create(null);
+
+  function cancelPendingMoveFrame() {
+    if (state.moveRaf) {
+      cancelAnimationFrame(state.moveRaf);
+      state.moveRaf = 0;
+    }
+    state.pendingMove = null;
+  }
+
+  function flushPendingMoveFrame() {
+    var pending = state.pendingMove;
+    state.pendingMove = null;
+    state.moveRaf = 0;
+    if (!pending) return;
+    if (pending.kind === 'pinch') {
+      updatePinch();
+    } else if (pending.kind === 'refresh-single') {
+      refreshSinglePointerStart();
+    } else if (pending.kind === 'pan-or-tap') {
+      updatePanOrTapCandidate(pending.point);
+    } else if (pending.kind === 'pan') {
+      updatePan(pending.point);
+    } else if (pending.kind === 'swipe-dismiss') {
+      updateSwipeDismiss(pending.point);
+    } else if (pending.kind === 'mouse-move') {
+      if (Math.abs(pending.point.x - state.startX) + Math.abs(pending.point.y - state.startY) > 8) {
+        state.moved = true;
+      }
+    }
+  }
+
+  function schedulePointerMoveVisual(kind, point) {
+    state.pendingMove = { kind: kind, point: point };
+    if (state.moveRaf) return;
+    state.moveRaf = requestAnimationFrame(flushPendingMoveFrame);
+  }
+
+  function flushPendingMoveBeforePointerEnd() {
+    if (!state.pendingMove) return;
+    if (state.moveRaf) {
+      cancelAnimationFrame(state.moveRaf);
+      state.moveRaf = 0;
+    }
+    flushPendingMoveFrame();
+  }
 
   function overlay() {
     return document.getElementById('photoPreviewOverlay');
@@ -941,23 +988,21 @@
         state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (state.pointers.size >= 2) {
           if (state.mode !== 'pinch') beginPinch();
-          updatePinch();
+          schedulePointerMoveVisual('pinch');
         } else if (state.mode === 'pinch') {
-          refreshSinglePointerStart();
+          schedulePointerMoveVisual('refresh-single');
         } else if (state.mode === 'pan-or-tap') {
-          updatePanOrTapCandidate({ x: event.clientX, y: event.clientY });
+          schedulePointerMoveVisual('pan-or-tap', { x: event.clientX, y: event.clientY });
         } else if (state.scale > 1.01 || state.mode === 'pan') {
-          updatePan({ x: event.clientX, y: event.clientY });
+          schedulePointerMoveVisual('pan', { x: event.clientX, y: event.clientY });
         } else {
-          updateSwipeDismiss({ x: event.clientX, y: event.clientY });
+          schedulePointerMoveVisual('swipe-dismiss', { x: event.clientX, y: event.clientY });
         }
       } else {
         if (state.mode === 'pan' && state.scale > 1.01) {
-          updatePan({ x: event.clientX, y: event.clientY });
+          schedulePointerMoveVisual('pan', { x: event.clientX, y: event.clientY });
         } else {
-          if (Math.abs(event.clientX - state.startX) + Math.abs(event.clientY - state.startY) > 8) {
-            state.moved = true;
-          }
+          schedulePointerMoveVisual('mouse-move', { x: event.clientX, y: event.clientY });
         }
       }
 
@@ -966,6 +1011,7 @@
     }, true);
 
     function finishPointer(event) {
+      flushPendingMoveBeforePointerEnd();
       if (event.pointerType === 'touch') {
         if (!state.pointers.has(event.pointerId)) return;
         state.pointers.delete(event.pointerId);
@@ -1019,6 +1065,7 @@
 
     surface.addEventListener('pointerup', finishPointer, true);
     surface.addEventListener('pointercancel', function (event) {
+      cancelPendingMoveFrame();
       releasePointerCapture(surface, event.pointerId);
       clearInteractionState();
       clearDismissVisual(true);
@@ -1251,6 +1298,7 @@
     delete window.__xtjPreviewExplicitPhotos;
     window.__xtjPhotoPreviewContext = null;
     clearInteractionState();
+    cancelPendingMoveFrame();
     if (typeof original.closePhotoPreview === 'function') {
       state.callingOriginalClose = true;
       try {
