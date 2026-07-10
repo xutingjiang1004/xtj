@@ -984,6 +984,7 @@
                 <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
             </div>
         </div>
+        <div class="pp-preview-toolbar" role="toolbar" aria-label="照片操作">
         <button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()">
             <span class="ui-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1003,6 +1004,7 @@
         <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
         <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90°" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
         <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
+        </div>
         
         <!-- 照片信息弹窗 -->
         <div class="pp-info-modal" id="ppInfoModal" style="display:none;" onclick="if(event.target===this)window.closePhotoInfo()">
