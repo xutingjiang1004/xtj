@@ -6998,9 +6998,6 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
         .eq('media_url', giftId);
       if (claimCount && claimCount >= claimLimit) { delete claimLocks[lockKey]; return res.status(400).json({ error: '活动名额已满' }); }
     }
-    // 检查是否已领取（使用 actor_key 去重，actor_key = 'pro_claim_' + giftId + '_' + userNameVal）
-    // 注意：actor_key 不加时间戳，确保同用户+同活动只能领取一次
-    var claimActorKey = 'pro_claim_' + giftId + '_' + userNameVal;
     var { data: existingClaim } = await supabase.from('posts')
       .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userNameVal)
