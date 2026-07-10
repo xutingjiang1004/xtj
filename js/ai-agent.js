@@ -1671,6 +1671,7 @@
         answer: card.querySelector('.ai-think-answer'),
         footer: card.querySelector('.ai-msg-footer'),
         retry: card.querySelector('.ai-research-retry'),
+        failureSlot: card.querySelector('.ai-research-failure-slot'),
         canvas: card.querySelector('.ai-research-particles'),
         searchBox: null
       };
@@ -1711,16 +1712,28 @@
     try { answer.innerHTML = renderMarkdown(String(content)); } catch (e) {}
   }
 
+  function syncResearchFailureNote(card, statusText) {
+    if (!isResearchCard(card)) return;
+    var refs = ensureResearchCardRefs(card);
+    if (!refs || !refs.failureSlot) return;
+    var note = refs.failureSlot.querySelector('.ai-research-failure-note');
+    var state = card._researchState || {};
+    var show = !!statusText && (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled');
+    if (!show) {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+      return;
+    }
+    if (!note) {
+      note = el('div', { class: 'ai-error-note ai-research-failure-note' });
+      refs.failureSlot.appendChild(note);
+    }
+    note.textContent = statusText;
+  }
+
   function markResearchCardOutcome(card, nextState, statusText) {
     if (!isResearchCard(card)) return;
     setResearchCardState(card, nextState, { statusText: statusText });
-    var body = card.querySelector('.ai-think-body');
-    if (!body || body.querySelector('.ai-research-failure-note')) return;
-    var note = el('div', { class: 'ai-error-note ai-research-failure-note' });
-    note.textContent = statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
-    var footer = body.querySelector('.ai-msg-footer');
-    if (footer) body.insertBefore(note, footer);
-    else body.appendChild(note);
+    syncResearchFailureNote(card, statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002');
   }
 
   function updateResearchProgress(card, ratio) {
@@ -1791,11 +1804,16 @@
     card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-timeout', 'ai-research-interrupted', 'ai-research-cancelled', 'ai-research-error');
     card.classList.add('ai-research-' + state.state);
     if (state.state === 'interrupted') card.classList.add('ai-research-error');
+    syncResearchFailureNote(card, null);
 
     if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       card.classList.remove('generating');
       state.canToggle = true;
-      setResearchDisclosure(card, state.persistExpanded ? true : !!opts.expanded);
+      var shouldExpandTerminal = state.persistExpanded ? true : !!opts.expanded;
+      if (!shouldExpandTerminal && (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled')) {
+        shouldExpandTerminal = true;
+      }
+      setResearchDisclosure(card, shouldExpandTerminal);
       stopResearchCardAnimation(card);
     } else {
       card.classList.add('generating');
@@ -1842,16 +1860,19 @@
       refs.status.textContent = opts.statusText || '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
     } else if (state.state === 'interrupted') {
       refs.title.textContent = '\u8fde\u63a5\u4e2d\u65ad';
       refs.status.textContent = opts.statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
     } else if (state.state === 'cancelled') {
       refs.title.textContent = '已取消';
       refs.status.textContent = '已取消本次深入研究。';
       refs.meta.textContent = '';
       updateResearchProgress(card, Math.max(0.18, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
     } else if (state.state === 'error') {
       refs.title.textContent = '研究失败，请重试';
       refs.status.textContent = opts.statusText || '本次深入研究未能完成。';
