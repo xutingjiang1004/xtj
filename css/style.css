@@ -7467,7 +7467,7 @@
 .perf-balanced .profile-user-card,
 .perf-balanced .toast,
 .perf-balanced .photo-wall-item,
-.perf-balanced .pp-preview-toolbar {
+#photoPreviewOverlay .pp-preview-toolbar {
   position: absolute;
   left: 50%;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -7479,8 +7479,8 @@
   padding: 8px 10px;
   background: rgba(0,0,0,0.45);
   border-radius: 16px;
-  backdrop-filter: blur(10px) saturate(118%) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(118%) !important;
+  backdrop-filter: blur(10px) saturate(118%);
+  -webkit-backdrop-filter: blur(10px) saturate(118%);
   max-width: calc(100vw - 20px);
   flex-wrap: nowrap;
   overflow: visible;
