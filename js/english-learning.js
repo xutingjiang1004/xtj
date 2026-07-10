@@ -351,17 +351,13 @@
     }
   }
 
-  async function loadRemoteState() {
+  async   function loadRemoteState() {
     var headers = await getAuthHeaders();
-    var body = addLegacyAuth({}, headers);
-    if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+    if (!headers || !headers.Authorization) {
       setSyncStatus('local', '离线模式');
       return null;
     }
     var url = apiBase() + '/english/state';
-    if (!headers.Authorization) {
-      url += '?user_name=' + encodeURIComponent(body.user_name) + '&password_hash=' + encodeURIComponent(body.password_hash);
-    }
     setSyncStatus('syncing', '同步中');
     var resp = await fetch(url, { method: 'GET', headers: headers });
     if (!resp.ok) throw new Error('同步读取失败');
@@ -404,8 +400,7 @@
     try {
       var headers = await getAuthHeaders();
       var payload = buildStatePayload();
-      var body = addLegacyAuth({ data: payload }, headers);
-      if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+      if (!headers || !headers.Authorization) {
         setSyncStatus('local', '离线模式');
         return;
       }
