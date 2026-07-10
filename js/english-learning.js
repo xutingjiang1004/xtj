@@ -137,10 +137,6 @@
     } catch (e) { return window.currentUser || ''; }
   }
 
-  function readPwHash() {
-    try { return sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { return ''; }
-  }
-
   function readUserToken() {
     try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { return ''; }
   }
@@ -159,17 +155,6 @@
     var token = readUserToken();
     if (token) headers.Authorization = 'Bearer ' + token;
     return headers;
-  }
-
-  function addLegacyAuth(body, headers) {
-    if (headers && headers.Authorization) return body;
-    var un = readUserName();
-    var pw = readPwHash();
-    if (un && pw) {
-      body.user_name = un;
-      body.password_hash = pw;
-    }
-    return body;
   }
 
   function uid(prefix) {
