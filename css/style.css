@@ -850,7 +850,6 @@
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
-            will-change: opacity, transform;
         }
         [data-theme="dark"] .post {
             background: rgba(30, 30, 40, 0.92);
@@ -985,7 +984,6 @@
             background: rgba(255, 59, 96, 0.15); color: var(--like-color);
             border-color: rgba(255, 59, 96, 0.3);
             animation: likePulse 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            will-change: transform;
         }
 
         .heart-particle {
@@ -995,7 +993,6 @@
             animation: heartFly 1.2s ease-out forwards;
             z-index: 9999;
             text-shadow: 0 0 12px rgba(255, 59, 96, 0.6);
-            will-change: transform, opacity;
         }
         @keyframes heartFly {
             0%   { transform: translate(0,0) scale(0) rotate(0deg); opacity: 1; }
@@ -1038,7 +1035,6 @@
             display: flex; align-items: center; justify-content: center; z-index: 100;
             opacity: 0; pointer-events: none;
             transition: opacity 0.16s ease;
-            will-change: opacity;
         }
         .modal-overlay.active { opacity: 1; pointer-events: all; }
         .modal-box {
@@ -1048,7 +1044,6 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.2);
             transform: translateY(8px); opacity: 0; transition: transform 0.18s ease, opacity 0.18s ease;
             contain: layout paint style;
-            will-change: transform, opacity;
         }
         .modal-overlay.active .modal-box { transform: translateY(0); opacity: 1; }
         .post-edit-modal {
@@ -1200,7 +1195,6 @@
             display: flex; align-items: center; justify-content: center;
             opacity: 0; pointer-events: none;
             transition: opacity 0.3s cubic-bezier(0.16,1,0.3,1);
-            will-change: opacity;
             -webkit-user-select: none; user-select: none;
             -webkit-touch-callout: none;
             touch-action: none;
@@ -1209,7 +1203,6 @@
         .img-viewer .iv-wrapper {
             display: flex; align-items: center; justify-content: center;
             width: 100%; height: 100%;
-            will-change: opacity;
         }
         .img-viewer .iv-wrapper.instant {
             transition: none !important;
@@ -1228,7 +1221,6 @@
             transform-origin: 0 0;
             transition: transform 0.2s cubic-bezier(0.16,1,0.3,1);
             -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.16,1,0.3,1);
-            will-change: transform;
         }
         .img-viewer img.instant {
             transition: none !important;
@@ -1545,7 +1537,6 @@
         }
         .chat-msg.sent-anim {
             animation: msgSend 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-            will-change: transform, opacity;
         }
         @keyframes msgSlide {
             0% { transform: translateY(6px) scale(0.992); opacity: 0; }
@@ -1630,7 +1621,6 @@
             align-items: center;
             justify-content: center;
             transform: translate3d(0,0,0);
-            will-change: transform;
             pointer-events: none;
             background: linear-gradient(135deg, #f7d76b, #f7b955);
             box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45), 0 4px 10px rgba(26, 71, 48, 0.12);
@@ -1773,8 +1763,8 @@
             box-shadow:
                 0 10px 28px rgba(31, 41, 55, 0.05),
                 inset 0 1px 0 rgba(255,255,255,0.92);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         .stat-empty-rich {
             border-radius: 24px;
@@ -2233,7 +2223,6 @@
             justify-content: center;
             z-index: 10001;
             pointer-events: none;
-            will-change: opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
@@ -2278,7 +2267,6 @@
             overflow: hidden;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
             border: 1px solid rgba(255, 255, 255, 0.4);
-            will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
@@ -2623,7 +2611,6 @@
         .dock-tab .dt-icon,
         .dock-tab .dt-label {
             transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), color 0.24s ease, opacity 0.24s ease;
-            will-change: transform;
         }
 
         .dock-tab.active .dt-icon,
@@ -3393,7 +3380,6 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.2);
             overflow: hidden;
             animation: modalPop 0.3s ease;
-            will-change: transform, opacity;
         }
         @keyframes modalPop {
             0% { opacity: 0; transform: translateY(8px); }
@@ -3552,7 +3538,6 @@
             transition: var(--trans-smooth);
             opacity: 0;
             transform: translateY(10px);
-            will-change: transform, opacity;
         }
         .announcement-item.visible {
             opacity: 1;
@@ -4783,7 +4768,7 @@
             transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .profile-switch input:checked + .profile-slider { background: #059669 !important; }
-        .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); will-change: transform; }
+        .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         .profile-switch input:checked + .profile-slider:before { transform: translateX(20px); }
 
         [data-theme="dark"] .dock-profile-container { background: transparent !important; }
@@ -5440,7 +5425,6 @@
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
             transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s cubic-bezier(0.16,1,0.3,1), filter 0.35s ease, opacity 0.35s ease;
-            will-change: transform;
         }
         .photo-wall-item.pw-stagger-enter {
             opacity: 0;
@@ -5678,7 +5662,6 @@
     overscroll-behavior: none;
     touch-action: none;
     padding: 0;
-    will-change: transform, opacity;
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
     transform-origin: center center;
@@ -5692,7 +5675,6 @@
             display: flex;
         }
         .photo-preview-overlay.active .pp-slide-track {
-            will-change: transform;
             transition: opacity 0.2s ease;
         }
         .photo-preview-overlay.pp-closing {
@@ -5700,7 +5682,6 @@
             background: #000;
             transform: translateZ(0);
             -webkit-transform: translateZ(0);
-            will-change: opacity, transform;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
@@ -5716,7 +5697,6 @@
         #photoPreviewImage {
             transform: translateZ(0);
             -webkit-transform: translateZ(0);
-            will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
@@ -5772,7 +5752,7 @@
             box-shadow: 0 6px 24px rgba(0,0,0,.18);
         }
         .photo-preview-close:active { transform: scale(.92); }
-        .photo-preview-close { will-change: transform; }
+        .photo-preview-close { }
         /* 预览左右切换箭头 */
         .pp-nav-arrow {
             position: absolute;
@@ -5852,7 +5832,6 @@
             display: flex;
             align-items: center;
             height: 100%;
-            will-change: transform;
             touch-action: none;
             -webkit-user-select: none;
             -webkit-touch-callout: none;
@@ -5881,7 +5860,6 @@
             justify-content: center;
             flex-shrink: 0;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0a0a0a 100%);
-            will-change: transform;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
@@ -5912,7 +5890,6 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
@@ -5949,8 +5926,8 @@
             border-radius: 999px;
             background: rgba(15, 23, 42, 0.65);
             border: 1px solid rgba(255,255,255,0.12);
-            backdrop-filter: blur(24px) saturate(150%);
-            -webkit-backdrop-filter: blur(24px) saturate(150%);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
             pointer-events: auto;
             transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16,1,0.3,1);
             opacity: 0;
@@ -6227,7 +6204,6 @@
             -webkit-backdrop-filter: blur(14px) saturate(150%);
             opacity: 0;
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
-            will-change: opacity, transform;
         }
         .upload-progress-overlay.upload-overlay-visible {
             display: flex;
@@ -7557,7 +7533,6 @@
 .perf-balanced .photo-wall-item,
 .perf-lite .photo-wall-item {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.06) !important;
-  will-change: auto !important;
 }
 
 .perf-balanced .photo-wall-item.pw-stagger-enter,
@@ -7708,8 +7683,8 @@
   box-shadow:
     0 26px 62px rgba(64, 112, 84, 0.14),
     0 2px 0 rgba(255, 255, 255, 0.54) inset;
-  backdrop-filter: blur(24px) saturate(138%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(138%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 #statModal .stat-detail-header {
@@ -8265,7 +8240,6 @@
 .chat-list-item {
   animation: xtjFloatIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: var(--xtj-enter-delay, 0ms);
-  will-change: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -9141,7 +9115,6 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 .chat-msg {
   animation: xtjChatMessageIn 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform, opacity;
 }
 
 @keyframes xtjChatMessageIn {
@@ -9963,7 +9936,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 #statModal .stat-user-group {
   background: rgba(238, 249, 242, 0.54) !important;
   border: 1px solid rgba(184, 214, 193, 0.64) !important;
-  border-radius: 24px !important;
+  border-radius: 18px !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34) !important;
   overflow: hidden;
 }
@@ -9972,7 +9945,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   width: 100%;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 24px !important;
+  border-radius: 18px !important;
   background: transparent !important;
   box-shadow: none !important;
   text-align: left;
@@ -15021,7 +14994,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   border-radius: 50%;
   transform: translateZ(0) scale(1);
   transform-origin: 50% 50%;
-  will-change: transform;
   transition: transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -15633,7 +15605,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   #editPostModal .post-action-box,
   #delModal .post-action-box {
     padding: 20px 18px 18px !important;
-    border-radius: 24px !important;
+    border-radius: 18px !important;
   }
 
   .post-action-actions,
@@ -16180,8 +16152,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
   border: 1px solid rgba(173, 221, 194, .55);
   box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
-  backdrop-filter: blur(18px) saturate(145%);
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
+
   border-radius: 18px;
 }
 
@@ -16190,8 +16161,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
   border: 1px solid rgba(173, 221, 194, .55);
   box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
-  backdrop-filter: blur(18px) saturate(145%);
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
+
   border-radius: 18px;
   padding: 0;
   display: flex;
@@ -16540,24 +16510,25 @@ button.post-publish:hover {
 }
 
 .chat-list-item {
-  background: var(--xtj-bg-card);
-  border: 1px solid var(--xtj-border-soft);
-  border-radius: var(--xtj-radius-md);
-  margin: 6px 8px;
-  box-shadow: var(--xtj-shadow-soft-2);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--xtj-border-soft);
+  border-radius: 14px;
+  margin: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .chat-list-item:hover {
-  background: var(--xtj-bg-card-strong);
+  background: rgba(232, 246, 239, 0.62);
   border-color: var(--xtj-border-soft-2);
 }
 
 .chat-list-item.active {
-  background: var(--xtj-bg-card-strong);
+  background: rgba(232, 246, 239, 0.72);
   border-color: rgba(116, 195, 148, 0.6);
-  box-shadow: 0 0 0 1px rgba(160, 225, 189, 0.5), var(--xtj-shadow-soft-2);
+  box-shadow: none;
 }
 
 .chat-messages {
@@ -16686,24 +16657,6 @@ button.post-publish:hover {
 #panelPosts .post-filter-bar,
 #panelPosts .stat-card,
 #panelPosts .post,
-#panelChat .chat-list-item,
-#panelChat .chat-header,
-#panelChat .chat-input-area,
-#panelProfile .profile-user-card,
-#panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
-#panelProfile .profile-settings,
-#panelProfile .profile-totals-bar {
-  border-radius: 24px !important;
-}
-
-#panelPosts nav,
-#panelPosts .publish-box,
-#panelPosts .post-filter-bar,
-#panelPosts .stat-card,
-#panelPosts .post,
-#panelChat .chat-list-item,
 #panelChat .chat-header,
 #panelChat .chat-input-area,
 #panelProfile .profile-user-card,
@@ -16719,25 +16672,20 @@ button.post-publish:hover {
 #panelPosts nav,
 #panelChat .chat-header,
 #panelChat .chat-input-area {
-  background: linear-gradient(180deg, rgba(252, 255, 254, 0.88), rgba(245, 251, 248, 0.82)) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
-  backdrop-filter: blur(18px) saturate(145%);
+  background: linear-gradient(180deg, rgba(252, 255, 254, 0.90), rgba(245, 251, 248, 0.86)) !important;
 }
 
 #panelPosts .publish-box,
 #panelPosts .post-filter-bar,
 #panelPosts .stat-card,
 #panelPosts .post,
-#panelChat .chat-list-item,
 #panelProfile .profile-user-card,
 #panelProfile .profile-activity-card,
 #panelProfile .xtj-vip-card,
 #panelProfile .profile-pro-style-entry,
 #panelProfile .profile-settings,
 #panelProfile .profile-totals-bar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 251, 249, 0.86)) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
-  backdrop-filter: blur(18px) saturate(145%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 251, 249, 0.82)) !important;
 }
 
 #panelPosts .publish-box,
@@ -16788,6 +16736,10 @@ button.post-publish:hover {
 
 #panelChat .dock-chat-container {
   min-height: calc(100dvh - 178px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.70), rgba(243, 250, 247, 0.62));
+  border: 1px solid rgba(127, 191, 168, 0.16);
+  border-radius: 18px;
+  overflow: hidden;
 }
 
 #panelChat #dockChatListView,
@@ -16800,16 +16752,34 @@ button.post-publish:hover {
 #panelChat .chat-list,
 #panelChat .chat-messages {
   min-height: 0;
-  padding: 6px 8px 14px;
+  padding: 0 14px 14px;
+}
+
+#panelChat .chat-list {
+  background: transparent;
+  border-radius: 0;
 }
 
 #panelChat .chat-list-item {
-  margin: 0 0 10px !important;
-  padding: 14px 16px !important;
+  margin: 0 !important;
+  padding: 14px 2px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(127, 191, 168, 0.16) !important;
+  border-radius: 14px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+#panelChat .chat-list-item:hover,
+#panelChat .chat-list-item.active,
+#panelChat .chat-list-item.unread {
+  background: rgba(232, 246, 239, 0.62) !important;
 }
 
 #panelChat .chat-list-item:last-child {
-  margin-bottom: 0 !important;
+  border-bottom: 0 !important;
 }
 
 #panelChat .chat-list-empty,
@@ -16914,8 +16884,8 @@ button.post-publish:hover {
   }
 
   #panelChat .chat-list-item {
-    border-radius: 22px !important;
-    margin-bottom: 8px !important;
+    border-radius: 12px !important;
+    margin-bottom: 0 !important;
   }
 
   #panelProfile .profile-totals-bar {
