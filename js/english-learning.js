@@ -310,6 +310,7 @@
     S.mistakes = state.mistakes;
     S.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings || {});
     S.lastRemoteUpdatedAt = state.updatedAt || 0;
+    S.serverRevision = state.revision || 0;
   }
 
   function buildStatePayload() {
@@ -351,17 +352,13 @@
     }
   }
 
-  async function loadRemoteState() {
+  async   function loadRemoteState() {
     var headers = await getAuthHeaders();
-    var body = addLegacyAuth({}, headers);
-    if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+    if (!headers || !headers.Authorization) {
       setSyncStatus('local', '离线模式');
       return null;
     }
     var url = apiBase() + '/english/state';
-    if (!headers.Authorization) {
-      url += '?user_name=' + encodeURIComponent(body.user_name) + '&password_hash=' + encodeURIComponent(body.password_hash);
-    }
     setSyncStatus('syncing', '同步中');
     var resp = await fetch(url, { method: 'GET', headers: headers });
     if (!resp.ok) throw new Error('同步读取失败');
@@ -404,24 +401,38 @@
     try {
       var headers = await getAuthHeaders();
       var payload = buildStatePayload();
-      var body = addLegacyAuth({ data: payload }, headers);
-      if (!headers.Authorization && (!body.user_name || !body.password_hash)) {
+      if (!headers || !headers.Authorization) {
         setSyncStatus('local', '离线模式');
         return;
       }
       setSyncStatus('syncing', '同步中');
+      payload.base_revision = S.serverRevision || 0;
       var resp = await fetch(apiBase() + '/english/state', {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify({ data: payload, base_revision: S.serverRevision || 0 })
       });
+      if (resp.status === 409) {
+        // 版本冲突：重新拉取服务端数据，合并后重试
+        var conflict = await resp.json().catch(function(){});
+        if (conflict && conflict.server) {
+          var merged = mergeStates(payload, conflict.server);
+          S.serverRevision = conflict.server.revision || 0;
+          payload.base_revision = S.serverRevision;
+          resp = await fetch(apiBase() + '/english/state', {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({ data: merged, base_revision: S.serverRevision })
+          });
+        }
+      }
       if (!resp.ok) {
-        var err = '';
-        try { var ej = await resp.json(); err = ej && ej.error || ''; } catch (e) {}
-        throw new Error(err || '同步保存失败');
+        var errMsg = '';
+        try { var ej2 = await resp.json(); errMsg = ej2 && ej2.error || ''; } catch (e) {}
+        throw new Error(errMsg || '同步保存失败');
       }
       var json = await resp.json();
       if (!json.ok) throw new Error(json.error || '同步保存失败');
+      if (json.data && json.data.revision) S.serverRevision = json.data.revision;
       setSyncStatus('synced', '已同步');
     } catch (e2) {
       setSyncStatus('error', '未同步');
@@ -1231,7 +1242,7 @@
     updateOfflinePracticeState(quiz);
     var article = String(quiz.article || '(本轮未生成文章)');
     text.innerHTML = buildHighlightedArticle(article, quiz.words || []);
-    if (meta) meta.textContent = (quiz.words.length || 0) + ' words 路 ' + (quiz.level || '').toUpperCase();
+    if (meta) meta.textContent = (quiz.words.length || 0) + ' words · ' + (quiz.level || '').toUpperCase();
     if (wordsBox) {
       wordsBox.innerHTML = '';
       (quiz.words || []).slice(0, 24).forEach(function(w) {
@@ -1363,7 +1374,10 @@
     while (questions.length < qcount && sample.length) {
       var w2 = sample[questions.length % sample.length];
       var correctOpt2 = w2.cn || ('释义: ' + w2.en);
-      var pool2 = [correctOpt2, '错误', '???', '??'];
+      var pool2 = [correctOpt2];
+      // 用其他单词的释义做干扰项
+      sample.forEach(function(x) { if (x.en !== w2.en && pool2.length < 4) pool2.push(x.cn || ('释义: ' + x.en)); });
+      while (pool2.length < 2) pool2.push('(暂无释义)');
       pool2 = shuffle(pool2);
       questions.push({
         id: 'q' + (qid++),
@@ -1371,7 +1385,7 @@
         question: '"' + w2.en + '" 的中文释义是?',
         options: pool2,
         answer: indexOfAnswer(pool2, correctOpt2),
-        explain: '错误错误'
+        explain: '正确答案: ' + (w2.cn || '暂无释义')
       });
     }
 
@@ -1828,7 +1842,7 @@
     var score = $('elResultScore');
     var text = $('elResultText');
     if (!card) return;
-    if (score) score.textContent = correct + ' / ' + total + ' 路 ' + pct + '%';
+    if (score) score.textContent = correct + ' / ' + total + ' · ' + pct + '%';
     if (text) {
       text.textContent = pct >= 80 ? '太棒了，掌握得很好！' :
         pct >= 60 ? '不错哦，继续加油！' :
@@ -1851,7 +1865,7 @@
           var ua = quiz.answers[q.id];
           if (typeof ua === 'number' && ua === oi && ua !== parseInt(q.answer, 10)) opt.classList.add('wrong');
         });
-        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' 路 ' + (q.explain || ''));
+        revealExplain(q.id, '正确答案: ' + optionText(q.options, q.answer) + ' · ' + (q.explain || ''));
       } else if (q.type === 'cloze') {
         (q.blanks || []).forEach(function(blank, bi) {
           document.querySelectorAll('.el-blank-sel[data-qid="' + q.id + '"][data-bi="' + bi + '"]').forEach(function(sel) {
