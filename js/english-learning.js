@@ -638,6 +638,7 @@
       script.async = true;
       script.onload = function() { resolve(window.ENGLISH_WORD_DICT || null); };
       script.onerror = function() {
+        englishDictionaryPromise = null;
         try { console.warn('[EL] English dictionary failed to load'); } catch (e) {}
         resolve(null);
       };

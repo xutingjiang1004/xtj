@@ -128,6 +128,15 @@ test('photo preview pointermove visual work is coalesced with rAF', function(){
   assert.ok(s.indexOf('requestAnimationFrame(flushPendingMoveFrame)') >= 0, 'missing rAF flush');
   assert.ok(s.indexOf('cancelPendingMoveFrame') >= 0, 'missing pending rAF cleanup');
 });
+test('photo preview pending swipe-dismiss flushes before pointerup end logic', function(){
+  var s = read('js/photo-wall/preview-hotfix.js');
+  assert.ok(/function flushPendingMoveBeforePointerEnd\(\) \{[\s\S]*state\.pendingMove[\s\S]*cancelAnimationFrame\(state\.moveRaf\)[\s\S]*flushPendingMoveFrame\(\);[\s\S]*\}/.test(s), 'missing synchronous pending-move flush helper');
+  var i = s.indexOf('function finishPointer(event)');
+  assert.ok(i >= 0, 'missing finishPointer');
+  var body = s.slice(i, s.indexOf("if (event.pointerType === 'touch')", i));
+  assert.ok(body.indexOf('flushPendingMoveBeforePointerEnd();') >= 0, 'pointerup does not flush pending move first');
+  assert.ok(body.indexOf('cancelPendingMoveFrame();') < 0, 'pointerup still discards pending move');
+});
 test('btn-primary hidden shimmer has no infinite animation', function(){
   var css = read('css/ui-enhance.css');
   var i = css.indexOf('.btn-primary::before');
@@ -139,6 +148,10 @@ test('index no longer statically loads english-dict.js', function(){
   var html = read('index.html');
   assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'static english-dict.js script remains');
   assert.ok(/meta name="xtj-english-dict-src" content="js\/english-dict\.min\.js\?v=/.test(html), 'dynamic dictionary source meta missing');
+});
+test('english dictionary loader clears failed promise for retry', function(){
+  var s = read('js/english-learning.js');
+  assert.ok(/script\.onerror = function\(\) \{[\s\S]*englishDictionaryPromise = null;[\s\S]*resolve\(null\);[\s\S]*\};/.test(s), 'failed dictionary load cannot retry');
 });
 test('performance profile skips duplicate class mutations', function(){
   var s = read('js/performance.js');

@@ -93,6 +93,15 @@
     state.moveRaf = requestAnimationFrame(flushPendingMoveFrame);
   }
 
+  function flushPendingMoveBeforePointerEnd() {
+    if (!state.pendingMove) return;
+    if (state.moveRaf) {
+      cancelAnimationFrame(state.moveRaf);
+      state.moveRaf = 0;
+    }
+    flushPendingMoveFrame();
+  }
+
   function overlay() {
     return document.getElementById('photoPreviewOverlay');
   }
@@ -1002,7 +1011,7 @@
     }, true);
 
     function finishPointer(event) {
-      cancelPendingMoveFrame();
+      flushPendingMoveBeforePointerEnd();
       if (event.pointerType === 'touch') {
         if (!state.pointers.has(event.pointerId)) return;
         state.pointers.delete(event.pointerId);
