@@ -5,7 +5,20 @@
   window.__xtjAnimationsLoaded = true;
 
   function hasGSAP() {
-    return typeof gsap !== 'undefined';
+    return typeof window.gsap !== 'undefined';
+  }
+
+  function runWithGSAP(fn) {
+    if (hasGSAP()) {
+      fn();
+      return true;
+    }
+    if (typeof window.ensureGsap === 'function') {
+      window.ensureGsap().then(function(loadedGsap) {
+        if (loadedGsap && hasGSAP()) fn();
+      });
+    }
+    return false;
   }
 
   function perfMode() {
@@ -53,7 +66,8 @@
     if (!overlay) return;
     if (_origOpenModal) _origOpenModal(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
-    if (!hasGSAP() || perfMode() === 'lite') return;
+    if (perfMode() === 'lite') return;
+    runWithGSAP(function() {
     var box = overlay.querySelector('.modal-box');
     if (!box) return;
     var cleanup = withTransientWillChange(box, 'transform, opacity');
@@ -67,6 +81,7 @@
     gsap.fromTo(box, { y: 22, scale: 0.98, opacity: 0 }, {
       y: 0, scale: 1, opacity: 1, duration: 0.36, ease: 'power3.out', clearProps: 'transform,opacity',
       onComplete: cleanup
+    });
     });
   };
 
@@ -104,7 +119,8 @@
     var wasLiked = btn && btn.classList && btn.classList.contains('liked');
     if (!_origToggleLike) return;
     var result = await _origToggleLike(btn, postId);
-    if (!btn || wasLiked || !btn.classList.contains('liked') || !hasGSAP() || perfMode() === 'lite') return result;
+    if (!btn || wasLiked || !btn.classList.contains('liked') || perfMode() === 'lite') return result;
+    runWithGSAP(function() {
     var cleanup = withTransientWillChange(btn, 'transform');
     gsap.fromTo(btn, { scale: 1 }, {
       scale: perfMode() === 'balanced' ? 1.08 : 1.18,
@@ -114,6 +130,7 @@
       repeat: 1,
       clearProps: 'transform',
       onComplete: cleanup
+    });
     });
     return result;
   };
@@ -125,7 +142,8 @@
       return;
     }
     if (_origOpenComment) _origOpenComment(postId);
-    if (!hasGSAP() || perfMode() === 'lite') return;
+    if (perfMode() === 'lite') return;
+    runWithGSAP(function() {
     var overlay = document.getElementById('commentModal');
     if (!overlay) return;
     var box = overlay.querySelector('.modal-box');
@@ -134,6 +152,7 @@
     gsap.fromTo(box, { y: 16, opacity: 0 }, {
       y: 0, opacity: 1, duration: perfMode() === 'balanced' ? 0.22 : 0.32, ease: 'power2.out',
       clearProps: 'transform,opacity', onComplete: cleanup
+    });
     });
   };
 
@@ -161,7 +180,8 @@
     var already = document.querySelector('.post.xtj-expanded');
     if (already && already !== post) collapsePost(already);
     post.classList.add('xtj-expanded');
-    if (!hasGSAP() || perfMode() === 'lite') return;
+    if (perfMode() === 'lite') return;
+    runWithGSAP(function() {
     var cleanup = withTransientWillChange(post, 'transform');
     gsap.to(post, {
       scale: 1.01,
@@ -171,11 +191,13 @@
       clearProps: 'transform',
       onComplete: cleanup
     });
+    });
   }
 
   function collapsePost(post) {
     post.classList.remove('xtj-expanded');
-    if (!hasGSAP() || perfMode() === 'lite') return;
+    if (perfMode() === 'lite') return;
+    runWithGSAP(function() {
     var cleanup = withTransientWillChange(post, 'transform');
     gsap.to(post, {
       scale: 1,
@@ -184,6 +206,7 @@
       ease: 'power2.out',
       clearProps: 'transform',
       onComplete: cleanup
+    });
     });
   }
 })();
