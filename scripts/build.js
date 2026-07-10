@@ -1,4 +1,5 @@
 const { execSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,6 +7,34 @@ const ROOT = path.resolve(__dirname, '..');
 const TERSER = path.resolve(ROOT, 'node_modules', '.bin', 'terser');
 const CSSO = path.resolve(ROOT, 'node_modules', '.bin', 'csso');
 const CLEAN_CSS = path.resolve(ROOT, 'node_modules', '.bin', 'cleancss');
+
+
+function contentHash(filePath) {
+  const fullPath = path.resolve(ROOT, filePath);
+  if (!fs.existsSync(fullPath)) return null;
+  return crypto.createHash('sha256').update(fs.readFileSync(fullPath)).digest('hex').slice(0, 10);
+}
+
+function updateIndexAssetVersions() {
+  const indexPath = path.resolve(ROOT, 'index.html');
+  if (!fs.existsSync(indexPath)) return false;
+  let html = fs.readFileSync(indexPath, 'utf8');
+  let changed = false;
+  html = html.replace(/\b(href|src)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(match, attr, assetPath) {
+    const hash = contentHash(assetPath);
+    if (!hash) return match;
+    const next = attr + '="' + assetPath + '?v=' + hash + '"';
+    if (next !== match) changed = true;
+    return next;
+  });
+  if (changed) {
+    fs.writeFileSync(indexPath, html);
+    console.log('[HASH] index.html local CSS/JS query strings updated');
+  } else {
+    console.log('[HASH] index.html local CSS/JS query strings already current');
+  }
+  return changed;
+}
 
 function quote(value) {
   return '"' + String(value).replace(/"/g, '\\"') + '"';
@@ -18,7 +47,7 @@ function cliCommand(binPath, args) {
     if (!fs.existsSync(cmdPath)) cmdPath = binPath;
     return quote(cmdPath) + (quotedArgs ? ' ' + quotedArgs : '');
   }
-  return 'sh ' + quote(binPath) + (quotedArgs ? ' ' + quotedArgs : '');
+  return quote(binPath) + (quotedArgs ? ' ' + quotedArgs : '');
 }
 
 const JS_FILES = [
@@ -135,6 +164,8 @@ const jsResults = JS_FILES.map(function(f) { return minifyJS(f, OPTIONAL_JS.inde
 // Minify CSS
 console.log('\n--- Minifying CSS ---');
 const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
+
+updateIndexAssetVersions();
 
 const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length;
 
