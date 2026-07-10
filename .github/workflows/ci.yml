@@ -9,45 +9,131 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci
-      - run: npm test
-      - name: Check for garbled visible strings
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run project tests
+        run: npm test
+
+      - name: Check known visible mojibake
         run: |
-          for f in js/ai-agent.js js/english-learning.js; do
-            while IFS= read -r line; do
-              case "$line" in \*\ /\*|\/\/*|*) continue ;; esac
-              if echo "$line" | grep -qF '鈥' || echo "$line" | grep -qF '错误错误'; then
-                echo "FAIL: $f"
-                exit 1
-              fi
-            done < "$f"
-          done
-          echo "OK: No garbled visible strings"
-      - name: Check no legacy auth
+          node <<'NODE'
+          const fs = require('fs');
+
+          const files = [
+            'js/ai-agent.js',
+            'js/english-learning.js'
+          ];
+
+          const badMarkers = [
+            '鈻?/span>',
+            '查看思考过程?(',
+            '步?',
+            '鏈懡涓?',
+            '错误错误'
+          ];
+
+          function stripComments(source) {
+            return source
+              .replace(/\/\*[\s\S]*?\*\//g, '')
+              .replace(/^\s*\/\/.*$/gm, '');
+          }
+
+          const findings = [];
+
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            const executableSource = stripComments(source);
+
+            for (const marker of badMarkers) {
+              if (executableSource.includes(marker)) {
+                findings.push(`${file}: ${marker}`);
+              }
+            }
+          }
+
+          if (findings.length > 0) {
+            console.error('Visible mojibake found:');
+            findings.forEach(item => console.error(`- ${item}`));
+            process.exit(1);
+          }
+
+          console.log('OK: no known visible mojibake found');
+          NODE
+
+      - name: Check no legacy auth runtime references
         run: |
-          if grep -qF 'password_hash' js/english-learning.js; then
-            echo "FAIL: password_hash still referenced"
-            exit 1
-          fi
-          echo "OK: No legacy auth"
+          node <<'NODE'
+          const fs = require('fs');
+
+          let source = fs.readFileSync(
+            'js/english-learning.js',
+            'utf8'
+          );
+
+          source = source
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+
+          const forbidden = [
+            'password_hash',
+            'addLegacyAuth',
+            'readPwHash'
+          ];
+
+          const found = forbidden.filter(item =>
+            source.includes(item)
+          );
+
+          if (found.length > 0) {
+            console.error(
+              'Legacy auth references found:',
+              found.join(', ')
+            );
+            process.exit(1);
+          }
+
+          console.log(
+            'OK: no legacy auth runtime references'
+          );
+          NODE
 
   lint:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci
-      - run: node --check render-api/server.js
-      - run: node --check js/core.js
-      - run: node --check js/ai-agent.js
-      - run: node --check js/english-learning.js
-      - run: node --check js/english-dict.js
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check server syntax
+        run: node --check render-api/server.js
+
+      - name: Check core syntax
+        run: node --check js/core.js
+
+      - name: Check AI syntax
+        run: node --check js/ai-agent.js
+
+      - name: Check English learning syntax
+        run: node --check js/english-learning.js
+
+      - name: Check dictionary syntax
+        run: node --check js/english-dict.js
+
       - run: echo "ALL SYNTAX CHECKS PASSED"
