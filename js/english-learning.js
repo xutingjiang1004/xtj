@@ -1140,6 +1140,7 @@
         topic: S.settings.topic || '',
         time: now()
       };
+      updateOfflinePracticeState(S.currentQuiz);
       renderArticle(S.currentQuiz);
       renderQuestions(S.currentQuiz);
       switchTab('practice');
