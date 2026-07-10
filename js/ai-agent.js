@@ -2948,7 +2948,7 @@
             }
           }
           if (searchResults.length > 5) {
-            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 鏉℃潵婧?/span>';
+            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
           }
           searchBox.innerHTML = searchHtml;
           var thinkBody = node.querySelector('.ai-think-body');
