@@ -4438,15 +4438,24 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
   try {
     var userName = req.userName;
     var mediaUrl = String(req.body && req.body.media_url || '').trim();
-    var contentType = req.body && req.body.content_type || '';
+    var content = String(req.body && req.body.content || '{}').trim();
+    var actorKey = String(req.body && req.body.actor_key || '').trim();
     if (!mediaUrl) return res.status(400).json({ error: '缺少图片地址' });
+    if (!actorKey) actorKey = 'photo_' + Date.now();
     var { data, error } = await supabase.from('posts').insert([{
       user_name: userName,
       media_url: mediaUrl,
       media_type: '__photo_wall__',
-      content: contentType
-    }]).select('id,user_name,media_url,content,created_at').maybeSingle();
-    if (error) return res.status(500).json({ error: '保存失败' });
+      content: content,
+      actor_key: actorKey
+    }]).select('id,user_name,media_url,content,created_at,views,actor_key').maybeSingle();
+    if (error) {
+      try {
+        var pathMatch = mediaUrl.match(/\/uploads\/(photos\/.+)/);
+        if (pathMatch) supabase.storage.from('uploads').remove([pathMatch[1]]);
+      } catch (_) {}
+      return res.status(500).json({ error: '保存失败' });
+    }
     return res.json({ ok: true, data: data });
   } catch (e) { return res.status(500).json({ error: '服务器错误' }); }
 });
