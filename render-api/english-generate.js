@@ -3,6 +3,7 @@
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const HTML_TAG_RE = /<\s*\/?\s*[a-z][^>]*>/i;
 const WORD_RE = /^[a-zA-Z\s\-']+$/;
+const QUESTION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
 class EnglishGenerateError extends Error {
   constructor(code, message) {
@@ -136,7 +137,8 @@ function validateEnglishGenerateOutput(data, request) {
     if (!WORD_RE.test(clean)) throw new EnglishGenerateError('INVALID_OUTPUT', 'words_used 格式错误');
     return clean;
   });
-  if (!Array.isArray(data.questions) || data.questions.length < 1 || data.questions.length > request.question_count) {
+  var expectsQuestions = request.types.indexOf('mc') >= 0 || request.types.indexOf('cloze') >= 0;
+  if (!Array.isArray(data.questions) || data.questions.length > request.question_count || (expectsQuestions && data.questions.length < 1)) {
     throw new EnglishGenerateError('INVALID_OUTPUT', 'questions 格式错误');
   }
 
@@ -150,6 +152,7 @@ function validateEnglishGenerateOutput(data, request) {
       throw new EnglishGenerateError('INVALID_OUTPUT', 'id 格式错误');
     }
     var cleanId = safeModelText(String(questionId), 80, 'id', false);
+    if (!QUESTION_ID_RE.test(cleanId)) throw new EnglishGenerateError('INVALID_OUTPUT', 'id 格式错误');
     if (seenQuestionIds[cleanId]) throw new EnglishGenerateError('INVALID_OUTPUT', 'id 重复');
     seenQuestionIds[cleanId] = true;
     var base = {
@@ -167,6 +170,8 @@ function validateEnglishGenerateOutput(data, request) {
     if (!Array.isArray(question.blanks) || question.blanks.length < 1 || question.blanks.length > 10) {
       throw new EnglishGenerateError('INVALID_OUTPUT', 'blanks 格式错误');
     }
+    var placeholderCount = (base.context.match(/___/g) || []).length;
+    if (placeholderCount !== question.blanks.length) throw new EnglishGenerateError('INVALID_OUTPUT', 'blanks 占位符数量不匹配');
     base.blanks = question.blanks.map(function(blank) {
       if (!isPlainObject(blank)) throw new EnglishGenerateError('INVALID_OUTPUT', 'blank 格式错误');
       var options = validateOptions(blank.options, 2, 6);
@@ -180,7 +185,7 @@ function validateEnglishGenerateOutput(data, request) {
   });
 
   var totalAnswerable = questions.reduce(function(sum, question) { return sum + answerableCount(question); }, 0);
-  if (totalAnswerable !== request.question_count) {
+  if (expectsQuestions ? totalAnswerable !== request.question_count : totalAnswerable !== 0) {
     throw new EnglishGenerateError('INVALID_OUTPUT', '可作答题量不足');
   }
 

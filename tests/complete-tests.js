@@ -285,7 +285,10 @@ test('legacy feature loaders and broad text scans are removed', function(){
 test('photo preview has maintainable source and no global error suppression', function(){
   var source = read('js/photo-wall/preview.js');
   var html = read('index.html');
-  assert.ok(source.indexOf('function onLoad()') >= 0 && source.indexOf('function onErr()') >= 0, 'named preview handlers missing');
+  assert.ok(source.indexOf('function handleLoad()') >= 0 && source.indexOf('function handleError()') >= 0, 'slide preview handlers missing');
+  assert.ok(source.indexOf('function handleOpenLoad()') >= 0 && source.indexOf('function handleOpenError()') >= 0 && source.indexOf('function cleanupOpenListeners()') >= 0, 'open preview handlers missing');
+  assert.strictEqual(source.indexOf('function onLoad()'), -1, 'legacy onLoad handler remains');
+  assert.strictEqual(source.indexOf('function onErr()'), -1, 'legacy onErr handler remains');
   assert.ok(source.indexOf('onErr is not defined') < 0 && source.indexOf('onLoad is not defined') < 0, 'preview source contains known error');
   assert.ok(html.indexOf('Suppressed preview.min.js known bug') < 0, 'preview error suppression remains');
   assert.ok(read('scripts/build.js').indexOf("'js/photo-wall/preview.js'") >= 0, 'preview source is not built');
