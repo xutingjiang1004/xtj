@@ -843,3 +843,84 @@
     display: block !important;
   }
 }
+
+/* Hotfix: keep the bottom Dock fully visible on iPad/wide touch viewports. */
+@media (min-width: 1024px) {
+  .dock-bar {
+    position: fixed !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: max(18px, env(safe-area-inset-bottom, 0px)) !important;
+    transform: translate(-50%, 0) !important;
+    opacity: 1 !important;
+  }
+  .dock-bar:hover,
+  .dock-bar:focus-within {
+    transform: translate(-50%, 0) !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Hotfix: resolve conflicting iPad/desktop post-grid rules without changing DOM. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  #panelPosts .wrap,
+  #panelPosts.active .wrap {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "stats" "publish" "filter" "feed" !important;
+    gap: 16px !important;
+    width: min(100%, calc(100vw - 32px)) !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+  }
+  #panelPosts .wrap > .stats,
+  #panelPosts.active .wrap > .stats {
+    grid-area: stats !important;
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    position: static !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
+  #panelPosts .wrap > #publishBox,
+  #panelPosts .wrap > #postFilterBar,
+  #panelPosts .wrap > #feed,
+  #panelPosts.active .wrap > #publishBox,
+  #panelPosts.active .wrap > #postFilterBar,
+  #panelPosts.active .wrap > #feed,
+  #panelPosts .wrap > #feed > .post,
+  #panelPosts.active .wrap > #feed > .post {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+  #panelPosts .wrap > #publishBox { grid-area: publish !important; grid-column: 1 / -1 !important; grid-row: auto !important; }
+  #panelPosts .wrap > #postFilterBar { grid-area: filter !important; grid-column: 1 / -1 !important; grid-row: auto !important; }
+  #panelPosts .wrap > #feed { grid-area: feed !important; grid-column: 1 / -1 !important; grid-row: auto !important; display: block !important; }
+}
+
+@media (min-width: 1280px) {
+  #panelPosts .wrap > #publishBox,
+  #panelPosts .wrap > #postFilterBar,
+  #panelPosts .wrap > #feed,
+  #panelPosts .wrap > #feed > .post {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+  #panelPosts .wrap > #feed > .post { max-width: none !important; }
+}

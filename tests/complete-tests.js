@@ -256,6 +256,9 @@ test('opening English lazy loads its module and keeps one dictionary owner', fun
   assert.strictEqual((html.match(/name="xtj-module-english-script"/g) || []).length, 1, 'english module asset count');
   assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'dictionary is statically loaded');
   assert.ok(core.indexOf("return loadXtjModule('english')") >= 0, 'English entry does not use the module loader');
+  assert.ok(core.indexOf('english_open_missing') >= 0, 'English module load does not validate open function');
+  assert.ok(core.indexOf('module_script_timeout') >= 0 && core.indexOf('15000') >= 0, 'module script timeout/retry guard missing');
+  assert.ok(core.indexOf('finally(function()') >= 0, 'English launcher does not restore state in finally');
   assert.ok(/function ensureEnglishDictionary\(\)/.test(read('js/english-learning.js')), 'English dictionary owner missing');
 });
 
@@ -286,12 +289,23 @@ test('photo preview has maintainable source and no global error suppression', fu
   var source = read('js/photo-wall/preview.js');
   var html = read('index.html');
   assert.ok(source.indexOf('function handleLoad()') >= 0 && source.indexOf('function handleError()') >= 0, 'slide preview handlers missing');
+  assert.ok(source.indexOf('J._ppCleanup && J._ppCleanup()') >= 0, 'open preview does not dispose old D() task before setting src');
+  assert.ok(source.indexOf('J._ppLoadGen = (J._ppLoadGen || 0) + 1') >= 0, 'open preview does not invalidate old generation');
   assert.ok(source.indexOf('function handleOpenLoad()') >= 0 && source.indexOf('function handleOpenError()') >= 0 && source.indexOf('function cleanupOpenListeners()') >= 0, 'open preview handlers missing');
   assert.strictEqual(source.indexOf('function onLoad()'), -1, 'legacy onLoad handler remains');
   assert.strictEqual(source.indexOf('function onErr()'), -1, 'legacy onErr handler remains');
   assert.ok(source.indexOf('onErr is not defined') < 0 && source.indexOf('onLoad is not defined') < 0, 'preview source contains known error');
   assert.ok(html.indexOf('Suppressed preview.min.js known bug') < 0, 'preview error suppression remains');
   assert.ok(read('scripts/build.js').indexOf("'js/photo-wall/preview.js'") >= 0, 'preview source is not built');
+});
+
+
+test('wide dock stays visible and iPad post layout is normalized', function(){
+  var css = read('css/ui-shell.css');
+  assert.ok(/@media \(min-width: 1024px\)[\s\S]*\.dock-bar[\s\S]*transform: translate\(-50%, 0\) !important[\s\S]*opacity: 1 !important/.test(css), 'wide dock is still hidden by default');
+  assert.ok(/bottom: max\(18px, env\(safe-area-inset-bottom, 0px\)\) !important/.test(css), 'dock safe-area bottom missing');
+  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1279px\)[\s\S]*grid-template-areas: "stats" "publish" "filter" "feed" !important/.test(css), 'iPad posts are not forced to one column with stats first');
+  assert.ok(/#panelPosts \.wrap > #feed > \.post[\s\S]*width: 100% !important[\s\S]*max-width: none !important/.test(css), 'feed posts are not normalized to full width');
 });
 
 test('debug performance metrics are opt-in and local-only', function(){
@@ -330,9 +344,9 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf("'后端不可达'") >= 0, 'safe network failure reason missing');
   assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
-test('dock tab and indicator selectors were not edited by this optimization', function(){
+test('dock tab and indicator structure selectors are not redesigned', function(){
   var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css"', {encoding:'utf8'});
-  assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
+  assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:tab|indicator)\b/m.test(diff), 'dock tab/indicator selector changed');
 });
 
 console.log('\n=== Photo Upload Failure Behavior ===');

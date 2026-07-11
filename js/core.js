@@ -1855,7 +1855,8 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 var existing = document.querySelector(selector);
                 if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
                 var node = existing || document.createElement('link');
-                function cleanup() { node.onload = null; node.onerror = null; }
+                var timer = setTimeout(function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_style_timeout:' + moduleName)); }, 15000);
+                function cleanup() { clearTimeout(timer); node.onload = null; node.onerror = null; }
                 node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
                 node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_style_failed:' + moduleName)); };
                 if (!existing) {
@@ -1876,7 +1877,8 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 var existing = document.querySelector(selector);
                 if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
                 var node = existing || document.createElement('script');
-                function cleanup() { node.onload = null; node.onerror = null; }
+                var timer = setTimeout(function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_script_timeout:' + moduleName)); }, 15000);
+                function cleanup() { clearTimeout(timer); node.onload = null; node.onerror = null; }
                 node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
                 node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_script_failed:' + moduleName)); };
                 if (!existing) {
@@ -1940,7 +1942,13 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
 
         function ensureEnglishLearningLoaded() {
-            return loadXtjModule('english');
+            return loadXtjModule('english').then(function() {
+                if (!window.EnglishLearning || typeof window.EnglishLearning.open !== 'function') {
+                    delete xtjModulePromises.english;
+                    throw new Error('english_open_missing');
+                }
+                return window.EnglishLearning;
+            });
         }
         window.__xtjEnsureEnglishLearningLoaded = ensureEnglishLearningLoaded;
 
@@ -1986,14 +1994,17 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         window.__xtjOpenAiChat = lazyAiChatLauncher;
 
         function lazyEnglishLearningLauncher() {
-            ensureEnglishLearningLoaded().then(function() {
-                if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-                    window.EnglishLearning.open();
-                    if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
-                }
+            var launcher = document.querySelector('[onclick*="__xtjOpenEnglishLearning"], [data-action="english-learning"]');
+            if (launcher) launcher.disabled = true;
+            if (typeof window.showToast === 'function') window.showToast('英语学习模块加载中，请稍候');
+            return ensureEnglishLearningLoaded().then(function(api) {
+                api.open();
+                if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('英语学习模块加载失败，请稍后重试');
                 console.error('[XTJ] english-learning lazy load failed:', err);
+            }).finally(function() {
+                if (launcher) launcher.disabled = false;
             });
         }
         window.__xtjOpenEnglishLearning = lazyEnglishLearningLauncher;

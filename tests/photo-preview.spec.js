@@ -15,27 +15,46 @@ async function setup(page) {
     await new Promise(resolve => setTimeout(resolve, 120));
     await route.fulfill({ status: 404, contentType: 'text/plain', body: 'slow nope' });
   });
-  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
   await page.addInitScript(() => {
-    window.__listenerStats = { active: 0, max: 0, adds: 0, removes: 0 };
+    const records = new WeakMap();
+    window.__listenerStats = { active: 0, max: 0, adds: 0, removes: 0, duplicateRemoves: 0 };
     const add = EventTarget.prototype.addEventListener;
     const remove = EventTarget.prototype.removeEventListener;
+    function keyFor(type, listener) { return type + '::' + String(listener && (listener.__listenerId || (listener.__listenerId = Math.random()))); }
+    function bucket(target) {
+      let map = records.get(target);
+      if (!map) { map = new Map(); records.set(target, map); }
+      return map;
+    }
     EventTarget.prototype.addEventListener = function(type, listener, options) {
-      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error')) {
-        window.__listenerStats.active += 1;
-        window.__listenerStats.adds += 1;
-        window.__listenerStats.max = Math.max(window.__listenerStats.max, window.__listenerStats.active);
+      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error') && listener) {
+        const map = bucket(this);
+        const key = keyFor(type, listener);
+        if (!map.has(key)) {
+          map.set(key, { type, listener });
+          window.__listenerStats.active += 1;
+          window.__listenerStats.adds += 1;
+          window.__listenerStats.max = Math.max(window.__listenerStats.max, window.__listenerStats.active);
+        }
       }
       return add.call(this, type, listener, options);
     };
     EventTarget.prototype.removeEventListener = function(type, listener, options) {
-      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error')) {
-        window.__listenerStats.active = Math.max(0, window.__listenerStats.active - 1);
-        window.__listenerStats.removes += 1;
+      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error') && listener) {
+        const map = records.get(this);
+        const key = keyFor(type, listener);
+        if (map && map.has(key)) {
+          map.delete(key);
+          window.__listenerStats.active -= 1;
+          window.__listenerStats.removes += 1;
+        } else {
+          window.__listenerStats.duplicateRemoves += 1;
+        }
       }
       return remove.call(this, type, listener, options);
     };
   });
+  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.currentUser="tester";' + script });
   return pageErrors;
 }

@@ -212,6 +212,7 @@
                 t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), q();
                 var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
                 o && o._ppCleanup && o._ppCleanup();
+                o && (o._ppLoadGen = (o._ppLoadGen || 0) + 1, o._ppUrl = null, o._ppListenerUrl = null, o.classList.remove("pp-placeholder"));
                 if (o && (a = o.getBoundingClientRect()), n && a && i && a.width > 0 && a.height > 0 && n.width > 0 && n.height > 0) {
                     i.style.transition = "none", i.style.opacity = "0";
                     var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
@@ -563,6 +564,8 @@
             _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(), _._cleanupOpenListeners = cleanupOpenListeners;
             if (J && S && S.imageUrl) {
                 var oe = C[S.imageUrl];
+                J._ppCleanup && J._ppCleanup(), J._ppLoadGen = (J._ppLoadGen || 0) + 1, J._ppUrl = null, J._ppListenerUrl = null, J.classList.remove("pp-placeholder"),
+                J.style.transform = "", J.style.transformOrigin = "", J.style.borderRadius = "";
                 if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, oe || J.complete) {
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();

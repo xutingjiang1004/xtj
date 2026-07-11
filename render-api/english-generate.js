@@ -197,15 +197,28 @@ function validateEnglishGenerateOutput(data, request) {
 }
 
 function buildMessages(input) {
+  var expectsQuestions = input && Array.isArray(input.types) && (input.types.indexOf('mc') >= 0 || input.types.indexOf('cloze') >= 0);
+  var rules = expectsQuestions ? [
+    '当 types 包含 mc 或 cloze 时，必须准确生成 question_count 对应的总可作答题量。',
+    '每个 mc 计 1 题；每个 cloze blank 计 1 题。',
+    '总可作答题量必须严格等于 question_count，不允许少题、不允许多题、不允许零题、不允许重复 question id。',
+    '只允许生成 types 请求中包含的题型。'
+  ] : [
+    'article-only 模式：types 只有 article。',
+    'questions 必须为 [] 空数组。',
+    '不要生成选择题，不要生成完形填空。',
+    'question_count 在 article-only 模式下不用于生成题目。',
+    'article 必须正常生成；words_used 必须保持正常数组结构。'
+  ];
   var instruction = [
     '请根据以下受控参数生成英语学习材料，并且只输出 JSON 对象。',
     '输出结构必须为 {"article":"...","words_used":["word"],"questions":[...]}。',
     '选择题必须有 4 个 options，answer 是 0 到 3 的数字下标。',
-    '完形填空使用现有 blanks 数组结构，每个 blank 包含 options、answer、explain。',
-    '必须准确生成 question_count 对应的可作答题量：每个选择题计 1 题，每个完形填空 blank 计 1 题；总可作答题量必须等于 question_count，不能少题、零题或重复 id。',
+    '完形填空使用现有 blanks 数组结构，每个 blank 包含 options、answer、explain。'
+  ].concat(rules, [
     '不得输出 HTML、脚本、Markdown 代码块或 JSON 之外的文字。',
     '参数：' + JSON.stringify(input)
-  ].join('\n');
+  ]).join('\n');
   return [
     { role: 'system', content: '你是英语教学 AI。严格遵守 JSON schema，不得添加额外文字。' },
     { role: 'user', content: instruction }
@@ -280,5 +293,6 @@ module.exports = {
   registerEnglishGenerateRoute,
   validateEnglishGenerateInput,
   validateEnglishGenerateOutput,
-  answerableCount
+  answerableCount,
+  buildMessages
 };

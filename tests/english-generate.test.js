@@ -8,7 +8,8 @@ const {
   createEnglishGenerateHandler,
   registerEnglishGenerateRoute,
   validateEnglishGenerateInput,
-  validateEnglishGenerateOutput
+  validateEnglishGenerateOutput,
+  buildMessages
 } = require('../render-api/english-generate');
 
 function validBody(overrides) {
@@ -149,6 +150,32 @@ test('successful DeepSeek response has an explicit source and abort signal', asy
   assert.equal(result.res.body.source, 'deepseek');
   assert.equal(captured.response_format.type, 'json_object');
   assert.ok(captured.signal instanceof AbortSignal);
+});
+
+
+test('article-only handler prompt requires empty questions and returns 200 with zero questions', async function() {
+  var capturedMessages;
+  var articleOnlyBody = validBody({ types: ['article'], question_count: 4 });
+  var result = await invoke({
+    body: articleOnlyBody,
+    callDeepSeek: async function(messages) {
+      capturedMessages = messages;
+      return { content: JSON.stringify({ article: 'Apple helps learners practice vocabulary.', words_used: ['apple'], questions: [] }), usage: null };
+    }
+  });
+  var prompt = capturedMessages.map(function(m) { return m.content; }).join('\n');
+  assert.match(prompt, /questions 必须为 \[\] 空数组/);
+  assert.doesNotMatch(prompt, /不能少题、零题|不能零题/);
+  assert.equal(result.res.statusCode, 200);
+  assert.equal(result.res.body.ok, true);
+  assert.equal(result.res.body.data.questions.length, 0);
+});
+
+test('question prompt still strictly requires question_count for mc or cloze', function() {
+  var prompt = buildMessages(validateEnglishGenerateInput(validBody({ types: ['article', 'mc'], question_count: 3 }))).map(function(m) { return m.content; }).join('\n');
+  assert.match(prompt, /严格等于 question_count/);
+  assert.match(prompt, /每个 mc 计 1 题；每个 cloze blank 计 1 题/);
+  assert.match(prompt, /不允许零题/);
 });
 
 test('malformed model JSON returns 502', async function() {
