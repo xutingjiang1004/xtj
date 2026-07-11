@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord } = require('./photo-create');
+const { registerEnglishGenerateRoute } = require('./english-generate');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
 
@@ -9493,127 +9494,15 @@ app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), asy
   }
 });
 
-/*
-  try {
-    }).filter(function(s) { return s && /^[a-zA-Z\s\-']+$/.test(s); });
-    if (sanitized.length === 0) return res.status(400).json({ error: '无有效单词' });
-
-    // 按 en 建立索引，避免 sanitized 过滤后索引错位
-    var wordsByEn = {};
-    (words || []).forEach(function(w) { if (w && w.en) wordsByEn[String(w.en).toLowerCase()] = w; });
-    var wordList = sanitized.map(function(en) {
-      var orig = wordsByEn[en];
-      var cn = (orig && orig.cn) ? String(orig.cn).slice(0, 80) : '';
-      var mastery = orig && orig.mastery != null ? (' mastery=' + Math.max(0, Math.min(100, parseInt(orig.mastery, 10) || 0))) : '';
-      return en + (cn ? ' (' + cn + ')' : '') + mastery;
-      for (var mi = 0; mi < mcCount; mi++) {
-        if (mi > 0) parts.push('    ,');
-        parts.push('    {');
-        parts.push('      "id": ' + qId++ + ',');
-        parts.push('      "type": "mc",');
-        parts.push('      "question": "题目 (词汇辨析/词义/同义词/语境理解, 围绕用户单词库或文章)",');
-        parts.push('      "options": ["A. ...", "B. ...", "C. ...", "D. ..."],');
-        parts.push('      "answer": 0,');
-        parts.push('      "explain": "中文解析 30-60 字"');
-        parts.push('    }');
-      }
-    }
-      parts.push('      ]');
-      parts.push('    }');
-    }
-    parts.push('  ]');
-    parts.push('}');
-    parts.push('');
-    parts.push('注意: answer 是 0-3 的数组下标; 解析必须中文; 仅输出 JSON。');
-
-    var prompt = parts.join('\n');
-    var responseFormat = { type: 'json_object' };
-
-    var aiResult;
-    try {
-      aiResult = await callDeepSeek(
-        [
-          { role: 'system', content: '你是英语教学 AI, 严格输出 JSON, 不输出任何额外文字。' },
-          { role: 'user', content: prompt }
-        ],
-        { thinking_mode: 'low', max_tokens: 4096, response_format: responseFormat }
-      );
-    } catch (e) {
-      console.error('[ENGLISH-GEN] AI failed:', e && e.message);
-      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
-    }
-
-    var text = (aiResult && aiResult.content) || '';
-    // 尝试提取 JSON
-    var firstBrace = text.indexOf('{');
-    var lastBrace = text.lastIndexOf('}');
-    var jsonText = (firstBrace >= 0 && lastBrace > firstBrace) ? text.slice(firstBrace, lastBrace + 1) : text;
-    var data;
-    try {
-      data = JSON.parse(jsonText);
-    } catch (e) {
-      console.error('[ENGLISH-GEN] parse failed:', e && e.message, 'raw:', text.slice(0, 300));
-      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
-    }
-
-    // 校验 + 清理
-    var result = {
-      article: data.article ? String(data.article).slice(0, 5000) : '',
-      words_used: Array.isArray(data.words_used) ? data.words_used.slice(0, 30).map(String) : sanitized.slice(0, 20),
-      questions: []
-    };
-    if (Array.isArray(data.questions)) {
-      data.questions.forEach(function(q) {
-        if (!q || !q.type) return;
-        if (q.type === 'mc') {
-          if (!q.question || !Array.isArray(q.options) || q.options.length < 2) return;
-          var ans = parseInt(q.answer);
-          if (isNaN(ans) || ans < 0 || ans >= q.options.length) ans = 0;
-          result.questions.push({
-            id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
-            type: 'mc',
-            question: String(q.question).slice(0, 500),
-            options: q.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
-            answer: ans,
-            explain: String(q.explain || '').slice(0, 300)
-          });
-        } else if (q.type === 'cloze') {
-          if (!q.context || !Array.isArray(q.blanks)) return;
-          var blanks = [];
-          q.blanks.forEach(function(b) {
-            if (!b || !Array.isArray(b.options)) return;
-            var a2 = parseInt(b.answer);
-            if (isNaN(a2) || a2 < 0 || a2 >= b.options.length) a2 = 0;
-            blanks.push({
-              options: b.options.slice(0, 6).map(function(o) { return String(o).slice(0, 200); }),
-              answer: a2,
-              explain: String(b.explain || '').slice(0, 200)
-            });
-          });
-          if (blanks.length > 0) {
-            result.questions.push({
-              id: q.id || ('q_' + Math.random().toString(36).slice(2, 6)),
-              type: 'cloze',
-              question: String(q.question || '完形填空').slice(0, 300),
-              context: String(q.context).slice(0, 3000),
-              blanks: blanks
-            });
-          }
-        }
-      });
-    }
-
-    if (result.questions.length === 0 && !result.article) {
-      return res.status(500).json({ error: 'AI 返回内容为空, 请重试' });
-    }
-
-    return res.json({ ok: true, data: result, usage: aiResult.usage || null });
-  } catch (e) {
-    console.error('[ENGLISH-GEN] exception:', e && e.message);
-    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
-  }
+registerEnglishGenerateRoute(app, {
+  authenticateUser: authenticateUser,
+  rateLimit: rateLimit,
+  callDeepSeek: callDeepSeek,
+  isDeepSeekConfigured: function() { return !!DEEPSEEK_API_KEY; },
+  logger: console,
+  timeoutMs: 55000
 });
-*/
+
 
 // POST /api/agent/english/parse-batch - 英语学习: AI 智能解析批量输入
 // 接收任意格式文本 (单词/句子/短语混合), 返回 [{en, cn}] 列表
@@ -9635,17 +9524,17 @@ app.post('/api/agent/english/parse-batch', authenticateUser, rateLimit(60000, 15
       '2. 中等及以上难度的常用词优先; 过于简单 (the, a, is) 跳过。',
       '3. 短语 (如 take off, look forward to) 可以保留为整体。',
       '4. 去重; 最多输出 ' + maxCount + ' 条。',
-      '5. 严格输出 JSON 数组, 严禁额外文字, 严禁 markdown 代码块。',
+      '5. 严格输出包含 words 数组的 JSON 对象, 严禁额外文字, 严禁 markdown 代码块。',
       '',
       '输出格式 (严格 JSON):',
-      '[{"en": "apple", "cn": "苹果"}, {"en": "take off", "cn": "起飞; 脱下"}]'
+      '{"words":[{"en":"apple","cn":"苹果"},{"en":"take off","cn":"起飞; 脱下"}]}'
     ].join('\n');
 
     var aiResult;
     try {
       aiResult = await callDeepSeek(
         [
-          { role: 'system', content: '你是英语单词提取 AI, 严格输出 JSON 数组, 不输出任何额外文字。' },
+          { role: 'system', content: '你是英语单词提取 AI, 严格输出包含 words 数组的 JSON 对象, 不输出任何额外文字。' },
           { role: 'user', content: prompt }
         ],
         { thinking_mode: 'low', max_tokens: 2048, response_format: { type: 'json_object' } }
@@ -9656,22 +9545,17 @@ app.post('/api/agent/english/parse-batch', authenticateUser, rateLimit(60000, 15
     }
 
     var raw = (aiResult && aiResult.content) || '';
-    var firstArr = raw.indexOf('[');
-    var lastArr = raw.lastIndexOf(']');
-    var jsonText = (firstArr >= 0 && lastArr > firstArr) ? raw.slice(firstArr, lastArr + 1) : raw;
-    var arr;
+    var parsed;
     try {
-      arr = JSON.parse(jsonText);
+      parsed = JSON.parse(raw);
     } catch (e) {
-      console.error('[ENGLISH-PARSE] JSON parse failed:', e && e.message, 'raw:', raw.slice(0, 200));
-      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+      console.error('[ENGLISH-PARSE] JSON parse failed:', e && e.message);
+      return res.status(502).json({ error: 'AI 返回格式错误, 请重试' });
     }
-    if (!Array.isArray(arr)) {
-      // 兼容 AI 把数组包在对象里返回的情况
-      if (arr && Array.isArray(arr.words)) arr = arr.words;
-      else if (arr && Array.isArray(arr.data)) arr = arr.data;
-      else return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.words)) {
+      return res.status(502).json({ error: 'AI 返回格式错误, 请重试' });
     }
+    var arr = parsed.words;
 
     var seen = {};
     var out = [];
