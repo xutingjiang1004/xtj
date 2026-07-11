@@ -17,7 +17,7 @@ console.log('\n=== Syntax Checks ===');
 console.log('\n=== Build Hash Checks ===');
 test('index.html CSS/JS query hashes match file content', function(){
   var html = read('index.html');
-  var re = /\b(?:href|src)="((?:css|js)\/[^"?#]+\.(?:css|js))\?v=([a-f0-9]{10})"/g;
+  var re = /\b(?:href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))\?v=([a-f0-9]{10})"/g;
   var m, count=0;
   while ((m = re.exec(html))) {
     assert.ok(fs.existsSync(m[1]), 'missing '+m[1]);
@@ -29,6 +29,24 @@ test('index.html CSS/JS query hashes match file content', function(){
 test('no manual date version query remains for local CSS/JS', function(){
   var html = read('index.html');
   assert.ok(!/\b(?:css|js)\/[^"?#]+\.(?:css|js)\?v=20\d{6,}/.test(html));
+});
+test('index.html uses minified local assets when a min build exists', function(){
+  var html = read('index.html');
+  var refs = [];
+  html.replace(/\b(?:href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(_, assetPath) {
+    refs.push(assetPath);
+    return _;
+  });
+  refs.forEach(function(assetPath) {
+    if (/\.min\.(css|js)$/.test(assetPath)) return;
+    var minPath = assetPath.replace(/\.css$/, '.min.css').replace(/\.js$/, '.min.js');
+    if (fs.existsSync(minPath)) assert.strictEqual(assetPath, minPath, assetPath + ' should use ' + minPath);
+  });
+});
+test('build CSS list includes ui-shell and photo-preview', function(){
+  var s = read('scripts/build.js');
+  assert.ok(s.indexOf("'css/ui-shell.css'") >= 0, 'ui-shell.css missing from CSS_FILES');
+  assert.ok(s.indexOf("'css/photo-preview.css'") >= 0, 'photo-preview.css missing from CSS_FILES');
 });
 
 console.log('\n=== English Sync / Pro RPC Static Checks ===');
@@ -158,6 +176,42 @@ test('performance profile skips duplicate class mutations', function(){
   assert.ok(s.indexOf('var currentProfile = null') >= 0, 'missing current profile cache');
   assert.ok(s.indexOf('if (profile === currentProfile) return;') >= 0, 'missing no-op same-profile guard');
   assert.ok(s.indexOf('resizeApplyFrameId = requestAnimationFrame') >= 0, 'missing resize rAF coalescing');
+});
+test('features observer scope is limited and does not reattach document.body', function(){
+  var s = read('js/features.js');
+  ['#feed','#dockChatMessages','#dockChatList','#dockChatContainer','#toastContainer','#panelPosts','#panelChat'].forEach(function(selector){
+    assert.ok(s.indexOf(selector) >= 0, 'missing observe target ' + selector);
+  });
+  assert.ok(s.indexOf('observe(document.body') < 0, 'document.body observer remains');
+  assert.ok(s.indexOf('attributes:true') < 0, 'broad attribute observer remains');
+  assert.ok(s.indexOf('REPAIR_ATTRS') >= 0, 'attribute repair helper missing');
+});
+test('photo preview css is sourced from css file rather than features injection', function(){
+  var features = read('js/features.js');
+  assert.ok(features.indexOf('#photoPreviewOverlay.photo-preview-overlay') < 0, 'preview overlay CSS still injected in features');
+  assert.ok(features.indexOf('#photoPreviewOverlay .pp-rotate-btn .ui-icon') < 0, 'preview button CSS still injected in features');
+  var css = read('css/photo-preview.css');
+  assert.ok(css.indexOf('.pp-preview-toolbar') >= 0, 'photo preview toolbar CSS missing');
+  assert.ok(css.indexOf('transform-origin: center center;') >= 0, 'photo preview info modal transform origin missing');
+});
+test('research card animator honors perf profiles and viewport visibility', function(){
+  var s = read('js/ai-agent.js');
+  assert.ok(s.indexOf("mode: 'lite'") >= 0 && s.indexOf('canvas: false') >= 0, 'lite research profile missing');
+  assert.ok(s.indexOf("mode: 'balanced'") >= 0 && s.indexOf('maxNodes: 40') >= 0 && s.indexOf('fps: 30') >= 0, 'balanced research profile missing');
+  assert.ok(s.indexOf("mode: 'full'") >= 0 && s.indexOf('maxNodes: 56') >= 0, 'full research profile missing');
+  assert.ok(s.indexOf('IntersectionObserver') >= 0, 'viewport observer missing');
+  assert.ok(s.indexOf('state.canToggle && card.classList.contains(\'collapsed\')') >= 0, 'collapsed-card pause guard missing');
+});
+test('english word list uses corrected selector, debounce, and delegated interactions', function(){
+  var css = read('css/english-learning.css');
+  assert.ok(css.indexOf('.el-word-list') < 0, 'old el-word-list selector remains');
+  assert.ok(css.indexOf('.el-wordlist') >= 0, 'correct el-wordlist selector missing');
+  assert.ok(css.indexOf('contain-intrinsic-size: 72px;') >= 0, 'word item intrinsic size missing');
+  var s = read('js/english-learning.js');
+  assert.ok(s.indexOf('var SEARCH_DEBOUNCE_MS = 100;') >= 0, 'search debounce constant missing');
+  assert.ok(s.indexOf('safeBind(\'elWordList\', \'change\'') >= 0, 'word list change delegation missing');
+  assert.ok(s.indexOf('safeBind(\'elWordList\', \'click\'') >= 0, 'word list click delegation missing');
+  assert.ok(s.indexOf('resetWordListInteractiveNodes(list);') >= 0, 'interactive node reset missing');
 });
 test('dock tab and indicator selectors were not edited by this optimization', function(){
   var diff = cp.execSync('git diff -- css/ui-enhance.css css/ai-agent.css js/english-learning.js js/photo-wall/preview-hotfix.js js/performance.js index.html scripts/build.js tests/complete-tests.js', {encoding:'utf8'});

@@ -81,10 +81,14 @@ body.english-learning-open {
   box-shadow: none !important;
 }
 
-.perf-lite #panelEnglishLearning .el-word-list,
-.perf-balanced #panelEnglishLearning .el-word-list {
+.perf-lite #panelEnglishLearning .el-wordlist,
+.perf-balanced #panelEnglishLearning .el-wordlist {
   content-visibility: auto;
-  contain-intrinsic-size: 220px;
+  contain-intrinsic-size: 220px 420px;
+}
+
+#panelEnglishLearning .el-word-item {
+  contain-intrinsic-size: 72px;
 }
 
 #panelEnglishLearning::before {
@@ -1962,7 +1966,11 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 180ms var(--el-ease);
+  transition:
+    transform 180ms var(--el-ease),
+    border-color 180ms var(--el-ease),
+    background-color 180ms var(--el-ease),
+    color 180ms var(--el-ease);
 }
 #panelEnglishLearning .el-regen-btn:hover {
   border-color: var(--el-line-strong);
@@ -2292,7 +2300,10 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
   padding: 4px 12px;
   font-size: 12px;
   cursor: pointer;
-  transition: all 160ms ease;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
 }
 #panelEnglishLearning .el-pill-cancel:hover {
   background: rgba(255, 80, 110, 0.18);

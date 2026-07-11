@@ -211,6 +211,7 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal {
 
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
   pointer-events: auto;
+  transform-origin: center center;
   transform: translate3d(0, 0, 0) scale(1);
   opacity: 1;
   transition: transform var(--pp-dur-slow) var(--pp-ease-standard), opacity var(--pp-dur-base) ease;
