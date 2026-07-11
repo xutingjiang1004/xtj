@@ -206,15 +206,56 @@ test('english word list uses corrected selector, debounce, and delegated interac
   var css = read('css/english-learning.css');
   assert.ok(css.indexOf('.el-word-list') < 0, 'old el-word-list selector remains');
   assert.ok(css.indexOf('.el-wordlist') >= 0, 'correct el-wordlist selector missing');
-  assert.ok(css.indexOf('contain-intrinsic-size: 72px;') >= 0, 'word item intrinsic size missing');
+  assert.ok(css.indexOf('contain-intrinsic-size: auto 72px;') >= 0, 'word item intrinsic size missing');
   var s = read('js/english-learning.js');
   assert.ok(s.indexOf('var SEARCH_DEBOUNCE_MS = 100;') >= 0, 'search debounce constant missing');
   assert.ok(s.indexOf('safeBind(\'elWordList\', \'change\'') >= 0, 'word list change delegation missing');
   assert.ok(s.indexOf('safeBind(\'elWordList\', \'click\'') >= 0, 'word list click delegation missing');
   assert.ok(s.indexOf('resetWordListInteractiveNodes(list);') >= 0, 'interactive node reset missing');
 });
+test('each local JavaScript entry module is statically referenced once', function(){
+  var html = read('index.html');
+  var refs = [];
+  html.replace(/<script\b[^>]*\bsrc="([^"]+)"[^>]*>/gi, function(_, src) {
+    if (!/^https?:\/\//i.test(src)) refs.push(src.split('?')[0]);
+    return _;
+  });
+  var seen = Object.create(null);
+  refs.forEach(function(src) { seen[src] = (seen[src] || 0) + 1; });
+  Object.keys(seen).forEach(function(src) {
+    assert.strictEqual(seen[src], 1, src + ' is referenced more than once');
+  });
+});
+test('core has no legacy loaders for static entry modules', function(){
+  var core = read('js/core.js');
+  [
+    'login-device', 'core-animations', 'features', 'ui-effects', 'pro-upgrade',
+    'pro-style', 'ai-agent', 'english-learning', 'english-dict', 'upload-ui',
+    'preview-hotfix'
+  ].forEach(function(moduleName) {
+    var loader = new RegExp("(?:xtjLoadScriptOnce|xtjLoadScriptSequence)[\\s\\S]{0,260}['\"][^'\"]*" + moduleName.replace(/[-/]/g, '\\$&') + "[^'\"]*['\"]");
+    assert.ok(!loader.test(core), 'legacy loader remains for ' + moduleName);
+  });
+  assert.ok(core.indexOf('function scheduleInteractiveEnhancements') < 0, 'interactive enhancement scheduler remains');
+  assert.ok(core.indexOf('function armCoreAnimationLoader') < 0, 'core animation loader remains');
+  assert.ok(!/xtjLoadScriptOnce\(['"]https:\/\/cdn\.jsdelivr\.net\/npm\/gsap/.test(core), 'GSAP lazy loader remains');
+});
+test('opening English uses the static module and only its dictionary loader', function(){
+  var html = read('index.html');
+  var core = read('js/core.js');
+  assert.strictEqual((html.match(/<script[^>]+src="js\/english-learning\.min\.js\?v=/g) || []).length, 1, 'english-learning static script count');
+  assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'dictionary is statically loaded');
+  assert.ok(!/xtjLoadScript(?:Once|Sequence)[\s\S]{0,260}english-(?:learning|dict)/.test(core), 'English click can insert another script');
+  assert.ok(/function ensureEnglishDictionary\(\)/.test(read('js/english-learning.js')), 'English dictionary owner missing');
+});
+test('login-device executes only from its single static entry', function(){
+  var html = read('index.html');
+  var core = read('js/core.js');
+  assert.strictEqual((html.match(/<script[^>]+src="js\/login-device\.min\.js\?v=/g) || []).length, 1, 'login-device static script count');
+  assert.ok(!/xtjLoadScript(?:Once|Sequence)[\s\S]{0,260}login-device/.test(core), 'core can load login-device twice');
+});
 test('dock tab and indicator selectors were not edited by this optimization', function(){
-  var diff = cp.execSync('git diff -- css/ui-enhance.css css/ai-agent.css js/english-learning.js js/photo-wall/preview-hotfix.js js/performance.js index.html scripts/build.js tests/complete-tests.js', {encoding:'utf8'});
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css"', {encoding:'utf8'});
   assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
 });
 
