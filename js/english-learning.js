@@ -811,8 +811,8 @@
     var mode = S.settings.focus || 'weak';
     var selectedIds = getSelectedWordIds();
     var words = S.words.slice();
-    if (mode === 'selected' && selectedIds.length) {
-      words = words.filter(function(w) { return selectedIds.indexOf(w.id) >= 0; });
+    if (mode === 'selected') {
+      words = selectedIds.length ? words.filter(function(w) { return selectedIds.indexOf(w.id) >= 0; }) : [];
     } else if (mode === 'weak') {
       var weak = words.filter(isWeakWord);
       var fresh = words.filter(function(w) { return (w.seen || 0) === 0; });
@@ -820,7 +820,9 @@
       words = weak.concat(fresh).concat(rest);
     }
     words = words.slice(0, MAX_WORDS);
-    if (notifyIfEmpty && !words.length) notify('请先添加单词到单词库');
+    if (notifyIfEmpty && !words.length) {
+      notify(mode === 'selected' ? '请先勾选需要生成练习的单词' : '请先添加单词到单词库');
+    }
     return words;
   }
 
