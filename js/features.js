@@ -1,169 +1,140 @@
 (function () {
   'use strict';
-  if (window.__xtjFeaturesSafeV9) return;
-  window.__xtjFeaturesSafeV9 = true;
+  if (window.__xtjFeaturesSafeV10) return;
+  window.__xtjFeaturesSafeV10 = true;
 
-  var repairTimer = null;
-  var repairQueue = [];
-  var queuedRepairRoots = new WeakSet();
+  var queuedNodes = [];
+  var queuedSet = new WeakSet();
   var repairScheduled = false;
-  var globalObserver = null;
-  var loaderHtml = null;
-  var photoInfoAnim = function(){};
+  var observer = null;
+  var LEGACY_MARKER = 'data-xtj-legacy-text';
   var REPAIR_ATTRS = ['title', 'aria-label', 'placeholder', 'alt'];
-  var REPAIR_TARGET_SELECTORS = ['#feed', '#dockChatMessages', '#dockChatList', '#dockChatContainer', '#toastContainer', '#panelPosts', '#panelChat'];
+  var MOJIBAKE_PAIRS = [
+    ['鍏ㄩ儴甯栧瓙', '全部帖子'], ['娌℃湁鎵惧埌相关甯栧瓙', '没有找到相关帖子'],
+    ['纭鎿嶄綔', '确认操作'], ['纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵', '确定要执行此操作吗？'],
+    ['鍔熻兘浼樺寲', '功能优化'], ['Bug修复', 'Bug修复'], ['鏂板', '新增'],
+    ['淇', '修复'], ['绛涢€', '筛选'], ['甯栧瓙', '帖子'], ['鐢ㄦ埛', '用户'],
+    ['鎸夐挳', '按钮'], ['涓炬姤', '举报'], ['鍔犺浇', '加载'], ['涓婁紶', '上传'],
+    ['鍙戦€', '发送'], ['失败', '失败'], ['鎴愬姛', '成功'], ['閿欒', '错误'],
+    ['鐓х墖', '照片'], ['椤甸潰', '页面'], ['鏁版嵁', '数据'], ['缃戠粶', '网络'],
+    ['瀹夊叏', '安全'], ['妯″紡', '模式'], ['棰勮', '预览'], ['鍒嗕韩', '分享'],
+    ['鏄剧ず', '显示'], ['鏀寔', '支持'], ['杩斿洖', '返回'], ['澶勭悊', '处理'],
+    ['璇█', '语言'], ['娴佺▼', '流程'], ['寮傛', '异常'], ['娓呯悊', '清理'],
+    ['鍘嬬缉', '压缩'], ['鍙戝竷', '发布'], ['淇濆瓨', '保存'], ['纭畾', '确定'],
+    ['鍒锋柊', '刷新'], ['鍙戦€佸け璐?', '发送失败'], ['加载涓?..', '加载中..'], ['加载涓?', '加载中']
+  ];
+  var replacements = Object.create(null);
+  var patterns = [];
 
-  function dedupeRepairRoots() {
-    var next = [];
-    for (var i = 0; i < repairQueue.length; i++) {
-      var root = repairQueue[i];
-      if (!root || !root.isConnected) continue;
-      var covered = false;
-      for (var j = 0; j < next.length; j++) {
-        if (next[j] === root || next[j].contains(root)) {
-          covered = true;
-          break;
-        }
-        if (root.contains(next[j])) {
-          next.splice(j, 1);
-          j--;
-        }
-      }
-      if (!covered) next.push(root);
-    }
-    repairQueue = next;
+  MOJIBAKE_PAIRS.forEach(function (pair) {
+    if (!pair[0] || pair[0] === pair[1] || replacements[pair[0]]) return;
+    replacements[pair[0]] = pair[1];
+    patterns.push(pair[0]);
+  });
+  patterns.sort(function (a, b) { return b.length - a.length; });
+  var repairPattern = new RegExp(patterns.map(function (value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }).join('|'), 'g');
+
+  function fixText(value) {
+    var text = String(value == null ? '' : value);
+    return text.replace(repairPattern, function (match) { return replacements[match] || match; });
   }
+  window.xtjFixText = fixText;
 
-  function flushRepairQueue() {
-    repairScheduled = false;
-    dedupeRepairRoots();
-    var roots = repairQueue.slice();
-    repairQueue = [];
-    queuedRepairRoots = new WeakSet();
-    roots.forEach(function(root) {
-      if (!root || !root.isConnected) return;
-      repairVisibleText(root);
+  function repairMarkedNode(node) {
+    if (!node || node.nodeType !== 1 || !node.hasAttribute(LEGACY_MARKER)) return;
+    Array.prototype.forEach.call(node.childNodes, function (child) {
+      if (child.nodeType === 3) child.nodeValue = fixText(child.nodeValue);
     });
+    REPAIR_ATTRS.forEach(function (attr) {
+      if (node.hasAttribute(attr)) node.setAttribute(attr, fixText(node.getAttribute(attr)));
+    });
+    node.removeAttribute(LEGACY_MARKER);
   }
 
-  function scheduleRepair(root, urgent) {
-    if (!root || root.nodeType !== 1) return;
-    if (queuedRepairRoots.has(root)) return;
-    queuedRepairRoots.add(root);
-    repairQueue.push(root);
+  function flushRepairs() {
+    repairScheduled = false;
+    var nodes = queuedNodes.slice();
+    queuedNodes.length = 0;
+    queuedSet = new WeakSet();
+    nodes.forEach(repairMarkedNode);
+  }
+
+  function scheduleRepair(node) {
+    if (!node || node.nodeType !== 1 || queuedSet.has(node)) return;
+    queuedSet.add(node);
+    queuedNodes.push(node);
     if (repairScheduled) return;
     repairScheduled = true;
-    var runner = urgent ? requestAnimationFrame : (window.requestIdleCallback || requestAnimationFrame);
-    runner(flushRepairQueue, urgent ? undefined : { timeout: 240 });
+    requestAnimationFrame(flushRepairs);
   }
 
-  function stopRepairLoop() {
-    if (repairTimer) {
-      clearTimeout(repairTimer);
-      repairTimer = null;
+  function collectMarkedNodes(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node.hasAttribute(LEGACY_MARKER)) scheduleRepair(node);
+    if (node.querySelectorAll) node.querySelectorAll('[' + LEGACY_MARKER + ']').forEach(scheduleRepair);
+  }
+
+  function patchToast() {
+    if (typeof window.showToast !== 'function' || window.showToast.__xtjPatchedV10) return;
+    var original = window.showToast;
+    window.showToast = function (message) {
+      var safeMessage = fixText(message == null ? '' : String(message)).trim() || '操作成功';
+      return original.call(this, safeMessage);
+    };
+    window.showToast.__xtjPatchedV10 = true;
+  }
+
+  function patchChat() {
+    if (typeof window.openChat === 'function' && !window.openChat.__xtjPatchedV10) {
+      var originalOpen = window.openChat;
+      window.openChat = function () { return originalOpen.apply(this, arguments); };
+      window.openChat.__xtjPatchedV10 = true;
     }
-    if (globalObserver) globalObserver.disconnect();
+    if (typeof window.switchDockTab === 'function' && !window.switchDockTab.__xtjPatchedV10) {
+      var originalSwitch = window.switchDockTab;
+      window.switchDockTab = function () { return originalSwitch.apply(this, arguments); };
+      window.switchDockTab.__xtjPatchedV10 = true;
+    }
   }
 
-  function repairAttrs(root) {
-    if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('[' + REPAIR_ATTRS.join('],[') + ']').forEach(function(el) {
-      REPAIR_ATTRS.forEach(function(attr) {
-        var v = el.getAttribute(attr);
-        if (bad(v)) el.setAttribute(attr, fixText(v));
+  function initProfileSync() {
+    window.syncProfileUser = function () {
+      var name = document.getElementById('profileName');
+      var status = document.getElementById('profileStatus');
+      var avatar = document.getElementById('profileAvatar');
+      if (!name) return;
+      if (window.currentUser) {
+        name.textContent = window.currentUser;
+        if (status) status.textContent = '查看资料';
+        if (avatar) avatar.textContent = window.currentUser[0].toUpperCase();
+      } else {
+        name.textContent = '未登录';
+        if (status) status.textContent = '请先登录';
+        if (avatar) avatar.textContent = '?';
+      }
+    };
+  }
+
+  function stopObserver() {
+    if (observer) observer.disconnect();
+  }
+
+  function boot() {
+    patchToast();
+    patchChat();
+    initProfileSync();
+    document.querySelectorAll('[' + LEGACY_MARKER + ']').forEach(scheduleRepair);
+    observer = new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        Array.prototype.forEach.call(record.addedNodes || [], collectMarkedNodes);
       });
     });
+    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('beforeunload', stopObserver);
   }
 
-  function repairObservedRoots(urgent) {
-    REPAIR_TARGET_SELECTORS.forEach(function(selector) {
-      var root = document.querySelector(selector);
-      if (root) scheduleRepair(root, urgent);
-    });
-  }
-
-  function observeRepairTargets() {
-    if (!globalObserver) return;
-    globalObserver.disconnect();
-    REPAIR_TARGET_SELECTORS.forEach(function(selector) {
-      var root = document.querySelector(selector);
-      if (root) globalObserver.observe(root, { childList: true, subtree: true });
-    });
-  }
-
-  var MOJIBAKE_PAIRS = [
-    ['已读', '已读'], ['未读', '未读'],
-    ['鍏ㄩ儴甯栧瓙', '全部帖子'], ['娌℃湁鎵惧埌相关甯栧瓙', '没有找到相关帖子'],
-    ['纭鎿嶄綔', '确认操作'], ['纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵', '确定要执行此操作吗？'], ['纭', '确认'],
-    ['消息', '消息'], ['公告', '公告'], ['未读煡閿欒', '未知错误'], ['网络错误', '网络错误'],
-    ['鍔熻兘浼樺寲', '功能优化'], ['Bug修复', 'Bug修复'], ['鏂板', '新增'], ['鏀硅繘', '改进'], ['鏇存柊', '更新'],
-    ['淇', '修复'], ['绛涢€', '筛选'], ['甯栧瓙', '帖子'], ['鐢ㄦ埛', '用户'], ['鍐呭', '内容'],
-    ['鎸夐挳', '按钮'], ['涓炬姤', '举报'], ['缃《', '置顶'], ['删除', '删除'], ['缂栬緫', '编辑'],
-    ['鍔犺浇', '加载'], ['涓婁紶', '上传'], ['鍙戦€', '发送'], ['失败', '失败'], ['鎴愬姛', '成功'],
-    ['閿欒', '错误'], ['鐓х墖', '照片'], ['椤甸潰', '页面'], ['鏁版嵁', '数据'], ['缃戠粶', '网络'],
-    ['瀹夊叏', '安全'], ['妯″紡', '模式'], ['浠ｇ爜', '代码'], ['棰勮', '预览'], ['鍒嗕韩', '分享'],
-    ['鏄剧ず', '显示'], ['鏀寔', '支持'], ['娲昏穬', '活跃'], ['鎶樺彔', '折叠'], ['闈㈡澘', '面板'],
-    ['鎺т欢', '控件'], ['鏁板窘绔', '徽章'], ['瑙﹀彂', '触发'], ['杩斿洖', '返回'], ['鏆楄壊', '暗色'],
-    ['涓婚', '主题'], ['棰滆壊', '颜色'], ['澶勭悊', '处理'], ['浜掑姩', '互动'], ['绉婚櫎', '移除'],
-    ['璇█', '语言'], ['娴佺▼', '流程'], ['淇″彿', '信号'], ['寮傛', '异常'], ['璋冩暣', '调整'],
-    ['浣撲細', '体验'], ['鍓嶇', '前端'], ['娓呯悊', '清理'], ['娈嬬暀', '残留'], ['涓婚', '主题'],
-    ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'], ['昨天', '昨天'],
-
-    ['</div><div>', ''], ['鈾?', '❤️'],
-    ['已读禐', '已赞'], ['已读援', '已赞'], ['注册', '注册'], ['重试', '重试'], ['正在', '正在'],
-    ['鍘嬬缉', '压缩'], ['鍙戝竷', '发布'], ['淇濆瓨', '保存'], ['纭畾', '确定'],
-    ['鍒锋柊', '刷新'], ['璇疯嚦灏戝～鍐欐爣棰樻垨', '请至少填写标题或'],
-    ['瀏览记录', '浏览记录'], ['鍙戦€佸け璐?', '发送失败'],
-    ['鍏ㄩ儴帖子', '全部帖子'], ['没有找到相关帖子', '没有找到相关帖子'],
-    ['未读嶅姟加载失败，岃刷新椤甸潰重试', '服务加载失败，请刷新页面重试'],
-    ['未读嶅姟', '服务'], ['相关', '相关'], ['提示', '提示'],
-    ['未读€杩戠櫥褰曪細', '最近登录：'],
-    ['评论', '评论'], ['未读煡', '未知'],
-    ['正在鍘嬬缉骞朵笂浼犲ご鍍?..', '正在压缩并上传头像..'],
-    ['正在鍘嬬缉骞朵笂浼犲ご鍍忋€?..', '正在压缩并上传头像..'],
-    ['加载涓?..', '加载中..'],
-    ['加载涓?', '加载中']
-  ];
-  var _mjBuilt=false,_mjRegex=null,_mjMap=null;
-  function _buildMjRegex(){_mjBuilt=true;var map={};var patterns=[];MOJIBAKE_PAIRS.forEach(function(p){if(p[0]!==p[1]&&p[0].length>0&&!map[p[0]]){map[p[0]]=p[1];patterns.push(p[0]);}});patterns.sort(function(a,b){return b.length-a.length;});var escaped=patterns.map(function(p){return p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');});_mjMap=map;_mjRegex=new RegExp(escaped.join('|'),'g');}
-  // ★ 修复 L1：在 fixText 调用前确保 _mjBuilt = true（先 build 再赋值）
-  _buildMjRegex();
-
-  function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
-  function waveTitle(v){var text=String(v||'加载中...');if(text==='加载中')text='加载中...';if(text!=='加载中...')return esc(text);return '<span class="xtj-loader-title-wave" aria-label="加载中...">'+Array.from(text).map(function(char,index){return '<span style="--wave-index:'+index+'" aria-hidden="true">'+esc(char)+'</span>';}).join('')+'</span>';}
-  function fixText(v){var s=String(v==null?'':v);if(!_mjBuilt){_buildMjRegex();}s=s.replace(_mjRegex,function(m){return _mjMap[m]||m;});s=s.replace(/加载\s*中/g,'加载中');s=s.replace(/加载\s+(?:高清|预览)/g,'加载高清');s=s.replace(/加载中\s+/g,'加载中');s=s.replace(/(加载中)\.{2,}$/g,'$1...');s=s.replace(/已读/g,'已读');s=s.replace(/未读/g,'未读');return s;} window.xtjFixText=fixText;
-  function bad(v){var s=String(v||'');if(/(断开|昨天|加载$|发出|确认|作者|已读$|未读$|修改|字数|开$|关闭$|—)/.test(s)||/无效|未知错误|网络错误/.test(s)){return true;}if(/^[\s\u4e00-\u9fa5]{1,3}$/.test(s)){return s.length<=3&&!/^(昨天|今天|明天|上午|下午|晚上|早上|中午|半夜|点赞|评论|回复|发布|删除|编辑)$/.test(s);}return false;}
-
-  function addStyle(){var old=document.getElementById('xtjSafeFeatureFixStyle');if(old)old.remove();var st=document.createElement('style');st.id='xtjSafeFeatureFixStyle';st.textContent=`
-  .toast-container{z-index:12000!important;gap:10px!important;max-width:min(92vw,520px)!important}.toast{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:78px!important;min-height:38px!important;max-width:min(88vw,420px)!important;padding:10px 18px!important;border-radius:999px!important;background:rgba(18,24,32,.88)!important;color:rgba(255,255,255,.97)!important;border:1px solid rgba(255,255,255,.15)!important;box-shadow:0 14px 40px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.16)!important;backdrop-filter:blur(18px) saturate(160%)!important;-webkit-backdrop-filter:blur(18px) saturate(160%)!important;font-size:14px!important;font-weight:650!important;line-height:1.35!important;text-align:center!important}.toast:empty{display:none!important}
-  .xtj-chat-loader,.xtj-chat-empty{min-height:58vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px 18px;color:var(--text-muted);position:relative;overflow:hidden}
-  .xtj-echo-loader{--s:clamp(210px,31vw,280px);width:var(--s);height:calc(var(--s)*.96);position:relative;display:grid;place-items:center;isolation:isolate;z-index:2;cursor:pointer;-webkit-tap-highlight-color:transparent;filter:drop-shadow(0 28px 72px rgba(123,213,255,.24));animation:xtjEchoFloat 4.6s ease-in-out infinite}.xtj-echo-core{position:absolute;width:50%;aspect-ratio:.72;border-radius:48% 52% 50% 50%/58% 58% 42% 42%;background:linear-gradient(135deg,rgba(255,255,255,.52),rgba(135,204,255,.18) 42%,rgba(255,231,168,.30)),radial-gradient(circle at 30% 20%,rgba(255,255,255,.92),transparent 22%);border:1px solid rgba(255,247,214,.76);box-shadow:0 0 38px rgba(255,222,143,.42),inset 0 0 42px rgba(255,255,255,.25),0 38px 100px rgba(73,169,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.6s ease-in-out infinite;z-index:8}.xtj-echo-core:before,.xtj-echo-core:after{content:'';position:absolute;inset:14px;border-radius:inherit;border:1px solid rgba(255,255,255,.32);box-shadow:inset 0 0 28px rgba(255,255,255,.18)}.xtj-echo-core:after{inset:-16px;border-color:rgba(255,227,150,.28);filter:blur(2px);animation:xtjPulseRing 2.2s ease-in-out infinite}
-  .xtj-echo-rune{position:absolute;width:82%;aspect-ratio:1;border-radius:50%;border:1px dashed rgba(255,227,154,.42);box-shadow:0 0 38px rgba(255,227,154,.14);animation:xtjRuneSpin 12s linear infinite;pointer-events:none;z-index:3}.xtj-echo-rune:before,.xtj-echo-rune:after{content:'';position:absolute;inset:9%;border-radius:50%;border:1px solid rgba(123,213,255,.22)}.xtj-echo-rune:after{inset:18%;border-style:dotted;border-color:rgba(255,255,255,.28);animation:xtjRuneSpinReverse 8s linear infinite}.xtj-echo-field{position:absolute;width:79%;aspect-ratio:1;border-radius:50%;opacity:.66;background:radial-gradient(circle,transparent 38%,rgba(123,213,255,.10) 39%,transparent 62%),conic-gradient(from 0deg,transparent,rgba(123,213,255,.32),transparent,rgba(255,227,154,.28),transparent);filter:blur(.3px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite;z-index:2}.xtj-echo-shock{position:absolute;width:34%;aspect-ratio:1;border-radius:50%;border:2px solid rgba(255,227,154,.62);opacity:0;z-index:4;pointer-events:none;animation:xtjShockLoop 2.8s ease-out infinite}.xtj-echo-shard{position:absolute;width:16px;height:42px;background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(255,218,138,.08));border:1px solid rgba(255,255,255,.42);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 12px rgba(255,222,140,.62));opacity:.72;z-index:6;animation:xtjShardOrbit 8s linear infinite}.xtj-echo-shard.s1{top:13%;left:18%;animation-delay:-1s}.xtj-echo-shard.s2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}.xtj-echo-shard.s3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}.xtj-echo-shard.s4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}
-  .xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}.xtj-echo-bolt.in{right:-34%;top:47%;width:56%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 20px rgba(255,111,141,.78),0 0 50px rgba(255,111,141,.40);transform:rotate(180deg);animation:xtjIncoming 3.5s ease-in infinite}.xtj-echo-bolt.out{left:45%;top:43%;width:62%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 22px rgba(123,213,255,.78),0 0 62px rgba(255,227,154,.38);transform:rotate(-24deg);animation:xtjReflected 3.5s ease-out infinite}.xtj-echo-blade{position:absolute;left:38%;top:52%;width:72%;height:11px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 28px rgba(255,227,154,.82),0 0 80px rgba(255,227,154,.42);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}
-  .xtj-echo-loader.xtj-cast{animation:xtjStagePulse .9s ease both}.xtj-echo-loader.xtj-cast .xtj-echo-core{animation:xtjMirrorSummon 1.1s cubic-bezier(.18,.8,.24,1.15) both}.xtj-echo-loader.xtj-cast .xtj-echo-rune{animation:xtjRuneBurst .95s ease both}.xtj-echo-loader.xtj-cast .xtj-echo-field{animation:xtjAbsorbBurst 1.15s ease both}.xtj-echo-loader.xtj-cast .xtj-echo-shock{animation:xtjShockCast .85s ease-out both}.xtj-echo-loader.xtj-cast .xtj-echo-blade{animation:xtjBladeCast 1.15s cubic-bezier(.12,.78,.2,1) both}.xtj-echo-loader.xtj-cast .xtj-echo-shard{animation:xtjShardBreak .9s ease-out both}
-  .xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:#ffe39a;box-shadow:0 0 16px rgba(255,227,154,.9);pointer-events:none;z-index:13;animation:xtjParticleFly .9s ease-out forwards}.xtj-chat-loader-title{margin-top:6px;font-size:20px;font-weight:850;letter-spacing:.05em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}.xtj-chat-loader-sub{margin-top:7px;font-size:12px;color:rgba(31,41,55,.42)}.xtj-chat-loader-dots{display:flex;gap:7px;margin-top:12px}.xtj-chat-loader-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,227,154,.70);box-shadow:0 0 14px rgba(255,227,154,.30);animation:xtjDot 1.1s ease-in-out infinite}.xtj-chat-loader-dots span:nth-child(2){animation-delay:.14s;background:rgba(123,213,255,.72)}.xtj-chat-loader-dots span:nth-child(3){animation-delay:.28s;background:rgba(181,156,255,.70)}[data-theme="dark"] .xtj-chat-loader-sub,[data-theme="dark"] .xtj-chat-empty-sub{color:rgba(255,255,255,.42)}.xtj-chat-empty-icon{width:72px;height:72px;border-radius:26px;display:flex;align-items:center;justify-content:center;font-size:31px;background:rgba(255,255,255,.34);border:1px solid rgba(255,255,255,.62);box-shadow:0 18px 46px rgba(59,130,246,.1);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}.xtj-chat-empty-title{margin-top:16px;font-size:20px;font-weight:760;color:rgba(31,41,55,.44)}.xtj-chat-empty-sub{margin-top:7px;font-size:13px;color:rgba(31,41,55,.34)}[data-theme="dark"] .xtj-chat-empty-title{color:rgba(255,255,255,.50)}
-  @keyframes xtjEchoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}@keyframes xtjMirrorFloat{0%,100%{transform:perspective(900px) rotateY(-12deg) rotateX(5deg) translateY(0)}50%{transform:perspective(900px) rotateY(-7deg) rotateX(7deg) translateY(-16px)}}@keyframes xtjPulseRing{0%,100%{opacity:.34;transform:scale(1)}50%{opacity:.78;transform:scale(1.06)}}@keyframes xtjRuneSpin{to{transform:rotate(360deg)}}@keyframes xtjRuneSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjAbsorbSwirl{0%,100%{opacity:.42;transform:rotate(0deg) scale(.92)}50%{opacity:.82;transform:rotate(180deg) scale(1.06)}}@keyframes xtjShockLoop{0%,70%{opacity:0;transform:scale(.18)}77%{opacity:.65;transform:scale(.35)}100%{opacity:0;transform:scale(2.8);filter:blur(3px)}}@keyframes xtjShardOrbit{0%{transform:translateY(0) rotate(0deg);opacity:.26}40%{opacity:.95}100%{transform:translateY(-38px) rotate(360deg);opacity:.26}}@keyframes xtjIncoming{0%,54%{opacity:0;transform:translateX(0) rotate(180deg) scaleX(.8)}60%{opacity:1}82%{opacity:1;transform:translateX(calc(var(--s)*-.86)) rotate(180deg) scaleX(1.1)}100%{opacity:0;transform:translateX(calc(var(--s)*-.93)) rotate(180deg) scaleX(.25)}}@keyframes xtjReflected{0%,66%{opacity:0;transform:rotate(-24deg) translateX(0) scaleX(.3)}72%{opacity:1}100%{opacity:0;transform:rotate(-24deg) translateX(calc(var(--s)*.78)) scaleX(1.1)}}@keyframes xtjBladeSlash{0%,72%{opacity:0;transform:rotate(-8deg) translateX(-70px) scaleX(.25);filter:blur(4px)}78%{opacity:1;filter:blur(0)}91%{opacity:1;transform:rotate(-8deg) translateX(160px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(300px) scaleX(.38);filter:blur(2px)}}@keyframes xtjStagePulse{0%,100%{filter:drop-shadow(0 28px 72px rgba(123,213,255,.24))}50%{filter:drop-shadow(0 38px 92px rgba(255,227,154,.38)) brightness(1.12)}}@keyframes xtjMirrorSummon{0%{opacity:0;transform:perspective(900px) rotateY(80deg) rotateX(28deg) scale(.18);filter:blur(12px) brightness(2)}58%{opacity:1;transform:perspective(900px) rotateY(-16deg) rotateX(6deg) scale(1.18);filter:blur(0) brightness(1.9)}100%{opacity:.94;transform:perspective(900px) rotateY(-12deg) rotateX(5deg) scale(1);filter:blur(0) brightness(1)}}@keyframes xtjRuneBurst{0%{transform:scale(.62) rotate(0deg);opacity:0;filter:blur(5px)}45%{transform:scale(1.12) rotate(90deg);opacity:1;filter:blur(0)}100%{transform:scale(1) rotate(160deg);opacity:.72}}@keyframes xtjAbsorbBurst{0%{opacity:0;transform:rotate(0deg) scale(.6)}28%{opacity:1}100%{opacity:0;transform:rotate(240deg) scale(1.2)}}@keyframes xtjShockCast{0%{opacity:.9;transform:scale(.2);filter:blur(0)}100%{opacity:0;transform:scale(3.2);filter:blur(3px)}}@keyframes xtjBladeCast{0%{opacity:0;transform:rotate(-8deg) translateX(-80px) scaleX(.25);filter:blur(4px)}18%{opacity:1;filter:blur(0)}58%{opacity:1;transform:rotate(-8deg) translateX(180px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(360px) scaleX(.38);filter:blur(2px)}}@keyframes xtjShardBreak{0%{opacity:1;transform:translate(0,0) rotate(0deg) scale(1)}100%{opacity:0;transform:translate(var(--sx,120px),var(--sy,-90px)) rotate(220deg) scale(.2)}}@keyframes xtjParticleFly{from{opacity:1;transform:translate(0,0) scale(1)}to{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0)}}@keyframes xtjDot{0%,100%{transform:translateY(0);opacity:.42}50%{transform:translateY(-5px);opacity:1}}@media(prefers-reduced-motion:reduce){.xtj-echo-loader,.xtj-echo-loader *,.xtj-chat-loader-dots span{animation:none!important}}
-  `;document.head.appendChild(st);}
-
-  function safeLoaderHtml(text, subtitle, variant){if(typeof window.getXtjLoadingHtml==='function')return window.getXtjLoadingHtml(text,subtitle,variant);if(typeof window.xtjMagicLoadingHtml==='function')return window.xtjMagicLoadingHtml(text,subtitle,variant);return '<div class="xtj-magic-loading loading" style="display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;text-align:center;color:var(--text-muted);"><div><div style="font-size:28px;line-height:1;margin-bottom:10px;">!</div><div>'+(text||'加载中...')+'</div>'+(subtitle?'<div style="font-size:12px;margin-top:6px;opacity:.7;">'+subtitle+'</div>':'')+'</div></div>';}
-  function loaderHtml(text){return safeLoaderHtml(text||'加载中...','','chat-list');}
-  function repairChatArea(el){if(!el)return;if(el.querySelector('.chat-list-item')||el.querySelector('.chat-msg')){repairVisibleText(el);return;}if(el.querySelector('.xtj-magic-loading')||el.querySelector('.xtj-loading-skeleton')||el.querySelector('.xtj-chat-empty')){repairVisibleText(el);return;}var raw=el.innerHTML||'';if(bad(raw))el.innerHTML=fixText(raw);repairVisibleText(el);}
-  function repairChat(){repairChatArea(document.getElementById('dockChatList'));repairChatArea(document.getElementById('dockChatMessages'));var title=document.getElementById('dockChatTitle');if(title&&bad(title.textContent))title.textContent=fixText(title.textContent||'消息');}
-  function repairReadUnread(root){if(window.__xtjPerfProfile==='lite')return;root=root||document.body;if(!root||!root.querySelectorAll)return;root.querySelectorAll('[class*="read"],[class*="status"],[class*="meta"],[class*="time"],.chat-msg,.chat-list-item').forEach(function(el){if(!el||!bad(el.textContent))return;if(el.childElementCount===0)el.textContent=fixText(el.textContent);});}
-  function repairToasts(){var box=document.getElementById('toastContainer');if(!box)return;Array.prototype.slice.call(box.querySelectorAll('.toast')).forEach(function(t){var text=fixText(t.textContent||'').trim();if(!text)t.remove();else if(t.textContent!==text)t.textContent=text;});}
-  function installRefinedUiPatches(){
-    // loaderHtml 由 preferUnifiedLoader 最终统一设置
-    photoInfoAnim=function(){if(window.__xtjPhotoInfoAnimationFixInstalledV10||typeof window.showPhotoInfo!=='function')return;window.__xtjPhotoInfoAnimationFixInstalledV10=true;var nativeShow=window.showPhotoInfo;function m(){return document.getElementById('ppInfoModal');}function c(x){return x?x.querySelector('.pp-info-modal-content'):null;}function b(){return document.getElementById('ppInfoBtn');}function origin(card){var btn=b();var btnRect=btn?btn.getBoundingClientRect():null;var cardRect=card?card.getBoundingClientRect():null;if(!btnRect||!cardRect||!cardRect.width||!cardRect.height)return null;return{dx:btnRect.left-cardRect.left+btnRect.width*.5-cardRect.width*.5,dy:btnRect.top-cardRect.top+btnRect.height*.5-cardRect.height*.5,scale:Math.max(.18,Math.min(.34,btnRect.width/cardRect.width))};}function animateIn(modal,card){var o=origin(card);modal.classList.remove('closing');modal.classList.add('active');modal.style.display='flex';modal.style.pointerEvents='auto';modal.style.opacity='0';card.style.transformOrigin='center center';card.style.transition='none';card.style.opacity='0';card.style.filter='blur(10px)';card.style.transform=o?'translate3d('+o.dx+'px,'+o.dy+'px,0) scale('+o.scale+')':'translate3d(0,18px,0) scale(.84)';modal._xtjInfoOrigin=o;void card.offsetHeight;requestAnimationFrame(function(){modal.style.transition='opacity 220ms ease-out';modal.style.opacity='1';card.style.transition='transform 540ms cubic-bezier(.18,1.22,.32,1), opacity 220ms ease-out, filter 240ms ease-out';card.style.transform='translate3d(0,0,0) scale(1)';card.style.opacity='1';card.style.filter='blur(0)';});}function close(modal){modal=modal||m();var card=c(modal);if(!modal||!card||modal.classList.contains('closing'))return;var o=origin(card)||modal._xtjInfoOrigin;modal.classList.remove('active');modal.classList.add('closing');modal.style.pointerEvents='none';modal.style.transition='opacity 180ms ease-in';modal.style.opacity='1';card.style.transition='transform 320ms cubic-bezier(.55,0,.85,.4), opacity 180ms ease-in, filter 180ms ease-in';card.style.transform=o?'translate3d('+o.dx+'px,'+o.dy+'px,0) scale('+o.scale+')':'translate3d(0,16px,0) scale(.84)';card.style.opacity='0';card.style.filter='blur(8px)';requestAnimationFrame(function(){modal.style.opacity='0';});setTimeout(function(){modal.style.display='none';modal.classList.remove('closing');card.style.transition='';card.style.transform='';card.style.opacity='';card.style.filter='';},320);}window.showPhotoInfo=function(){var x=m();if(x&&x.style.display!=='none'&&x.classList.contains('active')){close(x);return;}nativeShow.apply(this,arguments);setTimeout(function(){x=m();var y=c(x);repairVisibleText(x||document.body);if(!x||!y)return;animateIn(x,y);},0);};window.closePhotoInfo=function(){close(m());};};
-    if(document.getElementById('xtjFeatureRefinedStyle'))return;var st=document.createElement('style');st.id='xtjFeatureRefinedStyle';st.textContent='.xtj-chat-loader--sigil:before,.xtj-chat-loader--sigil:after{display:none!important}.xtj-chat-loader--sigil{min-height:56vh;padding:24px 18px 36px}.xtj-sigil-loader{position:relative;width:132px;height:132px;display:grid;place-items:center;filter:drop-shadow(0 18px 38px rgba(94,234,212,.14))}.xtj-sigil-ring,.xtj-sigil-ring--late,.xtj-sigil-grid{position:absolute;inset:0;border-radius:50%}.xtj-sigil-ring{border:1px solid rgba(110,231,183,.34);border-top-color:rgba(255,248,220,.95);border-bottom-color:rgba(125,211,252,.68);animation:xtjSigilSpin 3.2s linear infinite}.xtj-sigil-ring--late{inset:14px;border:1px dashed rgba(191,219,254,.34);animation:xtjSigilSpinReverse 2.4s linear infinite}.xtj-sigil-grid{inset:24px;border:1px solid rgba(255,255,255,.14);box-shadow:inset 0 0 0 1px rgba(110,231,183,.08)}.xtj-sigil-grid:before,.xtj-sigil-grid:after{content:"";position:absolute;left:50%;top:50%;width:58%;height:58%;border:1px solid rgba(255,255,255,.16);transform:translate(-50%,-50%) rotate(45deg)}.xtj-sigil-grid:after{width:34%;height:34%;border-color:rgba(125,211,252,.28)}.xtj-sigil-core{width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(167,243,208,.9) 46%,rgba(56,189,248,.9));box-shadow:0 0 0 10px rgba(45,212,191,.08),0 0 24px rgba(125,211,252,.2);transform:rotate(45deg);animation:xtjSigilPulse 1.8s ease-in-out infinite}.xtj-sigil-star{position:absolute;width:14px;height:14px;background:rgba(255,248,220,.95);clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%);filter:drop-shadow(0 0 12px rgba(255,239,184,.55));animation:xtjSigilFlicker 1.6s ease-in-out infinite}.xtj-sigil-dust{position:absolute;width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.82);box-shadow:0 0 14px currentColor;animation:xtjSigilOrbit 2.8s linear infinite}.xtj-sigil-dust.a{color:#fde68a;top:14px;left:50%;margin-left:-3px}.xtj-sigil-dust.b{color:#7dd3fc;right:18px;top:50%;margin-top:-3px;animation-delay:-.9s}.xtj-sigil-dust.c{color:#c4b5fd;bottom:16px;left:50%;margin-left:-3px;animation-delay:-1.7s}.xtj-chat-loader--sigil .xtj-chat-loader-title{margin-top:14px;font-size:18px;font-weight:800;letter-spacing:.04em;color:#d9f99d;text-shadow:0 0 22px rgba(110,231,183,.16)}.xtj-chat-loader--sigil .xtj-chat-loader-sub{margin-top:6px;font-size:12px;color:rgba(100,116,139,.74)}@keyframes xtjSigilSpin{to{transform:rotate(360deg)}}@keyframes xtjSigilSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjSigilPulse{0%,100%{transform:rotate(45deg) scale(.92)}50%{transform:rotate(45deg) scale(1.12)}}@keyframes xtjSigilFlicker{0%,100%{opacity:.72;transform:scale(.92)}50%{opacity:1;transform:scale(1.18)}}@keyframes xtjSigilOrbit{0%{transform:translateY(0) scale(.78);opacity:.38}50%{transform:translateY(-5px) scale(1.18);opacity:1}100%{transform:translateY(0) scale(.78);opacity:.38}}';document.head.appendChild(st);
-  }
-  function patchToast(){if(typeof window.showToast!=='function'||window.showToast.__xtjPatchedV9)return;var old=window.showToast;window.showToast=function(msg){msg=fixText(msg==null?'':String(msg)).trim()||'操作成功';return old.call(this,msg);};window.showToast.__xtjPatchedV9=true;}
-  function patchChat(){if(typeof window.openChat==='function'&&!window.openChat.__xtjPatchedV9){var oldOpen=window.openChat;window.openChat=function(){return oldOpen.apply(this,arguments);};window.openChat.__xtjPatchedV9=true;}if(typeof window.switchDockTab==='function'&&!window.switchDockTab.__xtjPatchedV9){var oldSwitch=window.switchDockTab;window.switchDockTab=function(){return oldSwitch.apply(this,arguments);};window.switchDockTab.__xtjPatchedV9=true;}}
-  function spawnParticles(loader,count){if(!loader)return;var profile=window.__xtjPerfProfile||'full';if(profile==='lite')return;var particleCap=profile==='balanced'?8:16;count=Math.min(count||particleCap,particleCap);var colors=['#ffe39a','#7bd5ff','#ffffff','#b59cff','#ff7a9c','#a78bfa','#34d399','#fbbf24'];for(var i=0;i<count;i++){var p=document.createElement('span');p.className='xtj-echo-particle';var angle=Math.random()*Math.PI*2;var distance=50+Math.random()*(profile==='balanced'?90:160);p.style.left='50%';p.style.top='50%';p.style.background=colors[i%colors.length];p.style.boxShadow='0 0 14px '+colors[i%colors.length]+',0 0 24px '+colors[i%colors.length];p.style.setProperty('--dx',(Math.cos(angle)*distance).toFixed(1)+'px');p.style.setProperty('--dy',(Math.sin(angle)*distance).toFixed(1)+'px');p.style.animationDuration=(profile==='balanced'?420:500+Math.random()*520).toFixed(0)+'ms';p.style.width=(profile==='balanced'?4:4+Math.random()*5).toFixed(0)+'px';p.style.height=p.style.width;loader.appendChild(p);p.addEventListener('animationend',function(){this.remove();});}}
-  function installMagicInteraction(){if(window.__xtjMagicInteractionInstalledV9)return;window.__xtjMagicInteractionInstalledV9=true;document.addEventListener('pointerdown',function(e){var now=Date.now();if(now-(installMagicInteraction._lastTs||0)<80)return;installMagicInteraction._lastTs=now;var loader=e.target.closest&&e.target.closest('.xtj-echo-loader');if(!loader)return;var profile=window.__xtjPerfProfile||'full';loader.classList.remove('xtj-cast');void loader.offsetWidth;if(profile!=='lite'){loader.classList.add('xtj-cast');spawnParticles(loader,profile==='balanced'?14:34);var shards=loader.querySelectorAll('.xtj-echo-shard');shards.forEach(function(shard,index){var sx=[-110,140,-150,120][index]||100;var sy=[-80,-110,110,88][index]||-80;shard.style.setProperty('--sx',sx+'px');shard.style.setProperty('--sy',sy+'px');});clearTimeout(loader._xtjCastTimer);loader._xtjCastTimer=setTimeout(function(){loader.classList.remove('xtj-cast');},profile==='balanced'?760:1180);}},{passive:true});}
-  function repairVisibleText(root){if(!root)return;var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:function(n){var p=n.parentElement;if(!p||/^(SCRIPT|STYLE|TEXTAREA|PRE|CODE)$/.test(p.tagName))return NodeFilter.FILTER_REJECT;return bad(n.nodeValue)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP;}});var nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);nodes.forEach(function(n){n.nodeValue=fixText(n.nodeValue);});repairAttrs(root);repairReadUnread(root);}
-  function initProfileSync(){window.syncProfileUser=function(){var n=document.getElementById('profileName'),s=document.getElementById('profileStatus'),a=document.getElementById('profileAvatar');if(!n)return;if(window.currentUser){n.textContent=window.currentUser;if(s)s.textContent='查看资料';if(a)a.textContent=window.currentUser[0].toUpperCase();}else{n.textContent='未登录';if(s)s.textContent='请先登录';if(a)a.innerHTML='?';}};document.addEventListener('change',function(e){if(e.target&&e.target.id==='profileThemeToggle'){if(window.__xtjThemeChangeLock||window.__xtjThemeControllerV2)return;window.__xtjThemeChangeLock=true;setTimeout(function(){window.__xtjThemeChangeLock=false;},500);var t=document.getElementById('themeToggle');if(t)t.click();}if(e.target&&e.target.id==='profileNotifToggle'){try{localStorage.setItem('xtj-notif',e.target.checked?'on':'off');}catch(_){}}});}
-  function installSpellLoaderPatch(){if(window.__xtjSpellLoaderPatchV1)return;window.__xtjSpellLoaderPatchV1=true;if(document.getElementById('xtjSpellLoaderStyle'))return;var st=document.createElement('style');st.id='xtjSpellLoaderStyle';st.textContent='.xtj-chat-loader--sigil:before,.xtj-chat-loader--sigil:after{display:none!important}.xtj-chat-loader--sigil{min-height:42vh;padding:18px 14px 28px}.xtj-sigil-loader{position:relative;width:108px;height:108px;display:grid;place-items:center;filter:drop-shadow(0 16px 34px rgba(94,234,212,.14))}.xtj-sigil-ring,.xtj-sigil-ring--late,.xtj-sigil-grid{position:absolute;inset:0;border-radius:50%}.xtj-sigil-ring{border:1px solid rgba(110,231,183,.32);border-top-color:rgba(255,248,220,.95);border-bottom-color:rgba(125,211,252,.64);animation:xtjSigilSpin 3.2s linear infinite}.xtj-sigil-ring--late{inset:12px;border:1px dashed rgba(191,219,254,.28);animation:xtjSigilSpinReverse 2.4s linear infinite}.xtj-sigil-grid{inset:22px;border:1px solid rgba(255,255,255,.12);box-shadow:inset 0 0 0 1px rgba(110,231,183,.08)}.xtj-sigil-grid:before,.xtj-sigil-grid:after{content:\"\";position:absolute;left:50%;top:50%;width:56%;height:56%;border:1px solid rgba(255,255,255,.14);transform:translate(-50%,-50%) rotate(45deg)}.xtj-sigil-grid:after{width:34%;height:34%;border-color:rgba(125,211,252,.24)}.xtj-sigil-core{width:20px;height:20px;border-radius:8px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(167,243,208,.92) 46%,rgba(56,189,248,.92));box-shadow:0 0 0 8px rgba(45,212,191,.08),0 0 22px rgba(125,211,252,.2);transform:rotate(45deg);animation:xtjSigilPulse 1.8s ease-in-out infinite}.xtj-sigil-star{position:absolute;width:12px;height:12px;background:rgba(255,248,220,.95);clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%);filter:drop-shadow(0 0 12px rgba(255,239,184,.55));animation:xtjSigilFlicker 1.6s ease-in-out infinite}.xtj-sigil-dust{position:absolute;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.82);box-shadow:0 0 14px currentColor;animation:xtjSigilOrbit 2.8s linear infinite}.xtj-sigil-dust.a{color:#fde68a;top:12px;left:50%;margin-left:-2.5px}.xtj-sigil-dust.b{color:#7dd3fc;right:16px;top:50%;margin-top:-2.5px;animation-delay:-.9s}.xtj-sigil-dust.c{color:#c4b5fd;bottom:14px;left:50%;margin-left:-2.5px;animation-delay:-1.7s}.xtj-chat-loader--sigil .xtj-chat-loader-title{margin-top:12px;font-size:17px;font-weight:800;letter-spacing:.04em;color:#d9f99d;text-shadow:0 0 22px rgba(110,231,183,.16)}.xtj-chat-loader--sigil .xtj-chat-loader-sub{margin-top:4px;font-size:11px;color:rgba(100,116,139,.74)}@keyframes xtjSigilSpin{to{transform:rotate(360deg)}}@keyframes xtjSigilSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjSigilPulse{0%,100%{transform:rotate(45deg) scale(.92)}50%{transform:rotate(45deg) scale(1.1)}}@keyframes xtjSigilFlicker{0%,100%{opacity:.72;transform:scale(.92)}50%{opacity:1;transform:scale(1.16)}}@keyframes xtjSigilOrbit{0%{transform:translateY(0) scale(.78);opacity:.38}50%{transform:translateY(-5px) scale(1.14);opacity:1}100%{transform:translateY(0) scale(.78);opacity:.38}}';document.head.appendChild(st);}
-  function preferUnifiedLoader(){loaderHtml=function(text){return safeLoaderHtml(text||'加载中...','','chat-list');};}
-  function boot(){try{addStyle();installRefinedUiPatches();installSpellLoaderPatch();preferUnifiedLoader();patchToast();patchChat();photoInfoAnim();installMagicInteraction();initProfileSync();if(typeof window.__xtjUiTextRepairStop==='function')window.__xtjUiTextRepairStop();repairObservedRoots(true);globalObserver=new MutationObserver(function(records){for(var i=0;i<records.length;i++){var record=records[i];if(!record.addedNodes||!record.addedNodes.length)continue;for(var j=0;j<record.addedNodes.length;j++){var node=record.addedNodes[j];if(!node||node.nodeType!==1)continue;if(node.classList&&node.classList.contains('xtj-echo-particle'))continue;scheduleRepair(node,false);}}});observeRepairTargets();document.addEventListener('visibilitychange',function(){if(document.hidden){stopRepairLoop();}else{observeRepairTargets();}});window.addEventListener('beforeunload',stopRepairLoop);}catch(e){console.warn('xtj features boot error:',e);}}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();

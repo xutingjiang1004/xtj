@@ -1,0 +1,480 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic:
+        - navigation:
+          - generic:
+            - heading "xtj" [level=1]
+            - button "切换深色模式"
+          - generic:
+            - generic:
+              - button "登录"
+              - button "注册"
+        - generic:
+          - generic:
+            - generic:
+              - button "🔍 筛选":
+                - generic: 🔍
+                - generic: 筛选
+              - generic: 全部帖子
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/7/8 16:51:40
+                  - generic: 公开
+              - generic: 小弟弟，你可以拍一张吐舌头，然后翻白眼，把手指放在嘴里搅动的照片了吗？
+              - generic: 浏览 40 | 点赞 0 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/7/8 16:51:24
+                  - generic: 公开
+              - generic: 尿是膀胱的泪滴，屁是痔疮的叹息 我的思念就像窜稀，一阵一阵 想终止但却无法停息 于是我不再擦屁股，从此生活就有了颜色。
+              - generic: 浏览 18 | 点赞 0 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/7/8 16:51:08
+                  - generic: 公开
+              - generic: 男生被草的感觉是一开始挺疼的，就是感觉肚子胀胀的很疼，反正第二天醒来就是那种喉咙痛、身底下痛，就是那种肌肉萎缩了，然后不想动的那种剧痛，还有就是那种肚子里特别胀的感觉，像是被卡车碾了似的，但是你还活着，还能动，缓几天就好，要是有人揉的话，那应该一天或者半天应该就能好，但是走路的话腿会有点不适应，然后药是无味的，不是固体是粉末，偶尔会有些液体吃了之后首先是头晕，其次是脸红，到后来就没意识了。有一种灼烧感然后有点痛，加快的话就有点麻，就感觉有东西在撞你肚子一样，并且能感觉到肚子里有东西在往外顶，然后第二天肚子会胀胀的，酸酸的，很不想动，到后期还会 瞳孔失焦 ，看东西都有重影
+              - generic: 浏览 5 | 点赞 0 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/28 16:19:41
+                  - generic: 公开
+              - generic: 【菜鸟驿站】你好，你购买的快递一直在震动，把客人都给吓跑了！请你在24小时内请来取件！
+              - generic: 浏览 151 | 点赞 1 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/28 16:19:26
+                  - generic: 公开
+              - generic: 我可能是个攻吧 因为我真的受不了了 我也可能是个受吧 因为我受不了了还一直在受
+              - generic: 浏览 65 | 点赞 1 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/23 17:06:43
+                  - generic: 公开
+              - generic: 这是你的脚吗？我刚刚忘记回你消息了，我们还可以再聊聊吗
+              - generic: 浏览 102 | 点赞 3 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/22 18:46:00
+                  - generic: 公开
+              - generic: 一群猪。
+              - generic: 浏览 45 | 点赞 2 | 评论 1
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic: "xxz: 对"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/18 14:25:27
+                  - generic: 公开
+              - generic: 浏览 70 | 点赞 1 | 评论 1
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic: "xxz: 666"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/14 21:39:49
+                  - generic: 公开
+              - generic: "666"
+              - generic: 浏览 35 | 点赞 1 | 评论 1
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic: "xxz: 777"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/4 09:49:00
+                  - generic: 公开
+              - generic: 浏览 31 | 点赞 5 | 评论 3
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic:
+                - generic: "xtj: 111"
+                - generic: "xtj: 666"
+                - generic: "xtj: 44545"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/3 12:41:44
+                  - generic: 公开
+              - generic: 浏览 8 | 点赞 1 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xtj
+                    - generic: 2026/6/3 10:22:51
+                  - generic: 公开
+              - generic: 浏览 8 | 点赞 3 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/6/2 19:34:43
+                  - generic: 公开
+              - generic: 浏览 4 | 点赞 0 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/23 22:04:35
+                  - generic: 公开
+              - generic: 哈哈哈
+              - generic: 浏览 12 | 点赞 4 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/3 12:14:35
+                  - generic: 公开
+              - generic: "666"
+              - generic: 浏览 21 | 点赞 1 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/3 09:27:18
+                  - generic: 公开
+              - generic: "111"
+              - generic: 浏览 21 | 点赞 2 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/3 09:26:52
+                  - generic: 公开
+              - generic: 猪
+              - generic: 浏览 22 | 点赞 2 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/2 13:51:37
+                  - generic: 公开
+              - generic: 你们好
+              - generic: 浏览 22 | 点赞 2 | 评论 5
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic:
+                - generic: "xxz: hi"
+                - generic: "xxz: ..."
+                - generic: "xxz: 666"
+                - generic: "xxz: ."
+                - generic: "xtj: 猪"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/2 12:36:16
+                  - generic: 公开
+              - generic: 你们是傻逼
+              - generic: 浏览 21 | 点赞 3 | 评论 0
+              - generic:
+                - button "点赞"
+                - button "评论"
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: xxz
+                    - generic: 2026/5/2 09:24:32
+                  - generic: 公开
+              - generic: "2112121"
+              - generic: 浏览 21 | 点赞 1 | 评论 1
+              - generic:
+                - button "点赞"
+                - button "评论"
+              - generic: "xxz: 323232"
+      - generic:
+        - generic:
+          - generic:
+            - heading "消息" [level=3]
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: 照片墙
+                - generic: 记录光影和日常
+            - generic:
+              - combobox:
+                - option "按日期 ↓" [selected]
+                - option "按日期 ↑"
+                - option "按名称"
+                - option "按大小"
+                - option "按热度"
+              - button "相册"
+              - button "上传"
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic: 照片墙上传
+                  - heading [level=4]: 选择完成，准备上传
+                  - paragraph: 请确认本次准备上传的照片内容。
+                - button: ×
+              - generic:
+                - generic: 0 张照片
+                - generic:
+                  - button: 重新选择
+                  - button: 开始上传
+          - button "Choose File"
+      - generic [ref=e421]:
+        - generic [ref=e422]: 我的
+        - generic [ref=e423] [cursor=pointer]:
+          - generic [ref=e424]: "?"
+          - generic [ref=e425]:
+            - generic [ref=e426]: 未登录
+            - generic [ref=e427]: 点击登录
+          - generic [ref=e428]: →
+        - generic [ref=e429]:
+          - button "点赞记录，共 0 条" [ref=e430] [cursor=pointer]:
+            - generic [ref=e431]:
+              - generic [ref=e432]:
+                - generic [ref=e433]: 我的互动
+                - heading "点赞记录" [level=4] [ref=e434]
+              - generic [ref=e435]: "0"
+          - button "评论记录，共 0 条" [ref=e436] [cursor=pointer]:
+            - generic [ref=e437]:
+              - generic [ref=e438]:
+                - generic [ref=e439]: 我的留言
+                - heading "评论记录" [level=4] [ref=e440]
+              - generic [ref=e441]: "0"
+        - generic [ref=e443] [cursor=pointer]:
+          - generic [ref=e448]:
+            - generic [ref=e449]: XTJ Pro
+            - generic [ref=e450]: 活动由管理员限时发布
+          - generic [ref=e451]: 开通
+        - button "Pro 装扮 登录后可查看和保存 Pro 视觉偏好 登录" [ref=e453] [cursor=pointer]:
+          - generic [ref=e454]: ✨
+          - generic [ref=e455]:
+            - generic [ref=e456]: Pro 装扮
+            - generic [ref=e457]: 登录后可查看和保存 Pro 视觉偏好
+          - generic [ref=e458]: 登录
+          - generic [ref=e459]: ›
+        - generic [ref=e460]:
+          - generic [ref=e461]:
+            - generic [ref=e462]: 深色模式
+            - generic [ref=e467]:
+              - checkbox
+          - generic [ref=e469]:
+            - generic [ref=e470]: 通知
+            - generic [ref=e476]:
+              - checkbox [checked]
+          - generic [ref=e478]:
+            - generic [ref=e479]: 关于
+            - generic [ref=e484]: xtj v0.93
+        - generic "累计互动数据" [ref=e485]:
+          - generic [ref=e486]:
+            - text: 帖子
+            - strong [ref=e487]: "0"
+          - generic [ref=e488]: "|"
+          - generic [ref=e489]:
+            - text: 点赞
+            - strong [ref=e490]: "0"
+          - generic [ref=e491]: "|"
+          - generic [ref=e492]:
+            - text: 评论
+            - strong [ref=e493]: "0"
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic: 我的互动
+            - heading "点赞记录" [level=3]
+          - button "关闭互动记录": ✕
+    - generic:
+      - button "帖子" [ref=e63] [cursor=pointer]
+      - button "聊天" [ref=e69] [cursor=pointer]
+      - button [ref=e74] [cursor=pointer]
+      - button "我的" [active] [ref=e85] [cursor=pointer]
+  - generic:
+    - generic:
+      - heading "发表评论" [level=3]
+      - textbox "写下你的想法..."
+      - generic:
+        - button "取消"
+        - button "发布评论"
+  - generic:
+    - generic:
+      - heading "确认删除帖子？" [level=3]
+      - paragraph: 删除后无法恢复
+      - generic:
+        - button "取消"
+        - button "确认删除"
+  - generic:
+    - generic:
+      - heading "编辑帖子" [level=3]
+      - textbox "修改帖子内容..."
+      - generic:
+        - generic: 可见范围
+        - generic:
+          - button "公开" [ref=e91] [cursor=pointer]
+          - button "私密" [ref=e92] [cursor=pointer]
+      - generic: 媒体文件会保留，本次只编辑正文和可见范围。
+      - generic:
+        - button "取消"
+        - button "保存修改"
+  - generic:
+    - generic:
+      - heading "确认操作" [level=3]
+      - paragraph: 确定要执行此操作吗？
+      - generic:
+        - button "取消"
+        - button "确认"
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: 欢迎回来
+        - textbox "昵称"
+        - textbox "密码"
+        - button "登录"
+        - generic: 没有账号？去注册
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: 创建账号
+        - textbox "昵称"
+        - textbox "邮箱（可选，用于接收通知）"
+        - paragraph: 有事情我会偷偷发邮箱给你的宝宝（不会骚扰你）
+        - textbox "密码（至少6位）"
+        - button "注册"
+        - generic: 已有账号？去登录
+  - generic:
+    - button "×"
+    - generic:
+      - img "预览"
+    - generic: 双指捏合可缩放
+  - generic:
+    - generic:
+      - generic:
+        - heading "统计详情" [level=3]
+        - button "关闭统计详情": ✕
+  - generic:
+    - generic:
+      - generic:
+        - heading "帖子详情" [level=3]
+        - button "关闭帖子详情": ✕
+  - generic:
+    - generic:
+      - generic:
+        - heading "个人资料" [level=3]
+        - button "✕"
+      - generic:
+        - generic:
+          - generic: "?"
+          - generic "更换头像": 📷
+        - generic:
+          - generic:
+            - generic: 用户名
+            - generic: "-"
+          - generic:
+            - generic: 用户ID
+            - generic: "-"
+          - generic:
+            - generic: 注册时间
+            - generic: "-"
+        - button "退出登录"
+  - generic:
+    - generic:
+      - generic:
+        - heading "用户资料" [level=3]
+        - button "✕"
+      - generic:
+        - generic: "?"
+        - generic: "-"
+        - generic: 最近登录：加载中...
+        - button "💬 发消息"
+  - generic:
+    - generic:
+      - generic:
+        - heading "Pro 会员" [level=3]
+        - button "✕"
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic: 限时
+              - text: 活动领 Pro

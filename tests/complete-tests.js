@@ -11,7 +11,7 @@ function read(p){ return fs.readFileSync(p,'utf8'); }
 function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0,10); }
 
 console.log('\n=== Syntax Checks ===');
-['render-api/server.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/english-learning.js','js/english-dict.js'].forEach(function(f){
+['render-api/server.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/english-learning.js','js/english-dict.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
   test(f, function(){ cp.execSync('node --check '+f, {stdio:'pipe'}); });
 });
 
@@ -187,13 +187,12 @@ test('performance profile skips duplicate class mutations', function(){
   assert.ok(s.indexOf('if (profile === currentProfile) return;') >= 0, 'missing no-op same-profile guard');
   assert.ok(s.indexOf('resizeApplyFrameId = requestAnimationFrame') >= 0, 'missing resize rAF coalescing');
 });
-test('features observer scope is limited and does not reattach document.body', function(){
+test('features observer repairs only explicitly marked added nodes', function(){
   var s = read('js/features.js');
-  ['#feed','#dockChatMessages','#dockChatList','#dockChatContainer','#toastContainer','#panelPosts','#panelChat'].forEach(function(selector){
-    assert.ok(s.indexOf(selector) >= 0, 'missing observe target ' + selector);
-  });
-  assert.ok(s.indexOf('observe(document.body') < 0, 'document.body observer remains');
-  assert.ok(s.indexOf('attributes:true') < 0, 'broad attribute observer remains');
+  assert.ok(s.indexOf("data-xtj-legacy-text") >= 0, 'explicit legacy marker missing');
+  assert.ok(s.indexOf('record.addedNodes') >= 0, 'observer does not use addedNodes');
+  assert.ok(s.indexOf('createTreeWalker') < 0, 'broad TreeWalker remains');
+  assert.ok(s.indexOf('REPAIR_TARGET_SELECTORS') < 0, 'feed/chat root scans remain');
   assert.ok(s.indexOf('REPAIR_ATTRS') >= 0, 'attribute repair helper missing');
 });
 test('photo preview css is sourced from css file rather than features injection', function(){
@@ -248,15 +247,66 @@ test('core has no legacy loaders for static entry modules', function(){
   });
   assert.ok(core.indexOf('function scheduleInteractiveEnhancements') < 0, 'interactive enhancement scheduler remains');
   assert.ok(core.indexOf('function armCoreAnimationLoader') < 0, 'core animation loader remains');
-  assert.ok(!/xtjLoadScriptOnce\(['"]https:\/\/cdn\.jsdelivr\.net\/npm\/gsap/.test(core), 'GSAP lazy loader remains');
+  assert.ok(core.indexOf("gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }") >= 0, 'GSAP is not owned by the module loader');
 });
-test('opening English uses the static module and only its dictionary loader', function(){
+test('opening English lazy loads its module and keeps one dictionary owner', function(){
   var html = read('index.html');
   var core = read('js/core.js');
-  assert.strictEqual((html.match(/<script[^>]+src="js\/english-learning\.min\.js\?v=/g) || []).length, 1, 'english-learning static script count');
+  assert.strictEqual((html.match(/<script[^>]+src="js\/english-learning\.min\.js\?v=/g) || []).length, 0, 'english-learning remains static');
+  assert.strictEqual((html.match(/name="xtj-module-english-script"/g) || []).length, 1, 'english module asset count');
   assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'dictionary is statically loaded');
-  assert.ok(!/xtjLoadScript(?:Once|Sequence)[\s\S]{0,260}english-(?:learning|dict)/.test(core), 'English click can insert another script');
+  assert.ok(core.indexOf("return loadXtjModule('english')") >= 0, 'English entry does not use the module loader');
   assert.ok(/function ensureEnglishDictionary\(\)/.test(read('js/english-learning.js')), 'English dictionary owner missing');
+});
+
+test('feature modules have one retryable CSS-first loader', function(){
+  var html = read('index.html');
+  var core = read('js/core.js');
+  assert.ok(core.indexOf('window.XTJModuleLoader = { load: loadXtjModule }') >= 0, 'public module loader missing');
+  assert.ok(core.indexOf('if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName]') >= 0, 'module promise dedupe missing');
+  assert.ok(core.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module cannot retry');
+  assert.ok(core.indexOf('definition.styles') < core.indexOf('definition.scripts'), 'CSS is not loaded before scripts');
+  ['ai-agent','english-learning','pro-upgrade','pro-style','photo-wall/preview','photo-wall/preview-hotfix','photo-wall/upload-ui'].forEach(function(asset) {
+    var escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.ok(!(new RegExp('<script[^>]+src="js/' + escaped + '\\.min\\.js')).test(html), asset + ' remains a static script');
+  });
+  assert.ok(!/<script[^>]+gsap@/.test(html), 'GSAP remains a first-load script');
+});
+
+test('legacy feature loaders and broad text scans are removed', function(){
+  var source = read('js/features.js');
+  ['xtj-echo-loader','xtj-sigil-loader','xtj-chat-loader--sigil','xtj-echo-particle','installSpellLoaderPatch','installMagicInteraction','spawnParticles','createTreeWalker','repairObservedRoots'].forEach(function(token) {
+    assert.strictEqual(source.indexOf(token), -1, 'legacy feature token remains: ' + token);
+  });
+  assert.ok(source.indexOf("data-xtj-legacy-text") >= 0, 'legacy marker scope missing');
+  assert.ok(/record\.addedNodes/.test(source), 'observer does not stay within addedNodes');
+});
+
+test('photo preview has maintainable source and no global error suppression', function(){
+  var source = read('js/photo-wall/preview.js');
+  var html = read('index.html');
+  assert.ok(source.indexOf('function onLoad()') >= 0 && source.indexOf('function onErr()') >= 0, 'named preview handlers missing');
+  assert.ok(source.indexOf('onErr is not defined') < 0 && source.indexOf('onLoad is not defined') < 0, 'preview source contains known error');
+  assert.ok(html.indexOf('Suppressed preview.min.js known bug') < 0, 'preview error suppression remains');
+  assert.ok(read('scripts/build.js').indexOf("'js/photo-wall/preview.js'") >= 0, 'preview source is not built');
+});
+
+test('debug performance metrics are opt-in and local-only', function(){
+  var source = read('js/performance.js');
+  assert.ok(source.indexOf("get('perf') === '1'") >= 0, 'perf query gate missing');
+  ['dom-content-loaded','load','first-post-render','longtask','largest-contentful-paint','totalBytes'].forEach(function(metric) {
+    assert.ok(source.indexOf(metric) >= 0, 'performance metric missing: ' + metric);
+  });
+  assert.ok(source.indexOf('fetch(') < 0 && source.indexOf('localStorage') < 0, 'performance metrics leave the browser');
+  assert.ok(read('js/core.js').indexOf("mark('english-first-open')") >= 0, 'English first-open mark missing');
+  assert.ok(read('js/core.js').indexOf("mark('ai-first-open')") >= 0, 'AI first-open mark missing');
+});
+
+test('hashed assets and dynamic APIs have explicit cache policies', function(){
+  var source = read('render-api/server.js');
+  assert.ok(source.indexOf("public, max-age=31536000, immutable") >= 0, 'immutable asset cache policy missing');
+  assert.ok(source.indexOf("res.setHeader('Cache-Control', 'no-cache')") >= 0, 'HTML no-cache policy missing');
+  assert.ok(source.indexOf("res.setHeader('Cache-Control', 'no-store')") >= 0, 'dynamic API no-store policy missing');
 });
 test('login-device executes only from its single static entry', function(){
   var html = read('index.html');
