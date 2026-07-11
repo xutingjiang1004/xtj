@@ -1841,6 +1841,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
         };
         var xtjModulePromises = Object.create(null);
+        var XTJ_MODULE_LOAD_TIMEOUT = 15000;
 
         function moduleAssetUrl(metaName) {
             var meta = document.querySelector('meta[name="' + metaName + '"]');
@@ -1854,10 +1855,29 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 var selector = 'link[data-xtj-asset="' + metaName + '"]';
                 var existing = document.querySelector(selector);
                 if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
                 var node = existing || document.createElement('link');
-                function cleanup() { node.onload = null; node.onerror = null; }
-                node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
-                node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_style_failed:' + moduleName)); };
+                var settled = false;
+                var timer = null;
+                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
+                function fail(code) {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjFailed = '1';
+                    if (node.parentNode) node.remove();
+                    reject(new Error(code + ':' + moduleName));
+                }
+                node.onload = function() {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjLoaded = '1';
+                    delete node.dataset.xtjFailed;
+                    resolve(node);
+                };
+                node.onerror = function() { fail('module_style_failed'); };
+                timer = setTimeout(function() { fail('module_style_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
                 if (!existing) {
                     node.rel = 'stylesheet';
                     node.href = url;
@@ -1875,10 +1895,29 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 var selector = 'script[data-xtj-asset="' + assetKey.replace(/"/g, '\\"') + '"]';
                 var existing = document.querySelector(selector);
                 if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
                 var node = existing || document.createElement('script');
-                function cleanup() { node.onload = null; node.onerror = null; }
-                node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
-                node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_script_failed:' + moduleName)); };
+                var settled = false;
+                var timer = null;
+                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
+                function fail(code) {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjFailed = '1';
+                    if (node.parentNode) node.remove();
+                    reject(new Error(code + ':' + moduleName));
+                }
+                node.onload = function() {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjLoaded = '1';
+                    delete node.dataset.xtjFailed;
+                    resolve(node);
+                };
+                node.onerror = function() { fail('module_script_failed'); };
+                timer = setTimeout(function() { fail('module_script_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
                 if (!existing) {
                     node.src = url;
                     node.defer = true;
@@ -1985,16 +2024,21 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         }
         window.__xtjOpenAiChat = lazyAiChatLauncher;
 
+        var englishLearningLaunchPromise = null;
         function lazyEnglishLearningLauncher() {
-            ensureEnglishLearningLoaded().then(function() {
-                if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-                    window.EnglishLearning.open();
-                    if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
-                }
+            if (englishLearningLaunchPromise) return englishLearningLaunchPromise;
+            englishLearningLaunchPromise = ensureEnglishLearningLoaded().then(function() {
+                if (!window.EnglishLearning || typeof window.EnglishLearning.open !== 'function') throw new Error('english_learning_open_function_missing');
+                window.EnglishLearning.open();
+                if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('英语学习模块加载失败，请稍后重试');
                 console.error('[XTJ] english-learning lazy load failed:', err);
+                return null;
+            }).finally(function() {
+                englishLearningLaunchPromise = null;
             });
+            return englishLearningLaunchPromise;
         }
         window.__xtjOpenEnglishLearning = lazyEnglishLearningLauncher;
 

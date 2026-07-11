@@ -843,3 +843,54 @@
     display: block !important;
   }
 }
+
+
+/* xtj-hotfix: keep the Dock reachable on wide touch viewports and make post columns deterministic. */
+@media (min-width: 1024px) {
+  .dock-bar, .dock-bar:hover, .dock-bar:focus-within {
+    left: 50% !important; right: auto !important; bottom: max(18px, env(safe-area-inset-bottom)) !important;
+    transform: translate(-50%, 0) !important; opacity: 1 !important;
+  }
+}
+@media (min-width: 1024px) and (max-width: 1279px) {
+  #panelPosts .wrap, #panelPosts.active .wrap {
+    display: grid !important; grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "stats" "publish" "filter" "feed" !important;
+    width: 100% !important; max-width: none !important; min-width: 0 !important;
+    margin-left: 0 !important; margin-right: 0 !important; box-sizing: border-box;
+  }
+  #panelPosts .stats {
+    grid-area: stats !important; grid-column: 1 !important; grid-row: auto !important; position: static !important;
+    display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100% !important; max-width: none !important; min-width: 0 !important;
+    margin-left: 0 !important; margin-right: 0 !important; box-sizing: border-box;
+  }
+  #panelPosts #publishBox, #panelPosts #postFilterBar, #panelPosts #feed, #panelPosts #feed > .post {
+    width: 100% !important; max-width: none !important; min-width: 0 !important;
+    margin-left: 0 !important; margin-right: 0 !important; box-sizing: border-box;
+  }
+  #panelPosts #publishBox { grid-area: publish !important; grid-column: 1 !important; grid-row: auto !important; }
+  #panelPosts #postFilterBar { grid-area: filter !important; grid-column: 1 !important; grid-row: auto !important; }
+  #panelPosts #feed { grid-area: feed !important; grid-column: 1 !important; grid-row: auto !important; padding-bottom: calc(132px + env(safe-area-inset-bottom)) !important; }
+  #panelPosts #feed > .post { grid-column: auto !important; grid-row: auto !important; }
+}
+@media (min-width: 1280px) {
+  #panelPosts .wrap, #panelPosts.active .wrap {
+    display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px) !important;
+    grid-template-areas: "publish stats" "filter stats" "feed stats" !important; column-gap: 24px !important;
+    width: 100% !important; max-width: none !important; min-width: 0 !important; box-sizing: border-box;
+  }
+  #panelPosts #publishBox, #panelPosts #postFilterBar, #panelPosts #feed, #panelPosts #feed > .post {
+    width: 100% !important; max-width: none !important; min-width: 0 !important;
+    margin-left: 0 !important; margin-right: 0 !important; box-sizing: border-box;
+  }
+  #panelPosts #publishBox { grid-area: publish !important; grid-column: 1 !important; grid-row: 1 !important; }
+  #panelPosts #postFilterBar { grid-area: filter !important; grid-column: 1 !important; grid-row: 2 !important; }
+  #panelPosts #feed { grid-area: feed !important; grid-column: 1 !important; grid-row: 3 !important; padding-bottom: calc(132px + env(safe-area-inset-bottom)) !important; }
+  #panelPosts #feed > .post { grid-column: auto !important; grid-row: auto !important; }
+  #panelPosts .stats {
+    grid-area: stats !important; grid-column: 2 !important; grid-row: 1 / span 3 !important; position: sticky !important; top: 24px !important;
+    display: grid !important; grid-template-columns: minmax(0, 1fr) !important; width: 100% !important; max-width: none !important;
+    min-width: 0 !important; margin: 0 !important; box-sizing: border-box; align-self: start;
+  }
+}
