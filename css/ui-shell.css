@@ -492,11 +492,7 @@
 }
 
 #panelEnglishLearning .el-page {
-  height: auto !important;
-  min-height: calc(100dvh - 112px) !important;
-  max-height: none !important;
-  padding: 0 16px calc(132px + env(safe-area-inset-bottom)) !important;
-  overflow: visible !important;
+  padding: 0 16px calc(24px + env(safe-area-inset-bottom)) !important;
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
@@ -836,11 +832,7 @@
   }
 
   #panelEnglishLearning .el-page {
-    height: auto !important;
-    min-height: calc(100dvh - 112px) !important;
-    max-height: none !important;
-    padding: 0 24px 132px !important;
-    overflow: visible !important;
+    padding: 0 24px 24px !important;
     background: transparent !important;
     border: 0 !important;
     box-shadow: none !important;
