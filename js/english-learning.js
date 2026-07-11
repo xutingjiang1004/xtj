@@ -15,6 +15,7 @@
   var MAX_HISTORY = 80;
   var MAX_MISTAKES = 120;
   var SAVE_DEBOUNCE_MS = 800;
+  var SEARCH_DEBOUNCE_MS = 100;
 
   var DEFAULT_SETTINGS = {
     defaultLevel: 'cet4',
@@ -435,6 +436,7 @@
     setSyncStatus('dirty', '待同步');
     if (S.batchMutating) {
       S.batchDirty = true;
+      syncSelectAllWordCheckbox();
       return;
     }
     if (S.syncTimer) clearTimeout(S.syncTimer);
@@ -727,6 +729,28 @@
     if (node) node.textContent = String(value);
   }
 
+  function syncWordItemSelection(item, checked) {
+    if (item) item.classList.toggle('selected', !!checked);
+  }
+
+  function syncSelectAllWordCheckbox() {
+    var selectAllNode = $('elSelectAllCb');
+    if (!selectAllNode) return;
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('.el-word-cb'));
+    var checkedCount = boxes.filter(function(cb) { return !!cb.checked; }).length;
+    selectAllNode.checked = !!boxes.length && checkedCount === boxes.length;
+    selectAllNode.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
+  }
+
+  function resetWordListInteractiveNodes(list) {
+    if (!list || !list.querySelectorAll) return;
+    list.querySelectorAll('.el-word-cb, .el-word-del').forEach(function(node) {
+      var clone = node.cloneNode(true);
+      if (node.classList.contains('el-word-cb')) clone.checked = !!node.checked;
+      if (node.parentNode) node.parentNode.replaceChild(clone, node);
+    });
+  }
+
   function renderWordList() {
     var list = $('elWordList');
     if (!list) return;
@@ -740,14 +764,11 @@
     words.forEach(function(w, index) {
       var item = el('article', { class: 'el-word-item', 'data-id': w.id, style: '--el-i:' + Math.min(index, 16) });
       var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id, 'aria-label': '选择 ' + w.en });
-      cb.addEventListener('change', function() {
-        item.classList.toggle('selected', cb.checked);
-        updateGenInfo();
-      });
       var main = el('div', { class: 'el-word-main' });
       main.appendChild(el('div', { class: 'el-word-en', text: w.en }));
       main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '暂无释义' }));
       var delBtn = el('button', { type: 'button', class: 'el-word-del', 'aria-label': '删除 ' + w.en, title: '删除', text: '×' });
+      delBtn.setAttribute('data-id', w.id);
       delBtn.addEventListener('click', function() {
         deleteWord(w.id);
         renderAll();
@@ -760,6 +781,8 @@
       frag.appendChild(item);
     });
     list.appendChild(frag);
+    resetWordListInteractiveNodes(list);
+    syncSelectAllWordCheckbox();
   }
 
   function updateGenInfo() {
@@ -2271,9 +2294,12 @@
     });
 
     safeBind('elSearchInput', 'input', function() {
-      var search = $('elSearchInput');
-      S.search = search ? (search.value || '') : '';
-      renderWordList();
+      clearTimeout(S.searchDebounceTimer);
+      S.searchDebounceTimer = setTimeout(function() {
+        var search = $('elSearchInput');
+        S.search = search ? (search.value || '') : '';
+        renderWordList();
+      }, SEARCH_DEBOUNCE_MS);
     });
 
     safeForEach('.el-filter', function(btn) {
@@ -2285,12 +2311,34 @@
       }, 'el-filter');
     });
 
+    safeBind('elWordList', 'change', function(ev) {
+      var target = ev.target;
+      if (!target || !target.classList || !target.classList.contains('el-word-cb')) return;
+      syncWordItemSelection(target.closest('.el-word-item'), target.checked);
+      syncSelectAllWordCheckbox();
+      updateGenInfo();
+    });
+
+    safeBind('elWordList', 'click', function(ev) {
+      var deleteBtn = ev.target && ev.target.closest ? ev.target.closest('.el-word-del') : null;
+      if (!deleteBtn) return;
+      var id = deleteBtn.getAttribute('data-id');
+      if (!id) return;
+      var word = S.words.find(function(entry) { return entry.id === id; });
+      if (!word) return;
+      deleteWord(id);
+      renderAll();
+      notify('宸插垹闄?' + word.en);
+    });
+
     var selectAllNode = $('elSelectAllCb');
     safeBind('elSelectAllCb', 'change', function() {
       safeForEach('.el-word-cb', function(cb) {
         cb.checked = !!(selectAllNode && selectAllNode.checked);
-        cb.dispatchEvent(new Event('change'));
+        syncWordItemSelection(cb.closest('.el-word-item'), cb.checked);
       });
+      syncSelectAllWordCheckbox();
+      updateGenInfo();
     });
 
     safeBind('elDeleteSelBtn', 'click', function() {
