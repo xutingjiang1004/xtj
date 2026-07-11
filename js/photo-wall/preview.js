@@ -52,37 +52,43 @@
     }
     function D(e, t) {
         if (e) {
-            if (e.onload = null, e.onerror = null, !t) return e.style.transition = "none", e.removeAttribute("src"), 
+            if (!t) return e._ppCleanup && e._ppCleanup(), e.style.transition = "none", e.removeAttribute("src"),
             e.style.opacity = "0", void (e._ppUrl = null);
-            if (e._ppUrl !== t) {
-                e._ppUrl = t;
-                var o = C[t];
-                if (o && o.naturalWidth > 0) return e.style.transition = "none", e.src = t, void (e.style.opacity = "1");
-                e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
-                var n = !1, i = 0, a = function() {
-                    n || (n = !0, e.onload = null, e.onerror = null, C[t] || (C[t] = e), delete H[t], 
-                    requestAnimationFrame(function() {
-                        e.style.transition = "opacity 0.2s ease-in-out", e.offsetHeight, e.style.opacity = "1";
-                    }));
-                }, r = function() {
-                    n || (e.onload = null, e.onerror = null, (i = (H[t] || 0) + 1) <= S ? (H[t] = i, 
-                    setTimeout(function() {
-                        e._ppUrl === t && (n = !1, e.onload = a, e.onerror = r, e.src = t + (-1 === t.indexOf("?") ? "?t=" : "&t=") + Date.now());
-                    }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
-                        if (!e) return;
-                        e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
-                    }(e)));
-                };
-                e.onload = a, e.onerror = r, e.src = t, e.complete && e.naturalWidth > 0 && a();
+            if (e._ppUrl === t) {
+                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
+                if (e._ppListenerUrl === t && e._ppCleanup) return;
+            } else e._ppCleanup && e._ppCleanup();
+            e._ppUrl = t;
+            var o = C[t];
+            if (o && o.naturalWidth > 0) return e._ppCleanup && e._ppCleanup(), e.style.transition = "none", e.src = t, void (e.style.opacity = "1");
+            e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
+            var n = !1, i = 0, a = (e._ppLoadGen || 0) + 1, r = null;
+            e._ppLoadGen = a;
+            function cleanup() {
+                r && (clearTimeout(r), r = null), e.removeEventListener("load", handleLoad), e.removeEventListener("error", handleError), e.onload = null, e.onerror = null, e._ppListenerUrl === t && (e._ppListenerUrl = null), e._ppCleanup === cleanup && (e._ppCleanup = null);
             }
+            function handleLoad() {
+                n || e._ppLoadGen !== a || e._ppUrl !== t || (n = !0, cleanup(), C[t] || (C[t] = e), delete H[t], requestAnimationFrame(function() {
+                    e._ppLoadGen === a && e._ppUrl === t && (e.style.transition = "opacity 0.2s ease-in-out", e.offsetHeight, e.style.opacity = "1");
+                }));
+            }
+            function handleError() {
+                n || e._ppLoadGen !== a || e._ppUrl !== t || (cleanup(), (i = (H[t] || 0) + 1) <= S ? (H[t] = i, r = setTimeout(function() {
+                    e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t + (-1 === t.indexOf("?") ? "?t=" : "&t=") + Date.now());
+                }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
+                    if (!e) return;
+                    e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
+                }(e)));
+            }
+            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t, e.complete && e.naturalWidth > 0 && handleLoad();
         }
     }
     function O(e) {
         if (M(), s) {
             var t = n, o = document.getElementById("ppPrevImg"), i = document.getElementById("photoPreviewImage"), r = document.getElementById("ppNextImg");
-            k(e), t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), 
-            e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1, 
-            s.classList.remove("snapping"), s.style.transition = "", s.style.transform = "translate3d(" + -a + "px, 0, 0)", 
+            k(e), t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
+            e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1,
+            s.classList.remove("snapping"), s.style.transition = "", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
             t[e] && window.updateAmbientBackground(t[e].imageUrl);
         }
     }
@@ -91,7 +97,7 @@
             c = !0, s.classList.add("snapping");
             s.style.transition = "transform 320ms cubic-bezier(0.33, 1, 0.68, 1)";
             var o = !1, n = function() {
-                o || (o = !0, s.removeEventListener("transitionend", n), s.classList.remove("snapping"), 
+                o || (o = !0, s.removeEventListener("transitionend", n), s.classList.remove("snapping"),
                 c = !1, t && t());
             };
             s.addEventListener("transitionend", n), setTimeout(n, 440), s.style.transform = "translate3d(" + e + "px, 0, 0)";
@@ -103,11 +109,11 @@
             var t = Math.abs(l - e), o = Math.min(Math.max(.5 * t, 150), 400);
             s.classList.add("snapping"), s.style.transition = "transform " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
             var r = function() {
-                s.removeEventListener("transitionend", r), s.classList.remove("snapping"), c = !1, 
+                s.removeEventListener("transitionend", r), s.classList.remove("snapping"), c = !1,
                 Y(10);
-                var e = i, t = n, o = document.getElementById("ppPrevImg"), a = (document.getElementById("photoPreviewImage"), 
+                var e = i, t = n, o = document.getElementById("ppPrevImg"), a = (document.getElementById("photoPreviewImage"),
                 document.getElementById("ppNextImg"));
-                e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), e < t.length - 1 && t[e + 1] ? D(a, t[e + 1].imageUrl) : D(a, null), 
+                e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), e < t.length - 1 && t[e + 1] ? D(a, t[e + 1].imageUrl) : D(a, null),
                 setTimeout(function() {
                     k(e);
                 }, 500);
@@ -118,8 +124,8 @@
         }
     }
     function N(e) {
-        i = e, q(), t = n[e], j(e), F(e), M(), s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)", 
-        l = 0, c = !1, s.classList.remove("snapping"), O(e), n[e] && window.updateAmbientBackground(n[e].imageUrl), 
+        i = e, q(), t = n[e], j(e), F(e), M(), s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
+        l = 0, c = !1, s.classList.remove("snapping"), O(e), n[e] && window.updateAmbientBackground(n[e].imageUrl),
         setTimeout(function() {
             f = !1;
         }, 300);
@@ -203,24 +209,25 @@
             e = !1;
             var t = document.getElementById("photoPreviewOverlay");
             if (t) {
-                t._cleanupPreview && t._cleanupPreview(), q();
+                t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), q();
                 var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
+                o && o._ppCleanup && o._ppCleanup();
                 if (o && (a = o.getBoundingClientRect()), n && a && i && a.width > 0 && a.height > 0 && n.width > 0 && n.height > 0) {
                     i.style.transition = "none", i.style.opacity = "0";
                     var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
-                    o.style.transition = "none", o.style.transform = "translate(0, 0) scale(1)", o.style.transformOrigin = "top left", 
-                    o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.15s cubic-bezier(0.25, 1, 0.4, 1)", 
-                    o.style.transition = "transform 0.2s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.2s cubic-bezier(0.25, 1, 0.4, 1)", 
-                    o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px", 
+                    o.style.transition = "none", o.style.transform = "translate(0, 0) scale(1)", o.style.transformOrigin = "top left",
+                    o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.15s cubic-bezier(0.25, 1, 0.4, 1)",
+                    o.style.transition = "transform 0.2s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.2s cubic-bezier(0.25, 1, 0.4, 1)",
+                    o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px",
                     t.style.opacity = "0", setTimeout(function() {
-                        i && (i.style.transition = "", i.style.opacity = ""), o && (o.style.transition = "", 
-                        o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""), 
+                        i && (i.style.transition = "", i.style.opacity = ""), o && (o.style.transition = "",
+                        o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""),
                         t.style.transition = "", t.style.opacity = "", t.classList.remove("active"), document.body.classList.remove("photo-previewing");
                     }, 220);
-                } else t.style.transition = "opacity 0.15s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0", 
+                } else t.style.transition = "opacity 0.15s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
                 setTimeout(function() {
-                    t.style.opacity = "", t.style.transition = "", t.classList.remove("active"), o && (o.style.transition = "", 
-                    o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""), 
+                    t.style.opacity = "", t.style.transition = "", t.classList.remove("active"), o && (o.style.transition = "",
+                    o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""),
                     i && (i.style.transition = "", i.style.opacity = ""), document.body.classList.remove("photo-previewing");
                 }, 150);
             } else document.body.classList.remove("photo-previewing");
@@ -243,11 +250,11 @@
         var n = "";
         n += K("大小", G(Z(e.fileSize), "--")), e.originalSize && Number(e.originalSize) > 0 && Number(e.originalSize) !== Number(e.fileSize || 0) && (n += K("原始大小", G(Z(e.originalSize), "--")));
         var i = "";
-        e.exif && ((e.exif.make || e.exif.model) && (i += K("设备", G(e.exif.model || e.exif.make, "--"))), 
-        e.exif.fNumber && (i += K("光圈", G("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (i += K("快门", G(e.exif.exposureTime, "--"))), 
+        e.exif && ((e.exif.make || e.exif.model) && (i += K("设备", G(e.exif.model || e.exif.make, "--"))),
+        e.exif.fNumber && (i += K("光圈", G("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (i += K("快门", G(e.exif.exposureTime, "--"))),
         e.exif.iso && (i += K("ISO", G(e.exif.iso, "--"))), e.exif.focalLength && (i += K("焦距", G(e.exif.focalLength + "mm", "--"))));
         var a = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + o + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + n + "</div>";
-        return i && (a += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + i + "</div>"), 
+        return i && (a += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + i + "</div>"),
         a;
     }
     function Q() {
@@ -257,7 +264,7 @@
             if (o && ("flex" === o.style.display || o.classList.contains("active") || o.classList.contains("closing"))) window.closePhotoInfo(); else {
                 if (!o) {
                     var n = document.createElement("div");
-                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>', 
+                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
                     document.body.appendChild(n), o = n;
                 }
                 o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
@@ -275,19 +282,19 @@
                 var l = "";
                 l += x("大小", I(i, "--"));
                 var c = "";
-                e.exif && ((e.exif.make || e.exif.model) && (c += x("设备", I(e.exif.model || e.exif.make, "--"))), 
-                e.exif.fNumber && (c += x("光圈", I("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (c += x("快门", I(e.exif.exposureTime, "--"))), 
+                e.exif && ((e.exif.make || e.exif.model) && (c += x("设备", I(e.exif.model || e.exif.make, "--"))),
+                e.exif.fNumber && (c += x("光圈", I("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (c += x("快门", I(e.exif.exposureTime, "--"))),
                 e.exif.iso && (c += x("ISO", I(e.exif.iso, "--"))), e.exif.focalLength && (c += x("焦距", I(e.exif.focalLength + "mm", "--"))));
                 var d = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + s + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + l + "</div>";
                 c && (d += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + c + "</div>");
                 var p = document.getElementById("ppInfoModalBody");
                 p && (p.innerHTML = d), o._closeTimeout && (clearTimeout(o._closeTimeout), o._closeTimeout = null);
                 var u = o.querySelector(".pp-info-modal-content"), f = document.getElementById("ppInfoBtn"), m = null;
-                if (f && (m = f.getBoundingClientRect()), o.classList.remove("closing"), o.classList.add("active"), 
-                o.style.display = "flex", o.style.opacity = "1", u.style.transition = "none", u.style.transform = "", 
+                if (f && (m = f.getBoundingClientRect()), o.classList.remove("closing"), o.classList.add("active"),
+                o.style.display = "flex", o.style.opacity = "1", u.style.transition = "none", u.style.transform = "",
                 u.style.opacity = "1", u.offsetHeight, m) {
                     var v = u.getBoundingClientRect(), y = m.left - v.left, h = m.top - v.top, w = m.width / v.width, g = m.height / v.height, b = Math.min(w, g);
-                    u.style.transform = "translate(" + y + "px, " + h + "px) scale(" + b + ")", u.style.transformOrigin = "top left", 
+                    u.style.transform = "translate(" + y + "px, " + h + "px) scale(" + b + ")", u.style.transformOrigin = "top left",
                     u.style.opacity = "0", o._ppInfoOrigin = {
                         dx: y,
                         dy: h,
@@ -296,10 +303,10 @@
                         btnHeight: m.height
                     };
                 }
-                u.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0", 
-                o.offsetHeight, o.style.opacity = "1", m ? (u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out", 
-                u.style.transform = "translate(0, 0) scale(1)", u.style.opacity = "1") : (u.style.transition = "none", 
-                u.style.transform = "scale(0.9)", u.style.opacity = "0", u.offsetHeight, u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out", 
+                u.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0",
+                o.offsetHeight, o.style.opacity = "1", m ? (u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                u.style.transform = "translate(0, 0) scale(1)", u.style.opacity = "1") : (u.style.transition = "none",
+                u.style.transform = "scale(0.9)", u.style.opacity = "0", u.offsetHeight, u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
                 u.style.transform = "scale(1)", u.style.opacity = "1");
             }
         }
@@ -349,20 +356,20 @@
     }, window.ppNextPhoto = function() {
         W(1);
     }, window.openPhotoPreview = function(b, L) {
-        if (!e) if (L || (n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : []), 
+        if (!e) if (L || (n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : []),
         n && 0 !== n.length) {
             b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
             var _ = document.getElementById("photoPreviewOverlay");
             if (!_) {
                 var H = document.createElement("div");
-                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>', 
+                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
                 document.body.appendChild(H), _ = H;
             }
             d || (!function(d) {
                 var b, L;
                 d.querySelector(".photo-preview-image-wrapper");
                 function T() {
-                    P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h), 
+                    P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h),
                     h = null), m.clear(), v = null, y = null, B.isActive = !1;
                 }
                 d._cleanupPreview = T, d.addEventListener("pointerdown", function(e) {
@@ -385,7 +392,7 @@
                                             var t = document.getElementById("ppDownloadConfirmModal");
                                             if (t) return t.style.display = "flex", t.offsetHeight, void t.classList.add("show");
                                             var o = document.createElement("div");
-                                            o.id = "ppDownloadConfirmModal", o.className = "pp-download-confirm-overlay", o.innerHTML = '<div class="pp-download-confirm-content"><div class="pp-download-confirm-title">是否要下载该图片？</div><div class="pp-download-confirm-buttons"><button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button><button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button></div></div>', 
+                                            o.id = "ppDownloadConfirmModal", o.className = "pp-download-confirm-overlay", o.innerHTML = '<div class="pp-download-confirm-content"><div class="pp-download-confirm-title">是否要下载该图片？</div><div class="pp-download-confirm-buttons"><button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button><button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button></div></div>',
                                             e.appendChild(o), o.offsetHeight, o.classList.add("show");
                                         } catch (e) {
                                             console.error("Error showing download confirm modal:", e);
@@ -444,13 +451,13 @@
                         } else if (o.scale <= 1.01 && B.isActive && p > 0) {
                             B.dy = p;
                             var O, R = Math.max(.7, 1 - p / (2 * r));
-                            B.scale = R, B.opacity = Math.max(0, 1 - p / r), (O = document.getElementById("photoPreviewImage")) && (d.style.opacity = B.opacity, 
+                            B.scale = R, B.opacity = Math.max(0, 1 - p / r), (O = document.getElementById("photoPreviewImage")) && (d.style.opacity = B.opacity,
                             O.style.transform = "translate(0, " + p + "px) scale(" + B.scale + ")");
                         } else {
                             if (c) return;
                             if (l = t, !(o.scale > 1.01)) {
                                 var A = -a + l, N = 1;
-                                0 === i && t > 0 && (N = 1 + t / a * 2), i === n.length - 1 && t < 0 && (N = 1 - t / a * 2), 
+                                0 === i && t > 0 && (N = 1 + t / a * 2), i === n.length - 1 && t < 0 && (N = 1 - t / a * 2),
                                 A = t / N - a, h && cancelAnimationFrame(h), h = requestAnimationFrame(function() {
                                     s.style.transform = "translate3d(" + A + "px, 0, 0)", h = null;
                                 });
@@ -476,7 +483,7 @@
                                 var _ = 150;
                                 if (B.dy > _) return B.isActive = !1, void V();
                                 var H = document.getElementById("photoPreviewImage");
-                                H && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", H.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)", 
+                                H && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", H.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)",
                                 d.style.opacity = 1, H.style.transform = ""), B.isActive = !1;
                             }
                             if (v) {
@@ -502,15 +509,15 @@
                                 }
                                 l = 0, D || (C = !1);
                             }
-                            if (!C) if (S) M - p < 300 && !u && (I && (clearTimeout(I), I = null), X(e.clientX, e.clientY), 
+                            if (!C) if (S) M - p < 300 && !u && (I && (clearTimeout(I), I = null), X(e.clientX, e.clientY),
                             u = !0, setTimeout(function() {
                                 u = !1;
-                            }, 300)), p = M; else if (M - p < 300 && !u && o.scale <= 1.01 && (I && (clearTimeout(I), 
+                            }, 300)), p = M; else if (M - p < 300 && !u && o.scale <= 1.01 && (I && (clearTimeout(I),
                             I = null), X(e.clientX, e.clientY), u = !0, setTimeout(function() {
                                 u = !1;
                             }, 300)), p = M, !u && o.scale <= 1.01 && !f) {
                                 var W = document.getElementById("ppInfoModal");
-                                if (W && "none" !== W.style.display && W.classList.contains("active")) return window.closePhotoInfo(), 
+                                if (W && "none" !== W.style.display && W.classList.contains("active")) return window.closePhotoInfo(),
                                 void (y = null);
                                 I && clearTimeout(I), I = setTimeout(function() {
                                     I = null, V();
@@ -522,7 +529,7 @@
                 }), d.addEventListener("pointercancel", function(e) {
                     if (P && (clearTimeout(P), P = null), m.clear(), v = null, y = null, B.isActive) {
                         var t = document.getElementById("photoPreviewImage");
-                        t && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", t.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)", 
+                        t && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", t.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)",
                         d.style.opacity = 1, t.style.transform = ""), B.isActive = !1;
                     }
                     o.scale <= 1.01 && A(0);
@@ -540,38 +547,47 @@
                     G && G.width > 0 && G.height > 0 && (D = G, W = K);
                 }
             }
-            _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"), 
-            _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1", 
+            _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"),
+            _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
             M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
-            var J = document.getElementById("photoPreviewImage");
+            var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
+            function cleanupOpenListeners() {
+                $ && (clearTimeout($), $ = null), J && (J.removeEventListener("load", handleOpenLoad), J.removeEventListener("error", handleOpenError)), _ && _._cleanupOpenListeners === cleanupOpenListeners && (_._cleanupOpenListeners = null);
+            }
+            function handleOpenLoad() {
+                _._openLoadGen === ee && (cleanupOpenListeners(), J.offsetHeight, J.style.opacity = "1", re());
+            }
+            function handleOpenError() {
+                _._openLoadGen === ee && (cleanupOpenListeners(), J.style.opacity = "1", re());
+            }
+            _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(), _._cleanupOpenListeners = cleanupOpenListeners;
+            J && (J._ppCleanup && J._ppCleanup(), J._ppLoadGen = (J._ppLoadGen || 0) + 1, J._ppUrl = null, J._ppListenerUrl = null, J.classList.remove("pp-placeholder"));
             if (J && S && S.imageUrl) {
-                var Q = C[S.imageUrl];
-                if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, Q || J.complete) {
+                var oe = C[S.imageUrl];
+                if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, oe || J.complete) {
                     if (J.offsetHeight, D) {
-                        var $ = J.getBoundingClientRect();
-                        if ($ && $.width > 0) {
-                            var ee = D.left - $.left, oe = D.top - $.top, ne = D.width / $.width, ie = D.height / $.height, ae = Math.min(ne, ie);
-                            J.style.transform = "translate(" + ee + "px, " + oe + "px) scale(" + ae + ")", J.style.transformOrigin = "top left", 
-                            J.style.borderRadius = 14 / ae + "px", J.style.opacity = "1";
+                        var ne = J.getBoundingClientRect();
+                        if (ne && ne.width > 0) {
+                            var ie = D.left - ne.left, ae = D.top - ne.top, se = D.width / ne.width, te = D.height / ne.height, le = Math.min(se, te);
+                            J.style.transform = "translate(" + ie + "px, " + ae + "px) scale(" + le + ")", J.style.transformOrigin = "top left",
+                            J.style.borderRadius = 14 / le + "px", J.style.opacity = "1";
                         }
                     }
-                    J.offsetHeight, D && J.getBoundingClientRect().width > 0 ? (_.style.transition = "opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1)", 
-                    J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)", 
-                    J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", setTimeout(re, 220)) : (J.style.opacity = "1", 
-                    setTimeout(re, 150));
-                } else J.addEventListener("load", function onLoad() {
-                    J.removeEventListener("load", onLoad), J.removeEventListener("error", onErr), J.offsetHeight, 
-                    J.style.opacity = "1", re();
-                }), J.addEventListener("error", function onErr() {
-                    J.removeEventListener("load", onLoad), J.removeEventListener("error", onErr), J.style.opacity = "1", 
-                    re();
-                }), setTimeout(re, 8e3);
+                    J.offsetHeight, D && J.getBoundingClientRect().width > 0 ? (_.style.transition = "opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
+                    J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+                    J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
+                    $ = setTimeout(re, 150));
+                } else {
+                    J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
+                        _._openLoadGen === ee && (cleanupOpenListeners(), re());
+                    }, 8e3);
+                }
             } else re();
         } else window.showToast("暂无照片");
         function re() {
-            J && (J.style.transition = "", J.style.transform = "", J.style.transformOrigin = "", 
-            J.style.borderRadius = ""), _.style.transition = "", O(b), j(b), F(b), W && (W.style.transition = "", 
-            W.style.opacity = "");
+            Q || (Q = !0, _ && _._cleanupOpenListeners && _._cleanupOpenListeners(), J && (J.style.transition = "", J.style.transform = "", J.style.transformOrigin = "",
+            J.style.borderRadius = ""), _.style.transition = "", O(b), j(b), F(b), W && (W.style.transition = "",
+            W.style.opacity = ""));
         }
     }, window.closePhotoPreview = V, Q = function() {
         var e = t;
@@ -580,7 +596,7 @@
             if (o && ("flex" === o.style.display || o.classList.contains("active") || o.classList.contains("closing"))) window.closePhotoInfo(); else {
                 if (!o) {
                     var n = document.createElement("div");
-                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>', 
+                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
                     document.body.appendChild(n), o = n;
                 }
                 o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
@@ -589,11 +605,11 @@
                 var i = document.getElementById("ppInfoModalBody");
                 i && (i.innerHTML = J(e)), o._closeTimeout && (clearTimeout(o._closeTimeout), o._closeTimeout = null);
                 var a = o.querySelector(".pp-info-modal-content"), r = document.getElementById("ppInfoBtn"), s = r ? r.getBoundingClientRect() : null;
-                if (o.classList.remove("closing"), o.classList.add("active"), o.style.display = "flex", 
-                o.style.opacity = "1", a.style.transition = "none", a.style.transform = "", a.style.opacity = "1", 
+                if (o.classList.remove("closing"), o.classList.add("active"), o.style.display = "flex",
+                o.style.opacity = "1", a.style.transition = "none", a.style.transform = "", a.style.opacity = "1",
                 a.offsetHeight, s) {
                     var l = a.getBoundingClientRect(), c = s.left - l.left, d = s.top - l.top, p = s.width / l.width, u = s.height / l.height, f = Math.min(p, u);
-                    a.style.transform = "translate(" + c + "px, " + d + "px) scale(" + f + ")", a.style.transformOrigin = "top left", 
+                    a.style.transform = "translate(" + c + "px, " + d + "px) scale(" + f + ")", a.style.transformOrigin = "top left",
                     a.style.opacity = "0", o._ppInfoOrigin = {
                         dx: c,
                         dy: d,
@@ -602,10 +618,10 @@
                         btnHeight: s.height
                     };
                 }
-                a.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0", 
-                o.offsetHeight, o.style.opacity = "1", s ? (a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out", 
-                a.style.transform = "translate(0, 0) scale(1)", a.style.opacity = "1") : (a.style.transition = "none", 
-                a.style.transform = "scale(0.9)", a.style.opacity = "0", a.offsetHeight, a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out", 
+                a.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0",
+                o.offsetHeight, o.style.opacity = "1", s ? (a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                a.style.transform = "translate(0, 0) scale(1)", a.style.opacity = "1") : (a.style.transition = "none",
+                a.style.transform = "scale(0.9)", a.style.opacity = "0", a.offsetHeight, a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
                 a.style.transform = "scale(1)", a.style.opacity = "1"), !e.fileSize && e.imageUrl && async function(e) {
                     if (!e || e.fileSize || !e.imageUrl) return e ? e.fileSize : null;
                     if (L[e.imageUrl]) return e.fileSize = L[e.imageUrl], e.fileSize;
@@ -635,22 +651,22 @@
             var o = e._ppInfoOrigin;
             if (o && t) {
                 var n = t.getBoundingClientRect(), i = document.getElementById("ppInfoBtn"), a = i ? i.getBoundingClientRect() : null, r = 0, s = 0, l = .3;
-                a ? (r = a.left - n.left, s = a.top - n.top, l = Math.min(a.width / n.width, a.height / n.height)) : (r = o.dx, 
-                s = o.dy, l = o.scale || .3), t.style.transition = "none", t.style.transform = "translate(0, 0) scale(1)", 
-                t.style.opacity = "1", t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in", 
-                t.style.transform = "translate(" + r + "px, " + s + "px) scale(" + l + ")", t.style.opacity = "0", 
-                e.style.transition = "opacity 0.25s ease-in", e.style.opacity = "0", e._closeTimeout && clearTimeout(e._closeTimeout), 
+                a ? (r = a.left - n.left, s = a.top - n.top, l = Math.min(a.width / n.width, a.height / n.height)) : (r = o.dx,
+                s = o.dy, l = o.scale || .3), t.style.transition = "none", t.style.transform = "translate(0, 0) scale(1)",
+                t.style.opacity = "1", t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in",
+                t.style.transform = "translate(" + r + "px, " + s + "px) scale(" + l + ")", t.style.opacity = "0",
+                e.style.transition = "opacity 0.25s ease-in", e.style.opacity = "0", e._closeTimeout && clearTimeout(e._closeTimeout),
                 e._closeTimeout = setTimeout(function() {
-                    t.style.transition = "none", t.style.transform = "", t.style.opacity = "", t.style.transformOrigin = "", 
-                    e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"), 
+                    t.style.transition = "none", t.style.transform = "", t.style.opacity = "", t.style.transformOrigin = "",
+                    e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
                     e._closeTimeout = null;
                 }, 320);
-            } else t && (t.style.transition = "none", t.style.transform = "scale(1)", t.style.opacity = "1", 
-            t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in", 
-            t.style.transform = "scale(0.9)", t.style.opacity = "0"), e.style.transition = "opacity 0.25s ease-in", 
+            } else t && (t.style.transition = "none", t.style.transform = "scale(1)", t.style.opacity = "1",
+            t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in",
+            t.style.transform = "scale(0.9)", t.style.opacity = "0"), e.style.transition = "opacity 0.25s ease-in",
             e.style.opacity = "0", e._closeTimeout = setTimeout(function() {
-                e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"), 
-                t && (t.style.transition = "none", t.style.transform = "", t.style.opacity = "", 
+                e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
+                t && (t.style.transition = "none", t.style.transform = "", t.style.opacity = "",
                 t.style.transformOrigin = ""), e._closeTimeout = null;
             }, 320);
         }
@@ -678,7 +694,7 @@
             s();
         } else window.showToast("暂无可分享的图片");
         function a() {
-            o && (o.innerHTML = o._origHTML || "🔗", o.classList.remove("copied"), o.style.transform = "", 
+            o && (o.innerHTML = o._origHTML || "🔗", o.classList.remove("copied"), o.style.transform = "",
             o._copying = !1);
         }
         function r() {
@@ -717,7 +733,7 @@
                             render: !1
                         })), r && r.ok ? (n = e.filter(function(e) {
                             return e && String(e.id) !== String(t.id);
-                        }), V(), window.renderPhotoWallWithoutReload ? window.renderPhotoWallWithoutReload() : window.renderPhotoWall && window.renderPhotoWall(), 
+                        }), V(), window.renderPhotoWallWithoutReload ? window.renderPhotoWallWithoutReload() : window.renderPhotoWall && window.renderPhotoWall(),
                         window.showToast("照片已从照片墙删除")) : (o && (o.disabled = !1), a && (a.disabled = !1));
                     }
                 }
@@ -782,7 +798,7 @@
                     console.error("Download error:", t), $(), E = !1;
                     try {
                         var i = document.createElement("a");
-                        i.href = e.imageUrl, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg", 
+                        i.href = e.imageUrl, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg",
                         document.body.appendChild(i), i.click(), setTimeout(function() {
                             try {
                                 document.body.removeChild(i);
