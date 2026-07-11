@@ -217,6 +217,45 @@ test('mixed multiple-choice and cloze blanks count toward requested answerable t
   assert.equal(result.questions.length, 3);
 });
 
+
+test('article-only generation accepts an empty questions array', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['article'], question_count: 4 }));
+  var result = validateEnglishGenerateOutput(validModel({ questions: [] }), request);
+  assert.equal(result.questions.length, 0);
+});
+
+test('cloze placeholder count must match blanks length', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q1', type: 'cloze', question: 'Complete.', context: 'Only one ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }, { options: ['c', 'd'], answer: 0 }, { options: ['e', 'f'], answer: 0 }, { options: ['g', 'h'], answer: 0 }
+    ] }]
+  }), request); }, /占位符数量不匹配/);
+
+  var request2 = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 2 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q1', type: 'cloze', question: 'Complete.', context: 'Two ___ blanks ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }
+    ] }]
+  }), request2); }, /占位符数量不匹配/);
+
+  var request3 = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 2 }));
+  var result = validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q_ok', type: 'cloze', question: 'Complete.', context: 'Two ___ blanks ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }, { options: ['c', 'd'], answer: 0 }
+    ] }]
+  }), request3);
+  assert.equal(result.questions[0].blanks.length, 2);
+});
+
+test('question ids reject selector-special characters', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 2 }));
+  ['q"bad', 'q[bad]', 'q bad'].forEach(function(id) {
+    var questions = validModel().questions.map(function(q, index) { return Object.assign({}, q, index === 0 ? { id: id } : {}); });
+    assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: questions }), request); }, /id 格式错误/);
+  });
+});
+
 test('handler timeout returns 504 and aborts the injected signal', async function() {
   var signal;
   var result = await invoke({
