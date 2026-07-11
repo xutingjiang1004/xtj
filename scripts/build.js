@@ -15,6 +15,20 @@ function contentHash(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(fullPath)).digest('hex').slice(0, 10);
 }
 
+function minifiedPath(filePath) {
+  if (/\.min\.(css|js)$/.test(filePath)) return filePath;
+  return filePath.replace(/\.css$/, '.min.css').replace(/\.js$/, '.min.js');
+}
+
+function indexLocalAssetRefs(html) {
+  const refs = [];
+  html.replace(/\b(href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(match, attr, assetPath) {
+    refs.push({ attr: attr, assetPath: assetPath });
+    return match;
+  });
+  return refs;
+}
+
 function updateIndexAssetVersions() {
   const indexPath = path.resolve(ROOT, 'index.html');
   if (!fs.existsSync(indexPath)) return false;
@@ -34,6 +48,27 @@ function updateIndexAssetVersions() {
     console.log('[HASH] index.html local CSS/JS query strings already current');
   }
   return changed;
+}
+
+function validateIndexMinifiedRefs() {
+  const indexPath = path.resolve(ROOT, 'index.html');
+  if (!fs.existsSync(indexPath)) return true;
+  const html = fs.readFileSync(indexPath, 'utf8');
+  const errors = [];
+  indexLocalAssetRefs(html).forEach(function(ref) {
+    const nextMin = minifiedPath(ref.assetPath);
+    if (nextMin === ref.assetPath) return;
+    if (!fs.existsSync(path.resolve(ROOT, nextMin))) return;
+    errors.push(ref.assetPath + ' should use ' + nextMin);
+  });
+  if (!errors.length) {
+    console.log('[CHECK] index.html minified asset refs OK');
+    return true;
+  }
+  errors.forEach(function(msg) {
+    console.error('[CHECK] ' + msg);
+  });
+  return false;
 }
 
 function quote(value) {
@@ -168,8 +203,9 @@ console.log('\n--- Minifying CSS ---');
 const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
 
 updateIndexAssetVersions();
+const indexRefsValid = validateIndexMinifiedRefs();
 
-const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length;
+const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length + (indexRefsValid ? 0 : 1);
 
 if (failed > 0) {
   console.error(`\n=== Build Complete with ${failed} failed/skipped item(s) ===`);

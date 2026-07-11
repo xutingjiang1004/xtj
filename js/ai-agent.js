@@ -1686,9 +1686,11 @@
     var canToggle = !!state.canToggle;
     if (state.userPinnedOpen && canToggle) expanded = true;
     if (!canToggle) expanded = false;
+    armResearchMotionWindow(card);
     card.classList.toggle('expanded', !!expanded && canToggle);
     card.classList.toggle('collapsed', !expanded || !canToggle);
     if (refs && refs.details) refs.details.open = !!expanded && canToggle;
+    syncResearchCardAnimatorState(card);
   }
 
   function resetResearchCardDisclosure(root) {
@@ -1765,6 +1767,39 @@
       try { state.animator.stop(); } catch (e2) {}
       state.animator = null;
     }
+  }
+
+  function getResearchAnimationProfile() {
+    var root = document.documentElement;
+    var profile = window.__xtjPerfProfile || root.getAttribute('data-xtj-perf-profile') || root.dataset.xtjPerfProfile || '';
+    if (!profile && root.classList.contains('perf-lite')) profile = 'lite';
+    if (!profile && root.classList.contains('perf-balanced')) profile = 'balanced';
+    if (!profile) profile = 'full';
+    if (profile === 'lite') return { mode: 'lite', canvas: false, minNodes: 0, maxNodes: 0, fps: 0, dpr: 1, shadowBlurBase: 0, shadowBlurBoost: 0 };
+    if (profile === 'balanced') return { mode: 'balanced', canvas: true, minNodes: 32, maxNodes: 40, fps: 30, dpr: 1.35, shadowBlurBase: 5, shadowBlurBoost: 8 };
+    return { mode: 'full', canvas: true, minNodes: 40, maxNodes: 56, fps: 45, dpr: 1.65, shadowBlurBase: 7, shadowBlurBoost: 10 };
+  }
+
+  function armResearchMotionWindow(card) {
+    var refs = ensureResearchCardRefs(card);
+    if (!refs || !refs.details) return;
+    refs.details.classList.add('ai-motion-window');
+    clearTimeout(refs.details._motionWindowTimer);
+    refs.details._motionWindowTimer = setTimeout(function() {
+      refs.details.classList.remove('ai-motion-window');
+    }, 380);
+  }
+
+  function shouldResearchCardAnimate(card) {
+    if (!isResearchCard(card) || !card.isConnected || document.hidden) return false;
+    var state = card._researchState || {};
+    if (state.state !== 'preparing' && state.state !== 'thinking' && state.state !== 'researching') return false;
+    return !(state.canToggle && card.classList.contains('collapsed'));
+  }
+
+  function syncResearchCardAnimatorState(card) {
+    if (!isResearchCard(card) || !card._researchState || !card._researchState.animator) return;
+    if (typeof card._researchState.animator.sync === 'function') card._researchState.animator.sync();
   }
 
   function syncResearchElapsed(card, ms) {
@@ -1880,6 +1915,7 @@
       updateResearchProgress(card, Math.max(0.12, state.progress || 0));
     }
 
+    syncResearchCardAnimatorState(card);
     if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
     if (refs.retry) refs.retry.style.display = (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') ? '' : 'none';
   }
@@ -1891,19 +1927,31 @@
     if (!canvas || !canvas.getContext) return null;
     var ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    var state = { running: true, paused: false, rafId: 0, nodes: [], width: 0, height: 0, dpr: 1 };
+    var profile = getResearchAnimationProfile();
+    var state = { running: true, paused: false, rafId: 0, nodes: [], width: 0, height: 0, dpr: 1, profile: profile, lastFrameTs: 0, isOffscreen: false, observer: null };
+    card.classList.toggle('ai-research-static', !profile.canvas);
+
+    function scheduleFrame() {
+      if (!state.running || state.paused || !state.profile.canvas) return;
+      if (state.rafId) cancelAnimationFrame(state.rafId);
+      state.rafId = requestAnimationFrame(draw);
+    }
 
     function resize() {
       if (!canvas.isConnected) return;
       var rect = canvas.getBoundingClientRect();
       state.width = Math.max(10, Math.floor(rect.width));
       state.height = Math.max(10, Math.floor(rect.height));
-      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      state.dpr = Math.min(window.devicePixelRatio || 1, state.profile.dpr);
       canvas.width = state.width * state.dpr;
       canvas.height = state.height * state.dpr;
       ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
-      var baseCount = state.width < 360 ? 48 : 64;
-      var targetCount = Math.max(48, Math.min(80, baseCount + Math.floor((state.width * state.height) / 18000)));
+      if (!state.profile.canvas) {
+        ctx.clearRect(0, 0, state.width, state.height);
+        return;
+      }
+      var baseCount = state.width < 360 ? state.profile.minNodes : Math.min(state.profile.maxNodes, state.profile.minNodes + 8);
+      var targetCount = Math.max(state.profile.minNodes, Math.min(state.profile.maxNodes, baseCount + Math.floor((state.width * state.height) / 24000)));
       state.nodes = Array.from({ length: targetCount }, function() {
         return {
           x: Math.random() * state.width,
@@ -1917,6 +1965,11 @@
 
     function draw(ts) {
       if (!state.running || state.paused) return;
+      if (state.profile.fps && state.lastFrameTs && ts - state.lastFrameTs < (1000 / state.profile.fps)) {
+        state.rafId = requestAnimationFrame(draw);
+        return;
+      }
+      state.lastFrameTs = ts;
       ctx.clearRect(0, 0, state.width, state.height);
       var mx = state.width / 2 + Math.cos(ts * 0.00055) * state.width * 0.12;
       var my = state.height / 2 + Math.sin(ts * 0.00085) * state.height * 0.12;
@@ -1954,7 +2007,7 @@
         var glow = Math.max(0, 1 - Math.sqrt(glowDx * glowDx + glowDy * glowDy) / 210);
         ctx.beginPath();
         ctx.shadowColor = 'rgba(135,255,229,0.55)';
-        ctx.shadowBlur = 8 + glow * 12;
+        ctx.shadowBlur = state.profile.shadowBlurBase + glow * state.profile.shadowBlurBoost;
         ctx.fillStyle = 'rgba(' + Math.round(132 + glow * 26) + ', ' + Math.round(234 + glow * 18) + ', 236, ' + (0.22 + glow * 0.42).toFixed(3) + ')';
         ctx.arc(dot.x, dot.y, 1.4 + Math.sin(dot.p) * 0.4 + glow, 0, Math.PI * 2);
         ctx.fill();
@@ -1970,9 +2023,23 @@
     }
 
     function resume() {
-      if (!state.running || !state.paused) return;
+      if (!state.running || !state.paused || !state.profile.canvas) return;
       state.paused = false;
-      state.rafId = requestAnimationFrame(draw);
+      scheduleFrame();
+    }
+
+    function sync() {
+      var shouldRun = shouldResearchCardAnimate(card) && !state.isOffscreen;
+      if (!state.profile.canvas) {
+        if (!shouldRun) pause();
+        return;
+      }
+      if (shouldRun) {
+        if (state.paused) resume();
+        else if (!state.rafId) scheduleFrame();
+      } else {
+        pause();
+      }
     }
 
     function stop() {
@@ -1980,20 +2047,31 @@
       pause();
       try { window.removeEventListener('resize', resize); } catch (e) {}
       try { document.removeEventListener('visibilitychange', handleVisibility); } catch (e2) {}
+      try { if (state.observer) state.observer.disconnect(); } catch (e3) {}
       ctx.clearRect(0, 0, state.width, state.height);
     }
 
     function handleVisibility() {
       if (!state.running) return;
-      if (document.hidden) pause();
-      else if (card._researchState && (card._researchState.state === 'preparing' || card._researchState.state === 'thinking' || card._researchState.state === 'researching')) resume();
+      sync();
+    }
+
+    function handleIntersection(entries) {
+      if (!entries || !entries.length) return;
+      state.isOffscreen = !entries[0].isIntersecting;
+      sync();
     }
 
     resize();
     window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', handleVisibility);
-    state.rafId = requestAnimationFrame(draw);
-    return { stop: stop, pause: pause, resume: resume, resize: resize };
+    if (window.IntersectionObserver) {
+      state.observer = new IntersectionObserver(handleIntersection, { threshold: 0.08 });
+      state.observer.observe(card);
+    }
+    state.paused = !shouldResearchCardAnimate(card);
+    if (state.profile.canvas && !state.paused) scheduleFrame();
+    return { stop: stop, pause: pause, resume: resume, resize: resize, sync: sync };
   }
 
   function buildResearchCardShell(options) {
@@ -2072,10 +2150,12 @@
     if (refs && refs.details) {
       refs.details.addEventListener('toggle', function() {
         if (!card._researchState.canToggle) return;
+        armResearchMotionWindow(card);
         card._researchState.persistExpanded = !!refs.details.open;
         card._researchState.userPinnedOpen = !!refs.details.open;
         card.classList.toggle('expanded', !!refs.details.open);
         card.classList.toggle('collapsed', !refs.details.open);
+        syncResearchCardAnimatorState(card);
       });
     }
     setResearchDisclosure(card, !!options.expanded && !!options.canToggle);

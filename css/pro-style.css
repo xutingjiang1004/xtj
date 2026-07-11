@@ -1475,6 +1475,18 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   will-change: transform;
 }
 
+.theme-preview .theme-preview-card,
+.theme-preview .theme-preview-topbar,
+.bubble-preview .bubble-preview-row:nth-child(1) .bubble-preview-msg,
+.bubble-preview .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent,
+.post-card-preview.is-leaf-corner::before,
+.post-card-preview.is-leaf-corner::after,
+.post-card-preview.is-soft-glow,
+.post-card-preview.is-minimal-pro::before,
+.pro-style-category-card .pro-style-category-icon {
+  will-change: auto;
+}
+
 /* 移动端：保存按钮整宽 */
 @media (max-width: 767px) {
   .profile-pro-style-panel-actions {
