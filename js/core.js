@@ -1814,117 +1814,169 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         }
         window.clearFeedCache = clearFeedCache;
 
-        var __xtjScriptLoadRegistry = Object.create(null);
-        function xtjLoadScriptOnce(src, key) {
-            var loadKey = String(key || src || '').trim();
-            if (!src || !loadKey) return Promise.reject(new Error('script_src_required'));
-            if (__xtjScriptLoadRegistry[loadKey]) return __xtjScriptLoadRegistry[loadKey];
-            __xtjScriptLoadRegistry[loadKey] = new Promise(function(resolve, reject) {
-                var selector = 'script[data-xtj-script-key="' + loadKey.replace(/"/g, '\\"') + '"]';
+        window.syncProfileUser = window.syncProfileUser || function() {
+            var name = document.getElementById('profileName');
+            var status = document.getElementById('profileStatus');
+            var avatar = document.getElementById('profileAvatar');
+            if (!name) return;
+            if (window.currentUser) {
+                name.textContent = window.currentUser;
+                if (status) status.textContent = '查看资料';
+                if (avatar) avatar.textContent = window.currentUser[0].toUpperCase();
+            } else {
+                name.textContent = '未登录';
+                if (status) status.textContent = '请先登录';
+                if (avatar) avatar.textContent = '?';
+            }
+        };
+
+        var xtjModuleDefinitions = {
+            enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
+            english: { styles: ['xtj-module-english-style'], scripts: ['xtj-module-english-script'] },
+            'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
+            pro: { styles: ['xtj-module-pro-style'], scripts: ['xtj-module-pro-upgrade', 'xtj-module-pro-script'] },
+            'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
+            'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
+            'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
+            gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
+        };
+        var xtjModulePromises = Object.create(null);
+
+        function moduleAssetUrl(metaName) {
+            var meta = document.querySelector('meta[name="' + metaName + '"]');
+            return meta && String(meta.content || '').trim();
+        }
+
+        function loadModuleStyle(moduleName, metaName) {
+            var url = moduleAssetUrl(metaName);
+            if (!url) return Promise.reject(new Error('missing_module_asset:' + metaName));
+            return new Promise(function(resolve, reject) {
+                var selector = 'link[data-xtj-asset="' + metaName + '"]';
                 var existing = document.querySelector(selector);
-                function handleLoaded(node) {
-                    try {
-                        node.dataset.xtjLoaded = '1';
-                        node.dataset.xtjScriptKey = loadKey;
-                    } catch (e) {}
-                    resolve(node);
+                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                var node = existing || document.createElement('link');
+                function cleanup() { node.onload = null; node.onerror = null; }
+                node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
+                node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_style_failed:' + moduleName)); };
+                if (!existing) {
+                    node.rel = 'stylesheet';
+                    node.href = url;
+                    node.dataset.xtjAsset = metaName;
+                    node.dataset.xtjModule = moduleName;
+                    document.head.appendChild(node);
                 }
-                function handleFailed(err) {
-                    delete __xtjScriptLoadRegistry[loadKey];
-                    reject(err instanceof Error ? err : new Error(String(err || ('Failed to load ' + src))));
-                }
-                if (existing) {
-                    if (existing.dataset.xtjLoaded === '1') {
-                        resolve(existing);
-                        return;
-                    }
-                    existing.addEventListener('load', function onLoad() {
-                        existing.removeEventListener('load', onLoad);
-                        handleLoaded(existing);
-                    }, { once: true });
-                    existing.addEventListener('error', function onError() {
-                        existing.removeEventListener('error', onError);
-                        handleFailed(new Error('Failed to load ' + src));
-                    }, { once: true });
-                    return;
-                }
-                var node = document.createElement('script');
-                node.src = src;
-                node.defer = true;
-                node.dataset.xtjScriptKey = loadKey;
-                node.onload = function() { handleLoaded(node); };
-                node.onerror = function() { handleFailed(new Error('Failed to load ' + src)); };
-                (document.body || document.head || document.documentElement).appendChild(node);
             });
-            return __xtjScriptLoadRegistry[loadKey];
         }
-        window.xtjLoadScriptOnce = xtjLoadScriptOnce;
 
-        function xtjLoadScriptSequence(items) {
-            return (items || []).reduce(function(chain, item) {
-                return chain.then(function() {
-                    return xtjLoadScriptOnce(item.src, item.key);
-                });
+        function loadModuleScript(moduleName, assetKey, directUrl) {
+            var url = directUrl || moduleAssetUrl(assetKey);
+            if (!url) return Promise.reject(new Error('missing_module_asset:' + assetKey));
+            return new Promise(function(resolve, reject) {
+                var selector = 'script[data-xtj-asset="' + assetKey.replace(/"/g, '\\"') + '"]';
+                var existing = document.querySelector(selector);
+                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                var node = existing || document.createElement('script');
+                function cleanup() { node.onload = null; node.onerror = null; }
+                node.onload = function() { cleanup(); node.dataset.xtjLoaded = '1'; resolve(node); };
+                node.onerror = function() { cleanup(); if (node.parentNode) node.remove(); reject(new Error('module_script_failed:' + moduleName)); };
+                if (!existing) {
+                    node.src = url;
+                    node.defer = true;
+                    node.dataset.xtjAsset = assetKey;
+                    node.dataset.xtjModule = moduleName;
+                    (document.body || document.head).appendChild(node);
+                }
+            });
+        }
+
+        function loadXtjModule(name) {
+            var moduleName = String(name || '');
+            var definition = xtjModuleDefinitions[moduleName];
+            if (!definition) return Promise.reject(new Error('unknown_module:' + moduleName));
+            if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName];
+            var dependencyChain = (definition.dependencies || []).reduce(function(chain, dependency) {
+                return chain.then(function() { return loadXtjModule(dependency); });
             }, Promise.resolve());
+            xtjModulePromises[moduleName] = dependencyChain.then(function() {
+                return Promise.all((definition.styles || []).map(function(metaName) {
+                    return loadModuleStyle(moduleName, metaName);
+                }));
+            }).then(function() {
+                var scripts = (definition.scripts || []).map(function(metaName) { return { key: metaName, url: null }; });
+                (definition.externalScripts || []).forEach(function(url) { scripts.push({ key: moduleName + '-external-' + url, url: url }); });
+                return scripts.reduce(function(chain, item) {
+                    return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
+                }, Promise.resolve());
+            }).catch(function(error) {
+                delete xtjModulePromises[moduleName];
+                throw error;
+            });
+            return xtjModulePromises[moduleName];
         }
+        window.XTJModuleLoader = { load: loadXtjModule };
 
-        var _photoWallLoaded = false;
-        var _photoWallLoading = null;
         function ensureGsap() {
-            // GSAP is loaded statically before core.js in index.html.  Keep this
-            // compatibility hook for modules that use it, but never add a second tag.
-            return Promise.resolve(window.gsap || null);
+            if (window.gsap) return Promise.resolve(window.gsap);
+            return loadXtjModule('gsap').then(function() { return window.gsap || null; });
         }
         window.ensureGsap = ensureGsap;
         window.__xtjEnsureGsap = ensureGsap;
 
         function ensurePhotoWallLoaded() {
-            if (_photoWallLoaded) return Promise.resolve();
-            if (_photoWallLoading) return _photoWallLoading;
-            _photoWallLoading = xtjLoadScriptSequence([
-                { src: 'js/photo-wall/data.min.js?v=20260618_2', key: 'photo-wall-data' },
-                { src: 'js/photo-wall/render.min.js?v=20260618_2', key: 'photo-wall-render' },
-                { src: 'js/photo-wall/photo-wall.min.js?v=20260618_2', key: 'photo-wall-main' }
-            ]).then(function() {
-                _photoWallLoaded = true;
-            }).finally(function() {
-                if (!_photoWallLoaded) _photoWallLoading = null;
-            });
-            return _photoWallLoading;
+            return loadXtjModule('photo-wall');
         }
 
         function ensurePhotoWallPreviewLoaded() {
-            // Both preview scripts are static, deferred scripts in index.html.
-            return Promise.resolve();
+            return loadXtjModule('photo-preview');
         }
 
         function ensurePhotoWallUploadLoaded() {
-            // upload-ui.min.js is loaded statically with the other entry modules.
-            return Promise.resolve();
+            return loadXtjModule('photo-upload');
         }
 
         function ensureAiAgentLoaded() {
-            // ai-agent.min.js is loaded statically with the other entry modules.
-            return Promise.resolve();
+            return loadXtjModule('ai-agent');
         }
         window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
 
         function ensureEnglishLearningLoaded() {
-            // english-learning.min.js owns its dictionary's single lazy load.
-            return Promise.resolve();
+            return loadXtjModule('english');
         }
         window.__xtjEnsureEnglishLearningLoaded = ensureEnglishLearningLoaded;
 
         function ensureCoreAnimationsLoaded() {
-            // core-animations.min.js is loaded statically with the other entry modules.
-            return Promise.resolve();
+            return loadXtjModule('enhancements');
         }
         window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
+
+        var originalOpenProStylePage = window.openProStylePage;
+        if (typeof originalOpenProStylePage === 'function') {
+            window.openProStylePage = function() {
+                var args = arguments;
+                return loadXtjModule('pro').then(function() {
+                    return originalOpenProStylePage.apply(window, args);
+                }).catch(function(error) {
+                    if (typeof window.showToast === 'function') window.showToast('Pro 模块加载失败，请稍后重试');
+                    console.error('[XTJ] pro module load failed:', error);
+                });
+            };
+        }
+
+        function loadEnhancementsAfterInteraction() {
+            document.removeEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
+            document.removeEventListener('keydown', loadEnhancementsAfterInteraction, true);
+            ensureCoreAnimationsLoaded().catch(function(error) {
+                console.error('[XTJ] enhancement module load failed:', error);
+            });
+        }
+        document.addEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
+        document.addEventListener('keydown', loadEnhancementsAfterInteraction, true);
 
         function lazyAiChatLauncher() {
             ensureAiAgentLoaded().then(function() {
                 if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher) {
                     window.__xtjOpenAiChat();
+                    if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
                 }
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
@@ -1937,6 +1989,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             ensureEnglishLearningLoaded().then(function() {
                 if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
                     window.EnglishLearning.open();
+                    if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
                 }
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('英语学习模块加载失败，请稍后重试');
@@ -13251,5 +13304,3 @@ function renderProfileActivityList(kind) {
                 }
             };
         })();
-
-

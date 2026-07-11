@@ -100,6 +100,7 @@ const JS_FILES = [
   'js/theme-toggle.js',
   'js/config.js',
   'js/photo-wall/upload-ui.js',
+  'js/photo-wall/preview.js',
   'js/photo-wall/preview-hotfix.js',
   'js/admin/admin.js'
 ];
@@ -191,7 +192,7 @@ console.log('=== xtj Build Script ===\n');
 console.log(`Source: ${ROOT}\n`);
 
 // 可选文件（缺失不报错）
-const OPTIONAL_JS = ['js/photo-wall/upload-ui.js', 'js/photo-wall/preview-hotfix.js'];
+const OPTIONAL_JS = ['js/photo-wall/upload-ui.js', 'js/photo-wall/preview.js', 'js/photo-wall/preview-hotfix.js'];
 const OPTIONAL_CSS = [];
 
 // Minify JS

@@ -1010,6 +1010,50 @@ body.english-learning-open {
   color: rgba(126, 92, 22, 0.88);
 }
 
+#panelEnglishLearning .el-generate-error {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(190, 72, 72, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 241, 241, 0.88);
+  color: #9d3434;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#panelEnglishLearning .el-generate-error[hidden] {
+  display: none;
+}
+
+#panelEnglishLearning .el-generate-error .el-actions-row {
+  margin-top: 10px;
+}
+
+#panelEnglishLearning .el-practice-source {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 720;
+  vertical-align: middle;
+}
+
+#panelEnglishLearning .el-practice-source[hidden] {
+  display: none;
+}
+
+#panelEnglishLearning .el-practice-source.is-ai {
+  background: rgba(45, 122, 87, 0.12);
+  color: #276f50;
+}
+
+#panelEnglishLearning .el-practice-source.is-local {
+  background: rgba(214, 168, 62, 0.16);
+  color: #996c17;
+}
+
 #panelEnglishLearning .el-locale-bar[data-local="true"] {
   border-color: rgba(214, 168, 62, 0.24);
   background: linear-gradient(135deg, rgba(255, 244, 214, 0.72), rgba(255, 249, 232, 0.92));
