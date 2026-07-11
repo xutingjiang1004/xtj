@@ -52,28 +52,32 @@
     }
     function D(e, t) {
         if (e) {
-            if (e.onload = null, e.onerror = null, !t) return e.style.transition = "none", e.removeAttribute("src"), 
+            e._ppCleanup && e._ppCleanup(), e.onload = null, e.onerror = null;
+            if (!t) return e.style.transition = "none", e.removeAttribute("src"),
             e.style.opacity = "0", void (e._ppUrl = null);
             if (e._ppUrl !== t) {
                 e._ppUrl = t;
                 var o = C[t];
                 if (o && o.naturalWidth > 0) return e.style.transition = "none", e.src = t, void (e.style.opacity = "1");
                 e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
-                var n = !1, i = 0, a = function() {
-                    n || (n = !0, e.onload = null, e.onerror = null, C[t] || (C[t] = e), delete H[t], 
-                    requestAnimationFrame(function() {
+                var n = !1, i = 0;
+                function cleanup() {
+                    e.removeEventListener("load", handleLoad), e.removeEventListener("error", handleError), e.onload = null, e.onerror = null, e._ppListenerUrl === t && (e._ppListenerUrl = null), e._ppCleanup === cleanup && (e._ppCleanup = null);
+                }
+                function handleLoad() {
+                    n || (n = !0, cleanup(), C[t] || (C[t] = e), delete H[t], requestAnimationFrame(function() {
                         e.style.transition = "opacity 0.2s ease-in-out", e.offsetHeight, e.style.opacity = "1";
                     }));
-                }, r = function() {
-                    n || (e.onload = null, e.onerror = null, (i = (H[t] || 0) + 1) <= S ? (H[t] = i, 
-                    setTimeout(function() {
-                        e._ppUrl === t && (n = !1, e.onload = a, e.onerror = r, e.src = t + (-1 === t.indexOf("?") ? "?t=" : "&t=") + Date.now());
+                }
+                function handleError() {
+                    n || (cleanup(), (i = (H[t] || 0) + 1) <= S ? (H[t] = i, setTimeout(function() {
+                        e._ppUrl === t && (n = !1, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t + (-1 === t.indexOf("?") ? "?t=" : "&t=") + Date.now());
                     }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
                         if (!e) return;
                         e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
                     }(e)));
-                };
-                e.onload = a, e.onerror = r, e.src = t, e.complete && e.naturalWidth > 0 && a();
+                }
+                e._ppListenerUrl === t && cleanup(), e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t, e.complete && e.naturalWidth > 0 && handleLoad();
             }
         }
     }
