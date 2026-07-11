@@ -45,11 +45,11 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=5934176024" />
+    <link rel="stylesheet" href="css/style.min.css?v=ac92a456f6" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" />
     <link rel="stylesheet" href="css/ai-agent.min.css?v=15f9eb4818" />
-    <link rel="stylesheet" href="css/english-learning.min.css?v=34da382e01" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=5934176024" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=15f9eb4818" /></noscript>
+    <link rel="stylesheet" href="css/english-learning.min.css?v=73d334cb44" />
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=ac92a456f6" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=15f9eb4818" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=cee8b18632" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=f33e4f9d58">
     <link rel="stylesheet" href="css/pro-style.min.css?v=ce1ed8fb3c">
@@ -342,8 +342,14 @@
                                 </div>
                             </div>
                             <div class="pw-upload-progress-copy">
-                                <div class="pw-upload-progress-title">上传中</div>
+                                <div class="pw-upload-progress-stage" id="pwUploadProgressStage">上传中</div>
                                 <div class="pw-upload-progress-text" id="pwUploadProgressText">准备上传</div>
+                                <div class="pw-upload-progress-stats" id="pwUploadProgressStats" aria-hidden="true">
+                                    <span class="pw-upload-progress-stat"><span class="k">已处理</span><span class="v" id="pwUploadProgressProcessed">0</span></span>
+                                    <span class="pw-upload-progress-stat is-ok"><span class="k">成功</span><span class="v" id="pwUploadProgressOk">0</span></span>
+                                    <span class="pw-upload-progress-stat is-fail"><span class="k">失败</span><span class="v" id="pwUploadProgressFail">0</span></span>
+                                    <span class="pw-upload-progress-stat is-pct"><span class="k">进度</span><span class="v" id="pwUploadProgressPct">0%</span></span>
+                                </div>
                                 <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在整理本次上传任务。</div>
                             </div>
                         </div>
@@ -352,7 +358,23 @@
                         </div>
                     </div>
                 </div>
-                <div id="pwUploadResult" class="pw-upload-result" role="alert" hidden></div>
+                <div id="pwUploadResult" class="pw-upload-result" role="alert" data-state="idle" hidden>
+                    <div class="pw-upload-result-row">
+                        <span class="pw-upload-result-icon" aria-hidden="true"></span>
+                        <div class="pw-upload-result-body">
+                            <div class="pw-upload-result-title" id="pwUploadResultTitle"></div>
+                            <div class="pw-upload-result-detail" id="pwUploadResultDetail"></div>
+                        </div>
+                        <button type="button" class="pw-upload-result-close" id="pwUploadResultClose" aria-label="关闭结果提示" hidden>
+                            <span aria-hidden="true">×</span>
+                        </button>
+                    </div>
+                    <div class="pw-upload-result-actions" id="pwUploadResultActions" hidden>
+                        <button type="button" class="pw-upload-result-action" id="pwUploadResultRefreshBtn" data-action="refresh-photos">
+                            刷新照片
+                        </button>
+                    </div>
+                </div>
 
             </div>
         </div>
@@ -1409,7 +1431,7 @@
     <script defer src="js/ai-agent.min.js?v=b17edff33a"></script>
 <meta name="xtj-english-dict-src" content="js/english-dict.min.js?v=cdbc3848c4" />
 <script defer src="js/english-learning.min.js?v=bc9d5cbef0"></script>
-    <script defer src="js/photo-wall/upload-ui.min.js?v=16e3a826cf"></script>
+    <script defer src="js/photo-wall/upload-ui.min.js?v=6eeffbfc17"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
