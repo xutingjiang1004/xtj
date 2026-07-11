@@ -70,6 +70,17 @@
   function updateUploadBatchProgress(processed, total, success, failed, prefix){
     var pct = uploadBatchPercent(processed, total);
     setProgress(uploadBatchText(processed, total, success, failed, prefix), pct);
+    // 同步填充 stats 行的数字
+    var processedEl = byId('pwUploadProgressProcessed');
+    var okEl = byId('pwUploadProgressOk');
+    var failEl = byId('pwUploadProgressFail');
+    var statsEl = byId('pwUploadProgressStats');
+    if (statsEl && processedEl && okEl && failEl) {
+      processedEl.textContent = String(processed);
+      okEl.textContent = String(success);
+      failEl.textContent = String(failed);
+      statsEl.hidden = false;
+    }
   }
 
   function safeFileName(file, fallbackExt){
@@ -121,9 +132,113 @@
   function setUploadResult(message, isError){
     var result = byId('pwUploadResult');
     if (!result) return;
-    result.textContent = message || '';
-    result.hidden = !message;
-    result.classList.toggle('is-error', !!isError);
+    var titleEl = byId('pwUploadResultTitle');
+    var detailEl = byId('pwUploadResultDetail');
+    var closeBtn = byId('pwUploadResultClose');
+    var actionsEl = byId('pwUploadResultActions');
+    // 旧 API 兼容: 若没有新子结构, 退化为 textContent
+    if (!titleEl || !detailEl) {
+      result.textContent = message || '';
+      result.hidden = !message;
+      result.classList.toggle('is-error', !!isError);
+      if (result.dataset) {
+        result.dataset.state = !message ? 'idle' : (isError ? 'error' : 'success');
+      }
+      return;
+    }
+    // 旧 setUploadResult(msg, isError): 通过布尔转 state
+    var state = isError ? 'error' : 'success';
+    return setUploadResultState(message, state);
+  }
+
+  function setUploadResultState(message, state){
+    var result = byId('pwUploadResult');
+    if (!result) return;
+    var titleEl = byId('pwUploadResultTitle');
+    var detailEl = byId('pwUploadResultDetail');
+    var closeBtn = byId('pwUploadResultClose');
+    var actionsEl = byId('pwUploadResultActions');
+    if (!titleEl || !detailEl) {
+      // 退化路径
+      result.textContent = message || '';
+      result.hidden = !message;
+      if (result.dataset) result.dataset.state = !message ? 'idle' : (state || 'success');
+      return;
+    }
+    var text = String(message || '');
+    if (!text) {
+      result.hidden = true;
+      result.dataset.state = 'idle';
+      titleEl.textContent = '';
+      detailEl.textContent = '';
+      if (closeBtn) closeBtn.hidden = true;
+      if (actionsEl) actionsEl.hidden = true;
+      return;
+    }
+    result.hidden = false;
+    var s = state || 'success';
+    result.dataset.state = s;
+    var titleMap = {
+      success: '上传成功',
+      partial: '部分上传成功',
+      error: '上传失败'
+    };
+    titleEl.textContent = titleMap[s] || titleMap.success;
+    // 主行 + 详细分行, 失败/部分失败展示前 3 行原因
+    var parts = text.split(/\n|[。;；]/).map(function(p){ return p.trim(); }).filter(Boolean);
+    if (parts.length > 1) {
+      detailEl.textContent = parts.join('\n');
+    } else {
+      detailEl.textContent = text;
+    }
+    if (actionsEl) actionsEl.hidden = (s === 'success');
+    if (closeBtn) closeBtn.hidden = false;
+  }
+
+  function clearUploadResult(){
+    var result = byId('pwUploadResult');
+    if (!result) return;
+    result.hidden = true;
+    if (result.dataset) result.dataset.state = 'idle';
+    var titleEl = byId('pwUploadResultTitle');
+    var detailEl = byId('pwUploadResultDetail');
+    var closeBtn = byId('pwUploadResultClose');
+    var actionsEl = byId('pwUploadResultActions');
+    if (titleEl) titleEl.textContent = '';
+    if (detailEl) detailEl.textContent = '';
+    if (closeBtn) closeBtn.hidden = true;
+    if (actionsEl) actionsEl.hidden = true;
+  }
+
+  function bindUploadResultActions(){
+    var closeBtn = byId('pwUploadResultClose');
+    if (closeBtn && !closeBtn.__xtjResultCloseBound) {
+      closeBtn.__xtjResultCloseBound = true;
+      closeBtn.addEventListener('click', function(){
+        clearUploadResult();
+        if (typeof window.focusUploadButton === 'function') window.focusUploadButton();
+      });
+    }
+    var actionsEl = byId('pwUploadResultActions');
+    if (actionsEl && !actionsEl.__xtjResultActionsBound) {
+      actionsEl.__xtjResultActionsBound = true;
+      actionsEl.addEventListener('click', function(event){
+        var btn = event.target.closest && event.target.closest('[data-action]');
+        if (!btn) return;
+        var action = btn.dataset.action;
+        // 占位钩子: 不实现业务逻辑, 仅暴露 data-action 语义化按钮结构
+        if (action === 'refresh-photos') {
+          // 触发自定义事件供现有 JS 监听 (不破坏现有 API)
+          try {
+            window.dispatchEvent(new CustomEvent('xtj:photo-result-refresh', { bubbles: true }));
+          } catch (_) {}
+          // 默认行为: 重新拉取数据
+          if (typeof window.loadPhotoWallData === 'function') {
+            try { window.loadPhotoWallData(true); } catch (_) {}
+          }
+        }
+      });
+    }
   }
 
   function openSheet(files){
@@ -169,12 +284,23 @@
     var statusEl = byId('pwUploadProgressStatus');
     var trackEl = byId('pwUploadProgressTrack');
     var fillEl = byId('pwUploadProgressFill');
+    var stageEl = byId('pwUploadProgressStage');
+    var statsEl = byId('pwUploadProgressStats');
+    var processedEl = byId('pwUploadProgressProcessed');
+    var okEl = byId('pwUploadProgressOk');
+    var failEl = byId('pwUploadProgressFail');
+    var pctEl = byId('pwUploadProgressPct');
     if (!text) {
       overlay.style.display = 'none';
       overlay.classList.remove('upload-overlay-visible');
       overlay.setAttribute('aria-hidden', 'true');
       if (trackEl) trackEl.hidden = true;
       if (fillEl) fillEl.style.width = '0%';
+      if (statsEl) statsEl.hidden = true;
+      if (pctEl) pctEl.textContent = '0%';
+      if (processedEl) processedEl.textContent = '0';
+      if (okEl) okEl.textContent = '0';
+      if (failEl) failEl.textContent = '0';
       return;
     }
     overlay.style.display = 'flex';
@@ -191,6 +317,16 @@
     if (trackEl) trackEl.hidden = !(typeof pct === 'number' && pct >= 0 && pct <= 100);
     if (fillEl && typeof pct === 'number' && pct >= 0 && pct <= 100) {
       fillEl.style.width = Math.round(pct) + '%';
+    }
+    if (pctEl && typeof pct === 'number' && pct >= 0 && pct <= 100) {
+      pctEl.textContent = Math.round(pct) + '%';
+    }
+    // 阶段: 0% 之前为准备, 100% 为完成, 处理中
+    if (stageEl) {
+      var rounded = (typeof pct === 'number') ? Math.round(pct) : -1;
+      if (rounded < 0) stageEl.textContent = '准备中';
+      else if (rounded >= 100) stageEl.textContent = '上传完成';
+      else stageEl.textContent = '上传中';
     }
   }
 
@@ -319,12 +455,20 @@
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
       if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
       var summary = '已处理 ' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+      // 状态: 全部成功 / 部分失败 / 全部失败
+      var resultState;
+      if (ok === 0 && fail > 0) resultState = 'error';
+      else if (fail > 0) resultState = 'partial';
+      else resultState = 'success';
+      // 兼容旧 API: setUploadResult(summary, isError) 也被调用, 测试会校验
       if (failures.length) {
         var details = failures.slice(0, 3).map(function(item){ return item.name + '（' + item.reason + '）'; }).join('；');
         if (failures.length > 3) details += '；另有 ' + (failures.length - 3) + ' 张失败';
-        setUploadResult(summary + '。' + details, fail > 0);
+        setUploadResult(summary + '\n' + details, resultState === 'error');
+        setUploadResultState(summary + '\n' + details, resultState);
       } else {
         setUploadResult(summary, false);
+        setUploadResultState(summary, resultState);
       }
       toast(summary);
       await new Promise(function(resolve){ setTimeout(resolve, 180); });
@@ -461,6 +605,7 @@
   function boot(){
     attachPhotoUploadUi();
     attachPostPreview();
+    bindUploadResultActions();
   }
 
   window.xtjUploadBtn = triggerPhotoUpload;
@@ -470,6 +615,8 @@
   window.triggerPhotoWallUpload = uploadPhotoWallFiles;
   window.resetPostPreview = resetPostPreview;
   window.setPhotoUploadResult = setUploadResult;
+  window.setPhotoUploadResultState = setUploadResultState;
+  window.clearPhotoUploadResult = clearUploadResult;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
