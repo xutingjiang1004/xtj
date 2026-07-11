@@ -3,6 +3,7 @@ var assert = require('assert');
 var fs = require('fs');
 var crypto = require('crypto');
 var cp = require('child_process');
+var vm = require('vm');
 
 var passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log('  ✅ ' + name); } catch(e) { failed++; console.log('  ❌ ' + name + ': ' + e.message); } }
@@ -300,24 +301,49 @@ test('fetch throws timeout sets AbortController and clears timer', function(){
   assert.ok(s.indexOf("fetchError.photoUploadCode = 'timeout'") >= 0, 'timeout code missing');
   assert.ok(s.indexOf('PHOTO_UPLOAD_TIMEOUT_MS') >= 0, 'timeout constant missing');
 });
-test('HTTP non-2xx response removes storage file exactly once', function(){
+test('HTTP non-2xx response leaves rollback to the server', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  var matches = s.match(/await cleanupStorage\(path\)/g);
-  assert.ok(matches, 'cleanupStorage not called');
   var httpOkBlock = s.slice(s.indexOf('if (!createRes.ok)'), s.indexOf('var createData;'));
-  assert.ok(httpOkBlock.indexOf('await cleanupStorage(path)') >= 0, 'HTTP error does not call cleanup');
+  assert.strictEqual(httpOkBlock.indexOf('await cleanupStorage(path)'), -1, 'HTTP error duplicates server rollback');
   assert.ok(httpOkBlock.indexOf("photoUploadStage = 'record'") >= 0, 'record stage marker missing');
 });
-test('JSON parse failure after HTTP 200 removes storage file', function(){
+test('JSON parse failure after HTTP response does not duplicate rollback', function(){
   var s = read('js/photo-wall/upload-ui.js');
   var parseCatch = s.slice(s.indexOf('catch (parseError)'));
-  assert.ok(parseCatch.indexOf('await cleanupStorage(path)') >= 0, 'parse error does not clean up');
+  assert.strictEqual(parseCatch.indexOf('await cleanupStorage(path)'), -1, 'parse error duplicates server rollback');
 });
-test('response with missing data field removes storage file', function(){
+test('response with missing data field remains a record failure', function(){
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf("if (!createData || !createData.data)") >= 0, 'missing data guard missing');
   var guardBlock = s.slice(s.indexOf("if (!createData || !createData.data)"), s.indexOf('return createData.data;'));
-  assert.ok(guardBlock.indexOf('await cleanupStorage(path)') >= 0, 'missing data does not clean up');
+  assert.strictEqual(guardBlock.indexOf('await cleanupStorage(path)'), -1, 'missing data duplicates server rollback');
+});
+
+test('photo create headers always retain JSON content type', function(){
+  var source = read('js/photo-wall/upload-ui.js');
+  var match = source.match(/function buildPhotoCreateHeaders\(authHeaders\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(match, 'missing photo create header helper');
+  var buildHeaders = vm.runInNewContext('(' + match[0] + ')', { Object: Object });
+  function plain(value) { return JSON.parse(JSON.stringify(value)); }
+  assert.deepStrictEqual(plain(buildHeaders({ 'Content-Type': 'application/custom', Authorization: 'Bearer test' })), {
+    'Content-Type': 'application/custom', Authorization: 'Bearer test'
+  });
+  assert.deepStrictEqual(plain(buildHeaders({ Authorization: 'Bearer test' })), {
+    'Content-Type': 'application/json', Authorization: 'Bearer test'
+  });
+  assert.deepStrictEqual(plain(buildHeaders(null)), { 'Content-Type': 'application/json' });
+  assert.deepStrictEqual(plain(buildHeaders({})), { 'Content-Type': 'application/json' });
+});
+
+test('photo create request sends only controlled metadata', function(){
+  var source = read('js/photo-wall/upload-ui.js');
+  var request = source.slice(source.indexOf("fetch(apiUrl('/api/photo/create')"), source.indexOf('var createData;'));
+  ['content:', 'actor_key:'].forEach(function(field) {
+    assert.strictEqual(request.indexOf(field), -1, 'legacy client field remains: ' + field);
+  });
+  ['media_url:', 'file_size:', 'original_size:', 'mime_type:'].forEach(function(field) {
+    assert.ok(request.indexOf(field) >= 0, 'missing controlled client field: ' + field);
+  });
 });
 test('batch upload refresh failure does not swallow upload results', function(){
   var s = read('js/photo-wall/upload-ui.js');
