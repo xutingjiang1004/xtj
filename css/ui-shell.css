@@ -356,6 +356,263 @@
   }
 }
 
+/* Main-panel visual baseline: one page surface, then grouped content only.
+   This intentionally scopes the cleanup above the Dock rather than restyling it. */
+:root {
+  --xtj-content-radius: 18px;
+  --xtj-control-radius: 12px;
+  --xtj-content-line: rgba(120, 177, 170, 0.16);
+  --xtj-content-surface: rgba(255, 255, 255, 0.76);
+  --xtj-content-surface-strong: rgba(255, 255, 255, 0.9);
+}
+
+#panelPosts .stats,
+#panelPosts.active .stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  overflow: clip;
+  border: 1px solid var(--xtj-content-line) !important;
+  border-radius: var(--xtj-content-radius) !important;
+  background: var(--xtj-content-surface) !important;
+  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
+}
+
+#panelPosts .stat-card,
+#panelPosts.active .stat-card {
+  min-height: 0 !important;
+  padding: 16px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelPosts .stat-card + .stat-card {
+  border-inline-start: 1px solid var(--xtj-content-line) !important;
+}
+
+#panelPosts .stat-card:hover {
+  transform: none !important;
+  background: rgba(228, 244, 236, 0.62) !important;
+  box-shadow: none !important;
+}
+
+#panelChat .dock-chat-container,
+#panelChat .chat-list,
+#panelChat .chat-messages {
+  min-height: calc(100dvh - 150px) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#panelChat #dockChatListView,
+#panelChat #dockChatDetailView,
+#panelChat .chat-view {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+#panelChat .chat-view.hidden {
+  display: none !important;
+}
+
+#panelChat .chat-list {
+  padding: 0 !important;
+}
+
+#panelChat .chat-list-item {
+  min-height: 74px;
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--xtj-content-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelChat .chat-list-item:hover,
+#panelChat .chat-list-item.active,
+#panelChat .chat-list-item.unread {
+  background: rgba(226, 243, 234, 0.58) !important;
+}
+
+#panelChat .chat-list-empty,
+#panelChat .chat-empty-state {
+  min-height: 0 !important;
+  padding: 48px 20px;
+}
+
+#panelProfile .dock-profile-container {
+  gap: 12px;
+  padding-bottom: calc(136px + env(safe-area-inset-bottom)) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+#panelProfile .profile-user-card,
+#panelProfile .xtj-vip-card,
+#panelProfile .profile-pro-style-entry,
+#panelProfile .profile-settings,
+#panelProfile .profile-activity-board {
+  border: 1px solid var(--xtj-content-line) !important;
+  border-radius: var(--xtj-content-radius) !important;
+  background: var(--xtj-content-surface) !important;
+  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
+}
+
+#panelProfile .profile-activity-card,
+#panelProfile .profile-totals-bar {
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelProfile .profile-activity-card + .profile-activity-card {
+  border-top: 1px solid var(--xtj-content-line) !important;
+}
+
+#panelProfile .profile-totals-bar {
+  padding: 8px 4px !important;
+  color: var(--xtj-text-sub) !important;
+}
+
+#panelProfile .profile-user-card,
+#panelProfile .profile-activity-card,
+#panelProfile .xtj-vip-card,
+#panelProfile .profile-pro-style-entry,
+#panelProfile .profile-settings {
+  border-radius: var(--xtj-content-radius) !important;
+}
+
+#panelEnglishLearning .el-page {
+  height: auto !important;
+  min-height: calc(100dvh - 112px) !important;
+  max-height: none !important;
+  padding: 0 16px calc(132px + env(safe-area-inset-bottom)) !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+#panelEnglishLearning .el-header {
+  margin: 0 -16px !important;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 12px !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#panelEnglishLearning .el-hero {
+  gap: 12px;
+  padding: 20px 0 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelEnglishLearning .el-tabs {
+  position: relative !important;
+  top: auto !important;
+  width: 100% !important;
+  margin: 0 0 16px !important;
+  border-radius: var(--xtj-content-radius) !important;
+}
+
+#panelEnglishLearning .el-main {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+#panelEnglishLearning .el-pane.active,
+#panelEnglishLearning .el-dashboard-grid,
+#panelEnglishLearning .el-practice-grid {
+  display: block !important;
+  min-height: 0 !important;
+}
+
+#panelEnglishLearning .el-card,
+#panelEnglishLearning .el-locale-bar {
+  border-radius: var(--xtj-content-radius) !important;
+  border-color: var(--xtj-content-line) !important;
+  background: var(--xtj-content-surface) !important;
+  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
+}
+
+#panelEnglishLearning .el-card + .el-card,
+#panelEnglishLearning .el-practice-output > .el-card {
+  margin-top: 12px !important;
+}
+
+#panelEnglishLearning .el-practice-output {
+  display: block !important;
+  margin-top: 12px;
+}
+
+#panelEnglishLearning .el-sync {
+  min-height: 28px;
+  border-radius: var(--xtj-control-radius) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelEnglishLearning .el-sync.is-local {
+  color: var(--el-muted) !important;
+  border-color: transparent !important;
+}
+
+#panelEnglishLearning .el-sync.is-error,
+#panelEnglishLearning .el-sync.is-merging {
+  border-color: rgba(200, 77, 91, 0.24) !important;
+  background: rgba(200, 77, 91, 0.06) !important;
+}
+
+@media (max-width: 1023px) {
+  #panelPosts .publish-box,
+  #panelPosts .post-filter-bar,
+  #panelPosts .post,
+  #panelProfile .profile-user-card,
+  #panelProfile .xtj-vip-card,
+  #panelProfile .profile-pro-style-entry,
+  #panelProfile .profile-settings,
+  #panelEnglishLearning .el-card {
+    border-radius: var(--xtj-content-radius) !important;
+  }
+}
+
+[data-theme="dark"] #panelPosts .stats,
+[data-theme="dark"] #panelProfile .profile-user-card,
+[data-theme="dark"] #panelProfile .xtj-vip-card,
+[data-theme="dark"] #panelProfile .profile-pro-style-entry,
+[data-theme="dark"] #panelProfile .profile-settings,
+[data-theme="dark"] #panelProfile .profile-activity-board,
+[data-theme="dark"] #panelEnglishLearning .el-card,
+[data-theme="dark"] #panelEnglishLearning .el-locale-bar {
+  background: rgba(20, 36, 31, 0.82) !important;
+  border-color: rgba(164, 216, 205, 0.12) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.16) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panelPosts *,
+  #panelChat *,
+  #panelProfile *,
+  #panelEnglishLearning * {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
 @media (max-width: 1023.98px) {
   .dock-bar {
     opacity: 1;
@@ -540,5 +797,57 @@
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container {
     width: min(1280px, 100%);
+  }
+}
+
+/* Final source-order guard for the legacy desktop shell above. */
+@media (min-width: 1024px) {
+  #panelPosts.active .stats {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    flex-direction: initial !important;
+    gap: 0 !important;
+    position: static !important;
+  }
+
+  #panelPosts.active .stat-card {
+    min-height: 0 !important;
+  }
+
+  #panelChat .dock-chat-container {
+    min-height: calc(100dvh - 150px) !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  #panelProfile .dock-profile-container {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  #panelProfile .profile-activity-card {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  #panelEnglishLearning .el-page {
+    height: auto !important;
+    min-height: calc(100dvh - 112px) !important;
+    max-height: none !important;
+    padding: 0 24px 132px !important;
+    overflow: visible !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  #panelEnglishLearning .el-dashboard-grid,
+  #panelEnglishLearning .el-practice-grid {
+    display: block !important;
   }
 }
