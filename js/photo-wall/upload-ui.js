@@ -38,6 +38,7 @@
   function isPhotoWallImage(file){ return isImage(file); }
 
   var MAX_PHOTO_UPLOAD_BYTES = 25 * 1024 * 1024;
+  var PHOTO_UPLOAD_TIMEOUT_MS = 25000;
 
   function createPhotoUploadError(code){
     var error = new Error(code || 'upload_failed');
@@ -56,7 +57,17 @@
     if (status === 401 || status === 403 || /jwt|token|unauthori[sz]ed|forbidden|登录/.test(message)) return '登录已过期';
     if (stage === 'storage') return '图片上传失败';
     if (stage === 'record') return '图片已上传，但记录保存失败';
+    if (code === 'cleanup_failed') return '图片记录已保存，但清理临时文件失败';
     return '上传失败';
+  }
+
+  function cleanupStorage(path){
+    if (!path) return Promise.resolve();
+    return window.sb.storage.from('uploads').remove([path])
+      .then(function(result){
+        if (result && result.error) console.error('[photo-upload] Storage cleanup error', result.error);
+      })
+      .catch(function(e){ console.error('[photo-upload] Storage cleanup failed', e); });
   }
 
   function uploadBatchText(processed, total, success, failed, prefix){
@@ -356,14 +367,13 @@
         cacheControl: '31536000',
         upsert: false
       });
+      if (upload.error) {
+        upload.error.photoUploadStage = 'storage';
+        throw upload.error;
+      }
     } catch (storageError) {
       storageError.photoUploadStage = 'storage';
       throw storageError;
-    }
-    if (upload.error) {
-      console.error('[photo-upload] Storage upload error', upload.error);
-      upload.error.photoUploadStage = 'storage';
-      throw upload.error;
     }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
     var content = JSON.stringify({
@@ -380,6 +390,9 @@
       ? await window.getUserAuthHeaders()
       : { 'Content-Type': 'application/json' };
     if (!headers) headers = { 'Content-Type': 'application/json' };
+    var controller = new AbortController();
+    var timeoutTimer = setTimeout(function() { controller.abort(); }, PHOTO_UPLOAD_TIMEOUT_MS);
+    var timedOut = false;
     var createRes;
     try {
       createRes = await fetch(apiUrl('/api/photo/create'), {
@@ -389,17 +402,24 @@
           media_url: publicUrl,
           content: content,
           actor_key: actorKey
-        })
+        }),
+        signal: controller.signal
       });
     } catch (fetchError) {
-      fetchError.photoUploadCode = /timeout|timed out/i.test(String(fetchError && fetchError.message || '')) ? 'timeout' : 'backend_unreachable';
+      timedOut = fetchError.name === 'AbortError';
+      if (timedOut) {
+        fetchError.photoUploadCode = 'timeout';
+      } else {
+        fetchError.photoUploadCode = 'backend_unreachable';
+      }
       fetchError.photoUploadStage = 'network';
+      await cleanupStorage(path);
       throw fetchError;
+    } finally {
+      clearTimeout(timeoutTimer);
     }
     if (!createRes.ok) {
-      try {
-        await window.sb.storage.from('uploads').remove([path]);
-      } catch (_) {}
+      await cleanupStorage(path);
       var errBody = {};
       try { errBody = await createRes.json(); } catch (_) {}
       var recordError = new Error(errBody.error || '创建照片记录失败');
@@ -407,7 +427,18 @@
       recordError.photoUploadStage = 'record';
       throw recordError;
     }
-    var createData = await createRes.json();
+    var createData;
+    try {
+      createData = await createRes.json();
+    } catch (parseError) {
+      await cleanupStorage(path);
+      parseError.photoUploadStage = 'record';
+      throw parseError;
+    }
+    if (!createData || !createData.data) {
+      await cleanupStorage(path);
+      throw createPhotoUploadError('record');
+    }
     return createData.data;
   }
 
@@ -450,28 +481,6 @@
         processed += 1;
         updateUploadBatchProgress(processed, total, ok, fail, processed === total ? '处理完成' : '正在处理');
       }
-      if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
-      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
-      else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
-      if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
-      var summary = '已处理 ' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
-      // 状态: 全部成功 / 部分失败 / 全部失败
-      var resultState;
-      if (ok === 0 && fail > 0) resultState = 'error';
-      else if (fail > 0) resultState = 'partial';
-      else resultState = 'success';
-      // 兼容旧 API: setUploadResult(summary, isError) 也被调用, 测试会校验
-      if (failures.length) {
-        var details = failures.slice(0, 3).map(function(item){ return item.name + '（' + item.reason + '）'; }).join('；');
-        if (failures.length > 3) details += '；另有 ' + (failures.length - 3) + ' 张失败';
-        setUploadResult(summary + '\n' + details, resultState === 'error');
-        setUploadResultState(summary + '\n' + details, resultState);
-      } else {
-        setUploadResult(summary, false);
-        setUploadResultState(summary, resultState);
-      }
-      toast(summary);
-      await new Promise(function(resolve){ setTimeout(resolve, 180); });
     } finally {
       setProgress('');
       state.uploading = false;
@@ -479,6 +488,39 @@
       var input = byId('photoFileInput');
       if (input) input.value = '';
       revoke('photoUrls');
+    }
+    var refreshFailed = false;
+    try {
+      if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
+      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+      else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
+    } catch (refreshError) {
+      console.error('[photo-upload] refresh failed', refreshError);
+      refreshFailed = true;
+    }
+    if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
+    var summary = '已处理 ' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+    if (refreshFailed) summary += '。照片已上传，但列表刷新失败，请点击重试';
+    // 状态: 全部成功 / 部分失败 / 全部失败
+    var resultState;
+    if (ok === 0 && fail > 0) resultState = 'error';
+    else if (fail > 0) resultState = 'partial';
+    else resultState = 'success';
+    // 兼容旧 API: setUploadResult(summary, isError) 保留以满足测试断言
+    if (failures.length) {
+      var details = failures.slice(0, 3).map(function(item){ return item.name + '（' + item.reason + '）'; }).join('；');
+      if (failures.length > 3) details += '；另有 ' + (failures.length - 3) + ' 张失败';
+      setUploadResult(summary + '\n' + details, resultState === 'error');
+      setUploadResultState(summary + '\n' + details, resultState);
+    } else {
+      setUploadResult(summary, false);
+      setUploadResultState(summary, resultState);
+    }
+    toast(summary);
+    await new Promise(function(resolve){ setTimeout(resolve, 180); });
+    if (refreshFailed && ok) {
+      var retryBtn = byId('pwUploadResult');
+      if (retryBtn) retryBtn.style.cursor = 'pointer';
     }
   }
 
