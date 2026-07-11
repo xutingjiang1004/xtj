@@ -45,16 +45,30 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=ac92a456f6" />
+    <link rel="stylesheet" href="css/style.min.css?v=0cf0f87452" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" />
-    <link rel="stylesheet" href="css/ai-agent.min.css?v=15f9eb4818" />
-    <link rel="stylesheet" href="css/english-learning.min.css?v=ed35b425a2" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=ac92a456f6" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=15f9eb4818" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=0cf0f87452" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=17c5ed4c4d" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=cee8b18632" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=f33e4f9d58">
-    <link rel="stylesheet" href="css/pro-style.min.css?v=ce1ed8fb3c">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=67d1d9f7b0">
-    <link rel="stylesheet" href="css/photo-preview.min.css?v=7c0ecd6d11">
+    <meta name="xtj-module-english-style" content="css/english-learning.min.css?v=ed35b425a2">
+    <meta name="xtj-module-english-script" content="js/english-learning.min.js?v=e11d1ba823">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=17c5ed4c4d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=b17edff33a">
+    <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=ce1ed8fb3c">
+    <meta name="xtj-module-pro-upgrade" content="js/pro-upgrade.min.js?v=99b4eac6d4">
+    <meta name="xtj-module-pro-script" content="js/pro-style.min.js?v=5f976a5f1e">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=7c0ecd6d11">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=a41b4013b1">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=9c4e102be8">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=4446c9ab3d">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=5b784a1a5c">
+    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=a2b674198e">
+    <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21e170fc76">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=0f72e8b4ec">
+    <meta name="xtj-module-features" content="js/features.min.js?v=172626a6df">
+    <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=dc9c360b6a">
+    <meta name="xtj-english-dict-src" content="js/english-dict.min.js?v=cdbc3848c4">
 </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1376,26 +1390,14 @@
     </script>
 
     <script>
-        // 集中噪音过滤: 静默已知的第三方库 / SDK 噪音错误
+        // 集中噪音过滤: 静默已知的 SDK 中止噪音
         // (1) ERR_ABORTED = Supabase SDK AbortController 5s timeout / page unload 自动 abort, 不是真错误
-        // (2) onErr/onLoad ReferenceError = preview.min.js 第三方库 bug, 我们无权修改 minified 文件
-        // (3) SyntaxError from preview.min.js = 上面 onErr 引发的二次错误
-        // ★ U3: 被过滤的错误以 console.warn 记录, 方便排查但不打断用户
         (function() {
             function isAbort(reason) {
                 if (!reason) return false;
                 if (reason.name === 'AbortError') return true;
                 var msg = String(reason.message || reason || '');
                 return /abort/i.test(msg) || /ERR_ABORTED/i.test(msg);
-            }
-            function isPhotoWallLibNoise(message, filename) {
-                if (!message) return false;
-                var src = String(filename || '');
-                if (!/preview\.min\.js/.test(src)) return false;
-                if (/onErr is not defined/.test(message)) return true;
-                if (/onLoad is not defined/.test(message)) return true;
-                if (/missing \) after argument list/.test(message)) return true;
-                return false;
             }
             // 静默 AbortError unhandled rejection (记录 warn 级别日志)
             window.addEventListener('unhandledrejection', function(e) {
@@ -1404,34 +1406,14 @@
                     e.preventDefault();
                 }
             });
-            // 静默照片墙第三方库已知 bug (记录 warn 级别日志)
-            window.addEventListener('error', function(e) {
-                if (isPhotoWallLibNoise(e.message, e.filename)) {
-                    console.warn('[XTJ] Suppressed preview.min.js known bug:', e.message);
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                }
-            }, true);
         })();
     </script>
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-    <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
-    <script defer src="js/performance.min.js?v=59807b0cc7"></script>
-    <script defer src="js/core.min.js?v=803f5c2fd3"></script>
+    <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
+    <script defer src="js/core.min.js?v=5159db4ff9"></script>
     <script defer src="js/login-device.min.js?v=ad593d9c75"></script>
-    <script defer src="js/core-animations.min.js?v=0f72e8b4ec"></script>
-    <script defer src="js/features.min.js?v=de76ab281f"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
-    <script defer data-xtj-loaded="1" src="js/photo-wall/preview.min.js?v=d700b0df36"></script>
-    <script defer data-xtj-loaded="1" src="js/photo-wall/preview-hotfix.min.js?v=9c4e102be8"></script>
-    <script defer src="js/ui-effects.min.js?v=dc9c360b6a"></script>
-    <script defer src="js/pro-upgrade.min.js?v=99b4eac6d4"></script>
-    <script defer src="js/pro-style.min.js?v=5f976a5f1e"></script>
-    <script defer src="js/ai-agent.min.js?v=b17edff33a"></script>
-<meta name="xtj-english-dict-src" content="js/english-dict.min.js?v=cdbc3848c4" />
-<script defer src="js/english-learning.min.js?v=e11d1ba823"></script>
-    <script defer src="js/photo-wall/upload-ui.min.js?v=4446c9ab3d"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
