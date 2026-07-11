@@ -13,6 +13,13 @@
 
   function byId(id){ return document.getElementById(id); }
 
+  function apiUrl(path) {
+    var base = (typeof window.API_BASE === 'string' && window.API_BASE)
+      ? window.API_BASE.replace(/\/$/, '')
+      : '';
+    return base + path;
+  }
+
   function toast(message){
     if (typeof window.showToast === 'function') window.showToast(message);
     else console.log('[XTJ]', message);
@@ -170,20 +177,30 @@
       mimeType: type,
       duration: null
     });
-    var insertPayload = {
-      user_name: user,
-      content: content,
-      media_url: publicUrl,
-      media_type: window.PHOTO_WALL_MARKER || MARKER,
-      actor_key: window.deviceId || ('photo_' + Date.now())
-    };
-    var insert = await window.sb.from('posts').insert([insertPayload])
-      .select('id,user_name,media_url,content,created_at,views,actor_key').maybeSingle();
-    if (insert.error) {
-      console.error('[photo-upload] DB insert error', insert.error, 'payload keys:', Object.keys(insertPayload));
-      throw insert.error;
+    var actorKey = window.deviceId || ('photo_' + Date.now());
+    var headers = (typeof window.getUserAuthHeaders === 'function')
+      ? await window.getUserAuthHeaders()
+      : { 'Content-Type': 'application/json' };
+    if (!headers) headers = { 'Content-Type': 'application/json' };
+    var createRes = await fetch(apiUrl('/api/photo/create'), {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        media_url: publicUrl,
+        content: content,
+        actor_key: actorKey
+      })
+    });
+    if (!createRes.ok) {
+      try {
+        await window.sb.storage.from('uploads').remove([path]);
+      } catch (_) {}
+      var errBody = {};
+      try { errBody = await createRes.json(); } catch (_) {}
+      throw new Error(errBody.error || '创建照片记录失败');
     }
-    return insert.data;
+    var createData = await createRes.json();
+    return createData.data;
   }
 
   async function uploadPhotoWallFiles(){
