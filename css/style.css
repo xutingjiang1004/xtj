@@ -7546,50 +7546,26 @@
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.10) !important;
 }
 
-.perf-lite .xtj-echo-core,
 .perf-lite .xtj-chat-empty-icon,
-.perf-lite .xtj-sigil-loader,
 .perf-lite .upload-progress-container {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   filter: none !important;
 }
 
-.perf-balanced .xtj-echo-core,
 .perf-balanced .xtj-chat-empty-icon,
-.perf-balanced .xtj-sigil-loader,
 .perf-balanced .upload-progress-container {
   backdrop-filter: blur(8px) saturate(115%) !important;
   -webkit-backdrop-filter: blur(8px) saturate(115%) !important;
 }
 
-.perf-balanced .xtj-echo-loader,
-.perf-balanced .xtj-sigil-loader,
-.perf-lite .xtj-echo-loader,
-.perf-lite .xtj-sigil-loader,
 .perf-lite .upload-progress-icon {
   filter: none !important;
 }
 
-.perf-lite .xtj-echo-loader *,
-.perf-lite .xtj-sigil-loader *,
 .perf-lite .upload-progress-icon * {
   box-shadow: none !important;
 }
-
-.perf-lite .xtj-echo-loader,
-.perf-lite .xtj-echo-loader *,
-.perf-lite .xtj-sigil-loader,
-.perf-lite .xtj-sigil-loader * {
-  animation: none !important;
-}
-
-.perf-balanced .xtj-echo-loader .xtj-echo-core {
-  box-shadow: 0 0 16px rgba(255,222,143,.22), inset 0 0 18px rgba(255,255,255,.15), 0 16px 40px rgba(73,169,255,.10) !important;
-}
-.perf-balanced .xtj-echo-bolt.in { box-shadow: 0 0 10px rgba(255,111,141,.48), 0 0 24px rgba(255,111,141,.20) !important; }
-.perf-balanced .xtj-echo-bolt.out { box-shadow: 0 0 10px rgba(123,213,255,.48), 0 0 28px rgba(255,227,154,.18) !important; }
-.perf-balanced .xtj-echo-blade { box-shadow: 0 0 14px rgba(255,227,154,.52), 0 0 36px rgba(255,227,154,.22) !important; }
 
 .perf-balanced .post,
 .perf-balanced .stat-card,
@@ -7641,18 +7617,11 @@
   filter: none !important;
 }
 
-.perf-lite .heart-particle,
-.perf-lite .xtj-echo-particle,
-.perf-lite .xtj-echo-shard,
-.perf-lite .xtj-echo-shock,
-.perf-lite .xtj-echo-blade,
-.perf-lite .xtj-echo-rune,
-.perf-lite .xtj-echo-field {
+.perf-lite .heart-particle {
   display: none !important;
 }
 
-.perf-balanced .heart-particle,
-.perf-balanced .xtj-echo-particle {
+.perf-balanced .heart-particle {
   animation-duration: 0.55s !important;
 }
 

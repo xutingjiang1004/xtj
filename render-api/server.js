@@ -1801,11 +1801,23 @@ app.use(function(req, res, next) {
 });
 
 // 托管前端静态文件（index.html, admin.html, js/ 等）
+app.use(function(req, res, next) {
+  if (req.path === '/health' || req.path.indexOf('/api/') === 0 || req.path.indexOf('/admin/') === 0) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {
     if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache');
+      return;
+    }
+    var originalUrl = String(res.req && res.req.originalUrl || '');
+    if (/\.(?:css|js)\?v=[a-f0-9]{10}(?:&|$)/i.test(originalUrl)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   }
 }));
