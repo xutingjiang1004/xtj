@@ -446,6 +446,20 @@ test('english-learning.css el-page keeps proper scroll properties', function(){
   assert.ok(pageRule.indexOf('-webkit-overflow-scrolling: touch') >= 0, 'scroll touch missing');
 });
 
+
+test('showToast wrapper forwards all arguments after text repair', function(){
+  var source = read('js/features.js');
+  assert.ok(source.indexOf('original.apply(this, args)') >= 0, 'showToast wrapper does not forward all arguments');
+  assert.ok(source.indexOf('args[0] = fixText') >= 0, 'showToast text repair missing');
+});
+
+test('selected focus with zero checked words does not fall back to all words', function(){
+  var source = read('js/english-learning.js');
+  assert.ok(source.indexOf("if (mode === 'selected')") >= 0, 'selected mode branch missing');
+  assert.ok(source.indexOf("words = selectedIds.length ? words.filter") >= 0, 'selected mode still falls back to all words');
+  assert.ok(source.indexOf('请先勾选需要生成练习的单词') >= 0, 'selected empty prompt missing');
+});
+
 console.log('\n=== English AI Generation Boundary ===');
 test('English generation failures never auto-create local practice', function(){
   var source = read('js/english-learning.js');

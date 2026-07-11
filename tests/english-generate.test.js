@@ -34,6 +34,13 @@ function validModel(overrides) {
       options: ['apple', 'pear', 'orange', 'banana'],
       answer: 0,
       explain: 'The article uses apple.'
+    }, {
+      id: 'q2',
+      type: 'mc',
+      question: 'What is apple in Chinese?',
+      options: ['苹果', '梨', '橙子', '香蕉'],
+      answer: 0,
+      explain: 'Apple means 苹果.'
     }]
   }, overrides || {});
 }
@@ -170,11 +177,44 @@ test('cloze preserves the blanks structure', function() {
   var result = validateEnglishGenerateOutput(validModel({
     article: '',
     questions: [{
-      id: 'q1', type: 'cloze', question: 'Complete the text.', context: 'I eat ___.',
-      blanks: [{ options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' }]
+      id: 'q1', type: 'cloze', question: 'Complete the text.', context: 'I eat ___ and ___.',
+      blanks: [{ options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' }, { options: ['learn', 'sleep'], answer: 0, explain: 'Learn fits.' }]
     }]
   }), request);
   assert.equal(result.questions[0].blanks[0].answer, 0);
+});
+
+
+test('model output with zero questions is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [] }), request); }, /questions 格式错误/);
+});
+
+test('model output with too few answerable items is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [validModel().questions[0]] }), request); }, /可作答题量不足/);
+});
+
+test('model output with duplicate question ids is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 2 }));
+  var q = validModel().questions[0];
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [q, Object.assign({}, q)] }), request); }, /id 重复/);
+});
+
+test('mixed multiple-choice and cloze blanks count toward requested answerable total', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['mc', 'cloze'], question_count: 4 }));
+  var mc = validModel().questions[0];
+  var result = validateEnglishGenerateOutput(validModel({
+    questions: [
+      mc,
+      Object.assign({}, mc, { id: 'q2', question: 'Which is a fruit?' }),
+      { id: 'q3', type: 'cloze', question: 'Complete the text.', context: 'I eat ___ and ___.', blanks: [
+        { options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' },
+        { options: ['learn', 'sleep'], answer: 0, explain: 'Learn fits the topic.' }
+      ] }
+    ]
+  }), request);
+  assert.equal(result.questions.length, 3);
 });
 
 test('handler timeout returns 504 and aborts the injected signal', async function() {

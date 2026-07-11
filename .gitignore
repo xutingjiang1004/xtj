@@ -11,3 +11,6 @@ node_modules/
 *.pem
 *.key
 secrets.*
+output/playwright/
+playwright-report/
+test-results/
