@@ -1870,29 +1870,10 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
         var _photoWallLoaded = false;
         var _photoWallLoading = null;
-        var _photoWallPreviewLoaded = false;
-        var _photoWallPreviewLoading = null;
-        var _photoWallUploadLoaded = false;
-        var _photoWallUploadLoading = null;
-        var _aiAgentLoaded = false;
-        var _aiAgentLoading = null;
-        var _englishLearningLoaded = false;
-        var _englishLearningLoading = null;
-        var _interactiveEnhancementsBooted = false;
-        var _coreAnimationsLoaded = false;
-        var _coreAnimationsLoading = null;
-        var _gsapLoading = null;
-
         function ensureGsap() {
-            if (typeof window.gsap !== 'undefined') return Promise.resolve(window.gsap);
-            if (_gsapLoading) return _gsapLoading;
-            _gsapLoading = xtjLoadScriptOnce('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', 'gsap').then(function() {
-                return window.gsap || null;
-            }).catch(function(err) {
-                console.warn('[XTJ] GSAP lazy load failed, using CSS fallback:', err);
-                return null;
-            });
-            return _gsapLoading;
+            // GSAP is loaded statically before core.js in index.html.  Keep this
+            // compatibility hook for modules that use it, but never add a second tag.
+            return Promise.resolve(window.gsap || null);
         }
         window.ensureGsap = ensureGsap;
         window.__xtjEnsureGsap = ensureGsap;
@@ -1913,116 +1894,32 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         }
 
         function ensurePhotoWallPreviewLoaded() {
-            if (_photoWallPreviewLoaded && typeof window.openPhotoPreview === 'function') return Promise.resolve();
-            if (_photoWallPreviewLoading) return _photoWallPreviewLoading;
-            _photoWallPreviewLoading = xtjLoadScriptSequence([
-                { src: 'js/photo-wall/preview.min.js?v=20260627_hotfix_v22', key: 'photo-wall-preview' },
-                { src: 'js/photo-wall/preview-hotfix.js?v=20260627_hotfix_v22', key: 'photo-wall-preview-hotfix' }
-            ]).then(function() {
-                _photoWallPreviewLoaded = true;
-            }).finally(function() {
-                if (!_photoWallPreviewLoaded) _photoWallPreviewLoading = null;
-            });
-            return _photoWallPreviewLoading;
+            // Both preview scripts are static, deferred scripts in index.html.
+            return Promise.resolve();
         }
 
         function ensurePhotoWallUploadLoaded() {
-            if (_photoWallUploadLoaded && typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) return Promise.resolve();
-            if (_photoWallUploadLoading) return _photoWallUploadLoading;
-            _photoWallUploadLoading = xtjLoadScriptOnce('js/photo-wall/upload-ui.min.js?v=20260623_v2', 'photo-wall-upload-ui').then(function() {
-                _photoWallUploadLoaded = true;
-            }).finally(function() {
-                if (!_photoWallUploadLoaded) _photoWallUploadLoading = null;
-            });
-            return _photoWallUploadLoading;
+            // upload-ui.min.js is loaded statically with the other entry modules.
+            return Promise.resolve();
         }
 
         function ensureAiAgentLoaded() {
-            if (_aiAgentLoaded && typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher) return Promise.resolve();
-            if (_aiAgentLoading) return _aiAgentLoading;
-            _aiAgentLoading = xtjLoadScriptOnce('js/ai-agent.js?v=20260708_perf_v1', 'ai-agent').then(function() {
-                _aiAgentLoaded = true;
-            }).finally(function() {
-                if (!_aiAgentLoaded) _aiAgentLoading = null;
-            });
-            return _aiAgentLoading;
+            // ai-agent.min.js is loaded statically with the other entry modules.
+            return Promise.resolve();
         }
         window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
 
         function ensureEnglishLearningLoaded() {
-            if (_englishLearningLoaded && window.EnglishLearning && typeof window.EnglishLearning.open === 'function') return Promise.resolve();
-            if (_englishLearningLoading) return _englishLearningLoading;
-            _englishLearningLoading = xtjLoadScriptSequence([
-                { src: 'js/english-dict.js?v=20260708_perf_v1', key: 'english-dict' },
-                { src: 'js/english-learning.js?v=20260708_perf_v1', key: 'english-learning' }
-            ]).then(function() {
-                _englishLearningLoaded = true;
-            }).finally(function() {
-                if (!_englishLearningLoaded) _englishLearningLoading = null;
-            });
-            return _englishLearningLoading;
+            // english-learning.min.js owns its dictionary's single lazy load.
+            return Promise.resolve();
         }
         window.__xtjEnsureEnglishLearningLoaded = ensureEnglishLearningLoaded;
 
         function ensureCoreAnimationsLoaded() {
-            if (_coreAnimationsLoaded) return Promise.resolve();
-            if (_coreAnimationsLoading) return _coreAnimationsLoading;
-            _coreAnimationsLoading = xtjLoadScriptOnce('js/core-animations.min.js?v=20260708_perf_v1', 'core-animations').then(function() {
-                _coreAnimationsLoaded = true;
-            }).finally(function() {
-                if (!_coreAnimationsLoaded) _coreAnimationsLoading = null;
-            });
-            return _coreAnimationsLoading;
+            // core-animations.min.js is loaded statically with the other entry modules.
+            return Promise.resolve();
         }
         window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
-
-        function scheduleInteractiveEnhancements() {
-            if (_interactiveEnhancementsBooted) return;
-            _interactiveEnhancementsBooted = true;
-            var run = function() {
-                xtjLoadScriptSequence([
-                    { src: 'js/login-device.js?v=20260629_abortfix_v1', key: 'login-device' },
-                    { src: 'js/features.js?v=20260623_1', key: 'features' },
-                    { src: 'js/ui-effects.js?v=20260708_perf_v1', key: 'ui-effects' },
-                    { src: 'js/pro-upgrade.js?v=20260627_profile_v3', key: 'pro-upgrade' },
-                    { src: 'js/pro-style.js?v=20260708_perf_v1', key: 'pro-style' }
-                ]).catch(function(err) {
-                    console.warn('[XTJ] deferred enhancement load failed:', err && err.message ? err.message : err);
-                });
-            };
-            if (typeof window.requestIdleCallback === 'function') {
-                window.requestIdleCallback(run, { timeout: 2200 });
-            } else {
-                setTimeout(run, 1200);
-            }
-        }
-
-        function armCoreAnimationLoader() {
-            var fired = false;
-            function trigger() {
-                if (fired) return;
-                fired = true;
-                document.removeEventListener('pointerdown', trigger, true);
-                document.removeEventListener('keydown', trigger, true);
-                if (typeof window.requestIdleCallback === 'function') {
-                    window.requestIdleCallback(function() {
-                        ensureCoreAnimationsLoaded().catch(function() {});
-                    }, { timeout: 2500 });
-                } else {
-                    setTimeout(function() { ensureCoreAnimationsLoaded().catch(function() {}); }, 1500);
-                }
-            }
-            document.addEventListener('pointerdown', trigger, true);
-            document.addEventListener('keydown', trigger, true);
-            setTimeout(trigger, 3500);
-        }
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', scheduleInteractiveEnhancements, { once: true });
-        } else {
-            scheduleInteractiveEnhancements();
-        }
-        armCoreAnimationLoader();
 
         function lazyAiChatLauncher() {
             ensureAiAgentLoaded().then(function() {
