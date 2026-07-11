@@ -396,6 +396,36 @@ test('english-learning.css el-page keeps proper scroll properties', function(){
   assert.ok(pageRule.indexOf('-webkit-overflow-scrolling: touch') >= 0, 'scroll touch missing');
 });
 
+console.log('\n=== English AI Generation Boundary ===');
+test('English generation failures never auto-create local practice', function(){
+  var source = read('js/english-learning.js');
+  var generate = source.slice(source.indexOf('async function generateQuiz'), source.indexOf('function englishGenerateFailureMessage'));
+  assert.strictEqual(generate.indexOf('buildLocalQuiz('), -1, 'generateQuiz still creates an automatic local fallback');
+  ['404', '502', '503', '504', 'Failed to fetch', 'NetworkError'].forEach(function(marker) {
+    assert.strictEqual(generate.indexOf(marker), -1, 'generateQuiz contains fallback marker: ' + marker);
+  });
+  assert.ok(generate.indexOf('showGenerationError(hint)') >= 0, 'generation error state missing');
+  assert.ok(generate.indexOf('showLoading(false)') >= 0, 'loading is not stopped in finally');
+});
+
+test('offline practice is only created by the explicit offline action', function(){
+  var source = read('js/english-learning.js');
+  var offline = source.slice(source.indexOf('function useOfflineExample'), source.indexOf('function cancelGeneration'));
+  assert.ok(offline.indexOf('buildLocalQuiz(') >= 0, 'explicit offline action does not create local practice');
+  assert.ok(offline.indexOf("local: true") >= 0 && offline.indexOf("source: 'local'") >= 0, 'offline source state missing');
+  assert.ok(source.indexOf("safeBind('elUseOfflineBtn', 'click', useOfflineExample)") >= 0, 'offline button is not bound');
+});
+
+test('AI and offline results have distinct persistent labels', function(){
+  var source = read('js/english-learning.js');
+  var html = read('index.html');
+  assert.ok(source.indexOf("source: 'deepseek'") >= 0, 'AI result source missing');
+  assert.ok(source.indexOf("sourceBadge.textContent = isAi ? 'AI生成' : ''") >= 0, 'AI label missing');
+  assert.ok(source.indexOf("sourceBadge.textContent = '离线模板，非 AI 生成'") >= 0, 'offline label missing');
+  assert.ok(/id="elGenerateError"[^>]*role="alert"/.test(html), 'persistent generation alert missing');
+  assert.ok(html.indexOf('id="elGenerateRetryBtn"') >= 0 && html.indexOf('id="elUseOfflineBtn"') >= 0, 'retry/offline actions missing');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
