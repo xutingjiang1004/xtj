@@ -81,14 +81,10 @@ body.english-learning-open {
   box-shadow: none !important;
 }
 
-.perf-lite #panelEnglishLearning .el-wordlist,
-.perf-balanced #panelEnglishLearning .el-wordlist {
+.perf-lite #panelEnglishLearning .el-word-item,
+.perf-balanced #panelEnglishLearning .el-word-item {
   content-visibility: auto;
-  contain-intrinsic-size: 220px 420px;
-}
-
-#panelEnglishLearning .el-word-item {
-  contain-intrinsic-size: 72px;
+  contain-intrinsic-size: auto 72px;
 }
 
 #panelEnglishLearning::before {
