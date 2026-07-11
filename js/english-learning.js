@@ -356,6 +356,11 @@
     if (!node) return null;
     var main = node.querySelector('.el-sync-main');
     if (!main) {
+      // The static fallback text is useful without JavaScript, but must not
+      // remain beside the live status once the component takes control.
+      Array.prototype.slice.call(node.childNodes).forEach(function(child) {
+        if (child.nodeType === 3) node.removeChild(child);
+      });
       main = el('span', { class: 'el-sync-main' });
       node.appendChild(main);
     }
