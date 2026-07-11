@@ -100,7 +100,14 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.save_english_state(TEXT, TEXT, INT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.claim_pro_gift(TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
--- 4. 必要索引
-CREATE INDEX IF NOT EXISTS idx_posts_media_type_url ON public.posts(media_type, media_url);
-CREATE INDEX IF NOT EXISTS idx_posts_media_type_user ON public.posts(media_type, user_name);
+-- 4. 必要索引（全部用 hash，避免 b‑tree 对超长值的 8191 字节限制）
+DROP INDEX IF EXISTS idx_posts_actor_key;
+DROP INDEX IF EXISTS idx_posts_media_type_url;
+DROP INDEX IF EXISTS idx_posts_media_type_user;
+DROP INDEX IF EXISTS idx_posts_media_url;
+DROP INDEX IF EXISTS idx_posts_user_name;
+
 CREATE INDEX IF NOT EXISTS idx_posts_actor_key ON public.posts USING hash(actor_key);
+CREATE INDEX IF NOT EXISTS idx_posts_media_type ON public.posts USING hash(media_type);
+CREATE INDEX IF NOT EXISTS idx_posts_media_url ON public.posts USING hash(media_url);
+CREATE INDEX IF NOT EXISTS idx_posts_user_name ON public.posts USING hash(user_name);
