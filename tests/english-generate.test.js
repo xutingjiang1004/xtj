@@ -58,8 +58,10 @@ async function invoke(options) {
   options = options || {};
   var res = fakeResponse();
   var capturedOptions;
+  var capturedMessages;
   var handler = createEnglishGenerateHandler({
     callDeepSeek: options.callDeepSeek || async function(messages, callOptions) {
+      capturedMessages = messages;
       capturedOptions = callOptions;
       return { content: JSON.stringify(validModel()), usage: null };
     },
@@ -68,7 +70,7 @@ async function invoke(options) {
     logger: { error: function() {} }
   });
   await handler({ body: options.body || validBody() }, res);
-  return { res: res, callOptions: capturedOptions };
+  return { res: res, callOptions: capturedOptions, messages: capturedMessages };
 }
 
 test('generate route is registered behind authentication and an independent limiter', function() {
@@ -217,6 +219,31 @@ test('mixed multiple-choice and cloze blanks count toward requested answerable t
   assert.equal(result.questions.length, 3);
 });
 
+
+
+test('article-only handler requests an empty questions array and returns 200', async function() {
+  var result = await invoke({
+    body: validBody({ types: ['article'], question_count: 4 }),
+    callDeepSeek: async function(messages) {
+      var prompt = messages.map(function(message) { return message.content; }).join('\n');
+      assert.match(prompt, /questions 必须严格为 \[\]/);
+      assert.doesNotMatch(prompt, /不能零题/);
+      assert.doesNotMatch(prompt, /不允许少题、多题、零题/);
+      return { content: JSON.stringify(validModel({ questions: [] })), usage: null };
+    }
+  });
+  assert.equal(result.res.statusCode, 200);
+  assert.equal(result.res.body.data.questions.length, 0);
+});
+
+test('question modes retain the strict requested answerable count prompt', async function() {
+  var result = await invoke({
+    body: validBody({ types: ['mc', 'cloze'], question_count: 4 })
+  });
+  var prompt = result.messages.map(function(message) { return message.content; }).join('\n');
+  assert.match(prompt, /总可作答题量必须等于 question_count/);
+  assert.match(prompt, /不允许少题、多题、零题或重复 id/);
+});
 
 test('article-only generation accepts an empty questions array', function() {
   var request = validateEnglishGenerateInput(validBody({ types: ['article'], question_count: 4 }));

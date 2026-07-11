@@ -50,10 +50,16 @@
         });
         return _[e] = t, t;
     }
+    function clearPreviewImageLoad(image, resetSource) {
+        if (!image) return;
+        image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
+        image._ppUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
+        image.classList.remove("pp-placeholder"), image.style.transition = "none";
+        resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
+    }
     function D(e, t) {
         if (e) {
-            if (!t) return e._ppCleanup && e._ppCleanup(), e.style.transition = "none", e.removeAttribute("src"),
-            e.style.opacity = "0", void (e._ppUrl = null);
+            if (!t) return void clearPreviewImageLoad(e, !0);
             if (e._ppUrl === t) {
                 if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
@@ -209,9 +215,9 @@
             e = !1;
             var t = document.getElementById("photoPreviewOverlay");
             if (t) {
-                t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), q();
+                t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), t._openLoadGen = (t._openLoadGen || 0) + 1, q();
                 var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
-                o && o._ppCleanup && o._ppCleanup();
+                clearPreviewImageLoad(o, !1);
                 if (o && (a = o.getBoundingClientRect()), n && a && i && a.width > 0 && a.height > 0 && n.width > 0 && n.height > 0) {
                     i.style.transition = "none", i.style.opacity = "0";
                     var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
@@ -221,13 +227,13 @@
                     o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px",
                     t.style.opacity = "0", setTimeout(function() {
                         i && (i.style.transition = "", i.style.opacity = ""), o && (o.style.transition = "",
-                        o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""),
+                        o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = "", o.style.opacity = "", o.classList.remove("pp-placeholder"), o.removeAttribute("src")),
                         t.style.transition = "", t.style.opacity = "", t.classList.remove("active"), document.body.classList.remove("photo-previewing");
                     }, 220);
                 } else t.style.transition = "opacity 0.15s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
                 setTimeout(function() {
                     t.style.opacity = "", t.style.transition = "", t.classList.remove("active"), o && (o.style.transition = "",
-                    o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = ""),
+                    o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = "", o.style.opacity = "", o.classList.remove("pp-placeholder"), o.removeAttribute("src")),
                     i && (i.style.transition = "", i.style.opacity = ""), document.body.classList.remove("photo-previewing");
                 }, 150);
             } else document.body.classList.remove("photo-previewing");
@@ -562,6 +568,7 @@
             }
             _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(), _._cleanupOpenListeners = cleanupOpenListeners;
             if (J && S && S.imageUrl) {
+                clearPreviewImageLoad(J, !1);
                 var oe = C[S.imageUrl];
                 if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, oe || J.complete) {
                     if (J.offsetHeight, D) {
