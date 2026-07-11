@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const { createPhotoRecord } = require('./photo-create');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
 
@@ -4436,27 +4437,14 @@ app.post('/admin/photo/restore/:id', verifyToken, async (req, res) => {
 // ===================== 用户照片上传 API（使用 service_role 绕过 RLS） ======================
 app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
-    var userName = req.userName;
-    var mediaUrl = String(req.body && req.body.media_url || '').trim();
-    var content = String(req.body && req.body.content || '{}').trim();
-    var actorKey = String(req.body && req.body.actor_key || '').trim();
-    if (!mediaUrl) return res.status(400).json({ error: '缺少图片地址' });
-    if (!actorKey) actorKey = 'photo_' + Date.now();
-    var { data, error } = await supabase.from('posts').insert([{
-      user_name: userName,
-      media_url: mediaUrl,
-      media_type: '__photo_wall__',
-      content: content,
-      actor_key: actorKey
-    }]).select('id,user_name,media_url,content,created_at,views,actor_key').maybeSingle();
-    if (error) {
-      try {
-        var pathMatch = mediaUrl.match(/\/uploads\/(photos\/.+)/);
-        if (pathMatch) supabase.storage.from('uploads').remove([pathMatch[1]]);
-      } catch (_) {}
-      return res.status(500).json({ error: '保存失败' });
-    }
-    return res.json({ ok: true, data: data });
+    var createResult = await createPhotoRecord({
+      body: req.body,
+      userName: req.userName,
+      supabase: supabase,
+      supabaseUrl: SUPABASE_URL,
+      logger: console
+    });
+    return res.status(createResult.status).json(createResult.body);
   } catch (e) { return res.status(500).json({ error: '服务器错误' }); }
 });
 
