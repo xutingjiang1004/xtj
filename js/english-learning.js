@@ -1217,6 +1217,7 @@
     }
     var level = getSelectedLevel();
     S.isGenerating = true;
+    clearGenerationError();
     updateGenInfo();
     showLoading(true);
     hideResult();
@@ -1268,7 +1269,9 @@
       if (!resp.ok) {
         var err = '';
         try { var ej = await resp.json(); err = (ej && ej.error) || ''; } catch (e) {}
-        throw new Error(err || ('HTTP ' + resp.status));
+        var responseError = new Error(err || ('HTTP ' + resp.status));
+        responseError.status = resp.status;
+        throw responseError;
       }
       var json = await resp.json();
       if (!json.ok || !json.data) throw new Error(json.error || '返回数据异常');
@@ -1282,7 +1285,9 @@
         level: level,
         types: types,
         topic: S.settings.topic || '',
-        time: now()
+        time: now(),
+        source: 'deepseek',
+        local: false
       };
       updateOfflinePracticeState(S.currentQuiz);
       renderArticle(S.currentQuiz);
@@ -1295,47 +1300,61 @@
         return;
       }
       try { console.error('[EL] generate error:', e2); } catch (e3) {}
-      // 后端不可用时，用本地模板兜底? 用户不至于完全卡住?
-      var emsg = String((e2 && e2.message) || '');
-      var backendDown = /HTTP (501|404|502|503)|Failed to fetch|NetworkError|AbortError/i.test(emsg);
-      if (backendDown) {
-        try {
-          var fallback = buildLocalQuiz(words, level, types, S.settings);
-          S.currentQuiz = {
-            id: uid('quiz'),
-            article: fallback.article,
-            words: fallback.words,
-            questions: fallback.questions,
-            answers: {},
-            level: level,
-            types: types,
-            topic: S.settings.topic || '',
-            time: now(),
-            local: true
-          };
-          renderArticle(S.currentQuiz);
-          renderQuestions(S.currentQuiz);
-          switchTab('practice');
-          updateOfflinePracticeState(S.currentQuiz);
-          notify('后端接口不可用，已加载离线示例');
-          return;
-        } catch (e4) {
-          try { console.error('[EL] local fallback failed:', e4); } catch (_) {}
-        }
-      }
-      var hint = emsg || '未知错误';
-      if (/HTTP 501|Unsupported method/i.test(hint)) {
-        hint = '后端接口不支持当前请求方式，请检查服务';
-      } else if (/HTTP 404|Not Found/i.test(hint)) {
-        hint = '后端接口未找到，请确认服务已启动';
-      }
-      notify('生成失败: ' + hint, 'error');
+      var hint = englishGenerateFailureMessage(e2);
+      showGenerationError(hint);
+      notify(hint, 'error');
     } finally {
       showLoading(false);
       S.isGenerating = false;
       S.currentController = null;
       updateGenInfo();
     }
+  }
+
+  function englishGenerateFailureMessage(error) {
+    var status = Number(error && error.status) || 0;
+    var message = String((error && error.message) || '');
+    if (status === 401 || status === 403) return '登录状态已失效，请重新登录后再生成。';
+    if (status === 404) return '英语 AI 生成服务尚未部署，请稍后重试。';
+    if (status === 502) return 'AI 服务暂时无响应，请稍后重新生成。';
+    if (status === 503) return 'AI 服务尚未配置或暂不可用。';
+    if (status === 504 || /timeout|超时/i.test(message)) return 'AI 生成超时，请重新生成。';
+    if (/Failed to fetch|NetworkError|network request failed/i.test(message)) return '网络连接失败，请检查网络后重新生成。';
+    return '生成失败，请稍后重新生成。';
+  }
+
+  function clearGenerationError() {
+    var box = $('elGenerateError');
+    var text = $('elGenerateErrorText');
+    if (text) text.textContent = '';
+    if (box) box.hidden = true;
+  }
+
+  function showGenerationError(message) {
+    var box = $('elGenerateError');
+    var text = $('elGenerateErrorText');
+    if (text) text.textContent = message;
+    if (box) box.hidden = false;
+  }
+
+  function useOfflineExample() {
+    syncSettingsFromInputs();
+    var words = getWordsForGeneration(true);
+    if (!words.length) return;
+    var types = getSelectedTypes();
+    if (!types.length) { notify('请至少选择一种题型'); return; }
+    var level = getSelectedLevel();
+    var fallback = buildLocalQuiz(words, level, types, S.settings);
+    S.currentQuiz = {
+      id: uid('quiz'), article: fallback.article, words: fallback.words,
+      questions: fallback.questions, answers: {}, level: level, types: types,
+      topic: S.settings.topic || '', time: now(), local: true, source: 'local'
+    };
+    clearGenerationError();
+    renderArticle(S.currentQuiz);
+    renderQuestions(S.currentQuiz);
+    updateOfflinePracticeState(S.currentQuiz);
+    switchTab('practice');
   }
 
   function cancelGeneration() {
@@ -1351,10 +1370,12 @@
 
   function updateOfflinePracticeState(quiz) {
     var isLocal = !!(quiz && quiz.local);
+    var isAi = !!(quiz && quiz.source === 'deepseek' && !isLocal);
     var articleCard = $('elArticleCard');
     var questionsCard = $('elQuestionsCard');
     var localeBar = $('elLocaleBar');
     var practicePane = $('elPanePractice');
+    var sourceBadge = $('elPracticeSource');
     var banner = document.querySelector('#panelEnglishLearning .el-offline-banner');
 
     [articleCard, questionsCard, localeBar].forEach(function(node) {
@@ -1365,15 +1386,26 @@
 
     if (!isLocal) {
       if (banner) banner.remove();
+      if (sourceBadge) {
+        sourceBadge.textContent = isAi ? 'AI生成' : '';
+        sourceBadge.className = 'el-practice-source' + (isAi ? ' is-ai' : '');
+        sourceBadge.hidden = !isAi;
+      }
       return;
+    }
+
+    if (sourceBadge) {
+      sourceBadge.textContent = '离线模板，非 AI 生成';
+      sourceBadge.className = 'el-practice-source is-local';
+      sourceBadge.hidden = false;
     }
 
     if (!banner) {
       banner = document.createElement('div');
       banner.className = 'el-offline-banner';
       banner.innerHTML =
-        '<div class=\"el-offline-banner-title\">离线示例</div>' +
-        '<div class=\"el-offline-banner-meta\">当前内容为本地模板示例，非 AI 生成；后端恢复后可重新生成正式练习。</div>';
+        '<div class=\"el-offline-banner-title\">离线模板，非 AI 生成</div>' +
+        '<div class=\"el-offline-banner-meta\">当前内容为本地模板示例；后端恢复后可重新生成正式练习。</div>';
       if (practicePane) practicePane.insertBefore(banner, practicePane.firstChild);
     }
   }
@@ -2378,6 +2410,8 @@
 
     safeBind('elGenBtn', 'click', function() { generateQuiz(); });
     safeBind('elRegenArticleBtn', 'click', function() { generateQuiz({ regenArticle: true }); });
+    safeBind('elGenerateRetryBtn', 'click', function() { generateQuiz(); });
+    safeBind('elUseOfflineBtn', 'click', useOfflineExample);
     safeBind('elSubmitBtn', 'click', submitAnswers);
     safeBind('elShowAnswerBtn', 'click', showAllAnswers);
     safeBind('elLoadingCancel', 'click', function() { cancelGeneration(); });
