@@ -281,6 +281,95 @@ test('dock tab and indicator selectors were not edited by this optimization', fu
   assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
 });
 
+console.log('\n=== Photo Upload Failure Behavior ===');
+test('upload has centralized cleanupStorage helper', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf('function cleanupStorage(path)') >= 0, 'cleanupStorage helper missing');
+  assert.ok(s.indexOf("console.error('[photo-upload] Storage cleanup error'") >= 0, 'cleanupStorage logs errors');
+});
+test('Storage upload success but fetch network error removes file', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf("await cleanupStorage(path)") >= 0, 'cleanupStorage not called after error');
+  assert.ok(s.indexOf("fetchError.photoUploadCode = 'backend_unreachable'") >= 0, 'network error code missing');
+});
+test('fetch throws timeout sets AbortController and clears timer', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf('var controller = new AbortController()') >= 0, 'AbortController missing');
+  assert.ok(s.indexOf('setTimeout(function() { controller.abort()') >= 0, 'timeout abort missing');
+  assert.ok(s.indexOf('clearTimeout(timeoutTimer)') >= 0, 'timeout timer not cleaned up');
+  assert.ok(s.indexOf("fetchError.photoUploadCode = 'timeout'") >= 0, 'timeout code missing');
+  assert.ok(s.indexOf('PHOTO_UPLOAD_TIMEOUT_MS') >= 0, 'timeout constant missing');
+});
+test('HTTP non-2xx response removes storage file exactly once', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  var matches = s.match(/await cleanupStorage\(path\)/g);
+  assert.ok(matches, 'cleanupStorage not called');
+  var httpOkBlock = s.slice(s.indexOf('if (!createRes.ok)'), s.indexOf('var createData;'));
+  assert.ok(httpOkBlock.indexOf('await cleanupStorage(path)') >= 0, 'HTTP error does not call cleanup');
+  assert.ok(httpOkBlock.indexOf("photoUploadStage = 'record'") >= 0, 'record stage marker missing');
+});
+test('JSON parse failure after HTTP 200 removes storage file', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  var parseCatch = s.slice(s.indexOf('catch (parseError)'));
+  assert.ok(parseCatch.indexOf('await cleanupStorage(path)') >= 0, 'parse error does not clean up');
+});
+test('response with missing data field removes storage file', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf("if (!createData || !createData.data)") >= 0, 'missing data guard missing');
+  var guardBlock = s.slice(s.indexOf("if (!createData || !createData.data)"), s.indexOf('return createData.data;'));
+  assert.ok(guardBlock.indexOf('await cleanupStorage(path)') >= 0, 'missing data does not clean up');
+});
+test('batch upload refresh failure does not swallow upload results', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf('var refreshFailed = false;') >= 0, 'refresh error boundary missing');
+  assert.ok(s.indexOf('refreshFailed = true') >= 0, 'refresh failure flag missing');
+  assert.ok(s.indexOf('列表刷新失败，请点击重试') >= 0, 'refresh failure message missing');
+  assert.ok(s.indexOf("window.loadPhotoWallData") >= 0, 'list refresh code missing');
+});
+test('storage cleanup failure preserves original upload error and logs', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf("console.error('[photo-upload] Storage cleanup failed'") >= 0, 'cleanup failure not logged');
+});
+test('refresh failure does not re-upload files', function(){
+  var s = read('js/photo-wall/upload-ui.js');
+  assert.ok(s.indexOf("state.photoFiles = []") > s.indexOf("} finally {"), 'photoFiles cleared in finally before refresh');
+});
+
+console.log('\n=== CSS Scroll Conflict ===');
+test('ui-shell.css no longer overrides el-page overflow/height with !important', function(){
+  var shell = read('css/ui-shell.css');
+  function cssBlock(sel) {
+    var i = shell.indexOf(sel + ' {');
+    if (i < 0) return '';
+    var depth = 0, j = i;
+    for (; j < shell.length; j++) {
+      if (shell[j] === '{') depth++;
+      else if (shell[j] === '}') { depth--; if (depth === 0) return shell.slice(i, j + 1); }
+    }
+    return '';
+  }
+  var baseRule = cssBlock('#panelEnglishLearning .el-page');
+  assert.ok(baseRule.indexOf('overflow: visible') < 0, 'overflow visible still overrides');
+  assert.ok(baseRule.indexOf('height: auto') < 0, 'height auto still overrides');
+  assert.ok(baseRule.indexOf('max-height: none') < 0, 'max-height none still overrides');
+  assert.ok(baseRule.indexOf('min-height: calc') < 0, 'min-height calc still overrides');
+});
+test('english-learning.css el-page keeps proper scroll properties', function(){
+  var css = read('css/english-learning.css');
+  var start = css.indexOf('#panelEnglishLearning .el-page {');
+  var depth = 0, end = start;
+  for (var i = start; i < css.length; i++) {
+    if (css[i] === '{') depth++;
+    else if (css[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  var pageRule = css.slice(start, end);
+  assert.ok(pageRule.indexOf('height: 100dvh') >= 0, 'height 100dvh missing');
+  assert.ok(pageRule.indexOf('max-height: 100dvh') >= 0, 'max-height 100dvh missing');
+  assert.ok(pageRule.indexOf('overflow-y: auto') >= 0, 'overflow-y auto missing');
+  assert.ok(pageRule.indexOf('overflow-x: hidden') >= 0, 'overflow-x hidden missing');
+  assert.ok(pageRule.indexOf('-webkit-overflow-scrolling: touch') >= 0, 'scroll touch missing');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
