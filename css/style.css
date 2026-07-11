@@ -8762,6 +8762,24 @@
   box-shadow: 0 2px 8px rgba(90, 179, 166, 0.2);
 }
 
+.pw-upload-result {
+  width: min(100% - 32px, 560px);
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(237, 250, 241, 0.96);
+  color: #23613d;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.pw-upload-result.is-error {
+  background: rgba(255, 239, 239, 0.96);
+  color: #9b3131;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pw-upload-liquid-shell,
   .pw-upload-liquid-glow,
