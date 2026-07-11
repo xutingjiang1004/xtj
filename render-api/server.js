@@ -4034,13 +4034,10 @@ async function authenticateUser(req, res, next) {
     }
   }
 
-  // 兼容旧 password_hash（逐步废弃）
-  // ★ 关键修复：GET 请求 req.body 可能为空，必须从 req.query 兜底
-  //   同时确保 password_hash 也能从 query 读取（前端 GET history 走 query 兜底）
+  // 兼容旧 password_hash（仅接受 body，不接受 query/URL）
   var body = req.body || {};
-  var query = req.query || {};
-  var password_hash = body.password_hash || query.password_hash || '';
-  var userName = body.user_name || query.user_name || body.reporter_name || query.reporter_name || '';
+  var password_hash = body.password_hash || '';
+  var userName = body.user_name || body.reporter_name || '';
   var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
   if (!userNameVal || !password_hash) {
     return res.status(401).json({ error: '缺少身份验证' });
@@ -4054,7 +4051,9 @@ async function authenticateUser(req, res, next) {
     if (!authRec || !authRec.media_url) {
       return res.status(403).json({ error: '身份验证失败' });
     }
-    if (!crypto.timingSafeEqual(Buffer.from(authRec.media_url), Buffer.from(password_hash))) {
+    var storedBuf = Buffer.from(authRec.media_url);
+    var providedBuf = Buffer.from(password_hash);
+    if (storedBuf.length !== providedBuf.length || !crypto.timingSafeEqual(storedBuf, providedBuf)) {
       return res.status(403).json({ error: '身份验证失败' });
     }
     req.userName = userNameVal;
@@ -4432,6 +4431,24 @@ app.post('/admin/photo/restore/:id', verifyToken, async (req, res) => {
   }).eq('id', id).eq('media_type', '__photo_wall__');
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
+});
+
+// ===================== 用户照片上传 API（使用 service_role 绕过 RLS） ======================
+app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var userName = req.userName;
+    var mediaUrl = String(req.body && req.body.media_url || '').trim();
+    var contentType = req.body && req.body.content_type || '';
+    if (!mediaUrl) return res.status(400).json({ error: '缺少图片地址' });
+    var { data, error } = await supabase.from('posts').insert([{
+      user_name: userName,
+      media_url: mediaUrl,
+      media_type: '__photo_wall__',
+      content: contentType
+    }]).select('id,user_name,media_url,content,created_at').maybeSingle();
+    if (error) return res.status(500).json({ error: '保存失败' });
+    return res.json({ ok: true, data: data });
+  } catch (e) { return res.status(500).json({ error: '服务器错误' }); }
 });
 
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
