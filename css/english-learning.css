@@ -143,6 +143,10 @@ body.english-learning-open {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  /* 滚动到 anchor 时给 sticky header 留出空间 */
+  scroll-padding-top: 88px;
+  /* 末段呼吸: 滚动底部留有视觉差 */
+  scroll-padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
 }
 
 #panelEnglishLearning .el-header {
@@ -358,8 +362,10 @@ body.english-learning-open {
   z-index: 10;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
+  align-items: stretch;
   gap: 2px;
   width: calc(100% - 40px);
+  min-height: 46px;
   margin: 0 20px 12px;
   padding: 4px;
   border: 1px solid var(--el-line);
@@ -372,7 +378,11 @@ body.english-learning-open {
 #panelEnglishLearning .el-tab {
   position: relative;
   z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 38px;
+  height: 38px;
   padding: 0 12px;
   border-radius: 12px;
   color: var(--el-muted);
@@ -383,6 +393,11 @@ body.english-learning-open {
   white-space: nowrap;
   cursor: grab;
   touch-action: none;
+}
+
+#panelEnglishLearning .el-tab:focus-visible {
+  outline: 2px solid var(--el-accent, #2faf7f);
+  outline-offset: 2px;
 }
 
 #panelEnglishLearning .el-tab:active {
@@ -404,10 +419,14 @@ body.english-learning-open {
   top: 4px;
   bottom: 4px;
   left: 0;
+  width: 0;
   border-radius: 12px;
   background: var(--el-surface-solid);
   box-shadow: 0 10px 30px rgba(25, 84, 64, 0.12);
+  /* 只用 transform, 避免影响布局; width 初始 0, 由 JS 设置为占位宽度并用 transform 偏移 */
   transition: transform 260ms var(--el-ease), width 260ms var(--el-ease);
+  pointer-events: none;
+  will-change: transform, width;
 }
 
 #panelEnglishLearning .el-main {
@@ -1691,6 +1710,75 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
   font-weight: 650;
 }
 
+/* 键盘弹起/可视视口收缩: 避免输入框被遮挡, 关键控件可滚动到视野内 */
+@supports (height: 100dvh) {
+  #panelEnglishLearning .el-page.is-keyboard-open {
+    height: 100dvh;
+  }
+}
+#panelEnglishLearning .el-input:focus-visible,
+#panelEnglishLearning .el-textarea:focus-visible,
+#panelEnglishLearning .el-btn:focus-visible,
+#panelEnglishLearning .el-action-btn:focus-visible,
+#panelEnglishLearning .el-filter:focus-visible,
+#panelEnglishLearning .el-tab:focus-visible,
+#panelEnglishLearning .el-btn-mini:focus-visible {
+  outline: 2px solid var(--el-accent, #2faf7f);
+  outline-offset: 2px;
+}
+
+/* 390/430 视口: tabs 不被压扁, 保持呼吸 */
+@media (max-width: 430px) {
+  #panelEnglishLearning .el-page {
+    /* 顶部状态栏高度从 env 推断, 提供更稳定 header 高度 */
+    padding-top: 0;
+  }
+  #panelEnglishLearning .el-tabs {
+    width: calc(100% - 28px);
+    margin: 0 14px 10px;
+    min-height: 44px;
+  }
+  #panelEnglishLearning .el-tab {
+    height: 36px;
+    min-height: 36px;
+    font-size: 12px;
+  }
+  #panelEnglishLearning .el-main {
+    padding: 0 14px 18px;
+  }
+}
+
+/* 500-800 视口: 紧凑布局, 仍可读 */
+@media (min-width: 431px) and (max-width: 800px) {
+  #panelEnglishLearning .el-page {
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+  #panelEnglishLearning .el-tabs {
+    min-height: 46px;
+  }
+  #panelEnglishLearning .el-tab {
+    height: 38px;
+    min-height: 38px;
+  }
+}
+
+/* 暗色模式关键颜色提升: 防止背景与文本对比不足 */
+[data-theme="dark"] #panelEnglishLearning .el-input,
+[data-theme="dark"] #panelEnglishLearning .el-textarea,
+[data-theme="dark"] #panelEnglishLearning .el-select-wrap select,
+[data-theme="dark"] #panelEnglishLearning .el-filter {
+  color: #e6f3ee;
+  background: rgba(20, 32, 28, 0.7);
+  border-color: rgba(120, 220, 170, 0.18);
+}
+[data-theme="dark"] #panelEnglishLearning .el-input::placeholder,
+[data-theme="dark"] #panelEnglishLearning .el-textarea::placeholder {
+  color: rgba(230, 243, 238, 0.5);
+}
+[data-theme="dark"] #panelEnglishLearning .el-tab.active {
+  color: #d6f4e8;
+}
+
 /* 已移?el-reveal / el-content-in / el-dropdown-in / el-list-in / el-expand-in 动画 */
 
 @keyframes el-orbit {
@@ -1807,16 +1895,18 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
     width: 100%;
   }
   #panelEnglishLearning .el-tabs {
-    overflow-x: auto;
-    grid-template-columns: repeat(2, minmax(86px, 1fr));
-    scrollbar-width: none;
+    /* 小视口: 保持 hidden, indicator 不会被裁切; 用更小字号 + 较短文字 */
+    overflow: hidden;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   #panelEnglishLearning .el-tabs::-webkit-scrollbar {
     display: none;
   }
   #panelEnglishLearning .el-tab {
     font-size: 12px;
-    padding: 0 10px;
+    padding: 0 8px;
+    height: 36px;
+    min-height: 36px;
   }
   #panelEnglishLearning .el-card {
     padding: 13px;
@@ -2310,16 +2400,18 @@ html[data-theme="dark"] #panelEnglishLearning .el-cloze-group {
 #panelEnglishLearning .el-tab-indicator {
   position: absolute !important;
   z-index: 1 !important;
-  top: 3px !important;
-  bottom: 3px !important;
+  top: 4px !important;
+  bottom: 4px !important;
   left: 0 !important;
-  border-radius: 11px !important;
+  width: 0 !important;
+  border-radius: 12px !important;
   background: var(--el-surface-solid) !important;
   box-shadow:
     0 6px 18px rgba(20, 124, 90, 0.10),
     inset 0 0 0 1px var(--el-line) !important;
-  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1), width 380ms cubic-bezier(0.34, 1.4, 0.64, 1) !important;
+  transition: transform 260ms var(--el-ease, ease), width 260ms var(--el-ease, ease) !important;
   pointer-events: none !important;
+  will-change: transform, width !important;
 }
 #panelEnglishLearning .el-tabs.is-dragging .el-tab-indicator {
   transition: none !important;
