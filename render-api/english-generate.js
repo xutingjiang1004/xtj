@@ -107,6 +107,14 @@ function validateOptions(options, min, max) {
   return options.map(function(option) { return safeModelText(option, 200, '选项', false); });
 }
 
+
+function answerableCount(question) {
+  if (!isPlainObject(question)) return 0;
+  if (question.type === 'mc') return 1;
+  if (question.type === 'cloze' && Array.isArray(question.blanks)) return question.blanks.length;
+  return 0;
+}
+
 function validateAnswer(answer, options) {
   if (!Number.isSafeInteger(answer) || answer < 0 || answer >= options.length) {
     throw new EnglishGenerateError('INVALID_OUTPUT', '答案下标错误');
@@ -128,10 +136,11 @@ function validateEnglishGenerateOutput(data, request) {
     if (!WORD_RE.test(clean)) throw new EnglishGenerateError('INVALID_OUTPUT', 'words_used 格式错误');
     return clean;
   });
-  if (!Array.isArray(data.questions) || data.questions.length > request.question_count) {
+  if (!Array.isArray(data.questions) || data.questions.length < 1 || data.questions.length > request.question_count) {
     throw new EnglishGenerateError('INVALID_OUTPUT', 'questions 格式错误');
   }
 
+  var seenQuestionIds = Object.create(null);
   var questions = data.questions.map(function(question, index) {
     if (!isPlainObject(question) || ['mc', 'cloze'].indexOf(question.type) < 0 || request.types.indexOf(question.type) < 0) {
       throw new EnglishGenerateError('INVALID_OUTPUT', 'question 类型错误');
@@ -140,8 +149,11 @@ function validateEnglishGenerateOutput(data, request) {
     if (typeof questionId !== 'string' && typeof questionId !== 'number') {
       throw new EnglishGenerateError('INVALID_OUTPUT', 'id 格式错误');
     }
+    var cleanId = safeModelText(String(questionId), 80, 'id', false);
+    if (seenQuestionIds[cleanId]) throw new EnglishGenerateError('INVALID_OUTPUT', 'id 重复');
+    seenQuestionIds[cleanId] = true;
     var base = {
-      id: safeModelText(String(questionId), 80, 'id', false),
+      id: cleanId,
       type: question.type,
       question: safeModelText(question.question, 500, 'question', false)
     };
@@ -167,6 +179,11 @@ function validateEnglishGenerateOutput(data, request) {
     return base;
   });
 
+  var totalAnswerable = questions.reduce(function(sum, question) { return sum + answerableCount(question); }, 0);
+  if (totalAnswerable !== request.question_count) {
+    throw new EnglishGenerateError('INVALID_OUTPUT', '可作答题量不足');
+  }
+
   var result = { article: article, words_used: wordsUsed, questions: questions };
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_RESPONSE_BYTES) {
     throw new EnglishGenerateError('INVALID_OUTPUT', '响应过长');
@@ -180,6 +197,7 @@ function buildMessages(input) {
     '输出结构必须为 {"article":"...","words_used":["word"],"questions":[...]}。',
     '选择题必须有 4 个 options，answer 是 0 到 3 的数字下标。',
     '完形填空使用现有 blanks 数组结构，每个 blank 包含 options、answer、explain。',
+    '必须准确生成 question_count 对应的可作答题量：每个选择题计 1 题，每个完形填空 blank 计 1 题；总可作答题量必须等于 question_count，不能少题、零题或重复 id。',
     '不得输出 HTML、脚本、Markdown 代码块或 JSON 之外的文字。',
     '参数：' + JSON.stringify(input)
   ].join('\n');
@@ -256,5 +274,6 @@ module.exports = {
   createEnglishGenerateHandler,
   registerEnglishGenerateRoute,
   validateEnglishGenerateInput,
-  validateEnglishGenerateOutput
+  validateEnglishGenerateOutput,
+  answerableCount
 };
