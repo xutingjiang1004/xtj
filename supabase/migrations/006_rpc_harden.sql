@@ -103,4 +103,4 @@ REVOKE EXECUTE ON FUNCTION public.claim_pro_gift(TEXT, TEXT, TEXT, TEXT, TEXT) F
 -- 4. 必要索引
 CREATE INDEX IF NOT EXISTS idx_posts_media_type_url ON public.posts(media_type, media_url);
 CREATE INDEX IF NOT EXISTS idx_posts_media_type_user ON public.posts(media_type, user_name);
-CREATE INDEX IF NOT EXISTS idx_posts_actor_key ON public.posts(actor_key);
+CREATE INDEX IF NOT EXISTS idx_posts_actor_key ON public.posts USING hash(actor_key);
