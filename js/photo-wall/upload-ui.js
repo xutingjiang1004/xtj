@@ -37,6 +37,41 @@
   function isMedia(file){ return isImage(file) || isVideo(file); }
   function isPhotoWallImage(file){ return isImage(file); }
 
+  var MAX_PHOTO_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+  function createPhotoUploadError(code){
+    var error = new Error(code || 'upload_failed');
+    error.photoUploadCode = code || 'upload_failed';
+    return error;
+  }
+
+  function photoUploadFailureReason(error, stage){
+    var code = error && error.photoUploadCode;
+    var status = Number(error && (error.status || error.statusCode)) || 0;
+    var message = String(error && error.message || '').toLowerCase();
+    if (code === 'unsupported_type') return '文件类型不支持';
+    if (code === 'file_too_large') return '文件超过 25 MB 限制';
+    if (code === 'timeout' || /timeout|timed out/.test(message)) return '网络超时';
+    if (code === 'backend_unreachable' || stage === 'network') return '后端不可达';
+    if (status === 401 || status === 403 || /jwt|token|unauthori[sz]ed|forbidden|登录/.test(message)) return '登录已过期';
+    if (stage === 'storage') return '图片上传失败';
+    if (stage === 'record') return '图片已上传，但记录保存失败';
+    return '上传失败';
+  }
+
+  function uploadBatchText(processed, total, success, failed, prefix){
+    return (prefix ? prefix + '，' : '') + '已处理 ' + processed + ' / ' + total + '，成功 ' + success + '，失败 ' + failed;
+  }
+
+  function uploadBatchPercent(processed, total){
+    return total > 0 ? Math.round((processed / total) * 100) : 100;
+  }
+
+  function updateUploadBatchProgress(processed, total, success, failed, prefix){
+    var pct = uploadBatchPercent(processed, total);
+    setProgress(uploadBatchText(processed, total, success, failed, prefix), pct);
+  }
+
   function safeFileName(file, fallbackExt){
     var name = String(file && file.name || 'media');
     var extMatch = name.match(/\.[a-z0-9]{1,8}$/i);
@@ -68,11 +103,27 @@
     }
   }
 
-  function closeSheet(){
+  function focusUploadButton(){
+    var trigger = byId('photoUploadBtn');
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  function closeSheet(options){
+    options = options || {};
     var sheet = byId('pwUploadSheet');
     if (!sheet) return;
+    if (state.uploading && !options.force) return;
     sheet.classList.remove('active');
     sheet.setAttribute('aria-hidden', 'true');
+    if (options.restoreFocus !== false) focusUploadButton();
+  }
+
+  function setUploadResult(message, isError){
+    var result = byId('pwUploadResult');
+    if (!result) return;
+    result.textContent = message || '';
+    result.hidden = !message;
+    result.classList.toggle('is-error', !!isError);
   }
 
   function openSheet(files){
@@ -106,6 +157,9 @@
     if (count) count.textContent = files.length + ' 张照片';
     sheet.classList.add('active');
     sheet.setAttribute('aria-hidden', 'false');
+    setUploadResult('');
+    var firstControl = byId('pwUploadReselectBtn') || byId('pwStartUploadBtn') || byId('pwUploadSheetClose');
+    if (firstControl && typeof firstControl.focus === 'function') firstControl.focus();
   }
 
   function setProgress(text, pct){
@@ -153,18 +207,26 @@
   }
 
   async function uploadOnePhotoWallFile(file, index, total){
-    var user = getCurrentUser();
-    if (!isPhotoWallImage(file)) throw new Error('请选择图片');
+    if (!isPhotoWallImage(file)) throw createPhotoUploadError('unsupported_type');
+    if (!Number.isFinite(Number(file.size)) || Number(file.size) > MAX_PHOTO_UPLOAD_BYTES) {
+      throw createPhotoUploadError('file_too_large');
+    }
     var path = 'photos/' + safeFileName(file, inferExt(file));
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
-    setProgress('正在上传 ' + (index + 1) + ' / ' + total);
-    var upload = await window.sb.storage.from('uploads').upload(path, file, {
-      contentType: type,
-      cacheControl: '31536000',
-      upsert: false
-    });
+    var upload;
+    try {
+      upload = await window.sb.storage.from('uploads').upload(path, file, {
+        contentType: type,
+        cacheControl: '31536000',
+        upsert: false
+      });
+    } catch (storageError) {
+      storageError.photoUploadStage = 'storage';
+      throw storageError;
+    }
     if (upload.error) {
       console.error('[photo-upload] Storage upload error', upload.error);
+      upload.error.photoUploadStage = 'storage';
       throw upload.error;
     }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
@@ -182,46 +244,57 @@
       ? await window.getUserAuthHeaders()
       : { 'Content-Type': 'application/json' };
     if (!headers) headers = { 'Content-Type': 'application/json' };
-    var createRes = await fetch(apiUrl('/api/photo/create'), {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({
-        media_url: publicUrl,
-        content: content,
-        actor_key: actorKey
-      })
-    });
+    var createRes;
+    try {
+      createRes = await fetch(apiUrl('/api/photo/create'), {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          media_url: publicUrl,
+          content: content,
+          actor_key: actorKey
+        })
+      });
+    } catch (fetchError) {
+      fetchError.photoUploadCode = /timeout|timed out/i.test(String(fetchError && fetchError.message || '')) ? 'timeout' : 'backend_unreachable';
+      fetchError.photoUploadStage = 'network';
+      throw fetchError;
+    }
     if (!createRes.ok) {
       try {
         await window.sb.storage.from('uploads').remove([path]);
       } catch (_) {}
       var errBody = {};
       try { errBody = await createRes.json(); } catch (_) {}
-      throw new Error(errBody.error || '创建照片记录失败');
+      var recordError = new Error(errBody.error || '创建照片记录失败');
+      recordError.status = createRes.status;
+      recordError.photoUploadStage = 'record';
+      throw recordError;
     }
     var createData = await createRes.json();
     return createData.data;
   }
 
   async function uploadPhotoWallFiles(){
-    if (state.uploading) return;
+    if (state.uploading) { toast('正在上传，请等待'); return; }
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
     if (!window.sb) { toast('Supabase 未加载，请刷新页面'); return; }
     if (!state.photoFiles.length) { toast('请选择照片'); return; }
     state.uploading = true;
-    closeSheet();
+    closeSheet({ force: true, restoreFocus: false });
+    var processed = 0;
     var ok = 0;
     var fail = 0;
-    var firstError = '';
+    var failures = [];
+    var total = state.photoFiles.length;
     try {
-      for (var i = 0; i < state.photoFiles.length; i++) {
+      updateUploadBatchProgress(processed, total, ok, fail, '正在准备上传');
+      for (var i = 0; i < total; i++) {
         try {
-          var pct = state.photoFiles.length > 1 ? Math.round((i / state.photoFiles.length) * 100) : 0;
-          setProgress('正在上传 ' + (i + 1) + ' / ' + state.photoFiles.length, pct);
-          var row = await uploadOnePhotoWallFile(state.photoFiles[i], i, state.photoFiles.length);
+          updateUploadBatchProgress(processed, total, ok, fail, '正在处理第 ' + (i + 1) + ' 张');
+          var row = await uploadOnePhotoWallFile(state.photoFiles[i], i, total);
           ok += 1;
-          setProgress('已上传 ' + ok + ' / ' + state.photoFiles.length, Math.round((ok / state.photoFiles.length) * 100));
           if (row && typeof window.normalizePhotoWallRow === 'function') {
             var item = window.normalizePhotoWallRow(row);
             if (item && item.imageUrl) {
@@ -233,15 +306,28 @@
         } catch (err) {
           console.error('[photo-upload] failed', err);
           fail += 1;
-          if (!firstError) firstError = err && err.message ? err.message : '上传失败';
+          failures.push({
+            name: String(state.photoFiles[i] && state.photoFiles[i].name || '图片').slice(0, 80),
+            reason: photoUploadFailureReason(err, err && err.photoUploadStage)
+          });
         }
+        processed += 1;
+        updateUploadBatchProgress(processed, total, ok, fail, processed === total ? '处理完成' : '正在处理');
       }
       if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
       if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
-      if (ok) toast('已上传 ' + ok + ' 张照片' + (fail ? '，失败 ' + fail + ' 张' : ''));
-      else toast(firstError || '上传失败');
+      var summary = '已处理 ' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+      if (failures.length) {
+        var details = failures.slice(0, 3).map(function(item){ return item.name + '（' + item.reason + '）'; }).join('；');
+        if (failures.length > 3) details += '；另有 ' + (failures.length - 3) + ' 张失败';
+        setUploadResult(summary + '。' + details, fail > 0);
+      } else {
+        setUploadResult(summary, false);
+      }
+      toast(summary);
+      await new Promise(function(resolve){ setTimeout(resolve, 180); });
     } finally {
       setProgress('');
       state.uploading = false;
@@ -277,6 +363,17 @@
         if (event.target === sheet) closeSheet();
       });
     }
+    if (!document.__xtjPhotoUploadEscapeBound) {
+      document.__xtjPhotoUploadEscapeBound = true;
+      document.addEventListener('keydown', function(event){
+        if (event.key !== 'Escape' || state.uploading) return;
+        var activeSheet = byId('pwUploadSheet');
+        if (activeSheet && activeSheet.classList.contains('active')) {
+          event.preventDefault();
+          closeSheet();
+        }
+      });
+    }
     if (reselectBtn && !reselectBtn.__xtjUploadBound) {
       reselectBtn.__xtjUploadBound = true;
       reselectBtn.addEventListener('click', function(){
@@ -293,6 +390,7 @@
   }
 
   function triggerPhotoUpload(){
+    if (state.uploading) { toast('正在上传，请等待'); return; }
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
     attachPhotoUploadUi();
@@ -371,6 +469,7 @@
   window.handlePhotoUpload = handlePhotoSelection;
   window.triggerPhotoWallUpload = uploadPhotoWallFiles;
   window.resetPostPreview = resetPostPreview;
+  window.setPhotoUploadResult = setUploadResult;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
