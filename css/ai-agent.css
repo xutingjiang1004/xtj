@@ -540,6 +540,10 @@
     max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 220ms ease,
     transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: auto;
+}
+
+.ai-thinking.ai-motion-window {
   will-change: max-height, opacity, transform;
 }
 
@@ -1728,7 +1732,6 @@
   overflow-x: hidden;
   padding: 16px;
   contain: layout style;
-  will-change: scroll-position;
   -webkit-overflow-scrolling: touch;
 }
 .dt-messages::-webkit-scrollbar { width: 5px; }
@@ -3601,6 +3604,10 @@
 
 .perf-lite #panelDeepThink .ai-research-card .ai-research-orbit,
 .perf-lite #panelDeepThink .ai-research-card .ai-research-particles {
+  display: none !important;
+}
+
+.ai-research-card.ai-research-static .ai-research-particles {
   display: none !important;
 }
 
