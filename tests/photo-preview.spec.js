@@ -5,37 +5,39 @@ const path = require('node:path');
 const script = fs.readFileSync(path.join(__dirname, '..', 'js', 'photo-wall', 'preview.js'), 'utf8');
 const okPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
 
+const installListenerMonitor = () => {
+  if (window.__listenerStats && window.__listenerStats.installed) return;
+  const targets = new Map();
+  const stats = { active: 0, max: 0, adds: 0, removes: 0, installed: true };
+  const add = EventTarget.prototype.addEventListener;
+  const remove = EventTarget.prototype.removeEventListener;
+  const trackable = (target, type) => target && target.id === 'photoPreviewImage' && (type === 'load' || type === 'error');
+  const listenersFor = (target, type) => {
+    let types = targets.get(target); if (!types) { types = new Map(); targets.set(target, types); }
+    let listeners = types.get(type); if (!listeners) { listeners = new Set(); types.set(type, listeners); }
+    return listeners;
+  };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (trackable(this, type)) { const listeners = listenersFor(this, type); if (!listeners.has(listener)) { listeners.add(listener); stats.active += 1; stats.adds += 1; stats.max = Math.max(stats.max, stats.active); } }
+    return add.call(this, type, listener, options);
+  };
+  EventTarget.prototype.removeEventListener = function(type, listener, options) {
+    if (trackable(this, type)) { const types = targets.get(this); const listeners = types && types.get(type); if (listeners && listeners.delete(listener)) { stats.active -= 1; stats.removes += 1; } }
+    return remove.call(this, type, listener, options);
+  };
+  window.__listenerStats = stats;
+};
+
 async function setup(page) {
   const pageErrors = [];
   page.on('pageerror', err => pageErrors.push(err.message));
   await page.route('**/ok.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
   await page.route('**/ok2.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
   await page.route('**/bad.png**', route => route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' }));
-  await page.route('**/slow-bad.png**', async route => {
-    await new Promise(resolve => setTimeout(resolve, 120));
-    await route.fulfill({ status: 404, contentType: 'text/plain', body: 'slow nope' });
-  });
+  await page.route('**/slow-bad.png**', async route => { await new Promise(resolve => setTimeout(resolve, 120)); await route.fulfill({ status: 404, contentType: 'text/plain', body: 'slow nope' }); });
+  await page.addInitScript(installListenerMonitor);
   await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
-  await page.addInitScript(() => {
-    window.__listenerStats = { active: 0, max: 0, adds: 0, removes: 0 };
-    const add = EventTarget.prototype.addEventListener;
-    const remove = EventTarget.prototype.removeEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error')) {
-        window.__listenerStats.active += 1;
-        window.__listenerStats.adds += 1;
-        window.__listenerStats.max = Math.max(window.__listenerStats.max, window.__listenerStats.active);
-      }
-      return add.call(this, type, listener, options);
-    };
-    EventTarget.prototype.removeEventListener = function(type, listener, options) {
-      if (this && this.id === 'photoPreviewImage' && (type === 'load' || type === 'error')) {
-        window.__listenerStats.active = Math.max(0, window.__listenerStats.active - 1);
-        window.__listenerStats.removes += 1;
-      }
-      return remove.call(this, type, listener, options);
-    };
-  });
+  await page.evaluate(installListenerMonitor);
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.currentUser="tester";' + script });
   return pageErrors;
 }

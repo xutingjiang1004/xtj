@@ -493,6 +493,22 @@ test('AI and offline results have distinct persistent labels', function(){
   assert.ok(html.indexOf('id="elGenerateRetryBtn"') >= 0 && html.indexOf('id="elUseOfflineBtn"') >= 0, 'retry/offline actions missing');
 });
 
+
+test('english module loader rejects failed assets, clears its cache, and validates the opener', function(){
+  var source = read('js/core.js');
+  assert.ok(source.indexOf('XTJ_MODULE_LOAD_TIMEOUT = 15000') >= 0, '15 second timeout missing');
+  assert.ok(source.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module promise is retained');
+  assert.ok(source.indexOf('if (node.parentNode) node.remove()') >= 0, 'failed module node is retained');
+  assert.ok(source.indexOf('english_learning_open_function_missing') >= 0, 'missing English opener is not rejected');
+  assert.ok(source.indexOf('englishLearningLaunchPromise = null') >= 0, 'English launcher is not released for retry');
+});
+test('wide Dock and iPad post layout use explicit visible and single-column overrides', function(){
+  var source = read('css/ui-shell.css');
+  assert.ok(/@media \(min-width: 1024px\)[\s\S]*?transform: translate\(-50%, 0\) !important/.test(source), 'wide Dock remains hidden');
+  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1279px\)[\s\S]*?grid-template-areas: "stats" "publish" "filter" "feed"/.test(source), 'iPad post layout is not single-column');
+  assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
