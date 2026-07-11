@@ -20,6 +20,10 @@
     return base + path;
   }
 
+  function buildPhotoCreateHeaders(authHeaders) {
+    return Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {});
+  }
+
   function toast(message){
     if (typeof window.showToast === 'function') window.showToast(message);
     else console.log('[XTJ]', message);
@@ -376,20 +380,10 @@
       throw storageError;
     }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
-    var content = JSON.stringify({
-      type: 'photo_wall',
-      mediaKind: 'image',
-      thumb: '',
-      fileSize: file.size || null,
-      originalSize: file.size || null,
-      mimeType: type,
-      duration: null
-    });
-    var actorKey = window.deviceId || ('photo_' + Date.now());
-    var headers = (typeof window.getUserAuthHeaders === 'function')
+    var authHeaders = (typeof window.getUserAuthHeaders === 'function')
       ? await window.getUserAuthHeaders()
-      : { 'Content-Type': 'application/json' };
-    if (!headers) headers = { 'Content-Type': 'application/json' };
+      : null;
+    var headers = buildPhotoCreateHeaders(authHeaders);
     var controller = new AbortController();
     var timeoutTimer = setTimeout(function() { controller.abort(); }, PHOTO_UPLOAD_TIMEOUT_MS);
     var timedOut = false;
@@ -400,8 +394,9 @@
         headers: headers,
         body: JSON.stringify({
           media_url: publicUrl,
-          content: content,
-          actor_key: actorKey
+          file_size: file.size || 0,
+          original_size: file.size || 0,
+          mime_type: type
         }),
         signal: controller.signal
       });
@@ -419,7 +414,6 @@
       clearTimeout(timeoutTimer);
     }
     if (!createRes.ok) {
-      await cleanupStorage(path);
       var errBody = {};
       try { errBody = await createRes.json(); } catch (_) {}
       var recordError = new Error(errBody.error || '创建照片记录失败');
@@ -431,12 +425,10 @@
     try {
       createData = await createRes.json();
     } catch (parseError) {
-      await cleanupStorage(path);
       parseError.photoUploadStage = 'record';
       throw parseError;
     }
     if (!createData || !createData.data) {
-      await cleanupStorage(path);
       throw createPhotoUploadError('record');
     }
     return createData.data;
