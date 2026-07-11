@@ -48,6 +48,15 @@ test('build CSS list includes ui-shell and photo-preview', function(){
   assert.ok(s.indexOf("'css/ui-shell.css'") >= 0, 'ui-shell.css missing from CSS_FILES');
   assert.ok(s.indexOf("'css/photo-preview.css'") >= 0, 'photo-preview.css missing from CSS_FILES');
 });
+test('photo upload sheet keeps keyboard focus and announces persistent results', function(){
+  var html = read('index.html');
+  var upload = read('js/photo-wall/upload-ui.js');
+  assert.ok(/id="pwUploadResult"[^>]*role="alert"/.test(html), 'upload result alert missing');
+  assert.ok(upload.indexOf('function focusUploadButton()') >= 0, 'upload button focus restore missing');
+  assert.ok(upload.indexOf("byId('pwUploadReselectBtn') || byId('pwStartUploadBtn')") >= 0, 'sheet initial focus missing');
+  assert.ok(upload.indexOf("event.key !== 'Escape' || state.uploading") >= 0, 'Escape upload guard missing');
+  assert.ok(upload.indexOf('window.setPhotoUploadResult = setUploadResult') >= 0, 'upload result API missing');
+});
 
 console.log('\n=== English Sync / Pro RPC Static Checks ===');
 test('english conflict response uses RPC server_content and fallback row', function(){
@@ -253,6 +262,19 @@ test('login-device executes only from its single static entry', function(){
   var core = read('js/core.js');
   assert.strictEqual((html.match(/<script[^>]+src="js\/login-device\.min\.js\?v=/g) || []).length, 1, 'login-device static script count');
   assert.ok(!/xtjLoadScript(?:Once|Sequence)[\s\S]{0,260}login-device/.test(core), 'core can load login-device twice');
+});
+test('photo upload progress is processed-based and reports safe batch outcomes', function(){
+  var source = read('js/photo-wall/upload-ui.js');
+  assert.ok(source.indexOf('var processed = 0;') >= 0, 'processed counter missing');
+  assert.ok(source.indexOf('processed += 1;') >= 0, 'every settled item must advance progress');
+  assert.ok(source.indexOf('updateUploadBatchProgress(processed, total, ok, fail') >= 0, 'batch progress helper unused');
+  assert.ok(source.indexOf('uploadBatchPercent(processed, total)') >= 0, 'progress must not be success-based');
+  assert.ok(source.indexOf("if (state.uploading) { toast('正在上传，请等待'); return; }") >= 0, 'duplicate start feedback missing');
+  assert.ok(source.indexOf("setUploadResult(summary") >= 0, 'persistent batch result missing');
+  assert.ok(source.indexOf("'文件类型不支持'") >= 0, 'safe type failure reason missing');
+  assert.ok(source.indexOf("'图片已上传，但记录保存失败'") >= 0, 'safe record failure reason missing');
+  assert.ok(source.indexOf("'后端不可达'") >= 0, 'safe network failure reason missing');
+  assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
 test('dock tab and indicator selectors were not edited by this optimization', function(){
   var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css"', {encoding:'utf8'});
