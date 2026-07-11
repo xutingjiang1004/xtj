@@ -203,7 +203,7 @@
     });
 
     var card = overlay.querySelector('.pro-celebration-card');
-    if (typeof gsap !== 'undefined') {
+    function runGsapCelebration() {
       var tl = gsap.timeline({ defaults: { ease: 'power4.out' } });
       tl.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.35 }, 0);
       tl.fromTo(card, { y: 80, opacity: 0, scale: 0.85 }, { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: 'back.out(1.5)' }, 0.15);
@@ -213,9 +213,20 @@
       tl.fromTo('.pro-celebration-info', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.5);
       tl.fromTo('.pro-celebration-feature', { y: 10, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.3, stagger: 0.04 }, 0.52);
       tl.fromTo('.pro-celebration-btn', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.6);
-    } else {
+    }
+    function useCssCelebrationFallback() {
       overlay.classList.add('is-ready');
       card.classList.add('is-ready');
+    }
+    if (typeof gsap !== 'undefined') {
+      runGsapCelebration();
+    } else if (typeof window.ensureGsap === 'function') {
+      window.ensureGsap().then(function(loadedGsap) {
+        if (loadedGsap && typeof gsap !== 'undefined' && document.body.contains(overlay)) runGsapCelebration();
+        else useCssCelebrationFallback();
+      });
+    } else {
+      useCssCelebrationFallback();
     }
 
     particleStop = window.__xtjStartProParticles('proCelebrationCanvas', 5000);
