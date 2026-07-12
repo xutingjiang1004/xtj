@@ -40,8 +40,6 @@
     var text = String(value == null ? '' : value);
     return text.replace(repairPattern, function (match) { return replacements[match] || match; });
   }
-  window.xtjFixText = fixText;
-
   function repairMarkedNode(node) {
     if (!node || node.nodeType !== 1 || !node.hasAttribute(LEGACY_MARKER)) return;
     Array.prototype.forEach.call(node.childNodes, function (child) {
