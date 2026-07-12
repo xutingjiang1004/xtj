@@ -1,4 +1,4 @@
-﻿const { test, expect } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 
 async function mainState(page) {
   return page.evaluate(() => {
@@ -9,7 +9,8 @@ async function mainState(page) {
       htmlOverflow: document.documentElement.style.overflow,
       bodyOverflow: document.body.style.overflow,
       touchAction: document.body.style.touchAction,
-      secondaryClass: document.body.classList.contains('secondary-page-open'),    };
+      secondaryClass: document.body.classList.contains('secondary-page-open')
+    };
   });
 }
 
@@ -44,7 +45,7 @@ test('legacy hidden dock and locked touch state are repaired on restore', async 
   expect(state.touchAction).toBe('');
 });
 
-test('multiple secondary pages do not unlock until all visible panels close', async ({ page }) => {
+test('deep think page locks navigation until it closes', async ({ page }) => {
   await page.evaluate(async () => {
     const deep = document.getElementById('panelDeepThink');
     deep.classList.remove('hidden');
