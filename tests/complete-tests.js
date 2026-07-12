@@ -285,7 +285,10 @@ test('legacy feature loaders and broad text scans are removed', function(){
 test('photo preview has maintainable source and no global error suppression', function(){
   var source = read('js/photo-wall/preview.js');
   var html = read('index.html');
-  assert.ok(source.indexOf('function onLoad()') >= 0 && source.indexOf('function onErr()') >= 0, 'named preview handlers missing');
+  assert.ok(source.indexOf('function handleLoad()') >= 0 && source.indexOf('function handleError()') >= 0, 'slide preview handlers missing');
+  assert.ok(source.indexOf('function handleOpenLoad()') >= 0 && source.indexOf('function handleOpenError()') >= 0 && source.indexOf('function cleanupOpenListeners()') >= 0, 'open preview handlers missing');
+  assert.strictEqual(source.indexOf('function onLoad()'), -1, 'legacy onLoad handler remains');
+  assert.strictEqual(source.indexOf('function onErr()'), -1, 'legacy onErr handler remains');
   assert.ok(source.indexOf('onErr is not defined') < 0 && source.indexOf('onLoad is not defined') < 0, 'preview source contains known error');
   assert.ok(html.indexOf('Suppressed preview.min.js known bug') < 0, 'preview error suppression remains');
   assert.ok(read('scripts/build.js').indexOf("'js/photo-wall/preview.js'") >= 0, 'preview source is not built');
@@ -446,6 +449,20 @@ test('english-learning.css el-page keeps proper scroll properties', function(){
   assert.ok(pageRule.indexOf('-webkit-overflow-scrolling: touch') >= 0, 'scroll touch missing');
 });
 
+
+test('showToast wrapper forwards all arguments after text repair', function(){
+  var source = read('js/features.js');
+  assert.ok(source.indexOf('original.apply(this, args)') >= 0, 'showToast wrapper does not forward all arguments');
+  assert.ok(source.indexOf('args[0] = fixText') >= 0, 'showToast text repair missing');
+});
+
+test('selected focus with zero checked words does not fall back to all words', function(){
+  var source = read('js/english-learning.js');
+  assert.ok(source.indexOf("if (mode === 'selected')") >= 0, 'selected mode branch missing');
+  assert.ok(source.indexOf("words = selectedIds.length ? words.filter") >= 0, 'selected mode still falls back to all words');
+  assert.ok(source.indexOf('请先勾选需要生成练习的单词') >= 0, 'selected empty prompt missing');
+});
+
 console.log('\n=== English AI Generation Boundary ===');
 test('English generation failures never auto-create local practice', function(){
   var source = read('js/english-learning.js');
@@ -474,6 +491,22 @@ test('AI and offline results have distinct persistent labels', function(){
   assert.ok(source.indexOf("sourceBadge.textContent = '离线模板，非 AI 生成'") >= 0, 'offline label missing');
   assert.ok(/id="elGenerateError"[^>]*role="alert"/.test(html), 'persistent generation alert missing');
   assert.ok(html.indexOf('id="elGenerateRetryBtn"') >= 0 && html.indexOf('id="elUseOfflineBtn"') >= 0, 'retry/offline actions missing');
+});
+
+
+test('english module loader rejects failed assets, clears its cache, and validates the opener', function(){
+  var source = read('js/core.js');
+  assert.ok(source.indexOf('XTJ_MODULE_LOAD_TIMEOUT = 15000') >= 0, '15 second timeout missing');
+  assert.ok(source.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module promise is retained');
+  assert.ok(source.indexOf('if (node.parentNode) node.remove()') >= 0, 'failed module node is retained');
+  assert.ok(source.indexOf('english_learning_open_function_missing') >= 0, 'missing English opener is not rejected');
+  assert.ok(source.indexOf('englishLearningLaunchPromise = null') >= 0, 'English launcher is not released for retry');
+});
+test('wide Dock and iPad post layout use explicit visible and single-column overrides', function(){
+  var source = read('css/ui-shell.css');
+  assert.ok(/@media \(min-width: 1024px\)[\s\S]*?transform: translate\(-50%, 0\) !important/.test(source), 'wide Dock remains hidden');
+  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1279px\)[\s\S]*?grid-template-areas: "stats" "publish" "filter" "feed"/.test(source), 'iPad post layout is not single-column');
+  assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
 });
 
 console.log('\n=== Results ===');

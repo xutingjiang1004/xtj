@@ -37,6 +37,7 @@
     isGenerating: false,
     isCancelled: false,
     currentController: null,
+    currentRequestId: 0,
     initialized: false,
     syncStatus: 'local',
     syncTimer: null,
@@ -49,7 +50,8 @@
     batchMutating: false,
     batchDirty: false,
     batchFeedback: null,
-    syncVisualTimer: null
+    syncVisualTimer: null,
+    selectedWordIds: Object.create(null)
   };
 
   var SYNC_STATUS_META = {
@@ -576,6 +578,7 @@
     if (word) {
       if (!S.tombstones) S.tombstones = [];
       S.tombstones.push({ en: word.en, id: word.id, deletedAt: Date.now(), updatedAt: Date.now() });
+      setWordSelected(id, false);
     }
     scheduleSave();
   }
@@ -742,9 +745,11 @@
     var selectAllNode = $('elSelectAllCb');
     if (!selectAllNode) return;
     var boxes = Array.prototype.slice.call(document.querySelectorAll('.el-word-cb'));
-    var checkedCount = boxes.filter(function(cb) { return !!cb.checked; }).length;
-    selectAllNode.checked = !!boxes.length && checkedCount === boxes.length;
-    selectAllNode.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
+    var totalSelected = getSelectedWordIds().length;
+    var visibleCheckedCount = boxes.filter(function(cb) { return !!cb.checked; }).length;
+    selectAllNode.checked = !!boxes.length && visibleCheckedCount === boxes.length && boxes.length > 0;
+    selectAllNode.indeterminate = visibleCheckedCount > 0 && visibleCheckedCount < boxes.length;
+    selectAllNode.dataset.totalSelected = String(totalSelected);
   }
 
   function resetWordListInteractiveNodes(list) {
@@ -769,6 +774,13 @@
     words.forEach(function(w, index) {
       var item = el('article', { class: 'el-word-item', 'data-id': w.id, style: '--el-i:' + Math.min(index, 16) });
       var cb = el('input', { type: 'checkbox', class: 'el-word-cb', 'data-id': w.id, 'aria-label': '选择 ' + w.en });
+      cb.checked = isWordSelected(w.id);
+      cb.addEventListener('change', function() {
+        setWordSelected(w.id, !!cb.checked);
+        syncWordItemSelection(item, cb.checked);
+        syncSelectAllWordCheckbox();
+        updateGenInfo();
+      });
       var main = el('div', { class: 'el-word-main' });
       main.appendChild(el('div', { class: 'el-word-en', text: w.en }));
       main.appendChild(el('div', { class: 'el-word-cn', text: w.cn || '暂无释义' }));
@@ -801,18 +813,37 @@
 
   function getSelectedWordIds() {
     var ids = [];
-    document.querySelectorAll('.el-word-cb:checked').forEach(function(cb) {
-      ids.push(cb.getAttribute('data-id'));
+    Object.keys(S.selectedWordIds || {}).forEach(function(id) {
+      if (S.selectedWordIds[id]) ids.push(id);
     });
     return ids;
+  }
+
+  function isWordSelected(id) {
+    return !!(S.selectedWordIds && id && S.selectedWordIds[id]);
+  }
+
+  function setWordSelected(id, selected) {
+    if (!id) return;
+    if (!S.selectedWordIds) S.selectedWordIds = Object.create(null);
+    if (selected) S.selectedWordIds[id] = true;
+    else delete S.selectedWordIds[id];
+  }
+
+  function clearSelectedWords() {
+    S.selectedWordIds = Object.create(null);
   }
 
   function getWordsForGeneration(notifyIfEmpty) {
     var mode = S.settings.focus || 'weak';
     var selectedIds = getSelectedWordIds();
     var words = S.words.slice();
-    if (mode === 'selected' && selectedIds.length) {
-      words = words.filter(function(w) { return selectedIds.indexOf(w.id) >= 0; });
+    if (mode === 'selected') {
+      words = selectedIds.length ? words.filter(function(w) { return selectedIds.indexOf(w.id) >= 0; }) : [];
+      if (!selectedIds.length) {
+        if (notifyIfEmpty) notify('请至少勾选一个单词');
+        return [];
+      }
     } else if (mode === 'weak') {
       var weak = words.filter(isWeakWord);
       var fresh = words.filter(function(w) { return (w.seen || 0) === 0; });
@@ -820,7 +851,9 @@
       words = weak.concat(fresh).concat(rest);
     }
     words = words.slice(0, MAX_WORDS);
-    if (notifyIfEmpty && !words.length) notify('请先添加单词到单词库');
+    if (notifyIfEmpty && !words.length) {
+      notify(mode === 'selected' ? '请先勾选需要生成练习的单词' : '请先添加单词到单词库');
+    }
     return words;
   }
 
@@ -1203,25 +1236,42 @@
 
   async function generateQuiz(opts) {
     opts = opts || {};
-    if (S.isGenerating) {
-      notify('正在生成中，请稍候...');
-      return;
+    // 递增 requestId: 每次请求独立, 旧请求的 catch/finally 不再污染新请求状态
+    S.currentRequestId = (S.currentRequestId || 0) + 1;
+    var requestId = S.currentRequestId;
+    // 若已有进行中的请求, 先取消旧的再开始新的
+    if (S.currentController && S.isGenerating) {
+      try { S.currentController.abort(); } catch (e) {}
     }
     syncSettingsFromInputs();
     var words = getWordsForGeneration(true);
-    if (!words.length) return;
+    if (!words.length) {
+      if (requestId === S.currentRequestId) {
+        S.isGenerating = false;
+        S.currentController = null;
+        showLoading(false);
+        updateGenInfo();
+      }
+      return;
+    }
     var types = getSelectedTypes();
     if (!types.length) {
       notify('请至少选择一种题型');
+      if (requestId === S.currentRequestId) {
+        S.isGenerating = false;
+        S.currentController = null;
+        showLoading(false);
+        updateGenInfo();
+      }
       return;
     }
     var level = getSelectedLevel();
     S.isGenerating = true;
+    S.isCancelled = false;
     clearGenerationError();
     updateGenInfo();
     showLoading(true);
     hideResult();
-    // 閲嶆柊鐢熸垚鏃跺彧闅愯棌鏃ч/鏃ф枃绔? 淇濈暀 scrollTop 浣撻獙鏇村钩婊?
     if (opts.regenArticle || opts.regenQuiz) {
       hideArticle();
       hideQuestions();
@@ -1231,15 +1281,14 @@
     }
     scheduleSave();
 
-    // AbortController: 鐢ㄦ埛鐐?鍙栨秷" 鎴?鍒囧埌鍗曡瘝搴撳悗鎯冲仠步㈢敓鎴愭椂鍙珛鍗充腑步?fetch
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     S.currentController = controller;
-    S.isCancelled = false;
 
     var headers;
     try {
       headers = await getAuthHeaders();
     } catch (e) {
+      if (requestId !== S.currentRequestId) return;
       showLoading(false);
       S.isGenerating = false;
       S.currentController = null;
@@ -1266,14 +1315,17 @@
       };
       if (controller) fetchOpts.signal = controller.signal;
       var resp = await fetch(apiBase() + '/english/generate', fetchOpts);
+      if (requestId !== S.currentRequestId) return;
       if (!resp.ok) {
         var err = '';
         try { var ej = await resp.json(); err = (ej && ej.error) || ''; } catch (e) {}
         var responseError = new Error(err || ('HTTP ' + resp.status));
         responseError.status = resp.status;
+        if (ej && ej.code) responseError.code = ej.code;
         throw responseError;
       }
       var json = await resp.json();
+      if (requestId !== S.currentRequestId) return;
       if (!json.ok || !json.data) throw new Error(json.error || '返回数据异常');
       var data = json.data;
       S.currentQuiz = {
@@ -1294,7 +1346,7 @@
       renderQuestions(S.currentQuiz);
       switchTab('practice');
     } catch (e2) {
-      // 用户主动取消: 静默关闭 loading
+      if (requestId !== S.currentRequestId) return;
       if (S.isCancelled || (e2 && e2.name === 'AbortError')) {
         S.isCancelled = false;
         return;
@@ -1304,6 +1356,7 @@
       showGenerationError(hint);
       notify(hint, 'error');
     } finally {
+      if (requestId !== S.currentRequestId) return;
       showLoading(false);
       S.isGenerating = false;
       S.currentController = null;
@@ -1313,13 +1366,22 @@
 
   function englishGenerateFailureMessage(error) {
     var status = Number(error && error.status) || 0;
+    var code = String((error && error.code) || '').toUpperCase();
     var message = String((error && error.message) || '');
-    if (status === 401 || status === 403) return '登录状态已失效，请重新登录后再生成。';
+    if (code === 'INVALID_INPUT') return '请求参数无效，请检查设置后重试。';
+    if (code === 'AUTH_REQUIRED' || status === 401 || status === 403) return '登录状态已失效，请重新登录后再生成。';
+    if (code === 'RATE_LIMITED' || status === 429) return '请求过于频繁，请稍候再试。';
+    if (code === 'PAYLOAD_TOO_LARGE') return '单词数量过多，请减少单词后重试。';
+    if (code === 'AI_NOT_CONFIGURED') return 'AI 服务尚未配置，请联系管理员。';
+    if (code === 'AI_TIMEOUT') return 'AI 生成超时，请重新生成。';
+    if (code === 'UPSTREAM_ERROR') return 'AI 上游服务出错，请稍后重试。';
+    if (code === 'INVALID_OUTPUT' || code === 'INVALID_CLOZE_STRUCTURE') return 'AI 输出格式异常，已自动丢弃，请重试。';
+    if (code === 'QUESTION_COUNT_MISMATCH') return 'AI 生成的题量不匹配，已自动重试；若持续出现请换个主题。';
     if (status === 404) return '英语 AI 生成服务尚未部署，请稍后重试。';
-    if (status === 502) return 'AI 服务暂时无响应，请稍后重新生成。';
-    if (status === 503) return 'AI 服务尚未配置或暂不可用。';
-    if (status === 504 || /timeout|超时/i.test(message)) return 'AI 生成超时，请重新生成。';
-    if (/Failed to fetch|NetworkError|network request failed/i.test(message)) return '网络连接失败，请检查网络后重新生成。';
+    if (status === 504 || /timeout|超时/i.test(message) || code === 'AI_TIMEOUT') return 'AI 生成超时，请重新生成。';
+    if (code === 'NETWORK_ERROR' || /Failed to fetch|NetworkError|network request failed/i.test(message)) return '网络连接失败，请检查网络后重新生成。';
+    if (status === 502) return 'AI 上游暂时不可用，请稍后重新生成。';
+    if (status === 503) return 'AI 服务暂不可用，请稍后重试。';
     return '生成失败，请稍后重新生成。';
   }
 
@@ -2370,24 +2432,27 @@
 
     var selectAllNode = $('elSelectAllCb');
     safeBind('elSelectAllCb', 'change', function() {
+      var want = !!(selectAllNode && selectAllNode.checked);
       safeForEach('.el-word-cb', function(cb) {
-        cb.checked = !!(selectAllNode && selectAllNode.checked);
+        cb.checked = want;
+        var id = cb.getAttribute('data-id');
+        if (id) setWordSelected(id, want);
         syncWordItemSelection(cb.closest('.el-word-item'), cb.checked);
       });
+      // 全选时也把当前筛选出的其他未显示词排除/包含? 不做: 只对可见词勾选, 符合预期
       syncSelectAllWordCheckbox();
       updateGenInfo();
     });
 
     safeBind('elDeleteSelBtn', 'click', function() {
-      var ids = Array.from(document.querySelectorAll('.el-word-cb:checked')).map(function(cb) {
-        return cb.getAttribute('data-id');
-      });
+      var ids = getSelectedWordIds();
       if (!ids.length) {
         notify('请先选择要删除的单词');
         return;
       }
       if (!confirm('确定删除选中的 ' + ids.length + ' 个单词吗？')) return;
       deleteSelected(ids);
+      clearSelectedWords();
       if (selectAllNode) selectAllNode.checked = false;
       renderAll();
     });
