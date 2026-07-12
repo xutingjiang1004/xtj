@@ -39,7 +39,7 @@
     }
 
     function hasVisibleSecondaryPage() {
-        return isVisiblePanel('panelEnglishLearning', 'el-show') || isVisiblePanel('panelDeepThink', 'active');
+        return isVisiblePanel('panelDeepThink', 'active');
     }
 
     function clearStaleDockDisplay() {
@@ -52,7 +52,6 @@
     function applySecondaryPageState(locked) {
         try {
             document.body.classList.toggle('secondary-page-open', !!locked);
-            document.body.classList.toggle('english-learning-open', isVisiblePanel('panelEnglishLearning', 'el-show'));
             if (locked) {
                 document.documentElement.style.overflow = 'hidden';
                 document.body.style.overflow = 'hidden';
@@ -62,7 +61,6 @@
                 document.body.style.overflow = '';
                 document.body.style.touchAction = '';
                 document.body.classList.remove('secondary-page-open');
-                document.body.classList.remove('english-learning-open');
                 clearStaleDockDisplay();
             }
         } catch (e) {}
@@ -72,8 +70,6 @@
 
     function reconcile() {
         if (hasVisibleSecondaryPage()) {
-            if (isVisiblePanel('panelEnglishLearning', 'el-show')) openPanels.add('english-learning');
-            else openPanels.delete('english-learning');
             if (isVisiblePanel('panelDeepThink', 'active')) openPanels.add('deep-think');
             else openPanels.delete('deep-think');
             applySecondaryPageState(true);
@@ -1826,7 +1822,6 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
-            english: { styles: ['xtj-module-english-style'], scripts: ['xtj-module-english-script'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
             pro: { styles: ['xtj-module-pro-style'], scripts: ['xtj-module-pro-upgrade', 'xtj-module-pro-script'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
@@ -1972,11 +1967,6 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         }
         window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
 
-        function ensureEnglishLearningLoaded() {
-            return loadXtjModule('english');
-        }
-        window.__xtjEnsureEnglishLearningLoaded = ensureEnglishLearningLoaded;
-
         function ensureCoreAnimationsLoaded() {
             return loadXtjModule('enhancements');
         }
@@ -2017,24 +2007,6 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
             });
         }
         window.__xtjOpenAiChat = lazyAiChatLauncher;
-
-        var englishLearningLaunchPromise = null;
-        function lazyEnglishLearningLauncher() {
-            if (englishLearningLaunchPromise) return englishLearningLaunchPromise;
-            englishLearningLaunchPromise = ensureEnglishLearningLoaded().then(function() {
-                if (!window.EnglishLearning || typeof window.EnglishLearning.open !== 'function') throw new Error('english_learning_open_function_missing');
-                window.EnglishLearning.open();
-                if (window.XTJPerf) window.XTJPerf.mark('english-first-open');
-            }).catch(function(err) {
-                if (typeof window.showToast === 'function') window.showToast('英语学习模块加载失败，请稍后重试');
-                console.error('[XTJ] english-learning lazy load failed:', err);
-                return null;
-            }).finally(function() {
-                englishLearningLaunchPromise = null;
-            });
-            return englishLearningLaunchPromise;
-        }
-        window.__xtjOpenEnglishLearning = lazyEnglishLearningLauncher;
 
         function lazyPhotoUploadLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {
@@ -5387,7 +5359,7 @@ function renderProfileActivityList(kind) {
                 if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").neq("media_type", "__user_style__").neq("media_type", "__revoked_token__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").neq("media_type", "__user_style__").neq("media_type", "__revoked_token__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -5402,7 +5374,7 @@ function renderProfileActivityList(kind) {
                     feedAllComments = data.comments;
                     feedAllLikes = data.likes;
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺冭埖甯撻梽銈呫仈閸嶅繐鎷伴敓鐭紮鎷锋穱鈩冧紖閿熸枻鎷峰綍閿涘矂妲诲顣坅se64婢堆冩禈閹炬垹鍨巐ocalStorage
-                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__user_style__' && p.media_type !== '__revoked_token__');
+                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__user_style__' && p.media_type !== '__revoked_token__');
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
                     // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
@@ -5444,7 +5416,7 @@ function renderProfileActivityList(kind) {
                 
                 const feed = document.getElementById('feed');
                 if (!feedVisiblePostsCache) {
-                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.user_name);
+                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.user_name);
                 }
                 const visiblePosts = feedVisiblePostsCache;
                 
@@ -5547,7 +5519,7 @@ function renderProfileActivityList(kind) {
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.user_name);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.user_name);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
 
@@ -6605,7 +6577,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__ai_agent_profile__")
                     .neq("media_type", "__ai_agent_msg__")
                     .neq("media_type", "__ai_agent_memory__")
-                    .neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__")
+                    .neq("media_type", "__ai_agent_config__")
                     .neq("media_type", "**ai_agent_memory_box**")
                     .neq("media_type", "**ai_agent_conv_summary**")
                     .neq("media_type", "**ai_agent_memory_log**");
@@ -7239,12 +7211,12 @@ function renderProfileActivityList(kind) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
-                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== ADMIN_META_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && post.media_type !== "__login_event__" && post.media_type !== "__security_alert__" && post.media_type !== "__admin_audit__" && post.media_type !== "__client_error__" && post.media_type !== "__email_sent__" && post.media_type !== "__vip__" && post.media_type !== "__vip_order__" && post.media_type !== "__user_style__" && post.media_type !== "__ai_agent_profile__" && post.media_type !== "__ai_agent_msg__" && post.media_type !== "__ai_agent_memory__" && post.media_type !== "__ai_agent_config__" && post.media_type !== "__ai_english_learning__" && post.media_type !== "**ai_agent_memory_box**" && post.media_type !== "**ai_agent_conv_summary**" && post.media_type !== "**ai_agent_memory_log**" && canViewPost(post);
+                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== ADMIN_META_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && post.media_type !== "__login_event__" && post.media_type !== "__security_alert__" && post.media_type !== "__admin_audit__" && post.media_type !== "__client_error__" && post.media_type !== "__email_sent__" && post.media_type !== "__vip__" && post.media_type !== "__vip_order__" && post.media_type !== "__user_style__" && post.media_type !== "__ai_agent_profile__" && post.media_type !== "__ai_agent_msg__" && post.media_type !== "__ai_agent_memory__" && post.media_type !== "__ai_agent_config__" && post.media_type !== "**ai_agent_memory_box**" && post.media_type !== "**ai_agent_conv_summary**" && post.media_type !== "**ai_agent_memory_log**" && canViewPost(post);
                     });
                     statAllComments = results[1].data || [];
                     statAllLikes = results[2].data || [];
@@ -7267,11 +7239,11 @@ function renderProfileActivityList(kind) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== '__user_style__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== '__user_style__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p); });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -7683,12 +7655,12 @@ function renderProfileActivityList(kind) {
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "__ai_english_learning__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p); });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -10948,7 +10920,7 @@ function renderProfileActivityList(kind) {
                         <h4>雅思词汇重构与代码清理</h4>
                         <ul>
                             <li>布局重构为简洁单词卡片样式</li>
-                            <li>TTS 语音优化，自动选择最自然英语发音</li>
+                            <li>TTS 语音优化，自动选择最自然发音</li>
                             <li>新增错误计数追踪和准确率进度条</li>
                             <li>新增重新学习/查看答案切换功能</li>
                             <li>移除 toggleAIChat 函数和 AI 欢迎消息</li>
@@ -12614,7 +12586,7 @@ function renderProfileActivityList(kind) {
                 var comments = Array.isArray(snapshot.comments) ? snapshot.comments : [];
                 var likes = Array.isArray(snapshot.likes) ? snapshot.likes : [];
                 var visiblePosts = normalizePosts(posts).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p);
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p);
                 });
                 var visiblePostIds = new Set(visiblePosts.map(function(post) { return String(post.id); }));
                 statAllPosts = visiblePosts;
@@ -12848,7 +12820,7 @@ function renderProfileActivityList(kind) {
 
             function applyStatSnapshot(posts, comments, likes) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== USER_STYLE_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '__ai_english_learning__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p);
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== USER_STYLE_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && canViewPost(p);
                 });
                 var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
                 statAllPosts = visiblePosts;

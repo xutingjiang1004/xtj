@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+﻿const { test, expect } = require('@playwright/test');
 
 async function mainState(page) {
   return page.evaluate(() => {
@@ -9,9 +9,7 @@ async function mainState(page) {
       htmlOverflow: document.documentElement.style.overflow,
       bodyOverflow: document.body.style.overflow,
       touchAction: document.body.style.touchAction,
-      secondaryClass: document.body.classList.contains('secondary-page-open'),
-      englishClass: document.body.classList.contains('english-learning-open')
-    };
+      secondaryClass: document.body.classList.contains('secondary-page-open'),    };
   });
 }
 
@@ -27,46 +25,6 @@ test('default startup restores dock and main page interaction', async ({ page })
   expect(state.touchAction).not.toBe('none');
 });
 
-test('english page locks and normal close restores navigation', async ({ page }) => {
-  await page.evaluate(async () => { await window.EnglishLearning.open(); });
-  await expect(page.locator('#panelEnglishLearning')).toHaveClass(/el-show/);
-  let state = await mainState(page);
-  expect(state.bodyOverflow).toBe('hidden');
-  expect(state.touchAction).toBe('none');
-
-  await page.evaluate(() => window.EnglishLearning.close());
-  await page.waitForTimeout(220);
-  state = await mainState(page);
-  expect(state.dockVisible).toBeTruthy();
-  expect(state.htmlOverflow).toBe('');
-  expect(state.bodyOverflow).toBe('');
-  expect(state.touchAction).toBe('');
-});
-
-test('english close restores through finally when close path throws', async ({ page }) => {
-  await page.evaluate(async () => { await window.EnglishLearning.open(); });
-  await page.evaluate(() => {
-    const panel = document.getElementById('panelEnglishLearning');
-    const original = panel.classList.remove.bind(panel.classList);
-    let thrown = false;
-    panel.classList.remove = function(token) {
-      if (!thrown && token === 'el-opening') {
-        thrown = true;
-        throw new Error('simulated close failure');
-      }
-      return original(...arguments);
-    };
-    try { window.EnglishLearning.close(); } catch (e) {}
-    panel.classList.remove = original;
-    panel.classList.remove('el-show');
-    panel.classList.add('hidden');
-    window.restoreMainNavigationState();
-  });
-  const state = await mainState(page);
-  expect(state.dockVisible).toBeTruthy();
-  expect(state.bodyOverflow).toBe('');
-  expect(state.touchAction).toBe('');
-});
 
 test('legacy hidden dock and locked touch state are repaired on restore', async ({ page }) => {
   await page.evaluate(() => {
@@ -75,8 +33,7 @@ test('legacy hidden dock and locked touch state are repaired on restore', async 
     document.body.style.touchAction = 'none';
     document.body.style.overflow = 'hidden';
     document.documentElement.style.overflow = 'hidden';
-    document.getElementById('panelEnglishLearning').classList.add('hidden');
-    document.getElementById('panelEnglishLearning').classList.remove('el-show');
+    
     document.getElementById('panelDeepThink').classList.add('hidden');
     document.getElementById('panelDeepThink').classList.remove('active');
     window.restoreMainNavigationState();
@@ -89,12 +46,10 @@ test('legacy hidden dock and locked touch state are repaired on restore', async 
 
 test('multiple secondary pages do not unlock until all visible panels close', async ({ page }) => {
   await page.evaluate(async () => {
-    await window.EnglishLearning.open();
     const deep = document.getElementById('panelDeepThink');
     deep.classList.remove('hidden');
     deep.classList.add('active');
     window.XTJSecondaryPageState.open('deep-think');
-    window.EnglishLearning.close();
   });
   let state = await mainState(page);
   expect(state.bodyOverflow).toBe('hidden');

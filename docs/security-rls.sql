@@ -19,7 +19,7 @@ USING (
 
 -- Do not add marker blacklists here. System markers such as __auth__, __admin_auth__,
 -- __vip__, __vip_order__, __vip_plan__, __pro_gift__, __pro_gift_claim__,
--- __ai_english_learning__, AI config/memory/audit rows, DM, report, security,
+-- AI config/memory/audit rows, DM, report, security,
 -- attack, login and client-error records are excluded because they are not in the
 -- explicit public media_type allowlist above.
 
