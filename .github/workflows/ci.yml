@@ -71,11 +71,5 @@ jobs:
       - name: Check AI agent syntax
         run: node --check js/ai-agent.js
 
-      - name: Check English learning syntax
-        run: node --check js/english-learning.js
-
-      - name: Check English dictionary syntax
-        run: node --check js/english-dict.js
-
       - name: Finish
         run: echo "ALL SYNTAX CHECKS PASSED"

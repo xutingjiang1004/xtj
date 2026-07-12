@@ -1,4 +1,4 @@
-// xtj automated checks
+﻿// xtj automated checks
 var assert = require('assert');
 var fs = require('fs');
 var crypto = require('crypto');
@@ -11,7 +11,7 @@ function read(p){ return fs.readFileSync(p,'utf8'); }
 function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0,10); }
 
 console.log('\n=== Syntax Checks ===');
-['render-api/server.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/english-learning.js','js/english-dict.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
+['render-api/server.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
   test(f, function(){ cp.execSync('node --check '+f, {stdio:'pipe'}); });
 });
 
@@ -59,13 +59,6 @@ test('photo upload sheet keeps keyboard focus and announces persistent results',
   assert.ok(upload.indexOf('window.setPhotoUploadResult = setUploadResult') >= 0, 'upload result API missing');
 });
 
-console.log('\n=== English Sync / Pro RPC Static Checks ===');
-test('english conflict response uses RPC server_content and fallback row', function(){
-  var s = read('render-api/server.js');
-  assert.ok(s.indexOf('rpcResult.data.server_content') >= 0, 'missing server_content parse');
-  assert.ok(s.indexOf('loadEnglishLearningRow(userName)') >= 0, 'missing fallback load');
-  assert.ok(s.indexOf('sanitizeEnglishLearningState(JSON.parse(content))') < 0, 'client payload used as conflict server');
-});
 test('pro claim route calls claim_pro_gift RPC and rejects nonnumeric id', function(){
   var s = read('render-api/server.js');
   var route = s.slice(s.indexOf("/api/pro-gifts/claim"), s.indexOf("// 管理员：手动赠送 Pro"));
@@ -83,7 +76,7 @@ test('anon posts writes revoked and public read allowlisted', function(){
   var s = read('supabase/migrations/005_harden_rpc_rls.sql');
   assert.ok(/REVOKE ALL ON posts FROM anon/.test(s));
   assert.ok(/CREATE POLICY anon_posts_public_read/.test(s));
-  ['__auth__','__vip__','__ai_english_learning__','__pro_gift_claim__'].forEach(function(marker){
+  ['__auth__','__vip__','__pro_gift_claim__'].forEach(function(marker){
     var policy = s.slice(s.indexOf('CREATE POLICY anon_posts_public_read'), s.indexOf('DROP POLICY IF EXISTS bans'));
     assert.ok(policy.indexOf(marker) < 0, 'system marker allowlisted: '+marker);
   });
@@ -99,22 +92,6 @@ test('likes/comments anon inserts require user, object and content constraints',
 });
 
 console.log('\n=== CSS Surface / Motion Checks ===');
-test('english core selectors are not redefined at top level', function(){
-  var css = read('css/english-learning.css');
-  ['el-page','el-header','el-sync','el-hero','el-main','el-card','el-dashboard-grid','el-practice-grid','el-tabs'].forEach(function(c){
-    var re = new RegExp('^#panelEnglishLearning \\.'+c+'\\s*\\{','gm');
-    var n = (css.match(re)||[]).length;
-    assert.strictEqual(n, 1, c+' count '+n);
-  });
-});
-test('english page has single safe-area bottom owner and card/tabs no blur', function(){
-  var css = read('css/english-learning.css');
-  assert.ok(/\.el-page[\s\S]*padding-bottom: calc\(24px \+ env\(safe-area-inset-bottom\)\)/.test(css));
-  assert.ok(!/\.el-main[\s\S]{0,160}safe-area-inset-bottom/.test(css));
-  function block(sel){ var i=css.indexOf(sel+' {'); assert.ok(i>=0, sel+' missing'); return css.slice(i, css.indexOf('}', i)); }
-  assert.ok(block('#panelEnglishLearning .el-card').indexOf('backdrop-filter') < 0);
-  assert.ok(block('#panelEnglishLearning .el-tabs').indexOf('backdrop-filter') < 0);
-});
 test('chat list and main chat surfaces stay flat', function(){
   var css = read('css/style.css') + '\n' + read('css/ui-enhance.css');
   assert.ok(css.indexOf('#panelChat .chat-list-item') >= 0);
@@ -139,17 +116,6 @@ test('ui-effects keeps only deprecated compatibility object', function(){
 
 
 console.log('\n=== Targeted Performance Optimization Static Checks ===');
-test('english neon points and lines are performance-profiled', function(){
-  var s = read('js/english-learning.js');
-  assert.ok(s.indexOf('points: 360') >= 0 && s.indexOf('lines: 14') >= 0, 'missing perf-full neon config');
-  assert.ok(s.indexOf('points: 220') >= 0 && s.indexOf('lines: 8') >= 0, 'missing perf-balanced neon config');
-  assert.ok(s.indexOf('NEON_POINTS  = 600') < 0 && s.indexOf('NEON_LINES   = 26') < 0, 'old fixed neon constants remain');
-});
-test('perf-lite english neon does not start canvas rAF', function(){
-  var s = read('js/english-learning.js');
-  assert.ok(/lite:\s*\{[^}]*canvas:\s*false/.test(s), 'lite canvas flag missing');
-  assert.ok(/if \(!_neonConfig\.canvas\) \{[\s\S]*?neonDrawStatic\(\);[\s\S]*?return;[\s\S]*?\}/.test(s), 'lite static path missing');
-});
 test('photo preview pointermove visual work is coalesced with rAF', function(){
   var s = read('js/photo-wall/preview-hotfix.js');
   assert.ok(s.indexOf('schedulePointerMoveVisual') >= 0, 'missing scheduler');
@@ -171,15 +137,6 @@ test('btn-primary hidden shimmer has no infinite animation', function(){
   var block = css.slice(i, css.indexOf('}', i));
   assert.ok(/animation:\s*none/.test(block), 'base shimmer still animates');
   assert.ok(/\.btn-primary:hover::before,[\s\S]*\.btn-primary:focus-visible::before[\s\S]*xtjBtnShimmer/.test(css), 'interaction shimmer gate missing');
-});
-test('index no longer statically loads english-dict.js', function(){
-  var html = read('index.html');
-  assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'static english-dict.js script remains');
-  assert.ok(/meta name="xtj-english-dict-src" content="js\/english-dict\.min\.js\?v=/.test(html), 'dynamic dictionary source meta missing');
-});
-test('english dictionary loader clears failed promise for retry', function(){
-  var s = read('js/english-learning.js');
-  assert.ok(/script\.onerror = function\(\) \{[\s\S]*englishDictionaryPromise = null;[\s\S]*resolve\(null\);[\s\S]*\};/.test(s), 'failed dictionary load cannot retry');
 });
 test('performance profile skips duplicate class mutations', function(){
   var s = read('js/performance.js');
@@ -211,17 +168,6 @@ test('research card animator honors perf profiles and viewport visibility', func
   assert.ok(s.indexOf('IntersectionObserver') >= 0, 'viewport observer missing');
   assert.ok(s.indexOf('state.canToggle && card.classList.contains(\'collapsed\')') >= 0, 'collapsed-card pause guard missing');
 });
-test('english word list uses corrected selector, debounce, and delegated interactions', function(){
-  var css = read('css/english-learning.css');
-  assert.ok(css.indexOf('.el-word-list') < 0, 'old el-word-list selector remains');
-  assert.ok(css.indexOf('.el-wordlist') >= 0, 'correct el-wordlist selector missing');
-  assert.ok(css.indexOf('contain-intrinsic-size: auto 72px;') >= 0, 'word item intrinsic size missing');
-  var s = read('js/english-learning.js');
-  assert.ok(s.indexOf('var SEARCH_DEBOUNCE_MS = 100;') >= 0, 'search debounce constant missing');
-  assert.ok(s.indexOf('safeBind(\'elWordList\', \'change\'') >= 0, 'word list change delegation missing');
-  assert.ok(s.indexOf('safeBind(\'elWordList\', \'click\'') >= 0, 'word list click delegation missing');
-  assert.ok(s.indexOf('resetWordListInteractiveNodes(list);') >= 0, 'interactive node reset missing');
-});
 test('each local JavaScript entry module is statically referenced once', function(){
   var html = read('index.html');
   var refs = [];
@@ -239,7 +185,7 @@ test('core has no legacy loaders for static entry modules', function(){
   var core = read('js/core.js');
   [
     'login-device', 'core-animations', 'features', 'ui-effects', 'pro-upgrade',
-    'pro-style', 'ai-agent', 'english-learning', 'english-dict', 'upload-ui',
+    'pro-style', 'ai-agent', 'upload-ui',
     'preview-hotfix'
   ].forEach(function(moduleName) {
     var loader = new RegExp("(?:xtjLoadScriptOnce|xtjLoadScriptSequence)[\\s\\S]{0,260}['\"][^'\"]*" + moduleName.replace(/[-/]/g, '\\$&') + "[^'\"]*['\"]");
@@ -249,15 +195,6 @@ test('core has no legacy loaders for static entry modules', function(){
   assert.ok(core.indexOf('function armCoreAnimationLoader') < 0, 'core animation loader remains');
   assert.ok(core.indexOf("gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }") >= 0, 'GSAP is not owned by the module loader');
 });
-test('opening English lazy loads its module and keeps one dictionary owner', function(){
-  var html = read('index.html');
-  var core = read('js/core.js');
-  assert.strictEqual((html.match(/<script[^>]+src="js\/english-learning\.min\.js\?v=/g) || []).length, 0, 'english-learning remains static');
-  assert.strictEqual((html.match(/name="xtj-module-english-script"/g) || []).length, 1, 'english module asset count');
-  assert.ok(!/<script[^>]+src="js\/english-dict\.js/.test(html), 'dictionary is statically loaded');
-  assert.ok(core.indexOf("return loadXtjModule('english')") >= 0, 'English entry does not use the module loader');
-  assert.ok(/function ensureEnglishDictionary\(\)/.test(read('js/english-learning.js')), 'English dictionary owner missing');
-});
 
 test('feature modules have one retryable CSS-first loader', function(){
   var html = read('index.html');
@@ -266,7 +203,7 @@ test('feature modules have one retryable CSS-first loader', function(){
   assert.ok(core.indexOf('if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName]') >= 0, 'module promise dedupe missing');
   assert.ok(core.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module cannot retry');
   assert.ok(core.indexOf('definition.styles') < core.indexOf('definition.scripts'), 'CSS is not loaded before scripts');
-  ['ai-agent','english-learning','pro-upgrade','pro-style','photo-wall/preview','photo-wall/preview-hotfix','photo-wall/upload-ui'].forEach(function(asset) {
+  ['ai-agent','pro-upgrade','pro-style','photo-wall/preview','photo-wall/preview-hotfix','photo-wall/upload-ui'].forEach(function(asset) {
     var escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.ok(!(new RegExp('<script[^>]+src="js/' + escaped + '\\.min\\.js')).test(html), asset + ' remains a static script');
   });
@@ -301,7 +238,6 @@ test('debug performance metrics are opt-in and local-only', function(){
     assert.ok(source.indexOf(metric) >= 0, 'performance metric missing: ' + metric);
   });
   assert.ok(source.indexOf('fetch(') < 0 && source.indexOf('localStorage') < 0, 'performance metrics leave the browser');
-  assert.ok(read('js/core.js').indexOf("mark('english-first-open')") >= 0, 'English first-open mark missing');
   assert.ok(read('js/core.js').indexOf("mark('ai-first-open')") >= 0, 'AI first-open mark missing');
 });
 
@@ -414,94 +350,12 @@ test('refresh failure does not re-upload files', function(){
   assert.ok(s.indexOf("state.photoFiles = []") > s.indexOf("} finally {"), 'photoFiles cleared in finally before refresh');
 });
 
-console.log('\n=== CSS Scroll Conflict ===');
-test('ui-shell.css no longer overrides el-page overflow/height with !important', function(){
-  var shell = read('css/ui-shell.css');
-  function cssBlock(sel) {
-    var i = shell.indexOf(sel + ' {');
-    if (i < 0) return '';
-    var depth = 0, j = i;
-    for (; j < shell.length; j++) {
-      if (shell[j] === '{') depth++;
-      else if (shell[j] === '}') { depth--; if (depth === 0) return shell.slice(i, j + 1); }
-    }
-    return '';
-  }
-  var baseRule = cssBlock('#panelEnglishLearning .el-page');
-  assert.ok(baseRule.indexOf('overflow: visible') < 0, 'overflow visible still overrides');
-  assert.ok(baseRule.indexOf('height: auto') < 0, 'height auto still overrides');
-  assert.ok(baseRule.indexOf('max-height: none') < 0, 'max-height none still overrides');
-  assert.ok(baseRule.indexOf('min-height: calc') < 0, 'min-height calc still overrides');
-});
-test('english-learning.css el-page keeps proper scroll properties', function(){
-  var css = read('css/english-learning.css');
-  var start = css.indexOf('#panelEnglishLearning .el-page {');
-  var depth = 0, end = start;
-  for (var i = start; i < css.length; i++) {
-    if (css[i] === '{') depth++;
-    else if (css[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
-  }
-  var pageRule = css.slice(start, end);
-  assert.ok(pageRule.indexOf('height: 100dvh') >= 0, 'height 100dvh missing');
-  assert.ok(pageRule.indexOf('max-height: 100dvh') >= 0, 'max-height 100dvh missing');
-  assert.ok(pageRule.indexOf('overflow-y: auto') >= 0, 'overflow-y auto missing');
-  assert.ok(pageRule.indexOf('overflow-x: hidden') >= 0, 'overflow-x hidden missing');
-  assert.ok(pageRule.indexOf('-webkit-overflow-scrolling: touch') >= 0, 'scroll touch missing');
-});
-
-
 test('showToast wrapper forwards all arguments after text repair', function(){
   var source = read('js/features.js');
   assert.ok(source.indexOf('original.apply(this, args)') >= 0, 'showToast wrapper does not forward all arguments');
   assert.ok(source.indexOf('args[0] = fixText') >= 0, 'showToast text repair missing');
 });
 
-test('selected focus with zero checked words does not fall back to all words', function(){
-  var source = read('js/english-learning.js');
-  assert.ok(source.indexOf("if (mode === 'selected')") >= 0, 'selected mode branch missing');
-  assert.ok(source.indexOf("words = selectedIds.length ? words.filter") >= 0, 'selected mode still falls back to all words');
-  assert.ok(source.indexOf('请先勾选需要生成练习的单词') >= 0, 'selected empty prompt missing');
-});
-
-console.log('\n=== English AI Generation Boundary ===');
-test('English generation failures never auto-create local practice', function(){
-  var source = read('js/english-learning.js');
-  var generate = source.slice(source.indexOf('async function generateQuiz'), source.indexOf('function englishGenerateFailureMessage'));
-  assert.strictEqual(generate.indexOf('buildLocalQuiz('), -1, 'generateQuiz still creates an automatic local fallback');
-  ['404', '502', '503', '504', 'Failed to fetch', 'NetworkError'].forEach(function(marker) {
-    assert.strictEqual(generate.indexOf(marker), -1, 'generateQuiz contains fallback marker: ' + marker);
-  });
-  assert.ok(generate.indexOf('showGenerationError(hint)') >= 0, 'generation error state missing');
-  assert.ok(generate.indexOf('showLoading(false)') >= 0, 'loading is not stopped in finally');
-});
-
-test('offline practice is only created by the explicit offline action', function(){
-  var source = read('js/english-learning.js');
-  var offline = source.slice(source.indexOf('function useOfflineExample'), source.indexOf('function cancelGeneration'));
-  assert.ok(offline.indexOf('buildLocalQuiz(') >= 0, 'explicit offline action does not create local practice');
-  assert.ok(offline.indexOf("local: true") >= 0 && offline.indexOf("source: 'local'") >= 0, 'offline source state missing');
-  assert.ok(source.indexOf("safeBind('elUseOfflineBtn', 'click', useOfflineExample)") >= 0, 'offline button is not bound');
-});
-
-test('AI and offline results have distinct persistent labels', function(){
-  var source = read('js/english-learning.js');
-  var html = read('index.html');
-  assert.ok(source.indexOf("source: 'deepseek'") >= 0, 'AI result source missing');
-  assert.ok(source.indexOf("sourceBadge.textContent = isAi ? 'AI生成' : ''") >= 0, 'AI label missing');
-  assert.ok(source.indexOf("sourceBadge.textContent = '离线模板，非 AI 生成'") >= 0, 'offline label missing');
-  assert.ok(/id="elGenerateError"[^>]*role="alert"/.test(html), 'persistent generation alert missing');
-  assert.ok(html.indexOf('id="elGenerateRetryBtn"') >= 0 && html.indexOf('id="elUseOfflineBtn"') >= 0, 'retry/offline actions missing');
-});
-
-
-test('english module loader rejects failed assets, clears its cache, and validates the opener', function(){
-  var source = read('js/core.js');
-  assert.ok(source.indexOf('XTJ_MODULE_LOAD_TIMEOUT = 15000') >= 0, '15 second timeout missing');
-  assert.ok(source.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module promise is retained');
-  assert.ok(source.indexOf('if (node.parentNode) node.remove()') >= 0, 'failed module node is retained');
-  assert.ok(source.indexOf('english_learning_open_function_missing') >= 0, 'missing English opener is not rejected');
-  assert.ok(source.indexOf('englishLearningLaunchPromise = null') >= 0, 'English launcher is not released for retry');
-});
 test('wide Dock and iPad post layout use explicit visible and single-column overrides', function(){
   var source = read('css/ui-shell.css');
   assert.ok(/@media \(min-width: 1024px\)[\s\S]*?transform: translate\(-50%, 0\) !important/.test(source), 'wide Dock remains hidden');

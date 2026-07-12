@@ -8,5 +8,5 @@
 
 -- Negative checks with anon key should fail or return zero rows for system markers:
 -- __auth__, __admin_auth__, __vip__, __vip_order__, __vip_plan__, __pro_gift__,
--- __pro_gift_claim__, __ai_english_learning__, AI messages/config/memory/audit,
+-- __pro_gift_claim__, AI messages/config/memory/audit,
 -- DM, report, security, attack, login and client-error records.
