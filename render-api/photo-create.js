@@ -48,12 +48,12 @@ function validatePhotoCreatePayload(body, supabaseUrl) {
   const contentObj = {
     type: 'photo_wall',
     mediaKind: 'image',
-    thumb: body.thumb_url || '',
+    thumb: '',
     fileSize: body.file_size,
     originalSize: body.original_size,
     mimeType: body.mime_type,
-    width: Number.isSafeInteger(body.width) && body.width > 0 ? body.width : null,
-    height: Number.isSafeInteger(body.height) && body.height > 0 ? body.height : null,
+    width: null,
+    height: null,
     duration: null,
     storagePath: storagePath
   };
@@ -61,6 +61,34 @@ function validatePhotoCreatePayload(body, supabaseUrl) {
   try { content = JSON.stringify(contentObj); } catch (_) { return invalid('图片信息无效', 'INVALID_INPUT'); }
   if (content.length > MAX_CONTENT_LENGTH) return invalid('图片信息无效', 'PAYLOAD_TOO_LARGE');
   return Object.assign({ ok: true, content: content, storagePath: storagePath, uploadId: uploadId }, urlResult);
+}
+
+function publicStorageUrl(supabaseUrl, storagePath) {
+  var origin = new URL(supabaseUrl).origin;
+  return origin + '/storage/v1/object/public/uploads/' + storagePath.split('/').map(encodeURIComponent).join('/');
+}
+
+async function createPhotoThumbnail(options) {
+  var storagePath = options && options.storagePath;
+  if (!storagePath || !options.supabase || !options.sharp) throw new Error('thumbnail unavailable');
+  var downloaded = await options.supabase.storage.from('uploads').download(storagePath);
+  if (!downloaded || downloaded.error || !downloaded.data) throw new Error('thumbnail source unavailable');
+  var input = Buffer.from(await downloaded.data.arrayBuffer());
+  var image = options.sharp(input, { animated: false });
+  var meta = await image.metadata();
+  var key = crypto.createHash('sha256').update(storagePath).digest('hex');
+  var thumbnailPath = 'photos/thumbs/' + key + '.webp';
+  var output = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+  var uploaded = await options.supabase.storage.from('uploads').upload(thumbnailPath, output, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
+  if (uploaded && uploaded.error) throw new Error('thumbnail upload failed');
+  return {
+    path: thumbnailPath,
+    url: publicStorageUrl(options.supabaseUrl, thumbnailPath),
+    fileSize: input.length,
+    width: Number.isSafeInteger(meta.width) ? meta.width : null,
+    height: Number.isSafeInteger(meta.height) ? meta.height : null,
+    exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null
+  };
 }
 
 async function cleanupStorageFile(supabase, storagePath, logger) {
@@ -71,14 +99,14 @@ async function cleanupStorageFile(supabase, storagePath, logger) {
       const msg = String((result.error && (result.error.message || result.error.error)) || '').toLowerCase();
       // not found 视为成功 (幂等)
       if (/not.?found|does not exist|no such|404/.test(msg)) return { ok: true };
-      if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { path: storagePath, error: String(result.error.message || result.error) });
+      if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { target: storagePath.indexOf('photos/thumbs/') === 0 ? 'thumbnail' : 'original' });
       return { ok: false, error: result.error };
     }
     return { ok: true };
   } catch (err) {
     const msg = String((err && (err.message || err.error)) || '').toLowerCase();
     if (/not.?found|does not exist|no such|404/.test(msg)) return { ok: true };
-    if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { path: storagePath, error: String(err && err.message || err) });
+    if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { target: storagePath.indexOf('photos/thumbs/') === 0 ? 'thumbnail' : 'original' });
     return { ok: false, error: err };
   }
 }
@@ -106,10 +134,28 @@ async function createPhotoRecord(options) {
   if (uploadId) {
     const existing = await findExistingPhotoByActorKey(options.supabase, actorKey);
     if (existing.ok && existing.data) {
+      await cleanupStorageFile(options.supabase, storagePath, options.logger);
       return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
     }
   }
 
+  var thumbnail = null;
+  if (typeof options.createThumbnail === 'function') {
+    try {
+      thumbnail = await options.createThumbnail({ supabase: options.supabase, supabaseUrl: options.supabaseUrl, storagePath: storagePath });
+      var contentObj = JSON.parse(validated.content);
+      contentObj.thumb = thumbnail.url || '';
+      contentObj.fileSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : contentObj.fileSize;
+      contentObj.originalSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : contentObj.originalSize;
+      contentObj.width = thumbnail.width || null;
+      contentObj.height = thumbnail.height || null;
+      if (thumbnail.exif) contentObj.exif = thumbnail.exif;
+      validated.content = JSON.stringify(contentObj);
+    } catch (_) {
+      await cleanupStorageFile(options.supabase, storagePath, options.logger);
+      return { status: 422, body: { ok: false, error: '图片缩略图处理失败', code: 'IMAGE_PROCESSING_FAILED' } };
+    }
+  }
   let insertResult;
   try {
     insertResult = await options.supabase.from('posts').insert([{
@@ -136,6 +182,7 @@ async function createPhotoRecord(options) {
   }
 
   // 真正失败: 清理 storage (幂等)
+  if (thumbnail && thumbnail.path) await cleanupStorageFile(options.supabase, thumbnail.path, options.logger);
   await cleanupStorageFile(options.supabase, storagePath, options.logger);
   const errMsg = (insertResult && insertResult.error && (insertResult.error.message || insertResult.error.details)) ? String(insertResult.error.message || insertResult.error.details) : '保存失败';
   const code = (insertResult && insertResult.error && insertResult.error.code === '23505') ? 'CONFLICT' : 'UPSTREAM_ERROR';
@@ -147,5 +194,6 @@ module.exports = {
   parseStoragePhotoUrl,
   validatePhotoCreatePayload,
   createPhotoRecord,
+  createPhotoThumbnail,
   cleanupStorageFile
 };
