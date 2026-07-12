@@ -92,6 +92,27 @@ test('likes/comments anon inserts require user, object and content constraints',
 });
 
 console.log('\n=== CSS Surface / Motion Checks ===');
+test('ui-shell and desktop CSS parse cleanly with no dangling fragments', function(){
+  var csstree = require('css-tree');
+  ['css/ui-shell.css', 'css/desktop.css', 'css/ui-shell.min.css'].forEach(function(file) {
+    csstree.parse(read(file));
+  });
+  var uiShell = read('css/ui-shell.css');
+  assert.ok(!/,\s*@media\b/.test(uiShell), 'selector list falls through into @media');
+  assert.ok(!/@media[^{]+\{\s*\}/.test(uiShell), 'empty media query remains');
+});
+test('chat responsive split keeps touch layouts single-pane and wide fine-pointer layouts stable', function(){
+  var uiShell = read('css/ui-shell.css');
+  var desktop = read('css/desktop.css');
+  assert.ok(/@media \(max-width: 1023\.98px\)[\s\S]*?#panelChat \.chat-view\.hidden[\s\S]*?display: none !important;/.test(uiShell), 'small-screen chat exclusivity missing');
+  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1179\.98px\),[\s\S]*?#panelChat \.dock-chat-container[\s\S]*?display: block !important;[\s\S]*?#panelChat \.chat-view\.hidden[\s\S]*?display: none !important;/.test(uiShell), 'tablet or coarse-pointer chat override missing');
+  assert.ok(/#panelChat \.dock-chat-container \{[\s\S]*?grid-template-columns:\s*340px minmax\(0,\s*1fr\)/.test(desktop), 'desktop chat split source missing');
+});
+test('profile shell cancels legacy named-grid tracks on wide layouts', function(){
+  var uiShell = read('css/ui-shell.css');
+  assert.ok(/#panelProfile \.profile-main-view \{[\s\S]*?display: block;/.test(uiShell), 'profile wide layout does not reset to block flow');
+  assert.ok(/#panelProfile \.profile-header,[\s\S]*?#panelProfile \.profile-settings \{[\s\S]*?grid-area: auto;[\s\S]*?grid-column: auto;/.test(uiShell), 'profile children still rely on legacy grid placement');
+});
 test('chat list and main chat surfaces stay flat', function(){
   var css = read('css/style.css') + '\n' + read('css/ui-enhance.css');
   assert.ok(css.indexOf('#panelChat .chat-list-item') >= 0);
