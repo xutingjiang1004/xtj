@@ -363,6 +363,48 @@ test('wide Dock and iPad post layout use explicit visible and single-column over
   assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
 });
 
+console.log('\n=== English Module Regression Guards ===');
+test('server.js public post filter excludes retired English marker', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf("__ai_english_learning__") >= 0, 'server.js missing __ai_english_learning__ filter');
+  assert.ok(s.indexOf(".neq('media_type', AI_ENGLISH_LEARNING_MARKER)") >= 0 || s.indexOf(".neq('media_type', '__ai_english_learning__')") >= 0, 'server.js filter chain missing English marker');
+});
+
+test('core.js Supabase query excludes retired English marker', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('neq("media_type", "__ai_english_learning__")') >= 0, 'core.js Supabase query missing English marker');
+});
+
+test('core.js cache filter excludes retired English marker', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf("p.media_type !== '__ai_english_learning__'") >= 0, 'core.js cachePosts filter missing English marker');
+  assert.ok(s.indexOf("post.media_type !== \"__ai_english_learning__\"") >= 0, 'core.js stat filter missing English marker');
+});
+
+test('retired English source files do not exist', function(){
+  assert.ok(!fileExists('render-api/english-generate.js'), 'english-generate.js still exists');
+  assert.ok(!fileExists('js/english-learning.js'), 'english-learning.js still exists');
+  assert.ok(!fileExists('js/english-dict.js'), 'english-dict.js still exists');
+  assert.ok(!fileExists('css/english-learning.css'), 'english-learning.css still exists');
+  assert.ok(!fileExists('tests/english-generate.test.js'), 'english-generate.test.js still exists');
+});
+
+test('index.html contains no English module references', function(){
+  var s = read('index.html');
+  assert.ok(s.indexOf('panelEnglishLearning') < 0, 'index.html contains panelEnglishLearning');
+  assert.ok(s.indexOf('xtj-module-english-style') < 0, 'index.html contains xtj-module-english-style');
+  assert.ok(s.indexOf('xtj-module-english-script') < 0, 'index.html contains xtj-module-english-script');
+  assert.ok(s.indexOf('xtj-english-dict-src') < 0, 'index.html contains xtj-english-dict-src');
+});
+
+test('server.js contains no English API routes', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('/api/agent/english/state') < 0, 'server.js contains /api/agent/english/state');
+  assert.ok(s.indexOf('/api/agent/english/parse-batch') < 0, 'server.js contains /api/agent/english/parse-batch');
+  assert.ok(s.indexOf('/api/agent/english/generate') < 0, 'server.js contains /api/agent/english/generate');
+  assert.ok(s.indexOf('registerEnglishGenerateRoute') < 0, 'server.js contains registerEnglishGenerateRoute');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
