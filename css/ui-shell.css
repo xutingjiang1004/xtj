@@ -415,8 +415,35 @@
   min-height: 0 !important;
 }
 
-#panelChat .chat-view.hidden {
-  display: none !important;
+/* On small touch layouts the chat views remain mutually exclusive.  Wide
+   layouts are owned by desktop.css, where list and detail are intentionally
+   displayed side-by-side. */
+@media (max-width: 1023.98px) {
+  #panelChat .chat-view.hidden {
+    display: none !important;
+  }
+}
+
+/* A 1024px tablet does not have enough reliable input space for the desktop
+   conversation split.  Keep the existing single-pane selection model until a
+   fine-pointer desktop has real room for both columns. */
+@media (min-width: 1024px) and (max-width: 1179.98px),
+       (min-width: 1180px) and (hover: none),
+       (min-width: 1180px) and (pointer: coarse) {
+  #panelChat .dock-chat-container {
+    display: block !important;
+    height: auto !important;
+  }
+
+  #panelChat #dockChatListView,
+  #panelChat #dockChatDetailView {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  #panelChat .chat-view.hidden {
+    display: none !important;
+  }
 }
 
 #panelChat .chat-list {
@@ -503,29 +530,6 @@
 
 
 
-@media (max-width: 1023px) {
-  #panelPosts .publish-box,
-  #panelPosts .post-filter-bar,
-  #panelPosts .post,
-  #panelProfile .profile-user-card,
-  #panelProfile .xtj-vip-card,
-  #panelProfile .profile-pro-style-entry,
-  #panelProfile .profile-settings,
-}
-
-[data-theme="dark"] #panelPosts .stats,
-[data-theme="dark"] #panelProfile .profile-user-card,
-[data-theme="dark"] #panelProfile .xtj-vip-card,
-[data-theme="dark"] #panelProfile .profile-pro-style-entry,
-[data-theme="dark"] #panelProfile .profile-settings,
-[data-theme="dark"] #panelProfile .profile-activity-board,
-
-@media (prefers-reduced-motion: reduce) {
-  #panelPosts *,
-  #panelChat *,
-  #panelProfile *,
-}
-
 @media (max-width: 1023.98px) {
   .dock-bar {
     opacity: 1;
@@ -559,12 +563,6 @@
   #panelChat .dock-chat-container,
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container,
-  #panelDeepThink .dt-page,
-
-  #panelPosts .wrap,
-  #panelChat .dock-chat-container,
-  #panelAi .photo-wall-container,
-  #panelProfile .dock-profile-container,
   #panelDeepThink .dt-page {
     background: var(--xtj-panel-shell-light) !important;
     border: 1px solid var(--xtj-line-soft) !important;
@@ -576,7 +574,10 @@
   [data-theme="dark"] #panelChat .dock-chat-container,
   [data-theme="dark"] #panelAi .photo-wall-container,
   [data-theme="dark"] #panelProfile .dock-profile-container,
-  [data-theme="dark"] #panelDeepThink .dt-page,
+  [data-theme="dark"] #panelDeepThink .dt-page {
+    background: var(--xtj-panel-shell-dark) !important;
+    border-color: rgba(164, 216, 205, 0.10) !important;
+  }
 
   #panelPosts .wrap {
     padding: 22px;
@@ -631,26 +632,22 @@
     padding: 24px;
   }
 
+  /* desktop.css used an older named-grid profile layout.  The current markup
+     is linear, so mixing unnamed columns with those old grid areas creates
+     implicit tracks and strands cards on wide screens. */
   #panelProfile .profile-main-view {
-    display: grid;
-    grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
-    gap: 18px;
-    align-items: start;
+    display: block;
   }
 
+  #panelProfile .profile-header,
   #panelProfile .profile-user-card,
-  #panelProfile .profile-totals-bar {
-    grid-column: 1 / -1;
-  }
-
-  #panelProfile .profile-activity-board {
-    grid-column: 1;
-  }
-
+  #panelProfile .profile-totals-bar,
+  #panelProfile .profile-activity-board,
   #panelProfile .xtj-vip-card,
   #panelProfile .profile-pro-style-entry-wrap,
   #panelProfile .profile-settings {
-    grid-column: 2;
+    grid-area: auto;
+    grid-column: auto;
   }
 
   #panelProfile .profile-user-card,
