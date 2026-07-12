@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - xtj-hotfix
 
   pull_request:
     branches:
