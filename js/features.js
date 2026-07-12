@@ -79,9 +79,10 @@
   function patchToast() {
     if (typeof window.showToast !== 'function' || window.showToast.__xtjPatchedV10) return;
     var original = window.showToast;
-    window.showToast = function (message) {
-      var safeMessage = fixText(message == null ? '' : String(message)).trim() || '操作成功';
-      return original.call(this, safeMessage);
+    window.showToast = function () {
+      var args = Array.prototype.slice.call(arguments);
+      args[0] = fixText(args[0] == null ? '' : String(args[0])).trim() || '操作成功';
+      return original.apply(this, args);
     };
     window.showToast.__xtjPatchedV10 = true;
   }
