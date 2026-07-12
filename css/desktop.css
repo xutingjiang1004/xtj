@@ -516,6 +516,11 @@
     max-width: 1200px;
     margin: 0 auto;
     padding: 24px 32px 60px;
+    height: auto;
+  }
+
+  /* The profile cards live inside .profile-main-view, not directly in the shell. */
+  #panelProfile .profile-main-view {
     display: grid;
     grid-template-columns: 340px minmax(0, 1fr);
     grid-template-areas:
@@ -526,7 +531,6 @@
       "totals  totals";
     gap: 20px;
     align-items: start;
-    height: auto;
   }
 
   /* 区域分配 */
@@ -943,6 +947,36 @@
   }
 }
 
+/* Tablet and compact desktop: keep the profile readable in one column. */
+@media (min-width: 1024px) and (max-width: 1179px) {
+  #panelProfile .profile-main-view {
+    display: block;
+  }
+  #panelProfile .profile-header,
+  #panelProfile .profile-user-card,
+  #panelProfile .xtj-vip-card,
+  #panelProfile .profile-settings,
+  #panelProfile .profile-activity-board,
+  #panelProfile .profile-totals-bar {
+    grid-area: auto;
+  }
+}
+
+/* Current profile markup is a linear flow. Keep it as one readable column at every wide size. */
+@media (min-width: 1180px) {
+  #panelProfile .profile-main-view {
+    display: block;
+  }
+  #panelProfile .profile-header,
+  #panelProfile .profile-user-card,
+  #panelProfile .xtj-vip-card,
+  #panelProfile .profile-settings,
+  #panelProfile .profile-activity-board,
+  #panelProfile .profile-totals-bar {
+    grid-area: auto;
+  }
+}
+
 /* ========== Final Desktop Dark Override ========== */
 [data-theme="dark"] .post,
 [data-theme="dark"] .publish-box,
@@ -1105,4 +1139,3 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-
