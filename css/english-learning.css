@@ -1021,6 +1021,26 @@ body.english-learning-open {
   line-height: 1.5;
 }
 
+#panelEnglishLearning .el-generate-status {
+  min-height: 22px;
+  margin-top: 10px;
+  color: var(--el-muted, #5d6f71);
+  font-size: 13px;
+  line-height: 22px;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+#panelEnglishLearning .el-generate-status[data-state="success"] { color: #16785f; }
+#panelEnglishLearning .el-generate-status[data-state="timeout"],
+#panelEnglishLearning .el-generate-status[data-state="invalid-output"],
+#panelEnglishLearning .el-generate-status[data-state="auth-expired"],
+#panelEnglishLearning .el-generate-status[data-state="network-error"],
+#panelEnglishLearning .el-generate-status[data-state="rate-limited"] { color: #a64949; }
+
+@media (prefers-reduced-motion: reduce) {
+  #panelEnglishLearning .el-generate-status { transition: none; }
+}
+
 #panelEnglishLearning .el-generate-error[hidden] {
   display: none;
 }

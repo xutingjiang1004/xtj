@@ -691,14 +691,6 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
         function isVipUser() {
             if (!currentUser) return false;
             if (currentUser === ADMIN_NAME) return true;
-            if (typeof window.__xtjCheckLocalVip === 'function') {
-                var localVip = window.__xtjCheckLocalVip(currentUser);
-                if (localVip) {
-                    __vipStatus.is_vip = true;
-                    __vipStatus.vip_info = localVip;
-                    return true;
-                }
-            }
             if (__vipStatus.is_vip !== true) return false;
             var info = __vipStatus.vip_info;
             if (!info || !info.expire_at) {
@@ -1291,17 +1283,15 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
         async function updateVipStatus() {
             if (!currentUser) return;
-
-            // 先检查本地缓存（即使API不可用也能识别VIP状态）
-            if (typeof window.__xtjCheckLocalVip === 'function') {
-                var localVip = window.__xtjCheckLocalVip(currentUser);
-                if (localVip) {
-                    __vipStatus.is_vip = true;
-                    __vipStatus.vip_info = localVip;
-                    updateVipUI();
-                    if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(true);
-                    return;
-                }
+            // 本地记录只用于提示“待核验”；不得直接授予已核验 Pro 状态。
+            var localCandidate = typeof window.__xtjCheckLocalVip === 'function' ? window.__xtjCheckLocalVip(currentUser) : null;
+            __vipStatus.is_vip = false;
+            __vipStatus.vip_info = null;
+            if (localCandidate) {
+                var pendingBadge = document.getElementById('vipCardBadge');
+                var pendingSub = document.getElementById('vipCardSub');
+                if (pendingBadge) { pendingBadge.textContent = '核验中'; pendingBadge.className = 'xtj-vip-card-badge'; }
+                if (pendingSub) pendingSub.textContent = '正在核验 Pro 权益';
             }
 
             // 尝试API查询
@@ -1342,6 +1332,10 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                     }
                 } catch(e) {}
             }
+            __vipStatus.is_vip = false;
+            __vipStatus.vip_info = null;
+            updateVipUI();
+            if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
         }
         async function ensureVipStatusFresh(force) {
             if (!currentUser) {

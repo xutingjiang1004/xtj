@@ -36,6 +36,9 @@
     search: '',
     isGenerating: false,
     isCancelled: false,
+    generationState: 'idle',
+    rateLimitUntil: 0,
+    rateLimitTimer: null,
     currentController: null,
     currentRequestId: 0,
     initialized: false,
@@ -808,7 +811,53 @@
     var info = $('elGenInfo');
     if (info) info.textContent = '已选 ' + total + ' 个单词';
     var gen = $('elGenBtn');
-    if (gen) gen.disabled = S.isGenerating || total === 0;
+    if (gen) gen.disabled = S.isGenerating || total === 0 || (S.settings.focus === 'selected' && total === 0);
+    var status = $('elGenerateStatus');
+    if (status && S.settings.focus === 'selected' && total === 0 && !S.isGenerating) {
+      status.textContent = '已选择“只用选中词”：请先勾选至少一个单词';
+      status.setAttribute('data-state', 'idle');
+    }
+  }
+
+  function setGenerationState(state, detail) {
+    S.generationState = state || 'idle';
+    var status = $('elGenerateStatus');
+    if (!status) return;
+    var copy = {
+      idle: '准备生成练习',
+      preparing: '正在准备生成请求',
+      generating: '正在生成练习',
+      validating: '正在校验生成内容',
+      success: '生成完成',
+      cancelled: '已取消生成，当前设置已保留',
+      timeout: '生成超时，请重试',
+      'invalid-output': 'AI 输出格式异常，未展示不完整练习',
+      'rate-limited': '请求过于频繁，请稍候再试',
+      'auth-expired': '登录状态已失效，请重新登录',
+      'network-error': '网络连接失败，请检查网络后重试'
+    };
+    status.textContent = detail || copy[S.generationState] || copy.idle;
+    status.setAttribute('data-state', S.generationState);
+  }
+
+  function startRateLimitCountdown(seconds) {
+    seconds = Math.max(1, Math.ceil(Number(seconds) || 0));
+    if (!seconds) return;
+    if (S.rateLimitTimer) clearInterval(S.rateLimitTimer);
+    S.rateLimitUntil = Date.now() + seconds * 1000;
+    function tick() {
+      var remaining = Math.max(0, Math.ceil((S.rateLimitUntil - Date.now()) / 1000));
+      if (!remaining) {
+        clearInterval(S.rateLimitTimer);
+        S.rateLimitTimer = null;
+        setGenerationState('idle');
+        updateGenInfo();
+        return;
+      }
+      setGenerationState('rate-limited', '请求过于频繁，请在 ' + remaining + ' 秒后重试');
+    }
+    tick();
+    S.rateLimitTimer = setInterval(tick, 250);
   }
 
   function getSelectedWordIds() {
@@ -1234,6 +1283,17 @@
     );
   };
 
+  function generationStateForError(error) {
+    var code = String(error && error.code || '').toUpperCase();
+    var status = Number(error && error.status) || 0;
+    if (status === 429 || code === 'RATE_LIMITED') return 'rate-limited';
+    if (status === 401 || status === 403 || code === 'AUTH_REQUIRED') return 'auth-expired';
+    if (status === 504 || code === 'AI_TIMEOUT') return 'timeout';
+    if (code === 'INVALID_OUTPUT' || code === 'INVALID_CLOZE_STRUCTURE' || code === 'QUESTION_COUNT_MISMATCH') return 'invalid-output';
+    if (code === 'NETWORK_ERROR' || /Failed to fetch|NetworkError|network request failed/i.test(String(error && error.message || ''))) return 'network-error';
+    return 'idle';
+  }
+
   async function generateQuiz(opts) {
     opts = opts || {};
     // 递增 requestId: 每次请求独立, 旧请求的 catch/finally 不再污染新请求状态
@@ -1244,8 +1304,10 @@
       try { S.currentController.abort(); } catch (e) {}
     }
     syncSettingsFromInputs();
+    setGenerationState('preparing');
     var words = getWordsForGeneration(true);
     if (!words.length) {
+      setGenerationState('idle', '请先选择至少一个单词');
       if (requestId === S.currentRequestId) {
         S.isGenerating = false;
         S.currentController = null;
@@ -1256,6 +1318,7 @@
     }
     var types = getSelectedTypes();
     if (!types.length) {
+      setGenerationState('idle', '请至少选择一种题型');
       notify('请至少选择一种题型');
       if (requestId === S.currentRequestId) {
         S.isGenerating = false;
@@ -1271,6 +1334,9 @@
     clearGenerationError();
     updateGenInfo();
     showLoading(true);
+    setGenerationState('generating', types.length === 1 && types[0] === 'article'
+      ? '正在生成文章'
+      : '正在生成练习，目标 ' + (S.settings.questionCount || 6) + ' 题');
     hideResult();
     if (opts.regenArticle || opts.regenQuiz) {
       hideArticle();
@@ -1322,8 +1388,10 @@
         var responseError = new Error(err || ('HTTP ' + resp.status));
         responseError.status = resp.status;
         if (ej && ej.code) responseError.code = ej.code;
+        responseError.retryAfter = Number(resp.headers.get('Retry-After') || (ej && ej.retry_after) || 0);
         throw responseError;
       }
+      setGenerationState('validating');
       var json = await resp.json();
       if (requestId !== S.currentRequestId) return;
       if (!json.ok || !json.data) throw new Error(json.error || '返回数据异常');
@@ -1345,14 +1413,19 @@
       renderArticle(S.currentQuiz);
       renderQuestions(S.currentQuiz);
       switchTab('practice');
+      setGenerationState('success');
     } catch (e2) {
       if (requestId !== S.currentRequestId) return;
       if (S.isCancelled || (e2 && e2.name === 'AbortError')) {
         S.isCancelled = false;
+        setGenerationState('cancelled');
         return;
       }
       try { console.error('[EL] generate error:', e2); } catch (e3) {}
       var hint = englishGenerateFailureMessage(e2);
+      var generationErrorState = generationStateForError(e2);
+      if (generationErrorState === 'rate-limited') startRateLimitCountdown(e2 && e2.retryAfter);
+      else setGenerationState(generationErrorState, generationErrorState === 'idle' ? hint : '');
       showGenerationError(hint);
       notify(hint, 'error');
     } finally {
