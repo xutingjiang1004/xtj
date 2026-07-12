@@ -66,9 +66,25 @@ function validateEnglishGenerateInput(body) {
     if (!typeSeen[value]) { typeSeen[value] = true; types.push(value); }
   });
 
-  var questionCount = body.question_count;
-  if (!Number.isSafeInteger(questionCount) || questionCount < 2 || questionCount > 10) {
-    failInput('question_count 必须为 2 到 10 的整数');
+  var hasQuizType = types.indexOf('mc') >= 0 || types.indexOf('cloze') >= 0;
+  var hasArticle = types.indexOf('article') >= 0;
+  var rawQuestionCount = body.question_count;
+  var questionCount;
+  if (!hasQuizType && hasArticle) {
+    // article-only: question_count must be 0 (or normalize to 0); any non-zero value is coerced to 0
+    if (rawQuestionCount == null) {
+      questionCount = 0;
+    } else {
+      if (!Number.isSafeInteger(rawQuestionCount) || rawQuestionCount < 0 || rawQuestionCount > 10) {
+        failInput('question_count 在仅生成文章模式下必须为 0');
+      }
+      questionCount = 0;
+    }
+  } else {
+    if (!Number.isSafeInteger(rawQuestionCount) || rawQuestionCount < 2 || rawQuestionCount > 10) {
+      failInput('question_count 必须为 2 到 10 的整数');
+    }
+    questionCount = rawQuestionCount;
   }
   var articleLength = requireString(body.article_length, 10, 'article_length', false).toLowerCase();
   if (['short', 'medium', 'long'].indexOf(articleLength) < 0) failInput('article_length 不受支持');
@@ -77,6 +93,8 @@ function validateEnglishGenerateInput(body) {
   if (['all', 'weak', 'selected'].indexOf(focus) < 0) failInput('focus 不受支持');
   if (body.regen_article != null && typeof body.regen_article !== 'boolean') failInput('regen_article 必须是布尔值');
   if (body.regen_quiz != null && typeof body.regen_quiz !== 'boolean') failInput('regen_quiz 必须是布尔值');
+  if (body.regen_article === true && types.indexOf('article') < 0) failInput('regen_article 要求 types 包含 article');
+  if (body.regen_quiz === true && types.indexOf('mc') < 0 && types.indexOf('cloze') < 0) failInput('regen_quiz 要求 types 包含 mc 或 cloze');
 
   return {
     words: words,
@@ -105,7 +123,16 @@ function validateOptions(options, min, max) {
   if (!Array.isArray(options) || options.length < min || options.length > max) {
     throw new EnglishGenerateError('INVALID_OUTPUT', '选项数量错误');
   }
-  return options.map(function(option) { return safeModelText(option, 200, '选项', false); });
+  var seen = Object.create(null);
+  var cleaned = options.map(function(option) {
+    var text = safeModelText(option, 200, '选项', false);
+    if (!text) throw new EnglishGenerateError('INVALID_OUTPUT', '选项不能为空');
+    var key = text.toLowerCase();
+    if (seen[key]) throw new EnglishGenerateError('INVALID_OUTPUT', '选项不得重复');
+    seen[key] = true;
+    return text;
+  });
+  return cleaned;
 }
 
 
@@ -137,9 +164,30 @@ function validateEnglishGenerateOutput(data, request) {
     if (!WORD_RE.test(clean)) throw new EnglishGenerateError('INVALID_OUTPUT', 'words_used 格式错误');
     return clean;
   });
+  // words_used 每个词必须属于请求词集
+  var requestWordMap = Object.create(null);
+  (request.words || []).forEach(function(w) { if (w && w.en) requestWordMap[w.en] = true; });
+  wordsUsed.forEach(function(used) {
+    if (!requestWordMap[used]) throw new EnglishGenerateError('INVALID_OUTPUT', 'words_used 包含未请求的词: ' + used);
+  });
   var expectsQuestions = request.types.indexOf('mc') >= 0 || request.types.indexOf('cloze') >= 0;
-  if (!Array.isArray(data.questions) || data.questions.length > request.question_count || (expectsQuestions && data.questions.length < 1)) {
-    throw new EnglishGenerateError('INVALID_OUTPUT', 'questions 格式错误');
+  var expectsArticleOnly = !expectsQuestions && request.types.indexOf('article') >= 0;
+  if (!Array.isArray(data.questions)) {
+    throw new EnglishGenerateError('INVALID_OUTPUT', 'questions 必须是数组');
+  }
+  if (expectsArticleOnly) {
+    // article-only: questions MUST be strictly empty
+    if (data.questions.length !== 0) {
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', '仅生成文章时 questions 必须为空数组');
+    }
+  } else if (expectsQuestions) {
+    if (data.questions.length < 1) {
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', 'questions 数量不足');
+    }
+    if (data.questions.length > request.question_count + 4) {
+      // 给一点余量但必须后续 answerableCount 严格匹配
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', 'questions 数量超出预期');
+    }
   }
 
   var seenQuestionIds = Object.create(null);
@@ -185,8 +233,18 @@ function validateEnglishGenerateOutput(data, request) {
   });
 
   var totalAnswerable = questions.reduce(function(sum, question) { return sum + answerableCount(question); }, 0);
-  if (expectsQuestions ? totalAnswerable !== request.question_count : totalAnswerable !== 0) {
-    throw new EnglishGenerateError('INVALID_OUTPUT', '可作答题量不足');
+  if (expectsArticleOnly) {
+    if (totalAnswerable !== 0) {
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', '仅生成文章时不允许有可作答题目');
+    }
+  } else if (expectsQuestions) {
+    if (totalAnswerable !== request.question_count) {
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', '可作答题量不匹配（期望 ' + request.question_count + '，实际 ' + totalAnswerable + '）');
+    }
+  } else {
+    if (totalAnswerable !== 0) {
+      throw new EnglishGenerateError('QUESTION_COUNT_MISMATCH', '不应该生成题目');
+    }
   }
 
   var result = { article: article, words_used: wordsUsed, questions: questions };
@@ -227,9 +285,10 @@ function createEnglishGenerateHandler(deps) {
     try {
       input = validateEnglishGenerateInput(req.body);
     } catch (error) {
-      return res.status(400).json({ ok: false, error: '请求参数不合法' });
+      var msg = String((error && error.message) || '请求参数不合法');
+      return res.status(400).json({ ok: false, error: msg, code: 'INVALID_INPUT' });
     }
-    if (!configured()) return res.status(503).json({ ok: false, error: 'AI 服务暂未配置' });
+    if (!configured()) return res.status(503).json({ ok: false, error: 'AI 服务暂未配置', code: 'AI_NOT_CONFIGURED' });
 
     var controller = new AbortController();
     var timer;
@@ -256,12 +315,20 @@ function createEnglishGenerateHandler(deps) {
       var data = validateEnglishGenerateOutput(parsed, input);
       return res.json({ ok: true, source: 'deepseek', data: data, usage: aiResult.usage || null });
     } catch (error) {
-      var message = String(error && error.message || '');
-      var isTimeout = error && (error.code === 'TIMEOUT' || error.name === 'AbortError') || /超时|timeout/i.test(message);
-      try { logger.error('[ENGLISH-GEN] failed', { code: isTimeout ? 'TIMEOUT' : (error && error.code || 'UPSTREAM') }); } catch (_) {}
-      if (isTimeout) return res.status(504).json({ ok: false, error: 'AI 生成超时，请重试' });
-      if (error && error.code === 'INVALID_OUTPUT') return res.status(502).json({ ok: false, error: 'AI 返回格式异常，请重试' });
-      return res.status(502).json({ ok: false, error: 'AI 服务暂时无响应，请重试' });
+      var message = String((error && error.message) || '');
+      var eCode = error && error.code ? String(error.code).toUpperCase() : 'UPSTREAM_ERROR';
+      var isTimeout = eCode === 'TIMEOUT' || (error && error.name === 'AbortError') || /超时|timeout/i.test(message);
+      var status = 502;
+      var replyCode = eCode;
+      var replyMsg = message || 'AI 服务暂时无响应，请重试';
+      if (isTimeout) { status = 504; replyCode = 'AI_TIMEOUT'; replyMsg = 'AI 生成超时，请重试'; }
+      else if (eCode === 'INVALID_INPUT') { status = 400; replyMsg = message || '请求参数不合法'; }
+      else if (eCode === 'INVALID_OUTPUT') { status = 502; replyCode = 'INVALID_OUTPUT'; replyMsg = 'AI 返回格式异常，请重试'; }
+      else if (eCode === 'QUESTION_COUNT_MISMATCH') { status = 502; replyCode = 'QUESTION_COUNT_MISMATCH'; replyMsg = message || '题量不匹配'; }
+      else if (eCode === 'INVALID_CLOZE_STRUCTURE') { status = 502; replyCode = 'INVALID_CLOZE_STRUCTURE'; replyMsg = '完形填空格式错误，请重试'; }
+      else if (eCode === 'UPSTREAM' || eCode === 'AI_NOT_CONFIGURED') { status = 503; replyCode = eCode === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'UPSTREAM_ERROR'; replyMsg = 'AI 服务暂未配置或不可用'; }
+      try { logger.error('[ENGLISH-GEN] failed', { code: replyCode, detail: message }); } catch (_) {}
+      return res.status(status).json({ ok: false, error: replyMsg, code: replyCode });
     } finally {
       clearTimeout(timer);
     }

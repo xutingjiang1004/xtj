@@ -189,12 +189,12 @@ test('cloze preserves the blanks structure', function() {
 
 test('model output with zero questions is rejected', function() {
   var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
-  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [] }), request); }, /questions 格式错误/);
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [] }), request); }, /questions 数量不足/);
 });
 
 test('model output with too few answerable items is rejected', function() {
   var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
-  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [validModel().questions[0]] }), request); }, /可作答题量不足/);
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [validModel().questions[0]] }), request); }, /可作答题量不匹配/);
 });
 
 test('model output with duplicate question ids is rejected', function() {
