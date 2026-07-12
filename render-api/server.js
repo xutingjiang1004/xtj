@@ -1,12 +1,12 @@
-// xtj Admin API service for Render deployment.
+﻿// xtj Admin API service for Render deployment.
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { createPhotoRecord } = require('./photo-create');
-const { registerEnglishGenerateRoute } = require('./english-generate');
+const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
 
@@ -1309,7 +1309,6 @@ const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const USER_STYLE_MARKER = '__user_style__';
-const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';
 const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
@@ -1352,7 +1351,6 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AI_AGENT_MESSAGE_MARKER)
     .neq('media_type', AI_AGENT_CONFIG_MARKER)
     .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
-    .neq('media_type', AI_ENGLISH_LEARNING_MARKER)
     .neq('media_type', REVOKED_TOKEN_MARKER);
 }
 
@@ -2505,11 +2503,13 @@ function rateLimit(windowMs, maxRequests) {
       record.resetAt = now + windowMs;
     }
     if (record.count >= maxRequests) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
       logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
       res.setHeader('X-RateLimit-Limit', maxRequests);
       res.setHeader('X-RateLimit-Remaining', 0);
       res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
-      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+      res.setHeader('Retry-After', retryAfterSeconds);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: retryAfterSeconds });
     }
     record.count++;
     rateLimitStore.set(key, record);
@@ -4455,6 +4455,7 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
       userName: req.userName,
       supabase: supabase,
       supabaseUrl: SUPABASE_URL,
+      createThumbnail: function(params) { return createPhotoThumbnail(Object.assign({}, params, { sharp: sharp })); },
       logger: console
     });
     return res.status(createResult.status).json(createResult.body);
@@ -9357,306 +9358,6 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
-});
-
-function sanitizeEnglishWordState(input) {
-  var en = String(input && input.en || '').trim().toLowerCase().slice(0, 60);
-  if (!en || !/^[a-zA-Z\s\-']+$/.test(en)) return null;
-  return {
-    id: String(input && input.id || ('w_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8))).slice(0, 80),
-    en: en,
-    cn: String(input && input.cn || '').trim().slice(0, 80),
-    mastery: Math.max(0, Math.min(100, parseInt(input && input.mastery, 10) || 0)),
-    seen: Math.max(0, Math.min(9999, parseInt(input && input.seen, 10) || 0)),
-    correct: Math.max(0, Math.min(9999, parseInt(input && input.correct, 10) || 0)),
-    wrong: Math.max(0, Math.min(9999, parseInt(input && input.wrong, 10) || 0)),
-    lastReviewedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.lastReviewedAt) || 0)),
-    addedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.addedAt) || Date.now())),
-    updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input && input.updatedAt) || Date.now()))
-  };
-}
-
-function sanitizeEnglishLearningState(input) {
-  input = input && typeof input === 'object' ? input : {};
-  var wordMap = {};
-  (Array.isArray(input.words) ? input.words : []).slice(0, 240).forEach(function(item) {
-    var w = sanitizeEnglishWordState(item);
-    if (!w) return;
-    var prev = wordMap[w.en];
-    if (!prev || (w.updatedAt || 0) >= (prev.updatedAt || 0)) wordMap[w.en] = w;
-  });
-  var words = Object.keys(wordMap).map(function(k) { return wordMap[k]; }).slice(0, 200);
-  var allowedLevels = { cet4: true, cet6: true, ielts: true };
-  var allowedTypes = { article: true, mc: true, cloze: true };
-  var cleanTypes = function(arr) {
-    return (Array.isArray(arr) ? arr : []).map(String).filter(function(t) { return allowedTypes[t]; }).slice(0, 3);
-  };
-  var history = (Array.isArray(input.history) ? input.history : []).slice(0, 80).map(function(h) {
-    var level = String(h && h.level || 'cet4').toLowerCase();
-    if (!allowedLevels[level]) level = 'cet4';
-    return {
-      id: String(h && h.id || ('h_' + Date.now())).slice(0, 80),
-      correct: Math.max(0, Math.min(999, parseInt(h && (h.correct != null ? h.correct : h.score), 10) || 0)),
-      score: Math.max(0, Math.min(999, parseInt(h && (h.score != null ? h.score : h.correct), 10) || 0)),
-      total: Math.max(0, Math.min(999, parseInt(h && h.total, 10) || 0)),
-      pct: Math.max(0, Math.min(100, parseInt(h && h.pct, 10) || 0)),
-      level: level,
-      types: cleanTypes(h && h.types),
-      topic: String(h && h.topic || '').slice(0, 80),
-      words: (Array.isArray(h && h.words) ? h.words : []).map(String).slice(0, 40),
-      mistakeCount: Math.max(0, Math.min(999, parseInt(h && h.mistakeCount, 10) || 0)),
-      time: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(h && h.time) || Date.now()))
-    };
-  });
-  var tombstones = (Array.isArray(input.tombstones) ? input.tombstones : []).slice(0, 500).map(function(t) {
-    return { en: String(t && t.en || '').trim().toLowerCase().slice(0, 60), id: String(t && t.id || '').slice(0, 80), deletedAt: Math.max(0, Number(t && t.deletedAt) || 0), updatedAt: Math.max(0, Number(t && t.updatedAt) || 0) };
-  }).filter(function(t) { return t.en && /^[a-zA-Z\s\-']+$/.test(t.en); });
-  var mistakes = (Array.isArray(input.mistakes) ? input.mistakes : []).slice(0, 200).map(function(m) {
-    return { en: String(m && m.en || '').trim().toLowerCase().slice(0, 60), cn: String(m && m.cn || '').trim().slice(0, 80), count: Math.max(0, Math.min(999, parseInt(m && m.count, 10) || 0)), updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(m && m.updatedAt) || 0)) };
-  }).filter(function(m) { return m.en && /^[a-zA-Z\s\-']+$/.test(m.en); });
-  var settingsIn = input.settings && typeof input.settings === 'object' ? input.settings : {};
-  var levelDefault = String(settingsIn.defaultLevel || 'cet4').toLowerCase();
-  if (!allowedLevels[levelDefault]) levelDefault = 'cet4';
-  var len = String(settingsIn.articleLength || 'medium').toLowerCase();
-  if (['short', 'medium', 'long'].indexOf(len) < 0) len = 'medium';
-  var focus = cleanTypes(settingsIn.focus);
-  var settingsUpdatedAt = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(settingsIn.updatedAt) || 0));
-  return {
-    version: 1,
-    words: words,
-    tombstones: tombstones,
-    history: history,
-    mistakes: mistakes,
-    settings: {
-      defaultLevel: levelDefault,
-      articleLength: len,
-      questionCount: Math.max(4, Math.min(10, parseInt(settingsIn.questionCount, 10) || 6)),
-      focus: focus,
-      topic: String(settingsIn.topic || '').slice(0, 80),
-      updatedAt: settingsUpdatedAt
-    },
-    updatedAt: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Number(input.updatedAt) || Date.now())),
-    server_updated_at: Date.now()
-  };
-}
-
-async function loadEnglishLearningRow(userName) {
-  var { data, error } = await supabase.from('posts')
-    .select('id, content, created_at')
-    .eq('user_name', userName)
-    .eq('media_type', AI_ENGLISH_LEARNING_MARKER)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-
-app.post('/api/agent/english/state', authenticateUser, rateLimit(60000, 30), async (req, res) => {
-  try {
-    var userName = req.userName;
-    var baseRevision = req.body && req.body.base_revision;
-    var payload = sanitizeEnglishLearningState((req.body && req.body.data) || req.body || {});
-    var actorKey = 'english_learning_state:' + userName;
-    payload.server_updated_at = Date.now();
-    var content = JSON.stringify(payload);
-
-    // 使用数据库 RPC 原子 compare-and-swap
-    var rpcResult = await supabase.rpc('save_english_state', {
-      p_user_name: userName,
-      p_content: content,
-      p_base_revision: typeof baseRevision !== 'undefined' && baseRevision !== null ? baseRevision : null,
-      p_actor_key: actorKey
-    });
-
-    if (!rpcResult.data || rpcResult.data.ok === false) {
-      if (rpcResult.data && rpcResult.data.error === '版本冲突') {
-        var conflictState = null;
-        var serverContent = rpcResult.data.server_content;
-        if (typeof serverContent === 'string' && serverContent) {
-          try { conflictState = sanitizeEnglishLearningState(JSON.parse(serverContent)); } catch (parseErr) { conflictState = null; }
-        } else if (serverContent && typeof serverContent === 'object') {
-          conflictState = sanitizeEnglishLearningState(serverContent);
-        }
-        if (!conflictState) {
-          var latestRow = await loadEnglishLearningRow(userName);
-          var latestParsed = latestRow && latestRow.content ? safeJsonParse(latestRow.content) : {};
-          conflictState = sanitizeEnglishLearningState(latestParsed || {});
-        }
-        conflictState.revision = rpcResult.data.server_revision || conflictState.revision || 0;
-        return res.status(409).json({ ok: false, error: '版本冲突', server: conflictState });
-      }
-      return res.status(500).json({ error: (rpcResult.data && rpcResult.data.error) || '同步保存失败' });
-    }
-
-    return res.json({
-      ok: true,
-      saved: true,
-      data: {
-        revision: rpcResult.data.revision || 1,
-        words_count: payload.words.length,
-        history_count: payload.history.length,
-        mistakes_count: payload.mistakes.length,
-        server_updated_at: payload.server_updated_at
-      }
-    });
-  } catch (e) {
-    console.error('[ENGLISH-STATE] save failed:', e && e.message);
-    return res.status(500).json({ error: '同步保存失败' });
-  }
-});
-
-registerEnglishGenerateRoute(app, {
-  authenticateUser: authenticateUser,
-  rateLimit: rateLimit,
-  callDeepSeek: callDeepSeek,
-  isDeepSeekConfigured: function() { return !!DEEPSEEK_API_KEY; },
-  logger: console,
-  timeoutMs: 55000
-});
-
-
-// POST /api/agent/english/parse-batch - 英语学习: AI 智能解析批量输入
-// 接收任意格式文本 (单词/句子/短语混合), 返回 [{en, cn}] 列表
-app.post('/api/agent/english/parse-batch', authenticateUser, rateLimit(60000, 15), async (req, res) => {
-  try {
-    var text = String((req.body && req.body.text) || '').trim();
-    var maxCount = Math.max(1, Math.min(200, parseInt(req.body && req.body.max_count, 10) || 60));
-    if (!text) return res.status(400).json({ error: '文本为空' });
-    if (text.length > 4000) text = text.slice(0, 4000);
-
-    var prompt = [
-      '你是一个英语单词提取助手。从用户输入的文本中提取**值得学习的英语单词或短语**, 并给出简洁的中文释义。',
-      '',
-      '【输入文本】',
-      text,
-      '',
-      '【要求】',
-      '1. 提取用户**想学的**英语单词或短语 (不要提取每个词, 只提取有学习价值的)。',
-      '2. 中等及以上难度的常用词优先; 过于简单 (the, a, is) 跳过。',
-      '3. 短语 (如 take off, look forward to) 可以保留为整体。',
-      '4. 去重; 最多输出 ' + maxCount + ' 条。',
-      '5. 严格输出包含 words 数组的 JSON 对象, 严禁额外文字, 严禁 markdown 代码块。',
-      '',
-      '输出格式 (严格 JSON):',
-      '{"words":[{"en":"apple","cn":"苹果"},{"en":"take off","cn":"起飞; 脱下"}]}'
-    ].join('\n');
-
-    var aiResult;
-    try {
-      aiResult = await callDeepSeek(
-        [
-          { role: 'system', content: '你是英语单词提取 AI, 严格输出包含 words 数组的 JSON 对象, 不输出任何额外文字。' },
-          { role: 'user', content: prompt }
-        ],
-        { thinking_mode: 'low', max_tokens: 2048, response_format: { type: 'json_object' } }
-      );
-    } catch (e) {
-      console.error('[ENGLISH-PARSE] AI failed:', e && e.message);
-      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
-    }
-
-    var raw = (aiResult && aiResult.content) || '';
-    var parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      console.error('[ENGLISH-PARSE] JSON parse failed:', e && e.message);
-      return res.status(502).json({ error: 'AI 返回格式错误, 请重试' });
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.words)) {
-      return res.status(502).json({ error: 'AI 返回格式错误, 请重试' });
-    }
-    var arr = parsed.words;
-
-    var seen = {};
-    var out = [];
-    for (var i = 0; i < arr.length && out.length < maxCount; i++) {
-      var w = arr[i];
-      if (!w) continue;
-      var en = String(w.en || w.word || w.english || '').trim().toLowerCase();
-      var cn = String(w.cn || w.meaning || w.zh || '').trim().slice(0, 80);
-      if (!en) continue;
-      if (!/^[a-zA-Z\s\-']+$/.test(en)) continue;
-      if (en.length > 60) continue;
-      if (seen[en]) continue;
-      seen[en] = true;
-      out.push({ en: en, cn: cn });
-    }
-
-    return res.json({ ok: true, data: { words: out }, usage: aiResult.usage || null });
-  } catch (e) {
-    console.error('[ENGLISH-PARSE] exception:', e && e.message);
-    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
-  }
-});
-
-// POST /api/agent/english/explain-word - AI 查询单词释义/例句/同义词
-// 接收 en, 返回 {en, cn, examples, synonyms, tip}
-app.post('/api/agent/english/explain-word', authenticateUser, rateLimit(60000, 30), async (req, res) => {
-  try {
-    var en = String((req.body && req.body.en) || '').trim().toLowerCase();
-    if (!en) return res.status(400).json({ error: '单词为空' });
-    if (!/^[a-zA-Z\s\-']+$/.test(en) || en.length > 60) {
-      return res.status(400).json({ error: '单词格式不合法' });
-    }
-    var context = String((req.body && req.body.context) || '').slice(0, 200);
-    var prompt = [
-      '请为英语单词/短语 "' + en + '" 提供简洁学习信息。',
-      context ? ('用户上下文: ' + context) : '',
-      '',
-      '【要求】',
-      '1. cn: 简洁中文释义 (≤30字, 多个含义用 ; 分隔)。',
-      '2. examples: 2 个日常英文例句 (数组, 每个 ≤80 字符)。',
-      '3. synonyms: 最多 3 个常用近义词 (数组)。',
-      '4. tip: 一句话记忆技巧或易错点 (≤50字)。',
-      '5. 严格输出 JSON 对象, 严禁额外文字, 严禁 markdown 代码块。',
-      '',
-      '输出格式:',
-      '{"en":"' + en + '","cn":"","examples":["",""], "synonyms":["","",""], "tip":""}'
-    ].filter(Boolean).join('\n');
-
-    var aiResult;
-    try {
-      aiResult = await callDeepSeek(
-        [
-          { role: 'system', content: '你是英语单词解释 AI, 严格输出 JSON 对象, 不输出任何额外文字。' },
-          { role: 'user', content: prompt }
-        ],
-        { thinking_mode: 'low', max_tokens: 600, response_format: { type: 'json_object' } }
-      );
-    } catch (e) {
-      console.error('[ENGLISH-EXPLAIN] AI failed:', e && e.message);
-      return res.status(500).json({ error: 'AI 调用失败: ' + (e.message || '未知') });
-    }
-
-    var raw = (aiResult && aiResult.content) || '';
-    var firstObj = raw.indexOf('{');
-    var lastObj = raw.lastIndexOf('}');
-    var jsonText = (firstObj >= 0 && lastObj > firstObj) ? raw.slice(firstObj, lastObj + 1) : raw;
-    var data;
-    try {
-      data = JSON.parse(jsonText);
-    } catch (e) {
-      console.error('[ENGLISH-EXPLAIN] JSON parse failed:', e && e.message, 'raw:', raw.slice(0, 200));
-      return res.status(500).json({ error: 'AI 返回格式错误, 请重试' });
-    }
-    if (!data || typeof data !== 'object') return res.status(500).json({ error: 'AI 返回数据异常' });
-
-    var cn = String(data.cn || data.meaning || '').trim().slice(0, 80);
-    var examples = Array.isArray(data.examples) ? data.examples.slice(0, 2).map(function(s) { return String(s || '').slice(0, 200); }) : [];
-    var synonyms = Array.isArray(data.synonyms) ? data.synonyms.slice(0, 3).map(function(s) { return String(s || '').slice(0, 40); }) : [];
-    var tip = String(data.tip || data.memo || '').trim().slice(0, 120);
-
-    return res.json({
-      ok: true,
-      data: { en: en, cn: cn, examples: examples, synonyms: synonyms, tip: tip },
-      usage: aiResult.usage || null
-    });
-  } catch (e) {
-    console.error('[ENGLISH-EXPLAIN] exception:', e && e.message);
-    try { return res.status(500).json({ error: '服务异常: ' + (e.message || '未知') }); } catch (_) {}
-  }
 });
 
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
