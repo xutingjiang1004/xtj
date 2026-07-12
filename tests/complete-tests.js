@@ -382,11 +382,11 @@ test('core.js cache filter excludes retired English marker', function(){
 });
 
 test('retired English source files do not exist', function(){
-  assert.ok(!fileExists('render-api/english-generate.js'), 'english-generate.js still exists');
-  assert.ok(!fileExists('js/english-learning.js'), 'english-learning.js still exists');
-  assert.ok(!fileExists('js/english-dict.js'), 'english-dict.js still exists');
-  assert.ok(!fileExists('css/english-learning.css'), 'english-learning.css still exists');
-  assert.ok(!fileExists('tests/english-generate.test.js'), 'english-generate.test.js still exists');
+  assert.ok(!fs.existsSync('render-api/english-generate.js'), 'english-generate.js still exists');
+  assert.ok(!fs.existsSync('js/english-learning.js'), 'english-learning.js still exists');
+  assert.ok(!fs.existsSync('js/english-dict.js'), 'english-dict.js still exists');
+  assert.ok(!fs.existsSync('css/english-learning.css'), 'english-learning.css still exists');
+  assert.ok(!fs.existsSync('tests/english-generate.test.js'), 'english-generate.test.js still exists');
 });
 
 test('index.html contains no English module references', function(){
