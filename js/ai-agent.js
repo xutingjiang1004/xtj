@@ -4952,61 +4952,6 @@ function showChatMessages() {
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
-    // 鈽?U3: 英语瀛︿範鎸夐挳 (鍦ㄦ繁搴︽€濊€冨乏杈? AI 鑱婂ぉ鍐呭叆鍙?
-    // 鈽?鏋佺畝瀹炵幇: 鐢ㄥ師鐢?DOM + 内联 onclick, 避开 el() helper 任何潜在问题
-    var englishBtn = document.createElement('button');
-    englishBtn.type = 'button';
-    englishBtn.id = 'aiEnglishToggle';
-    englishBtn.className = 'ai-english-toggle';
-    englishBtn.setAttribute('aria-label', '英语学习');
-    englishBtn.title = '英语学习 - 单词库与 AI 阅读练习';
-    var englishSvgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    englishSvgEl.setAttribute('viewBox', '0 0 24 24');
-    englishSvgEl.setAttribute('width', '14');
-    englishSvgEl.setAttribute('height', '14');
-    englishSvgEl.setAttribute('fill', 'none');
-    englishSvgEl.setAttribute('stroke', 'currentColor');
-    englishSvgEl.setAttribute('stroke-width', '2');
-    englishSvgEl.setAttribute('stroke-linecap', 'round');
-    englishSvgEl.setAttribute('stroke-linejoin', 'round');
-    englishSvgEl.style.verticalAlign = '-2px';
-    var pp1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pp1.setAttribute('d', 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20');
-    englishSvgEl.appendChild(pp1);
-    var pp2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pp2.setAttribute('d', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z');
-    englishSvgEl.appendChild(pp2);
-    var ll1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    ll1.setAttribute('x1', '9'); ll1.setAttribute('y1', '7'); ll1.setAttribute('x2', '15'); ll1.setAttribute('y2', '7');
-    englishSvgEl.appendChild(ll1);
-    var ll2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    ll2.setAttribute('x1', '9'); ll2.setAttribute('y1', '11'); ll2.setAttribute('x2', '15'); ll2.setAttribute('y2', '11');
-    englishSvgEl.appendChild(ll2);
-    englishBtn.appendChild(englishSvgEl);
-    var englishLabel = document.createElement('span');
-    englishLabel.className = 'ai-english-label';
-    englishLabel.textContent = '英语';
-    englishBtn.appendChild(englishLabel);
-    // 鈽?U3: 鐢?inline onclick 灞炴€? 瀹屽叏閬垮紑 addEventListener 任何问题
-    englishBtn.setAttribute('onclick', 'window.__aiEnglishClick && window.__aiEnglishClick(event)');
-    header.appendChild(englishBtn);
-    try { if (AI_DEBUG) console.log('[AI] English button appended'); } catch (e) {}
-
-    // 鈽?U3: 鍙礋璐ｈ皟鐢?window.EnglishLearning.open(), 涓嶇洿鎺ユ搷浣?panelEnglishLearning
-    window.__aiEnglishClick = function(ev) {
-      try {
-        if (ev && ev.preventDefault) ev.preventDefault();
-        if (ev && ev.stopPropagation) ev.stopPropagation();
-        if (window.EnglishLearning && typeof window.EnglishLearning.open === 'function') {
-          window.EnglishLearning.open();
-        } else {
-          try { notify('英语学习模块加载中，请稍后再试'); } catch (e) {}
-        }
-      } catch (e) {
-        try { if (AI_DEBUG) console.error('[EnglishBtn] error:', e); } catch (e2) {}
-      }
-    };
-
     // 深度思考?toggle 按钮
     var deepThinkBtn = el('button', {
       type: 'button',

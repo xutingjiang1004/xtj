@@ -95,8 +95,6 @@ const JS_FILES = [
   'js/pro-style.js',
   'js/login-device.js',
   'js/ai-agent.js',
-  'js/english-learning.js',
-  'js/english-dict.js',
   'js/theme-toggle.js',
   'js/config.js',
   'js/photo-wall/upload-ui.js',
@@ -113,7 +111,6 @@ const CSS_FILES = [
   'css/visual-refinements.css',
   'css/admin.css',
   'css/ai-agent.css',
-  'css/english-learning.css',
   'css/ui-shell.css',
   'css/photo-preview.css'
 ];
