@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --xtj-radius-sm: 14px;
   --xtj-radius-md: 20px;
   --xtj-radius-lg: 28px;
@@ -491,85 +491,17 @@
   border-radius: var(--xtj-content-radius) !important;
 }
 
-#panelEnglishLearning .el-page {
-  padding: 0 16px calc(24px + env(safe-area-inset-bottom)) !important;
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
 
-#panelEnglishLearning .el-header {
-  margin: 0 -16px !important;
-  padding: calc(14px + env(safe-area-inset-top)) 16px 12px !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
 
-#panelEnglishLearning .el-hero {
-  gap: 12px;
-  padding: 20px 0 12px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
 
-#panelEnglishLearning .el-tabs {
-  position: relative !important;
-  top: auto !important;
-  width: 100% !important;
-  margin: 0 0 16px !important;
-  border-radius: var(--xtj-content-radius) !important;
-}
 
-#panelEnglishLearning .el-main {
-  flex: 0 0 auto !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-}
 
-#panelEnglishLearning .el-pane.active,
-#panelEnglishLearning .el-dashboard-grid,
-#panelEnglishLearning .el-practice-grid {
-  display: block !important;
-  min-height: 0 !important;
-}
 
-#panelEnglishLearning .el-card,
-#panelEnglishLearning .el-locale-bar {
-  border-radius: var(--xtj-content-radius) !important;
-  border-color: var(--xtj-content-line) !important;
-  background: var(--xtj-content-surface) !important;
-  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
-}
 
-#panelEnglishLearning .el-card + .el-card,
-#panelEnglishLearning .el-practice-output > .el-card {
-  margin-top: 12px !important;
-}
 
-#panelEnglishLearning .el-practice-output {
-  display: block !important;
-  margin-top: 12px;
-}
 
-#panelEnglishLearning .el-sync {
-  min-height: 28px;
-  border-radius: var(--xtj-control-radius) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
 
-#panelEnglishLearning .el-sync.is-local {
-  color: var(--el-muted) !important;
-  border-color: transparent !important;
-}
 
-#panelEnglishLearning .el-sync.is-error,
-#panelEnglishLearning .el-sync.is-merging {
-  border-color: rgba(200, 77, 91, 0.24) !important;
-  background: rgba(200, 77, 91, 0.06) !important;
-}
 
 @media (max-width: 1023px) {
   #panelPosts .publish-box,
@@ -579,9 +511,6 @@
   #panelProfile .xtj-vip-card,
   #panelProfile .profile-pro-style-entry,
   #panelProfile .profile-settings,
-  #panelEnglishLearning .el-card {
-    border-radius: var(--xtj-content-radius) !important;
-  }
 }
 
 [data-theme="dark"] #panelPosts .stats,
@@ -590,23 +519,11 @@
 [data-theme="dark"] #panelProfile .profile-pro-style-entry,
 [data-theme="dark"] #panelProfile .profile-settings,
 [data-theme="dark"] #panelProfile .profile-activity-board,
-[data-theme="dark"] #panelEnglishLearning .el-card,
-[data-theme="dark"] #panelEnglishLearning .el-locale-bar {
-  background: rgba(20, 36, 31, 0.82) !important;
-  border-color: rgba(164, 216, 205, 0.12) !important;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.16) !important;
-}
 
 @media (prefers-reduced-motion: reduce) {
   #panelPosts *,
   #panelChat *,
   #panelProfile *,
-  #panelEnglishLearning * {
-    scroll-behavior: auto !important;
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 1ms !important;
-  }
 }
 
 @media (max-width: 1023.98px) {
@@ -643,11 +560,6 @@
   #panelAi .photo-wall-container,
   #panelProfile .dock-profile-container,
   #panelDeepThink .dt-page,
-  #panelEnglishLearning .el-page {
-    width: min(1220px, 100%);
-    margin: 0 auto;
-    border-radius: 28px;
-  }
 
   #panelPosts .wrap,
   #panelChat .dock-chat-container,
@@ -665,11 +577,6 @@
   [data-theme="dark"] #panelAi .photo-wall-container,
   [data-theme="dark"] #panelProfile .dock-profile-container,
   [data-theme="dark"] #panelDeepThink .dt-page,
-  [data-theme="dark"] #panelEnglishLearning .el-page {
-    background: var(--xtj-panel-shell-dark) !important;
-    border-color: rgba(164, 216, 205, 0.12) !important;
-    box-shadow: var(--xtj-glass-shadow) !important;
-  }
 
   #panelPosts .wrap {
     padding: 22px;
@@ -831,17 +738,7 @@
     box-shadow: none !important;
   }
 
-  #panelEnglishLearning .el-page {
-    padding: 0 24px 24px !important;
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-  }
 
-  #panelEnglishLearning .el-dashboard-grid,
-  #panelEnglishLearning .el-practice-grid {
-    display: block !important;
-  }
 }
 
 
