@@ -34,6 +34,13 @@ function validModel(overrides) {
       options: ['apple', 'pear', 'orange', 'banana'],
       answer: 0,
       explain: 'The article uses apple.'
+    }, {
+      id: 'q2',
+      type: 'mc',
+      question: 'What is apple in Chinese?',
+      options: ['苹果', '梨', '橙子', '香蕉'],
+      answer: 0,
+      explain: 'Apple means 苹果.'
     }]
   }, overrides || {});
 }
@@ -51,8 +58,10 @@ async function invoke(options) {
   options = options || {};
   var res = fakeResponse();
   var capturedOptions;
+  var capturedMessages;
   var handler = createEnglishGenerateHandler({
     callDeepSeek: options.callDeepSeek || async function(messages, callOptions) {
+      capturedMessages = messages;
       capturedOptions = callOptions;
       return { content: JSON.stringify(validModel()), usage: null };
     },
@@ -61,7 +70,7 @@ async function invoke(options) {
     logger: { error: function() {} }
   });
   await handler({ body: options.body || validBody() }, res);
-  return { res: res, callOptions: capturedOptions };
+  return { res: res, callOptions: capturedOptions, messages: capturedMessages };
 }
 
 test('generate route is registered behind authentication and an independent limiter', function() {
@@ -170,11 +179,108 @@ test('cloze preserves the blanks structure', function() {
   var result = validateEnglishGenerateOutput(validModel({
     article: '',
     questions: [{
-      id: 'q1', type: 'cloze', question: 'Complete the text.', context: 'I eat ___.',
-      blanks: [{ options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' }]
+      id: 'q1', type: 'cloze', question: 'Complete the text.', context: 'I eat ___ and ___.',
+      blanks: [{ options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' }, { options: ['learn', 'sleep'], answer: 0, explain: 'Learn fits.' }]
     }]
   }), request);
   assert.equal(result.questions[0].blanks[0].answer, 0);
+});
+
+
+test('model output with zero questions is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [] }), request); }, /questions 数量不足/);
+});
+
+test('model output with too few answerable items is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [validModel().questions[0]] }), request); }, /可作答题量不匹配/);
+});
+
+test('model output with duplicate question ids is rejected', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 2 }));
+  var q = validModel().questions[0];
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: [q, Object.assign({}, q)] }), request); }, /id 重复/);
+});
+
+test('mixed multiple-choice and cloze blanks count toward requested answerable total', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['mc', 'cloze'], question_count: 4 }));
+  var mc = validModel().questions[0];
+  var result = validateEnglishGenerateOutput(validModel({
+    questions: [
+      mc,
+      Object.assign({}, mc, { id: 'q2', question: 'Which is a fruit?' }),
+      { id: 'q3', type: 'cloze', question: 'Complete the text.', context: 'I eat ___ and ___.', blanks: [
+        { options: ['apples', 'cars'], answer: 0, explain: 'Apples can be eaten.' },
+        { options: ['learn', 'sleep'], answer: 0, explain: 'Learn fits the topic.' }
+      ] }
+    ]
+  }), request);
+  assert.equal(result.questions.length, 3);
+});
+
+
+
+test('article-only handler requests an empty questions array and returns 200', async function() {
+  var result = await invoke({
+    body: validBody({ types: ['article'], question_count: 4 }),
+    callDeepSeek: async function(messages) {
+      var prompt = messages.map(function(message) { return message.content; }).join('\n');
+      assert.match(prompt, /questions 必须严格为 \[\]/);
+      assert.doesNotMatch(prompt, /不能零题/);
+      assert.doesNotMatch(prompt, /不允许少题、多题、零题/);
+      return { content: JSON.stringify(validModel({ questions: [] })), usage: null };
+    }
+  });
+  assert.equal(result.res.statusCode, 200);
+  assert.equal(result.res.body.data.questions.length, 0);
+});
+
+test('question modes retain the strict requested answerable count prompt', async function() {
+  var result = await invoke({
+    body: validBody({ types: ['mc', 'cloze'], question_count: 4 })
+  });
+  var prompt = result.messages.map(function(message) { return message.content; }).join('\n');
+  assert.match(prompt, /总可作答题量必须等于 question_count/);
+  assert.match(prompt, /不允许少题、多题、零题或重复 id/);
+});
+
+test('article-only generation accepts an empty questions array', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['article'], question_count: 4 }));
+  var result = validateEnglishGenerateOutput(validModel({ questions: [] }), request);
+  assert.equal(result.questions.length, 0);
+});
+
+test('cloze placeholder count must match blanks length', function() {
+  var request = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 4 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q1', type: 'cloze', question: 'Complete.', context: 'Only one ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }, { options: ['c', 'd'], answer: 0 }, { options: ['e', 'f'], answer: 0 }, { options: ['g', 'h'], answer: 0 }
+    ] }]
+  }), request); }, /占位符数量不匹配/);
+
+  var request2 = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 2 }));
+  assert.throws(function() { validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q1', type: 'cloze', question: 'Complete.', context: 'Two ___ blanks ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }
+    ] }]
+  }), request2); }, /占位符数量不匹配/);
+
+  var request3 = validateEnglishGenerateInput(validBody({ types: ['cloze'], question_count: 2 }));
+  var result = validateEnglishGenerateOutput(validModel({
+    questions: [{ id: 'q_ok', type: 'cloze', question: 'Complete.', context: 'Two ___ blanks ___.', blanks: [
+      { options: ['a', 'b'], answer: 0 }, { options: ['c', 'd'], answer: 0 }
+    ] }]
+  }), request3);
+  assert.equal(result.questions[0].blanks.length, 2);
+});
+
+test('question ids reject selector-special characters', function() {
+  var request = validateEnglishGenerateInput(validBody({ question_count: 2 }));
+  ['q"bad', 'q[bad]', 'q bad'].forEach(function(id) {
+    var questions = validModel().questions.map(function(q, index) { return Object.assign({}, q, index === 0 ? { id: id } : {}); });
+    assert.throws(function() { validateEnglishGenerateOutput(validModel({ questions: questions }), request); }, /id 格式错误/);
+  });
 });
 
 test('handler timeout returns 504 and aborts the injected signal', async function() {
