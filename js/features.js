@@ -81,8 +81,7 @@
     var original = window.showToast;
     window.showToast = function () {
       var args = Array.prototype.slice.call(arguments);
-      var message = args[0];
-      args[0] = fixText(message == null ? '' : String(message)).trim() || '操作成功';
+      args[0] = fixText(args[0] == null ? '' : String(args[0])).trim() || '操作成功';
       return original.apply(this, args);
     };
     window.showToast.__xtjPatchedV10 = true;
