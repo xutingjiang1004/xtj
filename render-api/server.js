@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { createPhotoRecord } = require('./photo-create');
+const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const sharp = require('sharp');
 const { registerEnglishGenerateRoute } = require('./english-generate');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -4457,6 +4458,7 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
       userName: req.userName,
       supabase: supabase,
       supabaseUrl: SUPABASE_URL,
+      createThumbnail: function(params) { return createPhotoThumbnail(Object.assign({}, params, { sharp: sharp })); },
       logger: console
     });
     return res.status(createResult.status).json(createResult.body);
