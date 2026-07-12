@@ -113,6 +113,18 @@ test('profile shell cancels legacy named-grid tracks on wide layouts', function(
   assert.ok(/#panelProfile \.profile-main-view \{[\s\S]*?display: block;/.test(uiShell), 'profile wide layout does not reset to block flow');
   assert.ok(/#panelProfile \.profile-header,[\s\S]*?#panelProfile \.profile-settings \{[\s\S]*?grid-area: auto;[\s\S]*?grid-column: auto;/.test(uiShell), 'profile children still rely on legacy grid placement');
 });
+test('desktop chat layout helper keeps wide fine-pointer split explicit', function(){
+  var source = read('js/core.js');
+  assert.ok(source.indexOf('function shouldUseDesktopChatSplitLayout()') >= 0, 'missing desktop chat layout helper');
+  assert.ok(source.indexOf("window.matchMedia('(hover: hover) and (pointer: fine)')") >= 0, 'desktop chat split is not tied to fine pointer');
+  assert.ok(source.indexOf('function syncDockChatLayoutState()') >= 0, 'missing chat layout state sync');
+  assert.ok(source.indexOf('选择一条会话开始聊天') >= 0, 'desktop chat empty state missing');
+});
+test('coarse pointer touch target overrides and fine-pointer hover gate remain in source', function(){
+  var css = read('css/style.css');
+  assert.ok(/@media \(hover: hover\) and \(pointer: fine\)[\s\S]*?:where\([\s\S]*?\.chat-header \.back-btn[\s\S]*?\):not\(:disabled\):hover/.test(css), 'global button hover lift is not fine-pointer gated');
+  assert.ok(/@media \(pointer: coarse\)[\s\S]*?#photoPreviewOverlay \.photo-preview-close[\s\S]*?min-width: 44px !important;[\s\S]*?\.chat-header \.back-btn[\s\S]*?min-height: 44px !important;/.test(css), 'coarse pointer touch target override missing');
+});
 test('chat list and main chat surfaces stay flat', function(){
   var css = read('css/style.css') + '\n' + read('css/ui-enhance.css');
   assert.ok(css.indexOf('#panelChat .chat-list-item') >= 0);
@@ -290,6 +302,13 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
 test('dock tab and indicator selectors were not edited by this optimization', function(){
   var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak"', {encoding:'utf8'});
   assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
+});
+test('Playwright UI validation uses installed Edge channel and a dedicated test script', function(){
+  var pkg = JSON.parse(read('package.json'));
+  var config = read('playwright.config.js');
+  assert.strictEqual(pkg.scripts['test:ui'], 'playwright test', 'missing npm run test:ui');
+  assert.ok(config.indexOf("channel: process.env.PW_CHANNEL || 'msedge'") >= 0, 'Playwright is not configured to use system Edge');
+  assert.ok(config.indexOf("outputDir: 'output/playwright/test-results'") >= 0, 'Playwright output dir missing');
 });
 
 console.log('\n=== Photo Upload Failure Behavior ===');

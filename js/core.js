@@ -8564,6 +8564,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         loadDockChatList();
                     }
+                    syncDockChatLayoutState();
                     startDMPolling(300000);
                 }
                 if (tab === 'ai') {
@@ -8618,6 +8619,7 @@ function renderProfileActivityList(kind) {
             installDockIndicatorDrag();
             window.addEventListener('resize', function() {
                 requestAnimationFrame(syncDockIndicator);
+                requestAnimationFrame(syncDockChatLayoutState);
             });
             setTimeout(function() {
                 requestAnimationFrame(syncDockIndicator);
@@ -8626,6 +8628,65 @@ function renderProfileActivityList(kind) {
             let dockChatActiveUser = null;
             let dockChatSending = false;
             let _dockPreviewUrl = null;
+
+            function shouldUseDesktopChatSplitLayout() {
+                var width = Math.max(
+                    window.innerWidth || 0,
+                    document.documentElement ? (document.documentElement.clientWidth || 0) : 0
+                );
+                if (width < 1280) return false;
+                try {
+                    return !!window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+                } catch (_) {
+                    return true;
+                }
+            }
+
+            function renderDockChatDesktopEmptyState() {
+                var messages = document.getElementById('dockChatMessages');
+                if (!messages || window.__xtjAiChatActive) return;
+                if (!window.currentUser) {
+                    messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
+                    return;
+                }
+                messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">💬</div><div>选择一条会话开始聊天</div><div style="font-size:12px;">左侧列表会保持可见，方便切换会话</div></div>';
+            }
+
+            function syncDockChatLayoutState() {
+                if (window.__xtjAiChatActive) return;
+                var listView = document.getElementById('dockChatListView');
+                var detailView = document.getElementById('dockChatDetailView');
+                var backBtn = document.getElementById('dockChatBackBtn');
+                var titleEl = document.getElementById('dockChatTitle');
+                var inputArea = document.querySelector('#panelChat .chat-input-area');
+                if (!listView || !detailView) return;
+
+                if (shouldUseDesktopChatSplitLayout()) {
+                    listView.classList.remove('hidden');
+                    detailView.classList.remove('hidden');
+                    if (backBtn) backBtn.style.display = 'none';
+                    if (!dockChatActiveUser) {
+                        if (titleEl) titleEl.textContent = '消息';
+                        if (inputArea) inputArea.style.display = 'none';
+                        renderDockChatDesktopEmptyState();
+                    } else if (inputArea) {
+                        inputArea.style.display = '';
+                    }
+                    return;
+                }
+
+                if (!dockChatActiveUser) {
+                    detailView.classList.add('hidden');
+                    listView.classList.remove('hidden');
+                    if (backBtn) backBtn.style.display = 'none';
+                    if (titleEl) titleEl.textContent = '消息';
+                } else {
+                    listView.classList.add('hidden');
+                    detailView.classList.remove('hidden');
+                    if (backBtn) backBtn.style.display = 'flex';
+                }
+                if (inputArea) inputArea.style.display = '';
+            }
 
                                                             function renderChatLoadingState(el, options) {
                 if (!el) return;
@@ -8647,11 +8708,8 @@ function renderProfileActivityList(kind) {
                     var chatMessages2 = document.getElementById('dockChatMessages');
                     if (chatMessages2) chatMessages2.classList.remove('ai-chat-container');
                 }
-                document.getElementById('dockChatDetailView').classList.add('hidden');
-                document.getElementById('dockChatListView').classList.remove('hidden');
-                document.getElementById('dockChatBackBtn').style.display = 'none';
-                document.getElementById('dockChatTitle').textContent = '消息';
                 window.dockChatListCacheTime = 0;
+                syncDockChatLayoutState();
                 loadDockChatList();
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
@@ -8712,13 +8770,11 @@ function renderProfileActivityList(kind) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
                     setUnreadBadgeCount(0);
                     renderDockChatAiEntry(el);
+                    syncDockChatLayoutState();
                     return;
                 }
                 if (!dockChatActiveUser) {
-                    document.getElementById('dockChatDetailView').classList.add('hidden');
-                    document.getElementById('dockChatListView').classList.remove('hidden');
-                    document.getElementById('dockChatBackBtn').style.display = 'none';
-                    document.getElementById('dockChatTitle').textContent = '消息';
+                    syncDockChatLayoutState();
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 var hadRenderedList = !!el.children.length;
@@ -8752,6 +8808,7 @@ function renderProfileActivityList(kind) {
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
                         renderDockChatAiEntry(el);
+                        syncDockChatLayoutState();
                         return;
                     }
                     const convMap = {};
@@ -8771,6 +8828,7 @@ function renderProfileActivityList(kind) {
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
                     renderDockChatAiEntry(el);
+                    syncDockChatLayoutState();
                     // 非阻塞加载头像: 先显示列表, 头像后台补上
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
@@ -8779,6 +8837,7 @@ function renderProfileActivityList(kind) {
                     window.dockChatListCacheTime = 0;
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
                     renderDockChatAiEntry(el);
+                    syncDockChatLayoutState();
                 }
             }
 
@@ -9364,6 +9423,7 @@ function renderProfileActivityList(kind) {
                     if (sendBtn) sendBtn.disabled = false;
                     if (imgBtn) imgBtn.disabled = false;
                 }
+                syncDockChatLayoutState();
             }
             window.updateChatAuthUI = updateChatAuthUI;
 
