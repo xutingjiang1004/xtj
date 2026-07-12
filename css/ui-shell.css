@@ -221,10 +221,6 @@
   color: var(--text-muted);
 }
 
-[data-theme="dark"] .action-btn:hover {
-  background: rgba(24, 48, 54, 0.62);
-}
-
 [data-theme="dark"] .chat-entry-bar {
   background: linear-gradient(135deg, rgba(18, 38, 43, 0.78), rgba(13, 29, 34, 0.56));
 }
@@ -461,7 +457,6 @@
   box-shadow: none !important;
 }
 
-#panelChat .chat-list-item:hover,
 #panelChat .chat-list-item.active,
 #panelChat .chat-list-item.unread {
   background: rgba(226, 243, 234, 0.58) !important;
@@ -541,6 +536,16 @@
   .dock-bar,
   .dock-bar > .dock-indicator {
     transition: none !important;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="dark"] .action-btn:hover {
+    background: rgba(24, 48, 54, 0.62);
+  }
+
+  #panelChat .chat-list-item:hover {
+    background: rgba(226, 243, 234, 0.58) !important;
   }
 }
 

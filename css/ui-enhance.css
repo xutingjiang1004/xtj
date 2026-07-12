@@ -23,19 +23,13 @@
 }
 
 /* ========== 5. Modal Enhanced Animation ========== */
-.modal-overlay.active .modal-box {
-  transform: translateY(0) scale(1);
-  opacity: 1;
-}
 .modal-box {
-  transform: translateY(40px) scale(0.94);
-  opacity: 0;
-  transition: transform 0.45s cubic-bezier(0.18, 1.1, 0.28, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: none;
+  opacity: 1;
+  transition: none;
 }
 .modal-overlay {
-  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
-              backdrop-filter 0.4s ease;
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .modal-overlay.active {
   backdrop-filter: blur(4px);
@@ -135,11 +129,6 @@
 .photo-wall-grid .pw-item {
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.photo-wall-grid .pw-item:hover {
-  transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
-  z-index: 2;
 }
 .photo-wall-grid .pw-item:active {
   transform: scale(0.98);
@@ -309,10 +298,6 @@
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.profile-user-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(5, 150, 105, 0.12);
-}
 .profile-user-card:active {
   transform: scale(0.98);
 }
@@ -321,10 +306,6 @@
 .announcement-item {
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.25s ease;
-}
-.announcement-item.visible:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 /* ========== 26. Chat List Items Lift ========== */
@@ -337,6 +318,24 @@
 .chat-list-item:active {
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .photo-wall-grid .pw-item:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+    z-index: 2;
+  }
+
+  .profile-user-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(5, 150, 105, 0.12);
+  }
+
+  .announcement-item.visible:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  }
+}
+
 .perf-lite .xtj-glass-card,
 .perf-lite .xtj-floating-panel,
 .perf-lite .announcement-item,
@@ -347,4 +346,10 @@
 .perf-balanced .xtj-glass-card,
 .perf-balanced .xtj-floating-panel {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xtj-skeleton-card {
+    animation: none !important;
+  }
 }
