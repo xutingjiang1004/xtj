@@ -124,9 +124,11 @@
     padding: 6px 12px;
     min-height: 32px;
   }
-  #panelPosts .post > .actions .action-btn:hover {
-    background: var(--btn-soft-hover, #e6e9ec);
-    border-color: var(--border-soft-hover, rgba(0, 0, 0, 0.12));
+  @media (hover: hover) and (pointer: fine) {
+    #panelPosts .post > .actions .action-btn:hover {
+      background: var(--btn-soft-hover, #e6e9ec);
+      border-color: var(--border-soft-hover, rgba(0, 0, 0, 0.12));
+    }
   }
   /* 宸茬偣璧炵姸鎬?鈥?鐢ㄦ煍鍜岀殑绾㈣壊锛屼笉鍒虹溂 */
   #panelPosts .post > .actions .action-btn.liked {
@@ -146,8 +148,10 @@
     border-color: rgba(255, 255, 255, 0.08);
     color: #c4cfc7;
   }
-  [data-theme="dark"] #panelPosts .post > .actions .action-btn:hover {
-    background: #28322d;
+  @media (hover: hover) and (pointer: fine) {
+    [data-theme="dark"] #panelPosts .post > .actions .action-btn:hover {
+      background: #28322d;
+    }
   }
   [data-theme="dark"] #panelPosts .post > .actions .action-btn.liked {
     background: rgba(255, 59, 96, 0.15);
@@ -447,9 +451,11 @@
     -webkit-backdrop-filter: none;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
-  #panelAi .pw-album-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  @media (hover: hover) and (pointer: fine) {
+    #panelAi .pw-album-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
   }
   #panelAi .pw-album-cover {
     border-radius: 8px;
@@ -858,10 +864,12 @@
     color: #e6ebe8 !important;
   }
   /* hover 鐘舵€?*/
-  [data-theme="dark"] .chat-list-item:hover,
-  [data-theme="dark"] .profile-setting-item:hover,
-  [data-theme="dark"] .post:hover {
-    background: rgba(35, 42, 52, 0.92) !important;
+  @media (hover: hover) and (pointer: fine) {
+    [data-theme="dark"] .chat-list-item:hover,
+    [data-theme="dark"] .profile-setting-item:hover,
+    [data-theme="dark"] .post:hover {
+      background: rgba(35, 42, 52, 0.92) !important;
+    }
   }
   /* 鏂囧瓧鑹?*/
   [data-theme="dark"] .content,
@@ -1000,11 +1008,13 @@
   color: #f3f4f8 !important;
 }
 
-[data-theme="dark"] .chat-list-item:hover,
-[data-theme="dark"] .profile-setting-item:hover,
-[data-theme="dark"] .post:hover,
-[data-theme="dark"] .profile-user-card:hover {
-  background: rgba(34, 34, 48, 0.96) !important;
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="dark"] .chat-list-item:hover,
+  [data-theme="dark"] .profile-setting-item:hover,
+  [data-theme="dark"] .post:hover,
+  [data-theme="dark"] .profile-user-card:hover {
+    background: rgba(34, 34, 48, 0.96) !important;
+  }
 }
 
 [data-theme="dark"] .content,
@@ -1124,8 +1134,10 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
   }
 
-  [data-theme="dark"] .chat-list-item:hover {
-    background: rgba(255, 255, 255, 0.035) !important;
+  @media (hover: hover) and (pointer: fine) {
+    [data-theme="dark"] .chat-list-item:hover {
+      background: rgba(255, 255, 255, 0.035) !important;
+    }
   }
 }
 

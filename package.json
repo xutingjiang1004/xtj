@@ -7,7 +7,8 @@
     "start": "node render-api/server.js",
     "build": "node scripts/build.js",
     "test": "node --check render-api/server.js && node --check render-api/photo-create.js && node --check scripts/build.js && node --check js/core.js && node --check js/login-device.js && node --check js/ai-agent.js && node --test tests/photo-create.test.js && node tests/complete-tests.js",
-    "test:smoke": "node --check render-api/server.js && node --check scripts/build.js"
+    "test:smoke": "node --check render-api/server.js && node --check scripts/build.js",
+    "test:ui": "playwright test"
   },
   "repository": {
     "type": "git",
