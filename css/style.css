@@ -1133,6 +1133,17 @@
         }
 
         .auth-form { display: flex; flex-direction: column; gap: 16px; }
+        .sr-only {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+        }
         .auth-form .af-input {
             width: 100%;
             padding: 14px 18px;
@@ -1165,6 +1176,9 @@
             cursor: pointer;
             transition: var(--trans-smooth);
             padding: 4px;
+            border: 0;
+            background: transparent;
+            font: inherit;
         }
         .auth-form .af-link:hover { color: var(--primary); }
         .auth-form .af-title {
@@ -10150,44 +10164,46 @@ body.ios-chat-keyboard-open .chat-input-area {
   transform-origin: center;
 }
 
-:where(
-  button:not(.dock-tab):not(.stat-user-summary-card),
-  input[type="button"],
-  input[type="submit"],
-  input[type="reset"],
-  .file-label,
-  .announcement-tab,
-  .announcement-btn,
-  .announcement-close-btn,
-  .announcement-back-btn,
-  .announcement-delete-btn,
-  .announcement-admin-btn,
-  .photo-wall-btn,
-  .pw-album-back-btn,
-  .photo-wall-upload-btn,
-  .pw-upload-sheet-close,
-  .pw-upload-sheet-btn,
-  .post-filter-clear,
-  .post-filter-user-reset,
-  .filter-toggle-btn,
-  .post-vis-toggle .vis-btn,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .profile-detail-logout-btn,
-  .action-btn,
-  .stat-close-btn,
-  .stat-record-more-btn,
-  .stat-record-action,
-  .spi-open-btn,
-  .back-to-stats-btn,
-  .send-btn,
-  .chat-img-btn,
-  .chat-header .back-btn,
-  .chat-header .chat-close-btn,
-  .upc-msg-btn,
-  .pp-confirm-btn
-):not(:disabled):hover {
-  transform: translateY(-1px) scale(1.01);
+@media (hover: hover) and (pointer: fine) {
+  :where(
+    button:not(.dock-tab):not(.stat-user-summary-card),
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    .file-label,
+    .announcement-tab,
+    .announcement-btn,
+    .announcement-close-btn,
+    .announcement-back-btn,
+    .announcement-delete-btn,
+    .announcement-admin-btn,
+    .photo-wall-btn,
+    .pw-album-back-btn,
+    .photo-wall-upload-btn,
+    .pw-upload-sheet-close,
+    .pw-upload-sheet-btn,
+    .post-filter-clear,
+    .post-filter-user-reset,
+    .filter-toggle-btn,
+    .post-vis-toggle .vis-btn,
+    .profile-activity-btn,
+    .profile-activity-more,
+    .profile-detail-logout-btn,
+    .action-btn,
+    .stat-close-btn,
+    .stat-record-more-btn,
+    .stat-record-action,
+    .spi-open-btn,
+    .back-to-stats-btn,
+    .send-btn,
+    .chat-img-btn,
+    .chat-header .back-btn,
+    .chat-header .chat-close-btn,
+    .upc-msg-btn,
+    .pp-confirm-btn
+  ):not(:disabled):hover {
+    transform: translateY(-1px) scale(1.01);
+  }
 }
 
 :where(
@@ -15518,6 +15534,28 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 #photoPreviewOverlay .pp-rotate-btn {
   padding-left: 0 !important;
   padding-right: 0 !important;
+}
+
+@media (pointer: coarse) {
+  #photoPreviewOverlay .photo-preview-close,
+  #photoPreviewOverlay .pp-nav-arrow,
+  #photoPreviewOverlay .pp-zoom-btn,
+  #photoPreviewOverlay .pp-info-btn,
+  #photoPreviewOverlay .pp-share-btn,
+  #photoPreviewOverlay .pp-rotate-btn,
+  #photoPreviewOverlay .pp-delete-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .chat-header .back-btn,
+  .chat-img-btn,
+  .send-btn {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
 }
 
 #photoPreviewOverlay .pp-rotate-btn .ui-icon,
