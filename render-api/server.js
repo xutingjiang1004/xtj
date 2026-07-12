@@ -2505,11 +2505,13 @@ function rateLimit(windowMs, maxRequests) {
       record.resetAt = now + windowMs;
     }
     if (record.count >= maxRequests) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
       logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
       res.setHeader('X-RateLimit-Limit', maxRequests);
       res.setHeader('X-RateLimit-Remaining', 0);
       res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
-      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+      res.setHeader('Retry-After', retryAfterSeconds);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: retryAfterSeconds });
     }
     record.count++;
     rateLimitStore.set(key, record);

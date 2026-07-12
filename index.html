@@ -51,8 +51,8 @@
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=cee8b18632" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=f33e4f9d58">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=6b7b56ef89">
-    <meta name="xtj-module-english-style" content="css/english-learning.min.css?v=ed35b425a2">
-    <meta name="xtj-module-english-script" content="js/english-learning.min.js?v=14b9b9c26c">
+    <meta name="xtj-module-english-style" content="css/english-learning.min.css?v=70eb52630e">
+    <meta name="xtj-module-english-script" content="js/english-learning.min.js?v=dec73b21db">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=17c5ed4c4d">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=b17edff33a">
     <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=ce1ed8fb3c">
@@ -1411,7 +1411,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=2afa6a9ac3"></script>
+    <script defer src="js/core.min.js?v=87b2ec3924"></script>
     <script defer src="js/login-device.min.js?v=ad593d9c75"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
 
@@ -1589,6 +1589,7 @@
                             <input type="text" class="el-input" id="elTopicInput" maxlength="80" placeholder="例如 technology, travel, campus life，可留空" />
                         </div>
                         <button type="button" class="el-btn el-btn-primary el-btn-big" id="elGenBtn">生成专属练习</button>
+                        <div class="el-generate-status" id="elGenerateStatus" role="status" aria-live="polite" aria-atomic="true" data-state="idle">准备生成练习</div>
                         <div class="el-generate-error" id="elGenerateError" role="alert" hidden>
                             <div id="elGenerateErrorText"></div>
                             <div class="el-actions-row">
