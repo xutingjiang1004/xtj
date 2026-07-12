@@ -1309,6 +1309,7 @@ const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const USER_STYLE_MARKER = '__user_style__';
+const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';  // 退役模块，保留过滤防止旧数据泄漏
 const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
@@ -1351,6 +1352,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AI_AGENT_MESSAGE_MARKER)
     .neq('media_type', AI_AGENT_CONFIG_MARKER)
     .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
+    .neq('media_type', AI_ENGLISH_LEARNING_MARKER)
     .neq('media_type', REVOKED_TOKEN_MARKER);
 }
 
