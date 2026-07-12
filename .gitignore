@@ -14,3 +14,15 @@ secrets.*
 output/playwright/
 playwright-report/
 test-results/
+
+# Local backups and accidental files
+*.bak
+*.lnk
+/null
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Temporary visual audit output
+/screenshots/

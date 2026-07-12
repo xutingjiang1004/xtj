@@ -331,7 +331,7 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
 test('dock tab and indicator selectors were not edited by this optimization', function(){
-  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css"', {encoding:'utf8'});
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak"', {encoding:'utf8'});
   assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
 });
 
