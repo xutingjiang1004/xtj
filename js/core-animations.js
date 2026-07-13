@@ -142,18 +142,6 @@
       return;
     }
     if (_origOpenComment) _origOpenComment(postId);
-    if (perfMode() === 'lite') return;
-    runWithGSAP(function() {
-    var overlay = document.getElementById('commentModal');
-    if (!overlay) return;
-    var box = overlay.querySelector('.modal-box');
-    if (!box) return;
-    var cleanup = withTransientWillChange(box, 'transform, opacity');
-    gsap.fromTo(box, { y: 16, opacity: 0 }, {
-      y: 0, opacity: 1, duration: perfMode() === 'balanced' ? 0.22 : 0.32, ease: 'power2.out',
-      clearProps: 'transform,opacity', onComplete: cleanup
-    });
-    });
   };
 
   document.addEventListener('click', function (e) {
