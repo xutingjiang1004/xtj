@@ -50,9 +50,9 @@
     <noscript><link rel="stylesheet" href="css/style.min.css?v=ea370d28b4" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=72499a2382" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=c057cc7efc" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=70ac4fe6ac">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=fcc02b9eb5">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=72499a2382">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=d2a0d59d66">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=8a2306b0bb">
     <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=6b783e82b0">
     <meta name="xtj-module-pro-upgrade" content="js/pro-upgrade.min.js?v=99b4eac6d4">
     <meta name="xtj-module-pro-script" content="js/pro-style.min.js?v=5f976a5f1e">
@@ -63,7 +63,7 @@
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=5b784a1a5c">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=a2b674198e">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21e170fc76">
-    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=2fc89380a0">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=083e7948b6">
     <meta name="xtj-module-features" content="js/features.min.js?v=4fc5383fd8">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=dc9c360b6a">
     </head>
@@ -113,8 +113,8 @@
 
     <div class="dock-panels" id="dockPanels">
         <div class="dock-panel active" id="panelPosts">
-            <nav>
-                <div style="display:flex; align-items:center; gap:8px;">
+            <nav class="posts-nav">
+                <div class="posts-nav-brand">
                     <h1>xtj</h1>
                     <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
                         <span class="theme-toggle-orb" aria-hidden="true">
@@ -122,8 +122,9 @@
                         </span>
                     </button>
                 </div>
-                <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px; position:relative; z-index:3; pointer-events:auto;">
-                    <button class="announcement-btn" id="announcementBtn" title="公告">
+                <div class="posts-nav-tools" aria-label="站点工具">
+                <div id="announcement-btn-wrapper" style="display:none; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="announcement-btn posts-nav-icon-btn" id="announcementBtn" title="公告" aria-label="公告">
                         <svg viewBox="0 0 24 24">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
@@ -131,14 +132,15 @@
                         <span class="announcement-badge" id="announcementBadge" style="display:none;">0</span>
                     </button>
                 </div>
-                <div id="report-btn-wrapper" style="display:none; margin-right: 8px; position:relative; z-index:3; pointer-events:auto;">
-                    <button class="report-btn" id="reportBtn" title="举报" onclick="openReportModal()" style="position:relative;overflow:visible;">
+                <div id="report-btn-wrapper" style="display:none; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="report-btn posts-nav-icon-btn" id="reportBtn" title="举报" aria-label="举报" onclick="openReportModal()" style="position:relative;overflow:visible;">
                         <svg viewBox="0 0 24 24">
                             <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
                             <line x1="4" y1="22" x2="4" y2="15"></line>
                         </svg>
                         <span id="reportBtnBadge" class="nav-chat-badge" style="display:none;">0</span>
                     </button>
+                </div>
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
@@ -1413,7 +1415,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=8c4ef4f1b4"></script>
+    <script defer src="js/core.min.js?v=b22b765432"></script>
     <script defer src="js/login-device.min.js?v=ad593d9c75"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
 

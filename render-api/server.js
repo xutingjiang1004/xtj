@@ -4834,9 +4834,11 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
       var v = String(req.body.visibility);
       if (['public', 'private'].indexOf(v) >= 0) updates.visibility = v;
     }
-    if (Object.prototype.hasOwnProperty.call(req.body, 'is_pinned')) {
-      updates.is_pinned = !!req.body.is_pinned;
-      updates.pinned_at = req.body.is_pinned ? new Date().toISOString() : null;
+    // Pinning has its own transactional endpoint. Keeping it out of this
+    // generic update route prevents a stale client from bypassing the
+    // one-pinned-post-per-author invariant.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'is_pinned') || Object.prototype.hasOwnProperty.call(req.body, 'pinned_at')) {
+      return res.status(400).json({ error: 'Use /api/post/pin to change pin state', code: 'use_pin_endpoint' });
     }
     if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
       var contentStr = String(req.body.content);
@@ -4851,6 +4853,63 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (!updatedPost) return res.status(500).json({ error: '更新失败：未返回数据' });
     return res.json({ ok: true, data: updatedPost });
   } catch (e) { console.error('[API] post update:', e.message); return res.status(500).json({ error: '更新失败' }); }
+});
+
+// ===================== Atomic post pin API =====================
+// Contract: { post_id: number, is_pinned: boolean }
+// Success:  { ok: true, data: Post, unpinned_post_ids: number[] }
+// Failures: 400 malformed request, 403 non-owner, 404 missing post, 409 race.
+function isPinnableFeedPost(post) {
+  if (!post) return false;
+  return post.media_type == null || ['image', 'video', 'text', 'photo', 'album'].indexOf(post.media_type) >= 0;
+}
+
+app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var postId = parseInt(req.body && req.body.post_id, 10);
+    var isPinned = req.body && req.body.is_pinned;
+    if (!postId || isNaN(postId) || typeof isPinned !== 'boolean') {
+      return res.status(400).json({ error: 'post_id and boolean is_pinned are required', code: 'invalid_request' });
+    }
+
+    var { data: post, error: postError } = await supabase.from('posts')
+      .select('id, user_name, media_type')
+      .eq('id', postId)
+      .maybeSingle();
+    if (postError) return res.status(500).json({ error: sanitizeError(postError) });
+    if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    if (!isPinnableFeedPost(post)) return res.status(400).json({ error: 'Post cannot be pinned', code: 'not_pinnable' });
+
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    if (!isAdmin && post.user_name !== req.userName) {
+      return res.status(403).json({ error: 'Not allowed to pin this post', code: 'forbidden' });
+    }
+
+    var { data: rpcResult, error: rpcError } = await supabase.rpc('set_post_pin', {
+      p_post_id: postId,
+      p_actor_user: req.userName,
+      p_is_admin: isAdmin,
+      p_is_pinned: isPinned
+    });
+    if (rpcError) {
+      var rpcStatus = rpcError.code === '23505' ? 409 : 500;
+      return res.status(rpcStatus).json({ error: sanitizeError(rpcError), code: rpcStatus === 409 ? 'pin_conflict' : 'pin_failed' });
+    }
+    if (!rpcResult || !rpcResult.ok) {
+      var resultCode = rpcResult && rpcResult.code || 'pin_failed';
+      var resultStatus = resultCode === 'not_found' ? 404 : resultCode === 'forbidden' ? 403 : resultCode === 'pin_conflict' ? 409 : 400;
+      return res.status(resultStatus).json({ error: rpcResult && rpcResult.error || 'Pin operation failed', code: resultCode });
+    }
+
+    return res.json({
+      ok: true,
+      data: rpcResult.post,
+      unpinned_post_ids: Array.isArray(rpcResult.unpinned_post_ids) ? rpcResult.unpinned_post_ids : []
+    });
+  } catch (e) {
+    console.error('[API] post pin:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Pin operation failed', code: 'pin_failed' });
+  }
 });
 
 app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
