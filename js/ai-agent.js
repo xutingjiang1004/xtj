@@ -2411,6 +2411,7 @@
     var decoder = new TextDecoder();
     var buffer = '';
     var timedOut = false;
+    var MAX_EVENT_SIZE = 512 * 1024; // 512KB
 
     function safeRemoveProgressCard(removeNode) {
       if (!progressCard) return;
@@ -2627,28 +2628,63 @@
         }
         break;
       }
-      if (readResult.done) break;
+      if (readResult.done) {
+        // ★ EOF: flush TextDecoder 剩余 buffer
+        if (buffer) {
+          buffer += decoder.decode();
+          var eofLines = buffer.split('\n');
+          for (var ei = 0; ei < eofLines.length; ei++) {
+            var eLine = eofLines[ei];
+            // 支持 CRLF
+            eLine = eLine.replace(/\r$/, '');
+            if (!eLine || eLine.startsWith(':')) continue;
+            if (eLine.startsWith('data: ')) {
+              var eEventStr = eLine.slice(6);
+              if (eEventStr.length > MAX_EVENT_SIZE) continue;
+              var eEvt;
+              try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
+              if (eEvt) _handleSseEvent(eEvt);
+            }
+          }
+          buffer = '';
+        }
+        break;
+      }
       _resetIdle();
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (var li = 0; li < lines.length; li++) {
-        var line = lines[li].trim();
-        if (!line || !line.startsWith('data: ')) continue;
+        var line = lines[li];
+        // 支持 CRLF
+        line = line.replace(/\r$/, '');
+        // 忽略空行和注释行（heartbeat comments）
+        if (!line || line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
         var eventStr = line.slice(6);
+        // 大小限制
+        if (eventStr.length > MAX_EVENT_SIZE) continue;
         var evt;
-        try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+        try { evt = JSON.parse(eventStr); } catch (e) {
+          // Malformed JSON - 跳过，不阻塞其他事件
+          continue;
+        }
         if (!evt) continue;
-        if (S._currentReqId !== reqId) { if (abortedRef) abortedRef.value = true; break; }
+        _handleSseEvent(evt);
+      }
+
+    // SSE 事件处理函数
+    function _handleSseEvent(evt) {
+      if (S._currentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
 
         if (evt.type === 'meta') {
           if (streamConvIdRef) streamConvIdRef.value = evt.conversation_id;
-          continue;
+          return;
         }
         if (evt.type === 'heartbeat' || evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
           updateDeepThinkProgressCard(progressCard, evt);
-          continue;
+          return;
         }
         if (evt.type === 'thinking_chunk') {
           if (!aiNodeRef.value) ensureThinkCardNode();
@@ -2680,10 +2716,10 @@
             if (tTitle && !isResearchCard(aiNodeRef.value)) tTitle.textContent = '思考中...';
           }
           scrollToBottom(scrollEl, false);
-          continue;
+          return;
         }
         if (evt.type === 'answer_chunk') {
-          if (!evt.chunk) continue;
+          if (!evt.chunk) return;
           if (!aiNodeRef.value) ensureThinkCardNode();
           if (!answerStartedRef.value) {
             answerStartedRef.value = true;
@@ -2701,7 +2737,7 @@
           aiContentRef.value += String(evt.chunk);
           if (answerRendererRef.value) answerRendererRef.value.append(evt.chunk);
           scrollToBottom(scrollEl, false);
-          continue;
+          return;
         }
         if (evt.type === 'content') {
           aiContentRef.value += evt.text || '';
@@ -2712,7 +2748,7 @@
               try { opts.onAnswerStart(aiNodeRef.value, evt); } catch (e10) {}
             }
           }
-          continue;
+          return;
         }
         if (evt.type === 'error') {
           if (isResearchCard(progressCard)) {
@@ -2735,7 +2771,7 @@
           if (reader) try { reader.cancel(); } catch (e) {}
           if (abortedRef) abortedRef.value = true;
           if (doneReceivedRef) doneReceivedRef.value = true;
-          break;
+          return;
         }
         if (evt.type === 'done') {
           safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
@@ -2753,11 +2789,11 @@
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
           if (doneReceivedRef) doneReceivedRef.value = true;
           if (evtHandledRef) evtHandledRef.value = true;
-          break;
+          return;
         }
       }
-      if (doneReceivedRef && doneReceivedRef.value) break;
-      if (abortedRef && abortedRef.value) break;
+      if (doneReceivedRef && doneReceivedRef.value) return;
+      if (abortedRef && abortedRef.value) return;
     }
     try { clearInterval(_idleCheckTimer); } catch (e) {}
     return {
