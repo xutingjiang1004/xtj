@@ -238,6 +238,7 @@ const ADMIN_NAME = "xxz";
             // 共享 refresh promise，避免多个 API 同时刷新
             var _refreshPromise = null;
             var _protectedAuthFailureHandled = false;
+            var _lastRefreshAuthResult = { ok: false, reason: 'not_attempted', status: 0 };
             // 持久化登录标记（用户选择"保持登录"）
             var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
 
@@ -336,11 +337,20 @@ const ADMIN_NAME = "xxz";
                             var data = await res.json().catch(function(){ return {}; });
                             if (data && data.token) {
                                 setUserToken(data.token);
+                                _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
                                 return data.token;
                             }
+                            _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
+                            return '';
                         }
+                        _lastRefreshAuthResult = {
+                            ok: false,
+                            reason: (res.status === 401 || res.status === 403) ? 'expired' : 'unavailable',
+                            status: res.status
+                        };
                         return '';
                     } catch(e) {
+                        _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
                         return '';
                     } finally {
                         _refreshPromise = null;
@@ -419,11 +429,19 @@ const ADMIN_NAME = "xxz";
                         try { touchUserSession(false); } catch (e2) {}
                         return { ok: true, reason: 'ok', token: token, user_name: userName };
                     }
-                    handleProtectedAuthFailure();
-                    return { ok: false, reason: 'refresh_failed', token: '', user_name: userName };
+                    if (_lastRefreshAuthResult.reason === 'expired') {
+                        handleProtectedAuthFailure();
+                        return { ok: false, reason: 'expired', status: _lastRefreshAuthResult.status, token: '', user_name: userName };
+                    }
+                    return {
+                        ok: false,
+                        reason: _lastRefreshAuthResult.reason || 'unavailable',
+                        status: _lastRefreshAuthResult.status || 0,
+                        token: '',
+                        user_name: userName
+                    };
                 } catch (e) {
-                    handleProtectedAuthFailure();
-                    return { ok: false, reason: 'exception', token: '', user_name: '' };
+                    return { ok: false, reason: 'exception', status: 0, token: '', user_name: '' };
                 }
             };
             window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
@@ -2885,7 +2903,7 @@ const ADMIN_NAME = "xxz";
                         var _pwHash = authPasswordHash;
                         if (_pwHash && API_BASE) {
                             var tokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', headers: {'Content-Type':'application/json'},
+                                method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                                 body: JSON.stringify({ user_name: name, password_hash: _pwHash })
                             });
                             if (tokenRes.ok) {
@@ -3006,7 +3024,7 @@ const ADMIN_NAME = "xxz";
                     try {
                         if (API_BASE) {
                             var _regTokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', headers: {'Content-Type':'application/json'},
+                                method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                                 body: JSON.stringify({ user_name: name, password_hash: pwHash })
                             });
                             if (_regTokenRes.ok) {
@@ -3610,7 +3628,8 @@ const ADMIN_NAME = "xxz";
                     || mediaType === '**ai_agent_conv_summary**'
                     || mediaType === '**ai_agent_memory_log**'
                     || mediaType === '__user_style__'
-                    || mediaType === '__revoked_token__';
+                    || mediaType === '__revoked_token__'
+                    || mediaType === '__refresh_token__';
             }
 
             function repairProfileActivityText(value) {
@@ -4452,28 +4471,23 @@ function renderProfileActivityList(kind) {
                     var optimisticLikeRecord = { post_id: pid, user_name: currentUser, actor_key: deviceId };
                     updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
                     updateFeedStats();
+                    showToast(nextLiked ? '已点赞' : '已取消点赞');
                     if (typeof window.xtjAnimateLikeToggle === 'function') {
                         window.xtjAnimateLikeToggle(btn, nextLiked);
                     }
                     if (nextLiked) createHeartParticles(btn);
                     if (wasLiked) {
-                        var deleteQuery = sb.from("likes").delete().eq("post_id", pid);
-                        var currentIds = getCurrentLikeIdentityValues();
-                        var orParts = [];
-                        if (currentUser) orParts.push('user_name.eq.' + currentUser);
-                        currentIds.forEach(function(value) {
-                            orParts.push('actor_key.eq.' + value);
-                        });
-                        if (orParts.length) {
-                            var deleteResult = await deleteQuery.or(orParts.join(','));
-                            if (deleteResult && deleteResult.error) throw deleteResult.error;
-                        } else {
-                            var fallbackDeleteResult = await deleteQuery.eq("actor_key", deviceId);
-                            if (fallbackDeleteResult && fallbackDeleteResult.error) throw fallbackDeleteResult.error;
-                        }
+                        var deleteResult = await sb.from("likes").delete()
+                            .eq("post_id", pid)
+                            .eq("user_name", currentUser);
+                        if (deleteResult && deleteResult.error) throw deleteResult.error;
                     } else {
                         var insertResult = await sb.from("likes").insert([optimisticLikeRecord]);
-                        if (insertResult && insertResult.error) throw insertResult.error;
+                        // A stale client can miss an existing historical like. A unique violation
+                        // means the requested final state (liked) is already true, so keep the UI.
+                        if (insertResult && insertResult.error && String(insertResult.error.code || '') !== '23505') {
+                            throw insertResult.error;
+                        }
                     }
                     touchUserSession(false);
                     scheduleLikeStatRefresh();
@@ -5477,7 +5491,7 @@ function renderProfileActivityList(kind) {
                 if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").neq("media_type", "__user_style__").neq("media_type", "__revoked_token__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").neq("media_type", "__user_style__").neq("media_type", "__revoked_token__").neq("media_type", "__refresh_token__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -5492,7 +5506,7 @@ function renderProfileActivityList(kind) {
                     feedAllComments = data.comments;
                     feedAllLikes = data.likes;
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺冭埖甯撻梽銈呫仈閸嶅繐鎷伴敓鐭紮鎷锋穱鈩冧紖閿熸枻鎷峰綍閿涘矂妲诲顣坅se64婢堆冩禈閹炬垹鍨巐ocalStorage
-                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__user_style__' && p.media_type !== '__revoked_token__' && p.media_type !== '__ai_english_learning__');
+                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__user_style__' && p.media_type !== '__revoked_token__' && p.media_type !== '__refresh_token__' && p.media_type !== '__ai_english_learning__');
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
                     // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
@@ -6626,7 +6640,9 @@ function renderProfileActivityList(kind) {
             function normalizeFeedSnapshotCache(parsed) {
                 if (!parsed || !parsed.data) return null;
                 var data = parsed.data || {};
-                var posts = normalizePosts(data.posts || []);
+                var posts = normalizePosts(data.posts || []).filter(function(post) {
+                    return !(typeof isSystemPost === 'function' && isSystemPost(post));
+                });
                 var pages = Array.isArray(data.pages) ? data.pages.filter(function(page) {
                     return page && typeof page.offset === "number";
                 }) : [];
@@ -6699,6 +6715,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "**ai_agent_memory_box**")
                     .neq("media_type", "**ai_agent_conv_summary**")
                     .neq("media_type", "**ai_agent_memory_log**")
+                    .neq("media_type", "__refresh_token__")
                     .neq("media_type", "__ai_english_learning__");  // 退役模块，保留过滤防止旧数据泄漏
             }
             window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
@@ -6716,6 +6733,7 @@ function renderProfileActivityList(kind) {
                     "__pro_gift__", "__pro_gift_claim__",
                     "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
                     "__email_sent__", "__email_recipient_history__",
+                    "__refresh_token__", "__revoked_token__",
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
                     "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
                     "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
@@ -6730,7 +6748,7 @@ function renderProfileActivityList(kind) {
                 ).order("created_at", { ascending: false });
             }
 
-            async function fetchFeedPageChunk(offset, requestId) {
+            async function fetchFeedPageChunk(offset, requestId, deferRelated) {
                 var start = Math.max(0, Number(offset) || 0);
                 var end = start + FEED_PAGE_SIZE - 1;
                 var postRes = await getFeedBasePostQuery().range(start, end);
@@ -6740,11 +6758,25 @@ function renderProfileActivityList(kind) {
                 var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
                 var comments = [];
                 var likes = [];
+                var relatedPromise = null;
                 if (postIds.length) {
-                    var related = await Promise.all([
+                    relatedPromise = Promise.all([
                         sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
                         sb.from("likes").select("*").in("post_id", postIds)
                     ]);
+                    if (deferRelated) {
+                        return {
+                            offset: start,
+                            posts: posts,
+                            comments: comments,
+                            likes: likes,
+                            nextOffset: start + posts.length,
+                            endReached: posts.length < FEED_PAGE_SIZE,
+                            postIds: postIds,
+                            relatedPromise: relatedPromise
+                        };
+                    }
+                    var related = await relatedPromise;
                     if (requestId && requestId !== feedLoadRequestId) return null;
                     if (related[0].error || related[1].error) {
                         throw (related[0].error || related[1].error);
@@ -6761,6 +6793,30 @@ function renderProfileActivityList(kind) {
                     endReached: posts.length < FEED_PAGE_SIZE,
                     postIds: postIds
                 };
+            }
+
+            function hydrateDeferredFeedRelations(chunk, requestId) {
+                if (!chunk || !chunk.relatedPromise) return Promise.resolve(false);
+                return chunk.relatedPromise.then(function(related) {
+                    if (requestId !== feedLoadRequestId) return false;
+                    if (related[0].error || related[1].error) {
+                        throw (related[0].error || related[1].error);
+                    }
+                    mergeFeedPageIntoState({
+                        offset: chunk.offset,
+                        posts: [],
+                        comments: related[0].data || [],
+                        likes: related[1].data || [],
+                        nextOffset: chunk.nextOffset,
+                        endReached: chunk.endReached,
+                        postIds: chunk.postIds
+                    });
+                    writeFeedCacheSnapshot();
+                    return renderFeedFromMemoryState().then(function() { return true; });
+                }).catch(function(error) {
+                    console.warn('[feed] engagement hydration failed:', error);
+                    return false;
+                });
             }
 
             function mergeFeedPageIntoState(chunk) {
@@ -6982,7 +7038,12 @@ function renderProfileActivityList(kind) {
                     var auth = typeof window.ensureProtectedOperationAuth === 'function'
                         ? await window.ensureProtectedOperationAuth()
                         : { ok: !!(typeof window.getUserAuthHeaders === 'function' && await window.getUserAuthHeaders()) };
-                    if (!auth.ok) return;
+                    if (!auth.ok) {
+                        if (auth.reason !== 'expired' && auth.reason !== 'no_user') {
+                            showToast('认证服务暂时不可用，请稍后重试');
+                        }
+                        return;
+                    }
 
                     var current = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
                     if (current.error) throw current.error;
@@ -6993,14 +7054,30 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     nextPinned = !post.is_pinned;
-                    var headers = await window.getUserAuthHeaders();
-                    if (!headers) return;
-                    var response = await fetch((window.API_BASE || '') + '/api/post/pin', {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
-                    });
+                    async function requestPin(token) {
+                        return await fetch((window.API_BASE || '') + '/api/post/pin', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + token
+                            },
+                            body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
+                        });
+                    }
+                    var response = await requestPin(auth.token);
+                    if (response.status === 401) {
+                        var renewedToken = await window.refreshUserToken(true);
+                        if (renewedToken) response = await requestPin(renewedToken);
+                    }
                     var result = await response.json().catch(function() { return {}; });
+                    if (response.status === 401 || response.status === 403 && result.code === 'auth_expired') {
+                        if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure();
+                        return;
+                    }
+                    if (result.code === 'pin_migration_required') {
+                        throw new Error('置顶服务尚未完成数据库升级，请部署迁移 008_atomic_post_pin.sql');
+                    }
                     if (!response.ok || !result.ok || !result.data) throw new Error(result.error || 'Pin operation failed');
 
                     (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
@@ -7181,10 +7258,14 @@ function renderProfileActivityList(kind) {
                             var parsed = JSON.parse(cached);
                             if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
                                 if (requestId !== feedLoadRequestId) return;
-                                await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
-                                if (requestId !== feedLoadRequestId) return;
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
+                                ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId).then(function() {
+                                    if (requestId !== feedLoadRequestId) return;
+                                    return renderFeedFromMemoryState();
+                                }).catch(function(error) {
+                                    console.warn('[feed] cached coverage refresh failed:', error);
+                                });
                                 return;
                             }
                         }
@@ -7196,7 +7277,7 @@ function renderProfileActivityList(kind) {
                 }
                 try {
                     feedPageFetchPending = true;
-                    var chunk = await fetchFeedPageChunk(0, requestId);
+                    var chunk = await fetchFeedPageChunk(0, requestId, true);
                     if (!chunk) return;
                     if (requestId !== feedLoadRequestId) return;
                     feedAllPosts = [];
@@ -7209,8 +7290,6 @@ function renderProfileActivityList(kind) {
                     feedMapsCache = null;
                     if (chunk.posts.length) mergeFeedPageIntoState(chunk);
                     else feedEndReached = true;
-                    await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
-                    if (requestId !== feedLoadRequestId) return;
                     writeFeedCacheSnapshot();
                     // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
                     try {
@@ -7233,6 +7312,15 @@ function renderProfileActivityList(kind) {
                     } catch (e) { console.warn('[VIP history preload]', e); }
                     await renderFeedFromMemoryState();
                     setupFeedInfiniteScroll();
+                    hydrateDeferredFeedRelations(chunk, requestId).then(function() {
+                        if (requestId !== feedLoadRequestId) return;
+                        return ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
+                    }).then(function() {
+                        if (requestId !== feedLoadRequestId) return;
+                        writeFeedCacheSnapshot();
+                    }).catch(function(error) {
+                        console.warn('[feed] background hydration failed:', error);
+                    });
                 } catch (e) {
                     if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
@@ -13059,7 +13147,7 @@ function renderProfileActivityList(kind) {
 
             function applyStatSnapshot(posts, comments, likes) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== USER_STYLE_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__ai_english_learning__' && canViewPost(p);
+                    return p && !isSystemPost(p) && canViewPost(p);
                 });
                 var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
                 statAllPosts = visiblePosts;
