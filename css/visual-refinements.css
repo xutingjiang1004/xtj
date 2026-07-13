@@ -215,18 +215,21 @@
 .btn-primary {
   box-shadow: var(--xtj-shadow-md) !important;
 }
-.btn-primary:hover {
-  box-shadow: var(--xtj-shadow-lg) !important;
-  transform: translateY(-1px);
-}
-
 /* 帖子悬停 — 微妙上浮 */
 .post {
   transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
-.post:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--xtj-shadow-lg) !important;
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover {
+    box-shadow: var(--xtj-shadow-lg) !important;
+    transform: translateY(-1px);
+  }
+
+  .post:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--xtj-shadow-lg) !important;
+  }
 }
 
 /* ========== 7. 亮色模式微调 ========== */

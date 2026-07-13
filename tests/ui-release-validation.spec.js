@@ -300,4 +300,102 @@ test.describe('release validation', () => {
     }
     expect(failures, failures.join('\n')).toEqual([]);
   });
+
+  test('desktop chat remains dual-pane at every required desktop viewport', async ({ browser }) => {
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+      const context = await browser.newContext({ viewport });
+      const page = await context.newPage();
+      await gotoApp(page);
+      await page.locator('.dock-tab[data-tab="chat"]').click();
+      await expect(page.locator('#dockChatListView')).toBeVisible();
+      await expect(page.locator('#dockChatDetailView')).toBeVisible();
+      expect(await page.locator('#dockChatContainer').evaluate(el => getComputedStyle(el).display)).toBe('grid');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => innerWidth));
+      await context.close();
+    }
+  });
+
+  test('fine and coarse pointers expose the intended hover capability without sticky coarse hover', async ({ browser }) => {
+    const fine = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const finePage = await fine.newPage();
+    await gotoApp(finePage);
+    await switchTab(finePage, 'profile');
+    expect(await finePage.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBeTruthy();
+    const fineCard = finePage.locator('.profile-user-card');
+    await fineCard.hover();
+    await finePage.waitForTimeout(250);
+    expect(await fineCard.evaluate(el => el.matches(':hover'))).toBeTruthy();
+    await fine.close();
+
+    const coarse = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true });
+    const coarsePage = await coarse.newPage();
+    await gotoApp(coarsePage);
+    await switchTab(coarsePage, 'profile');
+    expect(await coarsePage.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBeFalsy();
+    const coarseCard = coarsePage.locator('.profile-user-card');
+    const coarseBefore = await coarseCard.evaluate(el => getComputedStyle(el).transform);
+    await coarseCard.dispatchEvent('mouseenter');
+    await coarsePage.waitForTimeout(250);
+    expect(await coarseCard.evaluate(el => getComputedStyle(el).transform)).toBe(coarseBefore);
+    await coarse.close();
+  });
+
+  test('reduced motion disables representative non-Dock infinite and transition animations in computed styles', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await gotoApp(page, { reducedMotion: 'reduce' });
+    await page.evaluate(() => {
+      const fixture = document.createElement('div');
+      fixture.id = 'motionAuditFixture';
+      fixture.innerHTML = '<div class="pro-style-preview-card"><span class="theme-preview"></span></div><div class="pro-celebration-overlay"><div class="pro-celebration-card"></div></div>';
+      document.body.appendChild(fixture);
+    });
+    const styles = await page.locator('#motionAuditFixture *').evaluateAll(nodes => nodes.map(el => {
+      const style = getComputedStyle(el);
+      return { className: el.className, animationName: style.animationName, animationDuration: style.animationDuration, transitionDuration: style.transitionDuration, willChange: style.willChange };
+    }));
+    for (const style of styles) {
+      expect(style.animationName, style.className).toBe('none');
+      expect(parseFloat(style.animationDuration), style.className).toBeLessThanOrEqual(0.001);
+      expect(parseFloat(style.transitionDuration), style.className).toBeLessThanOrEqual(0.001);
+      expect(['auto', '']).toContain(style.willChange);
+    }
+    await context.close();
+  });
+
+  test('auth modal has an accessible name and receives focus without browser errors', async ({ page }) => {
+    const pageErrors = [];
+    await page.addInitScript(() => {
+      window.__unhandledRejections = [];
+      addEventListener('unhandledrejection', event => window.__unhandledRejections.push(String(event.reason && event.reason.message || event.reason)));
+    });
+    page.on('pageerror', error => pageErrors.push(error.message));
+    await gotoApp(page);
+    await page.locator('#unauthUI .btn-primary').click();
+    const dialog = page.locator('#loginModal [role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await expect(dialog).toHaveAttribute('aria-labelledby', 'loginModalTitle');
+    await expect(page.locator('#loginNickInp')).toBeFocused();
+    expect(pageErrors).toEqual([]);
+    expect(await page.evaluate(() => window.__unhandledRejections)).toEqual([]);
+  });
+
+  test('thirty real Dock clicks do not leak page errors, unhandled rejections, or horizontal overflow', async ({ page }) => {
+    const pageErrors = [];
+    await page.addInitScript(() => {
+      window.__unhandledRejections = [];
+      addEventListener('unhandledrejection', event => window.__unhandledRejections.push(String(event.reason && event.reason.message || event.reason)));
+    });
+    page.on('pageerror', error => pageErrors.push(error.message));
+    await gotoApp(page);
+    const order = ['posts', 'chat', 'ai', 'profile'];
+    for (let index = 0; index < 30; index += 1) {
+      await page.locator(`.dock-tab[data-tab="${order[index % order.length]}"]`).click();
+    }
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => innerWidth));
+    expect(pageErrors).toEqual([]);
+    expect(await page.evaluate(() => window.__unhandledRejections)).toEqual([]);
+  });
 });

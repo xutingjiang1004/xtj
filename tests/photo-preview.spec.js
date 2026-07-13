@@ -121,3 +121,28 @@ test('quick open close reopen leaves no stale cleanup or duplicate listeners', a
   expect(state.stats.active).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('photo controls and info dialog expose names, trap focus, close on Escape, and restore focus', async ({ page }) => {
+  const errors = await setup(page);
+  await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/ok.png', username: 'u', timestamp: Date.now() }]));
+
+  for (const selector of ['#ppZoomOutBtn', '#ppZoomInBtn', '#ppInfoBtn', '#ppShareBtn', '#ppRotateBtn', '#ppDeleteBtn']) {
+    await expect(page.locator(selector)).toHaveAttribute('aria-label', /.+/);
+  }
+
+  await page.locator('#ppInfoBtn').focus();
+  await page.locator('#ppInfoBtn').click();
+  const dialog = page.locator('#ppInfoModal');
+  await expect(dialog).toHaveAttribute('role', 'dialog');
+  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog).toHaveAttribute('aria-labelledby', 'ppInfoModalTitle');
+  await expect(page.locator('#ppInfoModalTitle')).toHaveText(/.+/);
+  await expect(page.locator('.pp-info-modal-close')).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.pp-info-modal-close')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden({ timeout: 1000 });
+  await expect(page.locator('#ppInfoBtn')).toBeFocused();
+  expect(errors).toEqual([]);
+});

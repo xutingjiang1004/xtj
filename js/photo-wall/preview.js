@@ -279,6 +279,20 @@
                     n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
                     document.body.appendChild(n), o = n;
                 }
+                var infoTitle = o.querySelector(".pp-info-modal-title"), infoClose = o.querySelector(".pp-info-modal-close");
+                infoTitle && !infoTitle.id && (infoTitle.id = "ppInfoModalTitle"), o.setAttribute("role", "dialog"),
+                o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", "ppInfoModalTitle"),
+                infoClose && infoClose.setAttribute("aria-label", "关闭照片信息"), o._focusTrapInstalled || (o._focusTrapInstalled = !0,
+                o.addEventListener("keydown", function(e) {
+                    if ("Escape" === e.key) return e.preventDefault(), void window.closePhotoInfo();
+                    if ("Tab" !== e.key) return;
+                    var t = Array.from(o.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function(e) {
+                        return null !== e.offsetParent;
+                    });
+                    if (!t.length) return e.preventDefault();
+                    var n = t[0], i = t[t.length - 1];
+                    e.shiftKey && document.activeElement === n ? (e.preventDefault(), i.focus()) : !e.shiftKey && document.activeElement === i && (e.preventDefault(), n.focus());
+                }));
                 o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
                     e.target === o && window.closePhotoInfo();
                 }));
@@ -623,6 +637,20 @@
                     n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
                     document.body.appendChild(n), o = n;
                 }
+                var finalInfoTitle = o.querySelector(".pp-info-modal-title"), finalInfoClose = o.querySelector(".pp-info-modal-close");
+                finalInfoTitle && !finalInfoTitle.id && (finalInfoTitle.id = "ppInfoModalTitle"), o.setAttribute("role", "dialog"),
+                o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", "ppInfoModalTitle"),
+                finalInfoClose && finalInfoClose.setAttribute("aria-label", "关闭照片信息"), o._focusTrapInstalled || (o._focusTrapInstalled = !0,
+                o.addEventListener("keydown", function(e) {
+                    if ("Escape" === e.key) return e.preventDefault(), void window.closePhotoInfo();
+                    if ("Tab" !== e.key) return;
+                    var t = Array.from(o.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function(e) {
+                        return null !== e.offsetParent;
+                    });
+                    if (!t.length) return e.preventDefault();
+                    var n = t[0], i = t[t.length - 1];
+                    e.shiftKey && document.activeElement === n ? (e.preventDefault(), i.focus()) : !e.shiftKey && document.activeElement === i && (e.preventDefault(), n.focus());
+                }));
                 o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
                     e.target === o && window.closePhotoInfo();
                 }));
@@ -631,6 +659,10 @@
                 var a = o.querySelector(".pp-info-modal-content"), r = document.getElementById("ppInfoBtn"), s = r ? r.getBoundingClientRect() : null;
                 if (o.classList.remove("closing"), o.classList.add("active"), o.style.display = "flex",
                 o.style.opacity = "1", a.style.transition = "none", a.style.transform = "", a.style.opacity = "1",
+                o._restoreFocus = document.activeElement, setTimeout(function() {
+                    var e = o.querySelector(".pp-info-modal-close");
+                    e && e.focus();
+                }, 0),
                 a.offsetHeight, s) {
                     var l = a.getBoundingClientRect(), c = s.left - l.left, d = s.top - l.top, p = s.width / l.width, u = s.height / l.height, f = Math.min(p, u);
                     a.style.transform = "translate(" + c + "px, " + d + "px) scale(" + f + ")", a.style.transformOrigin = "top left",
@@ -683,7 +715,7 @@
                 e._closeTimeout = setTimeout(function() {
                     t.style.transition = "none", t.style.transform = "", t.style.opacity = "", t.style.transformOrigin = "",
                     e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
-                    e._closeTimeout = null;
+                    e._closeTimeout = null, e._restoreFocus && e._restoreFocus.isConnected && e._restoreFocus.focus(), e._restoreFocus = null;
                 }, 320);
             } else t && (t.style.transition = "none", t.style.transform = "scale(1)", t.style.opacity = "1",
             t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in",
@@ -691,7 +723,7 @@
             e.style.opacity = "0", e._closeTimeout = setTimeout(function() {
                 e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
                 t && (t.style.transition = "none", t.style.transform = "", t.style.opacity = "",
-                t.style.transformOrigin = ""), e._closeTimeout = null;
+                t.style.transformOrigin = ""), e._closeTimeout = null, e._restoreFocus && e._restoreFocus.isConnected && e._restoreFocus.focus(), e._restoreFocus = null;
             }, 320);
         }
     }, window.shareCurrentPhoto = function() {
