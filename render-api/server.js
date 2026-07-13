@@ -4228,7 +4228,7 @@ async function authenticateUser(req, res, next) {
           .eq('media_type', AUTH_MARKER)
           .maybeSingle();
         if (!userExists) {
-          return res.status(401).json({ error: '用户不存在或已注销' });
+          return res.status(401).json({ error: '用户不存在或已注销', code: 'auth_expired' });
         }
       } catch(e) {
         return res.status(500).json({ error: '认证查询失败' });
@@ -4244,7 +4244,7 @@ async function authenticateUser(req, res, next) {
   var userName = body.user_name || body.reporter_name || '';
   var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
   if (!userNameVal || !password_hash) {
-    return res.status(401).json({ error: '缺少身份验证' });
+    return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
   }
   try {
     var { data: authRec } = await supabase.from('posts')
@@ -4892,6 +4892,16 @@ app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, re
       p_is_pinned: isPinned
     });
     if (rpcError) {
+      var rpcMessage = String(rpcError.message || rpcError.details || '');
+      var migrationMissing = rpcError.code === 'PGRST202'
+        || rpcError.code === '42883'
+        || /set_post_pin|schema cache|could not find the function/i.test(rpcMessage);
+      if (migrationMissing) {
+        return res.status(503).json({
+          error: '置顶服务尚未完成数据库升级',
+          code: 'pin_migration_required'
+        });
+      }
       var rpcStatus = rpcError.code === '23505' ? 409 : 500;
       return res.status(rpcStatus).json({ error: sanitizeError(rpcError), code: rpcStatus === 409 ? 'pin_conflict' : 'pin_failed' });
     }
