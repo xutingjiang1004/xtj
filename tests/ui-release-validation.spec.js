@@ -226,6 +226,22 @@ test.describe('release validation', () => {
       expect(entry.height, entry.selector).toBeGreaterThanOrEqual(44);
       expect(entry.overflow, entry.selector).toBeFalsy();
     });
+    const mobileLayout = await mobilePage.evaluate(() => {
+      const nav = document.querySelector('#panelPosts .posts-nav');
+      const children = Array.from(nav.children);
+      const cards = Array.from(document.querySelectorAll('#panelPosts .stats .stat-card'));
+      return {
+        announcementIndex: children.indexOf(document.getElementById('announcement-btn-wrapper')),
+        reportIndex: children.indexOf(document.getElementById('report-btn-wrapper')),
+        authIndex: children.indexOf(nav.querySelector('.nav-auth')),
+        statsGap: parseFloat(getComputedStyle(document.querySelector('#panelPosts .stats')).columnGap),
+        statRadii: cards.map((card) => parseFloat(getComputedStyle(card).borderRadius))
+      };
+    });
+    expect(mobileLayout.announcementIndex).toBeLessThan(mobileLayout.reportIndex);
+    expect(mobileLayout.reportIndex).toBeLessThan(mobileLayout.authIndex);
+    expect(mobileLayout.statsGap).toBeGreaterThanOrEqual(7);
+    mobileLayout.statRadii.forEach((radius) => expect(radius).toBeGreaterThanOrEqual(16));
     await mobile.close();
 
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -234,6 +250,20 @@ test.describe('release validation', () => {
     await switchTab(desktopPage, 'profile');
     const columns = await desktopPage.evaluate(() => getComputedStyle(document.getElementById('profileMainView')).gridTemplateColumns);
     expect(columns.trim().split(/\s+/).length).toBe(2);
+    const profileSafety = await desktopPage.evaluate(() => {
+      const container = document.querySelector('#panelProfile .dock-profile-container');
+      const dock = document.getElementById('dockBar').getBoundingClientRect();
+      const last = document.getElementById('profileTotalsBar').getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        paddingBottom: parseFloat(getComputedStyle(container).paddingBottom),
+        dockHeight: dock.height,
+        lastBottom: last.bottom,
+        viewportHeight: innerHeight
+      };
+    });
+    expect(profileSafety.overflow).toBeFalsy();
+    expect(profileSafety.paddingBottom).toBeGreaterThan(profileSafety.dockHeight);
     await desktop.close();
   });
 

@@ -992,3 +992,140 @@
     min-height: 60px !important;
   }
 }
+
+/* Release guard: preserve the original post-nav item order and keep the
+   profile/stat surfaces visually continuous across legacy stylesheet layers. */
+#panelPosts.active .posts-nav > #announcement-btn-wrapper,
+#panelPosts.active .posts-nav > #report-btn-wrapper {
+  flex: 0 0 44px;
+  inline-size: 44px;
+  margin-inline-end: 8px !important;
+}
+
+#panelPosts .stats,
+#panelPosts.active .stats {
+  gap: 12px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelPosts .stats .stat-card,
+#panelPosts.active .stats .stat-card {
+  min-block-size: 82px !important;
+  border: 1px solid var(--xtj-content-line) !important;
+  border-radius: 18px !important;
+  background: color-mix(in srgb, var(--xtj-content-surface) 82%, transparent) !important;
+  box-shadow: 0 8px 22px rgba(56, 112, 93, 0.055) !important;
+}
+
+#panelPosts .stats .stat-card + .stat-card {
+  border-inline-start: 1px solid var(--xtj-content-line) !important;
+}
+
+#panelProfile .dock-profile-container {
+  padding-bottom: calc(154px + env(safe-area-inset-bottom)) !important;
+  scroll-padding-bottom: calc(154px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(240, 250, 247, 0.34), rgba(231, 247, 242, 0.18)) !important;
+}
+
+#panelProfile .profile-main-view {
+  align-items: start;
+  gap: 12px !important;
+}
+
+#panelProfile .profile-header { order: 0; }
+#panelProfile .profile-user-card { order: 1; }
+#panelProfile .profile-activity-board { order: 2; }
+#panelProfile .xtj-vip-card { order: 3; }
+#panelProfile .profile-pro-style-entry-wrap { order: 4; }
+#panelProfile .profile-settings { order: 5; }
+#panelProfile .profile-totals-bar { order: 6; }
+
+#panelProfile .profile-user-card,
+#panelProfile .profile-activity-board,
+#panelProfile .xtj-vip-card,
+#panelProfile .profile-pro-style-entry,
+#panelProfile .profile-settings,
+#panelProfile .profile-totals-bar {
+  border: 1px solid rgba(112, 174, 156, 0.14) !important;
+  background: rgba(247, 252, 250, 0.68) !important;
+  box-shadow: 0 8px 24px rgba(47, 105, 87, 0.045) !important;
+}
+
+#panelProfile .profile-activity-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+#panelProfile .profile-activity-card,
+#panelProfile .profile-activity-card--summary {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelProfile .profile-activity-card + .profile-activity-card {
+  border-top: 1px solid rgba(112, 174, 156, 0.14) !important;
+}
+
+[data-theme="dark"] #panelProfile .dock-profile-container {
+  background: linear-gradient(180deg, rgba(13, 29, 32, 0.34), rgba(15, 34, 36, 0.18)) !important;
+}
+
+[data-theme="dark"] #panelProfile .profile-user-card,
+[data-theme="dark"] #panelProfile .profile-activity-board,
+[data-theme="dark"] #panelProfile .xtj-vip-card,
+[data-theme="dark"] #panelProfile .profile-pro-style-entry,
+[data-theme="dark"] #panelProfile .profile-settings,
+[data-theme="dark"] #panelProfile .profile-totals-bar {
+  border-color: rgba(154, 211, 194, 0.10) !important;
+  background: rgba(20, 39, 42, 0.68) !important;
+}
+
+@media (max-width: 639.98px) {
+  #panelPosts.active .posts-nav {
+    gap: 4px;
+  }
+
+  #panelPosts.active .posts-nav > #announcement-btn-wrapper,
+  #panelPosts.active .posts-nav > #report-btn-wrapper {
+    margin-inline-end: 2px !important;
+  }
+
+  #panelPosts .stats,
+  #panelPosts.active .stats {
+    gap: 8px !important;
+  }
+
+  #panelPosts .stats .stat-card,
+  #panelPosts.active .stats .stat-card {
+    min-block-size: 76px !important;
+    padding-inline: 6px !important;
+    border-radius: 16px !important;
+  }
+
+  #panelProfile .dock-profile-container {
+    padding-inline: 16px !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  #panelPosts .stats,
+  #panelPosts.active .stats {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #panelPosts .stats .stat-card,
+  #panelPosts.active .stats .stat-card {
+    min-block-size: 88px !important;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+}

@@ -421,6 +421,14 @@ test('core.js cache filter excludes retired English marker', function(){
   assert.ok(s.indexOf("post.media_type !== \"__ai_english_learning__\"") >= 0, 'core.js stat filter missing English marker');
 });
 
+test('refresh token rows never enter feed cache, rendering, or statistics', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('neq("media_type", "__refresh_token__")') >= 0, 'feed query missing refresh token exclusion');
+  assert.ok(/SYSTEM_MARKERS[\s\S]*?"__refresh_token__"/.test(s), 'client render filter missing refresh token marker');
+  assert.ok(/normalizeFeedSnapshotCache[\s\S]*?isSystemPost\(post\)/.test(s), 'cache hydration does not remove system rows');
+  assert.ok(/function applyStatSnapshot[\s\S]*?!isSystemPost\(p\)/.test(s), 'statistics do not reuse the system-row filter');
+});
+
 test('retired English source files do not exist', function(){
   assert.ok(!fs.existsSync('render-api/english-generate.js'), 'english-generate.js still exists');
   assert.ok(!fs.existsSync('js/english-learning.js'), 'english-learning.js still exists');
