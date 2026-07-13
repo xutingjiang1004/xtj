@@ -8,10 +8,10 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:4173',
     browserName: 'chromium',
-    channel: process.env.PW_CHANNEL || 'msedge'
+    channel: process.env.PW_CHANNEL || (process.env.CI ? undefined : 'msedge')
   },
   webServer: {
-    command: 'python3 -m http.server 4173',
+    command: 'node scripts/serve-static.js',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 10000

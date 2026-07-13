@@ -8775,12 +8775,14 @@ function renderProfileActivityList(kind) {
                 if (window.__xtjAiChatActive) return;
                 var listView = document.getElementById('dockChatListView');
                 var detailView = document.getElementById('dockChatDetailView');
+                var container = document.getElementById('dockChatContainer');
                 var backBtn = document.getElementById('dockChatBackBtn');
                 var titleEl = document.getElementById('dockChatTitle');
                 var inputArea = document.querySelector('#panelChat .chat-input-area');
                 if (!listView || !detailView) return;
 
                 if (shouldUseDesktopChatSplitLayout()) {
+                    if (container) container.classList.add('desktop-split');
                     listView.classList.remove('hidden');
                     detailView.classList.remove('hidden');
                     if (backBtn) backBtn.style.display = 'none';
@@ -8794,6 +8796,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
 
+                if (container) container.classList.remove('desktop-split');
                 if (!dockChatActiveUser) {
                     detailView.classList.add('hidden');
                     listView.classList.remove('hidden');
