@@ -209,6 +209,34 @@ test.describe('release validation', () => {
     await context.close();
   });
 
+  test('post tools retain 44px targets and the profile becomes a two-column layout on desktop', async ({ browser }) => {
+    const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const mobilePage = await mobile.newPage();
+    await gotoApp(mobilePage);
+    const mobileState = await mobilePage.evaluate(() => {
+      document.getElementById('announcement-btn-wrapper').style.display = 'block';
+      document.getElementById('report-btn-wrapper').style.display = 'block';
+      return ['#announcementBtn', '#reportBtn'].map((selector) => {
+        const rect = document.querySelector(selector).getBoundingClientRect();
+        return { selector, width: rect.width, height: rect.height, overflow: document.documentElement.scrollWidth > window.innerWidth + 1 };
+      });
+    });
+    mobileState.forEach((entry) => {
+      expect(entry.width, entry.selector).toBeGreaterThanOrEqual(44);
+      expect(entry.height, entry.selector).toBeGreaterThanOrEqual(44);
+      expect(entry.overflow, entry.selector).toBeFalsy();
+    });
+    await mobile.close();
+
+    const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const desktopPage = await desktop.newPage();
+    await gotoApp(desktopPage);
+    await switchTab(desktopPage, 'profile');
+    const columns = await desktopPage.evaluate(() => getComputedStyle(document.getElementById('profileMainView')).gridTemplateColumns);
+    expect(columns.trim().split(/\s+/).length).toBe(2);
+    await desktop.close();
+  });
+
   test('chromium page scale factor 1.25 stays overflow-safe on representative widths', async ({ browser }) => {
     const cases = [
       { width: 390, height: 844, hasTouch: true, isMobile: true },
