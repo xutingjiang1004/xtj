@@ -110,20 +110,13 @@
     });
   };
 
-  var _origToggleLike = window.toggleLike;
-  window.toggleLike = async function (btn, postId) {
-    if (!window.currentUser) {
-      if (window.showToast) window.showToast('请先登录');
-      return;
-    }
-    var wasLiked = btn && btn.classList && btn.classList.contains('liked');
-    if (!_origToggleLike) return;
-    var result = await _origToggleLike(btn, postId);
-    if (!btn || wasLiked || !btn.classList.contains('liked') || perfMode() === 'lite') return result;
+  window.xtjAnimateLikeToggle = function (btn, liked) {
+    if (!btn || perfMode() === 'lite') return;
     runWithGSAP(function() {
     var cleanup = withTransientWillChange(btn, 'transform');
+    gsap.killTweensOf(btn);
     gsap.fromTo(btn, { scale: 1 }, {
-      scale: perfMode() === 'balanced' ? 1.08 : 1.18,
+      scale: liked ? (perfMode() === 'balanced' ? 1.08 : 1.18) : 0.94,
       duration: 0.14,
       ease: 'power2.out',
       yoyo: true,
@@ -132,7 +125,6 @@
       onComplete: cleanup
     });
     });
-    return result;
   };
 
   var _origOpenComment = window.openComment;
