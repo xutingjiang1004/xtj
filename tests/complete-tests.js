@@ -307,7 +307,7 @@ test('Playwright UI validation uses installed Edge channel and a dedicated test 
   var pkg = JSON.parse(read('package.json'));
   var config = read('playwright.config.js');
   assert.strictEqual(pkg.scripts['test:ui'], 'playwright test', 'missing npm run test:ui');
-  assert.ok(config.indexOf("channel: process.env.PW_CHANNEL || 'msedge'") >= 0, 'Playwright is not configured to use system Edge');
+  assert.ok(config.indexOf("channel: process.env.PW_CHANNEL || (process.env.CI ? undefined : 'msedge')") >= 0, 'Playwright must use system Edge locally and bundled Chromium in CI');
   assert.ok(config.indexOf("outputDir: 'output/playwright/test-results'") >= 0, 'Playwright output dir missing');
 });
 

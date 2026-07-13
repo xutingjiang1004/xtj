@@ -391,7 +391,27 @@
         throw createPhotoUploadError('cancelled');
       }
       if (timedOut) {
+        // ★ 超时不确定：先查询服务端是否已提交记录
         fetchError.photoUploadCode = 'timeout';
+        fetchError.photoUploadStage = 'uncertain';
+        try {
+          var statusRes = await fetch(apiUrl('/api/photo/status'), {
+            method: 'POST',
+            headers: buildPhotoCreateHeaders(headers),
+            body: JSON.stringify({ upload_id: uploadId }),
+            signal: (typeof AbortController !== 'undefined' ? (new AbortController()).signal : undefined)
+          });
+          var statusData = await statusRes.json().catch(function(){ return {}; });
+          if (statusData && statusData.status === 'committed' && statusData.data) {
+            // 服务端已提交，视为成功，不删除 Storage
+            return statusData.data;
+          }
+        } catch(statusErr) {
+          // 状态查询失败，继续清理流程
+        }
+        // 未提交才清理 Storage
+        await cleanupStorage(path);
+        throw fetchError;
       } else {
         fetchError.photoUploadCode = 'backend_unreachable';
       }
