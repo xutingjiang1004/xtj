@@ -715,13 +715,8 @@
 
     // 鈽?U3: 鍙敤浜?POST body, 涓嶅厑璁?password_hash 鍑虹幇鍦?GET URL
     var un = readUserName();
-    var pw = readPwHash();
     var body = {};
-    if (!token && un && pw) {
-      body.user_name = un;
-      body.password_hash = pw;
-    }
-    return { token: token, headers: headers, body: body, query: {}, userName: un, passwordHash: pw };
+    return { token: token, headers: headers, body: body, query: {}, userName: un };
   }
 
   async function sendOnce(method, path, body, options) {
@@ -782,14 +777,6 @@
     var first = await sendOnce(method, path, body, { forceNoToken: false });
     if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
     if (first && (first.status === 401 || first.status === 403)) {
-      var hasPw = hasLocalPasswordHash();
-      if (AI_DEBUG) { try { console.warn('[AI] auth failed, hasLocalPasswordHash =', hasPw); } catch (e3) {} }
-      if (hasPw) {
-        clearAiUserToken();
-        var second = await sendOnce(method, path, body, { forceNoToken: true, retry: true });
-        try { if (AI_DEBUG) console.warn('[AI] retry result (pw_hash)', { status: second && second.status, ok: second && second.ok, url: second && second.url }); } catch (e4) {}
-        return second;
-      }
       if (typeof window.refreshUserToken === 'function') {
         try {
           var refreshed = await window.refreshUserToken(true);
@@ -800,6 +787,7 @@
           }
         } catch (e6) {}
       }
+      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e7) {}
     }
     return first;
   }
@@ -807,13 +795,7 @@
   function describeError(r, fallback) {
     if (!r) return fallback || '请求失败';
     if (r.status === 401 || r.status === 403) {
-      var hasPw = false;
-      var hasTok = false;
-      try { hasPw = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')); } catch (e) {}
-      try { hasTok = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')); } catch (e2) {}
-      if (!hasPw && !hasTok && window.currentUser && typeof window.refreshUserToken === 'function') {
-        try { window.refreshUserToken(true).catch(function() {}); } catch (e3) {}
-      }
+      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e) {}
       return '凭据异常，请重新登录后再使用 AI 聊天';
     }
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
@@ -2366,15 +2348,12 @@
   }
 
   async function ensureUserAuthOrNotify() {
-    if (typeof window.ensureRealUserAuth !== 'function') return true;
+    var preflight = window.ensureProtectedOperationAuth || window.ensureRealUserAuth;
+    if (typeof preflight !== 'function') return true;
     try {
-      var auth = await window.ensureRealUserAuth();
+      var auth = await preflight();
       if (auth && auth.ok) return true;
       var reason = auth && auth.reason;
-      if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
-        notify('鉴权凭证缺失，请退出后重新登录再使用 AI 聊天');
-        return false;
-      }
       if (reason === 'no_user') {
         notify('请先登录后再使用 AI 聊天');
         return false;
@@ -2382,7 +2361,7 @@
     } catch (e) {
       try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
     }
-    notify('登录状态异常，请尝试刷新页面后重新登录');
+    try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e2) {}
     return false;
   }
 

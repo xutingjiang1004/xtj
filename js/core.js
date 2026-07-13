@@ -50,6 +50,12 @@
             _origDocOverflow = null;
             _origBodyOverflow = null;
             _origBodyTouchAction = null;
+        } else {
+            // A bfcache restore or legacy secondary page can leave inline
+            // locks behind without going through saveOriginalStyles().
+            document.documentElement.style.overflow = '';
+            document.body.style.overflow = '';
+            document.body.style.touchAction = '';
         }
     }
 
@@ -231,6 +237,7 @@ const ADMIN_NAME = "xxz";
             var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
             // 共享 refresh promise，避免多个 API 同时刷新
             var _refreshPromise = null;
+            var _protectedAuthFailureHandled = false;
             // 持久化登录标记（用户选择"保持登录"）
             var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
 
@@ -279,20 +286,33 @@ const ADMIN_NAME = "xxz";
                 try { localStorage.removeItem(PERSISTENT_AUTH_KEY); } catch(e) {}
             }
 
-            // 清除所有认证状态（logout 用）
-            function clearAllAuthState() {
+            // Clear all browser-side authentication state in one place. Password
+            // hashes are never retained as a session fallback.
+            function clearAllAuthState(options) {
+                options = options || {};
                 clearUserToken();
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { localStorage.removeItem('xtj_user'); } catch(e) {}
                 try { localStorage.removeItem(USER_SESSION_KEY); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
-                // 调用后端 logout 撤销 refresh token
-                try {
+                try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
+                // Explicit logout revokes the refresh cookie. An expired session
+                // must not make another request just to report that it expired.
+                if (options.revokeRemote !== false) try {
                     fetch(API_BASE + '/api/user/logout', { method: 'POST', credentials: 'include' }).catch(function(){});
                 } catch(e) {}
             }
             window.clearAllAuthState = clearAllAuthState;
+
+            function handleProtectedAuthFailure() {
+                if (_protectedAuthFailureHandled) return;
+                _protectedAuthFailureHandled = true;
+                clearAllAuthState({ revokeRemote: false });
+                try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
+                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+            }
+            window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
             async function ensureUserToken() {
                 var existingToken = getUserToken();
@@ -319,10 +339,6 @@ const ADMIN_NAME = "xxz";
                                 return data.token;
                             }
                         }
-                        // 401 = refresh token 无效/过期
-                        if (res.status === 401) {
-                            clearAllAuthState();
-                        }
                         return '';
                     } catch(e) {
                         return '';
@@ -335,27 +351,6 @@ const ADMIN_NAME = "xxz";
 
             // 兼容旧 password_hash 登录（迁移期间保留）
             async function ensureUserTokenLegacy() {
-                var existingToken = getUserToken();
-                if (existingToken) return existingToken;
-                if (!currentUser || !API_BASE) return '';
-                var pwHash = '';
-                try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
-                if (!pwHash) return '';
-                try {
-                    var tokenRes = await fetch(API_BASE + '/api/user/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: currentUser, password_hash: pwHash })
-                    });
-                    var tokenData = await tokenRes.json().catch(function() { return {}; });
-                    if (tokenRes.ok && tokenData && tokenData.token) {
-                        setUserToken(tokenData.token);
-                        return tokenData.token;
-                    }
-                    if (tokenRes.status === 401 || tokenRes.status === 403) {
-                        clearUserToken();
-                    }
-                } catch (e) {}
                 return '';
             }
 
@@ -367,7 +362,6 @@ const ADMIN_NAME = "xxz";
                 // 先尝试从 cookie 刷新
                 var token = await ensureUserToken();
                 // fallback 旧 password_hash
-                if (!token) token = await ensureUserTokenLegacy();
                 if (token) {
                     return {
                         'Content-Type': 'application/json',
@@ -394,28 +388,6 @@ const ADMIN_NAME = "xxz";
                     var token = await refreshUserTokenViaCookie();
                     if (token) return token;
                     // fallback 旧 password_hash
-                    var userName = '';
-                    try { userName = (typeof currentUser === 'string' ? currentUser : (currentUser && currentUser.user_name) || '') || ''; } catch (e) { userName = ''; }
-                    if (!userName) {
-                        try { userName = localStorage.getItem('xtj_user') || sessionStorage.getItem('xtj_user') || ''; } catch (e) {}
-                    }
-                    var pwHash = '';
-                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
-                    if (!userName || !pwHash) return '';
-                    clearUserToken();
-                    var tokenRes = await fetch(API_BASE + '/api/user/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, password_hash: pwHash })
-                    });
-                    var tokenData = await tokenRes.json().catch(function() { return {}; });
-                    if (tokenRes.ok && tokenData && tokenData.token) {
-                        setUserToken(tokenData.token);
-                        return tokenData.token;
-                    }
-                    if (tokenRes.status === 401 || tokenRes.status === 403) {
-                        clearUserToken();
-                    }
                 } catch (e) {}
                 return '';
             };
@@ -428,7 +400,7 @@ const ADMIN_NAME = "xxz";
              * 返回 { ok, reason, token, user_name }
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
-            window.ensureRealUserAuth = async function() {
+            window.ensureProtectedOperationAuth = async function() {
                 try {
                     var userName = '';
                     try {
@@ -441,22 +413,20 @@ const ADMIN_NAME = "xxz";
                     userName = String(userName || '').trim();
                     if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
 
-                    var token = '';
-                    try { token = sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { token = ''; }
-                    if (token) return { ok: true, reason: 'ok', token: token, user_name: userName };
-
-                    // 没 token，看是否有 password_hash
-                    var pwHash = '';
-                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
-                    if (pwHash && typeof window.refreshUserToken === 'function') {
-                        var newToken = await window.refreshUserToken(true);
-                        if (newToken) return { ok: true, reason: 'ok_refreshed', token: newToken, user_name: userName };
+                    var token = await ensureUserToken();
+                    if (token) {
+                        _protectedAuthFailureHandled = false;
+                        try { touchUserSession(false); } catch (e2) {}
+                        return { ok: true, reason: 'ok', token: token, user_name: userName };
                     }
-                    return { ok: false, reason: pwHash ? 'refresh_failed' : 'missing_auth_credentials', token: '', user_name: userName };
+                    handleProtectedAuthFailure();
+                    return { ok: false, reason: 'refresh_failed', token: '', user_name: userName };
                 } catch (e) {
+                    handleProtectedAuthFailure();
                     return { ok: false, reason: 'exception', token: '', user_name: '' };
                 }
             };
+            window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
 
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
@@ -491,8 +461,9 @@ const ADMIN_NAME = "xxz";
             return next;
         }
 
-        // 一次性迁移：将 localStorage 的 xtj_pw_hash 复制到 sessionStorage 后立刻删除旧值
-        try { if (localStorage.getItem('xtj_pw_hash')) { if (!sessionStorage.getItem('xtj_pw_hash')) sessionStorage.setItem('xtj_pw_hash', localStorage.getItem('xtj_pw_hash')); localStorage.removeItem('xtj_pw_hash'); } } catch(e) {}
+        // Remove credentials left by earlier clients; ongoing sessions are renewed
+        // exclusively through the HttpOnly refresh cookie.
+        try { sessionStorage.removeItem('xtj_pw_hash'); localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
 
         function clearUserSessionStorage() {
             try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
@@ -532,21 +503,6 @@ const ADMIN_NAME = "xxz";
                 localStorage.setItem("xtj_user", userName);
             } catch (e) {}
             lastUserSessionWriteAt = now;
-            // ★ 关键修复：检查真实鉴权凭据
-            try {
-                var _rt = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
-                var _rp = !!(sessionStorage.getItem('xtj_pw_hash'));
-                if (!_rt && !_rp) {
-                    try { console.warn('[AUTH] restore: 假登录态（token + pwHash 缺失），自动登出'); } catch (e) {}
-                    clearUserSessionStorage();
-                    return "";
-                }
-                // token 缺失但 pwHash 存在 → 自动刷新 token（不阻塞页面加载）
-                if (!_rt && _rp && typeof window.refreshUserToken === 'function') {
-                    try { console.warn('[AUTH] restore: token 缺失但 pwHash 存在，自动刷新 token'); } catch (e) {}
-                    window.refreshUserToken(true).catch(function(){});
-                }
-            } catch (e) {}
             return userName;
         }
 
@@ -583,9 +539,6 @@ const ADMIN_NAME = "xxz";
                     var headers = { 'Content-Type': 'application/json' };
                     if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
                     var body = { user_name: userName };
-                    if (!userToken) {
-                        body.password_hash = sessionStorage.getItem("xtj_pw_hash") || "";
-                    }
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
                     }).catch(function(){});
@@ -2868,6 +2821,7 @@ const ADMIN_NAME = "xxz";
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
+                var authPasswordHash = '';
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
 
@@ -2900,8 +2854,7 @@ const ADMIN_NAME = "xxz";
                             try {
                                 var adminAuthRec = await findAuthRecord(name);
                                 if (adminAuthRec && adminAuthRec.media_url) {
-            try { sessionStorage.setItem("xtj_pw_hash", adminAuthRec.media_url); } catch(e) {}
-            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
+            authPasswordHash = adminAuthRec.media_url;
                                 }
                             } catch(e) { console.warn('[Admin] 写入 xtj_pw_hash 失败:', e); }
                         } catch (apiErr) {
@@ -2922,15 +2875,14 @@ const ADMIN_NAME = "xxz";
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
-            try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
-            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
+            authPasswordHash = authRec.media_url;
                     }
 
                     // 获取 JWT token（替代 password_hash 认证）
                     // ★ 关键修复：拿不到 token 时也要继续登录流程，但 console.warn 提示
                     //   AI 模块会用 ensureRealUserAuth 主动补救
                     try {
-                        var _pwHash = sessionStorage.getItem("xtj_pw_hash") || "";
+                        var _pwHash = authPasswordHash;
                         if (_pwHash && API_BASE) {
                             var tokenRes = await fetch(API_BASE + '/api/user/login', {
                                 method: 'POST', headers: {'Content-Type':'application/json'},
@@ -2954,6 +2906,10 @@ const ADMIN_NAME = "xxz";
                             try { console.warn('[AUTH] login: no API_BASE, skip token fetch'); } catch(e) {}
                         }
                     } catch(e) { try { console.warn('[AUTH] login token fetch exception:', e && e.message); } catch(e2) {} }
+                    if (!getUserToken()) {
+                        showToast("登录会话建立失败，请重试", "error");
+                        return;
+                    }
 
                     currentUser = name;
                     window.currentUser = currentUser;
@@ -3045,8 +3001,6 @@ const ADMIN_NAME = "xxz";
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-            try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
-            try { localStorage.removeItem("xtj_pw_hash"); } catch(e) {}
                     // 获取 JWT token（替代 password_hash 认证）
                     // ★ 关键修复：拿不到 token 时也要继续注册流程，但 console.warn 提示
                     try {
@@ -3069,6 +3023,11 @@ const ADMIN_NAME = "xxz";
                             try { console.warn('[AUTH] register: no API_BASE, skip token fetch'); } catch(e) {}
                         }
                     } catch(e) { try { console.warn('[AUTH] register token fetch exception:', e && e.message); } catch(e2) {} }
+                    if (!getUserToken()) {
+                        clearAllAuthState({ revokeRemote: false });
+                        showToast("注册成功，但登录会话建立失败，请重新登录", "error");
+                        return;
+                    }
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -4417,6 +4376,25 @@ function renderProfileActivityList(kind) {
                 statsEl.textContent = text.replace(/点赞 \d+/, '点赞 ' + next);
             }
 
+            function getPostLikeButtons(postId) {
+                var pid = String(postId || '');
+                var buttons = [];
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var likeBtn = postEl.querySelector('.actions .action-btn');
+                    if (likeBtn) buttons.push(likeBtn);
+                });
+                return buttons;
+            }
+
+            function setPostLikePending(postId, pending) {
+                getPostLikeButtons(postId).forEach(function(likeBtn) {
+                    likeBtn.disabled = !!pending;
+                    if (pending) likeBtn.dataset.likePending = '1';
+                    else delete likeBtn.dataset.likePending;
+                });
+            }
+
             function updatePostLikeUi(postId, liked, likeRecord) {
                 var pid = String(postId || '');
                 if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
@@ -4436,8 +4414,9 @@ function renderProfileActivityList(kind) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var likeBtn = postEl.querySelector('.actions .action-btn');
                     var statsEl = postEl.querySelector('.post-stats-text');
+                    var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
                     setLikeButtonState(likeBtn, liked);
-                    updateLikeStatsText(statsEl, liked);
+                    if (stateChanged) updateLikeStatsText(statsEl, liked);
                 });
             }
             var likeStatRefreshTimer = null;
@@ -4451,21 +4430,34 @@ function renderProfileActivityList(kind) {
                 }, 300);
             }
 
+            var likeOperations = Object.create(null);
+            var likeOperationVersions = Object.create(null);
+
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
-                if (!btn || btn.dataset.likePending === '1') return;
+                var pid = String(postId || '');
+                if (!btn || !pid || likeOperations[pid]) return;
                 var wasLiked = btn.classList.contains("liked");
-                btn.dataset.likePending = '1';
-                btn.disabled = true;
+                var version = (likeOperationVersions[pid] || 0) + 1;
+                likeOperationVersions[pid] = version;
+                likeOperations[pid] = { version: version };
+                setPostLikePending(pid, true);
+                var previousOwnedLikes = (feedAllLikes || []).filter(function(item) {
+                    return isLikeOwnedByCurrentUser(item, pid);
+                });
 
                 try {
                     var nextLiked = !wasLiked;
-                    var optimisticLikeRecord = { post_id: postId, user_name: currentUser, actor_key: deviceId };
-                    updatePostLikeUi(postId, nextLiked, optimisticLikeRecord);
+                    var optimisticLikeRecord = { post_id: pid, user_name: currentUser, actor_key: deviceId };
+                    updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
                     updateFeedStats();
+                    if (typeof window.xtjAnimateLikeToggle === 'function') {
+                        window.xtjAnimateLikeToggle(btn, nextLiked);
+                    }
+                    if (nextLiked) createHeartParticles(btn);
                     if (wasLiked) {
-                        var deleteQuery = sb.from("likes").delete().eq("post_id", postId);
+                        var deleteQuery = sb.from("likes").delete().eq("post_id", pid);
                         var currentIds = getCurrentLikeIdentityValues();
                         var orParts = [];
                         if (currentUser) orParts.push('user_name.eq.' + currentUser);
@@ -4473,13 +4465,15 @@ function renderProfileActivityList(kind) {
                             orParts.push('actor_key.eq.' + value);
                         });
                         if (orParts.length) {
-                            await deleteQuery.or(orParts.join(','));
+                            var deleteResult = await deleteQuery.or(orParts.join(','));
+                            if (deleteResult && deleteResult.error) throw deleteResult.error;
                         } else {
-                            await deleteQuery.eq("actor_key", deviceId);
+                            var fallbackDeleteResult = await deleteQuery.eq("actor_key", deviceId);
+                            if (fallbackDeleteResult && fallbackDeleteResult.error) throw fallbackDeleteResult.error;
                         }
                     } else {
-                        await sb.from("likes").insert([optimisticLikeRecord]);
-                        createHeartParticles(btn);
+                        var insertResult = await sb.from("likes").insert([optimisticLikeRecord]);
+                        if (insertResult && insertResult.error) throw insertResult.error;
                     }
                     touchUserSession(false);
                     scheduleLikeStatRefresh();
@@ -4488,23 +4482,28 @@ function renderProfileActivityList(kind) {
                     }
                 } catch (e) {
                     console.error(e);
-                    updatePostLikeUi(postId, wasLiked);
+                    if (likeOperations[pid] && likeOperations[pid].version === version) {
+                        feedAllLikes = (feedAllLikes || []).filter(function(item) {
+                            return !isLikeOwnedByCurrentUser(item, pid);
+                        }).concat(previousOwnedLikes);
+                        persistFeedLikesCache();
+                        updatePostLikeUi(pid, wasLiked, previousOwnedLikes[0]);
+                    }
                     updateFeedStats();
                     scheduleLikeStatRefresh();
                     showToast('点赞操作失败');
                 } finally {
-                    setLikeButtonState(btn, btn.classList.contains('liked'));
-                    btn.disabled = false;
-                    delete btn.dataset.likePending;
+                    if (likeOperations[pid] && likeOperations[pid].version === version) {
+                        delete likeOperations[pid];
+                        setPostLikePending(pid, false);
+                    }
                 }
             };
 
             function createHeartParticles(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
-                if (typeof xtjHeartBurst === 'function') {
-                    xtjHeartBurst(btn);
-                }
+                if (typeof xtjHeartBurst === 'function') return xtjHeartBurst(btn);
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
@@ -6968,6 +6967,62 @@ function renderProfileActivityList(kind) {
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
+                    }
+                }
+            };
+
+            // Final pin action: server-side RPC enforces one pinned post per author.
+            window.togglePostPin = async function(postId, btn) {
+                if (!postId) return;
+                var originalText = btn ? btn.textContent : '';
+                var nextPinned = false;
+                var didSucceed = false;
+                try {
+                    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+                    var auth = typeof window.ensureProtectedOperationAuth === 'function'
+                        ? await window.ensureProtectedOperationAuth()
+                        : { ok: !!(typeof window.getUserAuthHeaders === 'function' && await window.getUserAuthHeaders()) };
+                    if (!auth.ok) return;
+
+                    var current = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    if (current.error) throw current.error;
+                    if (!current.data) throw new Error('Post not found');
+                    var post = normalizePost(current.data);
+                    if (currentUser !== post.user_name && currentUser !== ADMIN_NAME) {
+                        showToast('Not allowed');
+                        return;
+                    }
+                    nextPinned = !post.is_pinned;
+                    var headers = await window.getUserAuthHeaders();
+                    if (!headers) return;
+                    var response = await fetch((window.API_BASE || '') + '/api/post/pin', {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok || !result.data) throw new Error(result.error || 'Pin operation failed');
+
+                    (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
+                        syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
+                    });
+                    if (!syncPinnedPostIntoFeedState(result.data)) {
+                        clearFeedCache();
+                        await loadFeed(true);
+                    } else {
+                        writeFeedCacheSnapshot();
+                        await rebuildFeedFromCurrentState();
+                        await refreshPostDetailIfActive(postId);
+                    }
+                    didSucceed = true;
+                    showToast(nextPinned ? 'Pinned' : 'Pin removed');
+                } catch (e) {
+                    console.error('[pin] atomic update failed', e);
+                    showToast('Pin failed: ' + (e && e.message ? e.message : 'unknown error'));
+                } finally {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = didSucceed ? (nextPinned ? 'Unpin' : 'Pin') : (originalText || 'Pin');
                     }
                 }
             };
