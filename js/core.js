@@ -1,4 +1,4 @@
-﻿// console.log('[XTJ] core.js loaded, starting...');
+// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -29,6 +29,30 @@
 (function() {
     if (window.XTJSecondaryPageState && window.restoreMainNavigationState) return;
 
+    // 保存原始 overflow 和 touchAction，用于恢复
+    var _origDocOverflow = null;
+    var _origBodyOverflow = null;
+    var _origBodyTouchAction = null;
+
+    function saveOriginalStyles() {
+        if (_origDocOverflow === null) {
+            _origDocOverflow = document.documentElement.style.overflow || '';
+            _origBodyOverflow = document.body.style.overflow || '';
+            _origBodyTouchAction = document.body.style.touchAction || '';
+        }
+    }
+
+    function restoreOriginalStyles() {
+        if (_origDocOverflow !== null) {
+            document.documentElement.style.overflow = _origDocOverflow;
+            document.body.style.overflow = _origBodyOverflow;
+            document.body.style.touchAction = _origBodyTouchAction;
+            _origDocOverflow = null;
+            _origBodyOverflow = null;
+            _origBodyTouchAction = null;
+        }
+    }
+
     function isVisiblePanel(id, activeClass) {
         var panel = document.getElementById(id);
         if (!panel) return false;
@@ -39,6 +63,7 @@
     }
 
     function hasVisibleSecondaryPage() {
+        // 通用检查：任何 dock-panel 非默认的可见面板
         return isVisiblePanel('panelDeepThink', 'active');
     }
 
@@ -49,50 +74,69 @@
         }
     }
 
+    // 引用计数：每个 owner 独立计数，同一 owner 重复 open 幂等
+    var _openOwners = {}; // { ownerName: count }
+
     function applySecondaryPageState(locked) {
         try {
             document.body.classList.toggle('secondary-page-open', !!locked);
             if (locked) {
+                saveOriginalStyles();
                 document.documentElement.style.overflow = 'hidden';
                 document.body.style.overflow = 'hidden';
                 document.body.style.touchAction = 'none';
             } else {
-                document.documentElement.style.overflow = '';
-                document.body.style.overflow = '';
-                document.body.style.touchAction = '';
+                restoreOriginalStyles();
                 document.body.classList.remove('secondary-page-open');
                 clearStaleDockDisplay();
             }
         } catch (e) {}
     }
 
-    var openPanels = new Set();
+    function getAllOpenOwners() {
+        var owners = [];
+        for (var k in _openOwners) {
+            if (Object.prototype.hasOwnProperty.call(_openOwners, k) && _openOwners[k] > 0) {
+                owners.push(k);
+            }
+        }
+        return owners;
+    }
 
     function reconcile() {
-        if (hasVisibleSecondaryPage()) {
-            if (isVisiblePanel('panelDeepThink', 'active')) openPanels.add('deep-think');
-            else openPanels.delete('deep-think');
+        var owners = getAllOpenOwners();
+        if (owners.length > 0) {
             applySecondaryPageState(true);
             return true;
         }
-        openPanels.clear();
         applySecondaryPageState(false);
         return false;
     }
 
     window.XTJSecondaryPageState = {
-        open: function(panelName) {
-            if (panelName) openPanels.add(String(panelName));
+        open: function(ownerName) {
+            if (!ownerName) return;
+            ownerName = String(ownerName);
+            // 幂等：同一 owner 重复 open 只增加引用计数
+            _openOwners[ownerName] = (_openOwners[ownerName] || 0) + 1;
             reconcile();
         },
-        close: function(panelName) {
-            if (panelName) openPanels.delete(String(panelName));
+        close: function(ownerName) {
+            if (!ownerName) return;
+            ownerName = String(ownerName);
+            if (_openOwners[ownerName] && _openOwners[ownerName] > 0) {
+                _openOwners[ownerName]--;
+                if (_openOwners[ownerName] <= 0) delete _openOwners[ownerName];
+            }
+            // 未知 owner 不操作
             reconcile();
         },
         reset: function() {
+            _openOwners = {};
             reconcile();
         },
-        hasVisibleSecondaryPage: hasVisibleSecondaryPage
+        hasVisibleSecondaryPage: hasVisibleSecondaryPage,
+        getOpenOwners: getAllOpenOwners
     };
 
     window.restoreMainNavigationState = function() {
@@ -107,15 +151,15 @@
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
     else scheduleRestore();
-    window.addEventListener('pageshow', scheduleRestore);
+    // pageshow 恢复逻辑：browser back/forward 时重新检测
+    window.addEventListener('pageshow', function(e) {
+        // 仅当从 bfcache 恢复时才需要重新 reconcile
+        if (e.persisted) scheduleRestore();
+    });
     document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') scheduleRestore();
     });
-    window.addEventListener('error', function() {
-        setTimeout(function() {
-            try { window.restoreMainNavigationState(); } catch (e) {}
-        }, 80);
-    });
+    // 移除 window.error 作为导航事件（error 不应该触发导航状态恢复）
 })();
 
 window.safeLocalStorageGetJSON = function(key, fallback) {
@@ -185,45 +229,117 @@ const ADMIN_NAME = "xxz";
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
             var USER_TOKEN_KEY = 'xtj_user_token';
             var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
+            // 共享 refresh promise，避免多个 API 同时刷新
+            var _refreshPromise = null;
+            // 持久化登录标记（用户选择"保持登录"）
+            var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
 
             function getUserToken() {
-                var token = sessionStorage.getItem(USER_TOKEN_KEY) || localStorage.getItem(USER_TOKEN_KEY);
-                // 校验 localStorage token 是否过期（30天）
-                if (token && localStorage.getItem(USER_TOKEN_KEY)) {
-                    var ts = parseInt(localStorage.getItem(USER_TOKEN_TS_KEY), 10);
-                    if (ts && (Date.now() - ts > 30 * 24 * 60 * 60 * 1000)) {
-                        localStorage.removeItem(USER_TOKEN_KEY);
-                        localStorage.removeItem(USER_TOKEN_TS_KEY);
-                        token = null;
+                // 仅从 sessionStorage 读取（本次会话）
+                var token = sessionStorage.getItem(USER_TOKEN_KEY) || '';
+                // 检查是否过期
+                if (token) {
+                    var ts = parseInt(sessionStorage.getItem(USER_TOKEN_TS_KEY) || '0', 10);
+                    if (ts && (Date.now() - ts > 15 * 60 * 1000)) {
+                        // access token 可能已过期，尝试刷新
+                        token = '';
                     }
                 }
-                return token || '';
+                return token;
             }
 
             function setUserToken(token) {
                 if (token) {
                     sessionStorage.setItem(USER_TOKEN_KEY, token);
-                    localStorage.setItem(USER_TOKEN_KEY, token);
-                    localStorage.setItem(USER_TOKEN_TS_KEY, Date.now());
+                    sessionStorage.setItem(USER_TOKEN_TS_KEY, String(Date.now()));
                 }
+            }
+
+            function setPersistentAuth(enabled) {
+                try {
+                    if (enabled) {
+                        localStorage.setItem(PERSISTENT_AUTH_KEY, '1');
+                    } else {
+                        localStorage.removeItem(PERSISTENT_AUTH_KEY);
+                    }
+                } catch(e) {}
+            }
+
+            function isPersistentAuth() {
+                try {
+                    return localStorage.getItem(PERSISTENT_AUTH_KEY) === '1';
+                } catch(e) { return false; }
             }
 
             function clearUserToken() {
                 try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
+                try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
                 try { localStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
                 try { localStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
+                try { localStorage.removeItem(PERSISTENT_AUTH_KEY); } catch(e) {}
             }
+
+            // 清除所有认证状态（logout 用）
+            function clearAllAuthState() {
+                clearUserToken();
+                try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
+                try { localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
+                try { localStorage.removeItem('xtj_user'); } catch(e) {}
+                try { localStorage.removeItem(USER_SESSION_KEY); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
+                // 调用后端 logout 撤销 refresh token
+                try {
+                    fetch(API_BASE + '/api/user/logout', { method: 'POST', credentials: 'include' }).catch(function(){});
+                } catch(e) {}
+            }
+            window.clearAllAuthState = clearAllAuthState;
 
             async function ensureUserToken() {
                 var existingToken = getUserToken();
                 if (existingToken) return existingToken;
+                // 尝试用 refresh token 刷新
+                return await refreshUserTokenViaCookie();
+            }
+
+            // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
+            var _refreshPromise = null;
+            async function refreshUserTokenViaCookie() {
+                if (_refreshPromise) return _refreshPromise;
+                _refreshPromise = (async function() {
+                    try {
+                        var res = await fetch(API_BASE + '/api/user/refresh', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        if (res.ok) {
+                            var data = await res.json().catch(function(){ return {}; });
+                            if (data && data.token) {
+                                setUserToken(data.token);
+                                return data.token;
+                            }
+                        }
+                        // 401 = refresh token 无效/过期
+                        if (res.status === 401) {
+                            clearAllAuthState();
+                        }
+                        return '';
+                    } catch(e) {
+                        return '';
+                    } finally {
+                        _refreshPromise = null;
+                    }
+                })();
+                return _refreshPromise;
+            }
+
+            // 兼容旧 password_hash 登录（迁移期间保留）
+            async function ensureUserTokenLegacy() {
+                var existingToken = getUserToken();
+                if (existingToken) return existingToken;
                 if (!currentUser || !API_BASE) return '';
                 var pwHash = '';
-                try {
-pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
-                } catch (e) {
-                    pwHash = '';
-                }
+                try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
                 if (!pwHash) return '';
                 try {
                     var tokenRes = await fetch(API_BASE + '/api/user/login', {
@@ -245,12 +361,13 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
             /**
              * 返回统一认证请求头对象。
-             * 优先使用 JWT Bearer token；无 token 且无 password_hash 时返回 null。
-             * 有 token → 返回 { Authorization, Content-Type }
-             * 无 token 但有 currentUser + password_hash → 返回 null（调用方应传参兼容旧逻辑）
+             * 优先使用 refresh token 刷新，无 token 时 fallback 旧 password_hash
              */
             window.getUserAuthHeaders = async function() {
+                // 先尝试从 cookie 刷新
                 var token = await ensureUserToken();
+                // fallback 旧 password_hash
+                if (!token) token = await ensureUserTokenLegacy();
                 if (token) {
                     return {
                         'Content-Type': 'application/json',
@@ -265,9 +382,7 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
 
             /**
              * 强制刷新 token。
-             *  - force=false（默认）：和 ensureUserToken 一样，有旧 token 就直接返回
-             *  - force=true：忽略旧 token，主动用 currentUser + xtj_pw_hash 调 /api/user/login 换新 token
-             * 用途：AI 401/403 后由 ai-agent.js 调用，避开"旧 token 永远优先"的死循环
+             * 优先使用 refresh token cookie，fallback 旧 password_hash
              */
             window.refreshUserToken = async function(force) {
                 try {
@@ -275,6 +390,10 @@ pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
                         var existing = getUserToken();
                         if (existing) return existing;
                     }
+                    // 优先 cookie 刷新
+                    var token = await refreshUserTokenViaCookie();
+                    if (token) return token;
+                    // fallback 旧 password_hash
                     var userName = '';
                     try { userName = (typeof currentUser === 'string' ? currentUser : (currentUser && currentUser.user_name) || '') || ''; } catch (e) { userName = ''; }
                     if (!userName) {
