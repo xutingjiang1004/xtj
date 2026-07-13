@@ -48,22 +48,22 @@
     <link rel="stylesheet" href="css/style.min.css?v=ea370d28b4" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" />
     <noscript><link rel="stylesheet" href="css/style.min.css?v=ea370d28b4" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a00cd86eaf" /><link rel="stylesheet" href="css/ai-agent.min.css?v=72499a2382" /></noscript>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=4309c6a9bb" />
+    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=c057cc7efc" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=70ac4fe6ac">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=72499a2382">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=d2a0d59d66">
-    <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=ce1ed8fb3c">
+    <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=6b783e82b0">
     <meta name="xtj-module-pro-upgrade" content="js/pro-upgrade.min.js?v=99b4eac6d4">
     <meta name="xtj-module-pro-script" content="js/pro-style.min.js?v=5f976a5f1e">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=7c0ecd6d11">
-    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=3f6c4415b0">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=9c4e102be8">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=70b279a068">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=3c5c22c595">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=04742983b6">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=5b784a1a5c">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=a2b674198e">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21e170fc76">
-    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=0f72e8b4ec">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=2fc89380a0">
     <meta name="xtj-module-features" content="js/features.min.js?v=4fc5383fd8">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=dc9c360b6a">
     </head>
@@ -994,7 +994,7 @@
     </div>
 
     <!-- 照片墙全屏预览 - 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
-    <div class="photo-preview-overlay" id="photoPreviewOverlay">
+    <div class="photo-preview-overlay" id="photoPreviewOverlay" role="dialog" aria-modal="true" aria-label="照片预览" aria-hidden="true" tabindex="-1">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
         <button class="photo-preview-close" onclick="window.closePhotoPreview()" aria-label="关闭预览">
@@ -1019,14 +1019,14 @@
             </div>
         </div>
         <div class="pp-preview-toolbar" role="toolbar" aria-label="照片操作">
-        <button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()">
+        <button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" aria-label="缩小" onclick="window.zoomOut()">
             <span class="ui-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <path d="M5 12h14"></path>
                 </svg>
             </span>
         </button>
-        <button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()">
+        <button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" aria-label="放大" onclick="window.zoomIn()">
             <span class="ui-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <path d="M12 5v14"></path>
@@ -1034,18 +1034,18 @@
                 </svg>
             </span>
         </button>
-        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="window.showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
-        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
-        <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90°" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
-        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" aria-label="照片信息" onclick="window.showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
+        <button class="pp-share-btn" id="ppShareBtn" title="分享" aria-label="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
+        <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90°" aria-label="旋转 90 度" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" aria-label="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
         </div>
         
         <!-- 照片信息弹窗 -->
-        <div class="pp-info-modal" id="ppInfoModal" style="display:none;" onclick="if(event.target===this)window.closePhotoInfo()">
-            <div class="pp-info-modal-content" onclick="event.stopPropagation()">
+        <div class="pp-info-modal" id="ppInfoModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ppInfoModalTitle" aria-hidden="true" onclick="if(event.target===this)window.closePhotoInfo()">
+            <div class="pp-info-modal-content" tabindex="-1" onclick="event.stopPropagation()">
                 <div class="pp-info-modal-header">
-                    <span class="pp-info-modal-title">照片详情</span>
-                    <button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>
+                    <span class="pp-info-modal-title" id="ppInfoModalTitle">照片详情</span>
+                    <button class="pp-info-modal-close" aria-label="关闭照片详情" onclick="window.closePhotoInfo()">&times;</button>
                 </div>
                 <div class="pp-info-modal-body" id="ppInfoModalBody">
                 </div>
@@ -1413,7 +1413,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=24ac675c17"></script>
+    <script defer src="js/core.min.js?v=8c4ef4f1b4"></script>
     <script defer src="js/login-device.min.js?v=ad593d9c75"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
 
