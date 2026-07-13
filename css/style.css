@@ -427,13 +427,15 @@
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
         .btn-ghost {
             background: rgba(255,255,255,0.5);
             color: var(--text-main);
             border: 1px solid rgba(255,255,255,0.7);
         }
-        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-2px); }
+        @media (hover: hover) and (pointer: fine) {
+            .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+            .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-2px); }
+        }
         .user-pill {
             display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.7);
@@ -786,7 +788,6 @@
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 4px; }
         .stat-card { padding: 12px 10px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.06); min-width: 0; }
-        .stat-card:hover { transform: translateY(-3px) scale(1.015); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .stat-card b { display: block; font-size: 18px; color: var(--primary); font-weight: 800; line-height: 1.1; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
 
@@ -798,13 +799,16 @@
             transition: var(--trans-spring);
             overflow: hidden;
         }
-        .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .chat-entry-bar:active { transform: scale(0.99); }
         .ceb-icon {
             font-size: 26px; flex-shrink: 0;
             transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        .chat-entry-bar:hover .ceb-icon { transform: scale(1.075) rotate(-2.5deg); }
+        @media (hover: hover) and (pointer: fine) {
+            .stat-card:hover { transform: translateY(-3px) scale(1.015); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
+            .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
+            .chat-entry-bar:hover .ceb-icon { transform: scale(1.075) rotate(-2.5deg); }
+        }
         .ceb-label { font-size: 15px; font-weight: 600; color: var(--text-main); }
         .ceb-notify {
             margin-left: auto; font-size: 13px; color: var(--primary);
@@ -896,7 +900,9 @@
             transition: var(--trans-spring);
         }
         .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
-        .avatar:hover { transform: scale(1.05); }
+        @media (hover: hover) and (pointer: fine) {
+            .avatar:hover { transform: scale(1.05); }
+        }
         .user-info { display: flex; flex-direction: column; }
         .user-name { font-weight: 700; font-size: 15px; }
         .post-time { font-size: 12px; color: var(--text-muted); }
@@ -1255,7 +1261,9 @@
             -webkit-backdrop-filter: blur(8px);
             z-index: 10;
         }
-        .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
+        @media (hover: hover) and (pointer: fine) {
+            .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
+        }
         .img-viewer .iv-zoom-hint {
             position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
             background: rgba(255,255,255,0.1);
@@ -1313,7 +1321,9 @@
             box-shadow: 0 8px 20px rgba(75, 120, 94, 0.12), inset 0 1px 0 rgba(255,255,255,0.75);
             display: none;
         }
-        .chat-header .back-btn:hover { background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(234,248,239,0.88)); transform: translateY(-1px); }
+        @media (hover: hover) and (pointer: fine) {
+            .chat-header .back-btn:hover { background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(234,248,239,0.88)); transform: translateY(-1px); }
+        }
         .chat-header h3 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; }
         .chat-header .chat-close-btn {
             background: rgba(255,255,255,0.2); border: none;
@@ -1428,7 +1438,9 @@
             object-fit: cover;
             transition: transform 0.2s;
         }
-        .chat-msg .msg-img:hover { transform: scale(1.01); }
+        @media (hover: hover) and (pointer: fine) {
+            .chat-msg .msg-img:hover { transform: scale(1.01); }
+        }
         .chat-msg video.msg-img {
             cursor: default;
             object-fit: contain;
@@ -1510,7 +1522,9 @@
             transition: background 0.2s, transform 0.2s;
             box-shadow: 0 1px 4px rgba(0,0,0,0.3);
         }
-        .cfp-x:hover { background: #ff3b60; transform: scale(1.075); }
+        @media (hover: hover) and (pointer: fine) {
+            .cfp-x:hover { background: #ff3b60; transform: scale(1.075); }
+        }
         .cfp-name {
             flex: 1; font-size: 12px; color: var(--text-muted);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1527,7 +1541,6 @@
             color: white; font-size: 18px;
             transition: transform 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease, filter 0.22s ease;
         }
-        .send-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(5,150,105,0.24); filter: saturate(1.03); }
         .send-btn:disabled { opacity: 0.4; transform: none !important; }
         .chat-img-btn {
             width: 46px; height: 46px; border-radius: 16px;
@@ -1538,7 +1551,10 @@
             box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
             transition: transform 0.22s ease, background 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
         }
-        .chat-img-btn:hover { background: rgba(255,255,255,0.92); transform: translateY(-1px); box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12); border-color: rgba(172, 211, 189, 0.95); }
+        @media (hover: hover) and (pointer: fine) {
+            .send-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(5,150,105,0.24); filter: saturate(1.03); }
+            .chat-img-btn:hover { background: rgba(255,255,255,0.92); transform: translateY(-1px); box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12); border-color: rgba(172, 211, 189, 0.95); }
+        }
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
@@ -2402,7 +2418,7 @@
             -webkit-backdrop-filter: blur(0px);
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.35s ease-in-out, backdrop-filter 0.35s ease-in-out, background 0.35s ease-in-out;
+            transition: opacity 0.35s ease-in-out, background 0.35s ease-in-out;
         }
         .pp-confirm-overlay.active {
             background: rgba(0, 0, 0, 0.4);
@@ -2417,7 +2433,7 @@
             -webkit-backdrop-filter: blur(0px);
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.25s ease-in-out, backdrop-filter 0.25s ease-in-out, background 0.25s ease-in-out;
+            transition: opacity 0.25s ease-in-out, background 0.25s ease-in-out;
         }
         .pp-confirm-dialog {
             width: 88%;
@@ -4285,10 +4301,12 @@
             box-shadow: var(--profile-glass-shadow);
             transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s cubic-bezier(0.16,1,0.3,1), background 0.3s cubic-bezier(0.16,1,0.3,1);
         }
-        .profile-user-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 34px rgba(20, 61, 39, 0.10);
-            background: var(--profile-glass-bg-strong);
+        @media (hover: hover) and (pointer: fine) {
+            .profile-user-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 12px 34px rgba(20, 61, 39, 0.10);
+                background: var(--profile-glass-bg-strong);
+            }
         }
         .profile-user-card:active {
             transform: scale(0.97);
@@ -4609,9 +4627,11 @@
             opacity: 0.4;
             transition: transform 0.3s ease, opacity 0.3s ease;
         }
-        .profile-user-card:hover .profile-chevron {
-            transform: translateX(5px);
-            opacity: 0.7;
+        @media (hover: hover) and (pointer: fine) {
+            .profile-user-card:hover .profile-chevron {
+                transform: translateX(5px);
+                opacity: 0.7;
+            }
         }
         .profile-settings {
             flex: 1;
@@ -4912,9 +4932,6 @@
             cursor: pointer;
             transition: var(--trans-smooth);
         }
-        .profile-detail-avatar:hover {
-            transform: scale(1.025);
-        }
         .profile-detail-avatar img {
             width: 100%;
             height: 100%;
@@ -4938,8 +4955,13 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
             transition: var(--trans-smooth);
         }
-        .profile-detail-avatar-edit:hover {
-            transform: scale(1.1);
+        @media (hover: hover) and (pointer: fine) {
+            .profile-detail-avatar:hover {
+                transform: scale(1.025);
+            }
+            .profile-detail-avatar-edit:hover {
+                transform: scale(1.1);
+            }
         }
         .profile-detail-info {
             width: 100%;
@@ -5339,7 +5361,9 @@
             background:rgba(128,128,128,0.04);
             text-align:left;
         }
-        .pw-album-card:hover { transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.08); }
+        @media (hover: hover) and (pointer: fine) {
+            .pw-album-card:hover { transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.08); }
+        }
         .pw-album-cover {
             width:100%;
             aspect-ratio:4 / 3;
@@ -5502,24 +5526,33 @@
             transform: translateY(8px);
             transition: opacity .35s ease, transform .35s cubic-bezier(0.16,1,0.3,1);
         }
-        .photo-wall-item:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 28px 52px rgba(15, 23, 42, 0.16), 0 10px 24px rgba(15, 23, 42, 0.1);
-        }
-        .photo-wall-item:hover::before,
         .photo-wall-item:focus-visible::before,
         .photo-wall-item:active::before {
             opacity: .55;
         }
-        .photo-wall-item:hover img,
         .photo-wall-item:focus-visible img {
             transform: scale(1.045);
         }
-        .photo-wall-item:hover .pw-item-info,
         .photo-wall-item:focus-visible .pw-item-info,
         .photo-wall-item:active .pw-item-info {
             opacity: 1;
             transform: translateY(0);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .photo-wall-item:hover {
+                transform: translateY(-4px);
+                box-shadow: 0 28px 52px rgba(15, 23, 42, 0.16), 0 10px 24px rgba(15, 23, 42, 0.1);
+            }
+            .photo-wall-item:hover::before {
+                opacity: .55;
+            }
+            .photo-wall-item:hover img {
+                transform: scale(1.045);
+            }
+            .photo-wall-item:hover .pw-item-info {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         .photo-wall-item:active {
             transform: scale(.985);
@@ -7350,12 +7383,14 @@
 
 .pp-rotate-btn { position: absolute; right: 16px; bottom: 100px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: white; border: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; z-index: 100; }
 
-.pp-rotate-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
+@media (hover: hover) and (pointer: fine) {
+  .pp-rotate-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
+  .pp-zoom-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
+}
 
 .pp-rotate-btn:active { transform: scale(0.95); }
 
 .pp-zoom-btn { position: absolute; bottom: 100px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: white; border: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; z-index: 100; }
-.pp-zoom-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
 .pp-zoom-btn:active { transform: scale(0.95); }
 
 .pw-skeleton { width: auto; aspect-ratio: var(--pw-skel-aspect, 1 / 1); background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: pw-skeleton-loading 1.5s infinite; border-radius: 18px; }
@@ -13540,10 +13575,12 @@ html[data-pro-theme="lavender"] {
   text-align: left;
 }
 
-.pro-style-option-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(114, 182, 141, 0.48);
-  box-shadow: 0 14px 28px rgba(35, 82, 55, 0.1);
+@media (hover: hover) and (pointer: fine) {
+  .pro-style-option-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(114, 182, 141, 0.48);
+    box-shadow: 0 14px 28px rgba(35, 82, 55, 0.1);
+  }
 }
 
 .pro-style-option-card.active {
@@ -14004,10 +14041,12 @@ html[data-pro-theme="lavender"] {
   color: inherit;
 }
 
-.profile-pro-style-entry:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(40, 80, 60, 0.10);
-  border-color: rgba(34, 197, 130, 0.32);
+@media (hover: hover) and (pointer: fine) {
+  .profile-pro-style-entry:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(40, 80, 60, 0.10);
+    border-color: rgba(34, 197, 130, 0.32);
+  }
 }
 
 .profile-pro-style-entry:active {
@@ -14119,9 +14158,11 @@ html[data-pro-theme="lavender"] {
   transition: background 0.18s ease, transform 0.18s ease;
 }
 
-.profile-subpage-back:hover {
-  background: rgba(232, 248, 240, 0.92);
-  transform: translateX(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .profile-subpage-back:hover {
+    background: rgba(232, 248, 240, 0.92);
+    transform: translateX(-1px);
+  }
 }
 
 .profile-subpage-back:active {

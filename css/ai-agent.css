@@ -1907,7 +1907,9 @@
   transition: transform .15s, box-shadow .2s, opacity .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.dt-send:hover { box-shadow: 0 8px 22px rgba(66, 155, 122, .28); }
+@media (hover: hover) and (pointer: fine) {
+  .dt-send:hover { box-shadow: 0 8px 22px rgba(66, 155, 122, .28); }
+}
 .dt-send:active { transform: scale(.96); }
 .dt-send:disabled { opacity: .55; cursor: not-allowed; }
 
