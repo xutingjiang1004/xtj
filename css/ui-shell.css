@@ -420,6 +420,40 @@
   }
 }
 
+/* Final profile layout wins over legacy wide-screen layout patches above. */
+#panelProfile .profile-main-view {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: var(--profile-gap, 16px) !important;
+  width: min(100%, 560px) !important;
+  margin: 0 auto !important;
+}
+
+@media (min-width: 768px) {
+  #panelProfile .profile-main-view { width: min(100%, 720px) !important; }
+}
+
+@media (min-width: 1180px) {
+  #panelProfile .profile-main-view {
+    width: min(100%, 1120px) !important;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) !important;
+    grid-template-areas:
+      "header activity"
+      "user activity"
+      "vip activity"
+      "style activity"
+      "settings activity"
+      "totals totals" !important;
+  }
+  #panelProfile .profile-header { grid-area: header !important; }
+  #panelProfile .profile-user-card { grid-area: user !important; }
+  #panelProfile .xtj-vip-card { grid-area: vip !important; }
+  #panelProfile .profile-pro-style-entry-wrap { grid-area: style !important; }
+  #panelProfile .profile-settings { grid-area: settings !important; }
+  #panelProfile .profile-activity-board { grid-area: activity !important; }
+  #panelProfile .profile-totals-bar { grid-area: totals !important; }
+}
+
 /* A 1024px tablet does not have enough reliable input space for the desktop
    conversation split.  Keep the existing single-pane selection model until a
    fine-pointer desktop has real room for both columns. */
@@ -537,6 +571,162 @@
   .dock-bar > .dock-indicator {
     transition: none !important;
   }
+}
+
+/* Posts navigation and profile layout: final component-level rules. */
+#panelPosts.active .posts-nav {
+  gap: 12px;
+}
+
+#panelPosts.active .posts-nav > .posts-nav-brand,
+#panelPosts.active .posts-nav > .posts-nav-tools,
+#panelPosts.active .posts-nav > .nav-auth {
+  width: auto;
+  justify-content: flex-start;
+  flex: 0 0 auto;
+}
+
+#panelPosts.active .posts-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#panelPosts.active .posts-nav-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+#panelPosts.active .posts-nav .posts-nav-icon-btn {
+  box-sizing: border-box;
+  inline-size: 44px;
+  block-size: 44px;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  padding: 0 !important;
+  flex: 0 0 44px;
+  border-radius: 14px;
+  overflow: visible;
+}
+
+#panelPosts.active .posts-nav .posts-nav-icon-btn svg {
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+#panelPosts .stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  background: transparent;
+}
+
+#panelPosts .stats .stat-card,
+#panelPosts.active .stats .stat-card {
+  min-block-size: 82px;
+  border: 1px solid var(--xtj-content-line);
+  border-radius: 20px;
+  background: var(--xtj-content-surface);
+  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06);
+}
+
+#panelPosts .stats .stat-card + .stat-card {
+  border-inline-start: 1px solid var(--xtj-content-line);
+}
+
+#panelProfile .dock-profile-container {
+  --profile-gap: 16px;
+}
+
+#panelProfile .profile-main-view {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--profile-gap);
+  width: min(100%, 560px);
+  margin: 0 auto;
+}
+
+#panelProfile .profile-header,
+#panelProfile .profile-user-card,
+#panelProfile .profile-activity-board,
+#panelProfile .xtj-vip-card,
+#panelProfile .profile-pro-style-entry-wrap,
+#panelProfile .profile-settings,
+#panelProfile .profile-totals-bar {
+  grid-area: auto !important;
+  grid-column: auto !important;
+  margin: 0 !important;
+}
+
+#panelProfile .profile-user-card,
+#panelProfile .profile-activity-board,
+#panelProfile .xtj-vip-card,
+#panelProfile .profile-pro-style-entry,
+#panelProfile .profile-settings,
+#panelProfile .profile-totals-bar {
+  border: 1px solid var(--xtj-content-line) !important;
+  border-radius: 20px !important;
+  background: var(--xtj-content-surface) !important;
+  box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
+}
+
+#panelProfile .profile-activity-board {
+  overflow: hidden;
+}
+
+#panelProfile .profile-activity-card {
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#panelProfile .profile-totals-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px 8px !important;
+  text-align: center;
+}
+
+#panelProfile .profile-total-sep {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  #panelProfile .profile-main-view { width: min(100%, 720px); }
+}
+
+@media (min-width: 1180px) {
+  #panelProfile .profile-main-view {
+    width: min(100%, 1120px);
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+    grid-template-areas:
+      "header activity"
+      "user activity"
+      "vip activity"
+      "style activity"
+      "settings activity"
+      "totals totals";
+    align-items: start;
+  }
+  #panelProfile .profile-header { grid-area: header !important; }
+  #panelProfile .profile-user-card { grid-area: user !important; }
+  #panelProfile .xtj-vip-card { grid-area: vip !important; }
+  #panelProfile .profile-pro-style-entry-wrap { grid-area: style !important; }
+  #panelProfile .profile-settings { grid-area: settings !important; }
+  #panelProfile .profile-activity-board { grid-area: activity !important; }
+  #panelProfile .profile-totals-bar { grid-area: totals !important; }
+}
+
+@media (max-width: 639.98px) {
+  #panelPosts.active .posts-nav { gap: 6px; padding-inline: 12px; }
+  #panelPosts.active .posts-nav .nav-auth { min-width: 0; }
+  #panelPosts.active .posts-nav .user-pill #myName { max-inline-size: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #panelPosts .stats { gap: 8px; }
+  #panelPosts .stats .stat-card,
+  #panelPosts.active .stats .stat-card { min-block-size: 76px; border-radius: 16px; }
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -791,5 +981,14 @@
     grid-area: stats !important; grid-column: 2 !important; grid-row: 1 / span 3 !important; position: sticky !important; top: 24px !important;
     display: grid !important; grid-template-columns: minmax(0, 1fr) !important; width: 100% !important; max-width: none !important;
     min-width: 0 !important; margin: 0 !important; box-sizing: border-box; align-self: start;
+  }
+}
+
+@media (max-width: 480px) and (pointer: coarse) {
+  #photoPreviewOverlay .pp-nav-arrow {
+    width: 60px !important;
+    height: 60px !important;
+    min-width: 60px !important;
+    min-height: 60px !important;
   }
 }
