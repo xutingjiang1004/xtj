@@ -51,6 +51,8 @@
     forceClosing: false,
     callingOriginalClose: false,
     infoOpen: false,
+    previewReturnFocus: null,
+    infoReturnFocus: null,
     moveRaf: 0,
     pendingMove: null
   };
@@ -752,6 +754,32 @@
         event.stopImmediatePropagation();
       }, true);
     }
+    modal.addEventListener('keydown', function (event) {
+      if (!state.infoOpen) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        window.closePhotoInfo();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      var focusable = Array.prototype.filter.call(modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'), function (node) {
+        return !node.disabled && node.getAttribute('aria-hidden') !== 'true' && node.offsetParent !== null;
+      });
+      if (!focusable.length) {
+        event.preventDefault();
+        if (content) content.focus();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
   }
 
   function closePhotoInfoInternal(silent) {
@@ -760,6 +788,7 @@
     state.infoOpen = false;
     if (root) root.classList.remove('pp-info-open');
     if (!modal) return;
+    modal.setAttribute('aria-hidden', 'true');
     if (modal.__xtjInfoCloseTimer) {
       clearTimeout(modal.__xtjInfoCloseTimer);
       modal.__xtjInfoCloseTimer = 0;
@@ -774,6 +803,8 @@
       modal.classList.remove('closing');
       modal.style.pointerEvents = '';
       if (!silent && body) body.innerHTML = '';
+      if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
+      state.infoReturnFocus = null;
       return;
     }
     modal.__xtjInfoCloseTimer = window.setTimeout(function () {
@@ -782,6 +813,8 @@
       modal.classList.remove('closing');
       modal.style.pointerEvents = '';
       if (!silent && body) body.innerHTML = '';
+      if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
+      state.infoReturnFocus = null;
     }, 240);
   }
 
@@ -791,6 +824,7 @@
     var body = infoBody();
     var root = overlay();
     if (!modal || !body || !photo) return;
+    state.infoReturnFocus = document.activeElement;
     bindInfoModal();
     if (modal.__xtjInfoCloseTimer) {
       clearTimeout(modal.__xtjInfoCloseTimer);
@@ -801,6 +835,7 @@
     modal.classList.remove('closing');
     modal.classList.add('pp-info-prep');
     modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
     modal.style.pointerEvents = 'auto';
     state.infoOpen = true;
     if (root) root.classList.add('pp-info-open');
@@ -808,6 +843,9 @@
       requestAnimationFrame(function () {
         modal.classList.remove('pp-info-prep');
         modal.classList.add('active');
+        var closeBtn = modal.querySelector('.pp-info-modal-close');
+        if (closeBtn) closeBtn.focus();
+        else if (content) content.focus();
       });
     });
     if (!photo.fileSize) {
@@ -866,7 +904,11 @@
         root.style.removeProperty('--pp-img-y');
         root.style.removeProperty('--pp-scale');
         root.style.removeProperty('--pp-rotate');
+        root.setAttribute('aria-hidden', 'true');
       }
+
+      if (state.previewReturnFocus && document.contains(state.previewReturnFocus)) state.previewReturnFocus.focus();
+      state.previewReturnFocus = null;
 
       var img = previewImage();
       if (img) {
@@ -1181,6 +1223,10 @@
     applyImageTransform(false);
     syncTrackTransform(0, false);
     clearDismissVisual(false);
+    var root = overlay();
+    if (root) root.setAttribute('aria-hidden', 'false');
+    var closeBtn = root && root.querySelector('.photo-preview-close');
+    if (closeBtn) closeBtn.focus();
   }
 
   function resolvePhotoArray(arg1) {
@@ -1245,6 +1291,7 @@
     if (window.openPhotoPreview && window.openPhotoPreview.__xtjHotfixWrapped) return;
     window.openPhotoPreview = function (index, options) {
       closeLegacyViewer();
+      state.previewReturnFocus = document.activeElement;
       var explicitPhotos = resolvePhotoArray(options);
       if (!explicitPhotos || !explicitPhotos.length) {
         explicitPhotos = resolveFallbackPhotoArray();

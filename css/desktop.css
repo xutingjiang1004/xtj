@@ -319,6 +319,11 @@
     display: flex;
   }
 
+  #panelChat .dock-chat-container.desktop-split #dockChatListView.chat-view.hidden,
+  #panelChat .dock-chat-container.desktop-split #dockChatDetailView.chat-view.hidden {
+    display: flex !important;
+  }
+
   /* detail 内的消息区可滚动 */
   #panelChat #dockChatMessages {
     overflow-y: auto;
