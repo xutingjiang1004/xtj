@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -154,9 +155,18 @@ function minifyCSS(filePath, optional) {
     return false;
   }
   const outPath = fullPath.replace(/\.css$/, '.min.css');
+  var normalizedInputPath = null;
   const statsBefore = fs.statSync(fullPath).size;
   console.log(`[MINIFY-CSS] ${filePath} (${(statsBefore / 1024).toFixed(0)}KB)`);
   try {
+    // Git checks out text files with platform-specific line endings. Some CSS
+    // constructs preserve enough whitespace for CSSO to emit different bytes
+    // on Windows and Linux, which makes cache hashes and CI non-deterministic.
+    // Always minify an LF-normalized temporary input and remove it afterward.
+    var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\r\n?/g, '\n');
+    var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-css-'));
+    normalizedInputPath = path.join(tempDir, path.basename(fullPath));
+    fs.writeFileSync(normalizedInputPath, normalizedSource, 'utf8');
     if (!fs.existsSync(CSSO)) {
       console.log('  csso not installed, trying clean-css...');
       if (!fs.existsSync(CLEAN_CSS)) {
@@ -164,12 +174,12 @@ function minifyCSS(filePath, optional) {
         return false;
       }
       execSync(
-        cliCommand(CLEAN_CSS, ['-o', outPath, fullPath]),
+        cliCommand(CLEAN_CSS, ['-o', outPath, normalizedInputPath]),
         { stdio: 'pipe', timeout: 30000 }
       );
     } else {
       execSync(
-        cliCommand(CSSO, [fullPath, '--output', outPath]),
+        cliCommand(CSSO, [normalizedInputPath, '--output', outPath]),
         { stdio: 'pipe', timeout: 30000 }
       );
     }
@@ -182,6 +192,10 @@ function minifyCSS(filePath, optional) {
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
     return false;
+  } finally {
+    if (normalizedInputPath) {
+      try { fs.rmSync(path.dirname(normalizedInputPath), { recursive: true, force: true }); } catch (_) {}
+    }
   }
 }
 
