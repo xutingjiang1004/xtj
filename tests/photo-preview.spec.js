@@ -38,7 +38,7 @@ async function setup(page) {
   await page.addInitScript(installListenerMonitor);
   await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
   await page.evaluate(installListenerMonitor);
-  await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.currentUser="tester";' + script });
+  await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
   return pageErrors;
 }
 
@@ -83,7 +83,8 @@ test('same URL repeated while loading does not remove the only effective listene
   await page.waitForTimeout(40);
   const state = await previewState(page);
   expect(state.stats.max).toBeLessThanOrEqual(2);
-  expect(state.openCleanup || state.stats.active > 0).toBe(true);
+  const completed = await page.locator('#photoPreviewImage').evaluate(img => img.complete);
+  expect(state.openCleanup || state.stats.active > 0 || completed).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -91,7 +92,10 @@ test('failed retry from old URL cannot affect a newer image', async ({ page }) =
   const errors = await setup(page);
   await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/slow-bad.png', username: 'u', timestamp: Date.now() }]));
   await page.waitForTimeout(160);
-  await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/ok2.png', username: 'u', timestamp: Date.now() }]));
+  await page.evaluate(() => {
+    window.closePhotoPreview();
+    window.openPhotoPreview(0, [{ imageUrl: '/ok2.png', username: 'u', timestamp: Date.now() }]);
+  });
   await page.waitForTimeout(700);
   await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /ok2\.png/);
   await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');

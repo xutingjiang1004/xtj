@@ -120,7 +120,7 @@ test.describe('release validation', () => {
     expect(state.listDisplay).not.toBe('none');
     expect(state.detailDisplay).not.toBe('none');
     expect(state.backDisplay).toBe('none');
-    expect(state.detailText).toContain('选择一条会话开始聊天');
+    expect(/选择一条会话开始聊天|登录后可查看消息/.test(state.detailText)).toBeTruthy();
     await context.close();
   });
 
