@@ -1,4 +1,4 @@
-﻿// xtj Admin API service for Render deployment.
+// xtj Admin API service for Render deployment.
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -121,7 +121,8 @@ const DEEP_THINK_CONFIG = {
 // 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
 const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
 
-// 简单 exact-match 缓存 (TTL 5 分钟, key = userName + '::' + message + '::' + thinking_mode)
+// 简单 exact-match 缓存 (TTL 5 分钟)
+// 安全规则：有历史、搜索、附件、外部上下文、时效性问题时不缓存
 const aiResponseCache = new Map();
 const AI_CACHE_TTL_MS = 5 * 60 * 1000;
 const AI_CACHE_MAX_SIZE = 500;
@@ -139,6 +140,36 @@ setInterval(function() {
   });
   limitAiCacheSize();
 }, 5 * 60 * 1000);
+
+// 判断是否允许使用缓存
+function canUseAiCache(ctx, reqBody) {
+  // 有历史对话 → 禁止缓存
+  if (ctx && Array.isArray(ctx.history) && ctx.history.length > 0) return false;
+  // 使用了搜索 → 禁止缓存
+  if (ctx && ctx.search_used) return false;
+  // 有附件 → 禁止缓存
+  if (reqBody && (reqBody.attachments || reqBody.files || reqBody.images)) return false;
+  // 有外部上下文 → 禁止缓存
+  if (ctx && ctx.external_context) return false;
+  // 用户指定了 chat_mode → 禁止缓存
+  if (reqBody && reqBody.chat_mode && reqBody.chat_mode !== 'default') return false;
+  return true;
+}
+
+// 生成缓存 key（基于哈希，不记录原始对话）
+function buildAiCacheKey(userName, message, ctx, reqBody) {
+  var crypto = require('crypto');
+  var parts = [
+    'v2',
+    String(userName || ''),
+    String(message || '').trim(),
+    String(reqBody.thinking_mode || ''),
+    String(reqBody.chat_mode || ''),
+    String(reqBody.model || ''),
+    String(reqBody.config_version || '')
+  ];
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
+}
 
 // ===================== 共享工具函数 (提取自 M/R 架构) =====================
 function buildHistoryContext(ctx, message) {
@@ -2522,6 +2553,92 @@ function rateLimit(windowMs, maxRequests) {
   };
 }
 
+// 持久化限流（第二层，用于安全敏感操作）
+// 使用 Supabase 作为共享原子存储，防止分布式/多进程绕过
+const DB_RATE_LIMIT_MARKER = '__rate_limit__';
+const persistenceRateLimitCache = new Map(); // 本地缓存，减少 DB 查询
+
+async function checkPersistentRateLimit(key, windowMs, maxRequests) {
+  var now = Date.now();
+  var cacheKey = key + '::' + windowMs;
+  var cached = persistenceRateLimitCache.get(cacheKey);
+  if (cached && cached.resetAt > now && cached.count >= maxRequests) {
+    return { limited: true, retryAfter: Math.ceil((cached.resetAt - now) / 1000) };
+  }
+
+  try {
+    // 原子 upsert：使用 actor_key 唯一约束
+    var actorKey = 'rl_' + key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    var { data: existing } = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('media_type', DB_RATE_LIMIT_MARKER)
+      .eq('media_url', actorKey)
+      .maybeSingle();
+
+    var count = 0;
+    var resetAt = now + windowMs;
+    if (existing) {
+      try {
+        var prev = JSON.parse(existing.content || '{}');
+        if (prev.resetAt && prev.resetAt > now) {
+          count = prev.count || 0;
+          resetAt = prev.resetAt;
+        }
+      } catch(e) {}
+    }
+
+    if (count >= maxRequests) {
+      persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
+      return { limited: true, retryAfter: Math.ceil((resetAt - now) / 1000) };
+    }
+
+    count++;
+    var newContent = JSON.stringify({ count: count, resetAt: resetAt });
+    if (existing) {
+      await supabase.from('posts').update({ content: newContent, created_at: new Date(resetAt).toISOString() })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert([{
+        user_name: 'system',
+        content: newContent,
+        media_type: DB_RATE_LIMIT_MARKER,
+        media_url: actorKey,
+        actor_key: actorKey,
+        created_at: new Date(resetAt).toISOString()
+      }]);
+    }
+    persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
+    return { limited: false };
+  } catch(e) {
+    // DB 不可用时降级为仅本地限流
+    return { limited: false, degraded: true };
+  }
+}
+
+// 组合限流：第一层本地（快速），第二层持久化（安全敏感操作）
+function securityRateLimit(windowMs, maxRequests) {
+  var localLimit = rateLimit(windowMs, maxRequests);
+  return async function(req, res, next) {
+    // 先执行本地限流
+    var localPassed = false;
+    var _nextCalled = false;
+    var _next = function() { _nextCalled = true; next(); };
+    localLimit(req, res, _next);
+    if (!_nextCalled) return; // 本地已拒绝
+
+    // 持久化限流（仅对安全敏感操作）
+    var key = getRealIp(req) + ':' + req.path;
+    var result = await checkPersistentRateLimit(key, windowMs, maxRequests);
+    if (result.limited) {
+      logAttack(key, 'DB_RATE_LIMIT', req.method + ' ' + req.path);
+      res.setHeader('Retry-After', result.retryAfter);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: result.retryAfter });
+    }
+    // 本地限流已通过，持久化限流也通过了
+    // 注意：本地限流已经调用了 next()，这里不需要再调用
+  };
+}
+
 // ===================== DeepSeek 统一调用封装 =====================
 // ★ 调用 DeepSeek API 的唯一入口
 // - API Key 从后端 DEEPSEEK_API_KEY 读取，绝对不出现在前端 / 日志
@@ -3845,15 +3962,82 @@ function verifySignedToken(token) {
   return _verifyToken(token);
 }
 
+// 短期 access token（15分钟）
+const USER_ACCESS_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
+// 长期 refresh token（30天）
+const USER_REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+
 function signUserToken(userName, expireHours) {
   var USER_TOKEN_EXPIRY_MS = (expireHours || 720) * 60 * 60 * 1000;
   return _signPayload({ exp: Date.now() + USER_TOKEN_EXPIRY_MS, user_name: userName, type: 'user' });
+}
+
+function signUserAccessToken(userName) {
+  return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access' });
+}
+
+function signUserRefreshToken(userName) {
+  return _signPayload({ exp: Date.now() + USER_REFRESH_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_refresh', jti: crypto.randomUUID() });
 }
 
 function verifyUserToken(token) {
   var payload = _verifyToken(token);
   if (!payload || payload.type !== 'user' || !payload.user_name) return null;
   return payload;
+}
+
+function verifyUserAccessToken(token) {
+  var payload = _verifyToken(token);
+  if (!payload || payload.type !== 'user_access' || !payload.user_name) return null;
+  return payload;
+}
+
+function verifyUserRefreshToken(token) {
+  var payload = _verifyToken(token);
+  if (!payload || payload.type !== 'user_refresh' || !payload.user_name) return null;
+  return payload;
+}
+
+// ===== Refresh Token 持久化存储（用于撤销检测） =====
+const REFRESH_TOKEN_MARKER = '__refresh_token__';
+
+async function storeRefreshToken(userName, refreshToken) {
+  try {
+    var payload = verifyUserRefreshToken(refreshToken);
+    if (!payload) return;
+    await supabase.from('posts').insert([{
+      user_name: userName,
+      content: JSON.stringify({ jti: payload.jti, expires_at: new Date(payload.exp).toISOString() }),
+      media_type: REFRESH_TOKEN_MARKER,
+      media_url: payload.jti,
+      actor_key: 'rt_' + payload.jti
+    }]);
+  } catch(e) { console.warn('[RefreshToken] store failed:', e && e.message); }
+}
+
+async function revokeAllUserRefreshTokens(userName) {
+  try {
+    var { data: tokens } = await supabase.from('posts')
+      .select('media_url')
+      .eq('media_type', REFRESH_TOKEN_MARKER)
+      .eq('user_name', userName);
+    if (tokens && tokens.length > 0) {
+      await supabase.from('posts').delete().eq('media_type', REFRESH_TOKEN_MARKER).eq('user_name', userName);
+    }
+  } catch(e) { console.warn('[RefreshToken] revokeAll failed:', e && e.message); }
+}
+
+async function isRefreshTokenRevoked(refreshToken) {
+  try {
+    var payload = verifyUserRefreshToken(refreshToken);
+    if (!payload || !payload.jti) return true;
+    var { data } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', REFRESH_TOKEN_MARKER)
+      .eq('media_url', payload.jti)
+      .maybeSingle();
+    return !data;
+  } catch(e) { return true; }
 }
 
 function _getTokenFromRequest(req) {
@@ -4023,16 +4207,20 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   return res.json({ ok: true, username: ADMIN_USERNAME });
 });
 
-// ===================== 用户 Token 认证（JWT 替代 password_hash） =====================
-const USER_TOKEN_HEADER_HOURS = 720; // 用户 token 有效期 30 天
+// ===================== 用户 Token 认证（JWT access_token + refresh_token） =====================
+const USER_TOKEN_HEADER_HOURS = 720; // 旧 token 有效期 30 天（兼容期）
 
 async function authenticateUser(req, res, next) {
-  // 优先验证 Authorization header 中的用户 token
+  // 1. 验证 Authorization header 中的 access token（短期）
   var token = _getTokenFromRequest(req);
   if (token) {
-    var payload = verifyUserToken(token);
+    // 先尝试新 access token
+    var payload = verifyUserAccessToken(token);
+    if (!payload) {
+      // 兼容旧版 user token（30天）
+      payload = verifyUserToken(token);
+    }
     if (payload && payload.user_name) {
-      // 确认该用户仍存在于系统中
       try {
         var { data: userExists } = await supabase.from('posts')
           .select('id')
@@ -4050,7 +4238,7 @@ async function authenticateUser(req, res, next) {
     }
   }
 
-  // 兼容旧 password_hash（仅接受 body，不接受 query/URL）
+  // 2. 兼容旧 password_hash（迁移期间保留，仅接受 body）
   var body = req.body || {};
   var password_hash = body.password_hash || '';
   var userName = body.user_name || body.reporter_name || '';
@@ -4079,7 +4267,7 @@ async function authenticateUser(req, res, next) {
   }
 }
 
-// 用户登录/获取 token（用 password_hash 换取 JWT token）
+// 用户登录/获取 token（用 password_hash 换取 access_token + refresh_token）
 app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
   try {
     var { user_name, password_hash } = req.body;
@@ -4095,11 +4283,89 @@ app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
     if (!authRec || !authRec.media_url || !crypto.timingSafeEqual(Buffer.from(authRec.media_url), Buffer.from(password_hash))) {
       return res.status(401).json({ error: '账号或密码错误' });
     }
-    var token = signUserToken(userNameVal);
-    return res.json({ ok: true, token: token, user_name: userNameVal });
+    // 签发短期 access token + 长期 refresh token
+    var accessToken = signUserAccessToken(userNameVal);
+    var refreshToken = signUserRefreshToken(userNameVal);
+    await storeRefreshToken(userNameVal, refreshToken);
+
+    // 设置 refresh token 为 HttpOnly Secure SameSite Cookie
+    try {
+      res.cookie('xtj_user_refresh', refreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Strict',
+        maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
+        path: '/api/user'
+      });
+    } catch(e) {}
+
+    return res.json({ ok: true, token: accessToken, user_name: userNameVal, token_type: 'access' });
   } catch(e) {
     console.error('[API] 用户登录失败:', e.message);
     return res.status(500).json({ error: '登录失败' });
+  }
+});
+
+// 刷新用户 access token（使用 HttpOnly cookie 中的 refresh token）
+app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
+  try {
+    var refreshToken = (req.cookies && req.cookies.xtj_user_refresh) || '';
+    if (!refreshToken) {
+      return res.status(401).json({ error: '缺少 refresh token' });
+    }
+    var payload = verifyUserRefreshToken(refreshToken);
+    if (!payload || !payload.user_name) {
+      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+      return res.status(401).json({ error: 'refresh token 无效或已过期' });
+    }
+    // 检查是否已撤销
+    if (await isRefreshTokenRevoked(refreshToken)) {
+      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+      return res.status(401).json({ error: 'refresh token 已撤销，请重新登录' });
+    }
+    // 签发新的 access token + rotating refresh token
+    var newAccessToken = signUserAccessToken(payload.user_name);
+    var newRefreshToken = signUserRefreshToken(payload.user_name);
+    await storeRefreshToken(payload.user_name, newRefreshToken);
+    // 撤销旧的 refresh token
+    try {
+      await supabase.from('posts').delete()
+        .eq('media_type', REFRESH_TOKEN_MARKER)
+        .eq('media_url', payload.jti);
+    } catch(e) {}
+
+    res.cookie('xtj_user_refresh', newRefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+      maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
+      path: '/api/user'
+    });
+
+    return res.json({ ok: true, token: newAccessToken, user_name: payload.user_name, token_type: 'access' });
+  } catch(e) {
+    console.error('[API] 刷新 token 失败:', e.message);
+    return res.status(500).json({ error: '刷新失败' });
+  }
+});
+
+// 用户登出（撤销 refresh token）
+app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
+  try {
+    var refreshToken = (req.cookies && req.cookies.xtj_user_refresh) || '';
+    if (refreshToken) {
+      var payload = verifyUserRefreshToken(refreshToken);
+      if (payload && payload.jti) {
+        await supabase.from('posts').delete()
+          .eq('media_type', REFRESH_TOKEN_MARKER)
+          .eq('media_url', payload.jti);
+      }
+    }
+    res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+    return res.json({ ok: true });
+  } catch(e) {
+    res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+    return res.json({ ok: true });
   }
 });
 
@@ -4465,45 +4731,89 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
 });
 
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
+// 照片上传状态查询（按 upload_id 查询是否已提交）
+app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var uploadId = (req.body && req.body.upload_id) || '';
+    if (!uploadId) return res.status(400).json({ error: '缺少 upload_id' });
+    // 按 upload_id 查询（actor_key 格式: photo_upload_${uploadId}）
+    var { data: photo } = await supabase.from('posts')
+      .select('id, media_url, created_at, content')
+      .eq('media_type', '__photo_wall__')
+      .eq('actor_key', 'photo_upload_' + uploadId)
+      .eq('user_name', req.userName)
+      .maybeSingle();
+    if (!photo) return res.json({ status: 'not_found' });
+    return res.json({ status: 'committed', data: photo });
+  } catch(e) {
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
 app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
-    const { photoId, admin_pw } = req.body;
+    const { photoId } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
 
-    var isAdminOp = false;
-    if (req.userName === ADMIN_USERNAME && admin_pw) {
-      const { data: adminAuth } = await supabase.from('posts')
-        .select('media_url')
-        .eq('user_name', ADMIN_USERNAME)
-        .eq('media_type', ADMIN_AUTH_MARKER)
-        .maybeSingle();
-      if (adminAuth && adminAuth.media_url === admin_pw) isAdminOp = true;
-    }
-
+    // 查询照片记录（限制 media_type）
     const { data: photo } = await supabase.from('posts')
-      .select('user_name, media_url')
+      .select('id, user_name, media_url, media_type, actor_key')
       .eq('id', photoId)
+      .eq('media_type', '__photo_wall__')
       .maybeSingle();
 
-    if (!photo) return res.status(404).json({ error: '照片不存在' });
-    if (!isAdminOp && photo.user_name !== req.userName) return res.status(403).json({ error: '无权删除此照片' });
+    if (!photo) return res.status(404).json({ error: '照片不存在或已删除' });
 
-    var storagePath = null;
+    // 权限检查：owner 或 admin
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    if (!isAdmin && photo.user_name !== req.userName) {
+      return res.status(403).json({ error: '无权删除此照片' });
+    }
+
+    // 删除 Storage 中的文件（原图 + 缩略图）
+    var storagePaths = [];
+    var storageErrors = [];
     if (photo.media_url) {
       try {
         var parsed = new URL(photo.media_url);
         var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
-        storagePath = match && match[1] ? decodeURIComponent(match[1]) : null;
-        if (storagePath && storagePath.indexOf('..') >= 0) storagePath = null;
+        var basePath = match && match[1] ? decodeURIComponent(match[1]) : null;
+        if (basePath && basePath.indexOf('..') < 0) {
+          storagePaths.push(basePath);
+          // 缩略图路径（基于约定）
+          var thumbPath = basePath.replace(/(\.[^.]+)$/, '_thumb$1');
+          if (thumbPath !== basePath) storagePaths.push(thumbPath);
+        }
       } catch(_) {}
     }
-    if (storagePath) {
-      try { await supabase.storage.from('uploads').remove([storagePath]); } catch(_) {}
+    for (var i = 0; i < storagePaths.length; i++) {
+      try {
+        var { error: rmErr } = await supabase.storage.from('uploads').remove([storagePaths[i]]);
+        if (rmErr && !rmErr.message.includes('Not Found') && !rmErr.message.includes('not found')) {
+          storageErrors.push({ path: storagePaths[i], error: rmErr.message });
+        }
+      } catch(e) {
+        storageErrors.push({ path: storagePaths[i], error: e && e.message || 'unknown' });
+      }
     }
-    const { error } = await supabase.from('posts').delete().eq('id', photoId);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
 
-    return res.json({ ok: true });
+    // 使用 RPC 统一删除（清理 comments, likes, reports, notifications, actor records）
+    var actorKey = photo.actor_key || 'photo_' + photoId + '_' + Date.now();
+    var { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
+      p_post_id: photoId,
+      p_actor_key: actorKey
+    });
+    if (rpcErr) {
+      console.error('[photo-delete] RPC failed:', rpcErr.message);
+      return res.status(500).json({
+        error: '删除失败',
+        storage_errors: storageErrors.length > 0 ? storageErrors : undefined
+      });
+    }
+
+    return res.json({
+      ok: true,
+      storage_errors: storageErrors.length > 0 ? storageErrors : undefined
+    });
   } catch(e) {
     console.error('[API] 照片删除失败:', e.message);
     return res.status(500).json({ error: '删除失败' });
@@ -4529,13 +4839,12 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
       updates.pinned_at = req.body.is_pinned ? new Date().toISOString() : null;
     }
     if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
-      updates.content = String(req.body.content).slice(0, 50000);
+      var contentStr = String(req.body.content);
+      if (contentStr.length > 50000) return res.status(400).json({ error: '内容长度超过限制（50000字符）' });
+      updates.content = contentStr;
     }
-    // 允许前端传 updated_at（编辑/置顶/公开切私有都需要同步）
-    if (Object.prototype.hasOwnProperty.call(req.body, 'updated_at')) {
-      var ua = req.body.updated_at;
-      try { if (ua && !isNaN(new Date(ua).getTime())) updates.updated_at = ua; else updates.updated_at = new Date().toISOString(); } catch(e) { updates.updated_at = new Date().toISOString(); }
-    }
+    // 服务端生成 updated_at（不允许客户端传入）
+    updates.updated_at = new Date().toISOString();
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
     var { data: updatedPost, error } = await supabase.from('posts').update(updates).eq('id', postId).select('*').maybeSingle();
     if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -4548,11 +4857,16 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     var postId = parseInt(req.body && req.body.post_id);
     if (!postId || isNaN(postId)) return res.status(400).json({ error: '缺少 post_id' });
-    var { data: post } = await supabase.from('posts').select('user_name').eq('id', postId).maybeSingle();
+    var { data: post } = await supabase.from('posts').select('user_name, actor_key').eq('id', postId).maybeSingle();
     if (!post) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
-    var { error } = await supabase.from('posts').delete().eq('id', postId);
+    // 使用 RPC 统一删除（清理 comments, likes, reports, notifications, actor records, media）
+    var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
+    var { error } = await supabase.rpc('delete_post_with_actor', {
+      p_post_id: postId,
+      p_actor_key: actorKey
+    });
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true });
   } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
@@ -4632,6 +4946,8 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     }
   }
   
+  // 撤销被封禁用户的所有 refresh token
+  revokeAllUserRefreshTokens(userNameVal).catch(function(){});
   await logAdminAudit('ban_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
 });
@@ -4907,6 +5223,8 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     if (!delBlacklistRes.error) deletedBlacklist = delBlacklistRes.count || 0;
     else console.warn('[admin] 删除 blacklist 失败:', delBlacklistRes.error.message);
 
+    // 撤销被删除用户的所有 refresh token
+    revokeAllUserRefreshTokens(userName).catch(function(){});
     // 写入审计日志
     await logAdminAudit('delete_user', ADMIN_USERNAME,
       'user:' + userName +
@@ -7802,9 +8120,13 @@ async function handleDeepThinkChat(req, res) {
       'max';
     if (['low', 'medium', 'high', 'max'].indexOf(finalThinkingMode) < 0) finalThinkingMode = 'max';
 
-    // ★ 缓存检查: exact-match, TTL 5分钟
-    var cacheKey = userName + '::' + message + '::' + finalThinkingMode;
-    var cachedHit = aiResponseCache.get(cacheKey);
+    // ★ 缓存检查: 仅当无历史/搜索/附件/外部上下文时允许缓存
+    var cacheKey = '';
+    var cachedHit = null;
+    if (canUseAiCache(ctx, req.body)) {
+      cacheKey = buildAiCacheKey(userName, message, ctx, req.body);
+      cachedHit = aiResponseCache.get(cacheKey);
+    }
     if (cachedHit && cachedHit.expiresAt > Date.now()) {
       console.log('[AI-CACHE] 缓存命中, 直接返回');
       var nowTs = Date.now();
@@ -8007,10 +8329,12 @@ async function handleDeepThinkChat(req, res) {
     }
 
     // ★ 写入缓存 (含 thinking_log, 让缓存命中也能保存完整历史)
-    if (!aborted && finalContent && !flowResult.cancelled) {
+    // 仅当无历史/搜索/附件/外部上下文时允许缓存
+    if (!aborted && finalContent && !flowResult.cancelled && canUseAiCache(ctx, req.body)) {
       try {
+        var cacheKey2 = buildAiCacheKey(userName, message, ctx, req.body);
         var cacheThinkingLog = Array.isArray(flowResult.thinking_log) ? flowResult.thinking_log : [];
-        aiResponseCache.set(cacheKey, {
+        aiResponseCache.set(cacheKey2, {
           content: finalContent,
           usage: synthUsage,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
