@@ -83,4 +83,3 @@ test.describe('interaction regression contracts', () => {
     }
   });
 });
-
