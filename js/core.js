@@ -446,6 +446,35 @@ const ADMIN_NAME = "xxz";
             };
             window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
 
+            window.xtjProtectedFetch = async function(path, options) {
+                options = options || {};
+                var auth = await window.ensureProtectedOperationAuth();
+                if (!auth.ok) {
+                    var authError = new Error(auth.reason === 'expired' ? '登录已失效' : '认证服务暂时不可用');
+                    authError.code = auth.reason || 'auth_unavailable';
+                    authError.status = auth.status || 0;
+                    throw authError;
+                }
+                async function send(token) {
+                    var headers = Object.assign({}, options.headers || {});
+                    if (!headers['Content-Type'] && options.body != null) headers['Content-Type'] = 'application/json';
+                    headers.Authorization = 'Bearer ' + token;
+                    return fetch((window.API_BASE || '') + path, Object.assign({}, options, {
+                        credentials: 'include',
+                        headers: headers
+                    }));
+                }
+                var response = await send(auth.token);
+                if (response.status === 401) {
+                    var renewed = await window.refreshUserToken(true);
+                    if (renewed) response = await send(renewed);
+                }
+                if (response.status === 401) {
+                    window.handleProtectedAuthFailure();
+                }
+                return response;
+            };
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -4477,6 +4506,16 @@ function renderProfileActivityList(kind) {
             var likeOperations = Object.create(null);
             var likeOperationVersions = Object.create(null);
 
+            function animatePostLikeFeedback(postId, liked) {
+                var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
+                getPostLikeButtons(postId).forEach(function(likeBtn) {
+                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
+                    void likeBtn.offsetWidth;
+                    likeBtn.classList.add(className);
+                    setTimeout(function() { likeBtn.classList.remove(className); }, 260);
+                });
+            }
+
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
@@ -4496,23 +4535,20 @@ function renderProfileActivityList(kind) {
                     var optimisticLikeRecord = { post_id: pid, user_name: currentUser, actor_key: deviceId };
                     updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
                     updateFeedStats();
-                    showToast(nextLiked ? '已点赞' : '已取消点赞');
+                    animatePostLikeFeedback(pid, nextLiked);
                     if (typeof window.xtjAnimateLikeToggle === 'function') {
                         window.xtjAnimateLikeToggle(btn, nextLiked);
                     }
                     if (nextLiked) createHeartParticles(btn);
-                    if (wasLiked) {
-                        var deleteResult = await sb.from("likes").delete()
-                            .eq("post_id", pid)
-                            .eq("user_name", currentUser);
-                        if (deleteResult && deleteResult.error) throw deleteResult.error;
-                    } else {
-                        var insertResult = await sb.from("likes").insert([optimisticLikeRecord]);
-                        // A stale client can miss an existing historical like. A unique violation
-                        // means the requested final state (liked) is already true, so keep the UI.
-                        if (insertResult && insertResult.error && String(insertResult.error.code || '') !== '23505') {
-                            throw insertResult.error;
-                        }
+                    var numericPostId = Number(pid);
+                    if (!Number.isFinite(numericPostId) || numericPostId <= 0) throw new Error('帖子参数无效');
+                    var likeResponse = await window.xtjProtectedFetch('/api/post/like', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: numericPostId, liked: nextLiked })
+                    });
+                    var likeResult = await likeResponse.json().catch(function() { return {}; });
+                    if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== nextLiked) {
+                        throw new Error(likeResult.error || '点赞状态同步失败');
                     }
                     touchUserSession(false);
                     scheduleLikeStatRefresh();
@@ -6045,8 +6081,8 @@ function renderProfileActivityList(kind) {
             }
 
             async function insertPostRecord(payload, fallbackContent) {
-                var primary = await sb.from("posts").insert([payload]);
-                if (!primary.error) return { ok: true, fallback: false };
+                var primary = await sb.from("posts").insert([payload]).select('*').single();
+                if (!primary.error) return { ok: true, fallback: false, data: primary.data };
 
                 var message = String(primary.error.message || "");
                 var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
@@ -6059,9 +6095,35 @@ function renderProfileActivityList(kind) {
                     media_type: payload.media_type,
                     actor_key: payload.actor_key
                 };
-                var fallback = await sb.from("posts").insert([fallbackPayload]);
+                var fallback = await sb.from("posts").insert([fallbackPayload]).select('*').single();
                 if (fallback.error) return { ok: false, error: fallback.error };
-                return { ok: true, fallback: true };
+                return { ok: true, fallback: true, data: fallback.data };
+            }
+
+            function insertPublishedPostIntoFeed(post) {
+                if (!post || !post.id) return false;
+                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
+                feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
+                feedAllPosts.unshift(post);
+                feedVisiblePostsCache = null;
+                feedMapsCache = null;
+                var feed = document.getElementById('feed');
+                if (!feed) return false;
+                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
+                var template = document.createElement('template');
+                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
+                var postEl = template.content.firstElementChild;
+                if (!postEl) return false;
+                postEl.classList.add('visible', 'is-newly-published');
+                postEl.style.setProperty('--post-enter-delay', '0ms');
+                feed.insertBefore(postEl, feed.firstChild);
+                observePostViewportState([postEl]);
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() { postEl.classList.remove('is-newly-published'); });
+                });
+                writeFeedCacheSnapshot();
+                updateFeedStats();
+                return true;
             }
 
             function resetPostComposer() {
@@ -7055,6 +7117,11 @@ function renderProfileActivityList(kind) {
             // Final pin action: server-side RPC enforces one pinned post per author.
             window.togglePostPin = async function(postId, btn) {
                 if (!postId) return;
+                var numericPostId = Number(postId);
+                if (!Number.isFinite(numericPostId) || numericPostId <= 0) {
+                    showToast('置顶失败：帖子参数无效');
+                    return;
+                }
                 var originalText = btn ? btn.textContent : '';
                 var nextPinned = false;
                 var didSucceed = false;
@@ -7070,7 +7137,7 @@ function renderProfileActivityList(kind) {
                         return;
                     }
 
-                    var current = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    var current = await sb.from('posts').select('*').eq('id', numericPostId).maybeSingle();
                     if (current.error) throw current.error;
                     if (!current.data) throw new Error('Post not found');
                     var post = normalizePost(current.data);
@@ -7079,25 +7146,12 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     nextPinned = !post.is_pinned;
-                    async function requestPin(token) {
-                        return await fetch((window.API_BASE || '') + '/api/post/pin', {
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': 'Bearer ' + token
-                            },
-                            body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
-                        });
-                    }
-                    var response = await requestPin(auth.token);
-                    if (response.status === 401) {
-                        var renewedToken = await window.refreshUserToken(true);
-                        if (renewedToken) response = await requestPin(renewedToken);
-                    }
+                    var response = await window.xtjProtectedFetch('/api/post/pin', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: numericPostId, is_pinned: Boolean(nextPinned) })
+                    });
                     var result = await response.json().catch(function() { return {}; });
-                    if (response.status === 401 || response.status === 403 && result.code === 'auth_expired') {
-                        if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure();
+                    if (response.status === 401) {
                         return;
                     }
                     if (result.code === 'pin_migration_required') {
@@ -7114,7 +7168,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
-                        await refreshPostDetailIfActive(postId);
+                        await refreshPostDetailIfActive(numericPostId);
                     }
                     didSucceed = true;
                     showToast(nextPinned ? 'Pinned' : 'Pin removed');
@@ -7215,7 +7269,10 @@ function renderProfileActivityList(kind) {
                 }
                 var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
-                btn.textContent = "发布中..";
+                btn.classList.add('is-loading');
+                btn.setAttribute('aria-busy', 'true');
+                btn.dataset.originalText = btn.textContent;
+                btn.innerHTML = '<span>发布中</span>';
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -7246,17 +7303,24 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     touchUserSession(false);
-                    clearFeedCache();
                     resetPostComposer();
                     if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
-                    await loadFeed(true);
+                    if (!insertPublishedPostIntoFeed(insertRes.data)) {
+                        clearFeedCache();
+                        await loadFeed(true);
+                    } else {
+                        writeFeedCacheSnapshot();
+                    }
                     loadProfileActivity(true);
                 } catch (e) {
                     showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "发布动态";
+                    btn.classList.remove('is-loading');
+                    btn.setAttribute('aria-busy', 'false');
+                    btn.textContent = btn.dataset.originalText || "发布动态";
+                    delete btn.dataset.originalText;
                 }
             };
 
@@ -7370,6 +7434,13 @@ function renderProfileActivityList(kind) {
             loadMoreFeedPosts = async function() {
                 if (feedEndReached || feedPageFetchPending) return;
                 var feed = document.getElementById("feed");
+                var pageLoading = document.createElement("div");
+                pageLoading.className = "feed-page-loading";
+                pageLoading.setAttribute("role", "status");
+                pageLoading.setAttribute("aria-live", "polite");
+                pageLoading.textContent = "正在加载更多帖子";
+                var sentinel = document.getElementById("feedSentinel");
+                feed.insertBefore(pageLoading, sentinel || null);
                 var startIdx = feedPage * FEED_PAGE_SIZE;
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
@@ -7385,6 +7456,7 @@ function renderProfileActivityList(kind) {
                     }
                     filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 }
+                pageLoading.remove();
                 if (startIdx >= filteredPosts.length) {
                     feedEndReached = true;
                     var noMore = document.getElementById("feedNoMore");
@@ -8701,6 +8773,8 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            var dockPanelTransitionTimer = null;
+            var dockPanelAnimation = null;
             window.switchDockTab = function(tab, skipReturn, options) {
                 options = options || {};
                 var shouldAnimateTab = options.animate === true;
@@ -8827,12 +8901,42 @@ function renderProfileActivityList(kind) {
                 if (currentDockTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
                     window.cleanupPhotoWallTransientState();
                 }
+                var previousPanel = document.querySelector('.dock-panel.active');
                 currentDockTab = tab;
                 localStorage.setItem('xtj_current_tab', tab);
-                document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
-                if (panel) panel.classList.add('active');
+                if (dockPanelTransitionTimer) clearTimeout(dockPanelTransitionTimer);
+                if (dockPanelAnimation) {
+                    try { dockPanelAnimation.cancel(); } catch (_) {}
+                    dockPanelAnimation = null;
+                }
+                var reduceDockMotion = false;
+                try { reduceDockMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+                document.querySelectorAll('.dock-panel').forEach(function(candidate) {
+                    if (candidate !== previousPanel && candidate !== panel) candidate.classList.remove('active', 'is-entering', 'is-leaving');
+                });
+                if (panel) {
+                    if (!previousPanel || previousPanel === panel || reduceDockMotion) {
+                        if (previousPanel && previousPanel !== panel) previousPanel.classList.remove('active', 'is-entering', 'is-leaving');
+                        panel.classList.add('active');
+                        panel.classList.remove('is-entering', 'is-leaving');
+                    } else {
+                        previousPanel.classList.remove('active', 'is-entering', 'is-leaving');
+                        panel.classList.add('active');
+                        panel.classList.remove('is-entering', 'is-leaving');
+                        var animatedSurface = panel.firstElementChild || panel;
+                        if (animatedSurface && typeof animatedSurface.animate === 'function') {
+                            dockPanelAnimation = animatedSurface.animate([
+                                { opacity: 0.45, transform: 'translate3d(0, 4px, 0)' },
+                                { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+                            ], { duration: 200, easing: 'cubic-bezier(.2,.8,.3,1)' });
+                            dockPanelAnimation.onfinish = dockPanelAnimation.oncancel = function() {
+                                dockPanelAnimation = null;
+                            };
+                        }
+                    }
+                }
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
                 requestAnimationFrame(syncDockIndicator);
@@ -8872,33 +8976,19 @@ function renderProfileActivityList(kind) {
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 900, chat: 900, ai: 900, profile: 900 };
+            var animDurations = { posts: 220, chat: 220, ai: 220, profile: 220 };
 
             function triggerTabAnimation(el, tab) {
-                var cls = animClassMap[tab];
-                if (!cls) return;
+                if (!animClassMap[tab]) return;
                 if (animatingTabs[tab]) return;
                 animatingTabs[tab] = true;
-                // Use rAF to synchronize with iOS rendering pipeline for smooth 60fps compositing
                 requestAnimationFrame(function() {
-                    // Promote anim-layer to GPU only during animation to conserve GPU memory on iOS
-                    var animLayer = el.querySelector('.anim-layer');
-                    if (animLayer) animLayer.style.willChange = 'transform, opacity';
-                    el.classList.add(cls);
-                    // Clean up after animation duration + small buffer using rAF
-                    var cleanupFrame = Math.round((animDurations[tab] + 50) / (1000 / 60));
-                    var frames = 0;
-                    function cleanup() {
-                        frames++;
-                        if (frames >= cleanupFrame) {
-                            el.classList.remove(cls);
-                            if (animLayer) animLayer.style.willChange = 'auto';
-                            animatingTabs[tab] = false;
-                        } else {
-                            requestAnimationFrame(cleanup);
-                        }
-                    }
-                    requestAnimationFrame(cleanup);
+                    el.classList.remove('anim-post', 'anim-chat', 'anim-ai', 'anim-profile');
+                    el.classList.add('is-switch-feedback');
+                    setTimeout(function() {
+                        el.classList.remove('is-switch-feedback');
+                        animatingTabs[tab] = false;
+                    }, animDurations[tab]);
                 });
             }
 
@@ -9076,7 +9166,7 @@ function renderProfileActivityList(kind) {
                             variant: 'chat-list'
                         });
                     }
-                    const dmResp = await fetch(API_BASE + '/api/dm/list', { credentials: 'include' });
+                    const dmResp = await window.xtjProtectedFetch('/api/dm/list');
                     if (!dmResp.ok) throw new Error('DM list fetch failed');
                     const dmResult = await dmResp.json();
                     if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
@@ -9113,7 +9203,16 @@ function renderProfileActivityList(kind) {
                     });
                 } catch(e) {
                     window.dockChatListCacheTime = 0;
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
+                    if (!hadRenderedList) el.innerHTML = '';
+                    var retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.className = 'chat-load-retry';
+                    retry.textContent = '消息加载失败，点击重试';
+                    retry.addEventListener('click', function() {
+                        retry.remove();
+                        loadDockChatList();
+                    }, { once: true });
+                    el.appendChild(retry);
                     renderDockChatAiEntry(el);
                     syncDockChatLayoutState();
                 }
@@ -9127,10 +9226,9 @@ function renderProfileActivityList(kind) {
                     if (typeof onReady === 'function') onReady(false);
                     return Promise.resolve(false);
                 }
-                return fetch(API_BASE + '/api/avatar/batch', {
+                return window.xtjProtectedFetch('/api/avatar/batch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
                     body: JSON.stringify({ users: users })
                 })
                     .then(function(resp) { return resp.json(); })
@@ -9300,21 +9398,41 @@ function renderProfileActivityList(kind) {
                 var template = document.createElement('template');
                 template.innerHTML = html.trim();
                 var row = template.content.firstElementChild;
+                function setAiEntryLoading(loading, failed) {
+                    var preview = row.querySelector('.cli-preview');
+                    row.classList.toggle('is-loading', !!loading);
+                    row.classList.toggle('is-error', !!failed);
+                    row.setAttribute('aria-busy', loading ? 'true' : 'false');
+                    if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '和小猫聊聊天');
+                }
                 row.addEventListener('click', function(e) {
                     e.stopPropagation();
+                    if (row.getAttribute('aria-busy') === 'true') return;
+                    setAiEntryLoading(true, false);
                     if (typeof window.__xtjEnsureAiAgentLoaded === 'function') {
                         window.__xtjEnsureAiAgentLoaded().then(function() {
+                            setAiEntryLoading(false, false);
                             if (typeof window.__xtjOpenAiChat === 'function') {
                                 window.__xtjOpenAiChat();
                             } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
                                 window.__xtjAiAgent.open();
                             }
                         }).catch(function(err) {
+                            setAiEntryLoading(false, true);
                             console.error('[XTJ] failed to open AI chat:', err);
                             if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
                         });
                     } else if (typeof window.__xtjOpenAiChat === 'function') {
+                        setAiEntryLoading(false, false);
                         window.__xtjOpenAiChat();
+                    } else {
+                        setAiEntryLoading(false, true);
+                    }
+                });
+                row.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        row.click();
                     }
                 });
                 el.insertBefore(row, el.firstChild);
@@ -9498,26 +9616,11 @@ function renderProfileActivityList(kind) {
                 });
                 const el = document.getElementById('dockChatMessages');
                 try {
-                    const [sentRes, recvRes] = await Promise.all([
-                        sb.from("posts")
-                            .select("id, user_name, media_url, content, created_at, views, actor_key")
-                            .eq("media_type", DM_MARKER)
-                            .eq("user_name", window.currentUser)
-                            .eq("media_url", userName)
-                            .order("created_at", { ascending: true })
-                            .limit(180),
-                        sb.from("posts")
-                            .select("id, user_name, media_url, content, created_at, views, actor_key")
-                            .eq("media_type", DM_MARKER)
-                            .eq("user_name", userName)
-                            .eq("media_url", window.currentUser)
-                            .order("created_at", { ascending: true })
-                            .limit(180)
-                    ]);
-                    if (sentRes.error) throw sentRes.error;
-                    if (recvRes.error) throw recvRes.error;
+                    var messagesResp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(userName) + '&limit=180');
+                    var messagesResult = await messagesResp.json().catch(function() { return {}; });
+                    if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
-                    var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById((sentRes.data || []).concat(recvRes.data || []), true, 180));
+                    var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180));
                     var readAt = new Date().toISOString();
                     var pendingReadUpdates = [];
                     mergedMessages = mergedMessages.map(function(message) {
@@ -9544,7 +9647,16 @@ function renderProfileActivityList(kind) {
                     }
                 } catch(e) {
                     if (loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
+                        if (!(_chatCache[cacheKey] && _chatCache[cacheKey].length)) el.innerHTML = '';
+                        var retry = document.createElement('button');
+                        retry.type = 'button';
+                        retry.className = 'chat-load-retry';
+                        retry.textContent = '消息加载失败，点击重试';
+                        retry.addEventListener('click', function() {
+                            retry.remove();
+                            loadDockChatMessages(userName, false);
+                        }, { once: true });
+                        el.appendChild(retry);
                     }
                 }
             }
@@ -12874,7 +12986,23 @@ function renderProfileActivityList(kind) {
                 if (!body) return;
                 var history = typeof getViewHistory === 'function' ? getViewHistory() : [];
                 if (!history.length) {
-                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无浏览记录</div>';
+                    var viewedPosts = (Array.isArray(statAllPosts) ? statAllPosts : []).filter(function(post) {
+                        return Number(post && post.views) > 0;
+                    }).sort(function(a, b) { return Number(b.views || 0) - Number(a.views || 0); });
+                    if (!viewedPosts.length) {
+                        body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无浏览记录</div>';
+                        return;
+                    }
+                    body.innerHTML = viewedPosts.map(function(post, index) {
+                        return renderStatRecordCard({
+                            title: String(post.user_name || '该用户') + ' 的帖子 · ' + Number(post.views || 0) + ' 次浏览',
+                            copy: getStatPostSummary(post),
+                            postId: String(post.id || ''),
+                            time: formatStatDateTime(post.created_at),
+                            thumbHtml: getStatPostMediaHtml(post, String(post.id || '')),
+                            enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;"'
+                        });
+                    }).join('');
                     return;
                 }
                 body.innerHTML = history.map(function(item, index) {
@@ -13169,6 +13297,12 @@ function renderProfileActivityList(kind) {
                 statAllLikes = (Array.isArray(likes) ? likes : []).filter(function(l) {
                     return l && visiblePostIds.has(String(l.post_id));
                 });
+                var postsCountEl = document.getElementById('sPosts');
+                var viewsCountEl = document.getElementById('sViews');
+                var likesCountEl = document.getElementById('sLikes');
+                if (postsCountEl) postsCountEl.textContent = String(visiblePosts.length);
+                if (viewsCountEl) viewsCountEl.textContent = String(visiblePosts.reduce(function(total, post) { return total + (Number(post.views) || 0); }, 0));
+                if (likesCountEl) likesCountEl.textContent = String(statAllLikes.length + statAllComments.length);
                 statCacheTime = Date.now();
             }
 
@@ -13269,16 +13403,17 @@ function renderProfileActivityList(kind) {
                 var timeout = new Promise(function(resolve) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
-                var request = Promise.all([
-                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
-                    sb.from("comments").select("*").order("created_at"),
-                    sb.from("likes").select("*").order("created_at", { ascending: false })
-                ]).then(function(results) {
-                    return {
-                        posts: results[0].data || [],
-                        comments: results[1].data || [],
-                        likes: results[2].data || []
-                    };
+                var request = window.xtjProtectedFetch('/api/stats/snapshot?limit=1000')
+                .then(function(response) {
+                    return response.json().then(function(result) {
+                        if (!response.ok || !result.ok) throw new Error(result.error || '统计加载失败');
+                        return {
+                            posts: result.posts || [],
+                            comments: result.comments || [],
+                            likes: result.likes || [],
+                            totals: result.totals || {}
+                        };
+                    });
                 }).catch(function() {
                     return null;
                 });

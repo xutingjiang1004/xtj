@@ -4866,10 +4866,14 @@ function isPinnableFeedPost(post) {
 
 app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
-    var postId = parseInt(req.body && req.body.post_id, 10);
+    var rawPostId = req.body && req.body.post_id;
+    var postId = typeof rawPostId === 'number' && Number.isInteger(rawPostId) ? rawPostId : 0;
     var isPinned = req.body && req.body.is_pinned;
-    if (!postId || isNaN(postId) || typeof isPinned !== 'boolean') {
-      return res.status(400).json({ error: 'post_id and boolean is_pinned are required', code: 'invalid_request' });
+    if (postId <= 0) {
+      return res.status(400).json({ error: 'post_id must be a positive integer', code: 'invalid_post_id' });
+    }
+    if (typeof isPinned !== 'boolean') {
+      return res.status(400).json({ error: 'is_pinned must be boolean', code: 'invalid_pin_state' });
     }
 
     var { data: post, error: postError } = await supabase.from('posts')
@@ -4972,6 +4976,95 @@ app.delete('/api/likes/user/:userName/post/:postId', authenticateUser, async (re
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true });
   } catch (e) { console.error('[API] unlike:', e.message); return res.status(500).json({ error: '取消点赞失败' }); }
+});
+
+// Set the authenticated user's final like state.
+// Contract: { post_id: number, liked: boolean }
+app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var rawPostId = req.body && req.body.post_id;
+    var liked = req.body && req.body.liked;
+    var postId = typeof rawPostId === 'number' && Number.isInteger(rawPostId) ? rawPostId : 0;
+    if (postId <= 0 || typeof liked !== 'boolean') {
+      return res.status(400).json({ error: 'post_id must be a positive integer and liked must be boolean', code: 'invalid_request' });
+    }
+
+    var { data: post, error: postError } = await supabase.from('posts').select('id').eq('id', postId).maybeSingle();
+    if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
+    if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+
+    if (liked) {
+      var { error: likeError } = await supabase.from('likes').upsert({
+        post_id: postId,
+        user_name: req.userName,
+        actor_key: 'like_' + postId + '_' + req.userName
+      }, { onConflict: 'post_id,user_name', ignoreDuplicates: false });
+      if (likeError && String(likeError.code || '') !== '23505') {
+        var missingConstraint = String(likeError.code || '') === '42P10'
+          || /unique|on conflict|constraint/i.test(String(likeError.message || ''));
+        return res.status(missingConstraint ? 503 : 500).json({
+          error: missingConstraint ? 'Like storage is not ready' : sanitizeError(likeError),
+          code: missingConstraint ? 'like_constraint_required' : 'like_failed'
+        });
+      }
+    } else {
+      var { error: unlikeError } = await supabase.from('likes').delete().eq('post_id', postId).eq('user_name', req.userName);
+      if (unlikeError) return res.status(500).json({ error: sanitizeError(unlikeError), code: 'unlike_failed' });
+    }
+
+    var { count: likeCount, error: countError } = await supabase.from('likes')
+      .select('id', { count: 'exact', head: true }).eq('post_id', postId);
+    if (countError) return res.status(500).json({ error: sanitizeError(countError), code: 'like_count_failed' });
+    return res.json({ ok: true, post_id: postId, liked: liked, like_count: Number(likeCount) || 0 });
+  } catch (e) {
+    console.error('[API] post like:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Like operation failed', code: 'like_failed' });
+  }
+});
+
+// Authenticated feed statistics snapshot. System marker rows are excluded from
+// posts, while visit marker rows are exposed only as minimal event metadata.
+app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var limit = Math.min(Math.max(parseInt(req.query.limit || '500', 10) || 500, 1), 1000);
+    const [postsResult, likesResult, commentsResult, visitsResult] = await Promise.all([
+      applyPublicPostExclusions(supabase.from('posts')
+        .select('id, user_name, content, media_url, media_type, visibility, views, actor_key, created_at, is_pinned, pinned_at'))
+        .order('created_at', { ascending: false }).limit(limit),
+      supabase.from('likes').select('id, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('comments').select('id, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('id, media_url, created_at').eq('media_type', VISIT_MARKER)
+        .order('created_at', { ascending: false }).limit(5000)
+    ]);
+    var failed = postsResult.error || likesResult.error || commentsResult.error || visitsResult.error;
+    if (failed) return res.status(500).json({ error: sanitizeError(failed), code: 'stats_snapshot_failed' });
+
+    var posts = (postsResult.data || []).filter(function(post) {
+      return !post.visibility || post.visibility === 'public' || post.user_name === req.userName;
+    });
+    var postIds = new Set(posts.map(function(post) { return Number(post.id); }));
+    var likes = (likesResult.data || []).filter(function(row) { return postIds.has(Number(row.post_id)); });
+    var comments = (commentsResult.data || []).filter(function(row) { return postIds.has(Number(row.post_id)); });
+    var viewEvents = visitsResult.data || [];
+    var totalViews = posts.reduce(function(total, post) { return total + (Number(post.views) || 0); }, 0);
+    return res.json({
+      ok: true,
+      posts: posts,
+      likes: likes,
+      comments: comments,
+      view_events: viewEvents,
+      totals: {
+        posts: posts.length,
+        likes: likes.length,
+        comments: comments.length,
+        views: totalViews,
+        view_events: viewEvents.length
+      }
+    });
+  } catch (e) {
+    console.error('[API] stats snapshot:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Statistics are temporarily unavailable', code: 'stats_snapshot_failed' });
+  }
 });
 
 // ===================== 照片墙接口（修复 RLS 权限问题） ======================
@@ -5080,13 +5173,23 @@ app.post('/api/avatar/batch', authenticateUser, rateLimit(60000, 60), async (req
 // GET /api/dm/list - 获取当前用户的对话列表
 app.get('/api/dm/list', authenticateUser, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at')
-      .eq('media_type', '__dm__')
-      .eq('actor_key', 'dm_' + req.userName)
-      .order('created_at', { descending: true });
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true, data: data || [] });
+    const [sentResult, receivedResult] = await Promise.all([
+      supabase.from('posts').select('id, user_name, content, media_url, created_at')
+        .eq('media_type', DM_MARKER).eq('user_name', req.userName).order('created_at', { ascending: false }),
+      supabase.from('posts').select('id, user_name, content, media_url, created_at')
+        .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false })
+    ]);
+    if (sentResult.error || receivedResult.error) {
+      return res.status(400).json({ error: sanitizeError(sentResult.error || receivedResult.error), code: 'dm_list_failed' });
+    }
+    var byId = new Map();
+    (sentResult.data || []).concat(receivedResult.data || []).forEach(function(row) {
+      if (row && !byId.has(row.id)) byId.set(row.id, row);
+    });
+    var rows = Array.from(byId.values()).sort(function(a, b) {
+      return String(b.created_at || '').localeCompare(String(a.created_at || '')) || Number(b.id || 0) - Number(a.id || 0);
+    });
+    return res.json({ ok: true, data: rows });
   } catch (e) { console.error('[API] dm list get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -5094,22 +5197,33 @@ app.get('/api/dm/list', authenticateUser, async (req, res) => {
 app.get('/api/dm/messages', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.query.target || '').trim();
-    const limit = parseInt(req.query.limit || '200');
-    const afterId = parseInt(req.query.after_id || '0');
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
+    const afterId = Math.max(parseInt(req.query.after_id || '0', 10) || 0, 0);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
     // actor_key = dm_<user> 存储该用户发起的对话元数据
     // 真实私信内容每个消息都是一个 __dm__ 记录
-    let query = supabase.from('posts')
-      .select('*')
-      .eq('media_type', '__dm__');
-    query = query.or(`user_name.eq.${req.userName},actor_key.eq.dm_${req.userName}`);
-    if (afterId > 0) {
-      query = query.gt('id', afterId);
+    function buildDirectionQuery(sender, recipient) {
+      var query = supabase.from('posts')
+        .select('id, user_name, content, media_url, media_type, actor_key, created_at')
+        .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
+      if (afterId > 0) query = query.gt('id', afterId);
+      return query.order('id', { ascending: true }).limit(limit);
     }
-    query = query.order('id', { ascending: false }).limit(limit > 0 ? Math.min(limit, 1000) : 200);
-    const { data, error } = await query;
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true, data: (data || []).reverse() });
+    const [outboundResult, inboundResult] = await Promise.all([
+      buildDirectionQuery(req.userName, targetUser),
+      buildDirectionQuery(targetUser, req.userName)
+    ]);
+    if (outboundResult.error || inboundResult.error) {
+      return res.status(400).json({ error: sanitizeError(outboundResult.error || inboundResult.error), code: 'dm_messages_failed' });
+    }
+    var byMessageId = new Map();
+    (outboundResult.data || []).concat(inboundResult.data || []).forEach(function(row) {
+      if (row && !byMessageId.has(row.id)) byMessageId.set(row.id, row);
+    });
+    var messages = Array.from(byMessageId.values())
+      .sort(function(a, b) { return Number(a.id || 0) - Number(b.id || 0); })
+      .slice(-limit);
+    return res.json({ ok: true, data: messages });
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
