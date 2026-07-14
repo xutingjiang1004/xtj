@@ -1942,11 +1942,13 @@
     0 3px 12px rgba(82, 138, 120, .05),
     0 1px 0 rgba(255,255,255,.5) inset;
 }
+@media (hover: hover) and (pointer: fine) {
 #panelDeepThink .ai-think-card:hover {
   transform: translateY(-1px);
   box-shadow:
     0 5px 18px rgba(82, 138, 120, .08),
     0 1px 0 rgba(255,255,255,.5) inset;
+}
 }
 #panelDeepThink .ai-think-header {
   padding: 8px 12px;
@@ -2157,9 +2159,11 @@
   box-shadow: 0 3px 10px rgba(82, 138, 120, .08);
   transition: transform .15s, box-shadow .2s;
 }
+@media (hover: hover) and (pointer: fine) {
 #panelDeepThink .dt-msg.user .dt-msg-content:hover {
   transform: translateY(-1px);
   box-shadow: 0 5px 14px rgba(82, 138, 120, .12);
+}
 }
 #panelDeepThink .dt-msg.assistant .dt-msg-content {
   padding: 2px 0;
@@ -2221,12 +2225,14 @@
   transition: border-color .25s, background .25s, color .25s, box-shadow .25s, transform .15s;
   -webkit-tap-highlight-color: transparent;
 }
+@media (hover: hover) and (pointer: fine) {
 .ai-deep-think-toggle:hover {
   border-color: rgba(66, 155, 122, 0.42);
   background: rgba(255, 255, 255, 0.85);
   color: rgba(58, 142, 112, 0.95);
   box-shadow: 0 4px 14px rgba(82, 138, 120, 0.1);
   transform: translateY(-1px);
+}
 }
 .ai-deep-think-toggle:active { transform: scale(.96) translateY(0); }
 .ai-deep-think-toggle.on {
@@ -2273,11 +2279,13 @@
 .ai-progress-card.dt-animate-in {
   animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
 }
+@media (hover: hover) and (pointer: fine) {
 .ai-progress-card:hover {
   transform: translateY(-1px);
   box-shadow:
     0 6px 20px rgba(82, 138, 120, .1),
     0 1px 0 rgba(255, 255, 255, .5) inset;
+}
 }
 .ai-progress-card.ai-progress-card-cancelled,
 .ai-progress-card.ai-progress-card-error { opacity: .5; }
@@ -2435,6 +2443,7 @@
 .ai-think-card.dt-animate-in {
   animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
 }
+@media (hover: hover) and (pointer: fine) {
 .ai-think-card:hover {
   border-color: rgba(140, 196, 158, .28);
   background: linear-gradient(180deg, rgba(255, 255, 255, .8), rgba(250, 252, 251, .68));
@@ -2442,6 +2451,7 @@
     0 6px 24px rgba(82, 138, 120, .09),
     0 1px 0 rgba(255, 255, 255, .5) inset;
   transform: translateY(-1px);
+}
 }
 .ai-think-card.collapsed {
   border-color: rgba(140, 196, 158, .12);
