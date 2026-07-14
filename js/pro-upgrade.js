@@ -516,13 +516,9 @@
 
   // ===================== Pro 活动 API 调用 =====================
 
-  // 检测 fake login：有 currentUser 但无 token 也无 password_hash
+  // 检测浏览器仅残留用户名、但 access/refresh 会话不可用的状态。
   function isProGiftsFakeLogin() {
     if (typeof window.getUserToken === 'function' && window.getUserToken()) return false;
-    try {
-      var pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
-      if (pwHash) return false;
-    } catch (e) {}
     return true;
   }
 
