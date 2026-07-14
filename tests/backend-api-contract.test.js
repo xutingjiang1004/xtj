@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
+const likeMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '009_atomic_post_like.sql'), 'utf8');
 
 function routeSource(method, route, nextRoute) {
   const startToken = `app.${method}('${route}'`;
@@ -44,6 +45,12 @@ test('atomic like endpoint validates types and returns authoritative final count
   assert.match(source, /String\(likeError\.code \|\| ''\) !== '23505'/);
   assert.match(source, /select\('id', \{ count: 'exact', head: true \}\)/);
   assert.match(source, /post_id: postId, liked: liked, like_count:/);
+});
+
+test('atomic like migration cleans legacy duplicates and enforces one user like per post', () => {
+  assert.match(likeMigration, /DELETE FROM public\.likes AS older/);
+  assert.match(likeMigration, /CREATE UNIQUE INDEX IF NOT EXISTS likes_one_user_per_post/);
+  assert.match(likeMigration, /\(post_id, user_name\)/);
 });
 
 test('statistics snapshot is authenticated and excludes system markers from feed posts', () => {
