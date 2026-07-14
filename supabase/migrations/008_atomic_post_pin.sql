@@ -26,8 +26,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS posts_one_pinned_post_per_author
   ON public.posts (user_name)
   WHERE is_pinned IS TRUE;
 
+-- The production posts.id column is UUID. Remove the earlier, unusable BIGINT
+-- overload before installing the correctly typed RPC.
+DROP FUNCTION IF EXISTS public.set_post_pin(BIGINT, TEXT, BOOLEAN, BOOLEAN);
+
 CREATE OR REPLACE FUNCTION public.set_post_pin(
-  p_post_id BIGINT,
+  p_post_id UUID,
   p_actor_user TEXT,
   p_is_admin BOOLEAN,
   p_is_pinned BOOLEAN
@@ -39,9 +43,9 @@ AS $$
 DECLARE
   v_post public.posts%ROWTYPE;
   v_owner TEXT;
-  v_unpinned_ids BIGINT[] := ARRAY[]::BIGINT[];
+  v_unpinned_ids UUID[] := ARRAY[]::UUID[];
 BEGIN
-  IF p_post_id IS NULL OR p_post_id <= 0 OR p_actor_user IS NULL OR btrim(p_actor_user) = '' OR p_is_pinned IS NULL THEN
+  IF p_post_id IS NULL OR p_actor_user IS NULL OR btrim(p_actor_user) = '' OR p_is_pinned IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'code', 'invalid_request', 'error', 'Invalid pin request');
   END IF;
 
@@ -91,7 +95,7 @@ BEGIN
         AND is_pinned IS TRUE
       RETURNING id
     )
-    SELECT COALESCE(array_agg(id), ARRAY[]::BIGINT[]) INTO v_unpinned_ids
+    SELECT COALESCE(array_agg(id), ARRAY[]::UUID[]) INTO v_unpinned_ids
     FROM cleared;
 
     UPDATE public.posts
@@ -123,4 +127,5 @@ EXCEPTION
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.set_post_pin(BIGINT, TEXT, BOOLEAN, BOOLEAN) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.set_post_pin(UUID, TEXT, BOOLEAN, BOOLEAN) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.set_post_pin(UUID, TEXT, BOOLEAN, BOOLEAN) TO service_role;
