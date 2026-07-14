@@ -449,6 +449,22 @@ const ADMIN_NAME = "xxz";
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
+            // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
+            async function fetchAvatarUrl(userName) {
+                if (!userName) return null;
+                if (avatarCache[userName]) return avatarCache[userName];
+                try {
+                    var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
+                    if (!resp.ok) return null;
+                    var result = await resp.json();
+                    if (result.ok && result.avatar_url) {
+                        avatarCache[userName] = result.avatar_url;
+                        return result.avatar_url;
+                    }
+                } catch(e) {}
+                return null;
+            }
+
         function readUserSession() {
             try {
                 var raw = localStorage.getItem(USER_SESSION_KEY);
@@ -3161,7 +3177,7 @@ const ADMIN_NAME = "xxz";
                 
                 // 瀵倹加载头像閸滃瞼娅ヨぐ鏇熸??
                 try {
-                    // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
+                    // 当前用户优先使用localStorage缓存
                     if (userName === currentUser) {
                         try {
                             var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -3174,23 +3190,16 @@ const ADMIN_NAME = "xxz";
                         } catch(e) {}
                     }
                     
-                    var avatarRes = await sb.from("posts")
-                        .select("media_url")
-                        .eq("user_name", userName)
-                        .eq("media_type", "__avatar__")
-                        .eq("actor_key", "__avatar__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
+                    var avatarUrl = await fetchAvatarUrl(userName);
                     
-                    if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        // 非当前用户才用DB閸婂吋娲块弬鎵处鐎涙﹫绱欓敓鏂ゆ嫹鍓嶉敓鐭紮鎷峰鎻掓躬娑撳﹪娼伴悽鈺╫calStorage设置閿?
+                    if (avatarUrl) {
                         if (userName !== currentUser) {
-                            avatarCache[userName] = avatarRes.data[0].media_url;
+                            avatarCache[userName] = avatarUrl;
                         } else if (!avatarCache[currentUser]) {
-                            avatarCache[currentUser] = avatarRes.data[0].media_url;
+                            avatarCache[currentUser] = avatarUrl;
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
-                            var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarRes.data[0].media_url;
+                            var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarUrl;
                             avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像">';
                         }
                     }
@@ -3292,22 +3301,16 @@ const ADMIN_NAME = "xxz";
                 }
                 
                 try {
-                    const avatarRes = await sb.from("posts")
-                        .select("media_url")
-                        .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .eq("actor_key", "__avatar__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
+                    var avatarUrl = await fetchAvatarUrl(currentUser);
                     
-                    if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
+                    if (avatarUrl) {
+                        var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                         avatarEl.innerHTML = '<img src="' + safeAvatarUrl + '" alt="头像">';
-                        avatarCache[currentUser] = avatarRes.data[0].media_url;
+                        avatarCache[currentUser] = avatarUrl;
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
                             var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                            cv[currentUser] = avatarRes.data[0].media_url;
+                            cv[currentUser] = avatarUrl;
                             localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
                         } catch(e) {}
                     } else if (!avatarCache[currentUser]) {
@@ -3525,7 +3528,7 @@ const ADMIN_NAME = "xxz";
                             // 閸氬本顒為柛鎺旀ocalStorage
                             try {
                                 var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                                cv[currentUser] = avatarRes.data[0].media_url;
+                                cv[currentUser] = avatarUrl;
                                 localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
                             } catch(e) {}
                         } else {
@@ -4002,11 +4005,7 @@ function renderProfileActivityList(kind) {
                 profileActivityState.loading = true;
                 try {
                     var results = await Promise.all([
-                        sb.from('likes')
-                            .select('id, post_id, user_name, actor_key, created_at', { count: 'exact' })
-                            .eq('user_name', currentUser)
-                            .order('created_at', { ascending: false })
-                            .limit(160),
+                        fetch(API_BASE + '/api/likes/user/' + encodeURIComponent(currentUser) + '?limit=160', { credentials: 'include' }).then(function(r) { return r.json(); }).catch(function(e) { return { ok: false, error: e.message }; }),
                         sb.from('comments')
                             .select('id, post_id, user_name, content, actor_key, created_at', { count: 'exact' })
                             .eq('user_name', currentUser)
@@ -4036,12 +4035,12 @@ function renderProfileActivityList(kind) {
                     var commentsRes = results[1];
                     var postsCountRes = results[2];
                     var reportsRes = results[3];
-                    if (likesRes.error) throw likesRes.error;
+                    if (likesRes && !likesRes.ok) console.warn('likes load warning:', likesRes.error);
                     if (commentsRes.error) throw commentsRes.error;
                     if (postsCountRes.error) throw postsCountRes.error;
                     if (reportsRes && reportsRes.error) console.warn('reports load warning:', reportsRes.error);
 
-                    profileActivityState.likes = dedupeProfileLikes(likesRes.data || []);
+                    profileActivityState.likes = dedupeProfileLikes(likesRes && likesRes.data || []);
                     profileActivityState.comments = commentsRes.data || [];
                     profileActivityState.reports = (reportsRes && reportsRes.data || []).map(function(p) {
                         var c = {};
@@ -4174,11 +4173,9 @@ function renderProfileActivityList(kind) {
                         btn.disabled = true;
                         btn.textContent = '取消中..';
                     }
-                    var query = sb.from('likes').delete();
-                    if (postId) query = query.eq('post_id', postId).eq('user_name', currentUser);
-                    else if (likeId) query = query.eq('id', likeId);
-                    var result = await query;
-                    if (result.error) throw result.error;
+                    var resp = await fetch(API_BASE + '/api/likes/user/' + encodeURIComponent(currentUser) + '/post/' + postId, { method: 'DELETE', credentials: 'include' });
+                    var result = await resp.json();
+                    if (!resp.ok || !result.ok) throw new Error(result.error || '删除失败');
 
                     profileActivityState.likes = (profileActivityState.likes || []).filter(function(item) {
                         if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
@@ -4340,20 +4337,14 @@ function renderProfileActivityList(kind) {
                         updateAllAvatarElements(cachedAvatars[currentUser]);
                     } else {
                         // localStorage濞屸剝婀侀敍灞藉晙娴犲孩鏆熼幑顔肩氨閿熸枻鎷烽敓鏂ゆ嫹
-                        const avatarRes = await sb.from("posts")
-                            .select("media_url")
-                            .eq("user_name", currentUser)
-                            .eq("media_type", "__avatar__")
-                            .eq("actor_key", "__avatar__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                        if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                            avatarCache[currentUser] = avatarRes.data[0].media_url;
+                        var avatarUrl = await fetchAvatarUrl(currentUser);
+                        if (avatarUrl) {
+                            avatarCache[currentUser] = avatarUrl;
                             try {
-                                cachedAvatars[currentUser] = avatarRes.data[0].media_url;
+                                cachedAvatars[currentUser] = avatarUrl;
                                 localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                             } catch(e) {}
-                            updateAllAvatarElements(avatarRes.data[0].media_url);
+                            updateAllAvatarElements(avatarUrl);
                         } else {
                             var profileAvatar = document.getElementById('profileAvatar');
                             var myAvatar = document.getElementById('myAvatar');
@@ -5794,27 +5785,20 @@ function renderProfileActivityList(kind) {
                 var uncached = usernames.filter(function(u) { return !avatarCache[u]; });
                 if (uncached.length === 0) return;
                 try {
-                    var allData = [];
-                    var batchSize = 80; // Supabase .in() 限制最多 100 个项目，取 80 稳妥
-                    for (var i = 0; i < uncached.length; i += batchSize) {
-                        var batch = uncached.slice(i, i + batchSize);
-                        var { data: batchData } = await sb.from("posts")
-                            .select("user_name, media_url")
-                            .eq("media_type", "__avatar__")
-                            .eq("actor_key", "__avatar__")
-                            .in("user_name", batch)
-                            .order("created_at", { ascending: false });
-                        if (batchData) allData = allData.concat(batchData);
-                    }
-
-                    if (allData.length) {
-                        var seenUsers = {};
-                        allData.forEach(avatar => {
-                            if (avatar.media_url && !seenUsers[avatar.user_name]) {
-                                seenUsers[avatar.user_name] = true;
-                                avatarCache[avatar.user_name] = avatar.media_url;
-                            }
-                        });
+                    var resp = await fetch(API_BASE + '/api/avatar/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ users: uncached })
+                    });
+                    var result = await resp.json();
+                    if (resp.ok && result.ok && result.avatars) {
+                        var avatars = result.avatars;
+                        var keys = Object.keys(avatars);
+                        for (var ki = 0; ki < keys.length; ki++) {
+                            var k = keys[ki];
+                            if (avatars[k]) avatarCache[k] = avatars[k];
+                        }
                         if (currentUser) {
                             try {
                                 var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -9092,23 +9076,11 @@ function renderProfileActivityList(kind) {
                             variant: 'chat-list'
                         });
                     }
-                    const [sentRes, recvRes] = await Promise.all([
-                        sb.from("posts")
-                            .select("id, user_name, media_url, content, created_at, views, actor_key")
-                            .eq("media_type", DM_MARKER)
-                            .eq("user_name", window.currentUser)
-                            .order("created_at", { ascending: false })
-                            .limit(40),
-                        sb.from("posts")
-                            .select("id, user_name, media_url, content, created_at, views, actor_key")
-                            .eq("media_type", DM_MARKER)
-                            .eq("media_url", window.currentUser)
-                            .order("created_at", { ascending: false })
-                            .limit(40)
-                    ]);
-                    if (sentRes.error) throw sentRes.error;
-                    if (recvRes.error) throw recvRes.error;
-                    const allMsgs = mergeDockChatRowsById((sentRes.data || []).concat(recvRes.data || []), false, 180);
+                    const dmResp = await fetch(API_BASE + '/api/dm/list', { credentials: 'include' });
+                    if (!dmResp.ok) throw new Error('DM list fetch failed');
+                    const dmResult = await dmResp.json();
+                    if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
+                    const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
                         setUnreadBadgeCount(0);
@@ -9155,24 +9127,26 @@ function renderProfileActivityList(kind) {
                     if (typeof onReady === 'function') onReady(false);
                     return Promise.resolve(false);
                 }
-                return sb.from("posts")
-                    .select("user_name, media_url")
-                    .eq("media_type", "__avatar__")
-                    .eq("actor_key", "__avatar__")
-                    .in("user_name", users)
-                    .order("created_at", { ascending: false })
+                return fetch(API_BASE + '/api/avatar/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ users: users })
+                })
+                    .then(function(resp) { return resp.json(); })
                     .then(function(result) {
                         var changed = false;
-                        var seen = {};
-                        (result && result.data ? result.data : []).forEach(function(row) {
-                            if (!row || !row.user_name || !row.media_url || seen[row.user_name]) return;
-                            seen[row.user_name] = true;
-                            if (avatarCache[row.user_name] !== row.media_url) {
-                                avatarCache[row.user_name] = row.media_url;
-                                changed = true;
+                        if (result && result.ok && result.avatars) {
+                            var keys = Object.keys(result.avatars);
+                            for (var ki = 0; ki < keys.length; ki++) {
+                                var k = keys[ki];
+                                var v = result.avatars[k];
+                                if (v && avatarCache[k] !== v) {
+                                    avatarCache[k] = v;
+                                    changed = true;
+                                }
                             }
-                        });
-                        // 标记为已检查，即使没有变化也返回 true 供回调判断
+                        }
                         if (typeof onReady === 'function') onReady(changed || users.length > 0);
                         return changed || users.length > 0;
                     })
@@ -11973,13 +11947,10 @@ function renderProfileActivityList(kind) {
                 }
             } else {
                 try {
-                    sb.from('posts')
-                        .select('id, user_name, content, media_url, media_type, created_at')
-                        .eq('media_type', '__photo_wall__')
-                        .order('created_at', { ascending: false })
-                        .limit(200)
-                        .then(function(res) {
-                            _reportContentData = (res.data || []).map(resolveReportPhotoWallItem).filter(Boolean);
+                    fetch(API_BASE + '/api/photos/public?limit=200')
+                        .then(function(resp) { return resp.json(); })
+                        .then(function(result) {
+                            _reportContentData = (result.data || []).map(resolveReportPhotoWallItem).filter(Boolean);
                             renderReportContentList(container);
                         }).catch(function() {
                             container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
