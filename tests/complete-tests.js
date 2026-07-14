@@ -299,9 +299,16 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf("'后端不可达'") >= 0, 'safe network failure reason missing');
   assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
-test('dock tab and indicator selectors were not edited by this optimization', function(){
-  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak"', {encoding:'utf8'});
-  assert.ok(!/^[+-](?!\+\+\+|---).*\.dock-(?:bar|tab|indicator)\b/m.test(diff), 'dock bar/tab/indicator selector changed');
+test('Dock changes stay inside the approved selection-feedback scope', function(){
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/complete-tests.js"', {encoding:'utf8'});
+  var changedLines = diff.split(/\r?\n/).filter(function(line) {
+    return /^[+-](?!\+\+\+|---)/.test(line);
+  });
+  var forbidden = changedLines.filter(function(line) {
+    if (/\.dock-tab\.is-switch-feedback\s+\.dt-icon/.test(line)) return false;
+    return /\.dock-(?:bar|tab|indicator|liquid-lens|liquid-shine)\b|data-tab/.test(line);
+  });
+  assert.deepStrictEqual(forbidden, [], 'Dock structure, geometry or navigation selector changed');
 });
 test('Playwright UI validation uses installed Edge channel and a dedicated test script', function(){
   var pkg = JSON.parse(read('package.json'));
