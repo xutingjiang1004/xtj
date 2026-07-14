@@ -11,7 +11,7 @@ const coreMin = fs.readFileSync(path.join(root, 'js', 'core.min.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 
 test('protected auth only clears a genuinely expired session', () => {
-  assert.match(core, /reason:\s*\(res\.status === 401 \|\| res\.status === 403\) \? 'expired' : 'unavailable'/);
+  assert.match(core, /reason:\s*res\.status === 401 \? 'expired' : \(res\.status === 403 \? 'forbidden' : 'unavailable'\)/);
   assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired'\) \{\s*handleProtectedAuthFailure\(\)/);
   assert.match(core, /reason: 'network_error'/);
 });

@@ -72,7 +72,7 @@
     if (code === 'cancelled' || (error && error.name === 'AbortError')) return '已取消';
     if (code === 'unsupported_type') return '文件类型不支持';
     if (code === 'file_too_large') return '文件超过 25 MB 限制';
-    if (code === 'timeout' || /timeout|timed out/.test(message)) return '网络超时';
+    if (code === 'timeout' || /timeout|timed out/.test(message)) return '正在确认上传结果，请稍候';
     if (code === 'backend_unreachable' || stage === 'network') return '后端不可达';
     if (status === 401 || status === 403 || /jwt|token|unauthori[sz]ed|forbidden|登录/.test(message)) return '登录已过期';
     if (status === 429) return '请求过于频繁，请稍后重试';
