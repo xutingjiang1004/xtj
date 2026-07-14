@@ -14,7 +14,6 @@
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
   var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
-  var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
   var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
 
@@ -587,20 +586,6 @@
     return '';
   }
 
-  function readPwHash() {
-    for (var i = 0; i < PW_HASH_KEYS.length; i++) {
-      try {
-        var sv = sessionStorage.getItem(PW_HASH_KEYS[i]);
-        if (sv) return sv;
-      } catch (e) {}
-      try {
-        var lv = localStorage.getItem(PW_HASH_KEYS[i]);
-        if (lv) return lv;
-      } catch (e2) {}
-    }
-    return '';
-  }
-
   
   function abortCurrentRequest() {
     clearStreamCleanup();
@@ -640,11 +625,6 @@
       xtjConfigApiBase: window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE,
       hasCurrentUser: !!window.currentUser,
       currentUserName: readUserName() || null,
-      hasPwHash: !!readPwHash(),
-      hasUserToken: !!(function() {
-        try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'); }
-        catch (e) { return ''; }
-      })(),
       hasEnsureUserToken: typeof window.ensureUserToken === 'function',
       hasRefreshUserToken: typeof window.refreshUserToken === 'function',
       hasClearUserToken: typeof window.clearUserToken === 'function',
@@ -695,10 +675,6 @@
     try { localStorage.removeItem('xtj_user_token_ts'); } catch (e4) {}
   }
 
-  function hasLocalPasswordHash() {
-    return !!(readUserName() && readPwHash());
-  }
-
   async function getUserAuthPayload(options) {
     options = options || {};
     var forceNoToken = !!options.forceNoToken;
@@ -713,7 +689,6 @@
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
 
-    // 鈽?U3: 鍙敤浜?POST body, 涓嶅厑璁?password_hash 鍑虹幇鍦?GET URL
     var un = readUserName();
     var body = {};
     return { token: token, headers: headers, body: body, query: {}, userName: un };
@@ -1109,7 +1084,7 @@
           var entEl = el('div', { class: 'ai-thought-entry' });
           var roleLabel = entry.agent_role || 'AI';
           var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
-          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
@@ -2313,7 +2288,7 @@
         } else {
           var entry = el('div', { class: 'ai-thought-entry' });
           entry._role = roleLabel;
-          entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+          entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
           entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
           logBox.appendChild(entry);
           cached.lastEntry = entry;
@@ -2369,13 +2344,18 @@
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     // Fire-and-forget cancel to server
     try {
-      var token = localStorage.getItem('xtj_user_token');
-      var headers = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = 'Bearer ' + token;
-      fetch(API_BASE + '/chat/cancel', {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({ conversation_id: convId || S.conversationId || '' })
+      var tokenPromise = typeof window.ensureUserToken === 'function'
+        ? Promise.resolve(window.ensureUserToken()).catch(function() { return ''; })
+        : Promise.resolve('');
+      tokenPromise.then(function(token) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        return fetch(API_BASE + '/chat/cancel', {
+          method: 'POST',
+          headers: headers,
+          credentials: 'include',
+          body: JSON.stringify({ conversation_id: convId || S.conversationId || '' })
+        });
       }).catch(function() {});
     } catch (e) {}
     notify('\u5df2\u53d6\u6d88\u601d\u8003');
@@ -2550,7 +2530,7 @@
         mergedLog.forEach(function(entry) {
           var entEl = el('div', { class: 'ai-thought-entry' });
           var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
-          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(entry.agent_role || 'AI') + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(entry.agent_role || 'AI') + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
@@ -3053,7 +3033,7 @@
             var entEl = el('div', { class: 'ai-thought-entry' });
             var roleLabel = entry.agent_role || 'AI';
             var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
-            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
             thinkLogBox.appendChild(entEl);
           });
@@ -3597,7 +3577,7 @@
             var entEl = el('div', { class: 'ai-thought-entry' });
             var roleLabel = entry.agent_role || 'AI';
             var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
-            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
             entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
             thinkLogBox.appendChild(entEl);
           });

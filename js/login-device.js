@@ -397,7 +397,7 @@
     }
 
     // 发送登录事件
-    function doSend(userName, passwordHash, deviceId, sentKey, source) {
+    function doSend(userName, deviceId, sentKey, source) {
         try {
             if (isInCooldown(sentKey)) return;
 
@@ -407,7 +407,6 @@
             // 构建基础 body
             var bodyObj = {
                 user_name: userName,
-                password_hash: passwordHash,
                 device_id: deviceId,
                 device_type: detectDeviceType(ua),
                 os: detectOS(ua),
@@ -418,16 +417,18 @@
             };
 
             // 发送请求（指纹异步采集）
-            var sendReq = function() {
+            var sendReq = async function() {
                 lastSendAtByKey[sentKey] = Date.now();
                 var headers = { 'Content-Type': 'application/json' };
-                if (typeof getUserToken === 'function') {
-                    var token = getUserToken();
-                    if (token) headers['Authorization'] = 'Bearer ' + token;
-                }
+                var token = '';
+                if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
+                else if (typeof getUserToken === 'function') token = getUserToken();
+                if (!token) { lastSendAtByKey[sentKey] = 0; return; }
+                headers['Authorization'] = 'Bearer ' + token;
                 fetch(API_BASE + '/api/log-login-event', {
                     method: 'POST',
                     headers: headers,
+                    credentials: 'include',
                     body: JSON.stringify(bodyObj)
                 }).then(function(res) {
                     if (res.ok && source === 'login_success') {
@@ -495,18 +496,16 @@
         try {
             if (sessionStorage.getItem(sentKey)) return;
         } catch(e) {}
-        var pwHash;
-        try { pwHash = sessionStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
         var userToken = '';
         if (typeof getUserToken === 'function') {
             userToken = getUserToken();
         }
-        if (!pwHash && !userToken) return;
+        if (!userToken && typeof window.ensureUserToken !== 'function') return;
         var src = source || 'login_success';
         // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
         var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
         try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
-        doSend(userName, pwHash, deviceId, sentKey, src);
+        doSend(userName, deviceId, sentKey, src);
     };
 
     // 页面访问记录（15 秒冷却，页面刷新/打开时记录）
@@ -514,16 +513,15 @@
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
             debounceTimer = null;
-            var userName, passwordHash, deviceId;
+            var userName, deviceId;
             try {
                 userName = localStorage.getItem('xtj_user');
-                passwordHash = sessionStorage.getItem('xtj_pw_hash') || '';
                 deviceId = localStorage.getItem('xtj_device_id');
             } catch(e) { return; }
 
             if (!userName || !deviceId) return;
             var userToken = typeof getUserToken === 'function' ? getUserToken() : '';
-            if (!passwordHash && !userToken) return;
+            if (!userToken && typeof window.ensureUserToken !== 'function') return;
 
             // 15s localStorage 冷却
             var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
@@ -533,7 +531,7 @@
             try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
 
             var sentKey = 'xtj_login_visit_' + userName + '_' + deviceId;
-            doSend(userName, passwordHash, deviceId, sentKey, 'page_visit');
+            doSend(userName, deviceId, sentKey, 'page_visit');
         }, CHECK_DELAY_MS);
     }
 
@@ -545,21 +543,12 @@
     // 确保 device_id 已存在
     getOrCreateDeviceId();
 
-    // 拦截 localStorage/sessionStorage.setItem，监听登录凭据写入
+    // 监听用户会话建立；认证凭据本身不存储也不拦截。
     try {
         var _origSetItem = localStorage.setItem.bind(localStorage);
-        var _origSessionSetItem = sessionStorage.setItem.bind(sessionStorage);
         localStorage.setItem = function(key, value) {
             _origSetItem(key, value);
-            if (key === 'xtj_user' || key === 'xtj_pw_hash') {
-                trySendPageVisit();
-            }
-        };
-        sessionStorage.setItem = function(key, value) {
-            _origSessionSetItem(key, value);
-            if (key === 'xtj_pw_hash') {
-                trySendPageVisit();
-            }
+            if (key === 'xtj_user') trySendPageVisit();
         };
     } catch(e) {}
 
