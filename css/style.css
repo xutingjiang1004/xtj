@@ -10458,8 +10458,9 @@ body.ios-chat-keyboard-open .chat-input-area {
     .pp-confirm-btn,
     #statModal .stat-user-summary-card
   ) {
-    transition-duration: 0.18s !important;
-    animation-duration: 0.18s !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 

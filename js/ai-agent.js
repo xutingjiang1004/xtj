@@ -776,7 +776,7 @@
     if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
     var first = await sendOnce(method, path, body, { forceNoToken: false });
     if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
-    if (first && (first.status === 401 || first.status === 403)) {
+    if (first && first.status === 401) {
       if (typeof window.refreshUserToken === 'function') {
         try {
           var refreshed = await window.refreshUserToken(true);
@@ -794,10 +794,11 @@
 
   function describeError(r, fallback) {
     if (!r) return fallback || '请求失败';
-    if (r.status === 401 || r.status === 403) {
+    if (r.status === 401) {
       try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e) {}
       return '凭据异常，请重新登录后再使用 AI 聊天';
     }
+    if (r.status === 403) return '当前账号没有执行此操作的权限';
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
     if (r.status === 429) return 'AI 聊天次数已达上限，请稍后再试';
