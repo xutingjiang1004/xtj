@@ -20,18 +20,19 @@ test('login establishes the HttpOnly refresh-cookie session', () => {
   assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/login',[\s\S]*?credentials: 'include'/);
 });
 
-test('pin reuses preflight token and retries once after a real 401', () => {
-  assert.match(core, /var response = await requestPin\(auth\.token\)/);
-  assert.match(core, /if \(response\.status === 401\) \{[\s\S]*?refreshUserToken\(true\)[\s\S]*?requestPin\(renewedToken\)/);
-  assert.match(core, /credentials: 'include'/);
+test('pin uses the shared protected request with one 401 refresh retry', () => {
+  assert.match(core, /window\.xtjProtectedFetch = async function/);
+  assert.match(core, /if \(response\.status === 401\) \{[\s\S]*?refreshUserToken\(true\)/);
+  assert.match(core, /xtjProtectedFetch\('\/api\/post\/pin'/);
 });
 
-test('missing pin migration is reported separately from authentication', () => {
-  assert.match(server, /code: 'pin_migration_required'/);
-  assert.match(core, /result\.code === 'pin_migration_required'/);
+test('missing or wrongly typed pin RPC uses the authenticated compatibility path', () => {
+  assert.match(server, /rpcError\.code === '22P02'/);
+  assert.match(server, /migrationMissing[\s\S]*clearResult[\s\S]*pinResult/);
+  assert.match(server, /unpinResult/);
 });
 
-test('deployed minified bundle contains the auth and migration fixes', () => {
-  assert.match(coreMin, /pin_migration_required/);
+test('deployed minified bundle contains the protected auth fix', () => {
+  assert.match(coreMin, /xtjProtectedFetch/);
   assert.match(coreMin, /network_error/);
 });
