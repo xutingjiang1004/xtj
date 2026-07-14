@@ -228,13 +228,14 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
 }
 
 const ADMIN_NAME = "xxz";
-            const ADMIN_TOKEN_KEY = "xtj_admin_token";
             const AVATAR_CACHE_KEY = "xtj_avatars";
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
             var USER_TOKEN_KEY = 'xtj_user_token';
             var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
+            var memoryUserToken = '';
+            var memoryUserTokenIssuedAt = 0;
             // 共享 refresh promise，避免多个 API 同时刷新
             var _refreshPromise = null;
             var _protectedAuthFailureHandled = false;
@@ -244,12 +245,14 @@ const ADMIN_NAME = "xxz";
 
             function getUserToken() {
                 // 仅从 sessionStorage 读取（本次会话）
-                var token = sessionStorage.getItem(USER_TOKEN_KEY) || '';
+                var token = memoryUserToken || '';
                 // 检查是否过期
                 if (token) {
-                    var ts = parseInt(sessionStorage.getItem(USER_TOKEN_TS_KEY) || '0', 10);
+                    var ts = memoryUserTokenIssuedAt;
                     if (ts && (Date.now() - ts > 15 * 60 * 1000)) {
                         // access token 可能已过期，尝试刷新
+                        memoryUserToken = '';
+                        memoryUserTokenIssuedAt = 0;
                         token = '';
                     }
                 }
@@ -258,8 +261,8 @@ const ADMIN_NAME = "xxz";
 
             function setUserToken(token) {
                 if (token) {
-                    sessionStorage.setItem(USER_TOKEN_KEY, token);
-                    sessionStorage.setItem(USER_TOKEN_TS_KEY, String(Date.now()));
+                    memoryUserToken = String(token);
+                    memoryUserTokenIssuedAt = Date.now();
                 }
             }
 
@@ -280,6 +283,8 @@ const ADMIN_NAME = "xxz";
             }
 
             function clearUserToken() {
+                memoryUserToken = '';
+                memoryUserTokenIssuedAt = 0;
                 try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
                 try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
                 try { localStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
@@ -291,6 +296,7 @@ const ADMIN_NAME = "xxz";
             // hashes are never retained as a session fallback.
             function clearAllAuthState(options) {
                 options = options || {};
+                var tokenForRevocation = getUserToken();
                 clearUserToken();
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
@@ -301,7 +307,11 @@ const ADMIN_NAME = "xxz";
                 // Explicit logout revokes the refresh cookie. An expired session
                 // must not make another request just to report that it expired.
                 if (options.revokeRemote !== false) try {
-                    fetch(API_BASE + '/api/user/logout', { method: 'POST', credentials: 'include' }).catch(function(){});
+                    var logoutHeaders = {};
+                    if (tokenForRevocation) logoutHeaders.Authorization = 'Bearer ' + tokenForRevocation;
+                    fetch(API_BASE + '/api/user/logout', {
+                        method: 'POST', credentials: 'include', headers: logoutHeaders
+                    }).catch(function(){});
                 } catch(e) {}
             }
             window.clearAllAuthState = clearAllAuthState;
@@ -359,19 +369,13 @@ const ADMIN_NAME = "xxz";
                 return _refreshPromise;
             }
 
-            // 兼容旧 password_hash 登录（迁移期间保留）
-            async function ensureUserTokenLegacy() {
-                return '';
-            }
-
             /**
              * 返回统一认证请求头对象。
-             * 优先使用 refresh token 刷新，无 token 时 fallback 旧 password_hash
+             * 使用短期 access token，过期时仅通过 HttpOnly refresh cookie 刷新。
              */
             window.getUserAuthHeaders = async function() {
                 // 先尝试从 cookie 刷新
                 var token = await ensureUserToken();
-                // fallback 旧 password_hash
                 if (token) {
                     return {
                         'Content-Type': 'application/json',
@@ -386,7 +390,7 @@ const ADMIN_NAME = "xxz";
 
             /**
              * 强制刷新 token。
-             * 优先使用 refresh token cookie，fallback 旧 password_hash
+             * 使用 refresh token cookie 强制刷新。
              */
             window.refreshUserToken = async function(force) {
                 try {
@@ -397,7 +401,6 @@ const ADMIN_NAME = "xxz";
                     // 优先 cookie 刷新
                     var token = await refreshUserTokenViaCookie();
                     if (token) return token;
-                    // fallback 旧 password_hash
                 } catch (e) {}
                 return '';
             };
@@ -405,8 +408,7 @@ const ADMIN_NAME = "xxz";
             /**
              * ★ 新增：统一鉴权状态检查（AI 模块用）
              *  - 仅当 currentUser + 真实 token 都存在时，返回 ok=true
-             *  - 没 token 但有 pw_hash 时，主动用 refreshUserToken(true) 换新
-             *  - 都没了返回 ok=false（调用方应提示重新登录）
+             *  - 没有 access token 时，仅尝试 HttpOnly refresh cookie
              * 返回 { ok, reason, token, user_name }
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
@@ -1432,8 +1434,12 @@ const ADMIN_NAME = "xxz";
                 var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
                 var vc = new AbortController();
                 var vt = setTimeout(function() { vc.abort(); }, 8000);
-                var resp = await fetch(url, { signal: vc.signal });
-                clearTimeout(vt);
+                var resp;
+                try {
+                    resp = await fetch(url, { signal: vc.signal });
+                } finally {
+                    clearTimeout(vt);
+                }
                 var data = await resp.json();
                 var apiIsVip = data.is_vip === true;
                 if (apiIsVip) {
@@ -1607,11 +1613,7 @@ const ADMIN_NAME = "xxz";
                 ].join('');
             }
 
-            // 区分两种"无法请求"场景：
-            //  1. fake_login  — currentUser 存在但 token / password_hash 都没有，是页面级假登录
-            //                   提示文案："登录状态已过期，请重新登录后查看活动"
-            //  2. expired     — token 真的过期了，重试一次后仍 401/403
-            //                   提示文案："登录凭证需要刷新" + 重新登录按钮
+            // 当前用户存在但 access/refresh 会话均不可用时，要求重新登录。
             function renderFakeLogin() {
                 section.style.display = '';
                 list.innerHTML = [
@@ -1636,25 +1638,10 @@ const ADMIN_NAME = "xxz";
                 ].join('');
             }
 
-            // 检查是否处于"假登录"状态：有 currentUser 但完全没有 token / password_hash
-            function isFakeLogin() {
-                if (getUserToken()) return false;
-                try {
-                    var pwHash = sessionStorage.getItem('xtj_pw_hash') || '';
-                    if (pwHash) return false;
-                } catch (e) {}
-                return true;
-            }
-
             try {
                 var tok = await ensureUserToken();
                 if (!tok) {
-                    // 没拿到 token：先判别是 fake login 还是真正缺凭据
-                    if (isFakeLogin()) {
-                        renderFakeLogin();
-                    } else {
-                        renderAuthExpired();
-                    }
+                    renderFakeLogin();
                     return;
                 }
                 var headers = { 'Authorization': 'Bearer ' + tok };
@@ -1736,7 +1723,7 @@ const ADMIN_NAME = "xxz";
                     } else if (g.expired) {
                         buttonHtml = '<div class="pro-gift-claimed-badge disabled">已结束</div>';
                     } else {
-                        buttonHtml = '<button class="pro-gift-claim-btn" data-gift-id="' + escapeHtml(g.id) + '" onclick="claimProGift(\'' + escapeHtml(g.id) + '\')">领取 Pro</button>';
+                        buttonHtml = '<button type="button" class="pro-gift-claim-btn" data-gift-id="' + escapeHtml(g.id) + '">领取 Pro</button>';
                     }
 
                     var card = '<div class="' + cardClass + '" data-gift-id="' + escapeHtml(g.id) + '">';
@@ -1774,6 +1761,11 @@ const ADMIN_NAME = "xxz";
                     card += '</div></div>';
                     return card;
                 }).join('');
+                list.querySelectorAll('.pro-gift-claim-btn').forEach(function(button) {
+                    button.addEventListener('click', function() {
+                        window.claimProGift(button.dataset.giftId);
+                    });
+                });
             } catch(e) {
                 renderEmpty('Pro 活动加载失败', '请稍后重试');
             }
@@ -1782,8 +1774,13 @@ const ADMIN_NAME = "xxz";
         // 领取 Pro 赠送活动
         window.claimProGift = async function(giftId) {
             if (!currentUser) { showToast('请先登录'); return; }
-            var btn = document.querySelector('.pro-gift-claim-btn[data-gift-id="' + giftId + '"]');
-            var card = document.querySelector('.pro-gift-card[data-gift-id="' + giftId + '"]');
+            var giftKey = String(giftId == null ? '' : giftId);
+            var btn = Array.from(document.querySelectorAll('.pro-gift-claim-btn')).find(function(node) {
+                return node.dataset.giftId === giftKey;
+            }) || null;
+            var card = Array.from(document.querySelectorAll('.pro-gift-card')).find(function(node) {
+                return node.dataset.giftId === giftKey;
+            }) || null;
             if (btn) {
                 btn.classList.add('loading');
                 btn.textContent = '领取中...';
@@ -2602,49 +2599,6 @@ const ADMIN_NAME = "xxz";
             }, 300);
         };
 
-            // ===================== 密码哈希（PBKDF2） =====================
-            // 使用 PBKDF2-SHA256，100000 次迭代，16字节随机盐
-            // 存储格式：盐(hex):哈希(hex)，如 "a1b2c3...:d4e5f6..."
-            async function pbkdf2Hash(password, salt) {
-                const enc = new TextEncoder();
-                const keyMaterial = await crypto.subtle.importKey(
-                    'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
-                );
-                const bits = await crypto.subtle.deriveBits(
-                    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
-                    keyMaterial, 256
-                );
-                return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-            }
-            async function hashPasswordWithSalt(password, _username) {
-                var saltBytes = crypto.getRandomValues(new Uint8Array(16));
-                var salt = Array.from(saltBytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                var hash = await pbkdf2Hash(password, salt);
-                return salt + ':' + hash;
-            }
-            // 验证密码：支持 PBKDF2（新格式 salt:hash）和旧版 SHA-256 回退
-            async function verifyPassword(inputPw, stored, _username) {
-                if (!inputPw || !stored) return false;
-                // PBKDF2 格式：salt:hash
-                if (stored.indexOf(':') !== -1) {
-                    var parts = stored.split(':');
-                    var inputHash = await pbkdf2Hash(inputPw, parts[0]);
-                    return inputHash === parts[1];
-                }
-                // 回退旧版 SHA-256（无盐或用户名为盐）
-                var enc = new TextEncoder();
-                var buf = await crypto.subtle.digest('SHA-256', enc.encode(inputPw));
-                var oldHash = Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                if (oldHash === stored) return true;
-                // 旧版用户名为盐
-                if (_username) {
-                    var saltedBuf = await crypto.subtle.digest('SHA-256', enc.encode(_username + ':' + inputPw));
-                    var saltedHash = Array.from(new Uint8Array(saltedBuf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                    return saltedHash === stored;
-                }
-                return false;
-            }
-
             // ===================== 闁谎嗩嚙缂?/ 婵炲鍔岄崬?/ 闁谎嗩嚙閸?=====================
             const AUTH_MARKER = '__auth__';
             const ADMIN_AUTH_MARKER = '__admin_auth__';
@@ -2749,15 +2703,6 @@ const ADMIN_NAME = "xxz";
 
             function stopRestrictionPolling() {
                 if (restrictionPollTimer) { clearInterval(restrictionPollTimer); restrictionPollTimer = null; }
-            }
-
-            async function findAuthRecord(nickname) {
-                const { data } = await sb.from("posts")
-                    .select("id, user_name, media_url")
-                    .eq("user_name", nickname)
-                    .eq("media_type", AUTH_MARKER)
-                    .maybeSingle();
-                return data;
             }
 
             async function saveUserInfo(name, isNewUser, email) {
@@ -2918,7 +2863,6 @@ const ADMIN_NAME = "xxz";
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
-                var authPasswordHash = '';
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
 
@@ -2944,68 +2888,29 @@ const ADMIN_NAME = "xxz";
                                 btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
-                            if (loginRes.token) {
-                                localStorage.setItem(ADMIN_TOKEN_KEY, loginRes.token);
+                            if (!loginRes.user_token) {
+                                showToast("管理员用户会话建立失败", "error");
+                                return;
                             }
-                            // ★ 管理员也写入 xtj_pw_hash，以便 AI 聊天等模块鉴权
-                            try {
-                                var adminAuthRec = await findAuthRecord(name);
-                                if (adminAuthRec && adminAuthRec.media_url) {
-            authPasswordHash = adminAuthRec.media_url;
-                                }
-                            } catch(e) { console.warn('[Admin] 写入 xtj_pw_hash 失败:', e); }
+                            setUserToken(loginRes.user_token);
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
-                    } else {
-                        const authRec = await findAuthRecord(name);
-                        if (!authRec) {
-                            showToast("账号不存在，请先注册");
-                            btn.disabled = false; btn.textContent = "登录";
-                            return;
-                        }
-                        var pwOk = await verifyPassword(pw, authRec.media_url, name);
-                        if (!pwOk) {
-                            showToast("密码错误");
-                            btn.disabled = false; btn.textContent = "登录";
-                            return;
-                        }
-            authPasswordHash = authRec.media_url;
                     }
 
-                    // 获取 JWT token（替代 password_hash 认证）
-                    // ★ 关键修复：拿不到 token 时也要继续登录流程，但 console.warn 提示
-                    //   AI 模块会用 ensureRealUserAuth 主动补救
-                    try {
-                        var _pwHash = authPasswordHash;
-                        if (_pwHash && API_BASE) {
-                            var tokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                                body: JSON.stringify({ user_name: name, password_hash: _pwHash })
-                            });
-                            if (tokenRes.ok) {
-                                var tokenData = await tokenRes.json().catch(function(){ return {}; });
-                                if (tokenData && tokenData.token) {
-                                    setUserToken(tokenData.token);
-                                } else {
-                                    try { console.warn('[AUTH] login /api/user/login ok but no token in response'); } catch(e) {}
-                                }
-                            } else {
-                                try { console.warn('[AUTH] login /api/user/login failed, status =', tokenRes.status); } catch(e) {}
-                            }
-                        } else if (!_pwHash) {
-                            try { console.warn('[AUTH] login: no password_hash, skip token fetch'); } catch(e) {}
-                        } else if (name === ADMIN_NAME) {
-                            try { console.warn('[AUTH] login: admin user, skip token fetch'); } catch(e) {}
-                        } else if (!API_BASE) {
-                            try { console.warn('[AUTH] login: no API_BASE, skip token fetch'); } catch(e) {}
+                    if (name !== ADMIN_NAME) {
+                        var tokenRes = await fetch(API_BASE + '/api/user/login', {
+                            method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ user_name: name, password: pw })
+                        });
+                        var tokenData = await tokenRes.json().catch(function(){ return {}; });
+                        if (!tokenRes.ok || !tokenData.token) {
+                            showToast(tokenData.error || "账号或密码错误", "error");
+                            return;
                         }
-                    } catch(e) { try { console.warn('[AUTH] login token fetch exception:', e && e.message); } catch(e2) {} }
-                    if (!getUserToken()) {
-                        showToast("登录会话建立失败，请重试", "error");
-                        return;
+                        setUserToken(tokenData.token);
                     }
 
                     currentUser = name;
@@ -3074,57 +2979,19 @@ const ADMIN_NAME = "xxz";
                 btn.textContent = "注册中..";
 
                 try {
-                    const existing = await findAuthRecord(name);
-                    if (existing) {
-                        showToast("昵称 '" + name + "' 已被注册，请换一个");
-                        btn.disabled = false; btn.textContent = "注册中..";
+                    var registerRes = await fetch(API_BASE + '/api/user/register', {
+                        method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ user_name: name, password: pw })
+                    });
+                    var registerData = await registerRes.json().catch(function(){ return {}; });
+                    if (!registerRes.ok || !registerData.token) {
+                        showToast(registerData.error || "注册失败，请重试", "error");
                         return;
                     }
-
-                    const pwHash = await hashPasswordWithSalt(pw, name);
-                    const { error } = await sb.from("posts").insert([{
-                        user_name: name,
-                        content: AUTH_MARKER,
-                        media_url: pwHash,
-                        media_type: AUTH_MARKER,
-                        actor_key: AUTH_MARKER
-                    }]);
-                    if (error) {
-                        showToast("注册失败: " + error.message);
-                        btn.disabled = false; btn.textContent = "注册失败";
-                        return;
-                    }
-
+                    setUserToken(registerData.token);
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    // 获取 JWT token（替代 password_hash 认证）
-                    // ★ 关键修复：拿不到 token 时也要继续注册流程，但 console.warn 提示
-                    try {
-                        if (API_BASE) {
-                            var _regTokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                                body: JSON.stringify({ user_name: name, password_hash: pwHash })
-                            });
-                            if (_regTokenRes.ok) {
-                                var _regTokenData = await _regTokenRes.json().catch(function(){ return {}; });
-                                if (_regTokenData && _regTokenData.token) {
-                                    setUserToken(_regTokenData.token);
-                                } else {
-                                    try { console.warn('[AUTH] register /api/user/login ok but no token in response'); } catch(e) {}
-                                }
-                            } else {
-                                try { console.warn('[AUTH] register /api/user/login failed, status =', _regTokenRes.status); } catch(e) {}
-                            }
-                        } else {
-                            try { console.warn('[AUTH] register: no API_BASE, skip token fetch'); } catch(e) {}
-                        }
-                    } catch(e) { try { console.warn('[AUTH] register token fetch exception:', e && e.message); } catch(e2) {} }
-                    if (!getUserToken()) {
-                        clearAllAuthState({ revokeRemote: false });
-                        showToast("注册成功，但登录会话建立失败，请重新登录", "error");
-                        return;
-                    }
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -5399,7 +5266,7 @@ function renderProfileActivityList(kind) {
                             var vm = statsEl.textContent.match(/浏览 (\d+)/);
                             if (vm) {
                                 var newVal = parseInt(vm[1]) + 1;
-                                statsEl.innerHTML = statsEl.innerHTML.replace(/浏览 \d+/, '浏览 ' + newVal);
+                                statsEl.textContent = statsEl.textContent.replace(/浏览 \d+/, '浏览 ' + newVal);
                             }
                         }
                     }
@@ -5466,7 +5333,7 @@ function renderProfileActivityList(kind) {
                         var vm = statsEl.textContent.match(/(\d+)/);
                         if (vm) {
                             var newVal = parseInt(vm[1]) + 1;
-                            statsEl.innerHTML = statsEl.innerHTML.replace(/\d+/, String(newVal));
+                            statsEl.textContent = statsEl.textContent.replace(/\d+/, String(newVal));
                         }
                     }
                 }

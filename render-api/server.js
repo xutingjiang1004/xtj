@@ -3969,23 +3969,12 @@ const USER_ACCESS_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
 // 长期 refresh token（30天）
 const USER_REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
 
-function signUserToken(userName, expireHours) {
-  var USER_TOKEN_EXPIRY_MS = (expireHours || 720) * 60 * 60 * 1000;
-  return _signPayload({ exp: Date.now() + USER_TOKEN_EXPIRY_MS, user_name: userName, type: 'user' });
-}
-
 function signUserAccessToken(userName) {
-  return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access' });
+  return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access', jti: crypto.randomUUID() });
 }
 
 function signUserRefreshToken(userName) {
   return _signPayload({ exp: Date.now() + USER_REFRESH_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_refresh', jti: crypto.randomUUID() });
-}
-
-function verifyUserToken(token) {
-  var payload = _verifyToken(token);
-  if (!payload || payload.type !== 'user' || !payload.user_name) return null;
-  return payload;
 }
 
 function verifyUserAccessToken(token) {
@@ -4058,16 +4047,21 @@ async function persistRevokedToken(token, expiresAt) {
       user_name: ADMIN_USERNAME
     }]);
     revokedTokenHashes.add(crypto.createHash('sha256').update(token).digest('hex'));
-  } catch(e) { console.warn('[Revoke] 持久化撤销失败:', e.message); }
+    return true;
+  } catch(e) {
+    console.warn('[Revoke] 持久化撤销失败:', e.message);
+    return false;
+  }
 }
 
 async function loadRevokedTokenHashes() {
   try {
     var now = new Date().toISOString();
-    var { data } = await supabase.from('posts')
+    var { data, error: revokeLoadError } = await supabase.from('posts')
       .select('id, media_url, content')
       .eq('media_type', REVOKED_TOKEN_MARKER)
       .not('media_url', 'is', null);
+    if (revokeLoadError) throw revokeLoadError;
     (data || []).forEach(function(row) {
       try {
         var info = JSON.parse(row.content || '{}');
@@ -4090,12 +4084,21 @@ async function loadRevokedTokenHashes() {
     if (expiredIds.length > 0) {
       supabase.from('posts').delete().in('id', expiredIds).then(function(){}).catch(function(e){ console.warn('[Revoke] 清理过期吊销记录失败:', e && e.message); });
     }
-  } catch(e) { console.warn('[Revoke] 加载吊销列表失败:', e.message); }
+  } catch(e) {
+    console.warn('[Revoke] 加载吊销列表失败:', e.message);
+    throw e;
+  }
 }
 
 var revokedTokenHashes = new Set();
 var revokedTokenHashesReady = false;
-loadRevokedTokenHashes().then(function() { revokedTokenHashesReady = true; }).catch(function(){});
+var revokedTokenHashesLoadError = null;
+var revokedTokenHashesReadyPromise = loadRevokedTokenHashes().then(function() {
+  revokedTokenHashesReady = true;
+}).catch(function(e) {
+  console.error('[Revoke] 启动加载失败:', e && e.message);
+  revokedTokenHashesLoadError = e || new Error('revocation state unavailable');
+});
 
 function isTokenRevoked(token) {
   if (revokedTokens.has(token)) return true;
@@ -4103,7 +4106,20 @@ function isTokenRevoked(token) {
   return revokedTokenHashes.has(hash);
 }
 
-function verifyToken(req, res, next) {
+async function waitForRevocationState(res) {
+  if (revokedTokenHashesReady) return true;
+  try {
+    await revokedTokenHashesReadyPromise;
+    if (revokedTokenHashesLoadError) throw revokedTokenHashesLoadError;
+    return true;
+  } catch (e) {
+    res.status(503).json({ error: '认证服务正在初始化，请稍后重试' });
+    return false;
+  }
+}
+
+async function verifyToken(req, res, next) {
+  if (!(await waitForRevocationState(res))) return;
   var token = _getTokenFromRequest(req);
 
   // 从 HttpOnly Cookie 读取（优先级高于 Authorization header）
@@ -4206,30 +4222,26 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
     res.cookie('xtj_admin_token', token, cookieOpts);
   } catch(e) {}
 
-  return res.json({ ok: true, username: ADMIN_USERNAME });
+  var adminUserSession = await issueUserSession(res, ADMIN_USERNAME);
+  return res.json({ ok: true, username: ADMIN_USERNAME, user_token: adminUserSession.token });
 });
 
 // ===================== 用户 Token 认证（JWT access_token + refresh_token） =====================
-const USER_TOKEN_HEADER_HOURS = 720; // 旧 token 有效期 30 天（兼容期）
-
 async function authenticateUser(req, res, next) {
+  if (!(await waitForRevocationState(res))) return;
   // 1. 验证 Authorization header 中的 access token（短期）
   var token = _getTokenFromRequest(req);
   if (token) {
     // 先尝试新 access token
     var payload = verifyUserAccessToken(token);
-    if (!payload) {
-      // 兼容旧版 user token（30天）
-      payload = verifyUserToken(token);
-    }
-    if (payload && payload.user_name) {
+    if (payload && payload.user_name && !isTokenRevoked(token)) {
       try {
         var { data: userExists } = await supabase.from('posts')
           .select('id')
           .eq('user_name', payload.user_name)
           .eq('media_type', AUTH_MARKER)
           .maybeSingle();
-        if (!userExists) {
+        if (!userExists && payload.user_name !== ADMIN_USERNAME) {
           return res.status(401).json({ error: '用户不存在或已注销', code: 'auth_expired' });
         }
       } catch(e) {
@@ -4240,41 +4252,67 @@ async function authenticateUser(req, res, next) {
     }
   }
 
-  // 2. 兼容旧 password_hash（迁移期间保留，仅接受 body）
-  var body = req.body || {};
-  var password_hash = body.password_hash || '';
-  var userName = body.user_name || body.reporter_name || '';
-  var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
-  if (!userNameVal || !password_hash) {
-    return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
-  }
-  try {
-    var { data: authRec } = await supabase.from('posts')
-      .select('media_url')
-      .eq('user_name', userNameVal)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    if (!authRec || !authRec.media_url) {
-      return res.status(403).json({ error: '身份验证失败' });
-    }
-    var storedBuf = Buffer.from(authRec.media_url);
-    var providedBuf = Buffer.from(password_hash);
-    if (storedBuf.length !== providedBuf.length || !crypto.timingSafeEqual(storedBuf, providedBuf)) {
-      return res.status(403).json({ error: '身份验证失败' });
-    }
-    req.userName = userNameVal;
-    next();
-  } catch(e) {
-    return res.status(500).json({ error: '认证查询失败' });
-  }
+  // Protected APIs accept tokens only. Password-equivalent credentials are
+  // deliberately confined to /api/user/login and never travel with actions.
+  return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
-// 用户登录/获取 token（用 password_hash 换取 access_token + refresh_token）
+const AUTH_VERIFIER_PREFIX = 'scrypt:v1:';
+function safeTextEqual(left, right) {
+  var leftBuf = Buffer.from(String(left || ''));
+  var rightBuf = Buffer.from(String(right || ''));
+  return leftBuf.length === rightBuf.length && crypto.timingSafeEqual(leftBuf, rightBuf);
+}
+function scryptAsync(password, salt) {
+  return new Promise(function(resolve, reject) {
+    crypto.scrypt(String(password), salt, 32, { N: 16384, r: 8, p: 1 }, function(error, key) {
+      if (error) reject(error); else resolve(key);
+    });
+  });
+}
+async function deriveAuthVerifier(password) {
+  var salt = crypto.randomBytes(16).toString('base64url');
+  var key = await scryptAsync(password, salt);
+  return AUTH_VERIFIER_PREFIX + salt + ':' + key.toString('base64url');
+}
+async function verifyAuthPassword(stored, password, userName) {
+  var value = String(stored || '');
+  if (value.indexOf(AUTH_VERIFIER_PREFIX) === 0) {
+    var fields = value.split(':');
+    if (fields.length !== 4 || !fields[2] || !fields[3]) return false;
+    var key = await scryptAsync(password, fields[2]);
+    return safeTextEqual(fields[3], key.toString('base64url'));
+  }
+  // Legacy browser records: PBKDF2 salt:hash, SHA-256(password), or
+  // SHA-256(username:password). They are accepted only here and upgraded.
+  if (/^[a-f0-9]{32}:[a-f0-9]{64}$/i.test(value)) {
+    var legacyParts = value.split(':');
+    var pbkdf2Key = crypto.pbkdf2Sync(String(password), legacyParts[0], 100000, 32, 'sha256').toString('hex');
+    return safeTextEqual(legacyParts[1].toLowerCase(), pbkdf2Key);
+  }
+  var plainSha = crypto.createHash('sha256').update(String(password)).digest('hex');
+  if (safeTextEqual(value.toLowerCase(), plainSha)) return true;
+  var namedSha = crypto.createHash('sha256').update(String(userName) + ':' + String(password)).digest('hex');
+  return safeTextEqual(value.toLowerCase(), namedSha);
+}
+
+async function issueUserSession(res, userName) {
+  var accessToken = signUserAccessToken(userName);
+  var refreshToken = signUserRefreshToken(userName);
+  await storeRefreshToken(userName, refreshToken);
+  res.cookie('xtj_user_refresh', refreshToken, {
+    httpOnly: true, secure: true, sameSite: 'Strict',
+    maxAge: USER_REFRESH_TOKEN_EXPIRY_MS, path: '/api/user'
+  });
+  return { ok: true, token: accessToken, user_name: userName, token_type: 'access' };
+}
+
+// 用户登录/获取 token。客户端只提交用户输入的密码；不接受 password_hash。
 app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
   try {
-    var { user_name, password_hash } = req.body;
+    var { user_name, password } = req.body;
     var userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
-    if (!userNameVal || !password_hash) {
+    if (!userNameVal || typeof password !== 'string' || password.length < 1 || password.length > 128) {
       return res.status(400).json({ error: '缺少用户名或密码' });
     }
     var { data: authRec } = await supabase.from('posts')
@@ -4282,29 +4320,52 @@ app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
       .eq('user_name', userNameVal)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
-    if (!authRec || !authRec.media_url || !crypto.timingSafeEqual(Buffer.from(authRec.media_url), Buffer.from(password_hash))) {
+    if (!authRec || !authRec.media_url || !(await verifyAuthPassword(authRec.media_url, password, userNameVal))) {
       return res.status(401).json({ error: '账号或密码错误' });
     }
-    // 签发短期 access token + 长期 refresh token
-    var accessToken = signUserAccessToken(userNameVal);
-    var refreshToken = signUserRefreshToken(userNameVal);
-    await storeRefreshToken(userNameVal, refreshToken);
-
-    // 设置 refresh token 为 HttpOnly Secure SameSite Cookie
-    try {
-      res.cookie('xtj_user_refresh', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'Strict',
-        maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
-        path: '/api/user'
-      });
-    } catch(e) {}
-
-    return res.json({ ok: true, token: accessToken, user_name: userNameVal, token_type: 'access' });
+    if (String(authRec.media_url).indexOf(AUTH_VERIFIER_PREFIX) !== 0) {
+      var verifier = await deriveAuthVerifier(password);
+      var { error: verifierError } = await supabase.from('posts')
+        .update({ media_url: verifier })
+        .eq('user_name', userNameVal)
+        .eq('media_type', AUTH_MARKER)
+        .eq('media_url', authRec.media_url);
+      if (verifierError) return res.status(503).json({ error: '登录凭证升级失败，请重试' });
+    }
+    return res.json(await issueUserSession(res, userNameVal));
   } catch(e) {
     console.error('[API] 用户登录失败:', e.message);
     return res.status(500).json({ error: '登录失败' });
+  }
+});
+
+app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
+  try {
+    var userNameVal = validateString(req.body && req.body.user_name, MAX_USERNAME_LEN, '用户名');
+    var password = req.body && req.body.password;
+    if (!userNameVal || !/^[\u4e00-\u9fa5a-zA-Z0-9_]{2,20}$/.test(userNameVal)) {
+      return res.status(400).json({ error: '昵称格式不正确' });
+    }
+    if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+      return res.status(400).json({ error: '密码长度应为 6-128 位' });
+    }
+    var { data: existing, error: lookupError } = await supabase.from('posts')
+      .select('id').eq('user_name', userNameVal).eq('media_type', AUTH_MARKER).maybeSingle();
+    if (lookupError) return res.status(503).json({ error: '注册服务暂不可用' });
+    if (existing) return res.status(409).json({ error: '该昵称已被注册' });
+    var verifier = await deriveAuthVerifier(password);
+    var { error: insertError } = await supabase.from('posts').insert([{
+      user_name: userNameVal, content: AUTH_MARKER, media_url: verifier,
+      media_type: AUTH_MARKER, actor_key: AUTH_MARKER
+    }]);
+    if (insertError) {
+      if (String(insertError.code || '') === '23505') return res.status(409).json({ error: '该昵称已被注册' });
+      return res.status(503).json({ error: '注册失败，请重试' });
+    }
+    return res.status(201).json(await issueUserSession(res, userNameVal));
+  } catch (e) {
+    console.error('[API] 用户注册失败:', e.message);
+    return res.status(500).json({ error: '注册失败' });
   }
 });
 
@@ -4354,6 +4415,12 @@ app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
 // 用户登出（撤销 refresh token）
 app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
   try {
+    var accessToken = _getTokenFromRequest(req);
+    var accessPayload = accessToken ? verifyUserAccessToken(accessToken) : null;
+    if (accessPayload && accessPayload.jti) {
+      var accessRevoked = await persistRevokedToken(accessToken, accessPayload.exp);
+      if (!accessRevoked) return res.status(503).json({ error: '退出状态同步失败，请重试' });
+    }
     var refreshToken = (req.cookies && req.cookies.xtj_user_refresh) || '';
     if (refreshToken) {
       var payload = verifyUserRefreshToken(refreshToken);
@@ -6603,7 +6670,9 @@ app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req,
 
     // 支持按类型筛选
     if (req.query.type) {
-      query = query.eq('media_url', req.query.type);
+      var alertType = validateString(req.query.type, 50, '提醒类型');
+      if (!alertType || !/^[a-z0-9_\-]+$/i.test(alertType)) return res.status(400).json({ error: '提醒类型无效' });
+      query = query.eq('media_url', alertType);
     }
 
     var { data, error } = await query;
@@ -8013,7 +8082,9 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
       .limit(limit);
 
     if (req.query.type) {
-      query = query.eq('media_url', req.query.type);
+      var logType = validateString(req.query.type, 50, '日志类型');
+      if (!logType || !/^[a-z0-9_\-]+$/i.test(logType)) return res.status(400).json({ error: '日志类型无效' });
+      query = query.eq('media_url', logType);
     }
 
     var { data, error } = await query;
@@ -10764,6 +10835,9 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
     var targetUser = String(req.query.user_name || '').trim();
     var convId = String(req.query.conversation_id || '').trim();
     if (!targetUser || !convId) return res.status(400).json({ error: '缺少参数' });
+    if (convId !== 'legacy' && !/^[A-Z0-9\-]{6,}$/i.test(convId)) {
+      return res.status(400).json({ error: 'conversation_id 格式无效' });
+    }
 
     var query;
     if (convId === 'legacy') {
