@@ -726,6 +726,14 @@
       var auth = await getUserAuthPayload({ forceNoToken: !!options.forceNoToken });
       var headers = auth.headers;
       var opts = { method: method, headers: headers };
+      var requestController = typeof AbortController === 'function' ? new AbortController() : null;
+      var requestTimer = null;
+      if (requestController) {
+        opts.signal = requestController.signal;
+        requestTimer = setTimeout(function() {
+          try { requestController.abort(); } catch (eAbort) {}
+        }, Math.max(3000, Number(options.timeoutMs) || 12000));
+      }
 
       if (method === 'GET') {
         var extra = [];
@@ -747,7 +755,12 @@
         if (Object.keys(merged).length) opts.body = JSON.stringify(merged);
       }
 
-      var resp = await fetch(url, opts);
+      var resp;
+      try {
+        resp = await fetch(url, opts);
+      } finally {
+        if (requestTimer) clearTimeout(requestTimer);
+      }
       var rawText = '';
       try { rawText = await resp.text(); } catch (e2) {}
       var data = null;
@@ -766,7 +779,7 @@
         rawText: rawText ? String(rawText).slice(0, 300) : ''
       };
     } catch (e) {
-      var errMsg = (e && e.message) || '网络异常';
+      var errMsg = e && e.name === 'AbortError' ? '请求超时' : ((e && e.message) || '网络异常');
       try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg }); } catch (e5) {}
       return { ok: false, status: 0, data: null, error: errMsg, url: url, rawText: '' };
     }
@@ -1246,6 +1259,26 @@
     empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '徐旭泽') + ' 聊聊天' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '嗨，来聊天吧。') }));
     return empty;
+  }
+
+  function renderHistoryUnavailable(messagesEl, status) {
+    if (!messagesEl) return;
+    messagesEl.innerHTML = '';
+    var state = buildEmptyState(status === 0
+      ? '聊天记录加载超时，你仍可发送新消息'
+      : '聊天记录暂时无法加载，你仍可发送新消息');
+    state.classList.add('ai-history-unavailable');
+    var retry = el('button', {
+      type: 'button',
+      class: 'ai-history-retry',
+      text: '重新加载聊天记录',
+      'aria-label': '重新加载聊天记录'
+    });
+    retry.addEventListener('click', function() {
+      loadHistory(messagesEl, null);
+    });
+    state.appendChild(retry);
+    messagesEl.appendChild(state);
   }
 
   function appendMessage(messagesEl, msg) {
@@ -4719,6 +4752,16 @@
     if (before) S.loadingMore = true;
     else S.loading = true;
 
+    if (!before && messagesEl) {
+      messagesEl.setAttribute('aria-busy', 'true');
+      if (!messagesEl.children.length || messagesEl.querySelector('.ai-history-unavailable')) {
+        messagesEl.innerHTML = '';
+        var loadingState = buildEmptyState('正在加载聊天记录…');
+        loadingState.classList.add('ai-history-loading');
+        messagesEl.appendChild(loadingState);
+      }
+    }
+
     try {
       var qs = '?limit=' + HISTORY_PAGE_SIZE;
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
@@ -4728,15 +4771,7 @@
       if (!r.ok || !r.data) {
         if (!before) {
           try { console.warn('[AI] loadHistory failed:', r.status, r.error); } catch (e) {}
-          if (messagesEl.children.length === 0) {
-            messagesEl.innerHTML = '';
-            messagesEl.appendChild(buildEmptyState('聊天历史加载失败（' + (r.status || '?') + '），但你仍可发送新消息'));
-          } else {
-            messagesEl.appendChild(el('div', {
-              class: 'ai-msg-warn',
-                text: '聊天历史加载失败（' + (r.status || '?') + '），但你仍可发送新消息'
-            }));
-          }
+          renderHistoryUnavailable(messagesEl, r.status);
         }
         return;
       }
@@ -4778,6 +4813,7 @@
     } finally {
       S.loading = false;
       S.loadingMore = false;
+      if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
     }
   }
 

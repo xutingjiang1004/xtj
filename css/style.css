@@ -7390,11 +7390,11 @@
 
 /* Interaction feedback: like, publish and incremental feed updates. */
 .action-btn.like-feedback-add {
-  animation: xtj-like-add 220ms cubic-bezier(.2, .85, .35, 1);
+  animation: xtj-like-add 260ms cubic-bezier(.2, .85, .35, 1) !important;
 }
 
 .action-btn.like-feedback-remove {
-  animation: xtj-like-remove 180ms ease-out;
+  animation: xtj-like-remove 220ms ease-out !important;
 }
 
 @keyframes xtj-like-add {
@@ -7440,7 +7440,7 @@ button.post-publish.is-loading::after {
 }
 
 .post.is-newly-published {
-  animation: xtj-post-published 220ms cubic-bezier(.2, .8, .3, 1) both;
+  animation: xtj-post-published 280ms cubic-bezier(.16, 1, .3, 1) both !important;
 }
 
 @keyframes xtj-post-published {

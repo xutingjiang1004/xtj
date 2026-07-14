@@ -41,7 +41,7 @@ test('DM APIs are authenticated and select both sides of a conversation', () => 
 test('atomic like endpoint validates exact types and returns canonical state', () => {
   const endpoint = between(server, "app.post('/api/post/like'", '// ===================== 照片墙接口');
   assert.match(endpoint, /authenticateUser/);
-  assert.match(endpoint, /Number\.isInteger\(rawPostId\)/);
+  assert.match(endpoint, /normalizePostId\(rawPostId\)/);
   assert.match(endpoint, /typeof liked !== 'boolean'/);
   assert.match(endpoint, /post_id:\s*postId,\s*liked:\s*liked,\s*like_count:/);
   assert.match(endpoint, /\.eq\('post_id',\s*postId\)\.eq\('user_name',\s*req\.userName\)/);
@@ -51,17 +51,17 @@ test('like UI is optimistic, rolls back, animates both states, and has no succes
   const toggle = between(core, 'window.toggleLike = async function', 'function createHeartParticles');
   assert.match(toggle, /updatePostLikeUi\(pid,\s*nextLiked/);
   assert.match(toggle, /xtjProtectedFetch\('\/api\/post\/like'/);
-  assert.match(toggle, /JSON\.stringify\(\{ post_id:\s*numericPostId,\s*liked:\s*nextLiked \}\)/);
+  assert.match(toggle, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*liked:\s*nextLiked \}\)/);
   assert.match(toggle, /updatePostLikeUi\(pid,\s*wasLiked/);
   assert.match(toggle, /animatePostLikeFeedback\(pid,\s*nextLiked\)/);
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
   assert.doesNotMatch(toggle, /showToast\(['"](?:已点赞|已取消点赞)/);
 });
 
-test('pin request serializes a number and a boolean', () => {
+test('pin request serializes a UUID string and a boolean', () => {
   const pin = between(core, "window.togglePostPin = async function(postId, btn)", 'window.togglePostVisibility');
   assert.match(pin, /xtjProtectedFetch\('\/api\/post\/pin'/);
-  assert.match(pin, /JSON\.stringify\(\{ post_id:\s*numericPostId,\s*is_pinned:\s*(?:!!|Boolean\()nextPinned\)? \}\)/);
+  assert.match(pin, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*is_pinned:\s*(?:!!|Boolean\()nextPinned\)? \}\)/);
 });
 
 test('failed lazy AI loads clear their cached promise and expose retry state', () => {
