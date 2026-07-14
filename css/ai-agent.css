@@ -666,6 +666,37 @@
   color: rgba(102, 118, 116, 0.92);
 }
 
+.ai-history-retry {
+  min-width: 148px;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 9px 16px;
+  border: 1px solid rgba(78, 166, 137, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #287a64;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ai-history-retry:focus-visible {
+  outline: 3px solid rgba(38, 156, 123, 0.32);
+  outline-offset: 2px;
+}
+
+.ai-history-loading .ai-chat-empty-visual {
+  opacity: 0.72;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ai-history-retry:hover {
+    background: rgba(238, 251, 246, 0.92);
+    border-color: rgba(55, 158, 126, 0.42);
+  }
+}
+
 .ai-chat-input-bar {
   flex: 0 0 auto;
   display: flex;
