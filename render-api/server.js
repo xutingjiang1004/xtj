@@ -4941,6 +4941,178 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
 });
 
+// ===================== 点赞接口（修复 RLS 权限问题） ======================
+// GET /api/likes/user/:userName - 获取用户的点赞列表
+app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
+  try {
+    const targetUser = String(req.params.userName || '').trim();
+    if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    const limit = parseInt(req.query.limit || '160');
+    const { data, error } = await supabase.from('likes')
+      .select('id, post_id, user_name, actor_key, created_at')
+      .eq('user_name', targetUser)
+      .order('created_at', { ascending: false })
+      .limit(limit > 0 ? Math.min(limit, 500) : 160);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data: data || [] });
+  } catch (e) { console.error('[API] likes get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// DELETE /api/likes/user/:userName/post/:postId - 取消点赞
+app.delete('/api/likes/user/:userName/post/:postId', authenticateUser, async (req, res) => {
+  try {
+    const targetUser = String(req.params.userName || '').trim();
+    const postId = parseInt(req.params.postId);
+    if (!targetUser || !postId || isNaN(postId)) return res.status(400).json({ error: '参数无效' });
+    if (targetUser !== req.userName) return res.status(403).json({ error: '无权取消他人点赞' });
+    const { error } = await supabase.from('likes')
+      .delete()
+      .eq('post_id', postId)
+      .eq('user_name', targetUser);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch (e) { console.error('[API] unlike:', e.message); return res.status(500).json({ error: '取消点赞失败' }); }
+});
+
+// ===================== 照片墙接口（修复 RLS 权限问题） ======================
+// GET /api/photos/wall/:userName - 获取用户照片墙（需登录）
+app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
+  try {
+    const targetUser = String(req.params.userName || '').trim();
+    if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    const limit = parseInt(req.query.limit || '200');
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, media_type, created_at')
+      .eq('user_name', targetUser)
+      .eq('media_type', '__photo_wall__')
+      .order('created_at', { ascending: false })
+      .limit(limit > 0 ? Math.min(limit, 500) : 200);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data: data || [] });
+  } catch (e) { console.error('[API] photo wall get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// GET /api/photos/public - 公开照片墙（无需登录，限流）
+app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page || '0');
+    const limit = parseInt(req.query.limit || '20');
+    const from = page * limit;
+    const to = from + limit - 1;
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, media_url, content, created_at, views, actor_key')
+      .eq('media_type', '__photo_wall__')
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data: data || [] });
+  } catch (e) { console.error('[API] public photos:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// ===================== 头像接口（修复 RLS 权限问题） ======================
+// GET /api/avatar/:userName - 获取用户最新头像（需登录）
+app.get('/api/avatar/:userName', authenticateUser, async (req, res) => {
+  try {
+    const targetUser = String(req.params.userName || '').trim();
+    if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    const { data, error } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', targetUser)
+      .eq('media_type', '__avatar__')
+      .eq('actor_key', '__avatar__')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (!data || data.length === 0) {
+      return res.json({ ok: true, avatar_url: null });
+    }
+    return res.json({ ok: true, avatar_url: data[0].media_url || null });
+  } catch (e) { console.error('[API] avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// GET /api/avatar/public/:userName - 公开头像（无需登录，限流）
+app.get('/api/avatar/public/:userName', rateLimit(60000, 300), async (req, res) => {
+  try {
+    const targetUser = String(req.params.userName || '').trim();
+    if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    const { data, error } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', targetUser)
+      .eq('media_type', '__avatar__')
+      .eq('actor_key', '__avatar__')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (!data || data.length === 0) {
+      return res.json({ ok: true, avatar_url: null });
+    }
+    return res.json({ ok: true, avatar_url: data[0].media_url || null });
+  } catch (e) { console.error('[API] public avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// POST /api/avatar/batch - 批量获取头像（需登录）
+app.post('/api/avatar/batch', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var names = req.body && req.body.users;
+    if (!Array.isArray(names) || names.length === 0) return res.status(400).json({ error: '缺少用户列表' });
+    names = names.slice(0, 100).map(function(n) { return String(n || '').trim(); }).filter(Boolean);
+    if (names.length === 0) return res.json({ ok: true, avatars: {} });
+    const { data, error } = await supabase.from('posts')
+      .select('user_name, media_url')
+      .eq('media_type', '__avatar__')
+      .eq('actor_key', '__avatar__')
+      .in('user_name', names)
+      .order('created_at', { ascending: false });
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var result = {};
+    var seen = {};
+    (data || []).forEach(function(row) {
+      if (row.media_url && !seen[row.user_name]) {
+        seen[row.user_name] = true;
+        result[row.user_name] = row.media_url;
+      }
+    });
+    return res.json({ ok: true, avatars: result });
+  } catch (e) { console.error('[API] batch avatar:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// ===================== 私信列表接口（修复 RLS 权限问题） ======================
+// GET /api/dm/list - 获取当前用户的对话列表
+app.get('/api/dm/list', authenticateUser, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', '__dm__')
+      .eq('actor_key', 'dm_' + req.userName)
+      .order('created_at', { descending: true });
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data: data || [] });
+  } catch (e) { console.error('[API] dm list get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// GET /api/dm/messages - 获取与某个用户的完整对话（分页）
+app.get('/api/dm/messages', authenticateUser, async (req, res) => {
+  try {
+    const targetUser = String(req.query.target || '').trim();
+    const limit = parseInt(req.query.limit || '200');
+    const afterId = parseInt(req.query.after_id || '0');
+    if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
+    // actor_key = dm_<user> 存储该用户发起的对话元数据
+    // 真实私信内容每个消息都是一个 __dm__ 记录
+    let query = supabase.from('posts')
+      .select('*')
+      .eq('media_type', '__dm__');
+    query = query.or(`user_name.eq.${req.userName},actor_key.eq.dm_${req.userName}`);
+    if (afterId > 0) {
+      query = query.gt('id', afterId);
+    }
+    query = query.order('id', { ascending: false }).limit(limit > 0 ? Math.min(limit, 1000) : 200);
+    const { data, error } = await query;
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data: (data || []).reverse() });
+  } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
 // ===================== 封禁管理 ======================
 app.get('/admin/bans', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
