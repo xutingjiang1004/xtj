@@ -7388,6 +7388,108 @@
   .pp-zoom-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
 }
 
+/* Interaction feedback: like, publish and incremental feed updates. */
+.action-btn.like-feedback-add {
+  animation: xtj-like-add 220ms cubic-bezier(.2, .85, .35, 1);
+}
+
+.action-btn.like-feedback-remove {
+  animation: xtj-like-remove 180ms ease-out;
+}
+
+@keyframes xtj-like-add {
+  0% { transform: scale(1); }
+  48% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes xtj-like-remove {
+  0% { transform: scale(1); opacity: 1; }
+  48% { transform: scale(.96); opacity: .72; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+#pubBtn.is-loading,
+#postSubmit.is-loading,
+.btn-primary.is-loading,
+button.post-publish.is-loading {
+  position: relative;
+  pointer-events: none;
+  cursor: wait;
+  min-inline-size: var(--xtj-publish-button-width, 88px);
+}
+
+#pubBtn.is-loading::after,
+#postSubmit.is-loading::after,
+.btn-primary.is-loading::after,
+button.post-publish.is-loading::after {
+  content: "";
+  display: inline-block;
+  inline-size: 14px;
+  block-size: 14px;
+  margin-inline-start: 8px;
+  vertical-align: -2px;
+  border: 2px solid rgba(255, 255, 255, .38);
+  border-block-start-color: #fff;
+  border-radius: 50%;
+  animation: xtj-publish-spin 680ms linear infinite;
+}
+
+@keyframes xtj-publish-spin {
+  to { transform: rotate(1turn); }
+}
+
+.post.is-newly-published {
+  animation: xtj-post-published 220ms cubic-bezier(.2, .8, .3, 1) both;
+}
+
+@keyframes xtj-post-published {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.feed-loading-indicator,
+.feed-page-loading {
+  min-block-size: 64px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  opacity: .78;
+  transition: opacity 180ms ease;
+}
+
+.feed-loading-indicator::before,
+.feed-page-loading::before {
+  content: "";
+  inline-size: 20px;
+  block-size: 20px;
+  border: 2px solid color-mix(in srgb, var(--xtj-accent-mint, #2bc48a) 20%, transparent);
+  border-block-start-color: var(--xtj-accent-mint-deep, #159a70);
+  border-radius: 50%;
+  animation: xtj-feed-spin 760ms linear infinite;
+}
+
+@keyframes xtj-feed-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-btn.like-feedback-add,
+  .action-btn.like-feedback-remove,
+  .post.is-newly-published {
+    animation: none !important;
+  }
+
+  #pubBtn.is-loading::after,
+  #postSubmit.is-loading::after,
+  .btn-primary.is-loading::after,
+  button.post-publish.is-loading::after,
+  .feed-loading-indicator::before,
+  .feed-page-loading::before {
+    animation: none !important;
+  }
+}
+
 .pp-rotate-btn:active { transform: scale(0.95); }
 
 .pp-zoom-btn { position: absolute; bottom: 100px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: white; border: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; z-index: 100; }
