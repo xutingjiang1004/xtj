@@ -4540,11 +4540,11 @@ function renderProfileActivityList(kind) {
                         window.xtjAnimateLikeToggle(btn, nextLiked);
                     }
                     if (nextLiked) createHeartParticles(btn);
-                    var numericPostId = Number(pid);
-                    if (!Number.isFinite(numericPostId) || numericPostId <= 0) throw new Error('帖子参数无效');
+                    var normalizedPostId = pid.trim().toLowerCase();
+                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
                     var likeResponse = await window.xtjProtectedFetch('/api/post/like', {
                         method: 'POST',
-                        body: JSON.stringify({ post_id: numericPostId, liked: nextLiked })
+                        body: JSON.stringify({ post_id: normalizedPostId, liked: nextLiked })
                     });
                     var likeResult = await likeResponse.json().catch(function() { return {}; });
                     if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== nextLiked) {
@@ -5498,6 +5498,12 @@ function renderProfileActivityList(kind) {
                 setTimeout(async () => {
                     try {
                         await sb.rpc("increment_post_views", { p_post_id: postId });
+                        if (currentUser && postInfoCache[postId] && currentUser !== postInfoCache[postId].user_name && typeof window.xtjProtectedFetch === 'function') {
+                            await window.xtjProtectedFetch('/api/post/view', {
+                                method: 'POST',
+                                body: JSON.stringify({ post_id: String(postId) })
+                            });
+                        }
                     } catch (e) { console.error(e); }
                 }, 1000);
                 updateFeedStats();
@@ -6081,23 +6087,25 @@ function renderProfileActivityList(kind) {
             }
 
             async function insertPostRecord(payload, fallbackContent) {
-                var primary = await sb.from("posts").insert([payload]).select('*').single();
-                if (!primary.error) return { ok: true, fallback: false, data: primary.data };
-
-                var message = String(primary.error.message || "");
-                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
-                if (!maybeSchemaIssue) return { ok: false, error: primary.error };
-
-                var fallbackPayload = {
-                    user_name: payload.user_name,
-                    content: fallbackContent,
-                    media_url: payload.media_url,
-                    media_type: payload.media_type,
-                    actor_key: payload.actor_key
-                };
-                var fallback = await sb.from("posts").insert([fallbackPayload]).select('*').single();
-                if (fallback.error) return { ok: false, error: fallback.error };
-                return { ok: true, fallback: true, data: fallback.data };
+                try {
+                    var response = await window.xtjProtectedFetch('/api/post/create', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            content: payload.content || fallbackContent || '',
+                            media_url: payload.media_url || '',
+                            media_type: payload.media_type || '',
+                            actor_key: payload.actor_key || '',
+                            visibility: payload.visibility || 'public'
+                        })
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok || !result.data) {
+                        return { ok: false, error: new Error(result.error || '发布失败') };
+                    }
+                    return { ok: true, fallback: false, data: result.data };
+                } catch (error) {
+                    return { ok: false, error: error };
+                }
             }
 
             function insertPublishedPostIntoFeed(post) {
@@ -6118,9 +6126,9 @@ function renderProfileActivityList(kind) {
                 postEl.style.setProperty('--post-enter-delay', '0ms');
                 feed.insertBefore(postEl, feed.firstChild);
                 observePostViewportState([postEl]);
-                requestAnimationFrame(function() {
-                    requestAnimationFrame(function() { postEl.classList.remove('is-newly-published'); });
-                });
+                var clearPublishedAnimation = function() { postEl.classList.remove('is-newly-published'); };
+                postEl.addEventListener('animationend', clearPublishedAnimation, { once: true });
+                setTimeout(clearPublishedAnimation, 420);
                 writeFeedCacheSnapshot();
                 updateFeedStats();
                 return true;
@@ -6185,23 +6193,13 @@ function renderProfileActivityList(kind) {
                 var updatePayload = {
                     post_id: post.id,
                     content: newContent,
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
+                    visibility: nextVisibility
                 };
-                // 获取认证头
-                var headers = (typeof window.getUserAuthHeaders === 'function')
-                    ? await window.getUserAuthHeaders()
-                    : null;
-                if (!headers) return { ok: false, error: new Error('登录已失效，请重新登录') };
-
-                var resp = await fetch((window.API_BASE || '') + '/api/post/update', {
+                var resp = await window.xtjProtectedFetch('/api/post/update', {
                     method: 'POST',
-                    headers: headers,
                     body: JSON.stringify(updatePayload)
                 });
-                var result = await resp.json();
+                var result = await resp.json().catch(function() { return {}; });
                 if (!resp.ok || !result.ok) return { ok: false, error: new Error(result.error || '更新失败') };
                 // 优先使用后端返回的 data，否则重新查询
                 var verified = result.data ? normalizePost(result.data) : null;
@@ -6497,9 +6495,7 @@ function renderProfileActivityList(kind) {
                         showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
-                    var fetched = await sb.from("posts").select("*").eq("id", editPostId).maybeSingle();
-                    if (fetched.error) throw fetched.error;
-                    var fetchedPost = fetched.data || null;
+                    var fetchedPost = result.data || null;
                     if (!fetchedPost) {
                         throw new Error("保存失败，公开/私密状态未实际保存");
                     }
@@ -6782,6 +6778,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__visit__")
                     .neq("media_type", "__attack__")
                     .neq("media_type", "__user_visit__")
+                    .neq("media_type", "__post_view__")
                     .neq("media_type", "__ann__")
                     .neq("media_type", "__vip__")
                     .neq("media_type", "__vip_order__")
@@ -6815,7 +6812,7 @@ function renderProfileActivityList(kind) {
                 var SYSTEM_MARKERS = [
                     AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
                     "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
-                    "__attack__", "__user_visit__", "__ann__", "__ann_read__",
+                    "__attack__", "__user_visit__", "__post_view__", "__ann__", "__ann_read__",
                     "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
                     "__pro_gift__", "__pro_gift_claim__",
                     "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
@@ -7117,8 +7114,8 @@ function renderProfileActivityList(kind) {
             // Final pin action: server-side RPC enforces one pinned post per author.
             window.togglePostPin = async function(postId, btn) {
                 if (!postId) return;
-                var numericPostId = Number(postId);
-                if (!Number.isFinite(numericPostId) || numericPostId <= 0) {
+                var normalizedPostId = String(postId || '').trim().toLowerCase();
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
                     showToast('置顶失败：帖子参数无效');
                     return;
                 }
@@ -7137,10 +7134,11 @@ function renderProfileActivityList(kind) {
                         return;
                     }
 
-                    var current = await sb.from('posts').select('*').eq('id', numericPostId).maybeSingle();
-                    if (current.error) throw current.error;
-                    if (!current.data) throw new Error('Post not found');
-                    var post = normalizePost(current.data);
+                    var currentPost = normalizePosts(feedAllPosts).find(function(item) {
+                        return String(item.id).toLowerCase() === normalizedPostId;
+                    });
+                    if (!currentPost) throw new Error('帖子不存在，请刷新后重试');
+                    var post = normalizePost(currentPost);
                     if (currentUser !== post.user_name && currentUser !== ADMIN_NAME) {
                         showToast('Not allowed');
                         return;
@@ -7148,7 +7146,7 @@ function renderProfileActivityList(kind) {
                     nextPinned = !post.is_pinned;
                     var response = await window.xtjProtectedFetch('/api/post/pin', {
                         method: 'POST',
-                        body: JSON.stringify({ post_id: numericPostId, is_pinned: Boolean(nextPinned) })
+                        body: JSON.stringify({ post_id: normalizedPostId, is_pinned: Boolean(nextPinned) })
                     });
                     var result = await response.json().catch(function() { return {}; });
                     if (response.status === 401) {
@@ -7168,7 +7166,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
-                        await refreshPostDetailIfActive(numericPostId);
+                        await refreshPostDetailIfActive(normalizedPostId);
                     }
                     didSucceed = true;
                     showToast(nextPinned ? 'Pinned' : 'Pin removed');
@@ -7591,6 +7589,7 @@ function renderProfileActivityList(kind) {
             let statAllPosts = [];
             let statAllComments = [];
             let statAllLikes = [];
+            let statViewEvents = [];
             let statPollTimer = null;
             let statCacheTime = 0;
             const STAT_CACHE_DURATION = 30000; // 30绉掔紦锟?
@@ -8928,9 +8927,9 @@ function renderProfileActivityList(kind) {
                         var animatedSurface = panel.firstElementChild || panel;
                         if (animatedSurface && typeof animatedSurface.animate === 'function') {
                             dockPanelAnimation = animatedSurface.animate([
-                                { opacity: 0.45, transform: 'translate3d(0, 4px, 0)' },
+                                { opacity: 0, transform: 'translate3d(0, 8px, 0)' },
                                 { opacity: 1, transform: 'translate3d(0, 0, 0)' }
-                            ], { duration: 200, easing: 'cubic-bezier(.2,.8,.3,1)' });
+                            ], { duration: 240, easing: 'cubic-bezier(.16,1,.3,1)' });
                             dockPanelAnimation.onfinish = dockPanelAnimation.oncancel = function() {
                                 dockPanelAnimation = null;
                             };
@@ -12984,25 +12983,21 @@ function renderProfileActivityList(kind) {
             renderViewStats = window.renderViewStats = function() {
                 var body = document.getElementById('statModalBody');
                 if (!body) return;
-                var history = typeof getViewHistory === 'function' ? getViewHistory() : [];
+                var history = (Array.isArray(statViewEvents) ? statViewEvents : []).map(function(event) {
+                    var detail = {};
+                    try { detail = JSON.parse(event && event.content || '{}'); } catch (_) {}
+                    return {
+                        user_name: event && event.user_name,
+                        post_id: detail.post_id || (event && event.media_url),
+                        post_author: detail.post_author,
+                        post_content: detail.post_content,
+                        media_url: detail.media_url,
+                        media_type: detail.media_type,
+                        viewed_at: detail.viewed_at || (event && event.created_at)
+                    };
+                });
                 if (!history.length) {
-                    var viewedPosts = (Array.isArray(statAllPosts) ? statAllPosts : []).filter(function(post) {
-                        return Number(post && post.views) > 0;
-                    }).sort(function(a, b) { return Number(b.views || 0) - Number(a.views || 0); });
-                    if (!viewedPosts.length) {
-                        body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无浏览记录</div>';
-                        return;
-                    }
-                    body.innerHTML = viewedPosts.map(function(post, index) {
-                        return renderStatRecordCard({
-                            title: String(post.user_name || '该用户') + ' 的帖子 · ' + Number(post.views || 0) + ' 次浏览',
-                            copy: getStatPostSummary(post),
-                            postId: String(post.id || ''),
-                            time: formatStatDateTime(post.created_at),
-                            thumbHtml: getStatPostMediaHtml(post, String(post.id || '')),
-                            enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;"'
-                        });
-                    }).join('');
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无用户浏览记录</div>';
                     return;
                 }
                 body.innerHTML = history.map(function(item, index) {
@@ -13285,7 +13280,7 @@ function renderProfileActivityList(kind) {
                 } catch (e) {}
             }
 
-            function applyStatSnapshot(posts, comments, likes) {
+            function applyStatSnapshot(posts, comments, likes, viewEvents) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
                     return p && !isSystemPost(p) && canViewPost(p);
                 });
@@ -13297,11 +13292,16 @@ function renderProfileActivityList(kind) {
                 statAllLikes = (Array.isArray(likes) ? likes : []).filter(function(l) {
                     return l && visiblePostIds.has(String(l.post_id));
                 });
+                if (Array.isArray(viewEvents)) {
+                    statViewEvents = viewEvents.filter(function(event) {
+                        return event && visiblePostIds.has(String(event.media_url));
+                    });
+                }
                 var postsCountEl = document.getElementById('sPosts');
                 var viewsCountEl = document.getElementById('sViews');
                 var likesCountEl = document.getElementById('sLikes');
                 if (postsCountEl) postsCountEl.textContent = String(visiblePosts.length);
-                if (viewsCountEl) viewsCountEl.textContent = String(visiblePosts.reduce(function(total, post) { return total + (Number(post.views) || 0); }, 0));
+                if (viewsCountEl) viewsCountEl.textContent = String(statViewEvents.length);
                 if (likesCountEl) likesCountEl.textContent = String(statAllLikes.length + statAllComments.length);
                 statCacheTime = Date.now();
             }
@@ -13318,13 +13318,14 @@ function renderProfileActivityList(kind) {
                     return {
                         posts: statAllPosts,
                         comments: statAllComments,
-                        likes: statAllLikes
+                        likes: statAllLikes,
+                        view_events: statViewEvents
                     };
                 }
                 if (!force && statDataPromise) return statDataPromise;
                 statDataPromise = fetchStatSnapshotWithTimeout(5000).then(function(snapshot) {
                     if (snapshot) {
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
                     }
                     return snapshot;
                 }).finally(function() {
@@ -13390,7 +13391,7 @@ function renderProfileActivityList(kind) {
                 renderStatByTypeFinal(statCurrentType);
                 ensureStatDataLoaded(false).then(function(snapshot) {
                     if (!snapshot || !modal.classList.contains('active') || !statCurrentType) return;
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
                     renderStatByTypeFinal(statCurrentType);
                 }).catch(function() {});
             };
@@ -13411,6 +13412,7 @@ function renderProfileActivityList(kind) {
                             posts: result.posts || [],
                             comments: result.comments || [],
                             likes: result.likes || [],
+                            view_events: result.view_events || [],
                             totals: result.totals || {}
                         };
                     });

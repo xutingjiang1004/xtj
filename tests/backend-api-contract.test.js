@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
 const likeMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '009_atomic_post_like.sql'), 'utf8');
+const pinUuidMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '010_fix_post_pin_uuid.sql'), 'utf8');
 
 function routeSource(method, route, nextRoute) {
   const startToken = `app.${method}('${route}'`;
@@ -39,9 +40,10 @@ test('DM messages uses exact two-way participant filters and after_id', () => {
 test('atomic like endpoint validates types and returns authoritative final count', () => {
   const source = routeSource('post', '/api/post/like', "app.get('/api/stats/snapshot'");
   assert.match(source, /authenticateUser/);
-  assert.match(source, /typeof rawPostId === 'number' && Number\.isInteger\(rawPostId\)/);
+  assert.match(source, /normalizePostId\(rawPostId\)/);
   assert.match(source, /typeof liked !== 'boolean'/);
-  assert.match(source, /upsert\([\s\S]*onConflict: 'post_id,user_name'/);
+  assert.match(source, /existingLike[\s\S]*\.eq\('post_id', postId\)[\s\S]*\.eq\('user_name', req\.userName\)/);
+  assert.match(source, /if \(!existingLike\.data\)[\s\S]*\.insert\(/);
   assert.match(source, /String\(likeError\.code \|\| ''\) !== '23505'/);
   assert.match(source, /select\('id', \{ count: 'exact', head: true \}\)/);
   assert.match(source, /post_id: postId, liked: liked, like_count:/);
@@ -57,16 +59,23 @@ test('statistics snapshot is authenticated and excludes system markers from feed
   const source = routeSource('get', '/api/stats/snapshot', "app.get('/api/photos/wall/");
   assert.match(source, /authenticateUser/);
   assert.match(source, /applyPublicPostExclusions\(supabase\.from\('posts'\)/);
-  assert.match(source, /\.eq\('media_type', VISIT_MARKER\)/);
+  assert.match(source, /\.eq\('media_type', POST_VIEW_MARKER\)/);
   assert.match(source, /post\.visibility === 'public' \|\| post\.user_name === req\.userName/);
   assert.match(source, /view_events: viewEvents/);
   assert.match(source, /totals:/);
 });
 
-test('pin endpoint rejects coerced ids and reports readable validation codes', () => {
+test('pin endpoint requires UUID ids and reports readable validation codes', () => {
   const source = routeSource('post', '/api/post/pin', "app.post('/api/post/delete'");
-  assert.match(source, /typeof rawPostId === 'number' && Number\.isInteger\(rawPostId\)/);
+  assert.match(source, /normalizePostId\(rawPostId\)/);
   assert.match(source, /code: 'invalid_post_id'/);
   assert.match(source, /typeof isPinned !== 'boolean'/);
   assert.match(source, /code: 'invalid_pin_state'/);
+});
+
+test('deployed pin migration replaces the invalid bigint RPC with a service-role UUID RPC', () => {
+  assert.match(pinUuidMigration, /DROP FUNCTION IF EXISTS public\.set_post_pin\(BIGINT/);
+  assert.match(pinUuidMigration, /p_post_id UUID/);
+  assert.match(pinUuidMigration, /v_unpinned_ids UUID\[\]/);
+  assert.match(pinUuidMigration, /GRANT EXECUTE[\s\S]*TO service_role/);
 });

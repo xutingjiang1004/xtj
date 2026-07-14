@@ -1316,6 +1316,7 @@ const ADMIN_AUTH_MARKER = '__admin_auth__';
 const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
+const POST_VIEW_MARKER = '__post_view__';
 const LOGIN_EVENT_MARKER = '__login_event__';
 const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
@@ -1365,6 +1366,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', VISIT_MARKER)
     .neq('media_type', ATTACK_MARKER)
     .neq('media_type', USER_VISIT_MARKER)
+    .neq('media_type', POST_VIEW_MARKER)
     .neq('media_type', '__ann__')
     .neq('media_type', VIP_MARKER)
     .neq('media_type', VIP_ORDER_MARKER)
@@ -4821,10 +4823,60 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
 });
 
 // ===================== P0: 帖子编辑/删除 API (替代前端直接 Supabase UPDATE) =====================
+function normalizePostId(value) {
+  var id = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : '';
+}
+
+app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var content = String(req.body && req.body.content || '');
+    var mediaUrl = String(req.body && req.body.media_url || '');
+    var mediaType = String(req.body && req.body.media_type || '');
+    var visibility = String(req.body && req.body.visibility || 'public');
+    if (!content.trim() && !mediaUrl) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
+    if (content.length > 50000) return res.status(400).json({ error: '内容长度超过限制', code: 'content_too_long' });
+    if (['public', 'private'].indexOf(visibility) < 0) return res.status(400).json({ error: '可见范围无效', code: 'invalid_visibility' });
+    if (mediaUrl && !/^https:\/\//i.test(mediaUrl)) return res.status(400).json({ error: '媒体地址无效', code: 'invalid_media_url' });
+    if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
+
+    var payload = {
+      user_name: req.userName,
+      content: content,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      actor_key: String(req.body && req.body.actor_key || 'web_' + Date.now()),
+      visibility: visibility,
+      is_pinned: false,
+      pinned_at: null,
+      updated_at: null
+    };
+    var inserted = await supabase.from('posts').insert([payload]).select('*').single();
+    if (inserted.error) {
+      // Older production schemas may not yet expose the optional feed columns.
+      var schemaMismatch = /visibility|is_pinned|pinned_at|updated_at|column/i.test(String(inserted.error.message || ''));
+      if (!schemaMismatch) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      var legacyPayload = {
+        user_name: req.userName,
+        content: content,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        actor_key: payload.actor_key
+      };
+      inserted = await supabase.from('posts').insert([legacyPayload]).select('*').single();
+      if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+    }
+    return res.status(201).json({ ok: true, data: inserted.data });
+  } catch (e) {
+    console.error('[API] post create:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: '发布失败', code: 'create_failed' });
+  }
+});
+
 app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
-    var postId = parseInt(req.body && req.body.post_id);
-    if (!postId || isNaN(postId)) return res.status(400).json({ error: '缺少 post_id' });
+    var postId = normalizePostId(req.body && req.body.post_id);
+    if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
     var { data: post } = await supabase.from('posts').select('user_name').eq('id', postId).maybeSingle();
     if (!post) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
@@ -4856,8 +4908,8 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
 });
 
 // ===================== Atomic post pin API =====================
-// Contract: { post_id: number, is_pinned: boolean }
-// Success:  { ok: true, data: Post, unpinned_post_ids: number[] }
+// Contract: { post_id: UUID string, is_pinned: boolean }
+// Success:  { ok: true, data: Post, unpinned_post_ids: UUID string[] }
 // Failures: 400 malformed request, 403 non-owner, 404 missing post, 409 race.
 function isPinnableFeedPost(post) {
   if (!post) return false;
@@ -4867,10 +4919,10 @@ function isPinnableFeedPost(post) {
 app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var rawPostId = req.body && req.body.post_id;
-    var postId = typeof rawPostId === 'number' && Number.isInteger(rawPostId) ? rawPostId : 0;
+    var postId = normalizePostId(rawPostId);
     var isPinned = req.body && req.body.is_pinned;
-    if (postId <= 0) {
-      return res.status(400).json({ error: 'post_id must be a positive integer', code: 'invalid_post_id' });
+    if (!postId) {
+      return res.status(400).json({ error: 'post_id must be a UUID', code: 'invalid_post_id' });
     }
     if (typeof isPinned !== 'boolean') {
       return res.status(400).json({ error: 'is_pinned must be boolean', code: 'invalid_pin_state' });
@@ -4899,12 +4951,26 @@ app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, re
       var rpcMessage = String(rpcError.message || rpcError.details || '');
       var migrationMissing = rpcError.code === 'PGRST202'
         || rpcError.code === '42883'
-        || /set_post_pin|schema cache|could not find the function/i.test(rpcMessage);
+        || rpcError.code === '22P02'
+        || rpcError.code === '42501'
+        || /set_post_pin|schema cache|could not find the function|invalid input syntax.*bigint/i.test(rpcMessage);
       if (migrationMissing) {
-        return res.status(503).json({
-          error: '置顶服务尚未完成数据库升级',
-          code: 'pin_migration_required'
-        });
+        // Compatibility path for deployments where the RPC migration has not
+        // reached the database yet. Service-role writes still enforce owner
+        // permission and converge to one pinned post for this author.
+        if (isPinned) {
+          var clearResult = await supabase.from('posts').update({ is_pinned: false, pinned_at: null })
+            .eq('user_name', post.user_name).eq('is_pinned', true).neq('id', postId).select('id');
+          if (clearResult.error) return res.status(500).json({ error: sanitizeError(clearResult.error), code: 'pin_failed' });
+          var pinResult = await supabase.from('posts').update({ is_pinned: true, pinned_at: new Date().toISOString() })
+            .eq('id', postId).select('*').single();
+          if (pinResult.error) return res.status(500).json({ error: sanitizeError(pinResult.error), code: 'pin_failed' });
+          return res.json({ ok: true, data: pinResult.data, unpinned_post_ids: (clearResult.data || []).map(function(row) { return row.id; }) });
+        }
+        var unpinResult = await supabase.from('posts').update({ is_pinned: false, pinned_at: null })
+          .eq('id', postId).select('*').single();
+        if (unpinResult.error) return res.status(500).json({ error: sanitizeError(unpinResult.error), code: 'pin_failed' });
+        return res.json({ ok: true, data: unpinResult.data, unpinned_post_ids: [] });
       }
       var rpcStatus = rpcError.code === '23505' ? 409 : 500;
       return res.status(rpcStatus).json({ error: sanitizeError(rpcError), code: rpcStatus === 409 ? 'pin_conflict' : 'pin_failed' });
@@ -4928,8 +4994,8 @@ app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, re
 
 app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
-    var postId = parseInt(req.body && req.body.post_id);
-    if (!postId || isNaN(postId)) return res.status(400).json({ error: '缺少 post_id' });
+    var postId = normalizePostId(req.body && req.body.post_id);
+    if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
     var { data: post } = await supabase.from('posts').select('user_name, actor_key').eq('id', postId).maybeSingle();
     if (!post) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
@@ -4966,8 +5032,8 @@ app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
 app.delete('/api/likes/user/:userName/post/:postId', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.params.userName || '').trim();
-    const postId = parseInt(req.params.postId);
-    if (!targetUser || !postId || isNaN(postId)) return res.status(400).json({ error: '参数无效' });
+    const postId = normalizePostId(req.params.postId);
+    if (!targetUser || !postId) return res.status(400).json({ error: '参数无效', code: 'invalid_post_id' });
     if (targetUser !== req.userName) return res.status(403).json({ error: '无权取消他人点赞' });
     const { error } = await supabase.from('likes')
       .delete()
@@ -4979,14 +5045,14 @@ app.delete('/api/likes/user/:userName/post/:postId', authenticateUser, async (re
 });
 
 // Set the authenticated user's final like state.
-// Contract: { post_id: number, liked: boolean }
+// Contract: { post_id: UUID string, liked: boolean }
 app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
     var rawPostId = req.body && req.body.post_id;
     var liked = req.body && req.body.liked;
-    var postId = typeof rawPostId === 'number' && Number.isInteger(rawPostId) ? rawPostId : 0;
-    if (postId <= 0 || typeof liked !== 'boolean') {
-      return res.status(400).json({ error: 'post_id must be a positive integer and liked must be boolean', code: 'invalid_request' });
+    var postId = normalizePostId(rawPostId);
+    if (!postId || typeof liked !== 'boolean') {
+      return res.status(400).json({ error: 'post_id must be a UUID and liked must be boolean', code: 'invalid_request' });
     }
 
     var { data: post, error: postError } = await supabase.from('posts').select('id').eq('id', postId).maybeSingle();
@@ -4994,18 +5060,20 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
 
     if (liked) {
-      var { error: likeError } = await supabase.from('likes').upsert({
-        post_id: postId,
-        user_name: req.userName,
-        actor_key: 'like_' + postId + '_' + req.userName
-      }, { onConflict: 'post_id,user_name', ignoreDuplicates: false });
-      if (likeError && String(likeError.code || '') !== '23505') {
-        var missingConstraint = String(likeError.code || '') === '42P10'
-          || /unique|on conflict|constraint/i.test(String(likeError.message || ''));
-        return res.status(missingConstraint ? 503 : 500).json({
-          error: missingConstraint ? 'Like storage is not ready' : sanitizeError(likeError),
-          code: missingConstraint ? 'like_constraint_required' : 'like_failed'
-        });
+      var existingLike = await supabase.from('likes').select('id').eq('post_id', postId)
+        .eq('user_name', req.userName).limit(1).maybeSingle();
+      if (existingLike.error) return res.status(500).json({ error: sanitizeError(existingLike.error), code: 'like_failed' });
+      if (!existingLike.data) {
+        var { error: likeError } = await supabase.from('likes').insert([{
+          post_id: postId,
+          user_name: req.userName,
+          actor_key: 'like_' + postId + '_' + req.userName
+        }]);
+        // A concurrent request may win the unique constraint. That already is
+        // the requested final state and is therefore a successful operation.
+        if (likeError && String(likeError.code || '') !== '23505') {
+          return res.status(500).json({ error: sanitizeError(likeError), code: 'like_failed' });
+        }
       }
     } else {
       var { error: unlikeError } = await supabase.from('likes').delete().eq('post_id', postId).eq('user_name', req.userName);
@@ -5033,7 +5101,7 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
         .order('created_at', { ascending: false }).limit(limit),
       supabase.from('likes').select('id, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('id, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(5000),
-      supabase.from('posts').select('id, media_url, created_at').eq('media_type', VISIT_MARKER)
+      supabase.from('posts').select('id, user_name, media_url, content, created_at').eq('media_type', POST_VIEW_MARKER)
         .order('created_at', { ascending: false }).limit(5000)
     ]);
     var failed = postsResult.error || likesResult.error || commentsResult.error || visitsResult.error;
@@ -5042,11 +5110,11 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
     var posts = (postsResult.data || []).filter(function(post) {
       return !post.visibility || post.visibility === 'public' || post.user_name === req.userName;
     });
-    var postIds = new Set(posts.map(function(post) { return Number(post.id); }));
-    var likes = (likesResult.data || []).filter(function(row) { return postIds.has(Number(row.post_id)); });
-    var comments = (commentsResult.data || []).filter(function(row) { return postIds.has(Number(row.post_id)); });
-    var viewEvents = visitsResult.data || [];
-    var totalViews = posts.reduce(function(total, post) { return total + (Number(post.views) || 0); }, 0);
+    var postIds = new Set(posts.map(function(post) { return String(post.id); }));
+    var likes = (likesResult.data || []).filter(function(row) { return postIds.has(String(row.post_id)); });
+    var comments = (commentsResult.data || []).filter(function(row) { return postIds.has(String(row.post_id)); });
+    var viewEvents = (visitsResult.data || []).filter(function(row) { return postIds.has(String(row.media_url)); });
+    var totalViews = viewEvents.length;
     return res.json({
       ok: true,
       posts: posts,
@@ -5064,6 +5132,34 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
   } catch (e) {
     console.error('[API] stats snapshot:', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Statistics are temporarily unavailable', code: 'stats_snapshot_failed' });
+  }
+});
+
+app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, res) => {
+  try {
+    var postId = normalizePostId(req.body && req.body.post_id);
+    if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
+    var postResult = await applyPublicPostExclusions(supabase.from('posts')
+      .select('id, user_name, visibility, content, media_url, media_type').eq('id', postId)).maybeSingle();
+    if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_view_lookup_failed' });
+    var post = postResult.data;
+    if (!post || (post.visibility && post.visibility !== 'public' && post.user_name !== req.userName)) {
+      return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
+    }
+    if (String(post.user_name || '') === String(req.userName || '')) return res.json({ ok: true, recorded: false, reason: 'self_view' });
+    var now = new Date().toISOString();
+    var eventResult = await supabase.from('posts').insert([{
+      user_name: req.userName,
+      media_type: POST_VIEW_MARKER,
+      media_url: String(postId),
+      content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: String(post.content || '').slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
+      actor_key: 'pview_' + postId + '_' + Date.now()
+    }]).select('id, created_at').single();
+    if (eventResult.error) return res.status(500).json({ error: sanitizeError(eventResult.error), code: 'post_view_record_failed' });
+    return res.json({ ok: true, recorded: true, id: eventResult.data && eventResult.data.id, viewed_at: eventResult.data && eventResult.data.created_at || now });
+  } catch (e) {
+    console.error('[API] post view:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: '浏览记录失败', code: 'post_view_record_failed' });
   }
 });
 
