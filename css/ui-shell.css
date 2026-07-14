@@ -1129,3 +1129,84 @@
     justify-content: center;
   }
 }
+
+/* Page transition only: no Dock geometry, hit-area or visual-structure changes. */
+.dock-panel {
+  opacity: 0;
+  transform: translate3d(0, 4px, 0);
+  transition: none !important;
+}
+
+.dock-panel.active,
+.dock-panel.is-entering {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+}
+
+.dock-panel:not(.active):not(.is-entering) {
+  opacity: 0 !important;
+  transform: translate3d(0, 4px, 0) !important;
+}
+
+.perf-balanced .dock-panel,
+.perf-lite .dock-panel {
+  transition: none !important;
+}
+
+.dock-panel.is-leaving {
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, -4px, 0);
+  transition-duration: 150ms, 170ms;
+}
+
+.dock-panel.is-entering {
+  z-index: 2;
+}
+
+.dock-tab.is-switch-feedback .dt-icon {
+  animation: xtj-dock-switch-feedback 220ms cubic-bezier(.2, .8, .3, 1);
+}
+
+@keyframes xtj-dock-switch-feedback {
+  0% { transform: translateY(0); opacity: .82; }
+  50% { transform: translateY(-2px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* The messages heading and list share one continuous page surface. */
+#panelChat .dock-chat-container {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#panelChat .chat-header,
+[data-theme="dark"] #panelChat .chat-header {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+#panelChat .chat-list {
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-panel,
+  .dock-panel.active,
+  .dock-panel.is-entering,
+  .dock-panel.is-leaving {
+    transition: none !important;
+    transform: none !important;
+  }
+  .dock-tab.is-switch-feedback .dt-icon {
+    animation: none !important;
+  }
+}
