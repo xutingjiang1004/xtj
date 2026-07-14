@@ -345,7 +345,7 @@ const ADMIN_NAME = "xxz";
                         }
                         _lastRefreshAuthResult = {
                             ok: false,
-                            reason: (res.status === 401 || res.status === 403) ? 'expired' : 'unavailable',
+                            reason: res.status === 401 ? 'expired' : (res.status === 403 ? 'forbidden' : 'unavailable'),
                             status: res.status
                         };
                         return '';
@@ -559,7 +559,9 @@ const ADMIN_NAME = "xxz";
                     var body = { user_name: userName };
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
-                    }).catch(function(){});
+                    }).catch(function(){
+                        try { checkReportReplies(); } catch (_) {}
+                    });
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
                 // 无后端API时直接写Supabase，同天只记录一次
@@ -2800,15 +2802,47 @@ const ADMIN_NAME = "xxz";
                 }
             }
 
+            var authModalFocusOrigin = null;
             window.openAuthModal = function (mode) {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
-                document.getElementById(id).classList.add('active');
+                const modal = document.getElementById(id);
+                if (!modal) return;
+                authModalFocusOrigin = document.activeElement;
+                modal.setAttribute('aria-hidden', 'false');
+                modal.classList.add('active');
                 setTimeout(() => {
                     const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
                     if (nickInp) nickInp.focus();
                 }, 200);
             };
 
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Tab') {
+                    var activeAuth = ['loginModal', 'registerModal'].map(function (id) { return document.getElementById(id); }).find(function (modal) {
+                        return modal && modal.classList.contains('active');
+                    });
+                    if (activeAuth) {
+                        var focusables = Array.prototype.slice.call(activeAuth.querySelectorAll('button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])')).filter(function (node) {
+                            return !node.disabled && node.offsetParent !== null;
+                        });
+                        if (focusables.length) {
+                            var first = focusables[0], last = focusables[focusables.length - 1];
+                            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+                        }
+                    }
+                    return;
+                }
+                if (event.key !== 'Escape') return;
+                ['loginModal', 'registerModal'].some(function (id) {
+                    var modal = document.getElementById(id);
+                    if (modal && modal.classList.contains('active')) {
+                        window.closeModal(id);
+                        return true;
+                    }
+                    return false;
+                });
+            });
             document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
             document.getElementById('loginPwInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doLogin();
@@ -4906,6 +4940,13 @@ function renderProfileActivityList(kind) {
                     forceClosePostActionModal(id);
                 } else {
                     el.classList.remove("active");
+                }
+                if (id === 'loginModal' || id === 'registerModal') {
+                    el.setAttribute('aria-hidden', 'true');
+                    if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
+                        try { authModalFocusOrigin.focus(); } catch (_) {}
+                    }
+                    authModalFocusOrigin = null;
                 }
                 if (id === 'statModal' && statPollTimer) {
                     clearInterval(statPollTimer);
