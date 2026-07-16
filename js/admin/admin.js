@@ -708,6 +708,8 @@ async function initAdminClient() {
             document.removeEventListener(evt, resetActivityTimer);
         });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
+        allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = [];
+        allAuditLogs = []; allErrorLogs = [];
         annList = [];
         adminTabDataLoaded = {}
         clearSession();
@@ -793,8 +795,8 @@ async function initAdminClient() {
             'reports': { key: 'reports' },
             'blacklist': { key: 'blacklist' },
             'stats': { key: 'stats' },
-            'users': { key: 'users', loaders: ['users', 'logins'] },
-            'uservisit': { key: 'users', loaders: ['users', 'logins'] },
+            'users': { key: 'users', loaders: ['users', 'logins', 'security-alerts', 'mutes'] },
+            'uservisit': { key: 'users', loaders: ['users', 'logins', 'security-alerts', 'mutes'] },
             'security': { key: 'security-alerts', loaders: ['security-alerts', 'security-settings'] },
             'audit': { key: 'audit-logs' },
             'errorlog': { key: 'error-logs' },
@@ -3891,11 +3893,20 @@ async function initAdminClient() {
         overlay.classList.add('active');
     }
 
-    window.showUserDetailModal = function(userName) {
+    window.showUserDetailModal = async function(userName) {
         // Find user info
         var userObj = null;
         for (var i = 0; i < allUsers.length; i++) {
             if (allUsers[i].name === userName) { userObj = allUsers[i]; break; }
+        }
+        showModal('用户详情', '<div class="empty">正在加载用户授权数据…</div>');
+        try {
+            var sensitive = await apiCall('GET', '/admin/user-data?user_name=' + encodeURIComponent(userName));
+            if (userObj) userObj.info = mergeAdminUserInfo(userObj.info, sensitive.info || {});
+            allLoginEvents = (sensitive.login_events || []).concat(allLoginEvents.filter(function(row) { return row.user_name !== userName; }));
+            allBehaviorEvents = (sensitive.behavior_events || []).concat(allBehaviorEvents.filter(function(row) { return row.user_name !== userName; }));
+        } catch (error) {
+            showToast('授权数据加载失败，已显示可用摘要', 'error');
         }
         var userInfo = (userObj && userObj.info) || {};
         var stats = getUserActivityStats(userName);
@@ -3963,29 +3974,56 @@ async function initAdminClient() {
         if (latestFp.webrtc_local_ips && latestFp.webrtc_local_ips.length) {
             html += '<div><span style="font-size:11px;color:var(--text-muted);">内网IP</span><br><span style="font-size:10px;font-family:monospace;">' + escapeHtml(latestFp.webrtc_local_ips.slice(0, 3).join(', ')) + '</span></div>';
         }
-        var preciseLocation = userInfo.last_precise_location;
-        if (preciseLocation && Number.isFinite(Number(preciseLocation.latitude)) && Number.isFinite(Number(preciseLocation.longitude))) {
-            var latitude = Number(preciseLocation.latitude);
-            var longitude = Number(preciseLocation.longitude);
-            var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
-            html += '<div><span style="font-size:11px;color:var(--text-muted);">用户授权定位</span><br><a href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(latitude.toFixed(6) + ', ' + longitude.toFixed(6)) + '</a><br><span style="font-size:10px;color:var(--text-muted);">精度约 ' + escapeHtml(String(Math.round(Number(preciseLocation.accuracy_m) || 0))) + ' 米 · ' + escapeHtml(formatTime(preciseLocation.captured_at || preciseLocation.received_at || '')) + '</span></div>';
+        var latestDeviceMeta = latestEvent.device_meta || latestEvent;
+        var latestNetwork = latestDeviceMeta.network || {};
+        var screenText = latestDeviceMeta.screen_width && latestDeviceMeta.screen_height
+            ? latestDeviceMeta.screen_width + '×' + latestDeviceMeta.screen_height + (latestDeviceMeta.device_pixel_ratio ? ' @' + latestDeviceMeta.device_pixel_ratio + 'x' : '') : '-';
+        var networkText = [latestNetwork.effective_type, latestNetwork.downlink_mbps != null ? latestNetwork.downlink_mbps + ' Mbps' : '', latestNetwork.rtt_ms != null ? latestNetwork.rtt_ms + ' ms' : '', latestNetwork.save_data ? '省流量' : ''].filter(Boolean).join(' · ') || '-';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">屏幕</span><br>' + escapeHtml(screenText) + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">网络</span><br>' + escapeHtml(networkText) + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">语言 / 时区</span><br>' + escapeHtml([latestDeviceMeta.language || '-', latestDeviceMeta.timezone || '-'].join(' · ')) + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">硬件</span><br>' + escapeHtml([latestDeviceMeta.hardware_concurrency ? latestDeviceMeta.hardware_concurrency + ' 线程' : '-', latestDeviceMeta.device_memory_gb ? latestDeviceMeta.device_memory_gb + ' GB' : '-'].join(' · ')) + '</div>';
+        if (latestDeviceMeta.user_agent || latestEvent.user_agent) {
+            html += '<div style="grid-column:1/-1;"><span style="font-size:11px;color:var(--text-muted);">User-Agent</span><br><span style="font-size:10px;word-break:break-all;">' + escapeHtml(String(latestDeviceMeta.user_agent || latestEvent.user_agent).slice(0, 500)) + '</span></div>';
         }
         html += '</div>';
 
-        var contactsSnapshot = userInfo.consented_contacts;
-        var clipboardSnapshot = userInfo.consented_clipboard;
-        if (contactsSnapshot || clipboardSnapshot) {
+        var locationHistory = Array.isArray(userInfo.precise_location_history) ? userInfo.precise_location_history.slice() : [];
+        if (!locationHistory.length && userInfo.last_precise_location) locationHistory.push(userInfo.last_precise_location);
+        locationHistory = locationHistory.filter(function(location) {
+            return location && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude));
+        }).sort(function(a, b) { return toAdminTimeMs(b.captured_at || b.received_at) - toAdminTimeMs(a.captured_at || a.received_at); });
+        if (locationHistory.length) {
+            html += '<h4 style="margin:12px 0 8px;">用户授权定位历史（' + locationHistory.length + '）</h4><div style="max-height:180px;overflow:auto;font-size:11px;">';
+            locationHistory.slice(0, 50).forEach(function(location) {
+                var latitude = Number(location.latitude);
+                var longitude = Number(location.longitude);
+                var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
+                html += '<div style="padding:5px 0;border-bottom:1px solid rgba(148,163,184,.12);"><a href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(latitude.toFixed(6) + ', ' + longitude.toFixed(6)) + '</a> · 精度 ' + escapeHtml(String(Math.round(Number(location.accuracy_m) || 0))) + ' 米 · ' + escapeHtml(formatTime(location.captured_at || location.received_at || '')) + '</div>';
+            });
+            html += '</div>';
+        }
+
+        var contactsHistory = Array.isArray(userInfo.consented_contacts_history) ? userInfo.consented_contacts_history.slice() : [];
+        var clipboardHistory = Array.isArray(userInfo.consented_clipboard_history) ? userInfo.consented_clipboard_history.slice() : [];
+        if (!contactsHistory.length && userInfo.consented_contacts) contactsHistory.push(userInfo.consented_contacts);
+        if (!clipboardHistory.length && userInfo.consented_clipboard) clipboardHistory.push(userInfo.consented_clipboard);
+        contactsHistory.sort(function(a, b) { return toAdminTimeMs(b.selected_at || b.captured_at) - toAdminTimeMs(a.selected_at || a.captured_at); });
+        clipboardHistory.sort(function(a, b) { return toAdminTimeMs(b.captured_at) - toAdminTimeMs(a.captured_at); });
+        if (contactsHistory.length || clipboardHistory.length) {
             html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
-            if (contactsSnapshot && Array.isArray(contactsSnapshot.contacts)) {
-                html += '<div style="font-size:11px;margin-bottom:8px;"><b>主动选择的联系人（' + contactsSnapshot.contacts.length + '）</b><div style="max-height:160px;overflow:auto;margin-top:4px;">';
-                contactsSnapshot.contacts.slice(0, 100).forEach(function(contact) {
-                    html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);">' + escapeHtml([].concat(contact.names || [], contact.phones || [], contact.emails || []).join(' · ') || '-') + '</div>';
+            contactsHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
+                if (!snapshot || !Array.isArray(snapshot.contacts)) return;
+                html += '<div style="font-size:11px;margin-bottom:8px;"><b>主动选择的联系人 #' + (snapshotIndex + 1) + '（' + snapshot.contacts.length + '）</b> · ' + escapeHtml(formatTime(snapshot.selected_at || snapshot.captured_at || '')) + '<div style="max-height:160px;overflow:auto;margin-top:4px;">';
+                snapshot.contacts.slice(0, 100).forEach(function(contact) {
+                    html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);">' + escapeHtml([].concat(contact && contact.names || [], contact && contact.phones || [], contact && contact.emails || []).join(' · ') || '-') + '</div>';
                 });
                 html += '</div></div>';
-            }
-            if (clipboardSnapshot && clipboardSnapshot.text) {
-                html += '<div style="font-size:11px;margin-bottom:8px;"><b>最近一次主动上传的剪贴板</b><div style="font-size:10px;color:var(--text-muted);">' + escapeHtml(formatTime(clipboardSnapshot.captured_at || '')) + '</div><pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;padding:8px;background:rgba(148,163,184,.08);border-radius:8px;">' + escapeHtml(String(clipboardSnapshot.text).slice(0, 10000)) + '</pre></div>';
-            }
+            });
+            clipboardHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
+                if (!snapshot || !snapshot.text) return;
+                html += '<div style="font-size:11px;margin-bottom:8px;"><b>主动上传的剪贴板 #' + (snapshotIndex + 1) + '</b><div style="font-size:10px;color:var(--text-muted);">' + escapeHtml(formatTime(snapshot.captured_at || '')) + '</div><pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;padding:8px;background:rgba(148,163,184,.08);border-radius:8px;">' + escapeHtml(String(snapshot.text).slice(0, 10000)) + '</pre></div>';
+            });
         }
 
         var behaviorRows = allBehaviorEvents.filter(function(row) { return row.user_name === userName; }).slice(0, 20);

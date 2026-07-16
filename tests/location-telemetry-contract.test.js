@@ -16,14 +16,25 @@ test('precise geolocation is user initiated and can be stopped', () => {
   assert.match(device, /xtj_location_sharing_enabled/);
   assert.match(device, /window\.confirm\('将打开系统联系人选择器/);
   assert.match(device, /window\.confirm\('剪贴板可能包含敏感信息/);
+  assert.match(device, /navigator\.userActivation\.isActive === true/);
+  assert.match(device, /localStorage\.removeItem\('xtj_location_sharing_enabled'\)/);
 });
 
-test('location endpoint validates coordinates and stores only the latest fix', () => {
+test('behavior telemetry uses stable control identifiers and never accessible user text', () => {
+  const clickBlock = device.slice(device.indexOf("document.addEventListener('click'"), device.indexOf("document.addEventListener('visibilitychange'"));
+  const targetLine = clickBlock.match(/var target =[^\n]+/)[0];
+  assert.match(targetLine, /control\.id/);
+  assert.match(targetLine, /getAttribute\('data-action'\)/);
+  assert.doesNotMatch(targetLine, /aria-label|title|textContent|innerText|\.value/);
+});
+
+test('location endpoint validates coordinates and keeps one bounded record per page load', () => {
   assert.match(server, /app\.post\('\/api\/user\/location',[\s\S]*?authenticateUser/);
   assert.match(server, /latitude < -90 \|\| latitude > 90/);
   assert.match(server, /longitude < -180 \|\| longitude > 180/);
   assert.match(server, /info\.last_precise_location = preciseLocation/);
-  assert.doesNotMatch(server, /precise_location_history/);
+  assert.match(server, /info\.precise_location_history = locationHistory\.slice\(-100\)/);
+  assert.match(server, /item\.page_load_id !== pageLoadId/);
   assert.match(server, /geolocation=\(self\)/);
 });
 
@@ -39,4 +50,7 @@ test('device telemetry includes bounded network and capability metadata', () => 
   assert.match(server, /USER_BEHAVIOR_MARKER/);
   assert.match(admin, /用户明确授权的数据/);
   assert.match(admin, /最近用户行为/);
+  assert.match(html, /id="loginPrivacyNotice"/);
+  assert.match(html, /IP 大致地区/);
+  assert.match(html, /精确位置、通讯录和剪贴板只在你主动授权或点击后读取/);
 });
