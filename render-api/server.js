@@ -1339,6 +1339,40 @@ const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';  // 退役模块，保留过滤防止旧数据泄漏
 const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
+// Merge private per-user metadata atomically when migration 014 is deployed.
+// The checked fallback keeps older deployments functional until the migration is applied.
+async function mergeUserInfo(userName, patch) {
+  var safeUser = String(userName || '').trim();
+  if (!safeUser || safeUser.length > 100 || !patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('invalid_user_info_patch');
+  }
+  var rpc = await supabase.rpc('merge_user_info', { p_user_name: safeUser, p_patch: patch });
+  if (!rpc.error) return rpc.data || patch;
+  var rpcMessage = String(rpc.error.message || '');
+  var rpcMissing = ['PGRST202', '42883'].indexOf(String(rpc.error.code || '')) >= 0
+    || /merge_user_info|schema cache|could not find the function/i.test(rpcMessage);
+  if (!rpcMissing) throw rpc.error;
+
+  var lookup = await supabase.from('posts').select('id, content')
+    .eq('user_name', safeUser).eq('media_type', USER_INFO_MARKER)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (lookup.error) throw lookup.error;
+  var current = {};
+  if (lookup.data) { try { current = JSON.parse(lookup.data.content || '{}'); } catch (_) {} }
+  var merged = Object.assign({}, current, patch);
+  if (lookup.data) {
+    var updated = await supabase.from('posts').update({ content: JSON.stringify(merged) }).eq('id', lookup.data.id);
+    if (updated.error) throw updated.error;
+    return merged;
+  }
+  var inserted = await supabase.from('posts').insert([{
+    user_name: safeUser, media_type: USER_INFO_MARKER,
+    content: JSON.stringify(merged), actor_key: 'user_info_' + Date.now()
+  }]);
+  if (inserted.error) throw inserted.error;
+  return merged;
+}
+
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
 const ERROR_LOG_RETENTION_DAYS = 30;
@@ -1970,26 +2004,15 @@ async function logAdminLoginEvent(req) {
     if (!error) {
       try {
         const now = new Date().toISOString();
-        const { data: existingInfo } = await supabase.from('posts')
-          .select('id, content')
-          .eq('user_name', ADMIN_USERNAME)
-          .eq('media_type', USER_INFO_MARKER)
-          .maybeSingle();
-
-        var info = {};
-        if (existingInfo) {
-          try { info = JSON.parse(existingInfo.content || '{}'); } catch(e) {}
-        }
-
-        info.last_login = now;
-        if (!info.last_visit) info.last_visit = now;
-        info.last_device = detectDeviceTypeFromUA(ua) + ' · ' + detectOSFromUA(ua) + ' · ' + detectBrowserFromUA(ua);
-        info.last_ip = ip;
-        if (ipLocation) info.last_ip_location = ipLocation;
-
-        if (existingInfo) {
-          await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existingInfo.id);
-        }
+        var adminInfoPatch = {
+          last_login: now,
+          last_visit: now,
+          last_device: detectDeviceTypeFromUA(ua) + ' · ' + detectOSFromUA(ua) + ' · ' + detectBrowserFromUA(ua),
+          last_device_id: deviceId,
+          last_ip: ip
+        };
+        if (ipLocation) adminInfoPatch.last_ip_location = ipLocation;
+        await mergeUserInfo(ADMIN_USERNAME, adminInfoPatch);
       } catch(e) {
         console.warn('[AdminLoginEvent] 同步 user_info 失败:', e.message || e);
       }
@@ -6737,19 +6760,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
       actor_key: 'uvisit_' + Date.now()
     }]);
 
-    // 更新用户最近登录时间
-    const { data: existing } = await supabase.from('posts')
-      .select('id, content')
-      .eq('user_name', userNameVal)
-      .eq('media_type', '__user_info__')
-      .maybeSingle();
-
-    if (existing) {
-      var info = {};
-      try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
-      info.last_visit = now;
-      await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.id);
-    }
+    await mergeUserInfo(userNameVal, { last_visit: now });
 
     return res.json({ ok: true });
   } catch(e) {
@@ -6758,17 +6769,21 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
   }
 });
 
-// 用户主动授权的浏览器精确位置。只保存最新一次，不保存轨迹。
+// 用户主动授权的浏览器精确位置。每个页面生命周期最多保存一条，历史有界。
 app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
     var body = req.body || {};
     var latitude = Number(body.latitude);
     var longitude = Number(body.longitude);
     var accuracy = Number(body.accuracy);
+    var pageLoadId = String(body.page_load_id || '').trim();
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
         !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
         !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
       return res.status(400).json({ error: '位置参数无效', code: 'invalid_location' });
+    }
+    if (!/^page_[a-z0-9_]{8,80}$/i.test(pageLoadId)) {
+      return res.status(400).json({ error: '页面标识无效', code: 'invalid_page_load_id' });
     }
     function optionalNumber(value, min, max) {
       if (value === null || value === undefined || value === '') return null;
@@ -6789,28 +6804,53 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       speed_mps: optionalNumber(body.speed, 0, 1000),
       captured_at: capturedAt.toISOString(),
       received_at: new Date().toISOString(),
-      source: 'browser_geolocation'
+      source: 'browser_geolocation',
+      page_load_id: pageLoadId
     };
     var existing = await supabase.from('posts').select('id, content')
-      .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER).maybeSingle();
+      .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'location_lookup_failed' });
     var info = {};
     if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
     info.last_precise_location = preciseLocation;
-    var writeResult;
-    if (existing.data) {
-      writeResult = await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
-    } else {
-      writeResult = await supabase.from('posts').insert([{
-        user_name: req.userName, media_type: USER_INFO_MARKER,
-        content: JSON.stringify(info), actor_key: 'user_info_' + Date.now()
-      }]);
-    }
-    if (writeResult.error) return res.status(500).json({ error: sanitizeError(writeResult.error), code: 'location_save_failed' });
+    var locationHistory = (Array.isArray(info.precise_location_history) ? info.precise_location_history : [])
+      .filter(function(item) { return item && item.page_load_id !== pageLoadId; });
+    locationHistory.push(preciseLocation);
+    info.precise_location_history = locationHistory.slice(-100);
+    await mergeUserInfo(req.userName, {
+      last_precise_location: preciseLocation,
+      precise_location_history: info.precise_location_history
+    });
     return res.json({ ok: true, location: preciseLocation });
   } catch (error) {
     console.error('[API] user location:', error && error.message);
     return res.status(500).json({ error: '位置保存失败', code: 'location_save_failed' });
+  }
+});
+
+// Sensitive per-user data is loaded only when an administrator opens that user.
+// The access itself is recorded without copying sensitive values into the audit log.
+app.get('/admin/user-data', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var userName = String(req.query.user_name || '').trim();
+    if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
+    var results = await Promise.all([
+      supabase.from('posts').select('content, created_at').eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('user_name', userName)
+        .eq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(200),
+      supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('user_name', userName)
+        .eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(200)
+    ]);
+    var firstError = results[0].error || results[1].error || results[2].error;
+    if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
+    var info = {};
+    if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch (_) {} }
+    await logAdminAudit('view_user_sensitive_data', req.adminName || 'admin', 'target_user=' + userName + '; fields=ip,location,device,behavior,contacts,clipboard');
+    return res.json({ info: info, login_events: results[1].data || [], behavior_events: results[2].data || [] });
+  } catch (error) {
+    return res.status(500).json({ error: '用户详细数据加载失败' });
   }
 });
 
@@ -6834,16 +6874,22 @@ app.post('/api/user/consented-data', rateLimit(60000, 10), authenticateUser, asy
       }), selected_at: new Date().toISOString(), source: 'contact_picker_selection' };
       if (!stored.contacts.length) return res.status(400).json({ error: '未选择联系人', code: 'empty_contacts' });
     }
-    var existing = await supabase.from('posts').select('id, content').eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER).maybeSingle();
+    var existing = await supabase.from('posts').select('id, content').eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'consented_data_lookup_failed' });
     var info = {};
     if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
-    if (kind === 'contacts') info.consented_contacts = stored;
-    else info.consented_clipboard = stored;
-    var write = existing.data
-      ? await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id)
-      : await supabase.from('posts').insert([{ user_name: req.userName, media_type: USER_INFO_MARKER, content: JSON.stringify(info), actor_key: 'user_info_' + Date.now() }]);
-    if (write.error) return res.status(500).json({ error: sanitizeError(write.error), code: 'consented_data_save_failed' });
+    if (kind === 'contacts') {
+      info.consented_contacts = stored;
+      info.consented_contacts_history = (Array.isArray(info.consented_contacts_history) ? info.consented_contacts_history : []).concat([stored]).slice(-20);
+    } else {
+      info.consented_clipboard = stored;
+      info.consented_clipboard_history = (Array.isArray(info.consented_clipboard_history) ? info.consented_clipboard_history : []).concat([stored]).slice(-20);
+    }
+    var consentPatch = kind === 'contacts'
+      ? { consented_contacts: stored, consented_contacts_history: info.consented_contacts_history }
+      : { consented_clipboard: stored, consented_clipboard_history: info.consented_clipboard_history };
+    await mergeUserInfo(req.userName, consentPatch);
     return res.json({ ok: true, kind: kind, count: kind === 'contacts' ? stored.contacts.length : stored.text.length });
   } catch (error) {
     return res.status(500).json({ error: '授权数据保存失败', code: 'consented_data_save_failed' });
@@ -7008,40 +7054,15 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     // 同步更新 user_info（记录最近设备/IP/地区/登录时间）
     try {
       const now = new Date().toISOString();
-      const { data: existingInfo } = await supabase.from('posts')
-        .select('id, content')
-        .eq('user_name', userNameVal)
-        .eq('media_type', USER_INFO_MARKER)
-        .maybeSingle();
-
-      var info = {};
-      if (existingInfo) {
-        try { info = JSON.parse(existingInfo.content || '{}'); } catch(e) {}
-      }
-
-      if (srcVal === 'login_success' || srcVal === 'register_success') {
-        info.last_login = now;
-      }
-      if (srcVal === 'page_visit') {
-        info.last_visit = now;
-      }
-      // 同时设置 last_visit 作为兜底
-      if (!info.last_visit) info.last_visit = now;
-
-      info.last_device = (device_type || 'unknown') + ' · ' + (os || 'Unknown') + ' · ' + (browser || 'Unknown');
-      info.last_ip = ip;
-      if (ipLocation) info.last_ip_location = ipLocation;
-
-      if (existingInfo) {
-        await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existingInfo.id);
-      } else {
-        await supabase.from('posts').insert([{
-          user_name: userNameVal,
-          media_type: USER_INFO_MARKER,
-          content: JSON.stringify(info),
-          actor_key: 'user_info_' + Date.now()
-        }]);
-      }
+      var infoPatch = {
+        last_visit: now,
+        last_device: (device_type || 'unknown') + ' · ' + (os || 'Unknown') + ' · ' + (browser || 'Unknown'),
+        last_device_id: deviceIdVal,
+        last_ip: ip
+      };
+      if (srcVal === 'login_success' || srcVal === 'register_success') infoPatch.last_login = now;
+      if (ipLocation) infoPatch.last_ip_location = ipLocation;
+      await mergeUserInfo(userNameVal, infoPatch);
     } catch(e) {
       console.warn('[API] 同步 user_info 失败:', e.message || e);
     }
