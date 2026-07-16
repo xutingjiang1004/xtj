@@ -206,6 +206,7 @@
 
   function finishImg(img){
     if (!img) return;
+    img._pwQueued = false;
     img.classList.remove('pw-blur-in');
     img.classList.add('pw-blur-done');
     if (imgObserver) imgObserver.unobserve(img);
@@ -247,19 +248,40 @@
     }
   }
 
+  function queueImage(img){
+    if (!img || img._pwQueued || !img.getAttribute('data-src')) return;
+    img._pwQueued = true;
+    pendingImgs.push({ target:img });
+  }
+
+  function loadVisiblePhotoWallImages(container, limit){
+    container = container || document.getElementById('photoGrid');
+    if (!container) return;
+    var images = container.querySelectorAll('.photo-wall-item img[data-src]');
+    var max = Math.min(images.length, Number(limit) || 6);
+    var viewportLimit = Math.max(window.innerHeight * 1.5, 900);
+    for (var i = 0; i < max; i++) {
+      var img = images[i];
+      var rect = img.getBoundingClientRect();
+      if (rect.top > viewportLimit || rect.bottom < -120) continue;
+      queueImage(img);
+    }
+    pumpImages();
+  }
+
   function observeImages(container){
     pendingImgs = [];
     if (imgObserver) imgObserver.disconnect();
     if (window.IntersectionObserver) {
       imgObserver = new IntersectionObserver(function(entries){
         entries.forEach(function(entry){
-          if (entry.isIntersecting) pendingImgs.push(entry);
+          if (entry.isIntersecting) queueImage(entry.target);
         });
         pumpImages();
       }, { rootMargin:'500px 0px', threshold:0.05 });
       container.querySelectorAll('.pw-blur-in').forEach(function(img){ imgObserver.observe(img); });
     } else {
-      container.querySelectorAll('.pw-blur-in').forEach(function(img){ pendingImgs.push({ target:img }); });
+      container.querySelectorAll('.pw-blur-in').forEach(queueImage);
       pumpImages();
     }
   }
@@ -379,6 +401,7 @@
   window.formatPhotoTime = formatPhotoTime;
   window.sortPhotoWallData = sortPhotoWallData;
   window.applyPhotoWallAspect = applyPhotoWallAspect;
+  window.loadVisiblePhotoWallImages = loadVisiblePhotoWallImages;
   window.getCurrentRenderablePhotoWallPhotos = getCurrentRenderablePhotoWallPhotos;
   window.openPhotoWallPreviewAt = openPhotoWallPreviewAt;
   window.renderPhotoWall = renderPhotoWall;
