@@ -440,15 +440,11 @@
     grid-template-areas:
       "header activity"
       "user activity"
-      "vip activity"
-      "style activity"
       "settings activity"
       "totals totals" !important;
   }
   #panelProfile .profile-header { grid-area: header !important; }
   #panelProfile .profile-user-card { grid-area: user !important; }
-  #panelProfile .xtj-vip-card { grid-area: vip !important; }
-  #panelProfile .profile-pro-style-entry-wrap { grid-area: style !important; }
   #panelProfile .profile-settings { grid-area: settings !important; }
   #panelProfile .profile-activity-board { grid-area: activity !important; }
   #panelProfile .profile-totals-bar { grid-area: totals !important; }
@@ -511,9 +507,11 @@
 }
 
 #panelProfile .profile-user-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-activity-board {
   border: 1px solid var(--xtj-content-line) !important;
   border-radius: var(--xtj-content-radius) !important;
@@ -540,9 +538,11 @@
 }
 
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings {
   border-radius: var(--xtj-content-radius) !important;
 }
@@ -650,11 +650,17 @@
 }
 
 #panelProfile .profile-header,
+
+
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-board,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry-wrap,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   grid-area: auto !important;
   grid-column: auto !important;
@@ -662,10 +668,14 @@
 }
 
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-board,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   border: 1px solid var(--xtj-content-line) !important;
   border-radius: 20px !important;
@@ -705,16 +715,12 @@
     grid-template-areas:
       "header activity"
       "user activity"
-      "vip activity"
-      "style activity"
       "settings activity"
       "totals totals";
     align-items: start;
   }
   #panelProfile .profile-header { grid-area: header !important; }
   #panelProfile .profile-user-card { grid-area: user !important; }
-  #panelProfile .xtj-vip-card { grid-area: vip !important; }
-  #panelProfile .profile-pro-style-entry-wrap { grid-area: style !important; }
   #panelProfile .profile-settings { grid-area: settings !important; }
   #panelProfile .profile-activity-board { grid-area: activity !important; }
   #panelProfile .profile-totals-bar { grid-area: totals !important; }
@@ -807,11 +813,46 @@
     position: sticky;
     top: 0;
     z-index: 6;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
     margin-bottom: 18px;
     border-radius: 22px;
     background: rgba(255, 255, 255, 0.62) !important;
     border: 1px solid rgba(120, 177, 170, 0.14) !important;
     box-shadow: var(--xtj-shadow-soft) !important;
+  }
+
+  #panelAi .photo-wall-controls {
+    grid-column: 1 / -1;
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+  }
+
+  #panelAi .photo-wall-select,
+  #panelAi .photo-wall-btn,
+  #panelAi .photo-wall-upload-btn {
+    min-height: 44px;
+  }
+
+  #panelAi .photo-wall-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  @media (max-width: 430px) {
+    #panelAi .photo-wall-container {
+      padding-inline: 12px;
+    }
+
+    #panelAi .photo-wall-controls {
+      grid-template-columns: minmax(0, 1fr) minmax(88px, auto) minmax(88px, auto);
+    }
   }
 
   [data-theme="dark"] #panelAi .photo-wall-header {
@@ -835,20 +876,28 @@
   }
 
   #panelProfile .profile-header,
+
+
   #panelProfile .profile-user-card,
+
+
   #panelProfile .profile-totals-bar,
+
+
   #panelProfile .profile-activity-board,
-  #panelProfile .xtj-vip-card,
-  #panelProfile .profile-pro-style-entry-wrap,
+
+
   #panelProfile .profile-settings {
     grid-area: auto;
     grid-column: auto;
   }
 
   #panelProfile .profile-user-card,
+
+
   #panelProfile .profile-activity-card,
-  #panelProfile .xtj-vip-card,
-  #panelProfile .profile-pro-style-entry,
+
+
   #panelProfile .profile-settings {
     background: var(--xtj-panel-card-light) !important;
     border: 1px solid rgba(120, 177, 170, 0.14) !important;
@@ -856,9 +905,11 @@
   }
 
   [data-theme="dark"] #panelProfile .profile-user-card,
+
+
   [data-theme="dark"] #panelProfile .profile-activity-card,
-  [data-theme="dark"] #panelProfile .xtj-vip-card,
-  [data-theme="dark"] #panelProfile .profile-pro-style-entry,
+
+
   [data-theme="dark"] #panelProfile .profile-settings {
     background: var(--xtj-panel-card-dark) !important;
     border-color: rgba(164, 216, 205, 0.10) !important;
@@ -1039,16 +1090,18 @@
 #panelProfile .profile-header { order: 0; }
 #panelProfile .profile-user-card { order: 1; }
 #panelProfile .profile-activity-board { order: 2; }
-#panelProfile .xtj-vip-card { order: 3; }
-#panelProfile .profile-pro-style-entry-wrap { order: 4; }
-#panelProfile .profile-settings { order: 5; }
-#panelProfile .profile-totals-bar { order: 6; }
+#panelProfile .profile-settings { order: 3; }
+#panelProfile .profile-totals-bar { order: 4; }
 
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-board,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   border: 1px solid rgba(112, 174, 156, 0.14) !important;
   background: rgba(247, 252, 250, 0.68) !important;
@@ -1078,10 +1131,14 @@
 }
 
 [data-theme="dark"] #panelProfile .profile-user-card,
+
+
 [data-theme="dark"] #panelProfile .profile-activity-board,
-[data-theme="dark"] #panelProfile .xtj-vip-card,
-[data-theme="dark"] #panelProfile .profile-pro-style-entry,
+
+
 [data-theme="dark"] #panelProfile .profile-settings,
+
+
 [data-theme="dark"] #panelProfile .profile-totals-bar {
   border-color: rgba(154, 211, 194, 0.10) !important;
   background: rgba(20, 39, 42, 0.68) !important;
@@ -1165,16 +1222,6 @@
   z-index: 2;
 }
 
-.dock-tab.is-switch-feedback .dt-icon {
-  animation: xtj-dock-switch-feedback 220ms cubic-bezier(.2, .8, .3, 1);
-}
-
-@keyframes xtj-dock-switch-feedback {
-  0% { transform: translateY(0); opacity: .82; }
-  50% { transform: translateY(-2px); opacity: 1; }
-  100% { transform: translateY(0); opacity: 1; }
-}
-
 /* The messages heading and list share one continuous page surface. */
 #panelChat .dock-chat-container {
   background: transparent !important;
@@ -1205,8 +1252,5 @@
   .dock-panel.is-leaving {
     transition: none !important;
     transform: none !important;
-  }
-  .dock-tab.is-switch-feedback .dt-icon {
-    animation: none !important;
   }
 }

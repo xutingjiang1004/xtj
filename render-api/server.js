@@ -1322,11 +1322,6 @@ const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
 const CLIENT_ERROR_MARKER = '__client_error__';
 // VIP / Pro 相关
-const VIP_MARKER = '__vip__';
-const VIP_ORDER_MARKER = '__vip_order__';
-const VIP_PLAN_MARKER = '__vip_plan__';
-const PRO_GIFT_MARKER = '__pro_gift__';
-const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
 // 公告已读（跨设备同步用户已读公告）
 const ANN_READ_MARKER = '__ann_read__';
 // 邮件 / 历史邮箱
@@ -1340,7 +1335,6 @@ const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
 const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
-const USER_STYLE_MARKER = '__user_style__';
 const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';  // 退役模块，保留过滤防止旧数据泄漏
 const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
@@ -1368,12 +1362,12 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', USER_VISIT_MARKER)
     .neq('media_type', POST_VIEW_MARKER)
     .neq('media_type', '__ann__')
-    .neq('media_type', VIP_MARKER)
-    .neq('media_type', VIP_ORDER_MARKER)
-    .neq('media_type', VIP_PLAN_MARKER)
-    .neq('media_type', USER_STYLE_MARKER)
-    .neq('media_type', PRO_GIFT_MARKER)
-    .neq('media_type', PRO_GIFT_CLAIM_MARKER)
+    .neq('media_type', '__vip__')
+    .neq('media_type', '__vip_order__')
+    .neq('media_type', '__vip_plan__')
+    .neq('media_type', '__user_style__')
+    .neq('media_type', '__pro_gift__')
+    .neq('media_type', '__pro_gift_claim__')
     .neq('media_type', LOGIN_EVENT_MARKER)
     .neq('media_type', SECURITY_ALERT_MARKER)
     .neq('media_type', AUDIT_LOG_MARKER)
@@ -4751,6 +4745,7 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts')
     .select('id, user_name, content, media_url, actor_key, created_at, views, is_deleted, deleted_at, deleted_by')
     .eq('media_type', '__photo_wall__')
+    .or('is_deleted.is.null,is_deleted.eq.false')
     .order('created_at', { ascending: false })
     .limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -4767,26 +4762,29 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
-  const { id } = req.params;
-  const { error } = await supabase.from('posts').update({
-    is_deleted: true,
-    deleted_at: new Date().toISOString(),
-    deleted_by: 'admin'
-  }).eq('id', id).eq('media_type', '__photo_wall__');
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  const id = normalizePostId(req.params.id);
+  if (!id) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
+  const lookup = await supabase.from('posts')
+    .select('id, user_name, media_url, media_type, actor_key, content')
+    .eq('id', id).eq('media_type', '__photo_wall__').maybeSingle();
+  if (lookup.error) return res.status(400).json({ error: sanitizeError(lookup.error) });
+  if (!lookup.data) return res.json({ ok: true, deleted: false, already_deleted: true, photo_id: id });
+  const photo = lookup.data;
+  const result = await hardDeleteContent({
+    postId: id,
+    actorUser: ADMIN_USERNAME,
+    isAdmin: true,
+    expectPhoto: true,
+    actorKey: photo.actor_key || ('admin_photo_' + id),
+    storagePaths: collectPhotoStoragePaths(photo)
+  });
+  if (result.error) return res.status(500).json({ error: sanitizeError(result.error), code: 'delete_failed' });
+  if (!result.result || !result.result.ok) {
+    return res.status(500).json({ error: result.result && result.result.error || '删除未生效', code: result.result && result.result.code || 'delete_not_applied' });
+  }
+  await processStorageCleanupJobs();
   await logAdminAudit('delete_photo', auditUser, 'photo_id:' + id);
-  return res.json({ ok: true });
-});
-
-app.post('/admin/photo/restore/:id', verifyToken, async (req, res) => {
-  const { id } = req.params;
-  const { error } = await supabase.from('posts').update({
-    is_deleted: false,
-    deleted_at: null,
-    deleted_by: null
-  }).eq('id', id).eq('media_type', '__photo_wall__');
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ ok: true });
+  return res.json({ ok: true, deleted: result.result.deleted === true, already_deleted: result.result.already_deleted === true, photo_id: id });
 });
 
 // ===================== 用户照片上传 API（使用 service_role 绕过 RLS） ======================
@@ -4823,19 +4821,110 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
     return res.status(500).json({ error: '查询失败' });
   }
 });
+
+function collectPhotoStoragePaths(photo) {
+  var paths = [];
+  function addPath(value) {
+    var path = String(value || '').trim().replace(/^\/+/, '');
+    if (!path || path.indexOf('..') >= 0 || paths.indexOf(path) >= 0) return;
+    paths.push(path);
+  }
+  try {
+    var metadata = JSON.parse(photo && photo.content || '{}');
+    addPath(metadata.storagePath || metadata.storage_path);
+    addPath(metadata.thumb || metadata.thumbnailPath || metadata.thumbnail_path);
+  } catch (_) {}
+  if (photo && photo.media_url) {
+    try {
+      var parsed = new URL(photo.media_url);
+      var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
+      var basePath = match && match[1] ? decodeURIComponent(match[1]) : '';
+      addPath(basePath);
+      if (basePath) addPath(basePath.replace(/(\.[^.]+)$/, '_thumb$1'));
+    } catch (_) {}
+  }
+  return paths;
+}
+
+async function hardDeleteContent(params) {
+  var rpc = await supabase.rpc('hard_delete_content', {
+    p_post_id: params.postId,
+    p_actor_user: params.actorUser,
+    p_is_admin: !!params.isAdmin,
+    p_expect_photo: !!params.expectPhoto,
+    p_actor_key: params.actorKey || null,
+    p_storage_paths: params.storagePaths || []
+  });
+  if (rpc.error) return { error: rpc.error };
+  var result = rpc.data || {};
+  if (!result.ok) return { result: result };
+  var verification = await supabase.from('posts').select('id').eq('id', params.postId).maybeSingle();
+  if (verification.error) return { error: verification.error };
+  if (verification.data) return { result: { ok: false, code: 'delete_not_applied', error: 'Content still exists after delete' } };
+  return { result: result };
+}
+
+var _storageCleanupRunning = false;
+async function processStorageCleanupJobs() {
+  if (_storageCleanupRunning) return;
+  _storageCleanupRunning = true;
+  try {
+    var pending = await supabase.from('storage_cleanup_jobs')
+      .select('id, bucket, paths, attempts')
+      .in('status', ['pending', 'processing'])
+      .order('created_at', { ascending: true })
+      .limit(20);
+    if (pending.error) {
+      if (String(pending.error.code || '') !== '42P01' && String(pending.error.code || '') !== 'PGRST205') {
+        console.warn('[storage-cleanup] queue lookup failed:', pending.error.message);
+      }
+      return;
+    }
+    for (var i = 0; i < (pending.data || []).length; i++) {
+      var job = pending.data[i];
+      var paths = Array.isArray(job.paths) ? job.paths.filter(function(path) {
+        return typeof path === 'string' && path && path.indexOf('..') < 0;
+      }) : [];
+      await supabase.from('storage_cleanup_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', job.id);
+      var removeError = null;
+      if (paths.length) {
+        try {
+          var removal = await supabase.storage.from(job.bucket || 'uploads').remove(paths);
+          removeError = removal.error || null;
+        } catch (error) { removeError = error; }
+      }
+      if (removeError && !/not found/i.test(String(removeError.message || ''))) {
+        await supabase.from('storage_cleanup_jobs').update({
+          status: 'pending', attempts: Number(job.attempts || 0) + 1,
+          last_error: String(removeError.message || 'storage_delete_failed').slice(0, 1000), updated_at: new Date().toISOString()
+        }).eq('id', job.id);
+      } else {
+        await supabase.from('storage_cleanup_jobs').update({
+          status: 'completed', attempts: Number(job.attempts || 0) + 1,
+          last_error: null, completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        }).eq('id', job.id);
+      }
+    }
+  } catch (error) {
+    console.warn('[storage-cleanup] worker failed:', error && error.message);
+  } finally {
+    _storageCleanupRunning = false;
+  }
+}
+
 app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
-    const { photoId } = req.body;
-    if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
+    const photoId = normalizePostId(req.body && (req.body.photoId || req.body.photo_id));
+    if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
 
     // 查询照片记录（限制 media_type）
     const { data: photo } = await supabase.from('posts')
-      .select('id, user_name, media_url, media_type, actor_key')
+      .select('id, user_name, media_url, media_type, actor_key, content')
       .eq('id', photoId)
       .eq('media_type', '__photo_wall__')
       .maybeSingle();
 
-    if (!photo) return res.status(404).json({ error: '照片不存在或已删除' });
+    if (!photo) return res.json({ ok: true, deleted: false, already_deleted: true, cleanup_pending: false, photo_id: photoId });
 
     // 权限检查：owner 或 admin
     var isAdmin = req.userName === ADMIN_USERNAME;
@@ -4843,52 +4932,57 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
       return res.status(403).json({ error: '无权删除此照片' });
     }
 
-    // 删除 Storage 中的文件（原图 + 缩略图）
-    var storagePaths = [];
+    // The transaction removes the public row and persists cleanup work first.
+    var storagePaths = collectPhotoStoragePaths(photo);
     var storageErrors = [];
-    if (photo.media_url) {
-      try {
-        var parsed = new URL(photo.media_url);
-        var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
-        var basePath = match && match[1] ? decodeURIComponent(match[1]) : null;
-        if (basePath && basePath.indexOf('..') < 0) {
-          storagePaths.push(basePath);
-          // 缩略图路径（基于约定）
-          var thumbPath = basePath.replace(/(\.[^.]+)$/, '_thumb$1');
-          if (thumbPath !== basePath) storagePaths.push(thumbPath);
-        }
-      } catch(_) {}
-    }
-    // 使用 RPC 统一删除（清理 comments, likes, reports, notifications, actor records）
     var actorKey = photo.actor_key || 'photo_' + photoId + '_' + Date.now();
-    var { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
-      p_post_id: photoId,
-      p_actor_key: actorKey
+    var hardDelete = await hardDeleteContent({
+      postId: photoId,
+      actorUser: req.userName,
+      isAdmin: isAdmin,
+      expectPhoto: true,
+      actorKey: actorKey,
+      storagePaths: storagePaths
     });
-    if (rpcErr) {
-      console.error('[photo-delete] RPC failed:', rpcErr.message);
-      return res.status(500).json({
-        error: '删除失败',
-        storage_errors: storageErrors.length > 0 ? storageErrors : undefined
-      });
+    if (hardDelete.error) {
+      console.error('[photo-delete] RPC failed:', hardDelete.error.message);
+      return res.status(500).json({ error: '删除失败', code: 'delete_failed' });
+    }
+    var deleteResult = hardDelete.result || {};
+    if (!deleteResult.ok) {
+      var deleteStatus = deleteResult.code === 'forbidden' ? 403 : deleteResult.code === 'not_photo' ? 400 : 500;
+      return res.status(deleteStatus).json({ error: deleteResult.error || '删除失败', code: deleteResult.code || 'delete_not_applied' });
     }
 
     // The database record is authoritative. Delete it first so a transient
     // database failure can never leave a live row pointing at a missing file.
     // Storage cleanup is best-effort and can be retried independently.
-    for (var i = 0; i < storagePaths.length; i++) {
+    if (storagePaths.length) {
       try {
-        var { error: rmErr } = await supabase.storage.from('uploads').remove([storagePaths[i]]);
+        var { error: rmErr } = await supabase.storage.from('uploads').remove(storagePaths);
         if (rmErr && !rmErr.message.includes('Not Found') && !rmErr.message.includes('not found')) {
-          storageErrors.push({ path: storagePaths[i], error: rmErr.message });
+          storageErrors.push({ paths: storagePaths, error: rmErr.message });
         }
       } catch(e) {
-        storageErrors.push({ path: storagePaths[i], error: e && e.message || 'unknown' });
+        storageErrors.push({ paths: storagePaths, error: e && e.message || 'unknown' });
       }
+    }
+
+    if (deleteResult.cleanup_job_id) {
+      await supabase.from('storage_cleanup_jobs').update({
+        status: storageErrors.length ? 'pending' : 'completed',
+        attempts: 1,
+        last_error: storageErrors.length ? String(storageErrors[0].error || 'storage_delete_failed').slice(0, 1000) : null,
+        completed_at: storageErrors.length ? null : new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('id', deleteResult.cleanup_job_id);
     }
 
     return res.json({
       ok: true,
+      deleted: deleteResult.deleted === true,
+      already_deleted: deleteResult.already_deleted === true,
+      photo_id: photoId,
       cleanup_pending: storageErrors.length > 0,
       storage_errors: storageErrors.length > 0 ? storageErrors : undefined
     });
@@ -4989,7 +5083,8 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
 // Failures: 400 malformed request, 403 non-owner, 404 missing post, 409 race.
 function isPinnableFeedPost(post) {
   if (!post) return false;
-  return post.media_type == null || ['image', 'video', 'text', 'photo', 'album'].indexOf(post.media_type) >= 0;
+  var mediaType = String(post.media_type == null ? '' : post.media_type).trim().toLowerCase();
+  return ['', 'text', 'image', 'video', 'audio', 'photo', 'album'].indexOf(mediaType) >= 0;
 }
 
 app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, res) => {
@@ -5072,18 +5167,29 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var { data: post } = await supabase.from('posts').select('user_name, actor_key').eq('id', postId).maybeSingle();
-    if (!post) return res.status(404).json({ error: '帖子不存在' });
+    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type').eq('id', postId).maybeSingle();
+    if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'delete_lookup_failed' });
+    var post = lookup.data;
+    if (!post) return res.json({ ok: true, deleted: false, already_deleted: true, post_id: postId });
+    if (post.media_type === '__photo_wall__') return res.status(400).json({ error: '请使用照片删除功能', code: 'use_photo_delete' });
     var isAdmin = req.userName === ADMIN_USERNAME;
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
-    // 使用 RPC 统一删除（清理 comments, likes, reports, notifications, actor records, media）
     var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
-    var { error } = await supabase.rpc('delete_post_with_actor', {
-      p_post_id: postId,
-      p_actor_key: actorKey
+    var hardDelete = await hardDeleteContent({
+      postId: postId,
+      actorUser: req.userName,
+      isAdmin: isAdmin,
+      expectPhoto: false,
+      actorKey: actorKey,
+      storagePaths: []
     });
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true });
+    if (hardDelete.error) return res.status(500).json({ error: sanitizeError(hardDelete.error), code: 'delete_failed' });
+    var result = hardDelete.result || {};
+    if (!result.ok) {
+      var status = result.code === 'forbidden' ? 403 : result.code === 'not_found' ? 404 : 500;
+      return res.status(status).json({ error: result.error || '删除未生效', code: result.code || 'delete_not_applied' });
+    }
+    return res.json({ ok: true, deleted: result.deleted === true, already_deleted: result.already_deleted === true, post_id: postId });
   } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
 });
 
@@ -5336,6 +5442,7 @@ app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
       .select('id, user_name, content, media_url, media_type, created_at')
       .eq('user_name', targetUser)
       .eq('media_type', '__photo_wall__')
+      .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })
       .limit(limit > 0 ? Math.min(limit, 500) : 200);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -5353,6 +5460,7 @@ app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
     const { data, error } = await supabase.from('posts')
       .select('id, user_name, media_url, content, created_at, views, actor_key')
       .eq('media_type', '__photo_wall__')
+      .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })
       .range(from, to);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -6073,14 +6181,27 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
     const targetType = c.target_type || 'post';
     const targetId = c.target_id || '';
     if (targetType === 'post' || targetType === 'photo') {
-      const { data: post, error: fetchPostErr } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
+      const normalizedTargetId = normalizePostId(targetId);
+      if (!normalizedTargetId) return res.status(400).json({ error: '被举报内容参数无效', code: 'invalid_target_id' });
+      const { data: post, error: fetchPostErr } = await supabase.from('posts')
+        .select('id, actor_key, media_type, media_url, content').eq('id', normalizedTargetId).maybeSingle();
       if (fetchPostErr) return res.status(400).json({ error: sanitizeError(fetchPostErr) });
-      const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-      const { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
-        p_post_id: targetId,
-        p_actor_key: actorKey
-      });
-      if (rpcErr) return res.status(400).json({ error: sanitizeError(rpcErr) });
+      if (post) {
+        const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
+        const deletion = await hardDeleteContent({
+          postId: normalizedTargetId,
+          actorUser: ADMIN_USERNAME,
+          isAdmin: true,
+          expectPhoto: expectPhoto,
+          actorKey: post.actor_key || ('admin_' + Date.now()),
+          storagePaths: expectPhoto ? collectPhotoStoragePaths(post) : []
+        });
+        if (deletion.error) return res.status(500).json({ error: sanitizeError(deletion.error), code: 'delete_failed' });
+        if (!deletion.result || !deletion.result.ok) {
+          return res.status(500).json({ error: deletion.result && deletion.result.error || '删除未生效', code: deletion.result && deletion.result.code || 'delete_not_applied' });
+        }
+        if (expectPhoto) await processStorageCleanupJobs();
+      }
     }
     // 标记举报已处理
     const adminMsg = '被举报的' + (targetType === 'photo' ? '照片' : '帖子') + '已被删除';
@@ -7634,539 +7755,6 @@ app.post('/admin/email-recipient-history/clear', verifyToken, rateLimit(60000, 1
   } catch(e) {
     console.error('[Email Recipient History] 清空失败:', e.message);
     return res.status(500).json({ error: '清空失败' });
-  }
-});
-
-// ===================== VIP 会员 API =====================
-// VIP_MARKER / VIP_ORDER_MARKER / VIP_PLAN_MARKER 已在文件前面集中定义（行 129-131）
-
-const VIP_PLANS = [
-  {
-    id: 'pro_monthly',
-    name: 'XTJ Pro',
-    price: 3,
-    currency: 'CNY',
-    duration_days: 30,
-    features: ['custom_theme', 'pro_chat_bubble', 'pro_post_style']
-  }
-];
-
-// 获取可用套餐列表
-// 2026-06-25：Pro 改为限量/限定/限时活动制，不再开放常驻购买
-// 查询VIP状态
-app.get('/api/vip/status', authenticateUser, rateLimit(60000, 60), async (req, res) => {
-  try {
-    const userName = req.userName;
-    if (!userName) return res.status(401).json({ error: '请先登录' });
-
-    const { data: vipRecords } = await supabase.from('posts')
-      .select('*')
-      .eq('user_name', userName)
-      .eq('media_type', VIP_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    var activeVip = null;
-    var allVips = (vipRecords || []).map(function(r) {
-      try {
-        var c = JSON.parse(r.content || '{}');
-        if (c.is_active && c.expire_at && new Date(c.expire_at) > new Date() && !activeVip) {
-          activeVip = c;
-        }
-        return c;
-      } catch(e) { return null; }
-    }).filter(Boolean);
-
-    return res.json({
-      is_vip: !!activeVip,
-      active_vip: activeVip,
-      history: allVips
-    });
-  } catch(e) {
-    console.error('[VIP] 查询状态失败:', e.message);
-    return res.status(500).json({ error: '查询VIP状态失败' });
-  }
-});
-
-// ===================== Pro 赠送活动管理 =====================
-// PRO_GIFT_MARKER / PRO_GIFT_CLAIM_MARKER 已在文件前面集中定义（行 132-133）
-const VISUAL_PRO_FEATURES = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
-const DEFAULT_GIFT_FEATURES = VISUAL_PRO_FEATURES.slice();
-
-function normalizeVisualProFeatures(features) {
-  var arr = Array.isArray(features) ? features : [];
-  var clean = arr.filter(function(f) {
-    return VISUAL_PRO_FEATURES.indexOf(String(f || '')) >= 0;
-  });
-  return clean.length ? clean : VISUAL_PRO_FEATURES.slice();
-}
-
-// 管理员：获取全部 Pro 赠送活动
-// 2026-06-25：返回完整字段，包含 claim_limit / allowed_users / exclusive / start_at / end_at
-// claimed_count 必须从 __pro_gift_claim__ 实时统计（不信 content 里的 claimed_count）
-app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    const [giftsRes, claimsRes] = await Promise.all([
-      supabase.from('posts')
-        .select('id, user_name, content, created_at')
-        .eq('media_type', PRO_GIFT_MARKER)
-        .order('created_at', { ascending: false })
-        .limit(200),
-      // 实时统计领取数
-      supabase.from('posts')
-        .select('id, content')
-        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-        .limit(2000)
-    ]);
-    if (giftsRes.error) return res.status(400).json({ error: sanitizeError(giftsRes.error) });
-
-    // 索引：campaign_id -> claimed_count
-    var claimedMap = {};
-    (claimsRes.data || []).forEach(function(row) {
-      try {
-        var ci = JSON.parse(row.content || '{}');
-        var cid = String(ci.campaign_id || '').trim();
-        if (cid) claimedMap[cid] = (claimedMap[cid] || 0) + 1;
-      } catch(e) {}
-    });
-
-    var gifts = (giftsRes.data || []).map(function(row) {
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
-      // 兼容字段别名：allowed_users / exclusive_users / target_users
-      var allowedArr = Array.isArray(info.allowed_users) ? info.allowed_users
-                      : Array.isArray(info.exclusive_users) ? info.exclusive_users
-                      : Array.isArray(info.target_users) ? info.target_users
-                      : [];
-      var limitNum = parseInt(info.claim_limit != null ? info.claim_limit : (info.limit != null ? info.limit : (info.max_claims != null ? info.max_claims : 0)));
-      if (!Number.isFinite(limitNum) || limitNum < 0) limitNum = 0;
-      // 实时统计 claimed_count（不信任 content 里的 claimed_count）
-      var claimedCount = claimedMap[String(row.id)] || 0;
-      var remainingCount = limitNum > 0 ? Math.max(0, limitNum - claimedCount) : null;
-      return {
-        id: row.id,
-        created_by: row.user_name,
-        created_at: row.created_at,
-        title: info.title || '',
-        description: info.description || '',
-        features: normalizeVisualProFeatures(info.features),
-        duration_days: parseInt(info.duration_days) || 30,
-        start_at: info.start_at || '',
-        end_at: info.end_at || '',
-        claim_expire_at: info.claim_expire_at || '',
-        claim_limit: limitNum,
-        claimed_count: claimedCount,
-        remaining_count: remainingCount,
-        allowed_users: allowedArr,
-        exclusive_users: Array.isArray(info.exclusive_users) ? info.exclusive_users : [],
-        target_users: Array.isArray(info.target_users) ? info.target_users : [],
-        exclusive: !!info.exclusive,
-        is_active: info.is_active !== false,
-        is_published: !!info.is_published,
-        published_at: info.published_at || '',
-        updated_at: info.updated_at || ''
-      };
-    });
-    return res.json({ ok: true, gifts: gifts });
-  } catch(e) {
-    console.error('[ProGift] 查询失败:', e.message || e);
-    return res.status(500).json({ error: '查询失败' });
-  }
-});
-
-// 管理员：创建/编辑 Pro 赠送活动
-app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req, res) => {
-  try {
-    var { id, title, description, features, duration_days, claim_expire_at,
-          claim_limit, allowed_users, exclusive, start_at, end_at } = req.body;
-    var titleVal = String(title || '').trim().slice(0, 100);
-    var descVal = String(description || '').trim().slice(0, 500);
-    if (!titleVal) return res.status(400).json({ error: '请输入活动标题' });
-    if (!duration_days || duration_days < 1 || duration_days > 3650) return res.status(400).json({ error: '有效期1-3650天' });
-    var featuresArr = normalizeVisualProFeatures(features);
-    // 解析限定用户（支持字符串 "xxz, abc" 或数组）
-    var allowedArr = [];
-    if (Array.isArray(allowed_users)) {
-      allowedArr = allowed_users.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
-    } else if (typeof allowed_users === 'string' && allowed_users.trim()) {
-      allowedArr = allowed_users.split(/[,，\n;；\s]+/).map(function(u) { return String(u || '').trim(); }).filter(Boolean);
-    }
-    var limitNum = parseInt(claim_limit);
-    if (!Number.isFinite(limitNum) || limitNum < 0) limitNum = 0;
-    var isExclusive = !!exclusive;
-    var startAtISO = start_at ? new Date(start_at).toISOString() : '';
-    var endAtISO = end_at ? new Date(end_at).toISOString() : '';
-    var claimExpireISO = claim_expire_at ? new Date(claim_expire_at).toISOString() : (endAtISO || '');
-    var info = {
-      title: titleVal,
-      description: descVal,
-      features: featuresArr,
-      duration_days: Math.min(3650, Math.max(1, parseInt(duration_days) || 30)),
-      claim_expire_at: claimExpireISO,
-      start_at: startAtISO,
-      end_at: endAtISO,
-      claim_limit: limitNum,
-      allowed_users: allowedArr,
-      exclusive: isExclusive,
-      is_published: false,
-      updated_at: new Date().toISOString()
-    };
-    if (id) {
-      // 编辑已有的
-      var { data: existing } = await supabase.from('posts')
-        .select('content').eq('id', id).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
-      if (!existing) return res.status(404).json({ error: '活动不存在' });
-      var oldInfo = {};
-      try { oldInfo = JSON.parse(existing.content || '{}'); } catch(e) {}
-      // 保留原发布状态
-      info.is_published = !!oldInfo.is_published;
-      info.published_at = oldInfo.published_at || '';
-      info.created_at = oldInfo.created_at || new Date().toISOString();
-      var { error: updateErr } = await supabase.from('posts')
-        .update({ content: JSON.stringify(info) })
-        .eq('id', id);
-      if (updateErr) return res.status(400).json({ error: sanitizeError(updateErr) });
-    } else {
-      // 新建
-      info.created_at = new Date().toISOString();
-      var { error: insertErr } = await supabase.from('posts').insert([{
-        user_name: ADMIN_USERNAME,
-        media_type: PRO_GIFT_MARKER,
-        content: JSON.stringify(info),
-        actor_key: 'pro_gift_' + Date.now()
-      }]);
-      if (insertErr) return res.status(400).json({ error: sanitizeError(insertErr) });
-    }
-    return res.json({ ok: true });
-  } catch(e) {
-    console.error('[ProGift] 保存失败:', e.message);
-    return res.status(500).json({ error: '保存失败' });
-  }
-});
-
-// 管理员：发布/取消发布 Pro 赠送活动
-app.post('/admin/pro-gifts/toggle-publish', verifyToken, rateLimit(60000, 20), async (req, res) => {
-  try {
-    var { id, publish } = req.body;
-    if (!id) return res.status(400).json({ error: '缺少活动ID' });
-    var { data: existing } = await supabase.from('posts')
-      .select('content').eq('id', id).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
-    if (!existing) return res.status(404).json({ error: '活动不存在' });
-    var info = {};
-    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
-    info.is_published = !!publish;
-    if (publish && !info.published_at) info.published_at = new Date().toISOString();
-    info.updated_at = new Date().toISOString();
-    var { error: updateErr } = await supabase.from('posts')
-      .update({ content: JSON.stringify(info) })
-      .eq('id', id);
-    if (updateErr) return res.status(400).json({ error: sanitizeError(updateErr) });
-    return res.json({ ok: true, is_published: !!publish, published_at: info.published_at });
-  } catch(e) {
-    console.error('[ProGift] 发布操作失败:', e.message);
-    return res.status(500).json({ error: '操作失败' });
-  }
-});
-
-// 管理员：删除 Pro 赠送活动
-app.post('/admin/pro-gifts/delete', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    var { id } = req.body;
-    if (!id) return res.status(400).json({ error: '缺少活动ID' });
-    var { error } = await supabase.from('posts')
-      .delete().eq('id', id).eq('media_type', PRO_GIFT_MARKER);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true });
-  } catch(e) {
-    console.error('[ProGift] 删除失败:', e.message);
-    return res.status(500).json({ error: '删除失败' });
-  }
-});
-
-// 用户：获取可领取的 Pro 赠送活动（严格按用户身份过滤）
-app.get('/api/pro-gifts/available', rateLimit(60000, 30), authenticateUser, async (req, res) => {
-  try {
-    var userName = String((req.userName || req.query.user_name) || '').trim();
-    if (!userName) return res.status(401).json({ error: '请先登录' });
-    var now = new Date();
-    var nowISO = now.toISOString();
-    // 一次性查出所有已发布的活动
-    var { data: gifts } = await supabase.from('posts')
-      .select('id, content, created_at')
-      .eq('media_type', PRO_GIFT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(200);
-    // 一次性查用户的所有领取记录（用于标记已领取 + 统计每活动总数）
-    var { data: userClaims } = await supabase.from('posts')
-      .select('media_url, content')
-      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .eq('user_name', userName)
-      .limit(500);
-    var userClaimedIds = new Set();
-    (userClaims || []).forEach(function(c) {
-      if (c.media_url) userClaimedIds.add(String(c.media_url));
-    });
-    // 查所有领取记录（按 campaign_id 统计总量，用于 claim_limit）
-    var claimCountByCampaign = {};
-    var { data: allClaims } = await supabase.from('posts')
-      .select('media_url')
-      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .limit(5000);
-    (allClaims || []).forEach(function(c) {
-      if (c.media_url) claimCountByCampaign[c.media_url] = (claimCountByCampaign[c.media_url] || 0) + 1;
-    });
-
-    var available = [];
-    (gifts || []).forEach(function(g) {
-      var info = {};
-      try { info = JSON.parse(g.content || '{}'); } catch(e) {}
-      // 1. 必须已发布
-      if (!info.is_published && info.status !== 'published') return;
-      // 2. 不可禁用
-      if (info.is_active === false) return;
-      // 3. start_at 未到
-      if (info.start_at && new Date(info.start_at) > now) return;
-      // 4. end_at 已过
-      if (info.end_at && new Date(info.end_at) < now) return;
-      // 5. claim_expire_at 已过
-      if (info.claim_expire_at && new Date(info.claim_expire_at) < now) return;
-      // 6. 限定用户检查（allowed_users / exclusive_users / target_users 任一非空）
-      var allowedArr = [];
-      if (Array.isArray(info.allowed_users)) allowedArr = allowedArr.concat(info.allowed_users);
-      if (Array.isArray(info.exclusive_users)) allowedArr = allowedArr.concat(info.exclusive_users);
-      if (Array.isArray(info.target_users)) allowedArr = allowedArr.concat(info.target_users);
-      allowedArr = allowedArr.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
-      var hasAllowList = info.exclusive === true || allowedArr.length > 0;
-      if (hasAllowList && allowedArr.indexOf(userName) === -1) return; // 用户不在白名单，不返回
-      // 7. claim_limit 限制
-      var claimLimit = parseInt(info.claim_limit || info.limit || info.max_claims) || 0;
-      var claimedCount = claimCountByCampaign[g.id] || 0;
-      var alreadyClaimed = userClaimedIds.has(String(g.id));
-      // 已领取的即使名额满也要返回（用于展示"已领取"）
-      if (claimLimit > 0 && claimedCount >= claimLimit && !alreadyClaimed) return; // 名额已满且未领取，不返回
-      var remainingCount = claimLimit > 0 ? Math.max(0, claimLimit - claimedCount) : null;
-
-      available.push({
-        id: g.id,
-        title: info.title || '',
-        description: info.description || '',
-        features: normalizeVisualProFeatures(info.features),
-        duration_days: info.duration_days || 30,
-        start_at: info.start_at || '',
-        end_at: info.end_at || '',
-        claim_expire_at: info.claim_expire_at || '',
-        claim_limit: claimLimit,
-        claimed_count: claimedCount,
-        remaining_count: remainingCount,
-        exclusive: !!info.exclusive || (allowedArr.length > 0),
-        allowed_users: allowedArr,
-        already_claimed: alreadyClaimed,
-        published_at: info.published_at || ''
-      });
-    });
-    return res.json({ ok: true, gifts: available });
-  } catch(e) {
-    console.error('[ProGift] 查询可用活动失败:', e.message);
-    return res.status(500).json({ error: '查询失败' });
-  }
-});
-
-// 用户：领取 Pro 赠送活动（由数据库 RPC 在单事务内完成校验、名额检查、领取与 VIP 激活）
-app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (req, res) => {
-  try {
-    var giftId = String((req.body && req.body.gift_id) || '').trim();
-    var userNameVal = String(req.userName || '').trim();
-    if (!userNameVal) return res.status(401).json({ error: '请先登录' });
-    if (!normalizePostId(giftId)) return res.status(400).json({ error: 'gift_id must be a UUID', code: 'invalid_gift_id' });
-
-    var rpcResult = await supabase.rpc('claim_pro_gift_for_user', {
-      p_user_name: userNameVal,
-      p_gift_id: giftId
-    });
-    if (rpcResult.error) {
-      console.error('[ProGift] RPC领取失败:', rpcResult.error.message);
-      return res.status(500).json({ error: '领取失败' });
-    }
-    var data = rpcResult.data || {};
-    if (!data.ok) {
-      var msg = data.error || '领取失败';
-      var status = data.code === 'not_found' ? 404 : (data.code === 'forbidden' ? 403 : 400);
-      return res.status(status).json({ error: msg, code: data.code || 'claim_failed' });
-    }
-    return res.json({
-      ok: true,
-      user_name: userNameVal,
-      claim_id: data.claim_id,
-      plan_name: data.plan_name,
-      expire_at: data.expire_at,
-      is_active: true,
-      features: Array.isArray(data.features) ? data.features : normalizeVisualProFeatures(data.features),
-      source: 'pro_gift'
-    });
-  } catch(e) {
-    console.error('[ProGift] 领取失败:', e.message);
-    return res.status(500).json({ error: '领取失败' });
-  }
-});
-
-// 管理员：手动赠送 Pro 给指定用户
-app.post('/admin/pro-gifts/manual-gift', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    var { user_name, duration_days, features, reason } = req.body;
-    var userNameVal = String(user_name || '').trim();
-    if (!userNameVal) return res.status(400).json({ error: '请输入用户名' });
-    var days = Math.min(3650, Math.max(1, parseInt(duration_days) || 30));
-    var featuresArr = normalizeVisualProFeatures(features);
-    var reasonVal = String(reason || '管理员手动赠送').trim().slice(0, 200);
-    var now = new Date();
-    var nowISO = now.toISOString();
-    var expireAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-    // 写入 VIP 激活记录
-    var vipContent = JSON.stringify({
-      plan_id: 'admin_gift_' + Date.now(),
-      plan_name: 'XTJ Pro (管理员赠送)',
-      price: 0,
-      is_active: true,
-      order_no: 'ADMIN_GIFT_' + Date.now(),
-      start_at: nowISO,
-      expire_at: expireAt,
-      features: featuresArr,
-      activated_at: nowISO,
-      source: 'admin_gift',
-      reason: reasonVal
-    });
-    var { error: vipErr } = await supabase.from('posts').insert([{
-      user_name: userNameVal,
-      media_type: VIP_MARKER,
-      media_url: 'pro_monthly',
-      content: vipContent,
-      actor_key: 'vip_' + Date.now()
-    }]);
-    if (vipErr) return res.status(400).json({ error: sanitizeError(vipErr) });
-    return res.json({
-      ok: true,
-      user_name: userNameVal,
-      plan_name: 'XTJ Pro (管理员赠送)',
-      expire_at: expireAt,
-      is_active: true,
-      features: featuresArr,
-      source: 'admin_gift'
-    });
-  } catch(e) {
-    console.error('[ProGift] 手动赠送失败:', e.message);
-    return res.status(500).json({ error: '赠送失败' });
-  }
-});
-
-// 管理员：获取全部 Pro 激活/领取历史记录
-app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    // 查询所有 VIP 激活记录
-    var { data: vipRecords } = await supabase.from('posts')
-      .select('user_name, content, media_type, media_url, created_at')
-      .eq('media_type', VIP_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(500);
-    // 查询所有 Pro 赠送领取记录
-    var { data: claimRecords } = await supabase.from('posts')
-      .select('user_name, content, media_type, media_url, created_at')
-      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(500);
-    // 查询所有订单记录 (paid)
-    var { data: orderRecords } = await supabase.from('posts')
-      .select('user_name, content, media_type, media_url, created_at')
-      .eq('media_type', VIP_ORDER_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(500);
-
-    var records = [];
-
-    // 处理 VIP 激活记录
-    (vipRecords || []).forEach(function(row) {
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
-      var source = info.source || 'unknown';
-      var sourceLabel = '其他';
-      if (source === 'pro_gift') sourceLabel = '活动领取';
-      else if (source === 'admin_gift') sourceLabel = '管理员赠送';
-      else if (source === 'frontend_direct') sourceLabel = '自主开通';
-      else if (source === 'paid' || source === 'payment') sourceLabel = '付费购买';
-      records.push({
-        type: 'vip_activation',
-        user_name: row.user_name,
-        source: source,
-        source_label: sourceLabel,
-        activated_at: info.activated_at || info.start_at || row.created_at,
-        expire_at: info.expire_at || '',
-        plan_name: info.plan_name || 'XTJ Pro',
-        price: info.price || 0,
-        features: normalizeVisualProFeatures(info.features),
-        created_at: row.created_at
-      });
-    });
-
-    // 处理领取记录
-    (claimRecords || []).forEach(function(row) {
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
-      records.push({
-        type: 'gift_claim',
-        user_name: row.user_name,
-        source: 'pro_gift',
-        source_label: '免费赠送',
-        gift_id: info.campaign_id || row.media_url,
-        gift_title: info.campaign_title || '',
-        activated_at: info.claimed_at || row.created_at,
-        expire_at: info.vip_expire_at || '',
-        duration_days: info.duration_days || 0,
-        features: normalizeVisualProFeatures(info.features),
-        created_at: row.created_at
-      });
-    });
-
-    // 处理订单 (支付记录)
-    (orderRecords || []).forEach(function(row) {
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
-      if (info.status === 'paid') {
-        records.push({
-          type: 'order_paid',
-          user_name: row.user_name,
-          source: 'paid',
-          source_label: '付费购买',
-          order_no: info.order_no || row.media_url,
-          amount: info.amount || 0,
-          paid_at: info.paid_at || row.created_at,
-          created_at: row.created_at
-        });
-      }
-    });
-
-    // 按时间倒序排列
-    records.sort(function(a, b) {
-      var ta = a.activated_at || a.paid_at || a.created_at || '';
-      var tb = b.activated_at || b.paid_at || b.created_at || '';
-      return tb.localeCompare(ta);
-    });
-
-    // 统计每个用户的 Pro 次数和来源
-    var userStats = {};
-    records.forEach(function(r) {
-      var un = r.user_name;
-      if (!userStats[un]) userStats[un] = { count: 0, sources: [], first_at: '', last_at: '', last_expire: '' };
-      userStats[un].count++;
-      if (!userStats[un].sources.includes(r.source_label)) userStats[un].sources.push(r.source_label);
-      var t = r.activated_at || r.paid_at || r.created_at || '';
-      if (t && (!userStats[un].first_at || t < userStats[un].first_at)) userStats[un].first_at = t;
-      if (t && (!userStats[un].last_at || t > userStats[un].last_at)) userStats[un].last_at = t;
-      if (r.expire_at && (!userStats[un].last_expire || r.expire_at > userStats[un].last_expire)) userStats[un].last_expire = r.expire_at;
-    });
-
-    return res.json({ ok: true, records: records, user_stats: userStats });
-  } catch(e) {
-    console.error('[ProGift] 查询历史失败:', e.message);
-    return res.status(500).json({ error: '查询失败' });
   }
 });
 
@@ -11111,6 +10699,14 @@ async function autoCleanupAiMessages() {
 setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
 // 服务启动 30s 后执行首次清理
 setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
+
+// Persistent photo object cleanup. Database deletion is authoritative; failed
+// Storage removals remain queued and are retried after restarts.
+var _storageCleanupTimer = setInterval(function() {
+  processStorageCleanupJobs().catch(function() {});
+}, 60 * 1000);
+if (_storageCleanupTimer && typeof _storageCleanupTimer.unref === 'function') _storageCleanupTimer.unref();
+setTimeout(function() { processStorageCleanupJobs().catch(function() {}); }, 15000);
 
 // ===================== 全局错误处理 =====================
 process.on('uncaughtException', function(err) {

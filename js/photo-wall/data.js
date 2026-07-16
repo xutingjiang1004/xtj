@@ -250,7 +250,7 @@
     });
     var result = await response.json().catch(function(){ return {}; });
     if (!response.ok || !result.ok) throw new Error(result.error || 'cloud_delete_failed');
-    return true;
+    return result;
   }
 
   async function deletePhotoWallPhoto(item, opts){
@@ -267,9 +267,9 @@
     // 立即从本地 UI 移除 + 缓存清除（不等云端返回）
     removePhotoLocal(id, opts.render !== false);
     addDeletedPhotoId(id);
-    var cloudDeleted = false;
-    try { cloudDeleted = await deleteCloudPhoto(item); } catch (err) { console.warn('[PhotoWall] cloud delete failed', err); }
-    if (!cloudDeleted) {
+    var deleteResult = null;
+    try { deleteResult = await deleteCloudPhoto(item); } catch (err) { console.warn('[PhotoWall] cloud delete failed', err); }
+    if (!deleteResult) {
       removeDeletedPhotoId(id);
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
@@ -281,8 +281,13 @@
     }
     broadcastSync('photo_deleted', { photoId: id });
     try { await loadPhotoWallData(true); } catch (_) {}
-    setPhotoWallSyncStatus('synced', '已同步');
-    return { ok:true };
+    if (deleteResult.cleanup_pending) {
+      setPhotoWallSyncStatus('syncing', '列表已同步，文件清理中');
+      toast('照片已从全站移除，原文件正在清理');
+    } else {
+      setPhotoWallSyncStatus('synced', '已同步');
+    }
+    return { ok:true, cleanup_pending:!!deleteResult.cleanup_pending, already_deleted:!!deleteResult.already_deleted };
   }
 
   function extractStoragePath(url){
@@ -320,13 +325,11 @@
     if (message.type === 'photo_deleted' && message.photoId != null) {
       addDeletedPhotoId(message.photoId);
       removePhotoLocal(message.photoId, true);
-      if (window.sb) {
-        setTimeout(function(){
-          loadPhotoWallData(true).then(function(){
-            if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
-          });
-        }, 120);
-      }
+      setTimeout(function(){
+        loadPhotoWallData(true).then(function(){
+          if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+        });
+      }, 120);
     }
     if (message.type === 'photo_added') {
       setTimeout(function(){
@@ -381,16 +384,20 @@
 
   // Tab 聚焦/切回时自动重新同步（防止离线期间错过删除事件）
   var _lastVisibilitySync = 0;
+  function reconcilePhotoWallAfterResume(){
+    if (!navigator.onLine) return;
+    var now = Date.now();
+    if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
+    _lastVisibilitySync = now;
+    loadPhotoWallData(true).then(function(){
+      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+    });
+  }
   document.addEventListener('visibilitychange', function(){
-    if (!document.hidden && window.sb) {
-      var now = Date.now();
-      if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
-      _lastVisibilitySync = now;
-      loadPhotoWallData(true).then(function(){
-        if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
-      });
-    }
+    if (!document.hidden) reconcilePhotoWallAfterResume();
   });
+  window.addEventListener('online', reconcilePhotoWallAfterResume);
+  window.addEventListener('pageshow', reconcilePhotoWallAfterResume);
 
   window.setPhotoWallSyncStatus = setPhotoWallSyncStatus;
   window.addDeletedPhotoId = addDeletedPhotoId;
@@ -406,6 +413,4 @@
   window.deletePhotoWallPhoto = deletePhotoWallPhoto;
   window.syncPhotoViewCount = syncPhotoViewCount;
 })();
-
-
 

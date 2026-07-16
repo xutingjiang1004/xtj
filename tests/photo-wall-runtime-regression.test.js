@@ -94,7 +94,16 @@ test('post and photo uploads clean storage records and preserve audio type', () 
   assert.match(core, /\[post-publish\] orphan cleanup failed/);
   assert.match(core, /<audio src=/);
   assert.match(upload, /if \(!createRes\.ok\)[\s\S]{0,500}await cleanupStorage\(path\)/);
-  const rpcIndex = server.indexOf("supabase.rpc('delete_post_with_actor'");
-  const storageIndex = server.indexOf("supabase.storage.from('uploads').remove", rpcIndex);
-  assert.ok(rpcIndex >= 0 && storageIndex > rpcIndex, 'database delete must precede storage cleanup');
+  assert.match(upload, /MAX_PHOTO_UPLOAD_BYTES = 50 \* 1024 \* 1024/);
+  const deleteIndex = server.indexOf('var hardDelete = await hardDeleteContent({');
+  const storageIndex = server.indexOf("supabase.storage.from('uploads').remove", deleteIndex);
+  assert.ok(deleteIndex >= 0 && storageIndex > deleteIndex, 'verified database delete must precede storage cleanup');
+});
+
+test('photo deletion converges after resume and reports durable cleanup state', () => {
+  assert.match(dataSource, /window\.addEventListener\('online', reconcilePhotoWallAfterResume\)/);
+  assert.match(dataSource, /window\.addEventListener\('pageshow', reconcilePhotoWallAfterResume\)/);
+  assert.match(dataSource, /loadPhotoWallData\(true\)/);
+  assert.match(dataSource, /deleteResult\.cleanup_pending/);
+  assert.doesNotMatch(dataSource, /if \(window\.sb\) \{[\s\S]{0,120}loadPhotoWallData\(true\)/);
 });
