@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const core = fs.readFileSync(path.join(root, 'js', 'core.js'), 'utf8');
+const style = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 
 function between(source, start, end) {
@@ -56,6 +57,20 @@ test('like UI is optimistic, rolls back, animates both states, and has no succes
   assert.match(toggle, /animatePostLikeFeedback\(pid,\s*nextLiked\)/);
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
   assert.doesNotMatch(toggle, /showToast\(['"](?:已点赞|已取消点赞)/);
+});
+
+test('like feedback scatters hearts without scaling the action button', () => {
+  const toggle = between(core, 'window.toggleLike = async function', 'function createHeartParticles');
+  const particles = between(core, 'function createHeartParticles', '// =====================');
+  const feedbackCss = between(style, '/* Interaction feedback: like, publish', '#pubBtn.is-loading');
+  assert.match(toggle, /if \(nextLiked\) createHeartParticles\(btn\)/);
+  assert.doesNotMatch(toggle, /xtjAnimateLikeToggle/);
+  assert.match(particles, /prefers-reduced-motion:\s*reduce/);
+  assert.match(particles, /--heart-x/);
+  assert.match(particles, /--heart-y/);
+  assert.match(particles, /animationend/);
+  assert.doesNotMatch(feedbackCss, /transform:\s*scale/);
+  assert.doesNotMatch(style, /\.action-btn\.liked\s*\{[^}]*animation:/s);
 });
 
 test('pin request serializes a UUID string and a boolean', () => {
