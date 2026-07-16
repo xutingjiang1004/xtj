@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const script = fs.readFileSync(path.join(__dirname, '..', 'js', 'photo-wall', 'preview.js'), 'utf8');
+const renderScript = fs.readFileSync(path.join(__dirname, '..', 'js', 'photo-wall', 'render.js'), 'utf8');
 const okPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64');
 
 const installListenerMonitor = () => {
@@ -35,6 +36,7 @@ async function setup(page) {
   await page.route('**/ok2.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
   await page.route('**/bad.png**', route => route.fulfill({ status: 404, contentType: 'text/plain', body: 'nope' }));
   await page.route('**/slow-bad.png**', async route => { await new Promise(resolve => setTimeout(resolve, 120)); await route.fulfill({ status: 404, contentType: 'text/plain', body: 'slow nope' }); });
+  await page.route('**/rapid-*.png**', async route => { await new Promise(resolve => setTimeout(resolve, 15)); await route.fulfill({ status: 200, contentType: 'image/png', body: okPng }); });
   await page.addInitScript(installListenerMonitor);
   await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
   await page.evaluate(installListenerMonitor);
@@ -122,6 +124,22 @@ test('quick open close reopen leaves no stale cleanup or duplicate listeners', a
   expect(errors).toEqual([]);
 });
 
+test('rapidly switching 50 photos keeps the newest image and bounded listeners', async ({ page }) => {
+  const errors = await setup(page);
+  await page.evaluate(() => {
+    for (let index = 0; index < 50; index += 1) {
+      if (index > 0) window.closePhotoPreview();
+      window.openPhotoPreview(0, [{ id: index, imageUrl: '/rapid-' + index + '.png', username: 'u', timestamp: Date.now() }]);
+    }
+  });
+  await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /rapid-49\.png/);
+  await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');
+  const state = await previewState(page);
+  expect(state.stats.max).toBeLessThanOrEqual(2);
+  expect(state.stats.active).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test('photo controls and info dialog expose names, trap focus, close on Escape, and restore focus', async ({ page }) => {
   const errors = await setup(page);
   await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/ok.png', username: 'u', timestamp: Date.now() }]));
@@ -144,5 +162,39 @@ test('photo controls and info dialog expose names, trap focus, close on Escape, 
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden({ timeout: 1000 });
   await expect(page.locator('#ppInfoBtn')).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('photo grid warm loading uses the bounded queue and recovers broken images', async ({ page }) => {
+  const errors = [];
+  let active = 0;
+  let maxActive = 0;
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/queued-*.png', async route => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    active -= 1;
+    if (route.request().url().includes('queued-3.png')) {
+      await route.fulfill({ status: 404, contentType: 'text/plain', body: 'broken' });
+    } else {
+      await route.fulfill({ status: 200, contentType: 'image/png', body: okPng });
+    }
+  });
+  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
+  await page.evaluate(() => { window.IntersectionObserver = undefined; });
+  await page.addScriptTag({ content: renderScript });
+  await page.evaluate(() => {
+    window.photoWallData = Array.from({ length: 8 }, (_, index) => ({
+      id: 'q' + index,
+      imageUrl: '/queued-' + index + '.png',
+      username: 'u',
+      timestamp: Date.now() - index
+    }));
+    window.renderPhotoWallWithoutReload();
+  });
+  await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(0, { timeout: 5000 });
+  expect(maxActive).toBeLessThanOrEqual(4);
+  await expect(page.locator('.photo-wall-item').nth(3).locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
   expect(errors).toEqual([]);
 });
