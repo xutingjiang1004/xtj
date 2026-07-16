@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const core = fs.readFileSync('js/core.js', 'utf8');
 const device = fs.readFileSync('js/login-device.js', 'utf8');
 const ai = fs.readFileSync('js/ai-agent.js', 'utf8');
-const pro = fs.readFileSync('js/pro-upgrade.js', 'utf8');
 
 test('login and registration send the user-entered password only to dedicated auth APIs', () => {
   assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/login'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw \}\)/);
@@ -15,7 +14,7 @@ test('login and registration send the user-entered password only to dedicated au
 });
 
 test('runtime modules never read or send password-equivalent hashes', () => {
-  [device, ai, pro].forEach((source) => {
+  [device, ai].forEach((source) => {
     assert.doesNotMatch(source, /password_hash|xtj_pw_hash|xtj_password_hash/);
   });
   // Core retains removeItem calls solely to purge values left by old clients.

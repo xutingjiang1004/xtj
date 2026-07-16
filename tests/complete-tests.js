@@ -4,6 +4,8 @@ var fs = require('fs');
 var crypto = require('crypto');
 var cp = require('child_process');
 var vm = require('vm');
+var path = require('path');
+var ROOT = path.resolve(__dirname, '..');
 
 var passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log('  ✅ ' + name); } catch(e) { failed++; console.log('  ❌ ' + name + ': ' + e.message); } }
@@ -59,16 +61,12 @@ test('photo upload sheet keeps keyboard focus and announces persistent results',
   assert.ok(upload.indexOf('window.setPhotoUploadResult = setUploadResult') >= 0, 'upload result API missing');
 });
 
-test('pro claim route calls service-only UUID RPC and rejects invalid ids', function(){
-  var s = read('render-api/server.js');
-  var route = s.slice(s.indexOf("/api/pro-gifts/claim"), s.indexOf("// 管理员：手动赠送 Pro"));
-  assert.ok(route.indexOf("supabase.rpc('claim_pro_gift_for_user'") >= 0, 'missing RPC call');
-  assert.ok(route.indexOf('normalizePostId(giftId)') >= 0, 'missing UUID guard');
-  ['claimCount','postClaimCount','rollback','claimLocks'].forEach(function(x){ assert.ok(route.indexOf(x) < 0, 'old flow remains: '+x); });
-});
-test('pro RPC migration locks gift and validates JSON fields atomically', function(){
-  var s = read('supabase/migrations/012_harden_pro_claim_and_interactions.sql');
-  ['FOR UPDATE','Campaign allowlist is invalid','Campaign limits are invalid','__pro_gift_claim__','__vip__'].forEach(function(x){ assert.ok(s.indexOf(x)>=0, 'missing '+x); });
+test('retired Pro endpoints and standalone assets are absent', function(){
+  var server = read('render-api/server.js');
+  assert.ok(!/["']\/(?:api\/vip|api\/pro-gifts|admin\/pro-gifts)/.test(server), 'retired Pro endpoint remains');
+  ['js/pro-upgrade.js','js/pro-style.js','css/pro-style.css'].forEach(function(file){
+    assert.ok(!fs.existsSync(path.join(ROOT, file)), file + ' is still shipped');
+  });
 });
 
 console.log('\n=== RLS Static Checks ===');
@@ -217,8 +215,8 @@ test('each local JavaScript entry module is statically referenced once', functio
 test('core has no legacy loaders for static entry modules', function(){
   var core = read('js/core.js');
   [
-    'login-device', 'core-animations', 'features', 'ui-effects', 'pro-upgrade',
-    'pro-style', 'ai-agent', 'upload-ui',
+    'login-device', 'core-animations', 'features', 'ui-effects',
+    'ai-agent', 'upload-ui',
     'preview-hotfix'
   ].forEach(function(moduleName) {
     var loader = new RegExp("(?:xtjLoadScriptOnce|xtjLoadScriptSequence)[\\s\\S]{0,260}['\"][^'\"]*" + moduleName.replace(/[-/]/g, '\\$&') + "[^'\"]*['\"]");
@@ -236,7 +234,7 @@ test('feature modules have one retryable CSS-first loader', function(){
   assert.ok(core.indexOf('if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName]') >= 0, 'module promise dedupe missing');
   assert.ok(core.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module cannot retry');
   assert.ok(core.indexOf('definition.styles') < core.indexOf('definition.scripts'), 'CSS is not loaded before scripts');
-  ['ai-agent','pro-upgrade','pro-style','photo-wall/preview','photo-wall/preview-hotfix','photo-wall/upload-ui'].forEach(function(asset) {
+  ['ai-agent','photo-wall/preview','photo-wall/preview-hotfix','photo-wall/upload-ui'].forEach(function(asset) {
     var escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.ok(!(new RegExp('<script[^>]+src="js/' + escaped + '\\.min\\.js')).test(html), asset + ' remains a static script');
   });
@@ -300,12 +298,13 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
 test('Dock changes stay inside the approved selection-feedback scope', function(){
-  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/complete-tests.js"', {encoding:'utf8'});
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/**"', {encoding:'utf8'});
   var changedLines = diff.split(/\r?\n/).filter(function(line) {
     return /^[+-](?!\+\+\+|---)/.test(line);
   });
   var forbidden = changedLines.filter(function(line) {
     if (/\.dock-tab\.is-switch-feedback\s+\.dt-icon/.test(line)) return false;
+    if (/^-.*html\.xtj-pro-active\s+\.dock-tab\.active/.test(line)) return false;
     return /\.dock-(?:bar|tab|indicator|liquid-lens|liquid-shine)\b|data-tab/.test(line);
   });
   assert.deepStrictEqual(forbidden, [], 'Dock structure, geometry or navigation selector changed');

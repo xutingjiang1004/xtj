@@ -16,7 +16,7 @@
 
   window.PHOTO_WALL_MARKER = window.PHOTO_WALL_MARKER || MARKER;
 
-  var MAX_PHOTO_UPLOAD_BYTES = 25 * 1024 * 1024;
+  var MAX_PHOTO_UPLOAD_BYTES = 50 * 1024 * 1024;
   var MAX_BATCH_COUNT = 12;
   var MAX_BATCH_BYTES = 120 * 1024 * 1024;
   var CONCURRENCY = 3;
@@ -71,7 +71,7 @@
     var message = String(error && error.message || '').toLowerCase();
     if (code === 'cancelled' || (error && error.name === 'AbortError')) return '已取消';
     if (code === 'unsupported_type') return '文件类型不支持';
-    if (code === 'file_too_large') return '文件超过 25 MB 限制';
+    if (code === 'file_too_large') return '文件超过 50 MB 限制';
     if (code === 'timeout' || /timeout|timed out/.test(message)) return '正在确认上传结果，请稍候';
     if (code === 'backend_unreachable' || stage === 'network') return '后端不可达';
     if (status === 401 || status === 403 || /jwt|token|unauthori[sz]ed|forbidden|登录/.test(message)) return '登录已过期';
@@ -245,7 +245,7 @@
       var f = files[i];
       if (!isPhotoWallImage(f)) { skipped.push({ file: f, reason: '文件类型不支持' }); continue; }
       var size = Number(f.size) || 0;
-      if (size > MAX_PHOTO_UPLOAD_BYTES) { skipped.push({ file: f, reason: '超过单张 25MB 限制' }); continue; }
+      if (size > MAX_PHOTO_UPLOAD_BYTES) { skipped.push({ file: f, reason: '超过单张 50MB 限制' }); continue; }
       if (accepted.length >= MAX_BATCH_COUNT) { skipped.push({ file: f, reason: '超过每批 12 张限制' }); continue; }
       if (totalBytes + size > MAX_BATCH_BYTES) { skipped.push({ file: f, reason: '超过每批 120MB 总大小' }); continue; }
       accepted.push(f);

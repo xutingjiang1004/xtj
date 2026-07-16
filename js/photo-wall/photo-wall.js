@@ -10,17 +10,8 @@
       warmTimer = null;
       var schedule = window.requestIdleCallback || window.requestAnimationFrame;
       schedule(function(){
-        var images = document.querySelectorAll('#photoGrid .photo-wall-item img[data-src]');
-        var count = Math.min(images.length, 6);
-        var viewportLimit = Math.max(window.innerHeight * 1.5, 900);
-        for (var i = 0; i < count; i++) {
-          var img = images[i];
-          var url = img.getAttribute('data-src');
-          if (!url) continue;
-          var rect = img.getBoundingClientRect();
-          if (rect.top > viewportLimit || rect.bottom < -120) continue;
-          img.src = url;
-          img.removeAttribute('data-src');
+        if (typeof window.loadVisiblePhotoWallImages === 'function') {
+          window.loadVisiblePhotoWallImages(document.getElementById('photoGrid'), 6);
         }
       });
     }, 80);

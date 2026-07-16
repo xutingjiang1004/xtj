@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const MAX_MEDIA_URL_LENGTH = 2048;
-const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_MIME_TYPE_LENGTH = 128;
 const MAX_CONTENT_LENGTH = 2048;
 const MAX_UPLOAD_ID_LENGTH = 128;

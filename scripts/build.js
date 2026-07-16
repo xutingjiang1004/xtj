@@ -92,8 +92,6 @@ const JS_FILES = [
   'js/features.js',
   'js/core-animations.js',
   'js/ui-effects.js',
-  'js/pro-upgrade.js',
-  'js/pro-style.js',
   'js/login-device.js',
   'js/ai-agent.js',
   'js/theme-toggle.js',
@@ -110,7 +108,6 @@ const JS_FILES = [
 const CSS_FILES = [
   'css/style.css',
   'css/ui-enhance.css',
-  'css/pro-style.css',
   'css/desktop.css',
   'css/visual-refinements.css',
   'css/admin.css',

@@ -790,7 +790,6 @@ const ADMIN_NAME = "xxz";
             fileSize: null,
             originalSize: null,
             mimeType: "",
-            pro_at_post: false  // 发布时是否为 Pro 会员（冻结的 Pro 状态）
         };
         let postSearchState = {
             keyword: "",
@@ -819,1118 +818,7 @@ const ADMIN_NAME = "xxz";
             return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
         }
 
-        function isAdmin() { return currentUser === ADMIN_NAME; }
-
-        var __vipStatus = { is_vip: false, vip_info: null };
-        var vipStatusRefreshPromise = null;
-        function isVipUser() {
-            if (!currentUser) return false;
-            if (currentUser === ADMIN_NAME) return true;
-            if (__vipStatus.is_vip !== true) return false;
-            var info = __vipStatus.vip_info;
-            if (!info || !info.expire_at) {
-                __vipStatus.is_vip = false;
-                return false;
-            }
-            var expireTs = new Date(info.expire_at).getTime();
-            if (!isNaN(expireTs) && expireTs <= Date.now()) {
-                __vipStatus.is_vip = false;
-                return false;
-            }
-            return true;
-        }
-        function setVipStatus(v) {
-            __vipStatus.is_vip = !!v;
-            if (!v) __vipStatus.vip_info = null;
-        }
-        function getVipInfo() { return __vipStatus.vip_info; }
-
-        var USER_STYLE_MARKER = '__user_style__';
-        var USER_STYLE_STORAGE_PREFIX = 'xtj_user_style_';
-        var PRO_VISUAL_FEATURE_KEYS = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
-        var currentUserStyleRecordId = '';
-        var currentUserStyle = createDefaultUserStyle();
-        var currentUserStylePreview = null;
-
-        function createDefaultUserStyle() {
-            return {
-                theme: 'default',
-                chat_bubble_style: 'default',
-                post_card_style: 'default',
-                updated_at: ''
-            };
-        }
-
-        function getUserStyleStorageKey(userName) {
-            return USER_STYLE_STORAGE_PREFIX + String(userName || '').trim();
-        }
-
-        function normalizeUserStyle(payload) {
-            var style = Object.assign({}, createDefaultUserStyle(), payload || {});
-            var theme = String(style.theme || 'default');
-            var bubble = String(style.chat_bubble_style || 'default');
-            var postStyle = String(style.post_card_style || 'default');
-            if (['default', 'mint', 'aqua', 'sakura', 'lavender'].indexOf(theme) < 0) theme = 'default';
-            if (['default', 'mint', 'aqua', 'cream', 'sakura', 'lavender'].indexOf(bubble) < 0) bubble = 'default';
-            if (['default', 'clean_border', 'leaf_corner', 'soft_glow', 'minimal_pro'].indexOf(postStyle) < 0) postStyle = 'default';
-            style.theme = theme;
-            style.chat_bubble_style = bubble;
-            style.post_card_style = postStyle;
-            style.updated_at = style.updated_at ? String(style.updated_at) : '';
-            return style;
-        }
-
-        function readCachedUserStyle(userName) {
-            if (!userName) return null;
-            try {
-                return normalizeUserStyle(window.safeLocalStorageGetJSON(getUserStyleStorageKey(userName), null));
-            } catch(e) {
-                return null;
-            }
-        }
-
-        function writeCachedUserStyle(userName, style) {
-            if (!userName) return;
-            try {
-                localStorage.setItem(getUserStyleStorageKey(userName), JSON.stringify(normalizeUserStyle(style)));
-            } catch(e) {}
-        }
-
-        function getCurrentProFeatures() {
-            if (currentUser === ADMIN_NAME) return PRO_VISUAL_FEATURE_KEYS.slice();
-            if (!currentUser || !isVipUser()) return [];
-            var info = getVipInfo();
-            var features = Array.isArray(info && info.features) ? info.features : [];
-            return PRO_VISUAL_FEATURE_KEYS.filter(function(feature) {
-                return features.indexOf(feature) >= 0;
-            });
-        }
-        window.getCurrentProFeatures = getCurrentProFeatures;
-
-        function hasProFeature(feature) {
-            if (currentUser === ADMIN_NAME) return true;
-            if (!currentUser || !isVipUser()) return false;
-            return getCurrentProFeatures().indexOf(String(feature || '')) >= 0;
-        }
-        window.hasProFeature = hasProFeature;
-
-        function getCurrentStyleDraft() {
-            return normalizeUserStyle(currentUserStylePreview || currentUserStyle);
-        }
-
-        function getProStyleSelectMeta(type) {
-            if (type === 'theme') {
-                return {
-                    selectId: 'proThemeSelect',
-                    feature: 'custom_theme',
-                    key: 'theme',
-                    label: '专属主题'
-                };
-            }
-            if (type === 'bubble') {
-                return {
-                    selectId: 'proBubbleSelect',
-                    feature: 'pro_chat_bubble',
-                    key: 'chat_bubble_style',
-                    label: '聊天气泡'
-                };
-            }
-            return {
-                selectId: 'proPostStyleSelect',
-                feature: 'pro_post_style',
-                key: 'post_card_style',
-                label: '帖子卡片装饰'
-            };
-        }
-
-        function getUserStyleDraftFromControls() {
-            var draft = getCurrentStyleDraft();
-            var themeSelect = document.getElementById('proThemeSelect');
-            var bubbleSelect = document.getElementById('proBubbleSelect');
-            var postSelect = document.getElementById('proPostStyleSelect');
-            return normalizeUserStyle({
-                theme: themeSelect ? themeSelect.value : draft.theme,
-                chat_bubble_style: bubbleSelect ? bubbleSelect.value : draft.chat_bubble_style,
-                post_card_style: postSelect ? postSelect.value : draft.post_card_style,
-                updated_at: draft.updated_at || currentUserStyle.updated_at || ''
-            });
-        }
-
-        function setProStyleSelectValue(type, value) {
-            var meta = getProStyleSelectMeta(type);
-            var select = document.getElementById(meta.selectId);
-            if (!select) return false;
-            select.value = value;
-            currentUserStylePreview = getUserStyleDraftFromControls();
-            return true;
-        }
-        window.setProStyleSelectValue = setProStyleSelectValue;
-
-        function updateProStylePreviewActiveStates() {
-            var page = document.getElementById('profileProStylePage');
-            if (!page) return;
-            ['theme', 'bubble', 'post'].forEach(function(type) {
-                var meta = getProStyleSelectMeta(type);
-                var select = document.getElementById(meta.selectId);
-                var selectedValue = select ? String(select.value || 'default') : 'default';
-                var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
-                page.querySelectorAll('.pro-style-option-card[data-pro-style-type="' + type + '"]').forEach(function(card) {
-                    var cardValue = String(card.getAttribute('data-pro-style-value') || '');
-                    var active = cardValue === selectedValue;
-                    card.classList.toggle('active', active);
-                    card.classList.toggle('locked', !enabled && cardValue !== 'default');
-                    card.disabled = !enabled && cardValue !== 'default';
-                    card.setAttribute('aria-pressed', active ? 'true' : 'false');
-                    card.setAttribute('aria-disabled', (!enabled && cardValue !== 'default') ? 'true' : 'false');
-                });
-            });
-        }
-        window.updateProStylePreviewActiveStates = updateProStylePreviewActiveStates;
-
-        function bindProStylePreviewCards() {
-            var page = document.getElementById('profileProStylePage');
-            if (!page || page.dataset.previewCardsBound === '1') return;
-            page.dataset.previewCardsBound = '1';
-
-            page.addEventListener('click', function(evt) {
-                var card = evt.target && evt.target.closest ? evt.target.closest('.pro-style-option-card[data-pro-style-type]') : null;
-                if (!card) return;
-                var type = String(card.getAttribute('data-pro-style-type') || '');
-                var value = String(card.getAttribute('data-pro-style-value') || '');
-                var meta = getProStyleSelectMeta(type);
-                // 0.97i：移除非 Pro 用户点击预览的拦截
-                // 非 Pro 用户可以预览/查看所有 Pro 视觉权益（动画 + 切换预览）
-                // 权限校验在保存时（saveCurrentUserStylePart）进行
-                if (setProStyleSelectValue(type, value)) {
-                    updateProStylePreviewActiveStates();
-                    applyCurrentUserStyle();
-                }
-            });
-
-            ['proThemeSelect', 'proBubbleSelect', 'proPostStyleSelect'].forEach(function(id) {
-                var select = document.getElementById(id);
-                if (!select || select.dataset.previewSyncBound === '1') return;
-                select.dataset.previewSyncBound = '1';
-                select.addEventListener('change', function() {
-                    currentUserStylePreview = getUserStyleDraftFromControls();
-                    updateProStylePreviewActiveStates();
-                    applyCurrentUserStyle();
-                });
-            });
-        }
-        window.bindProStylePreviewCards = bindProStylePreviewCards;
-
-        function getResolvedUserStyle() {
-            var raw = getCurrentStyleDraft();
-            return {
-                theme: hasProFeature('custom_theme') ? raw.theme : 'default',
-                chat_bubble_style: hasProFeature('pro_chat_bubble') ? raw.chat_bubble_style : 'default',
-                post_card_style: hasProFeature('pro_post_style') ? raw.post_card_style : 'default'
-            };
-        }
-
-        function getCurrentUserPostStyleClass(post) {
-            if (!currentUser || !post || String(post.user_name || '') !== String(currentUser)) return '';
-            var resolved = getResolvedUserStyle();
-            if (!resolved.post_card_style || resolved.post_card_style === 'default') return ' is-self-post';
-            return ' is-self-post post-style-' + resolved.post_card_style;
-        }
-
-        function applyCurrentUserPostStyleToDom() {
-            var feed = document.getElementById('feed');
-            if (!feed || !currentUser) return;
-            var resolved = getResolvedUserStyle();
-            var styleClass = resolved.post_card_style && resolved.post_card_style !== 'default'
-                ? 'post-style-' + resolved.post_card_style
-                : '';
-            Array.prototype.forEach.call(feed.querySelectorAll('.post'), function(node) {
-                var postUser = node.getAttribute('data-post-user');
-                if (postUser !== String(currentUser)) return;
-                node.classList.add('is-self-post');
-                node.classList.remove('post-style-clean_border', 'post-style-leaf_corner', 'post-style-soft_glow', 'post-style-minimal_pro');
-                if (styleClass) node.classList.add(styleClass);
-            });
-        }
-
-        function renderProStyleSettings() {
-            // 0.97g 简化：landing 不再有 #proStylePanelLanding 包装（直接展示 3 个入口卡）
-            // 这里只做：刷新每个 select 的值 + 重新计算 preview 选中状态 + 更新入口卡描述
-            if (!currentUser) {
-                if (typeof updateProStyleEntry === 'function') updateProStyleEntry();
-                return;
-            }
-            // 同步所有分类面板的 select 值
-            var themeSelect = document.getElementById('proThemeSelect');
-            var bubbleSelect = document.getElementById('proBubbleSelect');
-            var postSelect = document.getElementById('proPostStyleSelect');
-            bindProStylePreviewCards();
-            var saved = getCurrentStyleDraft();
-            if (themeSelect) themeSelect.value = saved.theme;
-            if (bubbleSelect) bubbleSelect.value = saved.chat_bubble_style;
-            if (postSelect) postSelect.value = saved.post_card_style;
-            if (themeSelect) themeSelect.disabled = !hasProFeature('custom_theme');
-            if (bubbleSelect) bubbleSelect.disabled = !hasProFeature('pro_chat_bubble');
-            if (postSelect) postSelect.disabled = !hasProFeature('pro_post_style');
-            updateProStylePreviewActiveStates();
-            // 注意：此处不再强制 showProStyleLanding() ——
-            //      openProStylePage() 会在第一次进入时显式调用，
-            //      避免用户在子面板中编辑时被打回总览。
-            if (typeof updateProStyleEntry === 'function') {
-                updateProStyleEntry();
-            }
-        }
-
-        function updateProStyleEntry() {
-            var entry = document.getElementById('profileProStyleEntry');
-            var sub = document.getElementById('proStyleEntryStatus');
-            var badge = document.getElementById('proStyleEntryBadge');
-
-            if (!entry) return;
-
-            if (!currentUser) {
-                entry.classList.add('is-locked');
-                if (sub) sub.textContent = '登录后可查看和保存 Pro 视觉偏好';
-                if (badge) badge.textContent = '登录';
-                return;
-            }
-
-            entry.classList.remove('is-locked');
-
-            var features = typeof getCurrentProFeatures === 'function'
-                ? getCurrentProFeatures()
-                : [];
-
-            if (badge) {
-                badge.textContent = features.length ? ('已解锁 ' + features.length + ' 项') : '默认';
-            }
-
-            if (sub) {
-                var draft = typeof getCurrentStyleDraft === 'function'
-                    ? getCurrentStyleDraft()
-                    : null;
-
-                if (features.length) {
-                    sub.textContent = '专属主题、聊天气泡、帖子卡片装饰已可配置';
-                } else if (draft && (
-                    draft.theme !== 'default' ||
-                    draft.chat_bubble_style !== 'default' ||
-                    draft.post_card_style !== 'default'
-                )) {
-                    sub.textContent = '已保存偏好，重新获得 Pro 权益后自动恢复';
-                } else {
-                    sub.textContent = '当前使用默认视觉样式';
-                }
-            }
-        }
-        window.updateProStyleEntry = updateProStyleEntry;
-
-        // 三级分组入口：显示某个分类面板
-        window.showProStyleCategory = function(category) {
-            var entries = document.getElementById('proStyleCategoryCards');
-            // 外层总保存按钮已删除（每个板块独立保存），保留查找以便向后兼容
-            var actions = document.getElementById('proStylePanelActions');
-            var panels = {
-                theme: document.getElementById('proStylePanelTheme'),
-                bubble: document.getElementById('proStylePanelBubble'),
-                post: document.getElementById('proStylePanelPost')
-            };
-            if (entries) {
-                entries.hidden = true;
-                entries.classList.remove('is-enter');
-            }
-            if (actions) actions.hidden = true; // 兼容旧结构
-            var target = panels[category];
-            Object.keys(panels).forEach(function(key) {
-                if (panels[key]) {
-                    panels[key].hidden = (key !== category);
-                    panels[key].classList.remove('is-enter');
-                }
-            });
-            // 子面板淡入 + 轻微上浮
-            if (target) {
-                target.hidden = false;
-                try {
-                    // 强制 reflow 重启动画
-                    void target.offsetWidth;
-                    target.classList.add('is-enter');
-                } catch (e) {}
-            }
-            // 重新计算 preview 选中状态
-            if (typeof updateProStylePreviewActiveStates === 'function') {
-                try { updateProStylePreviewActiveStates(); } catch (_) {}
-            }
-            var panel = document.getElementById('profileProStylePage');
-            if (panel && typeof panel.scrollTo === 'function') {
-                panel.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        };
-
-        // 三级分组入口：返回总览
-        window.showProStyleLanding = function() {
-            // 0.97g 简化：landing 不再有 #proStylePanelLanding 包装
-            // 直接隐藏三个子面板 + 显示入口卡组
-            var entries = document.getElementById('proStyleCategoryCards');
-            var actions = document.getElementById('proStylePanelActions');
-            var panels = ['proStylePanelTheme', 'proStylePanelBubble', 'proStylePanelPost'];
-            panels.forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) {
-                    el.hidden = true;
-                    el.classList.remove('is-enter');
-                }
-            });
-            if (entries) {
-                entries.hidden = false;
-                entries.classList.remove('is-enter');
-                try {
-                    void entries.offsetWidth;
-                    entries.classList.add('is-enter');
-                } catch (e) {}
-            }
-            if (actions) actions.hidden = true; // 兼容旧结构
-            var panel = document.getElementById('profileProStylePage');
-            if (panel && typeof panel.scrollTo === 'function') {
-                panel.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        };
-
-        window.openProStylePage = function() {
-            if (!currentUser) {
-                showToast('请先登录');
-                return;
-            }
-
-            var main = document.getElementById('profileMainView');
-            var page = document.getElementById('profileProStylePage');
-            var panel = document.getElementById('panelProfile');
-
-            if (!page) return;
-
-            if (main) main.hidden = true;
-            page.hidden = false;
-            page.classList.add('active');
-
-            if (typeof renderProStyleSettings === 'function') {
-                renderProStyleSettings();
-            }
-            // 第一次进入时显式显示总览
-            // (renderProStyleSettings 不再自动 showLanding，避免在子面板编辑时被强制重置)
-            if (typeof window.showProStyleLanding === 'function') {
-                window.showProStyleLanding();
-            }
-
-            if (panel && typeof panel.scrollTo === 'function') {
-                panel.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        };
-
-        window.closeProStylePage = function() {
-            var main = document.getElementById('profileMainView');
-            var page = document.getElementById('profileProStylePage');
-            var panel = document.getElementById('panelProfile');
-
-            if (page) {
-                page.classList.remove('active');
-                page.hidden = true;
-            }
-
-            if (main) main.hidden = false;
-
-            if (panel && typeof panel.scrollTo === 'function') {
-                panel.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        };
-
-        function applyCurrentUserStyle() {
-            var root = document.documentElement;
-            var resolved = getResolvedUserStyle();
-            root.setAttribute('data-pro-theme', resolved.theme || 'default');
-            root.setAttribute('data-pro-chat-bubble', resolved.chat_bubble_style || 'default');
-            root.setAttribute('data-pro-post-style', resolved.post_card_style || 'default');
-            renderProStyleSettings();
-            applyCurrentUserPostStyleToDom();
-        }
-        window.__xtjApplyCurrentUserStyle = applyCurrentUserStyle;
-
-        async function loadCurrentUserStyle() {
-            currentUserStyleRecordId = '';
-            currentUserStyle = createDefaultUserStyle();
-            currentUserStylePreview = null;
-            if (!currentUser) {
-                applyCurrentUserStyle();
-                return currentUserStyle;
-            }
-            var cached = readCachedUserStyle(currentUser);
-            if (cached) {
-                currentUserStyle = cached;
-                applyCurrentUserStyle();
-            } else {
-                applyCurrentUserStyle();
-            }
-            if (!window.sb) return currentUserStyle;
-            try {
-                var styleRes = await sb.from("posts")
-                    .select("id, content")
-                    .eq("user_name", currentUser)
-                    .eq("media_type", USER_STYLE_MARKER)
-                    .order("created_at", { ascending: false })
-                    .limit(1);
-                if (styleRes.data && styleRes.data.length > 0) {
-                    currentUserStyleRecordId = styleRes.data[0].id || '';
-                    try {
-                        currentUserStyle = normalizeUserStyle(JSON.parse(styleRes.data[0].content || '{}'));
-                    } catch(e) {
-                        currentUserStyle = createDefaultUserStyle();
-                    }
-                    writeCachedUserStyle(currentUser, currentUserStyle);
-                }
-            } catch(e) {
-                if (!cached) currentUserStyle = createDefaultUserStyle();
-            }
-            applyCurrentUserStyle();
-            return currentUserStyle;
-        }
-        window.loadCurrentUserStyle = loadCurrentUserStyle;
-
-        window.saveCurrentUserStyle = async function() {
-            if (!currentUser) { showToast('请先登录'); return; }
-            var themeSelect = document.getElementById('proThemeSelect');
-            var bubbleSelect = document.getElementById('proBubbleSelect');
-            var postSelect = document.getElementById('proPostStyleSelect');
-            var saveBtn = document.getElementById('proStyleSaveBtn');
-            var nextStyle = normalizeUserStyle({
-                theme: themeSelect ? themeSelect.value : currentUserStyle.theme,
-                chat_bubble_style: bubbleSelect ? bubbleSelect.value : currentUserStyle.chat_bubble_style,
-                post_card_style: postSelect ? postSelect.value : currentUserStyle.post_card_style,
-                updated_at: new Date().toISOString()
-            });
-            if (saveBtn) {
-                saveBtn.disabled = true;
-                saveBtn.dataset.originText = saveBtn.textContent || '保存视觉偏好';
-                saveBtn.textContent = '保存中...';
-            }
-            try {
-                var payload = {
-                    user_name: currentUser,
-                    content: JSON.stringify(nextStyle),
-                    media_type: USER_STYLE_MARKER,
-                    actor_key: USER_STYLE_MARKER
-                };
-                if (currentUserStyleRecordId) {
-                    var updateRes = await sb.from("posts")
-                        .update({ content: payload.content, actor_key: USER_STYLE_MARKER })
-                        .eq("id", currentUserStyleRecordId);
-                    if (updateRes.error) throw updateRes.error;
-                } else {
-                    var insertRes = await sb.from("posts").insert([payload]).select("id");
-                    if (insertRes.error) throw insertRes.error;
-                    if (insertRes.data && insertRes.data[0] && insertRes.data[0].id) {
-                        currentUserStyleRecordId = insertRes.data[0].id;
-                    }
-                }
-                currentUserStyle = nextStyle;
-                currentUserStylePreview = nextStyle;
-                writeCachedUserStyle(currentUser, currentUserStyle);
-                applyCurrentUserStyle();
-                showToast('视觉偏好已保存');
-            } catch(e) {
-                showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
-                applyCurrentUserStyle();
-            } finally {
-                if (saveBtn) {
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = saveBtn.dataset.originText || '保存视觉偏好';
-                    saveBtn.removeAttribute('data-origin-text');
-                }
-            }
-        };
-
-        // 板块级保存：只保存 type 指定的字段，保留其他两个板块的已保存值
-        // type ∈ 'theme' | 'bubble' | 'post'
-        window.saveCurrentUserStylePart = async function(type) {
-            if (!currentUser) { showToast('请先登录'); return; }
-            if (!type) return;
-            var meta = getProStyleSelectMeta(type);
-            var selectEl = document.getElementById(meta.selectId);
-            if (!selectEl) {
-                showToast('未找到对应选项');
-                return;
-            }
-            // 权限校验
-            var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
-            if (!enabled && selectEl.value !== 'default') {
-                showToast('这是 Pro 视觉权益，领取包含该权益的 Pro 活动后可使用');
-                return;
-            }
-            // 找到本板块的"保存"按钮
-            var saveBtn = document.querySelector(
-                '.pro-style-save-btn[data-pro-style-save-type="' + type + '"]'
-            );
-            // 从 currentUserStyle 中读取其他两个板块已保存值（关键：保留！不能覆盖！）
-            var next = normalizeUserStyle({
-                theme: type === 'theme' ? selectEl.value : (currentUserStyle.theme || 'default'),
-                chat_bubble_style: type === 'bubble' ? selectEl.value : (currentUserStyle.chat_bubble_style || 'default'),
-                post_card_style: type === 'post' ? selectEl.value : (currentUserStyle.post_card_style || 'default'),
-                updated_at: new Date().toISOString()
-            });
-            var originText = '';
-            if (saveBtn) {
-                saveBtn.disabled = true;
-                originText = saveBtn.textContent || '保存';
-                saveBtn.dataset.originText = originText;
-                saveBtn.textContent = '保存中...';
-            }
-            try {
-                var payload = {
-                    user_name: currentUser,
-                    content: JSON.stringify(next),
-                    media_type: USER_STYLE_MARKER,
-                    actor_key: USER_STYLE_MARKER
-                };
-                if (currentUserStyleRecordId) {
-                    var updateRes = await sb.from("posts")
-                        .update({ content: payload.content, actor_key: USER_STYLE_MARKER })
-                        .eq("id", currentUserStyleRecordId);
-                    if (updateRes.error) throw updateRes.error;
-                } else {
-                    var insertRes = await sb.from("posts").insert([payload]).select("id");
-                    if (insertRes.error) throw insertRes.error;
-                    if (insertRes.data && insertRes.data[0] && insertRes.data[0].id) {
-                        currentUserStyleRecordId = insertRes.data[0].id;
-                    }
-                }
-                currentUserStyle = next;
-                currentUserStylePreview = next;
-                writeCachedUserStyle(currentUser, currentUserStyle);
-                applyCurrentUserStyle();
-                showToast('已保存「' + (meta.label || type) + '」板块');
-            } catch(e) {
-                showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
-                applyCurrentUserStyle();
-            } finally {
-                if (saveBtn) {
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = saveBtn.dataset.originText || '保存';
-                    saveBtn.removeAttribute('data-origin-text');
-                }
-            }
-        };
-
-        async function updateVipStatus() {
-            if (!currentUser) return;
-            // 本地记录只用于提示“待核验”；不得直接授予已核验 Pro 状态。
-            var localCandidate = typeof window.__xtjCheckLocalVip === 'function' ? window.__xtjCheckLocalVip(currentUser) : null;
-            __vipStatus.is_vip = false;
-            __vipStatus.vip_info = null;
-            if (localCandidate) {
-                var pendingBadge = document.getElementById('vipCardBadge');
-                var pendingSub = document.getElementById('vipCardSub');
-                if (pendingBadge) { pendingBadge.textContent = '核验中'; pendingBadge.className = 'xtj-vip-card-badge'; }
-                if (pendingSub) pendingSub.textContent = '正在核验 Pro 权益';
-            }
-
-            // 尝试API查询
-            try {
-                var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
-                var vc = new AbortController();
-                var vt = setTimeout(function() { vc.abort(); }, 8000);
-                var resp;
-                try {
-                    resp = await fetch(url, { signal: vc.signal });
-                } finally {
-                    clearTimeout(vt);
-                }
-                var data = await resp.json();
-                var apiIsVip = data.is_vip === true;
-                if (apiIsVip) {
-                    if (!data.active_vip || !data.active_vip.expire_at) {
-                        apiIsVip = false;
-                    } else {
-                        var apiExpireTs = new Date(data.active_vip.expire_at).getTime();
-                        if (!isNaN(apiExpireTs) && apiExpireTs <= Date.now()) {
-                            apiIsVip = false;
-                        }
-                    }
-                }
-                __vipStatus.is_vip = apiIsVip;
-                __vipStatus.vip_info = apiIsVip ? (data.active_vip || null) : null;
-                updateVipUI();
-                if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(__vipStatus.is_vip);
-                return;
-            } catch(e) {}
-
-            // 回退到Supabase直接查询
-            if (typeof window.__xtjQueryVipStatus === 'function') {
-                try {
-                    var vipData = await window.__xtjQueryVipStatus(currentUser);
-                    if (vipData && vipData.is_active) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = vipData;
-                        updateVipUI();
-                        if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(true);
-                    }
-                } catch(e) {}
-            }
-            __vipStatus.is_vip = false;
-            __vipStatus.vip_info = null;
-            updateVipUI();
-            if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
-        }
-        async function ensureVipStatusFresh(force) {
-            if (!currentUser) {
-                __vipStatus.is_vip = false;
-                __vipStatus.vip_info = null;
-                return __vipStatus;
-            }
-            if (!force && isVipUser()) return __vipStatus;
-            if (!vipStatusRefreshPromise || force) {
-                vipStatusRefreshPromise = Promise.resolve()
-                    .then(function() { return updateVipStatus(); })
-                    .catch(function() {})
-                    .finally(function() {
-                        vipStatusRefreshPromise = null;
-                    });
-            }
-            await vipStatusRefreshPromise;
-            return __vipStatus;
-        }
-        window.ensureVipStatusFresh = ensureVipStatusFresh;
-
-        function updateVipUI() {
-            var badge = document.getElementById('vipCardBadge');
-            var sub = document.getElementById('vipCardSub');
-            if (__vipStatus.is_vip) {
-                if (badge) { badge.textContent = '已激活'; badge.className = 'xtj-vip-card-badge active'; }
-                if (sub) {
-                    var info = getVipInfo();
-                    if (info && info.expire_at) {
-                        var d = new Date(info.expire_at);
-                        sub.textContent = '有效期至 ' + d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
-                    } else {
-                        sub.textContent = 'VIP 会员已激活';
-                    }
-                }
-            } else {
-                // 旧版"¥3/月"已彻底去除：不显示价格，引导用户进入弹窗查看活动
-                if (badge) { badge.textContent = '查看活动'; badge.className = 'xtj-vip-card-badge'; }
-                if (sub) sub.textContent = '活动由管理员限时发布';
-            }
-            // 刷新帖子列表
-            applyCurrentUserStyle();
-        }
-
-        function requestProGiftRelogin() {
-            window.__xtjPendingProRelogin = true;
-            if (typeof openAuthModal === 'function') {
-                openAuthModal('login');
-            } else {
-                var loginModal = document.getElementById('loginModal');
-                if (loginModal) loginModal.classList.add('active');
-            }
-        }
-        window.requestProGiftRelogin = requestProGiftRelogin;
-
-        async function resolvePendingProRelogin() {
-            if (!window.__xtjPendingProRelogin) return;
-            window.__xtjPendingProRelogin = false;
-            try { await ensureVipStatusFresh(true); } catch(e) {}
-            try { updateVipModalUI(); } catch(e) {}
-            try { await loadProGiftCampaigns(); } catch(e) {}
-        }
-
-        async function openVipModal() {
-            if (!currentUser) { showToast('请先登录'); return; }
-            try { await ensureUserToken(); } catch(e) {}
-            openModal('vipModal');
-            updateVipModalUI();
-        }
-
-        // 兼容保留：vipPayBtn 已被移除，这里只安全检查一下，不报错
-        function updateVipModalUI() {
-            // 旧版的"立即开通 ¥3"按钮和"已是VIP会员"状态卡已彻底移除
-            // 新版 Pro 弹窗只显示当前 Pro 状态 + Pro 活动列表
-            renderVipStatusBanner();
-            loadProGiftCampaigns();
-        }
-
-        // 弹窗顶部轻量 Pro 状态条（不显示任何价格/套餐）
-        function renderVipStatusBanner() {
-            var banner = document.getElementById('vipStatusBanner');
-            if (!banner) return;
-            var info = __vipStatus && __vipStatus.vip_info;
-            if (__vipStatus && __vipStatus.is_vip) {
-                var expireText = '';
-                if (info && info.expire_at) {
-                    try {
-                        expireText = new Date(info.expire_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
-                    } catch (e) {
-                        expireText = String(info.expire_at);
-                    }
-                }
-                banner.style.display = '';
-                banner.classList.add('is-pro');
-                banner.innerHTML = [
-                    '<span class="vip-status-banner-icon">👑</span>',
-                    '<span class="vip-status-banner-text">',
-                    '  当前是 Pro 会员',
-                    expireText ? ' · 有效至 ' + escapeHtml(expireText) : '',
-                    '</span>'
-                ].join('');
-            } else {
-                banner.style.display = 'none';
-                banner.classList.remove('is-pro');
-                banner.innerHTML = '';
-            }
-        }
-
-        // 兼容保留 handleVipPurchase 函数名（被删除按钮的旧 onclick 引用）
-        // 新规则：前端禁止直接开通 Pro，必须由后端管理发布的活动领取
-        async function handleVipPurchase() {
-            if (!currentUser) { showToast('请先登录'); return; }
-            if (__vipStatus && __vipStatus.is_vip) {
-                showToast('您已是 Pro 会员');
-                return;
-            }
-            // 前端已禁用直接开通入口；引导用户到下方活动区领取
-            showToast('Pro 会员由管理员限时发布，请等待活动开放后领取');
-        }
-
-        // 加载可领取的 Pro 赠送活动
-        async function loadProGiftCampaigns() {
-            var section = document.getElementById('proGiftSection');
-            var list = document.getElementById('proGiftList');
-            if (!section || !list || !currentUser) return;
-
-            // 渲染空状态（无活动时显示）
-            function renderEmpty(msg, sub) {
-                section.style.display = '';
-                list.innerHTML = [
-                    '<div class="pro-gift-empty">',
-                    '  <div class="pro-gift-empty-icon">🎁</div>',
-                    '  <div class="pro-gift-empty-text">' + escapeHtml(msg) + '</div>',
-                    sub ? '<div class="pro-gift-empty-sub">' + escapeHtml(sub) + '</div>' : '',
-                    '</div>'
-                ].join('');
-            }
-
-            // 当前用户存在但 access/refresh 会话均不可用时，要求重新登录。
-            function renderFakeLogin() {
-                section.style.display = '';
-                list.innerHTML = [
-                    '<div class="pro-gift-auth-card">',
-                    '  <div class="pro-gift-empty-icon">🔐</div>',
-                    '  <div class="pro-gift-auth-title">登录状态已过期</div>',
-                    '  <div class="pro-gift-auth-copy">你的登录状态已过期，请重新登录后查看 Pro 活动。</div>',
-                    '  <div class="pro-gift-auth-actions"><button type="button" class="btn primary pro-gift-auth-btn" onclick="openAuthModal(\'login\')">重新登录</button></div>',
-                    '</div>'
-                ].join('');
-            }
-
-            function renderAuthExpired() {
-                section.style.display = '';
-                list.innerHTML = [
-                    '<div class="pro-gift-auth-card">',
-                    '  <div class="pro-gift-empty-icon">🔐</div>',
-                    '  <div class="pro-gift-auth-title">登录凭证需要刷新</div>',
-                    '  <div class="pro-gift-auth-copy">你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。</div>',
-                    '  <div class="pro-gift-auth-actions"><button type="button" class="btn primary pro-gift-auth-btn" onclick="requestProGiftRelogin()">重新登录</button></div>',
-                    '</div>'
-                ].join('');
-            }
-
-            try {
-                var tok = await ensureUserToken();
-                if (!tok) {
-                    renderFakeLogin();
-                    return;
-                }
-                var headers = { 'Authorization': 'Bearer ' + tok };
-                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
-                    headers: headers,
-                    signal: AbortSignal.timeout(8000)
-                });
-                if (resp.status === 401 || resp.status === 403) {
-                    clearUserToken();
-                    // token 过期，尝试补一次 token 后重试
-                    var newTok = await ensureUserToken();
-                    if (newTok) {
-                        headers['Authorization'] = 'Bearer ' + newTok;
-                        resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
-                            headers: headers,
-                            signal: AbortSignal.timeout(8000)
-                        });
-                        if (resp.status === 401 || resp.status === 403) {
-                            clearUserToken();
-                            renderAuthExpired();
-                            return;
-                        }
-                    } else {
-                        // 重试后还是拿不到 token：先看是不是 fake login
-                        if (isFakeLogin()) {
-                            renderFakeLogin();
-                        } else {
-                            renderAuthExpired();
-                        }
-                        return;
-                    }
-                }
-                var data = await resp.json();
-                if (data && data.error) {
-                    renderEmpty('Pro 活动加载失败', data.error || '请稍后重试');
-                    return;
-                }
-                var gifts = (data && data.gifts) || [];
-                if (!gifts.length) {
-                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
-                    return;
-                }
-                section.style.display = '';
-                list.innerHTML = gifts.map(function(g) {
-                    var cardClass = 'pro-gift-card' + (g.already_claimed ? ' claimed' : '');
-                    var durationText = (g.duration_days || 30) + ' 天 Pro';
-                    if (g.claim_expire_at) {
-                        var expireDate = new Date(g.claim_expire_at);
-                        if (expireDate > new Date()) {
-                            var daysLeft = Math.ceil((expireDate - new Date()) / (1000 * 60 * 60 * 24));
-                            durationText += ' · 还剩 ' + daysLeft + ' 天';
-                        }
-                    }
-                    // 限定/专属活动标识
-                    var exclusiveTag = (g.exclusive || g.allowed_users || g.exclusive_users || g.target_users)
-                        ? '<span class="pro-gift-card-tag">专属</span>' : '';
-                    // 剩余名额
-                    var remainText = '';
-                    if (typeof g.remaining_count === 'number' && typeof g.claim_limit === 'number') {
-                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' / ' + g.claim_limit + ' 名额</span>';
-                    } else if (typeof g.remaining_count === 'number') {
-                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' 名额</span>';
-                    }
-                    // 截止时间
-                    var expireText = '';
-                    if (g.claim_expire_at) {
-                        try {
-                            expireText = new Date(g.claim_expire_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-                        } catch (e) { expireText = String(g.claim_expire_at); }
-                    }
-
-                    // 按钮状态：未领取 / 已领取 / 名额满 / 已结束
-                    var buttonHtml;
-                    if (g.already_claimed) {
-                        buttonHtml = '<div class="pro-gift-claimed-badge">' +
-                            '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取</div>';
-                    } else if (g.full || g.remaining_count === 0) {
-                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">名额已满</div>';
-                    } else if (g.expired) {
-                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">已结束</div>';
-                    } else {
-                        buttonHtml = '<button type="button" class="pro-gift-claim-btn" data-gift-id="' + escapeHtml(g.id) + '">领取 Pro</button>';
-                    }
-
-                    var card = '<div class="' + cardClass + '" data-gift-id="' + escapeHtml(g.id) + '">';
-                    card += '<div class="pro-gift-card-main">';
-                    card += '<div class="pro-gift-card-info">';
-                    card += '<div class="pro-gift-card-title">' + exclusiveTag + escapeHtml(g.title || '') + '</div>';
-                    if (g.description) {
-                        card += '<div class="pro-gift-card-desc">' + escapeHtml(g.description) + '</div>';
-                    }
-                    card += '<div class="pro-gift-card-meta">';
-                    card += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-                    card += '<span>' + durationText + '</span>';
-                    if (remainText) card += '<span class="pro-gift-card-dot">·</span>' + remainText;
-                    if (expireText) card += '<span class="pro-gift-card-dot">·</span><span>截止 ' + escapeHtml(expireText) + '</span>';
-                    card += '</div>';
-                    // 功能权益（来自后端活动 features）
-                    if (Array.isArray(g.features) && g.features.length) {
-                        var featureMap = {
-                            'vip_badge': '👑 身份标识',
-                            'photo_wall_unlimited': '📸 照片墙无限',
-                            'large_file_upload': '⬆️ 大文件上传',
-                            'pin_post': '📌 帖子置顶',
-                            'custom_theme': '🎨 专属主题',
-                            'profile_effects': '✨ 头像特效',
-                            'pro_chat_bubble': '💬 聊天气泡',
-                            'pro_post_style': '🪴 帖子卡片装饰'
-                        };
-                        var featNames = g.features.map(function(f) { return featureMap[f] || f; });
-                        card += '<div class="pro-gift-card-features">' + featNames.map(function(n) {
-                            return '<span class="pro-gift-card-feature">' + escapeHtml(n) + '</span>';
-                        }).join('') + '</div>';
-                    }
-                    card += '</div>';
-                    card += buttonHtml;
-                    card += '</div></div>';
-                    return card;
-                }).join('');
-                list.querySelectorAll('.pro-gift-claim-btn').forEach(function(button) {
-                    button.addEventListener('click', function() {
-                        window.claimProGift(button.dataset.giftId);
-                    });
-                });
-            } catch(e) {
-                renderEmpty('Pro 活动加载失败', '请稍后重试');
-            }
-        }
-
-        // 领取 Pro 赠送活动
-        window.claimProGift = async function(giftId) {
-            if (!currentUser) { showToast('请先登录'); return; }
-            var giftKey = String(giftId == null ? '' : giftId);
-            var btn = Array.from(document.querySelectorAll('.pro-gift-claim-btn')).find(function(node) {
-                return node.dataset.giftId === giftKey;
-            }) || null;
-            var card = Array.from(document.querySelectorAll('.pro-gift-card')).find(function(node) {
-                return node.dataset.giftId === giftKey;
-            }) || null;
-            if (btn) {
-                btn.classList.add('loading');
-                btn.textContent = '领取中...';
-            }
-            try {
-                var claimHeaders = { 'Content-Type': 'application/json' };
-                var tok2 = await ensureUserToken();
-                if (!tok2) {
-                    if (btn) {
-                        btn.classList.remove('loading');
-                        btn.textContent = '领取 Pro';
-                    }
-                    showToast('登录凭证需要刷新，请重新登录后领取', 'error');
-                    requestProGiftRelogin();
-                    return;
-                }
-                claimHeaders['Authorization'] = 'Bearer ' + tok2;
-                var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
-                    method: 'POST',
-                    headers: claimHeaders,
-                    body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
-                });
-                var data = await resp.json();
-                if (resp.status === 401 || resp.status === 403) {
-                    clearUserToken();
-                    // token 过期，尝试补一次 token 后重试
-                    var newTok2 = await ensureUserToken();
-                    if (newTok2) {
-                        claimHeaders['Authorization'] = 'Bearer ' + newTok2;
-                        resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
-                            method: 'POST',
-                            headers: claimHeaders,
-                            body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
-                        });
-                        data = await resp.json();
-                        if (resp.status === 401 || resp.status === 403) {
-                            clearUserToken();
-                            if (btn) { btn.classList.remove('loading'); btn.textContent = '领取 Pro'; }
-                            showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
-                            return;
-                        }
-                        // 重试成功，继续处理
-                    } else {
-                        if (btn) { btn.classList.remove('loading'); btn.textContent = '领取 Pro'; }
-                        showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
-                        requestProGiftRelogin();
-                        return;
-                    }
-                }
-                if (data.ok) {
-                    // 更新卡片状态
-                    if (card) {
-                        card.classList.add('claimed');
-                        if (btn) btn.remove();
-                        var infoDiv = card.querySelector('.pro-gift-card-info');
-                        if (infoDiv && infoDiv.parentNode) {
-                            var badge = document.createElement('div');
-                            badge.className = 'pro-gift-claimed-badge';
-                            badge.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取';
-                            infoDiv.parentNode.insertBefore(badge, infoDiv.nextSibling);
-                        }
-                    }
-                    showToast('🎉 Pro 已激活至 ' + new Date(data.expire_at).toLocaleDateString());
-                    // 刷新VIP状态和UI
-                    if (typeof window.__xtjSaveLocalVip === 'function') {
-                        window.__xtjSaveLocalVip(data);
-                    }
-                    ensureVipStatusFresh(true);
-                    updateVipUI();
-                    updateVipModalUI();
-                    if (typeof window.__xtjApplyProTheme === 'function') {
-                        window.__xtjApplyProTheme(true);
-                    }
-                    // 弹出庆祝动画
-                    setTimeout(function() {
-                        if (typeof window.__xtjShowProCelebration === 'function') {
-                            window.__xtjShowProCelebration(data);
-                        }
-                    }, 300);
-                    loadProGiftCampaigns();
-                } else {
-                    if (btn) {
-                        btn.classList.remove('loading');
-                        btn.textContent = '领取 Pro';
-                    }
-                    showToast(data.error || '领取失败', 'error');
-                }
-            } catch(e) {
-                if (btn) {
-                    btn.classList.remove('loading');
-                    btn.textContent = '领取 Pro';
-                }
-                showToast('领取失败: ' + e.message, 'error');
-            }
-        };
-
-        window.openVipModal = openVipModal;
-        window.handleVipPurchase = handleVipPurchase;
-
-        window.handleCancelPro = async function() {
-            if (!currentUser) { showToast('请先登录'); return; }
-            if (!__vipStatus.is_vip) { showToast('您还不是VIP会员'); return; }
-
-            if (!confirm('确定取消 XTJ Pro 订阅吗？\n取消后VIP权益将立即失效。')) return;
-
-            // 1. 清除本地VIP缓存
-            if (typeof window.__xtjClearLocalVip === 'function') {
-                window.__xtjClearLocalVip();
-            }
-
-            // 2. 尝试在Supabase标记取消
-            if (window.sb) {
-                try {
-                    var { data: vipRows } = await window.sb.from('posts')
-                        .select('id, content')
-                        .eq('user_name', currentUser)
-                        .eq('media_type', '__vip__')
-                        .order('created_at', { ascending: false })
-                        .limit(5);
-                    if (vipRows && vipRows.length > 0) {
-                        for (var i = 0; i < vipRows.length; i++) {
-                            try {
-                                var c = JSON.parse(vipRows[i].content || '{}');
-                                if (c.is_active) {
-                                    c.is_active = false;
-                                    c.cancelled_at = new Date().toISOString();
-                                    await window.sb.from('posts')
-                                        .update({ content: JSON.stringify(c) })
-                                        .eq('id', vipRows[i].id);
-                                }
-                            } catch(e) {}
-                        }
-                    }
-                } catch(e) {
-                    console.warn('[Pro] cancel supabase update failed', e);
-                }
-            }
-
-            // 3. 重置VIP状态
-            __vipStatus.is_vip = false;
-            __vipStatus.vip_info = null;
-            updateVipUI();
-            updateVipModalUI();
-            if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
-
-            // 4. 刷新帖子列表
-
-            showToast('已取消 Pro 订阅');
-        };
-
+function isAdmin() { return currentUser === ADMIN_NAME; }
         function clearFeedCache() {
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
             feedVisiblePostsCache = null;
@@ -1957,7 +845,6 @@ const ADMIN_NAME = "xxz";
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
-            pro: { styles: ['xtj-module-pro-style'], scripts: ['xtj-module-pro-upgrade', 'xtj-module-pro-script'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
@@ -2106,19 +993,6 @@ const ADMIN_NAME = "xxz";
         }
         window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
 
-        var originalOpenProStylePage = window.openProStylePage;
-        if (typeof originalOpenProStylePage === 'function') {
-            window.openProStylePage = function() {
-                var args = arguments;
-                return loadXtjModule('pro').then(function() {
-                    return originalOpenProStylePage.apply(window, args);
-                }).catch(function(error) {
-                    if (typeof window.showToast === 'function') window.showToast('Pro 模块加载失败，请稍后重试');
-                    console.error('[XTJ] pro module load failed:', error);
-                });
-            };
-        }
-
         function loadEnhancementsAfterInteraction() {
             document.removeEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
             document.removeEventListener('keydown', loadEnhancementsAfterInteraction, true);
@@ -2244,16 +1118,14 @@ const ADMIN_NAME = "xxz";
 
         function canPinPost(post) {
             if (!currentUser) return false;
-            if (isAdmin()) return true;
-            if (isVipUser()) return true;
-            return false;
+            var p = normalizePost(post);
+            return isAdmin() || (!!p && p.user_name === currentUser);
         }
         window.canPinPost = canPinPost;
 
-        // Check if user can pin this specific post (own post limit: 1 per VIP)
+        // Authors may pin their own post; the server enforces one pinned post per author.
         async function canPinThisPost(post) {
             if (isAdmin()) return true;
-            if (!isVipUser()) return false;
             var p = normalizePost(post);
             if (!p || p.user_name !== currentUser) return false;
             try {
@@ -2694,10 +1566,8 @@ const ADMIN_NAME = "xxz";
             function startRestrictionPolling() {
                 stopRestrictionPolling();
                 checkUserRestrictions();
-                updateVipStatus();
                 restrictionPollTimer = setInterval(function() {
                     checkUserRestrictions();
-                    updateVipStatus();
                 }, RESTRICTION_POLL_INTERVAL);
             }
 
@@ -2930,8 +1800,6 @@ const ADMIN_NAME = "xxz";
 
                     await initUI();
                     initialLoad(true);
-                    await resolvePendingProRelogin();
-                    try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
 
@@ -3006,8 +1874,6 @@ const ADMIN_NAME = "xxz";
 
                     await initUI();
                     initialLoad(true);
-                    await resolvePendingProRelogin();
-                    try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
 
@@ -3473,20 +2339,13 @@ const ADMIN_NAME = "xxz";
                 window.dockChatListCacheTime = 0;
                 document.body.style.overflow = '';
                 Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
-                // 退出登录时关闭 Pro 装扮二级页面 + 恢复主页面
-                var proStylePage = document.getElementById('profileProStylePage');
                 var profileMainView = document.getElementById('profileMainView');
-                if (proStylePage) {
-                    proStylePage.hidden = true;
-                    proStylePage.classList.remove('active');
-                }
                 if (profileMainView) {
                     profileMainView.hidden = false;
                 }
                 showToast("已退出登录");
                 await initUI();
                 initialLoad(true);
-                try { if (typeof window.updateProStyle === 'function') window.updateProStyle(''); } catch(e) {}
             };
 
             // 处理鎴戠殑椤甸潰锟矫伙拷卡片鐐癸拷??
@@ -4199,7 +3058,6 @@ function renderProfileActivityList(kind) {
                     
                     // 加载头像
                     loadUserAvatar();
-                    await loadCurrentUserStyle();
                     loadProfileActivity(true);
                     
                     queueDeferredStartupTasks();
@@ -4225,7 +3083,6 @@ function renderProfileActivityList(kind) {
                     if (profileAvatar) {
                         profileAvatar.innerHTML = '?';
                     }
-                    await loadCurrentUserStyle();
                     loadProfileActivity(true);
                     
                     try { stopDMPolling(); } catch(e) {}
@@ -4384,7 +3241,6 @@ function renderProfileActivityList(kind) {
                 var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
                 getPostLikeButtons(postId).forEach(function(likeBtn) {
                     likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
-                    void likeBtn.offsetWidth;
                     likeBtn.classList.add(className);
                     setTimeout(function() { likeBtn.classList.remove(className); }, 260);
                 });
@@ -4410,9 +3266,6 @@ function renderProfileActivityList(kind) {
                     updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
                     updateFeedStats();
                     animatePostLikeFeedback(pid, nextLiked);
-                    if (typeof window.xtjAnimateLikeToggle === 'function') {
-                        window.xtjAnimateLikeToggle(btn, nextLiked);
-                    }
                     if (nextLiked) createHeartParticles(btn);
                     var normalizedPostId = pid.trim().toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
@@ -4452,31 +3305,28 @@ function renderProfileActivityList(kind) {
             function createHeartParticles(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
-                if (typeof xtjHeartBurst === 'function') return xtjHeartBurst(btn);
+                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤️","💜","💙","💚","💛","🧡"];
-                const burstCount = perfProfile === 'balanced' ? 4 : 8;
+                const emojis = ["❤","♥","❤","♡","♥","❤"];
+                const burstCount = perfProfile === 'balanced' ? 4 : 6;
                 for (let i=0; i<burstCount; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
-                    heart.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-                    const angle = (Math.PI*2*i/burstCount) + (Math.random()-0.5)*0.4;
-                    const dist1 = 30 + Math.random()*20;
-                    const dist2 = 55 + Math.random()*40;
-                    const dist3 = 80 + Math.random()*50;
+                    heart.setAttribute('aria-hidden', 'true');
+                    heart.textContent = emojis[i % emojis.length];
+                    const angle = (-Math.PI * 0.9) + (Math.PI * 0.8 * i / Math.max(1, burstCount - 1)) + (Math.random()-0.5)*0.18;
+                    const distance = 26 + Math.random()*24;
                     heart.style.left = cx+'px';
                     heart.style.top = cy+'px';
-                    heart.style.setProperty('--tx25', Math.cos(angle)*dist1+'px');
-                    heart.style.setProperty('--ty25', Math.sin(angle)*dist1+'px');
-                    heart.style.setProperty('--tx60', Math.cos(angle)*dist2+'px');
-                    heart.style.setProperty('--ty60', Math.sin(angle)*dist2+'px');
-                    heart.style.setProperty('--tx', Math.cos(angle)*dist3+'px');
-                    heart.style.setProperty('--ty', Math.sin(angle)*dist3+'px');
-                    heart.style.animationDelay = (Math.random()*0.12)+'s';
+                    heart.style.setProperty('--heart-x', Math.cos(angle)*distance+'px');
+                    heart.style.setProperty('--heart-y', Math.sin(angle)*distance+'px');
+                    heart.style.setProperty('--heart-rotate', ((Math.random()-0.5)*32)+'deg');
+                    heart.style.setProperty('--heart-delay', (i*18)+'ms');
                     document.body.appendChild(heart);
-                    setTimeout(() => heart.remove(), 1200);
+                    heart.addEventListener('animationend', function() { heart.remove(); }, { once: true });
+                    setTimeout(function() { heart.remove(); }, 900);
                 }
             }
 
@@ -4770,21 +3620,20 @@ function renderProfileActivityList(kind) {
                 }, 10000);
 
                 try {
-                    const key = isAdmin() ? delOwnerKey : deviceId;
-                    const rpcPromise = sb.rpc("delete_post_with_actor", {
-                        p_post_id: targetPostId,
-                        p_actor_key: key
+                    const deletePromise = window.xtjProtectedFetch('/api/post/delete', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: targetPostId })
                     });
-                    const rpcTimeout = new Promise(function(_, reject) {
-                        setTimeout(function() { reject(new Error('rpc_timeout')); }, 8000);
+                    const requestTimeout = new Promise(function(_, reject) {
+                        setTimeout(function() { reject(new Error('delete_timeout')); }, 8000);
                     });
-                    let rpcResult;
+                    let deleteResponse;
                     try {
-                        rpcResult = await Promise.race([rpcPromise, rpcTimeout]);
+                        deleteResponse = await Promise.race([deletePromise, requestTimeout]);
                     } catch (raceErr) {
                         if (finished) return;
-                        if (raceErr && raceErr.message === 'rpc_timeout') {
-                            console.warn('[delBtn] RPC 超时');
+                        if (raceErr && raceErr.message === 'delete_timeout') {
+                            console.warn('[delBtn] delete request timed out');
                             finished = true;
                             cleanupDeleteSession({ toast: "删除请求超时，请刷新查看" });
                             if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
@@ -4793,10 +3642,10 @@ function renderProfileActivityList(kind) {
                         throw raceErr;
                     }
                     if (finished) return;
-                    const error = rpcResult && rpcResult.error;
-                    if (error) {
+                    const deleteResult = await deleteResponse.json().catch(function() { return {}; });
+                    if (!deleteResponse.ok || !deleteResult.ok || (!deleteResult.deleted && !deleteResult.already_deleted)) {
                         finished = true;
-                        cleanupDeleteSession({ toast: "删除失败: " + (error.message || "未知错误") });
+                        cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
                         return;
                     }
                     removeDeletedPostFromFeed(targetPostId);
@@ -5737,33 +4586,10 @@ function renderProfileActivityList(kind) {
                 }
                 var safeName = escapeHtml(username);
                 var safeNameJs = safeName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                // Pro 外圈：1) 帖子冻结的 pro_at_post；2) VIP 历史（post.created_at 在某 Pro 期间内）；3) 当前 VIP 状态
-                var isPro = false;
-        if (post) {
-            try {
-                var normalizedForAvatar = normalizePost(post);
-                var avatarMeta = normalizedForAvatar._contentMeta || {};
-                if (avatarMeta.pro_at_post === true) {
-                    if (normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
-                        typeof window.__xtjIsUserProAt === 'function' &&
-                        window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
-                        isPro = true;
-                    }
-                }
-                if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
-                            typeof window.__xtjIsUserProAt === 'function' &&
-                            window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
-                            isPro = true;
-                        }
-                    } catch(e) {}
-                }
                 // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
-                    if (isPro) {
-                        return '<div class="xtj-pro-avatar-ring" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
-                    }
                     return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
@@ -5947,10 +4773,8 @@ function renderProfileActivityList(kind) {
             }
 
             function collectPostMetadata(visibility, overrides) {
-                var wasPro = !!((typeof isVipUser === 'function') ? isVipUser() : false);
                 return Object.assign({}, POST_META_DEFAULTS, {
-                    visibility: visibility || "public",
-                    pro_at_post: wasPro
+                    visibility: visibility || "public"
                 }, overrides || {});
             }
 
@@ -6113,24 +4937,6 @@ function renderProfileActivityList(kind) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                var meta = normalized._contentMeta || {};
-                var isProPost = false;
-                if (meta.pro_at_post === true) {
-                    if (normalized.user_name && normalized.created_at &&
-                        typeof window.__xtjIsUserProAt === 'function' &&
-                        window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
-                        isProPost = true;
-                    }
-                }
-                var isProByHistory = false;
-                if (!isProPost && normalized.user_name && normalized.created_at &&
-                    typeof window.__xtjIsUserProAt === 'function' &&
-                    window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
-                    isProByHistory = true;
-                }
-                if (isProPost || isProByHistory) {
-                    bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
-                }
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
@@ -6193,7 +4999,7 @@ function renderProfileActivityList(kind) {
                     else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(normalized.media_url) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(normalized.media_url) + '\', this)"></div>';
                 }
                 return `
-                <div class="post glass${getCurrentUserPostStyleClass(normalized)}" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
+                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
                   <div class="post-header">
                     ${getAvatarHtml(normalized.user_name, normalized)}
                     <div class="post-header-main">
@@ -6931,11 +5737,6 @@ function renderProfileActivityList(kind) {
                         showToast('无权置顶');
                         return;
                     }
-                    if (!isVipUser() && currentUser !== ADMIN_NAME) {
-                        showToast('仅 Pro 会员可使用置顶功能');
-                        return;
-                    }
-
                     nextPinned = !dbPost.is_pinned;
                     var nextPinnedAt = nextPinned ? new Date().toISOString() : null;
                     var nextUpdatedAt = new Date().toISOString();
@@ -7130,10 +5931,8 @@ function renderProfileActivityList(kind) {
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                await ensureVipStatusFresh(true);
-                var isProNow = isVipUser();
-                var maxFileSize = isProNow ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isProNow ? "200MB" : "50MB")); return; }
+                var maxFileSize = 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
@@ -8832,19 +7631,51 @@ function renderProfileActivityList(kind) {
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 220, chat: 220, ai: 220, profile: 220 };
+            var animDurations = { posts: 900, chat: 900, ai: 900, profile: 900 };
+            var dockTabAnimationTimers = {};
+            var dockTabAnimationElements = {};
+            var dockTabAnimationGeneration = 0;
+
+            function clearTabAnimation(el, tab) {
+                if (dockTabAnimationTimers[tab]) {
+                    clearTimeout(dockTabAnimationTimers[tab]);
+                    delete dockTabAnimationTimers[tab];
+                }
+                if (el) {
+                    el.classList.remove(animClassMap[tab]);
+                    var animLayer = el.querySelector('.anim-layer');
+                    if (animLayer) animLayer.style.willChange = '';
+                }
+                delete dockTabAnimationElements[tab];
+                animatingTabs[tab] = false;
+            }
+
+            function clearAllTabAnimations() {
+                Object.keys(animClassMap).forEach(function(tabName) {
+                    clearTabAnimation(dockTabAnimationElements[tabName], tabName);
+                });
+            }
 
             function triggerTabAnimation(el, tab) {
-                if (!animClassMap[tab]) return;
-                if (animatingTabs[tab]) return;
+                var cls = animClassMap[tab];
+                if (!cls) return;
+                var generation = ++dockTabAnimationGeneration;
+                clearAllTabAnimations();
+                try {
+                    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+                } catch (_) {}
                 animatingTabs[tab] = true;
+                dockTabAnimationElements[tab] = el;
                 requestAnimationFrame(function() {
-                    el.classList.remove('anim-post', 'anim-chat', 'anim-ai', 'anim-profile');
-                    el.classList.add('is-switch-feedback');
-                    setTimeout(function() {
-                        el.classList.remove('is-switch-feedback');
-                        animatingTabs[tab] = false;
-                    }, animDurations[tab]);
+                    if (generation !== dockTabAnimationGeneration) return;
+                    var animLayer = el.querySelector('.anim-layer');
+                    if (animLayer) animLayer.style.willChange = 'transform, opacity';
+                    el.classList.add(cls);
+                    dockTabAnimationTimers[tab] = setTimeout(function() {
+                        if (generation === dockTabAnimationGeneration) {
+                            clearTabAnimation(el, tab);
+                        }
+                    }, animDurations[tab] + 50);
                 });
             }
 
@@ -9013,6 +7844,7 @@ function renderProfileActivityList(kind) {
                     syncDockChatLayoutState();
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                var listLoadSeq = ++_dockChatListLoadSeq;
                 var hadRenderedList = !!el.children.length;
                 try {
                     if (!hadRenderedList) {
@@ -9026,6 +7858,7 @@ function renderProfileActivityList(kind) {
                     if (!dmResp.ok) throw new Error('DM list fetch failed');
                     const dmResult = await dmResp.json();
                     if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
+                    if (listLoadSeq !== _dockChatListLoadSeq) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
@@ -9058,8 +7891,11 @@ function renderProfileActivityList(kind) {
                         if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
+                    if (listLoadSeq !== _dockChatListLoadSeq) return;
                     window.dockChatListCacheTime = 0;
                     if (!hadRenderedList) el.innerHTML = '';
+                    var previousRetry = el.querySelector('.chat-load-retry');
+                    if (previousRetry) previousRetry.remove();
                     var retry = document.createElement('button');
                     retry.type = 'button';
                     retry.className = 'chat-load-retry';
@@ -9114,6 +7950,7 @@ function renderProfileActivityList(kind) {
             var _chatCache = {};
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
+            var _dockChatListLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
             var _dockChatListRenderSignature = '';
 
@@ -9496,6 +8333,8 @@ function renderProfileActivityList(kind) {
                 } catch(e) {
                     if (loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
                         if (!(_chatCache[cacheKey] && _chatCache[cacheKey].length)) el.innerHTML = '';
+                        var previousRetry = el.querySelector('.chat-load-retry');
+                        if (previousRetry) previousRetry.remove();
                         var retry = document.createElement('button');
                         retry.type = 'button';
                         retry.className = 'chat-load-retry';
@@ -9554,8 +8393,8 @@ function renderProfileActivityList(kind) {
                 const file = fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
                 var targetUser = dockChatActiveUser;
-                var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
+                var maxFileSize = 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
@@ -10444,26 +9283,6 @@ function renderProfileActivityList(kind) {
                     `
                 },
                 {
-                    version: 'v0.89',
-                    date: '2026-06-25',
-                    content: `
-                        <h4>Pro 会员改为限量 / 限定 / 限时活动模式</h4>
-                        <ul>
-                            <li><b>彻底去除常驻 Pro 卡</b>：删除 vipModal 中 ¥3/月 套餐卡（vipPlanCard / vipPayBtn / vipCancelArea / 订阅条款 / 取消订阅）</li>
-                            <li><b>个人资料卡</b>：vipCard 不再显示"¥3/月"，改为"活动由管理员限时发布"</li>
-                            <li><b>弹窗只显示活动</b>：updateVipModalUI 只渲染 Pro 状态条 + 活动列表</li>
-                            <li><b>无活动空状态</b>：loadProGiftCampaigns 显示"暂无可领取的 Pro 活动"</li>
-                            <li><b>活动卡片增强</b>：专属标签 / 剩余名额 / 截止时间 / 功能权益 / 4 种按钮态（未领取/已领取/名额满/已结束）</li>
-                            <li><b>前端禁开通 Pro</b>：handleVipPurchase 不再调用 __xtjDirectPurchasePro，只 toast 引导用户到活动区</li>
-                            <li><b>前端 __xtjDirectPurchasePro 禁用</b>：保留函数名返回错误，注释 deprecated</li>
-                            <li><b>后端强校验</b>：/api/pro-gifts/available 与 /api/pro-gifts/claim 加 authenticateUser 中间件；claim 强制以 req.userName 为准</li>
-                            <li><b>活动发布</b>：/admin/pro-gifts/save 支持 claim_limit / allowed_users / exclusive / start_at / end_at</li>
-                            <li><b>活动编辑器</b>：限量名额 / 限定用户（逗号分隔）/ 是否专属 / 活动起止时间</li>
-                            <li><b>不影响</b>：照片墙 / 聊天 / 底部 Dock / 普通帖子 / 登录 / 其他后台管理</li>
-                        </ul>
-                    `
-                },
-                {
                     version: 'v0.88c',
                     date: '2026-06-24',
                     content: `
@@ -10489,7 +9308,6 @@ function renderProfileActivityList(kind) {
                             <li>修复 SENDGRID_API_KEY 误用 var 声明被覆盖的隐患</li>
                             <li>修复 /admin/report/:id/delete-post 和 /admin/report/:id/ban-user 端点缺少顶层 try-catch</li>
                             <li>修复 index.html / README.md / CHANGELOG.md 版本号不一致</li>
-                            <li>升级 pro-upgrade.js query string 版本号到 20260624_progift</li>
                         </ul>
                     `
                 },
@@ -10523,8 +9341,6 @@ function renderProfileActivityList(kind) {
                         </ul>
                         <h4>Bug 修复</h4>
                         <ul>
-                            <li><b>Pro badge 过期显示修复</b>：isVipUser() 加强 expire_at 判断，updateVipStatus() 防止 API 返回空 active_vip 时错误标记为 Pro</li>
-                            <li><b>Pro 赠送创建新活动按钮</b>：添加 progift 懒加载映射，Cookie 适配后按钮可正常打开</li>
                             <li><b>懒加载数据赋值修复</b>：reports 数据赋值到 reportsData、mutes 到 mutesData、新增 blacklist 分支</li>
                             <li><b>page_visit 无 password_hash 不发送</b>：改为有 token 也能发送</li>
                             <li><b>Cookie 登录后后台卡死</b>：loadAllData / fetchRegisterAlerts / renderPostsTab 等 5 处 getToken() 门禁全部移除</li>
