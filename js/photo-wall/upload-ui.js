@@ -427,11 +427,13 @@
       var recordError = new Error((errBody && errBody.error) || '创建照片记录失败');
       recordError.status = createRes.status;
       recordError.photoUploadStage = 'record';
+      await cleanupStorage(path);
       throw recordError;
     }
     var createData;
-    try { createData = await createRes.json(); } catch (parseError) { parseError.photoUploadStage = 'record'; throw parseError; }
+    try { createData = await createRes.json(); } catch (parseError) { parseError.photoUploadStage = 'record'; await cleanupStorage(path); throw parseError; }
     if (!createData || !createData.data) {
+      await cleanupStorage(path);
       throw createPhotoUploadError('record');
     }
     return createData.data;
