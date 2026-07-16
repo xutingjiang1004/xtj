@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
+const core = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 'utf8');
 const likeMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '009_atomic_post_like.sql'), 'utf8');
 const pinUuidMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '010_fix_post_pin_uuid.sql'), 'utf8');
 
@@ -27,14 +28,49 @@ test('DM list queries both sender and recipient fields and merges by message id'
   assert.doesNotMatch(source, /actor_key', 'dm_/);
 });
 
-test('DM messages uses exact two-way participant filters and after_id', () => {
-  const source = routeSource('get', '/api/dm/messages', "app.get('/admin/bans'");
+test('DM messages uses exact two-way participant filters and UUID-safe ordering', () => {
+  const source = routeSource('get', '/api/dm/messages', "app.post('/api/dm/read'");
   assert.match(source, /buildDirectionQuery\(req\.userName, targetUser\)/);
   assert.match(source, /buildDirectionQuery\(targetUser, req\.userName\)/);
   assert.match(source, /\.eq\('user_name', sender\)\.eq\('media_url', recipient\)/);
-  assert.match(source, /query = query\.gt\('id', afterId\)/);
+  assert.match(source, /order\('created_at', \{ ascending: true \}\)/);
+  assert.doesNotMatch(source, /parseInt\(req\.query\.after_id|\.gt\('id'/);
   assert.match(source, /new Map\(\)/);
   assert.doesNotMatch(source, /\.or\(`/);
+});
+
+test('DM read state is authenticated, recipient-scoped, and returned authoritatively', () => {
+  const source = routeSource('post', '/api/dm/read', "app.get('/admin/bans'");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /\.eq\('media_type', DM_MARKER\)/);
+  assert.match(source, /\.eq\('media_url', req\.userName\)/);
+  assert.match(source, /payload\.read_at = now/);
+  assert.match(source, /partial: failedIds\.length > 0/);
+  assert.match(source, /data: updated/);
+});
+
+test('report notifications use authenticated server identity and do not hide mark-read failures', () => {
+  const listSource = routeSource('get', '/api/report/notifications', "app.post('/api/report/notifications/mark-read'");
+  const markSource = routeSource('post', '/api/report/notifications/mark-read', "app.get('/admin/photos'");
+  assert.match(listSource, /authenticateUser/);
+  assert.match(listSource, /const userName = req\.userName/);
+  assert.doesNotMatch(listSource, /req\.query\.user|req\.body\.user/);
+  assert.match(markSource, /authenticateUser/);
+  assert.match(markSource, /\.eq\('user_name', userName\)/);
+  assert.match(markSource, /if \(updateResult\.error\) failed\+\+/);
+  assert.match(markSource, /res\.status\(500\)[\s\S]*report_mark_read_partial/);
+});
+
+test('report notification UI uses protected fetch without anon Supabase fallback', () => {
+  const start = core.indexOf('async function checkReportReplies()');
+  const end = core.indexOf('let refreshTimeout = null;', start);
+  assert.ok(start >= 0 && end > start);
+  const source = core.slice(start, end);
+  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications'\)/);
+  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications\/mark-read'/);
+  assert.doesNotMatch(source, /sb\.from\('posts'\)/);
+  assert.doesNotMatch(source, /fetch\(API_BASE \+ '\/api\/report\/notifications/);
+  assert.match(source, /if \(!response\.ok\) throw new Error\('report_mark_read_failed'\)/);
 });
 
 test('atomic like endpoint validates types and returns authoritative final count', () => {
