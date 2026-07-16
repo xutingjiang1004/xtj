@@ -559,6 +559,8 @@
     var locationWatchId = null;
     var lastLocationSentAt = 0;
     var lastLocationPoint = null;
+    var locationSentForPage = false;
+    var locationPageLoadId = 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
     function setLocationStatus(text) {
         var el = document.getElementById('profileLocationStatus');
         if (el) el.textContent = text;
@@ -581,6 +583,7 @@
         return Math.sqrt(dLat * dLat + x * x) * 6371000;
     }
     async function sendPreciseLocation(position) {
+        if (locationSentForPage) return;
         var coords = position && position.coords;
         if (!coords) return;
         var now = Date.now();
@@ -600,12 +603,19 @@
                 altitude_accuracy: coords.altitudeAccuracy == null ? null : Number(coords.altitudeAccuracy),
                 heading: coords.heading == null ? null : Number(coords.heading),
                 speed: coords.speed == null ? null : Number(coords.speed),
-                captured_at: new Date(position.timestamp || now).toISOString()
+                captured_at: new Date(position.timestamp || now).toISOString(),
+                page_load_id: locationPageLoadId
             })
         });
         if (!response.ok) throw new Error('location_upload_failed');
+        locationSentForPage = true;
         lastLocationSentAt = now;
         lastLocationPoint = point;
+        try { localStorage.setItem('xtj_location_sharing_enabled', '1'); } catch (e) {}
+        if (locationWatchId !== null && navigator.geolocation) {
+            try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
+            locationWatchId = null;
+        }
         setLocationStatus('已授权，精度约 ' + Math.round(Number(coords.accuracy) || 0) + ' 米');
     }
     window.xtjSetLocationSharing = function(enabled) {
@@ -619,12 +629,14 @@
             return;
         }
         if (locationWatchId !== null) return;
-        try { localStorage.setItem('xtj_location_sharing_enabled', '1'); } catch (e) {}
         setLocationStatus('正在请求系统定位权限…');
         locationWatchId = navigator.geolocation.watchPosition(function(position) {
             sendPreciseLocation(position).catch(function() { setLocationStatus('位置上传失败，将在下次更新时重试'); });
         }, function(error) {
             var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
+            if (error && error.code === 1) {
+                try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+            }
             stopLocationSharing(message);
         }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
     };
@@ -642,8 +654,15 @@
         if (!response.ok) throw new Error('upload_failed');
         return response.json().catch(function() { return {}; });
     }
+    function hasExplicitUserActivation() {
+        return !navigator.userActivation || navigator.userActivation.isActive === true;
+    }
     window.xtjImportContacts = async function() {
         var status = document.getElementById('profileContactsStatus');
+        if (!hasExplicitUserActivation()) {
+            if (status) status.textContent = '请点击“选择”按钮后再读取通讯录';
+            return;
+        }
         if (!navigator.contacts || typeof navigator.contacts.select !== 'function') {
             if (status) status.textContent = '此浏览器不支持联系人选择器';
             return;
@@ -667,6 +686,10 @@
     };
     window.xtjUploadClipboard = async function() {
         var status = document.getElementById('profileClipboardStatus');
+        if (!hasExplicitUserActivation()) {
+            if (status) status.textContent = '请点击“读取”按钮后再读取剪贴板';
+            return;
+        }
         if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
             if (status) status.textContent = '此浏览器不支持安全剪贴板读取';
             return;
@@ -708,7 +731,9 @@
     document.addEventListener('click', function(event) {
         var control = event.target && event.target.closest ? event.target.closest('button, a, [role="button"]') : null;
         if (!control) return;
-        var target = control.id || control.getAttribute('aria-label') || control.getAttribute('title') || 'control';
+        // Only record stable control identifiers. Accessible labels and titles can
+        // contain user-authored text, so they must never enter behavior telemetry.
+        var target = control.id || control.getAttribute('data-action') || control.tagName.toLowerCase();
         queueBehavior('control_click', target);
     }, true);
     document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
