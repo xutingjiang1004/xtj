@@ -45,24 +45,21 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=d763c9c128" />
+    <link rel="stylesheet" href="css/style.min.css?v=376d5688f2" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=d763c9c128" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a3c8537f2d" /></noscript>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=c057cc7efc" />
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=376d5688f2" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a3c8537f2d" /></noscript>
+    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=36837a3dfc" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=6b04f75e2e">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=4e06c5d0c5">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a3c8537f2d">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=877f3ab355">
-    <meta name="xtj-module-pro-style" content="css/pro-style.min.css?v=6238ca29e4">
-    <meta name="xtj-module-pro-upgrade" content="js/pro-upgrade.min.js?v=df92b7eb67">
-    <meta name="xtj-module-pro-script" content="js/pro-style.min.js?v=5f976a5f1e">
-    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=7c0ecd6d11">
-    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=8596593e4a">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=8459528844">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=3c5c22c595">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=b649bfc53f">
-    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=4af1396e85">
-    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=7fad4c872e">
-    <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=16b6f2dfb5">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=87adad3c72">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=87da1a8f98">
+    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=999f122d4b">
+    <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=6fc16f88ba">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=083e7948b6">
     <meta name="xtj-module-features" content="js/features.min.js?v=4fc5383fd8">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=dc9c360b6a">
@@ -381,6 +378,9 @@
                         </button>
                     </div>
                     <div class="pw-upload-result-actions" id="pwUploadResultActions" hidden>
+                        <button type="button" class="pw-upload-result-action" id="pwUploadResultRetry" data-action="retry-failed" hidden>
+                            重试失败项
+                        </button>
                         <button type="button" class="pw-upload-result-action" id="pwUploadResultRefreshBtn" data-action="refresh-photos">
                             刷新照片
                         </button>
@@ -426,40 +426,6 @@
                         <div class="profile-activity-list" id="profileCommentsList"></div>
                         <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
                     </section>
-                </div>
-                <div class="xtj-vip-card" id="vipCard" onclick="openVipModal()">
-                    <div class="xtj-vip-card-inner">
-                        <div class="xtj-vip-card-left">
-                            <div class="xtj-vip-card-icon">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
-                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                                </svg>
-                            </div>
-                            <div class="xtj-vip-card-text">
-                                <span class="xtj-vip-card-title">XTJ Pro</span>
-                                <span class="xtj-vip-card-sub" id="vipCardSub">活动由管理员限时发布</span>
-                            </div>
-                        </div>
-                        <span class="xtj-vip-card-badge" id="vipCardBadge">开通</span>
-                    </div>
-                </div>
-                <div class="profile-pro-style-entry-wrap">
-                    <button
-                        type="button"
-                        class="profile-pro-style-entry"
-                        id="profileProStyleEntry"
-                        onclick="openProStylePage()"
-                    >
-                        <span class="profile-pro-style-entry-icon" aria-hidden="true">✨</span>
-                        <span class="profile-pro-style-entry-main">
-                            <span class="profile-pro-style-entry-title">Pro 装扮</span>
-                            <span class="profile-pro-style-entry-sub" id="proStyleEntryStatus">
-                                专属主题、聊天气泡、帖子卡片
-                            </span>
-                        </span>
-                        <span class="profile-pro-style-entry-badge" id="proStyleEntryBadge">进入</span>
-                        <span class="profile-pro-style-entry-arrow" aria-hidden="true">›</span>
-                    </button>
                 </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
@@ -513,329 +479,7 @@
                     <span class="profile-total-item">评论 <strong id="profileTotalComments">0</strong></span>
                 </div>
                 </div><!-- /profileMainView -->
-                <section class="profile-subpage profile-pro-style-page" id="profileProStylePage" hidden>
-                    <div class="profile-subpage-head">
-                        <button type="button" class="profile-subpage-back" onclick="closeProStylePage()" aria-label="返回我的页">‹</button>
-                        <div class="profile-subpage-title-wrap">
-                            <div class="profile-subpage-kicker">XTJ Pro</div>
-                            <h2 class="profile-subpage-title">Pro 装扮</h2>
-                            <p class="profile-subpage-sub">管理你的专属主题、聊天气泡和帖子卡片装饰。</p>
-                        </div>
-                    </div>
-                    <div class="pro-style-category-cards" id="proStyleCategoryCards">
-                        <button type="button" class="pro-style-category-card" data-category="theme" onclick="showProStyleCategory('theme')">
-                            <div class="pro-style-category-icon">🎨</div>
-                            <div class="pro-style-category-info">
-                                <div class="pro-style-category-title">专属主题</div>
-                                <div class="pro-style-category-desc">整体界面配色风格</div>
-                            </div>
-                            <span class="pro-style-category-arrow">›</span>
-                        </button>
-                        <button type="button" class="pro-style-category-card" data-category="bubble" onclick="showProStyleCategory('bubble')">
-                            <div class="pro-style-category-icon">💬</div>
-                            <div class="pro-style-category-info">
-                                <div class="pro-style-category-title">聊天气泡</div>
-                                <div class="pro-style-category-desc">聊天消息气泡风格</div>
-                            </div>
-                            <span class="pro-style-category-arrow">›</span>
-                        </button>
-                        <button type="button" class="pro-style-category-card" data-category="post" onclick="showProStyleCategory('post')">
-                            <div class="pro-style-category-icon">🪴</div>
-                            <div class="pro-style-category-info">
-                                <div class="pro-style-category-title">帖子卡片装饰</div>
-                                <div class="pro-style-category-desc">帖子边框与装饰样式</div>
-                            </div>
-                            <span class="pro-style-category-arrow">›</span>
-                        </button>
-                    </div>
-                    <!-- 专属主题面板 -->
-                    <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelTheme" hidden>
-                        <div class="pro-style-category-panel-head">
-                            <button type="button" class="pro-style-category-back" onclick="showProStyleLanding()" aria-label="返回总览">‹ 返回</button>
-                            <span class="pro-style-category-panel-title">专属主题</span>
-                        </div>
-                        <label class="profile-pro-style-field">
-                            <select id="proThemeSelect" class="pro-style-native-select">
-                                <option value="default">默认</option>
-                                <option value="mint">薄荷绿</option>
-                                <option value="aqua">海盐蓝</option>
-                                <option value="sakura">樱雾粉</option>
-                                <option value="lavender">月光紫</option>
-                            </select>
-                            <div class="pro-style-preview-grid" data-pro-style-type="theme">
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="theme" data-pro-style-value="default">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="theme-preview is-default" aria-hidden="true">
-                                        <span class="theme-preview-topbar"></span>
-                                        <span class="theme-preview-surface">
-                                            <span class="theme-preview-title-line"></span>
-                                            <span class="theme-preview-card">
-                                                <span class="theme-preview-card-line is-strong"></span>
-                                                <span class="theme-preview-card-line"></span>
-                                                <span class="theme-preview-card-action"></span>
-                                            </span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">默认</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="theme" data-pro-style-value="mint">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="theme-preview is-mint" aria-hidden="true">
-                                        <span class="theme-preview-topbar"></span>
-                                        <span class="theme-preview-surface">
-                                            <span class="theme-preview-title-line"></span>
-                                            <span class="theme-preview-card">
-                                                <span class="theme-preview-card-line is-strong"></span>
-                                                <span class="theme-preview-card-line"></span>
-                                                <span class="theme-preview-card-action"></span>
-                                            </span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">薄荷绿</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="theme" data-pro-style-value="aqua">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="theme-preview is-aqua" aria-hidden="true">
-                                        <span class="theme-preview-topbar"></span>
-                                        <span class="theme-preview-surface">
-                                            <span class="theme-preview-title-line"></span>
-                                            <span class="theme-preview-card">
-                                                <span class="theme-preview-card-line is-strong"></span>
-                                                <span class="theme-preview-card-line"></span>
-                                                <span class="theme-preview-card-action"></span>
-                                            </span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">海盐蓝</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="theme" data-pro-style-value="sakura">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="theme-preview is-sakura" aria-hidden="true">
-                                        <span class="theme-preview-topbar"></span>
-                                        <span class="theme-preview-surface">
-                                            <span class="theme-preview-title-line"></span>
-                                            <span class="theme-preview-card">
-                                                <span class="theme-preview-card-line is-strong"></span>
-                                                <span class="theme-preview-card-line"></span>
-                                                <span class="theme-preview-card-action"></span>
-                                            </span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">樱雾粉</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="theme" data-pro-style-value="lavender">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="theme-preview is-lavender" aria-hidden="true">
-                                        <span class="theme-preview-topbar"></span>
-                                        <span class="theme-preview-surface">
-                                            <span class="theme-preview-title-line"></span>
-                                            <span class="theme-preview-card">
-                                                <span class="theme-preview-card-line is-strong"></span>
-                                                <span class="theme-preview-card-line"></span>
-                                                <span class="theme-preview-card-action"></span>
-                                            </span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">月光紫</span>
-                                </button>
-                            </div>
-                        </label>
-                        <div class="profile-pro-style-panel-actions">
-                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="theme" onclick="saveCurrentUserStylePart('theme')">保存</button>
-                        </div>
-                    </div>
-                    <!-- 聊天气泡面板 -->
-                    <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelBubble" hidden>
-                        <div class="pro-style-category-panel-head">
-                            <button type="button" class="pro-style-category-back" onclick="showProStyleLanding()" aria-label="返回总览">‹ 返回</button>
-                            <span class="pro-style-category-panel-title">聊天气泡</span>
-                        </div>
-                        <label class="profile-pro-style-field">
-                            <select id="proBubbleSelect" class="pro-style-native-select">
-                                <option value="default">默认</option>
-                                <option value="mint">薄荷玻璃</option>
-                                <option value="aqua">海盐蓝</option>
-                                <option value="cream">奶油白</option>
-                                <option value="sakura">樱花粉</option>
-                                <option value="lavender">雾紫</option>
-                            </select>
-                            <div class="pro-style-preview-grid" data-pro-style-type="bubble">
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="default">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-default" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">默认气泡</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">默认</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="mint">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-mint" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">薄荷玻璃</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">薄荷玻璃</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="aqua">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-aqua" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">海盐蓝</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">海盐蓝</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="cream">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-cream" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">奶油白</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">奶油白</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="sakura">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-sakura" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">樱花粉</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">樱花粉</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="bubble" data-pro-style-value="lavender">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="bubble-preview is-lavender" aria-hidden="true">
-                                        <span class="bubble-preview-row">
-                                            <span class="bubble-preview-msg">你好呀</span>
-                                        </span>
-                                        <span class="bubble-preview-row is-right">
-                                            <span class="bubble-preview-msg sent">雾紫</span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">雾紫</span>
-                                </button>
-                            </div>
-                        </label>
-                        <div class="profile-pro-style-panel-actions">
-                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="bubble" onclick="saveCurrentUserStylePart('bubble')">保存</button>
-                        </div>
-                    </div>
-                    <!-- 帖子卡片装饰面板 -->
-                    <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelPost" hidden>
-                        <div class="pro-style-category-panel-head">
-                            <button type="button" class="pro-style-category-back" onclick="showProStyleLanding()" aria-label="返回总览">‹ 返回</button>
-                            <span class="pro-style-category-panel-title">帖子卡片装饰</span>
-                        </div>
-                        <label class="profile-pro-style-field">
-                            <select id="proPostStyleSelect" class="pro-style-native-select">
-                                <option value="default">默认</option>
-                                <option value="clean_border">清透边框</option>
-                                <option value="leaf_corner">叶子</option>
-                                <option value="soft_glow">柔光卡片</option>
-                                <option value="minimal_pro">极简 Pro</option>
-                            </select>
-                            <div class="pro-style-preview-grid" data-pro-style-type="post">
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="default">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="post-card-preview is-default" aria-hidden="true">
-                                        <span class="post-card-preview-head">
-                                            <span class="post-card-preview-avatar"></span>
-                                            <span class="post-card-preview-user"></span>
-                                        </span>
-                                        <span class="post-card-preview-line is-strong"></span>
-                                        <span class="post-card-preview-line"></span>
-                                        <span class="post-card-preview-meta">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">默认</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="clean_border">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="post-card-preview is-clean-border" aria-hidden="true">
-                                        <span class="post-card-preview-head">
-                                            <span class="post-card-preview-avatar"></span>
-                                            <span class="post-card-preview-user"></span>
-                                        </span>
-                                        <span class="post-card-preview-line is-strong"></span>
-                                        <span class="post-card-preview-line"></span>
-                                        <span class="post-card-preview-meta">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">清透边框</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="leaf_corner">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="post-card-preview is-leaf-corner" aria-hidden="true">
-                                        <span class="post-card-preview-head">
-                                            <span class="post-card-preview-avatar"></span>
-                                            <span class="post-card-preview-user"></span>
-                                        </span>
-                                        <span class="post-card-preview-line is-strong"></span>
-                                        <span class="post-card-preview-line"></span>
-                                        <span class="post-card-preview-meta">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">叶子</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="soft_glow">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="post-card-preview is-soft-glow" aria-hidden="true">
-                                        <span class="post-card-preview-head">
-                                            <span class="post-card-preview-avatar"></span>
-                                            <span class="post-card-preview-user"></span>
-                                        </span>
-                                        <span class="post-card-preview-line is-strong"></span>
-                                        <span class="post-card-preview-line"></span>
-                                        <span class="post-card-preview-meta">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">柔光卡片</span>
-                                </button>
-                                <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="minimal_pro">
-                                    <span class="pro-style-card-check" aria-hidden="true"></span>
-                                    <span class="post-card-preview is-minimal-pro" aria-hidden="true">
-                                        <span class="post-card-preview-head">
-                                            <span class="post-card-preview-avatar"></span>
-                                            <span class="post-card-preview-user"></span>
-                                        </span>
-                                        <span class="post-card-preview-line is-strong"></span>
-                                        <span class="post-card-preview-line"></span>
-                                        <span class="post-card-preview-meta">
-                                            <span></span><span></span><span></span>
-                                        </span>
-                                    </span>
-                                    <span class="pro-style-option-title">极简 Pro</span>
-                                </button>
-                            </div>
-                        </label>
-                        <div class="profile-pro-style-panel-actions">
-                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="post" onclick="saveCurrentUserStylePart('post')">保存</button>
-                        </div>
-                    </div>
-                </section>
-            </div>
+           </div>
         </div>
     </div>
 
@@ -1234,40 +878,6 @@
         </div>
     </div>
 
-    <!-- VIP 套餐购买模态框 -->
-    <div class="modal-overlay" id="vipModal" onclick="if(event.target===this)closeModal('vipModal')">
-        <div class="modal-box glass vip-modal" onclick="event.stopPropagation()">
-            <div class="vip-modal-head">
-                <h3 class="vip-modal-title">
-                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                    </svg>
-                    Pro 会员
-
-                </h3>
-                <button class="btn btn-ghost" onclick="closeModal('vipModal')" style="padding:4px 12px;font-size:16px;">✕</button>
-            </div>
-            <div class="vip-modal-body">
-                <!-- 当前 Pro 状态条（已开通时显示，轻量） -->
-                <div id="vipStatusBanner" class="vip-status-banner" style="display:none;"></div>
-
-                <!-- Pro 活动区（必显示，渲染空状态 / 活动卡片） -->
-                <div id="proGiftSection" class="pro-gift-section">
-                    <div class="pro-gift-section-head">
-                        <div class="pro-gift-section-icon">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-                        </div>
-                        <div class="pro-gift-section-title">
-                            <span class="pro-gift-section-badge">限时</span>
-                            活动领 Pro
-                        </div>
-                    </div>
-                    <div id="proGiftList" class="pro-gift-list"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- 公告模态框 -->
     <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
         <div class="announcement-modal" onclick="event.stopPropagation()">
@@ -1413,7 +1023,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=6ca072a73f"></script>
+    <script defer src="js/core.min.js?v=ef47d344cd"></script>
     <script defer src="js/login-device.min.js?v=7b2d097223"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
 
