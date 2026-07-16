@@ -134,6 +134,24 @@ test('post delete is authenticated, idempotent, and verifies physical removal', 
   assert.match(source, /code: result\.code \|\| 'delete_not_applied'/);
 });
 
+test('post delete status is protected and reports authoritative existence', () => {
+  const source = routeSource('post', '/api/post/delete-status', "app.post('/api/post/like'");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /exists: false, deleted: true/);
+  assert.match(source, /exists: true, deleted: false/);
+  assert.match(source, /lookup\.data\.user_name !== req\.userName/);
+});
+
+test('missing hard-delete RPC uses checked service-role cleanup and verifies absence', () => {
+  const source = server.slice(server.indexOf('async function hardDeleteContent'), server.indexOf('var _storageCleanupRunning'));
+  assert.match(source, /PGRST202[\s\S]*42883/);
+  assert.match(source, /from\('likes'\)\.delete\(\)\.eq\('post_id', params\.postId\)/);
+  assert.match(source, /from\('comments'\)\.delete\(\)\.eq\('post_id', params\.postId\)/);
+  assert.match(source, /\['__post_view__', '__report__'\]/);
+  assert.match(source, /from\('posts'\)\.delete\(\)\.eq\('id', params\.postId\)/);
+  assert.match(source, /Content still exists after delete/);
+});
+
 test('photo delete removes the database row before durable storage cleanup', () => {
   const source = routeSource('post', '/api/photo/delete', "app.post('/api/post/create'");
   assert.match(source, /hardDeleteContent\(/);
@@ -141,7 +159,9 @@ test('photo delete removes the database row before durable storage cleanup', () 
   assert.ok(source.indexOf('hardDeleteContent({') < source.indexOf("supabase.storage.from('uploads').remove(storagePaths)"));
   assert.match(source, /deleted: deleteResult\.deleted === true/);
   assert.match(source, /already_deleted: deleteResult\.already_deleted === true/);
-  assert.match(source, /cleanup_pending: storageErrors\.length > 0/);
+  assert.match(source, /var cleanupStatePending = storageErrors\.length > 0/);
+  assert.match(source, /if \(cleanupStateUpdate\.error\) \{[\s\S]*cleanupStatePending = true/);
+  assert.match(source, /cleanup_pending: cleanupStatePending/);
 });
 
 test('public photo queries exclude historical soft-deleted rows', () => {

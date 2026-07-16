@@ -72,7 +72,10 @@
     _lastDtDedupKey: '',
     _lastConfigVersion: 0,
     resizeTimer: null,
-    _configRefreshTimer: null
+    _configRefreshTimer: null,
+    historyRequestId: 0,
+    conversationRequestId: 0,
+    lifecycleId: 0
   };
 
   function getAiStatusText() {
@@ -4731,6 +4734,8 @@
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;
     else S.loading = true;
+    var requestId = ++S.historyRequestId;
+    var requestedConversationId = S.conversationId;
 
     if (!before && messagesEl) {
       messagesEl.setAttribute('aria-busy', 'true');
@@ -4747,6 +4752,8 @@
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
       var r = await apiRequest('GET', '/chat/history' + qs);
+
+      if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
 
       if (!r.ok || !r.data) {
         if (!before) {
@@ -4791,9 +4798,11 @@
         } catch (e2) {}
       }
     } finally {
-      S.loading = false;
-      S.loadingMore = false;
-      if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+      if (requestId === S.historyRequestId) {
+        S.loading = false;
+        S.loadingMore = false;
+        if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+      }
     }
   }
 
@@ -4895,6 +4904,10 @@
       await new Promise(function(resolve) { setTimeout(resolve, 100); });
     }
     
+    var requestId = ++S.conversationRequestId;
+    S.historyRequestId += 1;
+    S.loading = false;
+    S.loadingMore = false;
     S.conversationId = cid;
     writeConvId(cid);
     S.messages = [];
@@ -4905,16 +4918,19 @@
     
     try {
       var r = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=' + HISTORY_PAGE_SIZE);
+      if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
       if (r && r.ok && r.data && r.data.messages) {
         S.messages = r.data.messages;
         S.hasMore = r.data.has_more;
         S.oldestCursor = r.data.oldest || null;
       }
     } catch (e) {
+      if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
       try { console.warn('[AI-CONV] switchConversation error:', e && e.message); } catch(ee) {}
       notify('加载对话历史失败');
     }
     
+    if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
     if (S.messagesEl) {
       S.messagesEl.innerHTML = '';
       if (S.messages.length) {
@@ -5285,8 +5301,10 @@ function showChatMessages() {
     // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
     restoreDeepThinkState();
     S.active = true;
+    var lifecycleId = ++S.lifecycleId;
     window.__xtjAiChatActive = true;
     var authOk = await ensureUserAuthOrNotify();
+    if (lifecycleId !== S.lifecycleId || !S.active) return;
     if (!authOk) {
       S.active = false;
       window.__xtjAiChatActive = false;
@@ -5338,10 +5356,12 @@ function showChatMessages() {
 
     try {
       var cfg = await ensureConfig();
+      if (lifecycleId !== S.lifecycleId || !S.active) return;
       applyConfigToUI(cfg);
     } catch (e4) {}
 
     await loadHistory(r.messagesEl, null);
+    if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
 
     // fallback: localStorage 鐨?convId 鏃犳晥锛堟病鏈夊巻鍙叉秷鎭級锛屽皾璇曞姞杞芥渶杩戜細璇?
     if (!S.messages.length && S.conversationId) {
@@ -5423,6 +5443,9 @@ function showChatMessages() {
   function closeAiChat() {
     if (!S.active) return;
     S.active = false;
+    S.lifecycleId += 1;
+    S.historyRequestId += 1;
+    S.conversationRequestId += 1;
     window.__xtjAiChatActive = false;
     clearReplyTimer();
     abortCurrentRequest(); // 鍐呴儴宸茶皟鐢?clearStreamCleanup

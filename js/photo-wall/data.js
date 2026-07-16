@@ -140,14 +140,18 @@
   function mergePhotoLists(primary, fallback){
     var deleted = getDeletedIds();
     var map = new Map();
-    function add(item, source){
+    function add(item){
       if (!item || !item.id || !item.imageUrl || item.imageUrl === '__deleted__') return;
       if (item.mediaKind === 'video' || /^video\//i.test(item.mimeType || '')) return;
-      if (source === 'local' && deleted.indexOf(String(item.id)) >= 0) return;
+      // A hard delete may reach Realtime/BroadcastChannel before a CDN or API
+      // snapshot has converged. Tombstones must therefore reject stale cloud
+      // rows as well as cached rows; UUIDs are never reused for uploads.
+      var identity = item.cloudId != null ? String(item.cloudId) : String(item.id);
+      if (deleted.indexOf(identity) >= 0 || deleted.indexOf(String(item.id)) >= 0) return;
       if (!map.has(String(item.id))) map.set(String(item.id), item);
     }
-    (Array.isArray(primary) ? primary : []).forEach(function(item){ add(item, 'cloud'); });
-    (Array.isArray(fallback) ? fallback : []).forEach(function(item){ add(item, 'local'); });
+    (Array.isArray(primary) ? primary : []).forEach(add);
+    (Array.isArray(fallback) ? fallback : []).forEach(add);
     return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
   }
 
@@ -229,7 +233,9 @@
     if (id == null) return false;
     var key = String(id);
     var before = window.photoWallData.length;
-    window.photoWallData = window.photoWallData.filter(function(item){ return String(item.id) !== key; });
+    window.photoWallData = window.photoWallData.filter(function(item){
+      return String(item.id) !== key && String(item.cloudId || '') !== key;
+    });
     saveLocalPhotoWallData();
     if (shouldRender !== false && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
       window.renderPhotoWallWithoutReload();
@@ -389,7 +395,7 @@
     var now = Date.now();
     if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
     _lastVisibilitySync = now;
-    loadPhotoWallData(true).then(function(){
+    return loadPhotoWallData(true).then(function(){
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
     });
   }
@@ -413,4 +419,3 @@
   window.deletePhotoWallPhoto = deletePhotoWallPhoto;
   window.syncPhotoViewCount = syncPhotoViewCount;
 })();
-

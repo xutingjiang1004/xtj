@@ -5363,6 +5363,12 @@
         @media (hover: hover) and (pointer: fine) {
             .pw-album-card:hover { transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.08); }
         }
+        .profile-data-action {
+            min-width: 56px;
+            min-height: 44px;
+            padding: 8px 14px;
+            flex: 0 0 auto;
+        }
         .pw-album-cover {
             width:100%;
             aspect-ratio:4 / 3;
@@ -14052,6 +14058,23 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   #photoPreviewOverlay .pp-preview-toolbar svg {
     width: 18px !important;
     height: 18px !important;
+  }
+}
+
+/* Keep the physical touch target at 44px even when the compact visual
+   breakpoint above is active. Five controls still fit within a 320px view. */
+@media (max-width: 375px) and (pointer: coarse) {
+  #photoPreviewOverlay .pp-preview-toolbar > button,
+  #photoPreviewOverlay .pp-zoom-btn,
+  #photoPreviewOverlay .pp-info-btn,
+  #photoPreviewOverlay .pp-share-btn,
+  #photoPreviewOverlay .pp-rotate-btn,
+  #photoPreviewOverlay .pp-delete-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    flex-basis: 44px !important;
   }
 }
 

@@ -2308,6 +2308,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             };
 
             window.doLogout = async function () {
+                try { if (typeof window.xtjStopLocationSharing === 'function') window.xtjStopLocationSharing('位置共享已关闭'); } catch (e) {}
                 currentUser = "";
                 window.currentUser = currentUser;
                 clearUserSessionStorage();
@@ -3436,30 +3437,45 @@ function renderProfileActivityList(kind) {
             };
             var commBtn = document.getElementById("commBtn");
             if (commBtn) commBtn.onclick = async () => {
+                if (commBtn.disabled) return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
                 const content = document.getElementById("commInp").value.trim();
                 if (!content) { showToast("请输入评论内容"); return; }
                 const btn = document.getElementById("commBtn");
+                const targetPostId = String(activePostId || '').trim().toLowerCase();
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
+                    showToast("帖子参数无效");
+                    return;
+                }
                 btn.textContent = "提交中..";
                 btn.disabled = true;
                 try {
                     const response = await window.xtjProtectedFetch('/api/post/comment', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ post_id: activePostId, content: content })
+                        body: JSON.stringify({ post_id: targetPostId, content: content })
                     });
-                    const result = await response.json();
+                    const result = await response.json().catch(function() { return {}; });
                     if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
                     touchUserSession(false);
                     closeModal("commentModal");
                     showToast("评论成功");
                     var scrollEl = document.getElementById('panelPosts');
                     var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
-                    await loadFeed(true);
+                    var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
+                    if (insertedComment) {
+                        feedAllComments = (feedAllComments || []).filter(function(item) {
+                            return !(item && item.id != null && String(item.id) === String(insertedComment.id));
+                        }).concat([insertedComment]);
+                        writeFeedCacheSnapshot();
+                        await renderFeedFromMemoryState();
+                    } else {
+                        await loadFeed(true);
+                    }
                     requestAnimationFrame(function() {
                         var p = document.getElementById('panelPosts');
                         if (p && savedScroll > 0) p.scrollTop = savedScroll;
-                        var postEl = document.querySelector('.post[data-post-id="' + activePostId + '"]');
+                        var postEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
                         if (postEl) postEl.classList.add('visible');
                     });
                     loadProfileActivity(true);
@@ -3548,6 +3564,34 @@ function renderProfileActivityList(kind) {
                     return String(post.id) !== String(postId);
                 });
             }
+            async function confirmPostDeleteStatus(postId) {
+                var controller = typeof AbortController === 'function' ? new AbortController() : null;
+                var statusTimeoutMs = Number(window.__xtjPostDeleteStatusTimeoutMs) > 0 ? Number(window.__xtjPostDeleteStatusTimeoutMs) : 8000;
+                var timer = setTimeout(function() { if (controller) controller.abort(); }, statusTimeoutMs);
+                try {
+                    var response = await window.xtjProtectedFetch('/api/post/delete-status', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: postId }),
+                        signal: controller ? controller.signal : undefined
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok) return { confirmed: false };
+                    return { confirmed: true, deleted: result.deleted === true && result.exists === false };
+                } catch (_) {
+                    return { confirmed: false };
+                } finally {
+                    clearTimeout(timer);
+                }
+            }
+            function applyConfirmedPostDeletion(postId, session) {
+                removeDeletedPostFromFeed(postId);
+                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+                if (session.postEl && session.postEl.parentNode) { try { session.postEl.remove(); } catch (e) {} }
+                if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
+                cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
+                showToast("帖子已删除");
+                if (typeof loadFeed === 'function') { try { setTimeout(function() { loadFeed(true); }, 0); } catch(e) {} }
+            }
             window.openDelete = function (postId, ownerKey) {
                 // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
                 if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
@@ -3583,14 +3627,7 @@ function renderProfileActivityList(kind) {
                 const session = getDeleteSession();
                 const targetPostId = String(delPostId);
                 const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
-                if (!currentPost) {
-                    cleanupDeleteSession({ toast: "帖子不存在或已被删除" });
-                    if (typeof loadFeed === 'function') {
-                        try { loadFeed(true); } catch (e) {}
-                    }
-                    return;
-                }
-                if (!canDeletePost(currentPost)) {
+                if (currentPost && !canDeletePost(currentPost)) {
                     cleanupDeleteSession({ toast: "无权删除这条帖子" });
                     return;
                 }
@@ -3610,36 +3647,49 @@ function renderProfileActivityList(kind) {
                 }
                 session.timeoutId = setTimeout(function() {
                     if (finished) return;
-                    console.warn('[delBtn] 删除超时');
+                    console.warn('[delBtn] delete flow exceeded safety deadline');
                     finished = true;
-                    cleanupDeleteSession({ toast: "删除超时，帖子可能已删除，请刷新查看" });
-                    // 超时后强制后台刷新 feed（fire-and-forget）
+                    cleanupDeleteSession({ toast: "删除状态确认超时，请刷新后重试" });
                     if (typeof loadFeed === 'function') {
                         try { loadFeed(true); } catch (e) {}
                     }
-                }, 10000);
+                }, 30000);
 
                 try {
-                    const deletePromise = window.xtjProtectedFetch('/api/post/delete', {
-                        method: 'POST',
-                        body: JSON.stringify({ post_id: targetPostId })
-                    });
-                    const requestTimeout = new Promise(function(_, reject) {
-                        setTimeout(function() { reject(new Error('delete_timeout')); }, 8000);
-                    });
+                    var deleteController = typeof AbortController === 'function' ? new AbortController() : null;
+                    var deleteTimedOut = false;
+                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 15000;
+                    var deleteTimer = setTimeout(function() {
+                        deleteTimedOut = true;
+                        if (deleteController) deleteController.abort();
+                    }, deleteTimeoutMs);
                     let deleteResponse;
                     try {
-                        deleteResponse = await Promise.race([deletePromise, requestTimeout]);
+                        deleteResponse = await window.xtjProtectedFetch('/api/post/delete', {
+                            method: 'POST',
+                            body: JSON.stringify({ post_id: targetPostId }),
+                            signal: deleteController ? deleteController.signal : undefined
+                        });
                     } catch (raceErr) {
                         if (finished) return;
-                        if (raceErr && raceErr.message === 'delete_timeout') {
-                            console.warn('[delBtn] delete request timed out');
+                        if (deleteTimedOut) {
+                            console.warn('[delBtn] delete request timed out; confirming authoritative state');
+                            var status = await confirmPostDeleteStatus(targetPostId);
+                            if (finished) return;
                             finished = true;
-                            cleanupDeleteSession({ toast: "删除请求超时，请刷新查看" });
-                            if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
+                            if (status.confirmed && status.deleted) {
+                                applyConfirmedPostDeletion(targetPostId, session);
+                            } else if (status.confirmed) {
+                                cleanupDeleteSession({ toast: "删除未完成，帖子仍然存在，请重试" });
+                            } else {
+                                cleanupDeleteSession({ toast: "无法确认删除状态，请刷新后重试" });
+                                if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
+                            }
                             return;
                         }
                         throw raceErr;
+                    } finally {
+                        clearTimeout(deleteTimer);
                     }
                     if (finished) return;
                     const deleteResult = await deleteResponse.json().catch(function() { return {}; });
@@ -3648,24 +3698,8 @@ function renderProfileActivityList(kind) {
                         cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
                         return;
                     }
-                    removeDeletedPostFromFeed(targetPostId);
-                    if (typeof clearFeedCache === 'function') {
-                        try { clearFeedCache(); } catch (e) {}
-                    }
-                    if (session.postEl && session.postEl.parentNode) {
-                        try { session.postEl.remove(); } catch (e) {}
-                    }
-                    // 同步更新帖子计数（DOM 已移除，sPosts 随之更新）
-                    if (typeof updateFeedStats === 'function') {
-                        try { updateFeedStats(); } catch (e) {}
-                    }
                     finished = true;
-                    cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
-                    showToast("帖子已删除");
-                    // 不再 await，fire-and-forget 后台刷新（用 setTimeout 0 让删除响应先回到 UI）
-                    if (typeof loadFeed === 'function') {
-                        try { setTimeout(function() { loadFeed(true); }, 0); } catch(e) {}
-                    }
+                    applyConfirmedPostDeletion(targetPostId, session);
                 } catch (e) {
                     if (finished) return;
                     console.error('[delBtn] 删除异常:', e);
@@ -5147,13 +5181,14 @@ function renderProfileActivityList(kind) {
 
             window.saveEditPost = async function() {
                 if (!editPostId) return;
+                var btn = document.getElementById("saveEditPostBtn");
+                if (!btn || btn.disabled) return;
                 var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(editPostId); });
                 if (!post || !canEditPost(post)) {
                     showToast("无权编辑这条帖子");
                     return;
                 }
                 var input = document.getElementById("editPostInp");
-                var btn = document.getElementById("saveEditPostBtn");
                 var nextContent = input ? input.value.trim() : "";
                 var nextVisibility = (document.getElementById("editPostVisibilityVal") || {}).value || "public";
                 if (!nextContent) {
@@ -5467,6 +5502,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__pro_gift__")
                     .neq("media_type", "__pro_gift_claim__")
                     .neq("media_type", "__login_event__")
+                    .neq("media_type", "__user_behavior__")
                     .neq("media_type", "__security_alert__")
                     .neq("media_type", "__admin_audit__")
                     .neq("media_type", "__client_error__")
@@ -5495,7 +5531,7 @@ function renderProfileActivityList(kind) {
                     "__attack__", "__user_visit__", "__post_view__", "__ann__", "__ann_read__",
                     "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
                     "__pro_gift__", "__pro_gift_claim__",
-                    "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
+                    "__login_event__", "__user_behavior__", "__security_alert__", "__admin_audit__", "__client_error__",
                     "__email_sent__", "__email_recipient_history__",
                     "__refresh_token__", "__revoked_token__",
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
@@ -5924,6 +5960,8 @@ function renderProfileActivityList(kind) {
             });
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
+                var btn = document.getElementById("pubBtn");
+                if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
@@ -5938,7 +5976,6 @@ function renderProfileActivityList(kind) {
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
-                var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
                 btn.classList.add('is-loading');
                 btn.setAttribute('aria-busy', 'true');
