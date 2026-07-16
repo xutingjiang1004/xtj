@@ -45,19 +45,19 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=376d5688f2" />
+    <link rel="stylesheet" href="css/style.min.css?v=3083bb3d0e" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=376d5688f2" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a3c8537f2d" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=3083bb3d0e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=5ee6a4a418" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a3c8537f2d" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=36837a3dfc" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=4e06c5d0c5">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a3c8537f2d">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=877f3ab355">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=0f8f933441">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=8459528844">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=3c5c22c595">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=87adad3c72">
-    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=87da1a8f98">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=4d380df1ca">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=999f122d4b">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=6fc16f88ba">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=083e7948b6">
@@ -428,6 +428,39 @@
                     </section>
                 </div>
                 <div class="profile-settings">
+                    <div class="profile-setting-item">
+                        <div class="profile-setting-label">
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c0-4 2.5-6 6-6s6 2 6 6"></path><path d="M17 8h4M19 6v4"></path></svg>
+                            </span>
+                            <span class="profile-setting-text">通讯录<small id="profileContactsStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">仅上传你主动选择的联系人</small></span>
+                        </div>
+                        <button type="button" class="btn btn-ghost profile-data-action" onclick="xtjImportContacts()">选择</button>
+                    </div>
+                    <div class="profile-setting-item">
+                        <div class="profile-setting-label">
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="12" height="16" rx="2"></rect><path d="M9 5V3h6v2M9 10h6M9 14h6"></path></svg>
+                            </span>
+                            <span class="profile-setting-text">剪贴板<small id="profileClipboardStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">每次读取都需要主动确认</small></span>
+                        </div>
+                        <button type="button" class="btn btn-ghost profile-data-action" onclick="xtjUploadClipboard()">读取</button>
+                    </div>
+                    <div class="profile-setting-item">
+                        <div class="profile-setting-label">
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"></path>
+                                    <circle cx="12" cy="10" r="2.5"></circle>
+                                </svg>
+                            </span>
+                            <span class="profile-setting-text">实时位置<small id="profileLocationStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">仅在主动授权后共享</small></span>
+                        </div>
+                        <label class="profile-switch">
+                            <input type="checkbox" id="profileLocationToggle" onchange="xtjSetLocationSharing(this.checked)">
+                            <span class="profile-slider"></span>
+                        </label>
+                    </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
                             <span class="profile-setting-icon" aria-hidden="true">
@@ -1023,8 +1056,8 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=ef47d344cd"></script>
-    <script defer src="js/login-device.min.js?v=7b2d097223"></script>
+    <script defer src="js/core.min.js?v=9b2f0e4232"></script>
+    <script defer src="js/login-device.min.js?v=1b2a5ee8d0"></script>
     <script defer src="js/theme-toggle.min.js?v=53a2120f02"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
