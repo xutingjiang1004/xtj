@@ -196,9 +196,24 @@
                 language: (navigator.language || navigator.userLanguage || 'unknown'),
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
                 platform: (navigator.platform || 'unknown'),
+                hardware_concurrency: Number(navigator.hardwareConcurrency) || null,
+                device_memory_gb: Number(navigator.deviceMemory) || null,
+                color_depth: window.screen ? Number(window.screen.colorDepth) || null : null,
+                pixel_depth: window.screen ? Number(window.screen.pixelDepth) || null : null,
+                cookies_enabled: navigator.cookieEnabled === true,
+                online: navigator.onLine !== false,
                 max_touch_points: navigator.maxTouchPoints || 0,
                 touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0)
             };
+            var connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (connection) {
+                meta.network = {
+                    effective_type: String(connection.effectiveType || '').slice(0, 20),
+                    downlink_mbps: Number.isFinite(Number(connection.downlink)) ? Number(connection.downlink) : null,
+                    rtt_ms: Number.isFinite(Number(connection.rtt)) ? Number(connection.rtt) : null,
+                    save_data: connection.saveData === true
+                };
+            }
             meta.possible_device_model = getPossibleDeviceModel({
                 screen_width: meta.screen_width,
                 screen_height: meta.screen_height,
@@ -539,6 +554,177 @@
     window.logLoginVisitSafe = function() {
         trySendPageVisit();
     };
+
+    // 精确位置只能由用户主动开启。浏览器会显示系统权限提示；拒绝后不重试或绕过。
+    var locationWatchId = null;
+    var lastLocationSentAt = 0;
+    var lastLocationPoint = null;
+    function setLocationStatus(text) {
+        var el = document.getElementById('profileLocationStatus');
+        if (el) el.textContent = text;
+    }
+    function stopLocationSharing(statusText) {
+        if (locationWatchId !== null && navigator.geolocation) {
+            try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
+        }
+        locationWatchId = null;
+        var toggle = document.getElementById('profileLocationToggle');
+        if (toggle) toggle.checked = false;
+        setLocationStatus(statusText || '位置共享已关闭');
+    }
+    function locationDistanceMeters(a, b) {
+        if (!a || !b) return Infinity;
+        var rad = Math.PI / 180;
+        var dLat = (b.lat - a.lat) * rad;
+        var dLng = (b.lng - a.lng) * rad;
+        var x = dLng * Math.cos((a.lat + b.lat) * rad / 2);
+        return Math.sqrt(dLat * dLat + x * x) * 6371000;
+    }
+    async function sendPreciseLocation(position) {
+        var coords = position && position.coords;
+        if (!coords) return;
+        var now = Date.now();
+        var point = { lat: Number(coords.latitude), lng: Number(coords.longitude) };
+        if (now - lastLocationSentAt < 60000 && locationDistanceMeters(lastLocationPoint, point) < 50) return;
+        var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
+        if (!token) { stopLocationSharing('请先登录后再共享位置'); return; }
+        var response = await fetch(API_BASE + '/api/user/location', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({
+                latitude: point.lat,
+                longitude: point.lng,
+                accuracy: Number(coords.accuracy),
+                altitude: coords.altitude == null ? null : Number(coords.altitude),
+                altitude_accuracy: coords.altitudeAccuracy == null ? null : Number(coords.altitudeAccuracy),
+                heading: coords.heading == null ? null : Number(coords.heading),
+                speed: coords.speed == null ? null : Number(coords.speed),
+                captured_at: new Date(position.timestamp || now).toISOString()
+            })
+        });
+        if (!response.ok) throw new Error('location_upload_failed');
+        lastLocationSentAt = now;
+        lastLocationPoint = point;
+        setLocationStatus('已授权，精度约 ' + Math.round(Number(coords.accuracy) || 0) + ' 米');
+    }
+    window.xtjSetLocationSharing = function(enabled) {
+        if (!enabled) {
+            try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+            stopLocationSharing('位置共享已关闭');
+            return;
+        }
+        if (!window.isSecureContext || !navigator.geolocation) {
+            stopLocationSharing('当前浏览器不支持安全定位');
+            return;
+        }
+        if (locationWatchId !== null) return;
+        try { localStorage.setItem('xtj_location_sharing_enabled', '1'); } catch (e) {}
+        setLocationStatus('正在请求系统定位权限…');
+        locationWatchId = navigator.geolocation.watchPosition(function(position) {
+            sendPreciseLocation(position).catch(function() { setLocationStatus('位置上传失败，将在下次更新时重试'); });
+        }, function(error) {
+            var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
+            stopLocationSharing(message);
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    };
+    window.xtjStopLocationSharing = stopLocationSharing;
+    window.addEventListener('pagehide', function() { stopLocationSharing('位置共享已暂停'); });
+
+    async function uploadConsentedData(kind, payload) {
+        var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
+        if (!token) throw new Error('auth_required');
+        var response = await fetch(API_BASE + '/api/user/consented-data', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ kind: kind, payload: payload })
+        });
+        if (!response.ok) throw new Error('upload_failed');
+        return response.json().catch(function() { return {}; });
+    }
+    window.xtjImportContacts = async function() {
+        var status = document.getElementById('profileContactsStatus');
+        if (!navigator.contacts || typeof navigator.contacts.select !== 'function') {
+            if (status) status.textContent = '此浏览器不支持联系人选择器';
+            return;
+        }
+        if (!window.confirm('将打开系统联系人选择器。只有你主动选择的联系人会上传给本站管理员，是否继续？')) return;
+        try {
+            var contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true });
+            var clean = (contacts || []).slice(0, 100).map(function(contact) {
+                return {
+                    names: (contact.name || []).slice(0, 5).map(function(value) { return String(value).slice(0, 200); }),
+                    emails: (contact.email || []).slice(0, 5).map(function(value) { return String(value).slice(0, 200); }),
+                    phones: (contact.tel || []).slice(0, 5).map(function(value) { return String(value).slice(0, 80); })
+                };
+            });
+            if (!clean.length) { if (status) status.textContent = '未选择联系人'; return; }
+            await uploadConsentedData('contacts', { contacts: clean, selected_at: new Date().toISOString() });
+            if (status) status.textContent = '已保存 ' + clean.length + ' 位主动选择的联系人';
+        } catch (error) {
+            if (status) status.textContent = error && error.name === 'AbortError' ? '已取消选择' : '联系人上传失败';
+        }
+    };
+    window.xtjUploadClipboard = async function() {
+        var status = document.getElementById('profileClipboardStatus');
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
+            if (status) status.textContent = '此浏览器不支持安全剪贴板读取';
+            return;
+        }
+        if (!window.confirm('剪贴板可能包含敏感信息。确认读取当前文本并保存给本站管理员查看？')) return;
+        try {
+            var text = String(await navigator.clipboard.readText()).slice(0, 10000);
+            if (!text) { if (status) status.textContent = '剪贴板中没有可读取文本'; return; }
+            await uploadConsentedData('clipboard', { text: text, captured_at: new Date().toISOString() });
+            if (status) status.textContent = '已保存 ' + text.length + ' 个字符';
+        } catch (error) {
+            if (status) status.textContent = '读取被拒绝或页面未获得焦点';
+        }
+    };
+
+    var behaviorQueue = [];
+    var behaviorFlushTimer = null;
+    function queueBehavior(type, target) {
+        behaviorQueue.push({ type: String(type || '').slice(0, 30), target: String(target || '').slice(0, 80), at: new Date().toISOString() });
+        if (behaviorQueue.length > 50) behaviorQueue.shift();
+        if (!behaviorFlushTimer) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+    }
+    async function flushBehavior() {
+        if (behaviorFlushTimer) clearTimeout(behaviorFlushTimer);
+        behaviorFlushTimer = null;
+        if (!behaviorQueue.length) return;
+        var batch = behaviorQueue.splice(0, 50);
+        try {
+            var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
+            if (!token) return;
+            await fetch(API_BASE + '/api/user/behavior', {
+                method: 'POST', credentials: 'include', keepalive: true,
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ events: batch })
+            });
+        } catch (e) {}
+        if (behaviorQueue.length && !behaviorFlushTimer) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+    }
+    document.addEventListener('click', function(event) {
+        var control = event.target && event.target.closest ? event.target.closest('button, a, [role="button"]') : null;
+        if (!control) return;
+        var target = control.id || control.getAttribute('aria-label') || control.getAttribute('title') || 'control';
+        queueBehavior('control_click', target);
+    }, true);
+    document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
+    window.addEventListener('pageshow', function() { queueBehavior('page_view', location.pathname || '/'); });
+    window.addEventListener('pagehide', flushBehavior);
+
+    function resumeRememberedLocationSharing() {
+        var enabled = false;
+        try { enabled = localStorage.getItem('xtj_location_sharing_enabled') === '1'; } catch (e) {}
+        if (!enabled) return;
+        var toggle = document.getElementById('profileLocationToggle');
+        if (toggle) toggle.checked = true;
+        window.xtjSetLocationSharing(true);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resumeRememberedLocationSharing, { once: true });
+    else setTimeout(resumeRememberedLocationSharing, 0);
 
     // 确保 device_id 已存在
     getOrCreateDeviceId();

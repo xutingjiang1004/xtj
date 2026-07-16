@@ -1318,6 +1318,7 @@ const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
 const POST_VIEW_MARKER = '__post_view__';
 const LOGIN_EVENT_MARKER = '__login_event__';
+const USER_BEHAVIOR_MARKER = '__user_behavior__';
 const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
 const CLIENT_ERROR_MARKER = '__client_error__';
@@ -1369,6 +1370,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', '__pro_gift__')
     .neq('media_type', '__pro_gift_claim__')
     .neq('media_type', LOGIN_EVENT_MARKER)
+    .neq('media_type', USER_BEHAVIOR_MARKER)
     .neq('media_type', SECURITY_ALERT_MARKER)
     .neq('media_type', AUDIT_LOG_MARKER)
     .neq('media_type', CLIENT_ERROR_MARKER)
@@ -1773,7 +1775,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), interest-cohort=()');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   next();
 });
@@ -1865,7 +1867,10 @@ function getRealIp(req) {
 
 // 获取客户端 IP（信任 req.ip，由 trust proxy 解析 X-Forwarded-For，用于登录事件记录）
 function getClientIp(req) {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  var ip = String(req.ip || req.socket.remoteAddress || 'unknown').trim();
+  if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
+  if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
+  return ip || 'unknown';
 }
 
 // UA 解析（后端用，与前端 js/login-device.js 规则一致）
@@ -2111,12 +2116,13 @@ async function logAdminAudit(action, operator, detail) {
 // 自动清理旧日志
 async function cleanupOldLogs(type) {
   try {
-    var days = type === 'error' ? ERROR_LOG_RETENTION_DAYS : (type === 'login' || type === 'security' ? LOGIN_LOG_RETENTION_DAYS : 90);
+    var days = (type === 'error' || type === 'behavior') ? ERROR_LOG_RETENTION_DAYS : (type === 'login' || type === 'security' ? LOGIN_LOG_RETENTION_DAYS : 90);
     var cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     var mediaType;
     if (type === 'login') mediaType = LOGIN_EVENT_MARKER;
     else if (type === 'security') mediaType = SECURITY_ALERT_MARKER;
     else if (type === 'error') mediaType = CLIENT_ERROR_MARKER;
+    else if (type === 'behavior') mediaType = USER_BEHAVIOR_MARKER;
     else return { deleted: 0 };
 
     var { data, error } = await supabase.from('posts')
@@ -4855,7 +4861,46 @@ async function hardDeleteContent(params) {
     p_actor_key: params.actorKey || null,
     p_storage_paths: params.storagePaths || []
   });
-  if (rpc.error) return { error: rpc.error };
+  if (rpc.error) {
+    var rpcMessage = String(rpc.error.message || rpc.error.details || '');
+    var rpcMissing = ['PGRST202', '42883'].indexOf(String(rpc.error.code || '')) >= 0
+      || /hard_delete_content|schema cache|could not find the function/i.test(rpcMessage);
+    if (!rpcMissing) return { error: rpc.error };
+    // Photo deletion also requires the durable storage cleanup queue created
+    // by migration 013; do not silently downgrade that separate contract.
+    if (params.expectPhoto) return { error: rpc.error };
+
+    // Service-role compatibility path for deployments where migration 013 has
+    // not reached Postgres yet. Every step is checked and final absence is
+    // verified, so a partial cleanup can never be reported as success.
+    var existing = await supabase.from('posts').select('id, user_name, media_type').eq('id', params.postId).maybeSingle();
+    if (existing.error) return { error: existing.error };
+    if (!existing.data) return { result: { ok: true, deleted: false, already_deleted: true } };
+    if (!params.isAdmin && existing.data.user_name !== params.actorUser) {
+      return { result: { ok: false, code: 'forbidden', error: 'Not allowed to delete this content' } };
+    }
+    if (!!params.expectPhoto !== (existing.data.media_type === '__photo_wall__')) {
+      return { result: { ok: false, code: params.expectPhoto ? 'not_photo' : 'use_photo_delete', error: 'Content type does not match delete endpoint' } };
+    }
+    var likeDelete = await supabase.from('likes').delete().eq('post_id', params.postId);
+    if (likeDelete.error) return { error: likeDelete.error };
+    var commentDelete = await supabase.from('comments').delete().eq('post_id', params.postId);
+    if (commentDelete.error) return { error: commentDelete.error };
+    var related = await supabase.from('posts').select('id, media_type, media_url, content')
+      .in('media_type', ['__post_view__', '__report__']);
+    if (related.error) return { error: related.error };
+    var relatedIds = (related.data || []).filter(function(row) {
+      if (row.media_type === '__post_view__') return String(row.media_url || '') === String(params.postId);
+      try { return String(JSON.parse(row.content || '{}').target_id || '') === String(params.postId); } catch (_) { return false; }
+    }).map(function(row) { return row.id; });
+    if (relatedIds.length) {
+      var relatedDelete = await supabase.from('posts').delete().in('id', relatedIds);
+      if (relatedDelete.error) return { error: relatedDelete.error };
+    }
+    var postDelete = await supabase.from('posts').delete().eq('id', params.postId);
+    if (postDelete.error) return { error: postDelete.error };
+    rpc = { data: { ok: true, deleted: true, already_deleted: false } };
+  }
   var result = rpc.data || {};
   if (!result.ok) return { result: result };
   var verification = await supabase.from('posts').select('id').eq('id', params.postId).maybeSingle();
@@ -4968,14 +5013,22 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
       }
     }
 
+    var cleanupStatePending = storageErrors.length > 0;
     if (deleteResult.cleanup_job_id) {
-      await supabase.from('storage_cleanup_jobs').update({
+      var cleanupStateUpdate = await supabase.from('storage_cleanup_jobs').update({
         status: storageErrors.length ? 'pending' : 'completed',
         attempts: 1,
         last_error: storageErrors.length ? String(storageErrors[0].error || 'storage_delete_failed').slice(0, 1000) : null,
         completed_at: storageErrors.length ? null : new Date().toISOString(),
         updated_at: new Date().toISOString()
       }).eq('id', deleteResult.cleanup_job_id);
+      // If the durable queue state could not be updated, leave the client in
+      // "cleanup pending" state. The queued job remains retryable and the
+      // periodic worker can safely repeat an idempotent Storage removal.
+      if (cleanupStateUpdate.error) {
+        cleanupStatePending = true;
+        console.warn('[storage-cleanup] delete state update failed:', cleanupStateUpdate.error.message);
+      }
     }
 
     return res.json({
@@ -4983,7 +5036,7 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
       deleted: deleteResult.deleted === true,
       already_deleted: deleteResult.already_deleted === true,
       photo_id: photoId,
-      cleanup_pending: storageErrors.length > 0,
+      cleanup_pending: cleanupStatePending,
       storage_errors: storageErrors.length > 0 ? storageErrors : undefined
     });
   } catch(e) {
@@ -5254,6 +5307,23 @@ app.get('/api/comments/user/:userName', authenticateUser, rateLimit(60000, 60), 
   } catch (e) {
     console.error('[API] comments get:', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Failed to load comments', code: 'comments_load_failed' });
+  }
+});
+
+app.post('/api/post/delete-status', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var postId = normalizePostId(req.body && req.body.post_id);
+    if (!postId) return res.status(400).json({ error: 'Invalid post id', code: 'invalid_post_id' });
+    var lookup = await supabase.from('posts').select('id, user_name, media_type').eq('id', postId).maybeSingle();
+    if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'status_lookup_failed' });
+    if (!lookup.data) return res.json({ ok: true, post_id: postId, exists: false, deleted: true });
+    if (lookup.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ error: 'Not allowed to inspect this post', code: 'forbidden' });
+    }
+    return res.json({ ok: true, post_id: postId, exists: true, deleted: false });
+  } catch (e) {
+    console.error('[API] post delete status:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Failed to confirm delete status', code: 'status_lookup_failed' });
   }
 });
 
@@ -6688,6 +6758,121 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
   }
 });
 
+// 用户主动授权的浏览器精确位置。只保存最新一次，不保存轨迹。
+app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (req, res) => {
+  try {
+    var body = req.body || {};
+    var latitude = Number(body.latitude);
+    var longitude = Number(body.longitude);
+    var accuracy = Number(body.accuracy);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+        !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
+      return res.status(400).json({ error: '位置参数无效', code: 'invalid_location' });
+    }
+    function optionalNumber(value, min, max) {
+      if (value === null || value === undefined || value === '') return null;
+      var number = Number(value);
+      return Number.isFinite(number) && number >= min && number <= max ? number : null;
+    }
+    var capturedAt = new Date(String(body.captured_at || ''));
+    if (!Number.isFinite(capturedAt.getTime()) || Math.abs(Date.now() - capturedAt.getTime()) > 10 * 60 * 1000) {
+      capturedAt = new Date();
+    }
+    var preciseLocation = {
+      latitude: latitude,
+      longitude: longitude,
+      accuracy_m: accuracy,
+      altitude_m: optionalNumber(body.altitude, -12000, 100000),
+      altitude_accuracy_m: optionalNumber(body.altitude_accuracy, 0, 100000),
+      heading_deg: optionalNumber(body.heading, 0, 360),
+      speed_mps: optionalNumber(body.speed, 0, 1000),
+      captured_at: capturedAt.toISOString(),
+      received_at: new Date().toISOString(),
+      source: 'browser_geolocation'
+    };
+    var existing = await supabase.from('posts').select('id, content')
+      .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'location_lookup_failed' });
+    var info = {};
+    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
+    info.last_precise_location = preciseLocation;
+    var writeResult;
+    if (existing.data) {
+      writeResult = await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
+    } else {
+      writeResult = await supabase.from('posts').insert([{
+        user_name: req.userName, media_type: USER_INFO_MARKER,
+        content: JSON.stringify(info), actor_key: 'user_info_' + Date.now()
+      }]);
+    }
+    if (writeResult.error) return res.status(500).json({ error: sanitizeError(writeResult.error), code: 'location_save_failed' });
+    return res.json({ ok: true, location: preciseLocation });
+  } catch (error) {
+    console.error('[API] user location:', error && error.message);
+    return res.status(500).json({ error: '位置保存失败', code: 'location_save_failed' });
+  }
+});
+
+app.post('/api/user/consented-data', rateLimit(60000, 10), authenticateUser, async (req, res) => {
+  try {
+    var kind = String(req.body && req.body.kind || '');
+    var payload = req.body && req.body.payload || {};
+    if (kind !== 'contacts' && kind !== 'clipboard') return res.status(400).json({ error: '数据类型无效', code: 'invalid_kind' });
+    var stored;
+    if (kind === 'clipboard') {
+      var text = String(payload.text || '').slice(0, 10000);
+      if (!text) return res.status(400).json({ error: '剪贴板文本为空', code: 'empty_clipboard' });
+      stored = { text: text, captured_at: new Date().toISOString(), source: 'explicit_clipboard_permission' };
+    } else {
+      var contacts = Array.isArray(payload.contacts) ? payload.contacts.slice(0, 100) : [];
+      function cleanList(values, count, length) {
+        return (Array.isArray(values) ? values : []).slice(0, count).map(function(value) { return String(value || '').slice(0, length); }).filter(Boolean);
+      }
+      stored = { contacts: contacts.map(function(contact) {
+        return { names: cleanList(contact && contact.names, 5, 200), emails: cleanList(contact && contact.emails, 5, 200), phones: cleanList(contact && contact.phones, 5, 80) };
+      }), selected_at: new Date().toISOString(), source: 'contact_picker_selection' };
+      if (!stored.contacts.length) return res.status(400).json({ error: '未选择联系人', code: 'empty_contacts' });
+    }
+    var existing = await supabase.from('posts').select('id, content').eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'consented_data_lookup_failed' });
+    var info = {};
+    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
+    if (kind === 'contacts') info.consented_contacts = stored;
+    else info.consented_clipboard = stored;
+    var write = existing.data
+      ? await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id)
+      : await supabase.from('posts').insert([{ user_name: req.userName, media_type: USER_INFO_MARKER, content: JSON.stringify(info), actor_key: 'user_info_' + Date.now() }]);
+    if (write.error) return res.status(500).json({ error: sanitizeError(write.error), code: 'consented_data_save_failed' });
+    return res.json({ ok: true, kind: kind, count: kind === 'contacts' ? stored.contacts.length : stored.text.length });
+  } catch (error) {
+    return res.status(500).json({ error: '授权数据保存失败', code: 'consented_data_save_failed' });
+  }
+});
+
+app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (req, res) => {
+  try {
+    var allowedTypes = ['page_view', 'control_click', 'visibility'];
+    var events = (Array.isArray(req.body && req.body.events) ? req.body.events : []).slice(0, 50).map(function(event) {
+      var type = String(event && event.type || '');
+      if (allowedTypes.indexOf(type) < 0) return null;
+      var at = new Date(String(event && event.at || ''));
+      return { type: type, target: String(event && event.target || '').slice(0, 80), at: Number.isFinite(at.getTime()) ? at.toISOString() : new Date().toISOString() };
+    }).filter(Boolean);
+    if (!events.length) return res.status(400).json({ error: '行为事件为空', code: 'empty_events' });
+    var insert = await supabase.from('posts').insert([{
+      user_name: req.userName, media_type: USER_BEHAVIOR_MARKER,
+      media_url: events[events.length - 1].type,
+      content: JSON.stringify({ events: events, received_at: new Date().toISOString() }),
+      actor_key: 'behavior_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+    }]);
+    if (insert.error) return res.status(500).json({ error: sanitizeError(insert.error), code: 'behavior_save_failed' });
+    return res.json({ ok: true, accepted: events.length });
+  } catch (error) {
+    return res.status(500).json({ error: '行为日志保存失败', code: 'behavior_save_failed' });
+  }
+});
+
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
@@ -6798,6 +6983,9 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         user_agent: user_agent || '',
         possible_device_model: possibleDeviceModel,
         ip: ip,
+        ip_version: ip.indexOf(':') >= 0 ? 6 : (ip === 'unknown' ? null : 4),
+        ip_source: 'trusted_proxy_request',
+        ip_geolocation_precision: 'approximate_city',
         ip_location: ipLocation,
         login_at: loginAt,
         source: srcVal,
@@ -6900,13 +7088,12 @@ app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
 // ===================== 登录事件查询（管理员） =====================
 app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    const { data, error } = await supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at')
-      .eq('media_type', LOGIN_EVENT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ data: data || [] });
+    const [loginResult, behaviorResult] = await Promise.all([
+      supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(500),
+      supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(500)
+    ]);
+    if (loginResult.error || behaviorResult.error) return res.status(400).json({ error: sanitizeError(loginResult.error || behaviorResult.error) });
+    return res.json({ data: loginResult.data || [], behavior: behaviorResult.data || [] });
   } catch(e) {
     console.error('[API] 登录事件查询失败:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -7101,13 +7288,13 @@ app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (r
 // ===================== 日志清理 =====================
 app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
   try {
-    var types = req.body.types || ['login', 'security', 'error'];
+    var types = req.body.types || ['login', 'security', 'error', 'behavior'];
     if (typeof types === 'string') types = [types];
-    var VALID_TYPES = ['login', 'security', 'error', 'all'];
+    var VALID_TYPES = ['login', 'security', 'error', 'behavior', 'all'];
     var results = {};
     var totalDeleted = 0;
 
-    if (types.indexOf('all') >= 0) types = ['login', 'security', 'error'];
+    if (types.indexOf('all') >= 0) types = ['login', 'security', 'error', 'behavior'];
 
     for (var i = 0; i < types.length; i++) {
       var t = types[i];
@@ -10660,6 +10847,7 @@ setInterval(function() {
   cleanupOldLogs('login').catch(function() {});
   cleanupOldLogs('security').catch(function() {});
   cleanupOldLogs('error').catch(function() {});
+  cleanupOldLogs('behavior').catch(function() {});
 }, 24 * 60 * 60 * 1000);
 
 // 自动清理 AI 聊天记录 (每天一次)

@@ -11,16 +11,23 @@ const dataSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/data.js'), 'ut
 
 function createPhotoDataRuntime(fetchImpl) {
   const storage = new Map();
+  const windowListeners = {};
+  const documentListeners = {};
   const window = {
     API_BASE: '',
     photoWallData: [],
     pwCurrentSortedPhotos: [],
-    addEventListener() {},
+    addEventListener(type, handler) { windowListeners[type] = handler; },
     getUserAuthHeaders: async () => ({ Authorization: 'Bearer test-token' })
   };
   const context = {
     window,
-    document: { getElementById: () => null, addEventListener() {}, querySelector: () => null },
+    document: {
+      hidden: false,
+      getElementById: () => null,
+      addEventListener(type, handler) { documentListeners[type] = handler; },
+      querySelector: () => null
+    },
     localStorage: {
       getItem: key => storage.has(key) ? storage.get(key) : null,
       setItem: (key, value) => storage.set(key, String(value)),
@@ -36,7 +43,7 @@ function createPhotoDataRuntime(fetchImpl) {
     clearTimeout
   };
   vm.runInNewContext(dataSource, context, { filename: 'data.js' });
-  return { window, storage };
+  return { window, storage, windowListeners, documentListeners };
 }
 
 test('public photo API loads even when window.sb is unavailable', async () => {
@@ -72,6 +79,40 @@ test('failed authenticated delete restores photo and removes local tombstone', a
   assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos_deleted') || '[]'), []);
 });
 
+test('delete tombstone rejects stale cloud snapshots during resume reconciliation', async () => {
+  const staleRow = { id: 'p3', user_name: 'owner', media_url: 'https://example.test/p3.jpg', created_at: '2026-01-01T00:00:00Z' };
+  const runtime = createPhotoDataRuntime(async url => {
+    if (url === '/api/photo/delete') {
+      return { ok: true, json: async () => ({ ok: true, deleted: true, cleanup_pending: true }) };
+    }
+    return { ok: true, json: async () => ({ ok: true, data: [staleRow] }) };
+  });
+  runtime.window.currentUser = 'owner';
+  const photo = { id: 'p3', cloudId: 'p3', username: 'owner', imageUrl: staleRow.media_url, timestamp: 1 };
+  runtime.window.photoWallData = [photo];
+  runtime.window.renderPhotoWallWithoutReload = () => {};
+
+  const result = await runtime.window.deletePhotoWallPhoto(photo);
+  assert.equal(result.cleanup_pending, true);
+  assert.equal(runtime.window.photoWallData.length, 0, 'stale delete response must not restore the photo');
+  assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos') || '[]'), []);
+
+  await runtime.windowListeners.online();
+  assert.equal(runtime.window.photoWallData.length, 0, 'online reconciliation must retain the tombstone');
+});
+
+test('external delete removes cached entries by cloudId before reconciliation', async () => {
+  const runtime = createPhotoDataRuntime(async () => ({ ok: true, json: async () => ({ ok: true, data: [] }) }));
+  runtime.window.photoWallData = [{ id: 'local-copy', cloudId: 'cloud-p4', username: 'owner', imageUrl: 'https://example.test/p4.jpg' }];
+  runtime.window.saveLocalPhotoWallData();
+  runtime.windowListeners.storage({
+    key: 'xtj_photo_sync_data',
+    newValue: JSON.stringify({ type: 'photo_deleted', photoId: 'cloud-p4' })
+  });
+  assert.equal(runtime.window.photoWallData.length, 0);
+  assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos') || '[]'), []);
+});
+
 test('photo production modules have source inputs and a single-settle image queue', () => {
   const build = fs.readFileSync(path.join(ROOT, 'scripts/build.js'), 'utf8');
   const pkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
@@ -105,5 +146,11 @@ test('photo deletion converges after resume and reports durable cleanup state', 
   assert.match(dataSource, /window\.addEventListener\('pageshow', reconcilePhotoWallAfterResume\)/);
   assert.match(dataSource, /loadPhotoWallData\(true\)/);
   assert.match(dataSource, /deleteResult\.cleanup_pending/);
+  assert.match(dataSource, /deleted\.indexOf\(identity\) >= 0/);
   assert.doesNotMatch(dataSource, /if \(window\.sb\) \{[\s\S]{0,120}loadPhotoWallData\(true\)/);
+});
+
+test('compact photo preview preserves 44px coarse-pointer controls', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8');
+  assert.match(css, /@media \(max-width: 375px\) and \(pointer: coarse\) \{[\s\S]*?#photoPreviewOverlay \.pp-preview-toolbar > button,[\s\S]*?min-width: 44px !important;[\s\S]*?min-height: 44px !important;/);
 });
