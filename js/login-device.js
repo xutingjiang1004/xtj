@@ -590,24 +590,57 @@
         var point = { lat: Number(coords.latitude), lng: Number(coords.longitude) };
         if (now - lastLocationSentAt < 60000 && locationDistanceMeters(lastLocationPoint, point) < 50) return;
         var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-        if (!token) { stopLocationSharing('请先登录后再共享位置'); return; }
-        var response = await fetch(API_BASE + '/api/user/location', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({
-                latitude: point.lat,
-                longitude: point.lng,
-                accuracy: Number(coords.accuracy),
-                altitude: coords.altitude == null ? null : Number(coords.altitude),
-                altitude_accuracy: coords.altitudeAccuracy == null ? null : Number(coords.altitudeAccuracy),
-                heading: coords.heading == null ? null : Number(coords.heading),
-                speed: coords.speed == null ? null : Number(coords.speed),
-                captured_at: new Date(position.timestamp || now).toISOString(),
-                page_load_id: locationPageLoadId
-            })
-        });
-        if (!response.ok) throw new Error('location_upload_failed');
+        if (!token) { setLocationStatus('请先登录后再共享位置'); return; }
+        setLocationStatus('正在上传坐标…');
+        var response;
+        try {
+            response = await fetch(API_BASE + '/api/user/location', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({
+                    latitude: point.lat,
+                    longitude: point.lng,
+                    accuracy: Number(coords.accuracy),
+                    altitude: coords.altitude == null ? null : Number(coords.altitude),
+                    altitude_accuracy: coords.altitudeAccuracy == null ? null : Number(coords.altitudeAccuracy),
+                    heading: coords.heading == null ? null : Number(coords.heading),
+                    speed: coords.speed == null ? null : Number(coords.speed),
+                    captured_at: new Date(position.timestamp || now).toISOString(),
+                    page_load_id: locationPageLoadId
+                })
+            });
+        } catch (netErr) {
+            setLocationStatus('上传失败：网络错误，点击重试');
+            return;
+        }
+        var data = null;
+        var parseError = null;
+        try { data = await response.json(); } catch (e) { parseError = e; }
+        if (!response.ok || parseError) {
+            var serverCode = (data && data.code) || 'unknown';
+            var serverMsg = (data && data.error) || ('HTTP ' + response.status);
+            setLocationStatus('上传失败：' + serverMsg + '（' + serverCode + '），点击重试');
+            return;
+        }
+        // 验证服务端返回
+        if (!data || data.ok !== true || data.stored !== true) {
+            setLocationStatus('坐标未保存到服务器，点击重试');
+            return;
+        }
+        var returnedLoc = data.location;
+        if (!returnedLoc || !Number.isFinite(Number(returnedLoc.latitude)) || !Number.isFinite(Number(returnedLoc.longitude))) {
+            setLocationStatus('服务端返回坐标异常，点击重试');
+            return;
+        }
+        // 验证返回坐标与提交值一致
+        var latDiff = Math.abs(Number(returnedLoc.latitude) - point.lat);
+        var lngDiff = Math.abs(Number(returnedLoc.longitude) - point.lng);
+        if (latDiff > 0.0001 || lngDiff > 0.0001) {
+            setLocationStatus('服务端返回坐标与提交不一致，点击重试');
+            return;
+        }
+        // 所有验证通过，标记为已发送
         locationSentForPage = true;
         lastLocationSentAt = now;
         lastLocationPoint = point;
@@ -616,7 +649,17 @@
             try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
             locationWatchId = null;
         }
-        setLocationStatus('已授权，精度约 ' + Math.round(Number(coords.accuracy) || 0) + ' 米');
+        var resolutionStatus = data.resolution_status || 'pending';
+        var accuracyText = Math.round(Number(coords.accuracy) || 0) + ' 米';
+        if (resolutionStatus === 'resolved' && data.address) {
+            setLocationStatus('定位已保存 · ' + (typeof data.address === 'string' ? data.address : '已解析') + ' · 精度约 ' + accuracyText);
+        } else if (resolutionStatus === 'pending') {
+            setLocationStatus('坐标已保存，地址解析中 · 精度约 ' + accuracyText);
+        } else if (resolutionStatus === 'failed') {
+            setLocationStatus('坐标已保存，地址解析失败 · 精度约 ' + accuracyText);
+        } else {
+            setLocationStatus('定位已保存 · 精度约 ' + accuracyText);
+        }
     }
     window.xtjSetLocationSharing = function(enabled) {
         if (!enabled) {
@@ -629,16 +672,41 @@
             return;
         }
         if (locationWatchId !== null) return;
+        // 重置页面级发送标记，允许重试
+        locationSentForPage = false;
         setLocationStatus('正在请求系统定位权限…');
-        locationWatchId = navigator.geolocation.watchPosition(function(position) {
-            sendPreciseLocation(position).catch(function() { setLocationStatus('位置上传失败，将在下次更新时重试'); });
+        // 先使用 getCurrentPosition 获取首个位置，再启动 watchPosition 持续更新
+        navigator.geolocation.getCurrentPosition(function(position) {
+            setLocationStatus('正在获取坐标…');
+            sendPreciseLocation(position).catch(function() {
+                setLocationStatus('位置上传失败，点击重试');
+            });
+            // 成功后启动持续监听
+            if (locationSentForPage) {
+                locationWatchId = navigator.geolocation.watchPosition(function(pos) {
+                    sendPreciseLocation(pos).catch(function() {});
+                }, function(watchErr) {
+                    // 静默处理 watch 错误，不影响已成功的首次上传
+                }, { enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 });
+            } else {
+                // 首次未成功，启动 watch 继续尝试
+                locationWatchId = navigator.geolocation.watchPosition(function(pos) {
+                    sendPreciseLocation(pos).catch(function() {});
+                }, function(error) {
+                    var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
+                    if (error && error.code === 1) {
+                        try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+                    }
+                    stopLocationSharing(message);
+                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+            }
         }, function(error) {
             var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
             if (error && error.code === 1) {
                 try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
             }
             stopLocationSharing(message);
-        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
     };
     window.xtjStopLocationSharing = stopLocationSharing;
     window.addEventListener('pagehide', function() { stopLocationSharing('位置共享已暂停'); });

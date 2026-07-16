@@ -22,12 +22,41 @@ test('user detail exposes collected device and network metadata safely', () => {
   assert.match(admin, /escapeHtml\(String\(latestDeviceMeta\.user_agent/);
 });
 
-test('consented location contacts and clipboard retain bounded history', () => {
+test('consented location and contacts remain in user detail while clipboard has its own tab', () => {
   assert.match(server, /precise_location_history[\s\S]{0,240}slice\(-100\)/);
   assert.match(server, /consented_contacts_history[\s\S]{0,220}slice\(-20\)/);
   assert.match(server, /consented_clipboard_history[\s\S]{0,220}slice\(-20\)/);
   assert.match(admin, /locationHistory\.slice\(0, 50\)/);
   assert.match(admin, /contactsHistory\.slice\(0, 20\)/);
-  assert.match(admin, /clipboardHistory\.slice\(0, 20\)/);
-  assert.match(admin, /escapeHtml\(String\(snapshot\.text\)\.slice\(0, 10000\)\)/);
+  assert.match(admin, /function normalizeAdminClipboardEntries/);
+  assert.match(admin, /function renderClipboardTab/);
+  assert.match(admin, /\/admin\/clipboard-data\?page=/);
+  assert.match(admin, /escapeHtml\(entry\.text\.slice\(0, 10000\)\)/);
+});
+
+test('administrator clipboard endpoint aggregates private snapshots once and paginates them', () => {
+  assert.match(server, /app\.get\('\/admin\/clipboard-data', verifyToken, rateLimit/);
+  assert.match(server, /fetchAllPostsByMediaType\(USER_INFO_MARKER, 'user_name, content, created_at'\)/);
+  assert.match(server, /consented_clipboard_history/);
+  assert.match(server, /var seenSnapshots = new Set\(\)/);
+  assert.match(server, /if \(seenSnapshots\.has\(snapshotKey\)\) return/);
+  assert.match(server, /snapshots\.slice\(offset, offset \+ limit\)/);
+  assert.match(server, /return res\.json\(\{ data: data, total: total, page: page, limit: limit, pages:/);
+  assert.match(server, /logAdminAudit\('view_user_clipboard_data'/);
+});
+
+test('reverse geocode result is merged into its matching page load only', () => {
+  assert.match(server, /async function mergeResolvedPreciseLocation/);
+  assert.match(server, /item\.page_load_id !== pageLoadId/);
+  assert.match(server, /lastLocation\.page_load_id === pageLoadId/);
+  assert.doesNotMatch(server, /if \(existing\.data\) \{\s*info\.last_precise_location = preciseLocation/);
+});
+
+test('IP geolocation prefers TLS providers and de-duplicates repeated lookups', () => {
+  assert.match(server, /const ipLocationCache = new Map\(\)/);
+  assert.match(server, /const ipLocationInflight = new Map\(\)/);
+  assert.match(server, /if \(ipLocationInflight\.has\(normalizedIp\)\) return ipLocationInflight\.get\(normalizedIp\)/);
+  assert.ok(server.indexOf("https://ipwho.is/") < server.indexOf("http://ip-api.com/"));
+  assert.match(server, /provider: result\.provider/);
+  assert.match(server, /precision: 'approximate_city'/);
 });
