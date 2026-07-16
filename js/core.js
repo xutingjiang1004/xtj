@@ -4384,7 +4384,6 @@ function renderProfileActivityList(kind) {
                 var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
                 getPostLikeButtons(postId).forEach(function(likeBtn) {
                     likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
-                    void likeBtn.offsetWidth;
                     likeBtn.classList.add(className);
                     setTimeout(function() { likeBtn.classList.remove(className); }, 260);
                 });
@@ -4410,9 +4409,6 @@ function renderProfileActivityList(kind) {
                     updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
                     updateFeedStats();
                     animatePostLikeFeedback(pid, nextLiked);
-                    if (typeof window.xtjAnimateLikeToggle === 'function') {
-                        window.xtjAnimateLikeToggle(btn, nextLiked);
-                    }
                     if (nextLiked) createHeartParticles(btn);
                     var normalizedPostId = pid.trim().toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
@@ -4452,31 +4448,28 @@ function renderProfileActivityList(kind) {
             function createHeartParticles(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
-                if (typeof xtjHeartBurst === 'function') return xtjHeartBurst(btn);
+                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤️","💜","💙","💚","💛","🧡"];
-                const burstCount = perfProfile === 'balanced' ? 4 : 8;
+                const emojis = ["❤","♥","❤","♡","♥","❤"];
+                const burstCount = perfProfile === 'balanced' ? 4 : 6;
                 for (let i=0; i<burstCount; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
-                    heart.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-                    const angle = (Math.PI*2*i/burstCount) + (Math.random()-0.5)*0.4;
-                    const dist1 = 30 + Math.random()*20;
-                    const dist2 = 55 + Math.random()*40;
-                    const dist3 = 80 + Math.random()*50;
+                    heart.setAttribute('aria-hidden', 'true');
+                    heart.textContent = emojis[i % emojis.length];
+                    const angle = (-Math.PI * 0.9) + (Math.PI * 0.8 * i / Math.max(1, burstCount - 1)) + (Math.random()-0.5)*0.18;
+                    const distance = 26 + Math.random()*24;
                     heart.style.left = cx+'px';
                     heart.style.top = cy+'px';
-                    heart.style.setProperty('--tx25', Math.cos(angle)*dist1+'px');
-                    heart.style.setProperty('--ty25', Math.sin(angle)*dist1+'px');
-                    heart.style.setProperty('--tx60', Math.cos(angle)*dist2+'px');
-                    heart.style.setProperty('--ty60', Math.sin(angle)*dist2+'px');
-                    heart.style.setProperty('--tx', Math.cos(angle)*dist3+'px');
-                    heart.style.setProperty('--ty', Math.sin(angle)*dist3+'px');
-                    heart.style.animationDelay = (Math.random()*0.12)+'s';
+                    heart.style.setProperty('--heart-x', Math.cos(angle)*distance+'px');
+                    heart.style.setProperty('--heart-y', Math.sin(angle)*distance+'px');
+                    heart.style.setProperty('--heart-rotate', ((Math.random()-0.5)*32)+'deg');
+                    heart.style.setProperty('--heart-delay', (i*18)+'ms');
                     document.body.appendChild(heart);
-                    setTimeout(() => heart.remove(), 1200);
+                    heart.addEventListener('animationend', function() { heart.remove(); }, { once: true });
+                    setTimeout(function() { heart.remove(); }, 900);
                 }
             }
 
@@ -9013,6 +9006,7 @@ function renderProfileActivityList(kind) {
                     syncDockChatLayoutState();
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                var listLoadSeq = ++_dockChatListLoadSeq;
                 var hadRenderedList = !!el.children.length;
                 try {
                     if (!hadRenderedList) {
@@ -9026,6 +9020,7 @@ function renderProfileActivityList(kind) {
                     if (!dmResp.ok) throw new Error('DM list fetch failed');
                     const dmResult = await dmResp.json();
                     if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
+                    if (listLoadSeq !== _dockChatListLoadSeq) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
@@ -9058,8 +9053,11 @@ function renderProfileActivityList(kind) {
                         if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
+                    if (listLoadSeq !== _dockChatListLoadSeq) return;
                     window.dockChatListCacheTime = 0;
                     if (!hadRenderedList) el.innerHTML = '';
+                    var previousRetry = el.querySelector('.chat-load-retry');
+                    if (previousRetry) previousRetry.remove();
                     var retry = document.createElement('button');
                     retry.type = 'button';
                     retry.className = 'chat-load-retry';
@@ -9114,6 +9112,7 @@ function renderProfileActivityList(kind) {
             var _chatCache = {};
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
+            var _dockChatListLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
             var _dockChatListRenderSignature = '';
 
@@ -9496,6 +9495,8 @@ function renderProfileActivityList(kind) {
                 } catch(e) {
                     if (loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
                         if (!(_chatCache[cacheKey] && _chatCache[cacheKey].length)) el.innerHTML = '';
+                        var previousRetry = el.querySelector('.chat-load-retry');
+                        if (previousRetry) previousRetry.remove();
                         var retry = document.createElement('button');
                         retry.type = 'button';
                         retry.className = 'chat-load-retry';

@@ -36,7 +36,20 @@
             e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), e < t.length - 1 && t[e + 1] ? D(i, t[e + 1].imageUrl) : D(i, null);
         }
     }
-    var C = {}, _ = {}, H = {}, S = 3;
+    var C = {}, _ = {}, H = {}, S = 3, previewCacheOrder = [], PREVIEW_CACHE_LIMIT = 12;
+    function cachePreviewImage(e, t) {
+        if (!e || !t) return;
+        C[e] = t;
+        var o = previewCacheOrder.indexOf(e);
+        o >= 0 && previewCacheOrder.splice(o, 1), previewCacheOrder.push(e);
+        while (previewCacheOrder.length > PREVIEW_CACHE_LIMIT) delete C[previewCacheOrder.shift()];
+    }
+    document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) return;
+        previewCacheOrder.length = 0, Object.keys(C).forEach(function(e) {
+            delete C[e];
+        });
+    });
     function U(e) {
         if (!e) return Promise.resolve();
         if (C[e]) return Promise.resolve();
@@ -44,12 +57,12 @@
         var t = new Promise(function(t) {
             var o = new Image;
             function n() {
-                o.complete ? (C[e] = o, delete _[e], delete H[e], t()) : o.onload = o.onerror = function() {
-                    C[e] = o, delete _[e], delete H[e], t();
+                o.complete ? (cachePreviewImage(e, o), delete _[e], delete H[e], t()) : o.onload = o.onerror = function() {
+                    cachePreviewImage(e, o), delete _[e], delete H[e], t();
                 };
             }
             o.src = e, "decode" in o ? o.decode().then(function() {
-                C[e] = o, delete _[e], delete H[e], t();
+                cachePreviewImage(e, o), delete _[e], delete H[e], t();
             }).catch(function() {
                 n();
             }) : n();
@@ -80,7 +93,7 @@
                 r && (clearTimeout(r), r = null), e.removeEventListener("load", handleLoad), e.removeEventListener("error", handleError), e.onload = null, e.onerror = null, e._ppListenerUrl === t && (e._ppListenerUrl = null), e._ppCleanup === cleanup && (e._ppCleanup = null);
             }
             function handleLoad() {
-                n || e._ppLoadGen !== a || e._ppUrl !== t || (n = !0, cleanup(), C[t] || (C[t] = e), delete H[t], requestAnimationFrame(function() {
+                n || e._ppLoadGen !== a || e._ppUrl !== t || (n = !0, cleanup(), C[t] || cachePreviewImage(t, e), delete H[t], requestAnimationFrame(function() {
                     e._ppLoadGen === a && e._ppUrl === t && (e.style.transition = "opacity 0.2s ease-in-out", e.offsetHeight, e.style.opacity = "1");
                 }));
             }
