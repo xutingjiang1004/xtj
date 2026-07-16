@@ -4727,17 +4727,22 @@ app.post('/api/report/notifications/mark-read', authenticateUser, async (req, re
       .eq('user_name', userName)
       .eq('media_type', '__report__');
     if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var marked = 0;
+    var failed = 0;
     for (var i = 0; i < (data || []).length; i++) {
       var p = data[i];
       try {
         var c = JSON.parse(p.content || '{}');
         if (Array.isArray(c.notifications) && c.notifications.some(function(n) { return !n.is_read; })) {
           c.notifications.forEach(function(n) { n.is_read = true; });
-          await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', p.id);
+          var updateResult = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', p.id).eq('user_name', userName).eq('media_type', '__report__');
+          if (updateResult.error) failed++;
+          else marked++;
         }
-      } catch(e) {}
+      } catch(e) { failed++; }
     }
-    return res.json({ ok: true });
+    if (failed) return res.status(500).json({ error: '部分通知未能标记为已读', code: 'report_mark_read_partial', marked: marked, failed: failed });
+    return res.json({ ok: true, marked: marked });
   } catch(e) { return res.status(500).json({ error: '操作失败' }); }
 });
 
@@ -4854,17 +4859,6 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
         }
       } catch(_) {}
     }
-    for (var i = 0; i < storagePaths.length; i++) {
-      try {
-        var { error: rmErr } = await supabase.storage.from('uploads').remove([storagePaths[i]]);
-        if (rmErr && !rmErr.message.includes('Not Found') && !rmErr.message.includes('not found')) {
-          storageErrors.push({ path: storagePaths[i], error: rmErr.message });
-        }
-      } catch(e) {
-        storageErrors.push({ path: storagePaths[i], error: e && e.message || 'unknown' });
-      }
-    }
-
     // 使用 RPC 统一删除（清理 comments, likes, reports, notifications, actor records）
     var actorKey = photo.actor_key || 'photo_' + photoId + '_' + Date.now();
     var { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
@@ -4879,8 +4873,23 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
       });
     }
 
+    // The database record is authoritative. Delete it first so a transient
+    // database failure can never leave a live row pointing at a missing file.
+    // Storage cleanup is best-effort and can be retried independently.
+    for (var i = 0; i < storagePaths.length; i++) {
+      try {
+        var { error: rmErr } = await supabase.storage.from('uploads').remove([storagePaths[i]]);
+        if (rmErr && !rmErr.message.includes('Not Found') && !rmErr.message.includes('not found')) {
+          storageErrors.push({ path: storagePaths[i], error: rmErr.message });
+        }
+      } catch(e) {
+        storageErrors.push({ path: storagePaths[i], error: e && e.message || 'unknown' });
+      }
+    }
+
     return res.json({
       ok: true,
+      cleanup_pending: storageErrors.length > 0,
       storage_errors: storageErrors.length > 0 ? storageErrors : undefined
     });
   } catch(e) {
@@ -5084,6 +5093,9 @@ app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.params.userName || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    if (targetUser !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ error: '无权查看他人点赞记录', code: 'forbidden' });
+    }
     const limit = parseInt(req.query.limit || '160');
     const { data, error } = await supabase.from('likes')
       .select('id, post_id, user_name, actor_key, created_at')
@@ -5109,6 +5121,79 @@ app.delete('/api/likes/user/:userName/post/:postId', authenticateUser, async (re
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true });
   } catch (e) { console.error('[API] unlike:', e.message); return res.status(500).json({ error: '取消点赞失败' }); }
+});
+
+function normalizeInteractionId(value) {
+  var id = String(value == null ? '' : value).trim().toLowerCase();
+  return /^\d+$/.test(id) || /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : '';
+}
+
+// Comments are written only through the authenticated application API. The
+// server always derives user_name from the verified XTJ access token.
+app.get('/api/comments/user/:userName', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var targetUser = String(req.params.userName || '').trim();
+    if (!targetUser) return res.status(400).json({ error: 'Missing user name', code: 'invalid_user' });
+    if (targetUser !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ error: 'Not allowed to view these comments', code: 'forbidden' });
+    }
+    var limit = Math.min(Math.max(parseInt(req.query.limit || '160', 10) || 160, 1), 500);
+    var result = await supabase.from('comments')
+      .select('id, post_id, user_name, content, actor_key, created_at', { count: 'exact' })
+      .eq('user_name', targetUser)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (result.error) return res.status(500).json({ error: sanitizeError(result.error), code: 'comments_load_failed' });
+    return res.json({ ok: true, data: result.data || [], count: Number(result.count) || 0 });
+  } catch (e) {
+    console.error('[API] comments get:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Failed to load comments', code: 'comments_load_failed' });
+  }
+});
+
+app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var postId = normalizePostId(req.body && req.body.post_id);
+    var content = String(req.body && req.body.content || '').trim();
+    if (!postId) return res.status(400).json({ error: 'post_id must be a UUID', code: 'invalid_post_id' });
+    if (!content) return res.status(400).json({ error: 'Comment cannot be empty', code: 'empty_comment' });
+    if (content.length > 5000) return res.status(400).json({ error: 'Comment is too long', code: 'comment_too_long' });
+
+    var postResult = await supabase.from('posts').select('id').eq('id', postId).maybeSingle();
+    if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_lookup_failed' });
+    if (!postResult.data) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+
+    var inserted = await supabase.from('comments').insert([{
+      post_id: postId,
+      user_name: req.userName,
+      content: content,
+      actor_key: 'comment_' + crypto.randomUUID()
+    }]).select('id, post_id, user_name, content, actor_key, created_at').single();
+    if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'comment_failed' });
+    return res.status(201).json({ ok: true, data: inserted.data });
+  } catch (e) {
+    console.error('[API] comment create:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Failed to publish comment', code: 'comment_failed' });
+  }
+});
+
+app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var commentId = normalizeInteractionId(req.params.commentId);
+    if (!commentId) return res.status(400).json({ error: 'Invalid comment id', code: 'invalid_comment_id' });
+    var existing = await supabase.from('comments').select('id, user_name').eq('id', commentId).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'comment_lookup_failed' });
+    if (!existing.data) return res.json({ ok: true, already_deleted: true });
+    if (existing.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ error: 'Not allowed to delete this comment', code: 'forbidden' });
+    }
+    var deleted = await supabase.from('comments').delete().eq('id', commentId).eq('user_name', existing.data.user_name);
+    if (deleted.error) return res.status(500).json({ error: sanitizeError(deleted.error), code: 'comment_delete_failed' });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[API] comment delete:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: 'Failed to delete comment', code: 'comment_delete_failed' });
+  }
 });
 
 // Set the authenticated user's final like state.
@@ -5213,7 +5298,10 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
     if (!post || (post.visibility && post.visibility !== 'public' && post.user_name !== req.userName)) {
       return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
     }
-    if (String(post.user_name || '') === String(req.userName || '')) return res.json({ ok: true, recorded: false, reason: 'self_view' });
+    if (String(post.user_name || '') === String(req.userName || '')) {
+      var selfView = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
+      return res.json({ ok: true, recorded: false, reason: 'self_view', views: Number(selfView.data && selfView.data.views) || 0 });
+    }
     var now = new Date().toISOString();
     var eventResult = await supabase.from('posts').insert([{
       user_name: req.userName,
@@ -5223,7 +5311,14 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       actor_key: 'pview_' + postId + '_' + Date.now()
     }]).select('id, created_at').single();
     if (eventResult.error) return res.status(500).json({ error: sanitizeError(eventResult.error), code: 'post_view_record_failed' });
-    return res.json({ ok: true, recorded: true, id: eventResult.data && eventResult.data.id, viewed_at: eventResult.data && eventResult.data.created_at || now });
+    var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: postId });
+    if (incrementResult.error) {
+      if (eventResult.data && eventResult.data.id) await supabase.from('posts').delete().eq('id', eventResult.data.id).eq('media_type', POST_VIEW_MARKER);
+      return res.status(500).json({ error: sanitizeError(incrementResult.error), code: 'post_view_increment_failed' });
+    }
+    var countResult = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
+    if (countResult.error) return res.status(500).json({ error: sanitizeError(countResult.error), code: 'post_view_count_failed' });
+    return res.json({ ok: true, recorded: true, id: eventResult.data && eventResult.data.id, viewed_at: eventResult.data && eventResult.data.created_at || now, views: Number(countResult.data && countResult.data.views) || 0 });
   } catch (e) {
     console.error('[API] post view:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '浏览记录失败', code: 'post_view_record_failed' });
@@ -5337,9 +5432,9 @@ app.post('/api/avatar/batch', authenticateUser, rateLimit(60000, 60), async (req
 app.get('/api/dm/list', authenticateUser, async (req, res) => {
   try {
     const [sentResult, receivedResult] = await Promise.all([
-      supabase.from('posts').select('id, user_name, content, media_url, created_at')
+      supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', req.userName).order('created_at', { ascending: false }),
-      supabase.from('posts').select('id, user_name, content, media_url, created_at')
+      supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
         .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false })
     ]);
     if (sentResult.error || receivedResult.error) {
@@ -5361,16 +5456,14 @@ app.get('/api/dm/messages', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.query.target || '').trim();
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
-    const afterId = Math.max(parseInt(req.query.after_id || '0', 10) || 0, 0);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
     // actor_key = dm_<user> 存储该用户发起的对话元数据
     // 真实私信内容每个消息都是一个 __dm__ 记录
     function buildDirectionQuery(sender, recipient) {
       var query = supabase.from('posts')
-        .select('id, user_name, content, media_url, media_type, actor_key, created_at')
+        .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
-      if (afterId > 0) query = query.gt('id', afterId);
-      return query.order('id', { ascending: true }).limit(limit);
+      return query.order('created_at', { ascending: true }).limit(limit);
     }
     const [outboundResult, inboundResult] = await Promise.all([
       buildDirectionQuery(req.userName, targetUser),
@@ -5384,10 +5477,52 @@ app.get('/api/dm/messages', authenticateUser, async (req, res) => {
       if (row && !byMessageId.has(row.id)) byMessageId.set(row.id, row);
     });
     var messages = Array.from(byMessageId.values())
-      .sort(function(a, b) { return Number(a.id || 0) - Number(b.id || 0); })
+      .sort(function(a, b) {
+        return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id || '').localeCompare(String(b.id || ''));
+      })
       .slice(-limit);
     return res.json({ ok: true, data: messages });
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+});
+
+// Read state is server-authoritative and scoped to messages addressed to the
+// authenticated user. A sender cannot mark their own outbound rows as read.
+app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, res) => {
+  try {
+    var rawIds = Array.isArray(req.body && req.body.message_ids) ? req.body.message_ids : [];
+    var messageIds = Array.from(new Set(rawIds.map(normalizePostId).filter(Boolean))).slice(0, 200);
+    if (!messageIds.length) return res.status(400).json({ error: '消息参数无效', code: 'invalid_message_ids' });
+    var lookup = await supabase.from('posts')
+      .select('id, user_name, media_url, media_type, content, views')
+      .in('id', messageIds)
+      .eq('media_type', DM_MARKER)
+      .eq('media_url', req.userName);
+    if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'dm_read_lookup_failed' });
+    var now = new Date().toISOString();
+    var updated = [];
+    var failedIds = [];
+    for (var i = 0; i < (lookup.data || []).length; i++) {
+      var row = lookup.data[i];
+      var payload = {};
+      try { payload = JSON.parse(row.content || '{}'); } catch (_) { payload = { text: String(row.content || '') }; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = { text: String(row.content || '') };
+      if (!payload.read_at) payload.read_at = now;
+      var nextViews = Math.max(Number(row.views) || 0, 1);
+      var result = await supabase.from('posts')
+        .update({ content: JSON.stringify(payload), views: nextViews })
+        .eq('id', row.id)
+        .eq('media_type', DM_MARKER)
+        .eq('media_url', req.userName)
+        .select('id, user_name, media_url, media_type, content, views, created_at')
+        .single();
+      if (result.error) failedIds.push(String(row.id));
+      else if (result.data) updated.push(result.data);
+    }
+    return res.json({ ok: true, marked: updated.length, partial: failedIds.length > 0, failed_ids: failedIds, data: updated });
+  } catch (e) {
+    console.error('[API] dm read:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: '消息已读状态更新失败', code: 'dm_read_update_failed' });
+  }
 });
 
 // ===================== 封禁管理 ======================
@@ -7842,10 +7977,9 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     var giftId = String((req.body && req.body.gift_id) || '').trim();
     var userNameVal = String(req.userName || '').trim();
     if (!userNameVal) return res.status(401).json({ error: '请先登录' });
-    if (!giftId) return res.status(400).json({ error: '缺少活动ID' });
-    if (!/^\d+$/.test(giftId)) return res.status(400).json({ error: '活动ID格式错误' });
+    if (!normalizePostId(giftId)) return res.status(400).json({ error: 'gift_id must be a UUID', code: 'invalid_gift_id' });
 
-    var rpcResult = await supabase.rpc('claim_pro_gift', {
+    var rpcResult = await supabase.rpc('claim_pro_gift_for_user', {
       p_user_name: userNameVal,
       p_gift_id: giftId
     });
@@ -7856,8 +7990,8 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
     var data = rpcResult.data || {};
     if (!data.ok) {
       var msg = data.error || '领取失败';
-      var status = msg === '活动不存在' ? 404 : (msg.indexOf('名单') >= 0 ? 403 : 400);
-      return res.status(status).json({ error: msg });
+      var status = data.code === 'not_found' ? 404 : (data.code === 'forbidden' ? 403 : 400);
+      return res.status(status).json({ error: msg, code: data.code || 'claim_failed' });
     }
     return res.json({
       ok: true,
