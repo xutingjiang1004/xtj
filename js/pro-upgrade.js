@@ -517,11 +517,6 @@
   // ===================== Pro 活动 API 调用 =====================
 
   // 检测浏览器仅残留用户名、但 access/refresh 会话不可用的状态。
-  function isProGiftsFakeLogin() {
-    if (typeof window.getUserToken === 'function' && window.getUserToken()) return false;
-    return true;
-  }
-
   // 假登录提示
   function renderFakeLogin() {
     return [
@@ -547,10 +542,6 @@
       return;
     }
     // 假登录状态：直接显示"登录状态已过期"，不浪费一次 401
-    if (isProGiftsFakeLogin()) {
-      listEl.innerHTML = renderFakeLogin();
-      return;
-    }
     listEl.innerHTML = '<div class="pro-gift-loading">加载中...</div>';
 
     for (var retry = 0; retry <= 1; retry++) {
@@ -567,17 +558,17 @@
           headers: headers,
           signal: _createTimeoutSignal(10000)
         });
-        if (resp.status === 401 || resp.status === 403) {
+        if (resp.status === 403) {
+          listEl.innerHTML = '<div class="pro-gift-error">当前账号无权查看此活动</div>';
+          return;
+        }
+        if (resp.status === 401) {
           if (retry === 0) {
             // 尝试重试（clearUserToken + 重新认证）
             if (typeof window.clearUserToken === 'function') {
               window.clearUserToken();
             }
             // 重试前再判断一次：重试后变成 fake login 也要立刻结束
-            if (isProGiftsFakeLogin()) {
-              listEl.innerHTML = renderFakeLogin();
-              return;
-            }
             continue;
           }
           listEl.innerHTML = renderAuthRequired();
@@ -615,7 +606,7 @@
       var expired = g.expired || g.is_expired;
       var disabled = claimed || expired;
       return [
-        '<div class="pro-gift-card" data-id="' + (g.id || g.gift_id) + '">',
+        '<div class="pro-gift-card" data-id="' + escapeAttr(g.id || g.gift_id) + '">',
         '  <div class="pro-gift-card-header">',
         '    <div class="pro-gift-card-title">' + escapeHtml(name) + '</div>',
         '    <div class="pro-gift-card-badge' + (claimed ? ' claimed' : '') + '">' + (claimed ? '已领取' : (expired ? '已结束' : '可用')) + '</div>',
@@ -623,12 +614,17 @@
         cfg.description ? '  <div class="pro-gift-card-desc">' + escapeHtml(cfg.description) + '</div>' : '',
         '  <div class="pro-gift-card-footer">',
         remain ? '    <span class="pro-gift-card-remain">剩余 ' + remain + ' 份</span>' : '',
-        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id).replace(/\\/g, '\\\\') + '\', event)">立即领取</button>',
+        disabled ? '' : '    <button type="button" class="pro-gift-card-btn" data-gift-id="' + escapeAttr(g.id || g.gift_id) + '">立即领取</button>',
         '  </div>',
         '</div>'
       ].join('');
     }).join('');
     container.innerHTML = html;
+    container.querySelectorAll('.pro-gift-card-btn[data-gift-id]').forEach(function(button) {
+      button.addEventListener('click', function(event) {
+        window.onClaimGift(button.dataset.giftId, event);
+      });
+    });
   }
 
   // 需要重新登录的提示渲染

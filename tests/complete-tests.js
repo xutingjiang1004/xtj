@@ -59,16 +59,16 @@ test('photo upload sheet keeps keyboard focus and announces persistent results',
   assert.ok(upload.indexOf('window.setPhotoUploadResult = setUploadResult') >= 0, 'upload result API missing');
 });
 
-test('pro claim route calls claim_pro_gift RPC and rejects nonnumeric id', function(){
+test('pro claim route calls service-only UUID RPC and rejects invalid ids', function(){
   var s = read('render-api/server.js');
   var route = s.slice(s.indexOf("/api/pro-gifts/claim"), s.indexOf("// 管理员：手动赠送 Pro"));
-  assert.ok(route.indexOf("supabase.rpc('claim_pro_gift'") >= 0, 'missing RPC call');
-  assert.ok(route.indexOf('/^\\d+$/') >= 0, 'missing numeric guard');
+  assert.ok(route.indexOf("supabase.rpc('claim_pro_gift_for_user'") >= 0, 'missing RPC call');
+  assert.ok(route.indexOf('normalizePostId(giftId)') >= 0, 'missing UUID guard');
   ['claimCount','postClaimCount','rollback','claimLocks'].forEach(function(x){ assert.ok(route.indexOf(x) < 0, 'old flow remains: '+x); });
 });
 test('pro RPC migration locks gift and validates JSON fields atomically', function(){
-  var s = read('supabase/migrations/005_harden_rpc_rls.sql');
-  ['FOR UPDATE','allowed_users 字段必须是数组','claim_limit 或 duration_days 字段必须是数字','__pro_gift_claim__','__vip__'].forEach(function(x){ assert.ok(s.indexOf(x)>=0, 'missing '+x); });
+  var s = read('supabase/migrations/012_harden_pro_claim_and_interactions.sql');
+  ['FOR UPDATE','Campaign allowlist is invalid','Campaign limits are invalid','__pro_gift_claim__','__vip__'].forEach(function(x){ assert.ok(s.indexOf(x)>=0, 'missing '+x); });
 });
 
 console.log('\n=== RLS Static Checks ===');
@@ -83,12 +83,12 @@ test('anon posts writes revoked and public read allowlisted', function(){
   assert.ok(!/ON bans[\s\S]{0,120}(USING \(true\)[\s\S]{0,80}WITH CHECK \(true\)|WITH CHECK \(true\)[\s\S]{0,80}USING \(true\))/.test(s));
 });
 
-test('likes/comments anon inserts require user, object and content constraints', function(){
-  var s = read('supabase/migrations/005_harden_rpc_rls.sql');
-  assert.ok(s.indexOf('post_id IS NOT NULL') >= 0);
-  assert.ok(s.indexOf("btrim(user_name) <> ''") >= 0);
-  assert.ok(s.indexOf("btrim(content) <> ''") >= 0);
-  assert.ok(s.indexOf('WITH CHECK (true)') < 0);
+test('likes/comments anonymous mutations are revoked', function(){
+  var s = read('supabase/migrations/012_harden_pro_claim_and_interactions.sql');
+  assert.ok(s.indexOf('DROP POLICY IF EXISTS anon_likes_insert') >= 0);
+  assert.ok(s.indexOf('DROP POLICY IF EXISTS anon_comments_insert') >= 0);
+  assert.ok(/REVOKE INSERT, UPDATE, DELETE ON public\.likes FROM PUBLIC, anon, authenticated/.test(s));
+  assert.ok(/REVOKE INSERT, UPDATE, DELETE ON public\.comments FROM PUBLIC, anon, authenticated/.test(s));
 });
 
 console.log('\n=== CSS Surface / Motion Checks ===');
@@ -337,22 +337,22 @@ test('fetch throws timeout sets AbortController and clears timer', function(){
   assert.ok(s.indexOf("fetchError.photoUploadCode = 'timeout'") >= 0, 'timeout code missing');
   assert.ok(s.indexOf('PHOTO_UPLOAD_TIMEOUT_MS') >= 0, 'timeout constant missing');
 });
-test('HTTP non-2xx response leaves rollback to the server', function(){
+test('HTTP non-2xx response cleans the uploaded file', function(){
   var s = read('js/photo-wall/upload-ui.js');
   var httpOkBlock = s.slice(s.indexOf('if (!createRes.ok)'), s.indexOf('var createData;'));
-  assert.strictEqual(httpOkBlock.indexOf('await cleanupStorage(path)'), -1, 'HTTP error duplicates server rollback');
+  assert.ok(httpOkBlock.indexOf('await cleanupStorage(path)') >= 0, 'HTTP error leaves an orphan upload');
   assert.ok(httpOkBlock.indexOf("photoUploadStage = 'record'") >= 0, 'record stage marker missing');
 });
-test('JSON parse failure after HTTP response does not duplicate rollback', function(){
+test('JSON parse failure after HTTP response cleans the uploaded file', function(){
   var s = read('js/photo-wall/upload-ui.js');
   var parseCatch = s.slice(s.indexOf('catch (parseError)'));
-  assert.strictEqual(parseCatch.indexOf('await cleanupStorage(path)'), -1, 'parse error duplicates server rollback');
+  assert.ok(parseCatch.indexOf('await cleanupStorage(path)') >= 0, 'parse error leaves an orphan upload');
 });
 test('response with missing data field remains a record failure', function(){
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf("if (!createData || !createData.data)") >= 0, 'missing data guard missing');
   var guardBlock = s.slice(s.indexOf("if (!createData || !createData.data)"), s.indexOf('return createData.data;'));
-  assert.strictEqual(guardBlock.indexOf('await cleanupStorage(path)'), -1, 'missing data duplicates server rollback');
+  assert.ok(guardBlock.indexOf('await cleanupStorage(path)') >= 0, 'missing data leaves an orphan upload');
 });
 
 test('photo create headers always retain JSON content type', function(){
