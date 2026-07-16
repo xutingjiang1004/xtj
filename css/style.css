@@ -12769,1880 +12769,6 @@ body.ios-chat-keyboard-open .chat-input-area {
   color: #9bdcb6 !important;
 }
 
-/* ==================== VIP 会员系统 ==================== */
-.xtj-vip-card {
-  margin: 12px 16px;
-  padding: 0;
-  cursor: pointer;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(255,215,0,0.08) 0%, rgba(255,193,7,0.04) 100%);
-  border: 1px solid rgba(255,215,0,0.15);
-  transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
-}
-.xtj-vip-card:hover {
-  border-color: rgba(255,215,0,0.35);
-  background: linear-gradient(135deg, rgba(255,215,0,0.14) 0%, rgba(255,193,7,0.08) 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(255,215,0,0.08);
-}
-.xtj-vip-card:active {
-  transform: scale(0.98);
-}
-.xtj-vip-card-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-}
-.xtj-vip-card-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.xtj-vip-card-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  flex-shrink: 0;
-}
-.xtj-vip-card-icon svg {
-  width: 20px;
-  height: 20px;
-}
-.xtj-vip-card-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.xtj-vip-card-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-main);
-  letter-spacing: -0.01em;
-}
-.xtj-vip-card-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-.xtj-vip-card-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-  transition: all 0.3s ease;
-}
-.xtj-vip-card-badge.active {
-  background: linear-gradient(135deg, #10b981, #059669);
-}
-[data-theme="dark"] .xtj-vip-card {
-  background: linear-gradient(135deg, rgba(255,215,0,0.06) 0%, rgba(255,193,7,0.02) 100%);
-  border-color: rgba(255,215,0,0.12);
-}
-[data-theme="dark"] .xtj-vip-card:hover {
-  border-color: rgba(255,215,0,0.28);
-  background: linear-gradient(135deg, rgba(255,215,0,0.1) 0%, rgba(255,193,7,0.05) 100%);
-}
-
-/* VIP Modal */
-.vip-modal {
-  max-width: 400px;
-  width: 92%;
-  padding: 0;
-  overflow: hidden;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.97) !important;
-  backdrop-filter: blur(40px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
-}
-[data-theme="dark"] .vip-modal {
-  background: rgba(28, 28, 45, 0.98) !important;
-  backdrop-filter: blur(40px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
-}
-.vip-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
-  background: linear-gradient(135deg, rgba(245,158,11,0.06) 0%, rgba(255,255,255,0.02) 100%);
-}
-[data-theme="dark"] .vip-modal-head {
-  border-bottom-color: rgba(255,255,255,0.08);
-  background: linear-gradient(135deg, rgba(245,158,11,0.1) 0%, transparent 100%);
-}
-.vip-modal-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-.vip-modal-title svg {
-  stroke: #f59e0b;
-}
-.vip-modal-body {
-  padding: 24px;
-}
-.vip-plan-card {
-  text-align: center;
-  padding: 28px 24px 24px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(255,215,0,0.05) 0%, rgba(255,255,255,0.02) 100%);
-  border: 1px solid rgba(255,215,0,0.12);
-  position: relative;
-  overflow: hidden;
-}
-.vip-plan-card::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -50%;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle, rgba(255,215,0,0.06) 0%, transparent 70%);
-  pointer-events: none;
-}
-.vip-plan-card--active {
-  border-color: rgba(245,158,11,0.3);
-  box-shadow: 0 4px 24px rgba(245,158,11,0.08);
-}
-[data-theme="dark"] .vip-plan-card {
-  background: linear-gradient(135deg, rgba(255,215,0,0.04) 0%, rgba(255,255,255,0.01) 100%);
-}
-.vip-plan-price {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-.vip-plan-currency {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-.vip-plan-amount {
-  font-size: 48px;
-  font-weight: 900;
-  color: var(--text-main);
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-.vip-plan-period {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-left: 2px;
-}
-.vip-plan-name {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-main);
-  margin-bottom: 6px;
-}
-.vip-plan-desc {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 20px;
-}
-.vip-plan-features {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 24px;
-  text-align: left;
-}
-.vip-plan-feature {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(0,0,0,0.03);
-}
-[data-theme="dark"] .vip-plan-feature {
-  background: rgba(255,255,255,0.02);
-  border-color: rgba(255,255,255,0.04);
-}
-.vip-plan-feature-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-}
-.vip-plan-feature-text {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-main);
-}
-.vip-pay-btn {
-  width: 100%;
-  padding: 14px 24px;
-  border: none;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
-  position: relative;
-  overflow: hidden;
-}
-.vip-pay-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(245,158,11,0.3);
-}
-.vip-pay-btn:active {
-  transform: scale(0.97);
-}
-.vip-pay-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none !important;
-  box-shadow: none !important;
-}
-.vip-pay-btn.loading {
-  pointer-events: none;
-}
-[data-theme="dark"] .vip-pay-btn {
-  box-shadow: 0 4px 16px rgba(245,158,11,0.15);
-}
-.vip-modal-footer {
-  margin-top: 16px;
-  text-align: center;
-}
-.vip-modal-footer-text {
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.7;
-}
-
-/* Pro 赠送活动区 */
-.pro-gift-section {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border, rgba(0,0,0,0.08));
-}
-.pro-gift-section-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.pro-gift-section-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, rgba(245,158,11,0.18), rgba(245,158,11,0.08));
-  color: #f59e0b;
-}
-.pro-gift-section-title {
-  font-size: 14px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.pro-gift-section-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  letter-spacing: 0.04em;
-}
-.pro-gift-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.pro-gift-card {
-  position: relative;
-  border-radius: 12px;
-  padding: 12px 14px;
-  border: 1px solid rgba(245,158,11,0.2);
-  background: linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02));
-  transition: all 0.25s ease;
-  overflow: hidden;
-}
-.pro-gift-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.08), transparent);
-  transition: left 0.6s ease;
-}
-.pro-gift-card:hover::before {
-  left: 100%;
-}
-.pro-gift-card:hover {
-  border-color: rgba(245,158,11,0.35);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(245,158,11,0.08);
-}
-.pro-gift-card.claimed {
-  opacity: 0.5;
-  filter: grayscale(0.4);
-  pointer-events: none;
-}
-.pro-gift-card-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  position: relative;
-  z-index: 1;
-}
-.pro-gift-card-info {
-  flex: 1;
-  min-width: 0;
-}
-.pro-gift-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 3px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pro-gift-card-desc {
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pro-gift-card-meta {
-  font-size: 10px;
-  color: #f59e0b;
-  margin-top: 4px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.pro-gift-card-meta svg {
-  width: 11px;
-  height: 11px;
-}
-.pro-gift-claim-btn {
-  flex-shrink: 0;
-  padding: 7px 16px;
-  border-radius: 10px;
-  border: none;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(245,158,11,0.25);
-}
-.pro-gift-claim-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(245,158,11,0.35);
-}
-.pro-gift-claim-btn:active {
-  transform: translateY(0);
-}
-.pro-gift-claim-btn.loading {
-  opacity: 0.7;
-  cursor: wait;
-  pointer-events: none;
-}
-.pro-gift-claimed-badge {
-  flex-shrink: 0;
-  padding: 5px 12px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--success, #059669);
-  background: rgba(5,150,105,0.1);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.pro-gift-claimed-badge.disabled {
-  color: var(--text-muted, #6b7280);
-  background: rgba(107,114,128,0.12);
-}
-
-/* Pro 活动卡片 - 专属标签 */
-.pro-gift-card-tag {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: linear-gradient(135deg,#f59e0b,#d97706);
-  color: #fff;
-  margin-right: 6px;
-  vertical-align: 1px;
-  letter-spacing: 0.05em;
-}
-/* Pro 活动卡片 - 剩余名额 */
-.pro-gift-card-remain {
-  font-weight: 600;
-  color: #ef4444;
-}
-.pro-gift-card-dot {
-  margin: 0 2px;
-  color: var(--text-muted, #9ca3af);
-  opacity: 0.6;
-}
-/* Pro 活动卡片 - 功能权益标签 */
-.pro-gift-card-features {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-.pro-gift-card-feature {
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: rgba(245,158,11,0.1);
-  color: #b45309;
-  font-weight: 500;
-}
-[data-theme="dark"] .pro-gift-card-feature {
-  background: rgba(245,158,11,0.15);
-  color: #fbbf24;
-}
-
-/* Pro 弹窗 - 顶部轻量状态条（已开通时显示） */
-.vip-status-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.08));
-  border: 1px solid rgba(245,158,11,0.25);
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: #b45309;
-  font-weight: 500;
-}
-.vip-status-banner.is-pro {
-  background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.08));
-  border-color: rgba(245,158,11,0.35);
-}
-.vip-status-banner-icon {
-  font-size: 16px;
-}
-.vip-status-banner-text {
-  flex: 1;
-  line-height: 1.5;
-}
-[data-theme="dark"] .vip-status-banner {
-  color: #fbbf24;
-}
-
-/* Pro 弹窗 - 空状态 */
-.pro-gift-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 36px 16px 28px;
-  text-align: center;
-  color: var(--text-muted, #6b7280);
-}
-.pro-gift-empty-icon {
-  font-size: 36px;
-  margin-bottom: 10px;
-  opacity: 0.7;
-}
-.pro-gift-empty-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary, #374151);
-  margin-bottom: 6px;
-}
-.pro-gift-empty-sub {
-  font-size: 11px;
-  color: var(--text-muted, #9ca3af);
-  line-height: 1.5;
-}
-[data-theme="dark"] .pro-gift-empty-text {
-  color: #e5e7eb;
-}
-
-/* VIP 已激活标识（简洁简约版：透明 + 描边） */
-.xtj-vip-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--pro-accent, #f59e0b);
-  border: 1px solid var(--pro-accent, #f59e0b);
-  letter-spacing: 0.04em;
-  vertical-align: middle;
-  margin-left: 4px;
-  position: relative;
-  top: -1px;
-  box-shadow: none;
-  animation: none;
-}
-.xtj-vip-badge svg {
-  width: 9px;
-  height: 9px;
-  fill: currentColor;
-}
-
-/* ========== Pro 会员弹窗增强 ========== */
-.vip-modal-badge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #f59e0b, #ef4444);
-  color: #fff;
-  margin-left: 8px;
-  vertical-align: middle;
-  animation: vipBadgePulse 2s ease-in-out infinite;
-}
-@keyframes vipBadgePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
-}
-.vip-plan-card {
-  position: relative;
-}
-
-/* ========== Pro 庆祝动画 ========== */
-.pro-celebration-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  transition: opacity 0.4s ease;
-}
-.pro-celebration-overlay.pro-celebration-exit {
-  opacity: 0;
-  pointer-events: none;
-}
-.pro-celebration-overlay.pro-celebration-exit .pro-celebration-card {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0;
-  transition: all 0.5s ease;
-}
-.pro-celebration-bg {
-  position: absolute;
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  background: radial-gradient(circle, #f59e0b 0%, transparent 70%);
-  pointer-events: none;
-  opacity: 0;
-}
-#proCelebrationCanvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-.pro-celebration-card {
-  position: relative;
-  z-index: 2;
-  background: linear-gradient(145deg, #1c1917, #292524);
-  border: 1px solid rgba(245,158,11,0.25);
-  border-radius: 24px;
-  padding: 40px 36px 32px;
-  max-width: 380px;
-  width: 90%;
-  text-align: center;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(245,158,11,0.1);
-}
-.pro-celebration-icon {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 16px;
-  background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(239,68,68,0.15));
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: celebIconGlow 2s ease-in-out infinite;
-}
-@keyframes celebIconGlow {
-  0%, 100% { box-shadow: 0 0 10px rgba(245,158,11,0.2); }
-  50% { box-shadow: 0 0 25px rgba(245,158,11,0.4); }
-}
-.pro-celebration-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #fbbf24;
-  margin-bottom: 6px;
-  letter-spacing: 0.5px;
-}
-.pro-celebration-sub {
-  font-size: 14px;
-  color: #a8a29e;
-  margin-bottom: 20px;
-}
-.pro-celebration-info {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  margin-bottom: 20px;
-  padding: 12px;
-  background: rgba(255,255,255,0.04);
-  border-radius: 12px;
-}
-.pro-celebration-info-item {
-  text-align: center;
-}
-.pro-celebration-info-label {
-  display: block;
-  font-size: 11px;
-  color: #78716c;
-  margin-bottom: 2px;
-}
-.pro-celebration-info-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fbbf24;
-}
-.pro-celebration-features {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 24px;
-}
-.pro-celebration-feature {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #d6d3d1;
-  padding: 6px 10px;
-  background: rgba(255,255,255,0.04);
-  border-radius: 8px;
-}
-.pcf-icon {
-  font-size: 14px;
-}
-.pro-celebration-btn {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1c1917;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  cursor: pointer;
-  transition: all 0.25s ease;
-  box-shadow: 0 4px 15px rgba(245,158,11,0.3);
-}
-.pro-celebration-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(245,158,11,0.4);
-}
-.pro-celebration-btn:active {
-  transform: translateY(0);
-}
-
-/* ========== Pro 主题（开通后界面焕新） ========== */
-html.xtj-pro-active {
-  --pro-accent: #f59e0b;
-  --pro-accent-light: #fbbf24;
-  --pro-glow: rgba(245,158,11,0.15);
-}
-html.xtj-pro-active .dock-tab.active .dt-label {
-  color: var(--pro-accent);
-}
-html.xtj-pro-active .dock-tab.active .dt-icon {
-  color: var(--pro-accent);
-}
-html.xtj-pro-active .dock-tab.active .dt-svg {
-  filter: drop-shadow(0 0 6px rgba(245,158,11,0.4));
-}
-html.xtj-pro-active .xtj-vip-card {
-  border-color: var(--pro-accent);
-  box-shadow: 0 0 20px var(--pro-glow), 0 0 40px var(--pro-glow);
-  background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.02));
-}
-html.xtj-pro-active .xtj-vip-card .xtj-vip-card-badge.active {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  box-shadow: 0 0 12px rgba(245,158,11,0.3);
-}
-html.xtj-pro-active .avatar-ring {
-  box-shadow: none;
-  animation: none;
-}
-@keyframes proAvatarGlow {
-  0%, 100% { box-shadow: 0 0 0 1px #f59e0b; }
-  50% { box-shadow: 0 0 0 1px #fbbf24; }
-}
-html.xtj-pro-active .xtj-vip-card .xtj-vip-card-sub {
-  color: var(--pro-accent-light);
-}
-html.xtj-pro-active .profile-setting-item.pro-setting-highlight {
-  border-color: rgba(245,158,11,0.2);
-  background: rgba(245,158,11,0.05);
-}
-html.xtj-pro-active .profile-setting-item.pro-setting-highlight .profile-setting-label {
-  color: var(--pro-accent-light);
-}
-html.xtj-pro-active .post-vip-badge {
-  background: transparent;
-  color: var(--pro-accent);
-  border: 1px solid var(--pro-accent);
-  box-shadow: none;
-  animation: none;
-  padding: 0 5px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
-  letter-spacing: 0.04em;
-}
-@keyframes proBadgePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-/* ========== 取消订阅按钮 ========== */
-html {
-  --xtj-pro-theme-accent: #5cb17c;
-  --xtj-pro-theme-soft: rgba(92, 177, 124, 0.12);
-  --xtj-pro-theme-border: rgba(124, 196, 152, 0.32);
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #059669, #10b981);
-  --xtj-pro-bubble-color: #ffffff;
-}
-
-html[data-pro-theme="mint"] {
-  --xtj-pro-theme-accent: #5cb17c;
-  --xtj-pro-theme-soft: rgba(92, 177, 124, 0.14);
-  --xtj-pro-theme-border: rgba(124, 196, 152, 0.34);
-}
-
-html[data-pro-theme="aqua"] {
-  --xtj-pro-theme-accent: #5ba9c8;
-  --xtj-pro-theme-soft: rgba(91, 169, 200, 0.14);
-  --xtj-pro-theme-border: rgba(133, 195, 220, 0.34);
-}
-
-html[data-pro-theme="sakura"] {
-  --xtj-pro-theme-accent: #d38bab;
-  --xtj-pro-theme-soft: rgba(211, 139, 171, 0.14);
-  --xtj-pro-theme-border: rgba(230, 179, 201, 0.34);
-}
-
-html[data-pro-theme="lavender"] {
-  --xtj-pro-theme-accent: #8f86d6;
-  --xtj-pro-theme-soft: rgba(143, 134, 214, 0.14);
-  --xtj-pro-theme-border: rgba(181, 173, 236, 0.34);
-}
-
-.profile-pro-style-panel {
-  margin: 14px 0 16px;
-  padding: 16px 18px;
-  border-radius: 22px;
-  border: 1px solid var(--xtj-pro-theme-border);
-  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,252,249,0.92));
-  box-shadow: 0 14px 28px rgba(27, 72, 47, 0.08);
-  display: grid;
-  gap: 14px;
-}
-
-.profile-pro-style-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.profile-pro-style-copy {
-  min-width: 0;
-}
-
-.profile-pro-style-kicker {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--xtj-pro-theme-accent);
-}
-
-.profile-pro-style-title {
-  margin-top: 4px;
-  font-size: 16px;
-  font-weight: 800;
-  color: #214633;
-}
-
-.profile-pro-style-sub {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.65;
-  color: rgba(43, 78, 59, 0.72);
-}
-
-.profile-pro-style-badge {
-  flex: 0 0 auto;
-  padding: 7px 12px;
-  border-radius: 999px;
-  background: var(--xtj-pro-theme-soft);
-  color: var(--xtj-pro-theme-accent);
-  border: 1px solid var(--xtj-pro-theme-border);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.profile-pro-style-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.profile-pro-style-field {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.pro-style-native-select {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.profile-pro-style-label {
-  font-size: 12px;
-  font-weight: 800;
-  color: #325641;
-}
-
-.pro-style-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.pro-style-option-card {
-  position: relative;
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 18px;
-  border: 1px solid rgba(186, 220, 197, 0.92);
-  background: rgba(255,255,255,0.94);
-  box-shadow: 0 10px 22px rgba(35, 82, 55, 0.06);
-  cursor: pointer;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background-color 0.18s ease, opacity 0.18s ease;
-  text-align: left;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .pro-style-option-card:hover {
-    transform: translateY(-1px);
-    border-color: rgba(114, 182, 141, 0.48);
-    box-shadow: 0 14px 28px rgba(35, 82, 55, 0.1);
-  }
-}
-
-.pro-style-option-card.active {
-  border-color: rgba(96, 178, 126, 0.82);
-  background: linear-gradient(180deg, rgba(246, 254, 249, 0.98), rgba(236, 250, 241, 0.95));
-  box-shadow: 0 0 0 1px rgba(155, 222, 178, 0.82), 0 16px 30px rgba(56, 114, 77, 0.12);
-}
-
-.pro-style-option-card.locked,
-.pro-style-option-card:disabled {
-  opacity: 0.72;
-  cursor: not-allowed;
-}
-
-.pro-style-option-card.locked::after {
-  content: 'Pro';
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.92);
-  border: 1px solid rgba(188, 218, 198, 0.9);
-  color: #4e8062;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.pro-style-card-check {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid rgba(176, 211, 188, 0.92);
-  background: rgba(255,255,255,0.94);
-  box-shadow: 0 4px 10px rgba(35, 82, 55, 0.08);
-}
-
-.pro-style-option-card.active .pro-style-card-check {
-  border-color: rgba(76, 162, 109, 0.92);
-  background: linear-gradient(135deg, #63b783, #89d1a5);
-}
-
-.pro-style-option-card.active .pro-style-card-check::before {
-  content: '';
-  position: absolute;
-  left: 6px;
-  top: 3px;
-  width: 4px;
-  height: 8px;
-  border-right: 2px solid #fff;
-  border-bottom: 2px solid #fff;
-  transform: rotate(42deg);
-}
-
-.pro-style-option-title {
-  font-size: 13px;
-  font-weight: 800;
-  color: #2f5c43;
-}
-
-.theme-preview,
-.bubble-preview,
-.post-card-preview {
-  width: 100%;
-  min-width: 0;
-}
-
-.theme-preview {
-  position: relative;
-  display: grid;
-  gap: 8px;
-  min-height: 118px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(188, 218, 198, 0.86);
-  background: linear-gradient(180deg, #f7fbf8, #edf7f1);
-  overflow: hidden;
-}
-
-.theme-preview::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at top right, rgba(255,255,255,0.7), rgba(255,255,255,0) 42%);
-  pointer-events: none;
-}
-
-.theme-preview-topbar {
-  height: 10px;
-  width: 58%;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.72);
-}
-
-.theme-preview-surface {
-  display: grid;
-  gap: 10px;
-}
-
-.theme-preview-title-line {
-  height: 8px;
-  width: 42%;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.7);
-}
-
-.theme-preview-card {
-  display: grid;
-  gap: 7px;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.78);
-  border: 1px solid rgba(255,255,255,0.7);
-  box-shadow: 0 10px 20px rgba(45, 98, 66, 0.08);
-}
-
-.theme-preview-card-line {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(122, 162, 141, 0.2);
-}
-
-.theme-preview-card-line.is-strong {
-  width: 68%;
-}
-
-.theme-preview-card-line:not(.is-strong) {
-  width: 82%;
-}
-
-.theme-preview-card-action {
-  width: 26px;
-  height: 26px;
-  border-radius: 9px;
-  background: rgba(120, 181, 144, 0.28);
-  justify-self: end;
-}
-
-.theme-preview.is-default {
-  background: linear-gradient(180deg, #f7fbf8, #edf6f0);
-}
-
-.theme-preview.is-mint {
-  background: linear-gradient(180deg, rgba(218, 244, 226, 0.95), rgba(235, 250, 240, 0.95));
-}
-
-.theme-preview.is-aqua {
-  background: linear-gradient(180deg, rgba(220, 242, 250, 0.95), rgba(236, 249, 252, 0.95));
-}
-
-.theme-preview.is-sakura {
-  background: linear-gradient(180deg, rgba(251, 233, 241, 0.95), rgba(252, 243, 247, 0.95));
-}
-
-.theme-preview.is-lavender {
-  background: linear-gradient(180deg, rgba(236, 232, 252, 0.95), rgba(246, 244, 253, 0.95));
-}
-
-.theme-preview.is-default .theme-preview-card-action {
-  background: rgba(148, 182, 161, 0.24);
-}
-
-.theme-preview.is-mint .theme-preview-card-action {
-  background: rgba(92, 177, 124, 0.28);
-}
-
-.theme-preview.is-aqua .theme-preview-card-action {
-  background: rgba(91, 169, 200, 0.28);
-}
-
-.theme-preview.is-sakura .theme-preview-card-action {
-  background: rgba(211, 139, 171, 0.26);
-}
-
-.theme-preview.is-lavender .theme-preview-card-action {
-  background: rgba(143, 134, 214, 0.28);
-}
-
-.bubble-preview {
-  display: grid;
-  gap: 10px;
-  min-height: 118px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(188, 218, 198, 0.86);
-  background: linear-gradient(180deg, rgba(248, 252, 249, 0.96), rgba(239, 248, 242, 0.96));
-}
-
-.bubble-preview-row {
-  display: flex;
-}
-
-.bubble-preview-row.is-right {
-  justify-content: flex-end;
-}
-
-.bubble-preview-msg {
-  display: inline-flex;
-  align-items: center;
-  max-width: 80px;
-  min-height: 30px;
-  padding: 7px 10px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.86);
-  color: rgba(59, 81, 66, 0.9);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.35;
-  box-shadow: 0 8px 18px rgba(51, 94, 69, 0.08);
-}
-
-.bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #daf3e2, #cfead9);
-  color: #245239;
-}
-
-.bubble-preview.is-default .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #daf3e2, #cfead9);
-  color: #245239;
-}
-
-.bubble-preview.is-mint .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #5aa986, #7fd1ae);
-  color: #fff;
-}
-
-.bubble-preview.is-aqua .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #67b5d8, #88d0e6);
-  color: #fff;
-}
-
-.bubble-preview.is-cream .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #fff7eb, #f8ead4);
-  color: #7d6240;
-}
-
-.bubble-preview.is-sakura .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #f6d8e3, #edbfd1);
-  color: #855065;
-}
-
-.bubble-preview.is-lavender .bubble-preview-msg.sent {
-  background: linear-gradient(135deg, #d8d2f6, #c3bced);
-  color: #554d8e;
-}
-
-.post-card-preview {
-  position: relative;
-  display: grid;
-  gap: 8px;
-  min-height: 118px;
-  padding: 12px;
-  border-radius: 18px;
-  border: 1px solid rgba(188, 218, 198, 0.86);
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246, 251, 248, 0.96));
-  box-shadow: 0 12px 24px rgba(39, 83, 56, 0.08);
-  overflow: hidden;
-}
-
-.post-card-preview-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.post-card-preview-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #8dd3a9, #68bf8d);
-  flex: 0 0 auto;
-}
-
-.post-card-preview-user {
-  width: 54px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(97, 136, 113, 0.22);
-}
-
-.post-card-preview-line {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(97, 136, 113, 0.18);
-}
-
-.post-card-preview-line.is-strong {
-  width: 72%;
-}
-
-.post-card-preview-line:not(.is-strong) {
-  width: 86%;
-}
-
-.post-card-preview-meta {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.post-card-preview-meta span {
-  width: 26px;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(97, 136, 113, 0.16);
-}
-
-.post-card-preview.is-clean-border {
-  border-color: rgba(133, 195, 220, 0.46);
-  box-shadow: 0 12px 28px rgba(42, 96, 66, 0.08), inset 0 0 0 1px rgba(91, 169, 200, 0.12);
-}
-
-.post-card-preview.is-leaf-corner::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 30px;
-  height: 30px;
-  border-radius: 12px 0 12px 18px;
-  background: radial-gradient(circle at 30% 30%, rgba(117, 194, 146, 0.72), rgba(117, 194, 146, 0.1) 72%);
-}
-
-.post-card-preview.is-soft-glow {
-  border-color: rgba(176, 215, 190, 0.82);
-  box-shadow: 0 0 0 1px rgba(207, 234, 216, 0.85), 0 18px 36px rgba(110, 179, 138, 0.16);
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(244, 251, 247, 0.95));
-}
-
-.post-card-preview.is-minimal-pro .post-card-preview-head {
-  position: relative;
-  padding-bottom: 8px;
-}
-
-.post-card-preview.is-minimal-pro .post-card-preview-head::after {
-  content: '';
-  position: absolute;
-  left: 30px;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(92, 177, 124, 0.7), rgba(255,255,255,0));
-  opacity: 0.52;
-}
-
-.pro-gift-auth-card {
-  display: grid;
-  gap: 10px;
-  justify-items: center;
-  padding: 26px 18px 24px;
-  border-radius: 22px;
-  border: 1px solid rgba(188, 218, 198, 0.92);
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245, 250, 247, 0.96));
-  box-shadow: 0 16px 30px rgba(39, 83, 56, 0.08);
-  text-align: center;
-}
-
-.pro-gift-auth-card .pro-gift-empty-icon {
-  margin-bottom: 0;
-}
-
-.pro-gift-auth-title {
-  font-size: 15px;
-  font-weight: 800;
-  color: #234b35;
-}
-
-.pro-gift-auth-copy {
-  max-width: 320px;
-  font-size: 12px;
-  line-height: 1.65;
-  color: rgba(47, 82, 62, 0.74);
-}
-
-.pro-gift-auth-actions {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.pro-gift-auth-btn {
-  min-width: 112px;
-}
-
-.pro-gift-auth-btn-secondary {
-  background: rgba(255, 255, 255, .7) !important;
-  color: #2d6c4b !important;
-  border: 1px solid rgba(173, 221, 194, .65) !important;
-  box-shadow: none !important;
-}
-
-.pro-gift-auth-btn-secondary:hover {
-  background: rgba(255, 255, 255, .9) !important;
-  border-color: rgba(127, 209, 174, .85) !important;
-}
-
-.profile-pro-style-field select {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(190, 220, 202, 0.9);
-  background: rgba(255,255,255,0.96);
-  color: var(--text-main);
-  font-size: 13px;
-  font-weight: 600;
-  outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-}
-
-.profile-pro-style-field select:focus {
-  border-color: var(--xtj-pro-theme-accent);
-  box-shadow: 0 0 0 3px var(--xtj-pro-theme-soft);
-}
-
-.profile-pro-style-field select:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  background: rgba(244, 248, 245, 0.96);
-}
-
-.profile-pro-style-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.profile-pro-style-actions .btn {
-  min-width: 144px;
-}
-
-/* ========== v0.97 Pro 视觉装扮二级页面 ========== */
-.profile-main-view {
-  display: block;
-}
-
-.profile-pro-style-entry-wrap {
-  margin: 14px 16px 0;
-}
-
-.profile-pro-style-entry {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(34, 197, 130, 0.18);
-  background: linear-gradient(135deg, rgba(232, 248, 240, 0.92), rgba(245, 251, 247, 0.96));
-  box-shadow: 0 6px 18px rgba(40, 80, 60, 0.06);
-  cursor: pointer;
-  text-align: left;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-  font: inherit;
-  color: inherit;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .profile-pro-style-entry:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 22px rgba(40, 80, 60, 0.10);
-    border-color: rgba(34, 197, 130, 0.32);
-  }
-}
-
-.profile-pro-style-entry:active {
-  transform: translateY(0);
-  box-shadow: 0 4px 12px rgba(40, 80, 60, 0.06);
-}
-
-.profile-pro-style-entry.is-locked {
-  opacity: 0.85;
-  filter: saturate(0.7);
-}
-
-.profile-pro-style-entry-icon {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #5aa986, #7fd1ae);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-}
-
-.profile-pro-style-entry-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.profile-pro-style-entry-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1f2d27;
-  letter-spacing: 0.2px;
-}
-
-.profile-pro-style-entry-sub {
-  font-size: 12px;
-  color: #5a6b62;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.profile-pro-style-entry-badge {
-  flex: 0 0 auto;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(34, 197, 130, 0.14);
-  color: #1f7a4a;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-}
-
-.profile-pro-style-entry.is-locked .profile-pro-style-entry-badge {
-  background: rgba(120, 132, 124, 0.14);
-  color: #5a6b62;
-}
-
-.profile-pro-style-entry-arrow {
-  flex: 0 0 auto;
-  font-size: 22px;
-  line-height: 1;
-  color: #5a6b62;
-  margin-left: 2px;
-}
-
-.profile-subpage {
-  display: block;
-  padding: 14px 16px 28px;
-  animation: xtjProfileSubpageIn 0.22s ease;
-}
-
-.profile-subpage[hidden] {
-  display: none !important;
-}
-
-.profile-subpage-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(34, 197, 130, 0.16);
-}
-
-.profile-subpage-back {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  border: 1px solid rgba(34, 197, 130, 0.22);
-  background: rgba(255, 255, 255, 0.72);
-  color: #1f7a4a;
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: background 0.18s ease, transform 0.18s ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .profile-subpage-back:hover {
-    background: rgba(232, 248, 240, 0.92);
-    transform: translateX(-1px);
-  }
-}
-
-.profile-subpage-back:active {
-  transform: translateX(0);
-}
-
-.profile-subpage-title-wrap {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.profile-subpage-kicker {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: #1f7a4a;
-  margin-bottom: 4px;
-}
-
-.profile-subpage-title {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #1f2d27;
-  letter-spacing: 0.2px;
-}
-
-.profile-subpage-sub {
-  margin: 0;
-  font-size: 12.5px;
-  color: #5a6b62;
-  line-height: 1.5;
-}
-
-.profile-pro-style-page .profile-pro-style-panel {
-  border-radius: 18px;
-  border: 1px solid rgba(34, 197, 130, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 251, 247, 0.94));
-  box-shadow: 0 10px 24px rgba(40, 80, 60, 0.06);
-  padding: 16px;
-  margin: 0;
-}
-
-@keyframes xtjProfileSubpageIn {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-[data-theme="dark"] .profile-pro-style-entry {
-  background: linear-gradient(135deg, rgba(31, 50, 41, 0.92), rgba(20, 36, 28, 0.96));
-  border-color: rgba(127, 209, 174, 0.22);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
-}
-
-[data-theme="dark"] .profile-pro-style-entry-title {
-  color: #e7f5ec;
-}
-
-[data-theme="dark"] .profile-pro-style-entry-sub {
-  color: #93a89c;
-}
-
-[data-theme="dark"] .profile-pro-style-entry-badge {
-  background: rgba(127, 209, 174, 0.18);
-  color: #c5ead5;
-}
-
-[data-theme="dark"] .profile-pro-style-entry.is-locked .profile-pro-style-entry-badge {
-  background: rgba(120, 132, 124, 0.18);
-  color: #93a89c;
-}
-
-[data-theme="dark"] .profile-pro-style-entry-arrow {
-  color: #93a89c;
-}
-
-[data-theme="dark"] .profile-subpage-head {
-  border-bottom-color: rgba(127, 209, 174, 0.18);
-}
-
-[data-theme="dark"] .profile-subpage-back {
-  background: rgba(20, 36, 28, 0.72);
-  border-color: rgba(127, 209, 174, 0.28);
-  color: #c5ead5;
-}
-
-[data-theme="dark"] .profile-subpage-title {
-  color: #e7f5ec;
-}
-
-[data-theme="dark"] .profile-subpage-sub {
-  color: #93a89c;
-}
-
-[data-theme="dark"] .profile-pro-style-page .profile-pro-style-panel {
-  background: linear-gradient(180deg, rgba(20, 36, 28, 0.96), rgba(15, 28, 22, 0.98));
-  border-color: rgba(127, 209, 174, 0.18);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.36);
-}
-
-html[data-pro-theme]:not([data-pro-theme="default"]) .profile-pro-style-panel,
-html[data-pro-theme]:not([data-pro-theme="default"]) .xtj-vip-card,
-html[data-pro-theme]:not([data-pro-theme="default"]) .dock-profile-container .profile-user-card,
-html[data-pro-theme]:not([data-pro-theme="default"]) .publish-box {
-  border-color: var(--xtj-pro-theme-border) !important;
-  box-shadow: 0 16px 34px rgba(27, 72, 47, 0.08), 0 0 0 1px var(--xtj-pro-theme-soft) inset !important;
-}
-
-html[data-pro-chat-bubble="mint"] {
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #5aa986, #7fd1ae);
-  --xtj-pro-bubble-color: #ffffff;
-}
-
-html[data-pro-chat-bubble="aqua"] {
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #67b5d8, #88d0e6);
-  --xtj-pro-bubble-color: #ffffff;
-}
-
-html[data-pro-chat-bubble="cream"] {
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #fff7eb, #f8ead4);
-  --xtj-pro-bubble-color: #7d6240;
-}
-
-html[data-pro-chat-bubble="sakura"] {
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #f6d8e3, #edbfd1);
-  --xtj-pro-bubble-color: #855065;
-}
-
-html[data-pro-chat-bubble="lavender"] {
-  --xtj-pro-bubble-bg: linear-gradient(135deg, #d8d2f6, #c3bced);
-  --xtj-pro-bubble-color: #554d8e;
-}
-
-html[data-pro-chat-bubble]:not([data-pro-chat-bubble="default"]) .chat-msg.sent {
-  background: var(--xtj-pro-bubble-bg);
-  color: var(--xtj-pro-bubble-color);
-  box-shadow: 0 10px 24px rgba(65, 104, 82, 0.14);
-}
-
-html[data-pro-chat-bubble="cream"] .chat-msg.sent .msg-read-status,
-html[data-pro-chat-bubble="sakura"] .chat-msg.sent .msg-read-status,
-html[data-pro-chat-bubble="lavender"] .chat-msg.sent .msg-read-status {
-  color: rgba(72, 54, 36, 0.62);
-}
-
-.post.is-self-post.post-style-clean_border {
-  border-color: var(--xtj-pro-theme-border);
-  box-shadow: 0 12px 28px rgba(42, 96, 66, 0.10), inset 0 0 0 1px var(--xtj-pro-theme-soft);
-}
-
-.post.is-self-post.post-style-leaf_corner {
-  position: relative;
-  border-color: rgba(171, 214, 187, 0.7);
-}
-
-.post.is-self-post.post-style-leaf_corner::after {
-  content: '';
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px 0 12px 18px;
-  background: radial-gradient(circle at 30% 30%, rgba(117, 194, 146, 0.72), rgba(117, 194, 146, 0.12) 72%);
-  pointer-events: none;
-}
-
-.post.is-self-post.post-style-soft_glow {
-  border-color: rgba(176, 215, 190, 0.78);
-  box-shadow: 0 0 0 1px rgba(207, 234, 216, 0.9), 0 18px 36px rgba(110, 179, 138, 0.16);
-  background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(246, 252, 248, 0.94));
-}
-
-.post.is-self-post.post-style-minimal_pro {
-  border-color: rgba(164, 205, 180, 0.9);
-  box-shadow: 0 14px 30px rgba(33, 79, 54, 0.08);
-}
-
-.post.is-self-post.post-style-minimal_pro .post-header {
-  position: relative;
-  padding-bottom: 10px;
-}
-
-.post.is-self-post.post-style-minimal_pro .post-header::after {
-  content: '';
-  position: absolute;
-  left: 52px;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, var(--xtj-pro-theme-accent), rgba(255,255,255,0));
-  opacity: 0.42;
-}
-
-[data-theme="dark"] .profile-pro-style-panel {
-  background: rgba(28, 40, 34, 0.92);
-  border-color: rgba(105, 150, 123, 0.24);
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
-}
-
-[data-theme="dark"] .profile-pro-style-title {
-  color: #edf7f0;
-}
-
-[data-theme="dark"] .profile-pro-style-sub,
-[data-theme="dark"] .profile-pro-style-label {
-  color: rgba(215, 232, 220, 0.78);
-}
-
-[data-theme="dark"] .pro-style-option-card {
-  background: rgba(24, 35, 29, 0.94);
-  border-color: rgba(88, 126, 103, 0.38);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
-}
-
-[data-theme="dark"] .pro-style-option-card.active {
-  background: linear-gradient(180deg, rgba(28, 48, 36, 0.98), rgba(23, 42, 31, 0.96));
-  box-shadow: 0 0 0 1px rgba(102, 179, 128, 0.42), 0 18px 30px rgba(0, 0, 0, 0.28);
-}
-
-[data-theme="dark"] .pro-style-option-title,
-[data-theme="dark"] .pro-gift-auth-title {
-  color: #edf7f0;
-}
-
-[data-theme="dark"] .theme-preview,
-[data-theme="dark"] .bubble-preview,
-[data-theme="dark"] .post-card-preview,
-[data-theme="dark"] .pro-gift-auth-card {
-  border-color: rgba(86, 126, 101, 0.36);
-  background: linear-gradient(180deg, rgba(36, 49, 41, 0.98), rgba(26, 37, 31, 0.96));
-}
-
-[data-theme="dark"] .theme-preview-card,
-[data-theme="dark"] .bubble-preview-msg,
-[data-theme="dark"] .post-card-preview {
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
-}
-
-[data-theme="dark"] .theme-preview-card,
-[data-theme="dark"] .bubble-preview-msg,
-[data-theme="dark"] .post-card-preview.is-default {
-  background-color: rgba(255,255,255,0.06);
-}
-
-[data-theme="dark"] .pro-gift-auth-copy {
-  color: rgba(215, 232, 220, 0.78);
-}
-
-[data-theme="dark"] .profile-pro-style-field select {
-  background: rgba(20, 28, 24, 0.92);
-  border-color: rgba(94, 131, 108, 0.3);
-  color: #edf7f0;
-}
-
-[data-theme="dark"] .profile-pro-style-field select:disabled {
-  background: rgba(24, 34, 28, 0.92);
-}
-
-[data-theme="dark"] .post.is-self-post.post-style-clean_border,
-[data-theme="dark"] .post.is-self-post.post-style-leaf_corner,
-[data-theme="dark"] .post.is-self-post.post-style-soft_glow,
-[data-theme="dark"] .post.is-self-post.post-style-minimal_pro {
-  border-color: rgba(123, 165, 140, 0.34);
-}
-
-@media (max-width: 720px) {
-  .profile-pro-style-panel {
-    padding: 14px;
-    border-radius: 18px;
-  }
-
-  .profile-pro-style-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .profile-pro-style-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .pro-style-preview-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .profile-pro-style-actions .btn {
-    width: 100%;
-  }
-
-  .pro-style-option-card {
-    padding: 11px;
-    border-radius: 16px;
-  }
-
-  .theme-preview,
-  .bubble-preview,
-  .post-card-preview {
-    min-height: 110px;
-  }
-
-  .pro-gift-auth-card {
-    padding: 22px 14px 20px;
-    border-radius: 18px;
-  }
-}
-
-.vip-modal-cancel-area {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(0,0,0,0.06);
-}
-[data-theme="dark"] .vip-modal-cancel-area {
-  border-top-color: rgba(255,255,255,0.08);
-}
-.vip-cancel-btn {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid rgba(239,68,68,0.3);
-  border-radius: 10px;
-  background: rgba(239,68,68,0.06);
-  color: #ef4444;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.vip-cancel-btn:hover {
-  background: rgba(239,68,68,0.12);
-  border-color: rgba(239,68,68,0.5);
-}
-.vip-cancel-btn:active {
-  transform: scale(0.97);
-}
-
-/* ========== Pro 头像框（所有头像通用，简洁版：无旋转外圈） ========== */
-.xtj-pro-avatar-ring {
-  position: relative;
-  display: inline-flex;
-}
-.xtj-pro-avatar-ring::before {
-  display: none;
-}
-.xtj-pro-avatar-ring .avatar {
-  position: relative;
-  z-index: 1;
-}
-.xtj-pro-avatar-ring .avatar img {
-  border: none;
-  border-radius: 50%;
-  box-shadow: none;
-}
-@keyframes proAvatarRingSpin {
-  0%, 100% { opacity: 0; }
-  50% { opacity: 0; }
-}
-
-/* ========== Pro 点赞特效增强 ========== */
-html.xtj-pro-active .heart-particle {
-  color: #f59e64;
-  filter: drop-shadow(0 2px 3px rgba(245,158,100,0.2));
-}
-html.xtj-pro-active .action-btn.liked {
-  color: #f59e0b !important;
-  text-shadow: 0 0 8px rgba(245,158,11,0.3);
-}
-
-/* ========== Pro 增强 — VIP 身份标识（已简化为与基础徽章一致） ========== */
-.xtj-vip-badge.xtj-vip-enhanced {
-  background: transparent !important;
-  box-shadow: none;
-  animation: none;
-}
-.xtj-vip-badge.xtj-vip-enhanced svg {
-  filter: none;
-}
-
 /* ===== XTJ record card + post detail fix ===== */
 #profileActivityModal .profile-activity-modal-list,
 #statRecordsModal .stat-records-list {
@@ -15328,25 +13454,62 @@ h1 {
 }
 
 [data-theme="dark"] nav,
+
+
 [data-theme="dark"] .dock-bar,
+
+
 [data-theme="dark"] .post,
+
+
 [data-theme="dark"] .publish-box,
+
+
 [data-theme="dark"] .post-filter-bar,
+
+
 [data-theme="dark"] .stats,
+
+
 [data-theme="dark"] .profile-user-card,
+
+
 [data-theme="dark"] .profile-activity-card,
+
+
 [data-theme="dark"] .profile-setting-item,
+
+
 [data-theme="dark"] .profile-totals-bar,
-[data-theme="dark"] .xtj-vip-card,
+
+
 [data-theme="dark"] .photo-wall-header,
+
+
 [data-theme="dark"] .photo-wall-item,
+
+
 [data-theme="dark"] .chat-header,
+
+
 [data-theme="dark"] .chat-input-area,
+
+
 [data-theme="dark"] .chat-list-item,
+
+
 [data-theme="dark"] .profile-settings,
+
+
 [data-theme="dark"] .modal-box,
+
+
 [data-theme="dark"] .announcement-modal,
+
+
 [data-theme="dark"] .report-modal,
+
+
 [data-theme="dark"] .report-history-modal {
   background: rgba(23, 24, 33, 0.86) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
@@ -15405,27 +13568,48 @@ h1 {
 }
 
 [data-theme="dark"] .post-text,
+
+
 [data-theme="dark"] .content,
+
+
 [data-theme="dark"] .profile-user-name,
+
+
 [data-theme="dark"] .profile-user-status,
+
+
 [data-theme="dark"] .profile-setting-text,
+
+
 [data-theme="dark"] .profile-activity-card h4,
+
+
 [data-theme="dark"] .stat-card .stat-label,
-[data-theme="dark"] .vip-modal-title,
-[data-theme="dark"] .vip-plan-name,
-[data-theme="dark"] .vip-plan-feature-text,
+
+
 [data-theme="dark"] .photo-wall-title,
+
+
 [data-theme="dark"] .msg-text,
+
+
 [data-theme="dark"] .chat-header h3,
+
+
 [data-theme="dark"] .post-author-name {
   color: var(--text-main) !important;
 }
 
 [data-theme="dark"] .msg-time,
+
+
 [data-theme="dark"] .post-time,
+
+
 [data-theme="dark"] .post-stat,
-[data-theme="dark"] .vip-plan-desc,
-[data-theme="dark"] .vip-modal-footer-text,
+
+
 [data-theme="dark"] .post-stats-text {
   color: var(--text-muted) !important;
 }
@@ -16648,17 +14832,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   }
 }
 
-/* ============================================================
- * 0.97d — 我的页视觉系统统一（v2）
-   - 统一外层宽度 calc(100% - 32px), max-width 420px, auto margin
- *   - 统一浅绿玻璃拟态背景
- *   - 设置项改为内嵌行（整体大卡片 + 内部行 + border-bottom 分割）
- *   - XTJ Pro 卡片橙色只用于 icon + 按钮
-   - Pro 装扮入口与其他卡片统一
-   - 底部统计栏加 safe-area-inset-bottom
- *   - Pro 装扮二级页 [hidden] 强制 display:none
-   - 保存按钮：总览隐藏 / 子面板内显示
-   ============================================================ */
+
 
 /* 强制 [hidden] 始终隐藏（不被其他 display 规则覆盖） */
 [hidden] {
@@ -16667,10 +14841,14 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 
 /* 1) 我的页外层宽度统一 */
 .dock-profile-container .profile-user-card,
+
+
 .dock-profile-container .profile-activity-card,
-.dock-profile-container .xtj-vip-card,
-.dock-profile-container .profile-pro-style-entry-wrap,
+
+
 .dock-profile-container .profile-settings,
+
+
 .dock-profile-container .profile-totals-bar {
   width: calc(100% - 32px);
   max-width: 420px;
@@ -16680,9 +14858,9 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 
 /* 2) 统一卡片背景（浅绿玻璃拟态） */
 .dock-profile-container .profile-user-card,
-.dock-profile-container .profile-activity-card,
-.dock-profile-container .xtj-vip-card,
-.dock-profile-container .profile-pro-style-entry {
+
+
+.dock-profile-container .profile-activity-card {
   background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
   border: 1px solid rgba(173, 221, 194, .55);
   box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
@@ -16728,49 +14906,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   color: #2d6c4b !important;
 }
 
-/* 4) XTJ Pro 卡片：橙色只用于 icon + 按钮，背景使用统一浅绿玻璃 */
-.dock-profile-container .xtj-vip-card {
-  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72)) !important;
-  border: 1px solid rgba(173, 221, 194, .55) !important;
-  box-shadow: 0 14px 30px rgba(41, 108, 76, .08) !important;
-  backdrop-filter: blur(18px) saturate(145%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
-  border-radius: 18px !important;
-}
-.dock-profile-container .xtj-vip-card:hover {
-  border-color: rgba(173, 221, 194, .85) !important;
-  box-shadow: 0 16px 34px rgba(41, 108, 76, .12) !important;
-}
-.dock-profile-container .xtj-vip-card-icon {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  color: #fff !important;
-}
-.dock-profile-container .xtj-vip-card-badge {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  color: #fff !important;
-}
-.dock-profile-container .xtj-vip-card-badge.active {
-  background: linear-gradient(135deg, #10b981, #059669) !important;
-}
-
-/* 5) Pro 装扮入口：统一卡片外观 */
-.dock-profile-container .profile-pro-style-entry {
-  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72)) !important;
-  border: 1px solid rgba(173, 221, 194, .55) !important;
-  box-shadow: 0 14px 30px rgba(41, 108, 76, .08) !important;
-  backdrop-filter: blur(18px) saturate(145%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
-  border-radius: 18px !important;
-}
-.dock-profile-container .profile-pro-style-entry:hover {
-  border-color: rgba(173, 221, 194, .85) !important;
-  box-shadow: 0 16px 34px rgba(41, 108, 76, .12) !important;
-}
-.dock-profile-container .profile-pro-style-entry-main {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
 
 /* 6) 底部统计栏：留出 Dock 安全距离 */
 .dock-profile-container .profile-totals-bar {
@@ -16779,76 +14914,22 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   padding: 8px 0 0;
 }
 
-/* 7) Pro 装扮二级页：主页面与子页面互斥显示（[hidden] 已在上面统一） */
+
 .dock-profile-container .profile-main-view {
   display: block;
 }
 .dock-profile-container .profile-main-view[hidden] {
   display: none !important;
 }
-.dock-profile-container .profile-pro-style-page {
-  display: block;
-}
-.dock-profile-container .profile-pro-style-page[hidden] {
-  display: none !important;
-}
-
-/* 8) Pro 装扮保存按钮：总览隐藏，子面板内显示 */
-.dock-profile-container .profile-pro-style-page #proStylePanelActions {
-  /* 默认：总览页内隐藏（通过 JS 在子面板切换时控制 hidden） */
-}
-.dock-profile-container .profile-pro-style-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(173, 221, 194, .35);
-  /* 强制覆盖 pro-style.css 里的 sticky 定位（不能悬浮在总览页中间） */
-  position: static !important;
-  bottom: auto !important;
-  z-index: auto !important;
-  background: transparent !important;
-}
-
-/* 当保存按钮在子面板内时（用户已点开 theme/bubble/post）才显示 */
-/* 总览页下隐藏（避免遮住 3 个分类入口） */
-.dock-profile-container .profile-pro-style-actions[hidden] {
-  display: none !important;
-}
-
-/* 子面板（theme/bubble/post）内的保存按钮 - 永远显示在子面板底部 */
-.dock-profile-container #proStylePanelTheme .profile-pro-style-actions,
-.dock-profile-container #proStylePanelBubble .profile-pro-style-actions,
-.dock-profile-container #proStylePanelPost .profile-pro-style-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(173, 221, 194, .35);
-}
-
-/* 9) Pro 装扮二级页背景和定位 */
-.dock-profile-container .profile-pro-style-page {
-  padding: 14px 16px 28px;
-  background: transparent;
-  min-height: 100%;
-}
-.dock-profile-container .profile-pro-style-page .profile-pro-style-panel {
-  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
-  border: 1px solid rgba(173, 221, 194, .55);
-  box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
-  backdrop-filter: blur(18px) saturate(145%);
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
-  border-radius: 18px;
-}
 
 /* 10) 暗色模式适配 */
 [data-theme="dark"] .dock-profile-container .profile-user-card,
+
+
 [data-theme="dark"] .dock-profile-container .profile-activity-card,
-[data-theme="dark"] .dock-profile-container .xtj-vip-card,
-[data-theme="dark"] .dock-profile-container .profile-pro-style-entry,
-[data-theme="dark"] .dock-profile-container .profile-settings,
-[data-theme="dark"] .dock-profile-container .profile-pro-style-page .profile-pro-style-panel {
+
+
+[data-theme="dark"] .dock-profile-container .profile-settings {
   background: linear-gradient(180deg, rgba(20,32,26,.82), rgba(16,28,22,.72)) !important;
   border-color: rgba(120, 170, 145, .25) !important;
   box-shadow: 0 14px 30px rgba(0, 0, 0, .35) !important;
@@ -16861,14 +14942,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   border-color: rgba(120, 170, 145, .25) !important;
   color: #c5ead5 !important;
 }
-[data-theme="dark"] .dock-profile-container .profile-pro-style-actions {
-  border-top-color: rgba(120, 170, 145, .2);
-}
 
-/* ========================================================
- * XTJ 统一视觉系统（浅蓝 + 浅绿 + 奶白玻璃拟态）
- * 用于：首页 / 聊天页 / 我的页 / Pro 装扮的卡片与容器
- * ======================================================== */
+
 :root {
   --xtj-bg-page: linear-gradient(180deg, #eef7f6 0%, #f5fbfa 48%, #edf6f4 100%);
   --xtj-bg-card: linear-gradient(180deg, rgba(255, 255, 255, .84), rgba(245, 252, 249, .72));
@@ -17089,10 +15164,14 @@ button.post-publish:hover {
  * 我的页 UI 收口（已部分在 0.97d 完成，此处补强）
  * ======================================================== */
 .dock-profile-container .profile-user-card,
+
+
 .dock-profile-container .profile-activity-card,
-.dock-profile-container .xtj-vip-card,
-.dock-profile-container .profile-pro-style-entry-wrap,
+
+
 .dock-profile-container .profile-settings,
+
+
 .dock-profile-container .profile-totals-bar {
   background: var(--xtj-bg-card-strong) !important;
   border: 1px solid var(--xtj-border-soft) !important;
@@ -17102,34 +15181,12 @@ button.post-publish:hover {
   -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
 }
 
-/* XTJ Pro 卡：橙色仅作局部点缀（icon + 按钮），整体保持玻璃化 */
-.xtj-vip-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, .88), rgba(252, 248, 240, .78)) !important;
-  border: 1px solid rgba(255, 215, 0, .22) !important;
-}
-
-.xtj-vip-card:hover {
-  border-color: rgba(255, 215, 0, .42) !important;
-}
 
 /* 互动记录卡（点赞/评论） */
 .dock-profile-container .profile-activity-card {
   background: var(--xtj-bg-card-strong) !important;
 }
 
-/* Pro 装扮入口 */
-.dock-profile-container .profile-pro-style-entry-wrap {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-}
-.dock-profile-container .profile-pro-style-entry {
-  background: var(--xtj-bg-card-strong) !important;
-  border: 1px solid var(--xtj-border-soft) !important;
-  border-radius: var(--xtj-radius-lg) !important;
-  box-shadow: var(--xtj-shadow-soft) !important;
-}
 
 /* 设置区域：合并到一张大玻璃卡片 */
 .dock-profile-container .profile-settings {
@@ -17184,20 +15241,44 @@ button.post-publish:hover {
 
 /* ========================================================
  * Main panel UI unification
- * Scope: posts, chat, profile content only. Dock stays untouched.
+ * Scope: posts,
+
+
+chat,
+
+
+profile content only. Dock stays untouched.
  * ======================================================== */
 #panelPosts nav,
+
+
 #panelPosts .publish-box,
+
+
 #panelPosts .post-filter-bar,
+
+
 #panelPosts .stat-card,
+
+
 #panelPosts .post,
+
+
 #panelChat .chat-header,
+
+
 #panelChat .chat-input-area,
+
+
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   border: 1px solid rgba(127, 191, 168, 0.20) !important;
   box-shadow: 0 14px 34px rgba(79, 130, 118, 0.10) !important;
@@ -17210,14 +15291,26 @@ button.post-publish:hover {
 }
 
 #panelPosts .publish-box,
+
+
 #panelPosts .post-filter-bar,
+
+
 #panelPosts .stat-card,
+
+
 #panelPosts .post,
+
+
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 251, 249, 0.82)) !important;
 }
@@ -17233,11 +15326,17 @@ button.post-publish:hover {
 }
 
 #panelPosts .publish-box,
+
+
 #panelPosts .post,
+
+
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings {
   overflow: clip;
 }
@@ -17336,18 +15435,22 @@ button.post-publish:hover {
 }
 
 #panelProfile .profile-user-card,
+
+
 #panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry,
+
+
 #panelProfile .profile-settings,
+
+
 #panelProfile .profile-totals-bar {
   margin: 0 !important;
 }
 
 #panelProfile .profile-user-card,
-#panelProfile .profile-activity-card,
-#panelProfile .xtj-vip-card,
-#panelProfile .profile-pro-style-entry {
+
+
+#panelProfile .profile-activity-card {
   padding: 18px 18px 17px !important;
 }
 
@@ -17374,15 +15477,29 @@ button.post-publish:hover {
 }
 
 [data-theme="dark"] #panelPosts .publish-box,
+
+
 [data-theme="dark"] #panelPosts .post-filter-bar,
+
+
 [data-theme="dark"] #panelPosts .stat-card,
+
+
 [data-theme="dark"] #panelPosts .post,
+
+
 [data-theme="dark"] #panelChat .chat-list-item,
+
+
 [data-theme="dark"] #panelProfile .profile-user-card,
+
+
 [data-theme="dark"] #panelProfile .profile-activity-card,
-[data-theme="dark"] #panelProfile .xtj-vip-card,
-[data-theme="dark"] #panelProfile .profile-pro-style-entry,
+
+
 [data-theme="dark"] #panelProfile .profile-settings,
+
+
 [data-theme="dark"] #panelProfile .profile-totals-bar {
   background: linear-gradient(180deg, rgba(28, 43, 37, 0.94), rgba(18, 31, 27, 0.90)) !important;
   border-color: rgba(130, 191, 167, 0.16) !important;
@@ -17395,12 +15512,15 @@ button.post-publish:hover {
 
 @media (max-width: 1023px) {
   #panelPosts .publish-box,
+
   #panelPosts .post-filter-bar,
+
   #panelPosts .post,
+
   #panelProfile .profile-user-card,
+
   #panelProfile .profile-activity-card,
-  #panelProfile .xtj-vip-card,
-  #panelProfile .profile-pro-style-entry,
+
   #panelProfile .profile-settings {
     border-radius: 22px !important;
   }

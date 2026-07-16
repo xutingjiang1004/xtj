@@ -9,6 +9,7 @@ const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.
 const core = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 'utf8');
 const likeMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '009_atomic_post_like.sql'), 'utf8');
 const pinUuidMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '010_fix_post_pin_uuid.sql'), 'utf8');
+const hardDeleteMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '013_hard_delete_content_and_photo_cleanup.sql'), 'utf8');
 
 function routeSource(method, route, nextRoute) {
   const startToken = `app.${method}('${route}'`;
@@ -114,4 +115,48 @@ test('deployed pin migration replaces the invalid bigint RPC with a service-role
   assert.match(pinUuidMigration, /p_post_id UUID/);
   assert.match(pinUuidMigration, /v_unpinned_ids UUID\[\]/);
   assert.match(pinUuidMigration, /GRANT EXECUTE[\s\S]*TO service_role/);
+});
+
+test('pin endpoint accepts every normal feed type including blank and audio', () => {
+  const source = routeSource('post', '/api/post/pin', "app.post('/api/post/delete'");
+  assert.match(server, /\['', 'text', 'image', 'video', 'audio', 'photo', 'album'\]/);
+  assert.match(server, /String\(post\.media_type == null \? '' : post\.media_type\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(source, /code: 'not_pinnable'/);
+});
+
+test('post delete is authenticated, idempotent, and verifies physical removal', () => {
+  const source = routeSource('post', '/api/post/delete', "app.get('/api/likes/user/");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /already_deleted: true/);
+  assert.match(source, /hardDeleteContent\(/);
+  assert.match(source, /deleted: result\.deleted === true/);
+  assert.match(server, /Content still exists after delete/);
+  assert.match(source, /code: result\.code \|\| 'delete_not_applied'/);
+});
+
+test('photo delete removes the database row before durable storage cleanup', () => {
+  const source = routeSource('post', '/api/photo/delete', "app.post('/api/post/create'");
+  assert.match(source, /hardDeleteContent\(/);
+  assert.match(source, /supabase\.storage\.from\('uploads'\)\.remove\(storagePaths\)/);
+  assert.ok(source.indexOf('hardDeleteContent({') < source.indexOf("supabase.storage.from('uploads').remove(storagePaths)"));
+  assert.match(source, /deleted: deleteResult\.deleted === true/);
+  assert.match(source, /already_deleted: deleteResult\.already_deleted === true/);
+  assert.match(source, /cleanup_pending: storageErrors\.length > 0/);
+});
+
+test('public photo queries exclude historical soft-deleted rows', () => {
+  const wall = routeSource('get', '/api/photos/wall/:userName', "app.get('/api/photos/public'");
+  const publicWall = routeSource('get', '/api/photos/public', "app.get('/api/avatar/");
+  assert.match(wall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+  assert.match(publicWall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+});
+
+test('hard-delete migration exposes no privileged cleanup surface to clients', () => {
+  assert.match(hardDeleteMigration, /CREATE TABLE IF NOT EXISTS public\.storage_cleanup_jobs/);
+  assert.match(hardDeleteMigration, /ALTER TABLE public\.storage_cleanup_jobs ENABLE ROW LEVEL SECURITY/);
+  assert.match(hardDeleteMigration, /REVOKE ALL ON FUNCTION public\.hard_delete_content[\s\S]*FROM PUBLIC, anon, authenticated/);
+  assert.match(hardDeleteMigration, /GRANT EXECUTE ON FUNCTION public\.hard_delete_content[\s\S]*TO service_role/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.likes WHERE post_id = p_post_id/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.comments WHERE post_id = p_post_id/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.posts WHERE id = p_post_id/);
 });
