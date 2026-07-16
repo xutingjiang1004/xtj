@@ -18,6 +18,19 @@ async function openApp(page, reducedMotion = 'no-preference') {
 }
 
 test.describe('interaction regression contracts', () => {
+  test('Dock uses the four legacy per-tab animations without generic bounce', async ({ page }) => {
+    await openApp(page);
+    const animationName = { posts: 'post', chat: 'chat', ai: 'ai', profile: 'profile' };
+    for (const tab of ['posts', 'chat', 'ai', 'profile']) {
+      const button = page.locator(`.dock-tab[data-tab="${tab}"]`);
+      await button.click();
+      await expect(button).toHaveClass(new RegExp(`\\banim-${animationName[tab]}\\b`));
+      await expect(button).not.toHaveClass(/is-switch-feedback/);
+      await page.waitForTimeout(950);
+      await expect(button).not.toHaveClass(new RegExp(`\\banim-${animationName[tab]}\\b`));
+    }
+  });
+
   test('thirty real Dock clicks settle on exactly one panel without a stale page', async ({ page }) => {
     test.setTimeout(60000);
     const errors = [];
@@ -80,6 +93,7 @@ test.describe('interaction regression contracts', () => {
       expect(state.active).toHaveLength(1);
       expect(state.outgoing).toEqual([]);
       expect(state.animated).toBeFalsy();
+      await expect(page.locator(`.dock-tab[data-tab="${tab}"]`)).not.toHaveClass(/\banim-(?:posts|chat|ai|profile)\b/);
     }
   });
 });

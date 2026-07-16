@@ -16,22 +16,11 @@ function routeBlock(start, end) {
   return server.slice(from, to);
 }
 
-test('legacy caller-controlled Pro RPC overloads are removed', () => {
-  assert.match(migration, /DROP FUNCTION IF EXISTS public\.claim_pro_gift\(TEXT, TEXT\)/);
-  assert.match(migration, /DROP FUNCTION IF EXISTS public\.claim_pro_gift\(TEXT, TEXT, TEXT, TEXT, TEXT\)/);
-  assert.match(migration, /REVOKE ALL ON FUNCTION public\.claim_pro_gift_for_user\(TEXT, UUID\) FROM PUBLIC, anon, authenticated/);
-  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.claim_pro_gift_for_user\(TEXT, UUID\) TO service_role/);
-});
-
-test('Pro claim uses UUID from HTTP boundary through database lookup', () => {
-  const route = routeBlock("app.post('/api/pro-gifts/claim'", "app.post('/admin/pro-gifts/manual-gift'");
-  assert.match(route, /authenticateUser/);
-  assert.match(route, /normalizePostId\(giftId\)/);
-  assert.match(route, /rpc\('claim_pro_gift_for_user'/);
-  assert.doesNotMatch(route, /\^\\d\+\$/);
-  assert.match(migration, /p_gift_id UUID/);
-  assert.match(migration, /WHERE id = p_gift_id AND media_type = '__pro_gift__'/);
-  assert.doesNotMatch(migration, /p_gift_id::bigint/);
+test('Pro HTTP endpoints and standalone assets stay retired', () => {
+  assert.doesNotMatch(server, /['"]\/(?:api\/vip|api\/pro-gifts|admin\/pro-gifts)/);
+  for (const asset of ['js/pro-upgrade.js', 'js/pro-style.js', 'css/pro-style.css']) {
+    assert.equal(fs.existsSync(asset), false, `${asset} must not be shipped`);
+  }
 });
 
 test('anonymous likes and comments cannot impersonate a username', () => {
