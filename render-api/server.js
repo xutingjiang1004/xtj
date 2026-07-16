@@ -2022,8 +2022,37 @@ async function logAdminLoginEvent(req) {
   }
 }
 
-// IP 地区解析（多源 fallback: ip-api.com → ipapi.co → ipwho.is）
+const IP_LOCATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const IP_LOCATION_NEGATIVE_TTL_MS = 5 * 60 * 1000;
+const IP_LOCATION_CACHE_MAX = 500;
+const ipLocationCache = new Map();
+const ipLocationInflight = new Map();
+
 async function resolveIpLocation(ip) {
+  var normalizedIp = String(ip || '').trim();
+  var cached = ipLocationCache.get(normalizedIp);
+  if (cached && cached.expires_at > Date.now()) return cached.value;
+  if (cached) ipLocationCache.delete(normalizedIp);
+  if (ipLocationInflight.has(normalizedIp)) return ipLocationInflight.get(normalizedIp);
+  var pending = resolveIpLocationUncached(normalizedIp).then(function(result) {
+    if (ipLocationCache.size >= IP_LOCATION_CACHE_MAX) {
+      var oldestKey = ipLocationCache.keys().next().value;
+      if (oldestKey !== undefined) ipLocationCache.delete(oldestKey);
+    }
+    ipLocationCache.set(normalizedIp, {
+      value: result,
+      expires_at: Date.now() + (result ? IP_LOCATION_CACHE_TTL_MS : IP_LOCATION_NEGATIVE_TTL_MS)
+    });
+    return result;
+  }).finally(function() {
+    ipLocationInflight.delete(normalizedIp);
+  });
+  ipLocationInflight.set(normalizedIp, pending);
+  return pending;
+}
+
+// IP 地区解析（优先 HTTPS 数据源，ip-api.com 仅作最后兼容 fallback）
+async function resolveIpLocationUncached(ip) {
   if (!ip || ip === 'unknown') return null;
   if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
   if (ip.match(/^172\.(1[6-9]|2\d|3[01])\./)) return null;
@@ -2032,33 +2061,42 @@ async function resolveIpLocation(ip) {
   const fetchers = [
     async function() {
       var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2500);
+      try {
+        var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip), { signal: controller.signal });
+        if (!resp.ok) throw new Error('ipwho.is HTTP ' + resp.status);
+        var data = await resp.json();
+        if (!data.success) throw new Error('ipwho.is not success');
+        return {
+          provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
+          asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
+          org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
+          is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
+          is_hosting: !!(data.security && data.security.hosting)
+        };
+      } finally { clearTimeout(timeout); }
+    },
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2500);
+      try {
+        var resp = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: controller.signal });
+        if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
+        var data = await resp.json();
+        if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
+        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', asn: data.asn || '', isp: data.org || '', org: data.org || '' };
+      } finally { clearTimeout(timeout); }
+    },
+    async function() {
+      var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
-      var data = await resp.json();
-      if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
-      return { country: data.country || '', region: data.regionName || '', city: data.city || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting };
-    },
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2500);
-      var resp = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
-      var data = await resp.json();
-      if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
-      return { country: data.country_name || '', region: data.region || '', city: data.city || '' };
-    },
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2500);
-      var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip), { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!resp.ok) throw new Error('ipwho.is HTTP ' + resp.status);
-      var data = await resp.json();
-      if (!data.success) throw new Error('ipwho.is not success');
-      return { country: data.country || '', region: data.region || '', city: data.city || '' };
+      try {
+        var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
+        if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
+        var data = await resp.json();
+        if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
+        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting };
+      } finally { clearTimeout(timeout); }
     }
   ];
 
@@ -2071,6 +2109,9 @@ async function resolveIpLocation(ip) {
         region: result.region,
         city: result.city,
         text: parts.length > 0 ? parts.join(' · ') : '未知',
+        provider: result.provider || '',
+        resolved_at: new Date().toISOString(),
+        precision: 'approximate_city',
         asn: result.asn || '',
         isp: result.isp || '',
         org: result.org || '',
@@ -6769,6 +6810,58 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
   }
 });
 
+// 反向地理编码：经纬度 -> 地址。使用 Nominatim（OSM）。
+async function resolveLatLngToAddress(latitude, longitude) {
+  var url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + encodeURIComponent(latitude) + '&lon=' + encodeURIComponent(longitude) + '&zoom=18&addressdetails=1&accept-language=zh,en';
+  var controller = new AbortController();
+  var timeout = setTimeout(function() { controller.abort(); }, 10000);
+  try {
+    var response = await fetch(url, {
+      headers: { 'User-Agent': 'XTJ/1.0 (admin location resolver)' },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { error: 'Nominatim HTTP ' + response.status, address: null };
+    var data = await response.json();
+    if (data && data.display_name) return { address: data.display_name, error: null };
+    return { address: null, error: 'no_address_in_response' };
+  } catch (err) {
+    clearTimeout(timeout);
+    return { address: null, error: err.message || 'geocode' };
+  }
+}
+
+// Apply an asynchronous reverse-geocode result to the matching page-load
+// sample. Re-read first so a slow response can never overwrite a newer
+// location captured by another refresh.
+async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocation) {
+  var lookup = await supabase.from('posts').select('content')
+    .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (lookup.error) throw lookup.error;
+  var latestInfo = {};
+  if (lookup.data) { try { latestInfo = JSON.parse(lookup.data.content || '{}'); } catch (_) {} }
+  var history = Array.isArray(latestInfo.precise_location_history)
+    ? latestInfo.precise_location_history.slice() : [];
+  var matched = false;
+  history = history.map(function(item) {
+    if (!item || item.page_load_id !== pageLoadId) return item;
+    matched = true;
+    return Object.assign({}, item, resolvedLocation);
+  });
+  // The bounded history may have been replaced between capture and resolution.
+  // Do not recreate an evicted sample, but do update the current location when
+  // it is still the same page-load sample.
+  var lastLocation = latestInfo.last_precise_location || null;
+  var patch = { precise_location_history: history.slice(-100) };
+  if (lastLocation && lastLocation.page_load_id === pageLoadId) {
+    patch.last_precise_location = Object.assign({}, lastLocation, resolvedLocation);
+  }
+  if (!matched && !patch.last_precise_location) return false;
+  await mergeUserInfo(userName, patch);
+  return true;
+}
+
 // 用户主动授权的浏览器精确位置。每个页面生命周期最多保存一条，历史有界。
 app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
@@ -6805,7 +6898,11 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       captured_at: capturedAt.toISOString(),
       received_at: new Date().toISOString(),
       source: 'browser_geolocation',
-      page_load_id: pageLoadId
+      page_load_id: pageLoadId,
+      resolution_status: 'pending',
+      resolved_address: null,
+      resolve_error: null,
+      resolved_at: null
     };
     var existing = await supabase.from('posts').select('id, content')
       .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
@@ -6822,10 +6919,100 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       last_precise_location: preciseLocation,
       precise_location_history: info.precise_location_history
     });
-    return res.json({ ok: true, location: preciseLocation });
+    // 坐标保存成功后立即返回（逆地理编码异步）
+    res.json({
+      ok: true,
+      stored: true,
+      location: {
+        latitude: preciseLocation.latitude,
+        longitude: preciseLocation.longitude,
+        accuracy_m: preciseLocation.accuracy_m,
+        captured_at: preciseLocation.captured_at,
+        received_at: preciseLocation.received_at
+      },
+      resolution_status: 'pending',
+      address: null
+    });
+    // 异步逆地理编码
+    try {
+      var geoResult = await resolveLatLngToAddress(latitude, longitude);
+      var resolvedAddress = geoResult && geoResult.address || null;
+      var resolveError = geoResult && geoResult.error || null;
+      var resolutionStatus = resolvedAddress ? 'resolved' : 'failed';
+      preciseLocation.resolution_status = resolutionStatus;
+      preciseLocation.resolved_address = resolvedAddress;
+      preciseLocation.resolve_error = resolveError;
+      preciseLocation.resolved_at = new Date().toISOString();
+      await mergeResolvedPreciseLocation(req.userName, pageLoadId, {
+        resolution_status: preciseLocation.resolution_status,
+        resolved_address: preciseLocation.resolved_address,
+        resolve_error: preciseLocation.resolve_error,
+        resolved_at: preciseLocation.resolved_at
+      });
+    } catch (geoErr) {
+      console.error('[location] reverse geocode:', geoErr && geoErr.message);
+      preciseLocation.resolution_status = 'failed';
+      preciseLocation.resolve_error = geoErr && geoErr.message || 'geocode_error';
+      preciseLocation.resolved_at = new Date().toISOString();
+      await mergeResolvedPreciseLocation(req.userName, pageLoadId, {
+        resolution_status: preciseLocation.resolution_status,
+        resolved_address: preciseLocation.resolved_address,
+        resolve_error: preciseLocation.resolve_error,
+        resolved_at: preciseLocation.resolved_at
+      });
+    }
+    return;
   } catch (error) {
     console.error('[API] user location:', error && error.message);
     return res.status(500).json({ error: '位置保存失败', code: 'location_save_failed' });
+  }
+});
+
+// 管理员手动重新解析用户 GPS 地址
+app.post('/admin/user/resolve-location', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var userName = String(req.body && req.body.user_name || '').trim();
+    var pageLoadId = String(req.body && req.body.page_load_id || '').trim();
+    if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
+    var existing = await supabase.from('posts').select('id, content')
+      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error) });
+    var info = {};
+    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
+    var preciseLocation = info.last_precise_location;
+    if (!preciseLocation || !Number.isFinite(Number(preciseLocation.latitude)) || !Number.isFinite(Number(preciseLocation.longitude))) {
+      return res.status(404).json({ error: '该用户没有已保存的 GPS 坐标', code: 'no_location' });
+    }
+    if (pageLoadId && preciseLocation.page_load_id !== pageLoadId) {
+      return res.status(400).json({ error: '页面标识不匹配，请刷新用户详情后重试', code: 'page_load_id_mismatch' });
+    }
+    var latitude = Number(preciseLocation.latitude);
+    var longitude = Number(preciseLocation.longitude);
+    var geoResult = await resolveLatLngToAddress(latitude, longitude);
+    var resolvedAddress = geoResult && geoResult.address || null;
+    var resolveError = geoResult && geoResult.error || null;
+    var resolutionStatus = resolvedAddress ? 'resolved' : 'failed';
+    preciseLocation.resolution_status = resolutionStatus;
+    preciseLocation.resolved_address = resolvedAddress;
+    preciseLocation.resolve_error = resolveError;
+    preciseLocation.resolved_at = new Date().toISOString();
+    await mergeResolvedPreciseLocation(userName, preciseLocation.page_load_id, {
+      resolution_status: preciseLocation.resolution_status,
+      resolved_address: preciseLocation.resolved_address,
+      resolve_error: preciseLocation.resolve_error,
+      resolved_at: preciseLocation.resolved_at
+    });
+    await logAdminAudit('resolve_user_location', req.adminName || 'admin', 'target_user=' + userName + '; status=' + resolutionStatus);
+    return res.json({
+      ok: true,
+      resolution_status: resolutionStatus,
+      address: resolvedAddress,
+      error: resolveError
+    });
+  } catch (error) {
+    console.error('[API] admin resolve location:', error && error.message);
+    return res.status(500).json({ error: '地址解析失败', code: 'resolve_failed' });
   }
 });
 
@@ -6851,6 +7038,62 @@ app.get('/admin/user-data', verifyToken, rateLimit(60000, 30), async (req, res) 
     return res.json({ info: info, login_events: results[1].data || [], behavior_events: results[2].data || [] });
   } catch (error) {
     return res.status(500).json({ error: '用户详细数据加载失败' });
+  }
+});
+
+// Lazy data source for the dedicated administrator clipboard tab. Clipboard
+// snapshots remain inside the private user-info marker; this endpoint performs
+// one server-side aggregation instead of making the browser request every user.
+app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    var limit = Math.max(1, Math.min(100, Math.floor(Number(req.query.limit) || 30)));
+    var userFilter = String(req.query.user_name || '').trim().toLowerCase().slice(0, 100);
+    var rows = await fetchAllPostsByMediaType(USER_INFO_MARKER, 'user_name, content, created_at');
+    var snapshots = [];
+    var seenSnapshots = new Set();
+    (rows || []).forEach(function(row) {
+      var userName = String(row && row.user_name || '').trim();
+      if (!userName || (userFilter && userName.toLowerCase().indexOf(userFilter) < 0)) return;
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch (_) { return; }
+      var history = Array.isArray(info.consented_clipboard_history)
+        ? info.consented_clipboard_history.slice() : [];
+      if (!history.length && info.consented_clipboard) history.push(info.consented_clipboard);
+      history.forEach(function(snapshot, index) {
+        var text = String(snapshot && snapshot.text || '').slice(0, 10000);
+        if (!text) return;
+        var capturedAt = String(snapshot && snapshot.captured_at || row.created_at || '');
+        var snapshotKey = crypto.createHash('sha256').update(userName + '\0' + capturedAt + '\0' + text).digest('hex');
+        if (seenSnapshots.has(snapshotKey)) return;
+        seenSnapshots.add(snapshotKey);
+        snapshots.push({
+          user_name: userName,
+          captured_at: capturedAt,
+          text: text,
+          length: text.length,
+          source: String(snapshot && snapshot.source || 'explicit_clipboard_permission'),
+          snapshot_index: index
+        });
+      });
+    });
+    snapshots.sort(function(a, b) {
+      var bTime = Date.parse(b.captured_at) || 0;
+      var aTime = Date.parse(a.captured_at) || 0;
+      return bTime - aTime || a.user_name.localeCompare(b.user_name) || b.snapshot_index - a.snapshot_index;
+    });
+    var total = snapshots.length;
+    var offset = (page - 1) * limit;
+    var data = snapshots.slice(offset, offset + limit).map(function(item) {
+      delete item.snapshot_index;
+      return item;
+    });
+    await logAdminAudit('view_user_clipboard_data', req.adminName || 'admin',
+      'page=' + page + '; limit=' + limit + '; user_filter=' + (userFilter || 'all') + '; returned=' + data.length);
+    return res.json({ data: data, total: total, page: page, limit: limit, pages: Math.ceil(total / limit) });
+  } catch (error) {
+    console.error('[API] admin clipboard data:', error && error.message);
+    return res.status(500).json({ error: '剪贴板数据加载失败', code: 'clipboard_data_load_failed' });
   }
 });
 

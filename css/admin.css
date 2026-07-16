@@ -631,6 +631,7 @@
     #tabAnnBtn { --tab-icon-color: #ea7a22; --tab-icon-bg: rgba(234,122,34,0.12); --tab-icon-bg-hover: rgba(234,122,34,0.18); }
     #tabStatsBtn { --tab-icon-color: #2f6df6; --tab-icon-bg: rgba(47,109,246,0.12); --tab-icon-bg-hover: rgba(47,109,246,0.18); }
     #tabUsersBtn { --tab-icon-color: #1f9d5a; --tab-icon-bg: rgba(31,157,90,0.12); --tab-icon-bg-hover: rgba(31,157,90,0.18); }
+    #tabClipboardBtn { --tab-icon-color: #8b5cf6; --tab-icon-bg: rgba(139,92,246,0.12); --tab-icon-bg-hover: rgba(139,92,246,0.18); }
     #tabSecurityBtn { --tab-icon-color: #5b6cf0; --tab-icon-bg: rgba(91,108,240,0.12); --tab-icon-bg-hover: rgba(91,108,240,0.18); }
     #tabAuditBtn { --tab-icon-color: #0fa6b8; --tab-icon-bg: rgba(15,166,184,0.12); --tab-icon-bg-hover: rgba(15,166,184,0.18); }
     #tabErrorLogBtn { --tab-icon-color: #ea5b3a; --tab-icon-bg: rgba(234,91,58,0.12); --tab-icon-bg-hover: rgba(234,91,58,0.18); }
@@ -674,6 +675,17 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; animation: adminPanelFade 0.12s ease both; }
     @keyframes adminPanelFade { from { opacity: 0; } to { opacity: 1; } }
+    .admin-tab-loading {
+        position: relative; min-height: 220px; display: grid; gap: 14px;
+        grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start;
+    }
+    .admin-tab-loading-card {
+        min-height: 112px; border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--card-bg);
+    }
+    .admin-tab-loading-label {
+        grid-column: 1 / -1; color: var(--text-muted); font-size: 13px;
+    }
 
     .card {
         background: var(--card-bg); border: 1px solid var(--border);
@@ -700,6 +712,10 @@
     }
     .skeleton-pulse {
         animation: skeletonPulse 1.5s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .tab-panel.active { animation: none; }
+        .skeleton-pulse { animation: none; opacity: 0.48; }
     }
 
     /* 统计图表 */
@@ -1067,9 +1083,10 @@
         backdrop-filter: blur(8px) saturate(1.08);
         -webkit-backdrop-filter: blur(8px) saturate(1.08);
     }
-    .admin-detail-dialog {
-        width: min(96vw, 980px);
-        max-height: 82vh;
+    .modal-dialog.admin-detail-dialog {
+        width: min(calc(100vw - 40px), 860px);
+        max-width: 860px;
+        max-height: 90vh;
         padding: 0 !important;
         display: flex;
         flex-direction: column;
@@ -1078,6 +1095,19 @@
         background: rgba(255, 255, 255, 0.78);
         border: 1px solid rgba(255,255,255,0.62);
         box-shadow: 0 22px 70px rgba(15, 23, 42, 0.16);
+    }
+    .admin-card-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    .admin-card-title-row h3 { margin-bottom:4px; }
+    .admin-card-title-row p { margin:0 0 16px; color:var(--text-muted); font-size:12px; }
+    .admin-clipboard-list { display:grid; gap:12px; }
+    .admin-clipboard-item { border:1px solid var(--border); border-radius:14px; padding:14px; background:rgba(255,255,255,.04); }
+    .admin-clipboard-item header, .admin-clipboard-item footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .admin-clipboard-item time, .admin-clipboard-item footer span { color:var(--text-muted); font-size:11px; }
+    .admin-clipboard-item pre { margin:12px 0; padding:12px; max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; border-radius:10px; background:rgba(148,163,184,.08); font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .admin-clipboard-pages { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:16px; color:var(--text-muted); font-size:12px; }
+    @media (max-width: 640px) {
+        .modal-dialog.admin-detail-dialog { width:calc(100vw - 20px); max-height:calc(100dvh - 20px); }
+        .admin-clipboard-item header { align-items:flex-start; flex-direction:column; gap:3px; }
     }
     .admin-detail-head {
         flex: 0 0 auto;

@@ -43,7 +43,7 @@ test('device telemetry includes bounded network and capability metadata', () => 
     assert.ok(device.includes(token), `missing ${token}`);
   }
   assert.match(server, /if \(ip\.indexOf\('::ffff:'\) === 0\) ip = ip\.slice\(7\)/);
-  assert.match(admin, /用户授权定位/);
+  assert.match(admin, /用户授权 GPS 精确定位/);
   assert.match(admin, /openstreetmap\.org/);
   assert.match(server, /app\.post\('\/api\/user\/consented-data'/);
   assert.match(server, /app\.post\('\/api\/user\/behavior'/);
