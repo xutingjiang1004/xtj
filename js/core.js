@@ -947,15 +947,18 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return chain.then(function() { return loadXtjModule(dependency); });
             }, Promise.resolve());
             xtjModulePromises[moduleName] = dependencyChain.then(function() {
-                return Promise.all((definition.styles || []).map(function(metaName) {
-                    return loadModuleStyle(moduleName, metaName);
-                }));
-            }).then(function() {
+                // 并行加载 CSS 和 JS，避免串行等待
+                var cssPromise = (definition.styles || []).length > 0
+                    ? Promise.all((definition.styles || []).map(function(metaName) { return loadModuleStyle(moduleName, metaName); }))
+                    : Promise.resolve();
                 var scripts = (definition.scripts || []).map(function(metaName) { return { key: metaName, url: null }; });
                 (definition.externalScripts || []).forEach(function(url) { scripts.push({ key: moduleName + '-external-' + url, url: url }); });
-                return scripts.reduce(function(chain, item) {
-                    return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
-                }, Promise.resolve());
+                var jsPromise = scripts.length > 0
+                    ? scripts.reduce(function(chain, item) {
+                        return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
+                    }, Promise.resolve())
+                    : Promise.resolve();
+                return Promise.all([cssPromise, jsPromise]);
             }).catch(function(error) {
                 delete xtjModulePromises[moduleName];
                 throw error;
@@ -1004,17 +1007,129 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
         document.addEventListener('keydown', loadEnhancementsAfterInteraction, true);
 
         function lazyAiChatLauncher() {
-            ensureAiAgentLoaded().then(function() {
-                if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher) {
-                    window.__xtjOpenAiChat();
-                    if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
+            var _aiChatOpenInProgress = false;
+            var _aiChatOpenPromise = null;
+            var _aiChatLastError = null;
+
+            window.__xtjOpenAiChat = function() {
+                if (_aiChatOpenInProgress) return;
+                _aiChatOpenInProgress = true;
+                _aiChatLastError = null;
+
+                // 立即进入 AI 页面骨架（300ms 内）
+                var aiChatPanel = document.getElementById('panelAiChat');
+                if (aiChatPanel) {
+                    // 清理旧状态
+                    if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
+                    if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
+                    aiChatPanel.style.display = '';
+                    aiChatPanel.innerHTML = getAiChatSkeleton();
+                    aiChatPanel.classList.add('active');
+                    aiChatPanel.setAttribute('aria-busy', 'true');
                 }
-            }).catch(function(err) {
-                if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
-                console.error('[XTJ] ai-agent lazy load failed:', err);
-            });
+
+                // 显示 loading 在 AI 页面内部
+                var loadingEl = aiChatPanel ? aiChatPanel.querySelector('.ai-chat-loading') : null;
+                if (loadingEl) loadingEl.textContent = '正在加载 AI 模块...';
+
+                // 初始化分阶段错误状态
+                var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
+
+                _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
+                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
+                    return ensureUserToken().then(function(token) {
+                        if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
+                        if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
+                        if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
+                            window.__xtjOpenAiChat();
+                            if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
+                            return;
+                        }
+                        errorState.config = true;
+                        throw new Error('ai_module_not_ready');
+                    });
+                }).catch(function(err) {
+                    _aiChatLastError = err;
+                    _aiChatOpenInProgress = false;
+                    if (aiChatPanel) {
+                        aiChatPanel.removeAttribute('aria-busy');
+                        renderAiChatErrorState(aiChatPanel, errorState, err);
+                    }
+                    console.error('[XTJ] ai-agent lazy load failed:', err);
+                }).finally(function() {
+                    _aiChatOpenInProgress = false;
+                    if (loadingEl) loadingEl.textContent = '';
+                });
+            };
+            lazyAiChatLauncher._realOpen = window.__xtjOpenAiChat;
         }
-        window.__xtjOpenAiChat = lazyAiChatLauncher;
+
+        function getAiChatSkeleton() {
+            return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
+                + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
+                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
+                + '</div>';
+        }
+
+        function renderAiChatErrorState(panel, errorState, err) {
+            var errorEl = panel.querySelector('.ai-chat-error');
+            var loadingEl = panel.querySelector('.ai-chat-loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (!errorEl) return;
+            errorEl.style.display = '';
+
+            var msgs = [];
+            var errMsg = err && err.message || '';
+
+            if (errorState.resource) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>AI 资源加载失败</strong><br><small style="color:var(--text-secondary);">请检查网络连接后重试</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试加载</button>'
+                    + '</div>');
+            }
+            if (errorState.auth) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>登录已过期</strong><br><small style="color:var(--text-secondary);">请重新登录后继续使用 AI</small><br>'
+                    + '<button onclick="window.openAuthModal(\'login\')" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重新登录</button>'
+                    + '</div>');
+            }
+            if (errorState.config) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>AI 配置加载失败</strong><br><small style="color:var(--text-secondary);">服务器暂不可用</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
+                    + '</div>');
+            }
+            if (msgs.length === 0) {
+                msgs.push('<div class="ai-chat-error-item" style="padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>加载失败</strong><br><small style="color:var(--text-secondary);">' + escapeHtml(errMsg || '未知错误') + '</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
+                    + '</div>');
+            }
+            errorEl.innerHTML = msgs.join('');
+        }
+
+        // 空闲时预加载 AI 模块（不阻塞消息列表首屏渲染）
+        var _aiPreloadScheduled = false;
+        function scheduleAiPreload() {
+            if (_aiPreloadScheduled) return;
+            _aiPreloadScheduled = true;
+            var preloadFn = function() {
+                try {
+                    ensureAiAgentLoaded().then(function() {
+                        console.log('[XTJ] AI module preloaded');
+                    }).catch(function(err) {
+                        console.warn('[XTJ] AI module preload failed:', err && err.message);
+                    });
+                } catch(e) {}
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(preloadFn, { timeout: 2000 });
+            } else {
+                setTimeout(preloadFn, 2000);
+            }
+        }
+        // 在消息页面加载后触发预加载
+        window.__xtjScheduleAiPreload = scheduleAiPreload;
 
         function lazyPhotoUploadLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {
@@ -3586,11 +3701,39 @@ function renderProfileActivityList(kind) {
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
-                if (session.postEl && session.postEl.parentNode) { try { session.postEl.remove(); } catch (e) {} }
+
+                // 乐观删除动画：透明度+位移+高度收缩，180-220ms
+                if (session.postEl && session.postEl.parentNode) {
+                    var el = session.postEl;
+                    var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                    if (reducedMotion) {
+                        try { el.remove(); } catch (e) {}
+                    } else {
+                        el.style.transition = 'opacity 200ms ease, transform 200ms ease, max-height 200ms ease, margin 200ms ease, padding 200ms ease';
+                        el.style.opacity = '0';
+                        el.style.transform = 'translateY(-8px) scale(0.98)';
+                        el.style.maxHeight = '0';
+                        el.style.overflow = 'hidden';
+                        el.style.margin = '0';
+                        el.style.padding = '0';
+                        el.style.border = 'none';
+                        el.style.pointerEvents = 'none';
+                        var onTransitionEnd = function() {
+                            try { el.remove(); } catch (e) {}
+                            el.removeEventListener('transitionend', onTransitionEnd);
+                        };
+                        el.addEventListener('transitionend', onTransitionEnd);
+                        // 兜底：250ms 后强制移除
+                        setTimeout(function() {
+                            try { if (el.parentNode) el.remove(); } catch (e) {}
+                        }, 250);
+                    }
+                }
+
                 if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
                 cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
                 showToast("帖子已删除");
-                if (typeof loadFeed === 'function') { try { setTimeout(function() { loadFeed(true); }, 0); } catch(e) {} }
+                // 不再调用 loadFeed(true)，避免整页重建和闪白
             }
             window.openDelete = function (postId, ownerKey) {
                 // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
@@ -3650,9 +3793,7 @@ function renderProfileActivityList(kind) {
                     console.warn('[delBtn] delete flow exceeded safety deadline');
                     finished = true;
                     cleanupDeleteSession({ toast: "删除状态确认超时，请刷新后重试" });
-                    if (typeof loadFeed === 'function') {
-                        try { loadFeed(true); } catch (e) {}
-                    }
+                    // 不再调用 loadFeed(true)，防止整页重建
                 }, 30000);
 
                 try {
@@ -3683,7 +3824,7 @@ function renderProfileActivityList(kind) {
                                 cleanupDeleteSession({ toast: "删除未完成，帖子仍然存在，请重试" });
                             } else {
                                 cleanupDeleteSession({ toast: "无法确认删除状态，请刷新后重试" });
-                                if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
+                                // 不再强制 loadFeed
                             }
                             return;
                         }
@@ -3704,7 +3845,22 @@ function renderProfileActivityList(kind) {
                     if (finished) return;
                     console.error('[delBtn] 删除异常:', e);
                     finished = true;
-                    cleanupDeleteSession({ toast: "删除帖子失败: " + (e && e.message || "未知错误") });
+                    // 恢复目标帖子视觉状态
+                    if (session.postEl) {
+                        try {
+                            session.postEl.style.opacity = session.originalOpacity || '';
+                            session.postEl.style.pointerEvents = session.originalPointerEvents || '';
+                            session.postEl.style.filter = session.originalFilter || '';
+                            session.postEl.style.transition = '';
+                            session.postEl.style.transform = '';
+                            session.postEl.style.maxHeight = '';
+                            session.postEl.style.overflow = '';
+                            session.postEl.style.margin = '';
+                            session.postEl.style.padding = '';
+                            session.postEl.style.border = '';
+                        } catch(e) {}
+                    }
+                    cleanupDeleteSession({ toast: "删除帖子失败: " + (e && e.message || "未知错误"), restoreVisual: false });
                 } finally {
                     if (!finished) {
                         cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: false });
@@ -3730,8 +3886,11 @@ function renderProfileActivityList(kind) {
                 } else {
                     el.classList.remove("active");
                 }
+                // 删除弹窗取消时立即清理，不播放动画
+                if (id === 'delModal') {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
                 if (id === 'loginModal' || id === 'registerModal') {
-                    el.setAttribute('aria-hidden', 'true');
                     if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
                         try { authModalFocusOrigin.focus(); } catch (_) {}
                     }
