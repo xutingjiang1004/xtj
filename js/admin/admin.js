@@ -236,7 +236,7 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allBehaviorEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
     var adminDataLoadedAt = 0;
     var adminDataLoading = false;
     var adminTabDataLoaded = {};
@@ -838,6 +838,7 @@ async function initAdminClient() {
             } else if (dataType === 'logins' || dataType === 'login-events') {
                 var loginRes = await apiCall('GET', '/admin/login-events');
                 allLoginEvents = loginRes.data || [];
+                allBehaviorEvents = loginRes.behavior || [];
                 adminTabDataLoaded['login-events'] = true;
             } else if (dataType === 'security-alerts') {
                 var secRes = await apiCall('GET', '/admin/security-alerts');
@@ -1401,7 +1402,7 @@ async function initAdminClient() {
                 bansData = apiData.bans || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
+        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -3161,7 +3162,7 @@ async function initAdminClient() {
                 bansData = apiData.bans || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
+        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -3962,7 +3963,47 @@ async function initAdminClient() {
         if (latestFp.webrtc_local_ips && latestFp.webrtc_local_ips.length) {
             html += '<div><span style="font-size:11px;color:var(--text-muted);">内网IP</span><br><span style="font-size:10px;font-family:monospace;">' + escapeHtml(latestFp.webrtc_local_ips.slice(0, 3).join(', ')) + '</span></div>';
         }
+        var preciseLocation = userInfo.last_precise_location;
+        if (preciseLocation && Number.isFinite(Number(preciseLocation.latitude)) && Number.isFinite(Number(preciseLocation.longitude))) {
+            var latitude = Number(preciseLocation.latitude);
+            var longitude = Number(preciseLocation.longitude);
+            var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
+            html += '<div><span style="font-size:11px;color:var(--text-muted);">用户授权定位</span><br><a href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(latitude.toFixed(6) + ', ' + longitude.toFixed(6)) + '</a><br><span style="font-size:10px;color:var(--text-muted);">精度约 ' + escapeHtml(String(Math.round(Number(preciseLocation.accuracy_m) || 0))) + ' 米 · ' + escapeHtml(formatTime(preciseLocation.captured_at || preciseLocation.received_at || '')) + '</span></div>';
+        }
         html += '</div>';
+
+        var contactsSnapshot = userInfo.consented_contacts;
+        var clipboardSnapshot = userInfo.consented_clipboard;
+        if (contactsSnapshot || clipboardSnapshot) {
+            html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
+            if (contactsSnapshot && Array.isArray(contactsSnapshot.contacts)) {
+                html += '<div style="font-size:11px;margin-bottom:8px;"><b>主动选择的联系人（' + contactsSnapshot.contacts.length + '）</b><div style="max-height:160px;overflow:auto;margin-top:4px;">';
+                contactsSnapshot.contacts.slice(0, 100).forEach(function(contact) {
+                    html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);">' + escapeHtml([].concat(contact.names || [], contact.phones || [], contact.emails || []).join(' · ') || '-') + '</div>';
+                });
+                html += '</div></div>';
+            }
+            if (clipboardSnapshot && clipboardSnapshot.text) {
+                html += '<div style="font-size:11px;margin-bottom:8px;"><b>最近一次主动上传的剪贴板</b><div style="font-size:10px;color:var(--text-muted);">' + escapeHtml(formatTime(clipboardSnapshot.captured_at || '')) + '</div><pre style="white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;padding:8px;background:rgba(148,163,184,.08);border-radius:8px;">' + escapeHtml(String(clipboardSnapshot.text).slice(0, 10000)) + '</pre></div>';
+            }
+        }
+
+        var behaviorRows = allBehaviorEvents.filter(function(row) { return row.user_name === userName; }).slice(0, 20);
+        if (behaviorRows.length) {
+            var behaviorItems = [];
+            behaviorRows.forEach(function(row) {
+                try {
+                    var parsedBehavior = JSON.parse(row.content || '{}');
+                    (parsedBehavior.events || []).forEach(function(event) { behaviorItems.push(event); });
+                } catch (e) {}
+            });
+            behaviorItems.sort(function(a, b) { return toAdminTimeMs(b.at) - toAdminTimeMs(a.at); });
+            html += '<h4 style="margin:12px 0 8px;">最近用户行为</h4><div style="max-height:180px;overflow:auto;font-size:11px;">';
+            behaviorItems.slice(0, 50).forEach(function(event) {
+                html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);"><span style="color:var(--text-muted);">' + escapeHtml(formatTime(event.at || '')) + '</span> · ' + escapeHtml(event.type || '-') + ' · ' + escapeHtml(event.target || '-') + '</div>';
+            });
+            html += '</div>';
+        }
 
         // Activity stats
         html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;padding:10px;background:rgba(255,255,255,0.05);border-radius:10px;">';
