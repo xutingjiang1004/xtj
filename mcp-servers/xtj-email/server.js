@@ -32,9 +32,14 @@ if (!FROM_EMAIL) { console.error("[xtj-email-mcp] 请设置 FROM_EMAIL"); proces
 function isRecipientAllowed(to) {
   if (!ALLOWED_RECIPIENTS.length) return to.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   return ALLOWED_RECIPIENTS.some(r => {
-    if (r.includes('*')) {
-      const domain = r.replace('*.', '');
+    if (r === '*') return true;
+    if (r.startsWith('*@')) {
+      const domain = r.slice(2);
       return to.toLowerCase().endsWith('@' + domain);
+    }
+    if (r.startsWith('*.')) {
+      const domain = r.slice(2);
+      return to.toLowerCase().endsWith('.' + domain);
     }
     return to.toLowerCase() === r;
   });

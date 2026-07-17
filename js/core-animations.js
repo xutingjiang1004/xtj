@@ -67,8 +67,10 @@
     if (_origOpenModal) _origOpenModal(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
     if (perfMode() === 'lite') return;
+    var overlayRef = overlay;
+    delete _closeModalGuard[id];
     runWithGSAP(function() {
-    var box = overlay.querySelector('.modal-box');
+    var box = overlayRef.querySelector('.modal-box');
     if (!box) return;
     var cleanup = withTransientWillChange(box, 'transform, opacity');
     if (perfMode() === 'balanced') {
@@ -86,6 +88,7 @@
   };
 
   var _origCloseModal = window.closeModal;
+  var _closeModalGuard = {};
   window.closeModal = function (id) {
     var overlay = document.getElementById(id);
     if (!overlay || !hasGSAP() || perfMode() === 'lite') {
@@ -97,6 +100,7 @@
       if (_origCloseModal) _origCloseModal(id);
       return;
     }
+    _closeModalGuard[id] = true;
     var cleanup = withTransientWillChange(box, 'transform, opacity');
     gsap.to(box, {
       y: 12,
@@ -105,7 +109,10 @@
       ease: 'power2.in',
       onComplete: function () {
         cleanup();
-        if (_origCloseModal) _origCloseModal(id);
+        if (_closeModalGuard[id]) {
+          delete _closeModalGuard[id];
+          if (_origCloseModal) _origCloseModal(id);
+        }
       }
     });
   };

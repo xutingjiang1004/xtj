@@ -144,6 +144,11 @@
             border-color: rgba(181,225,217,0.08);
         }
         [data-theme="dark"] .post-stats-text { color: var(--text-muted); }
+[data-theme="dark"] .post-location-display { color: var(--text-secondary); }
+[data-theme="dark"] .post-ip-region { color: var(--text-muted); }
+[data-theme="dark"] .post-location-btn { border-color: var(--border-color); color: var(--text-secondary); }
+[data-theme="dark"] .post-location-panel { background: var(--bg-card); border-color: var(--border-color); }
+[data-theme="dark"] .post-location-option { border-bottom-color: var(--border-color); }
         [data-theme="dark"] .action-btn {
             background: rgba(18,39,44,0.48);
             border-color: rgba(181,225,217,0.08);
@@ -953,6 +958,107 @@
         .media img { cursor: pointer; }
 
         .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+
+/* 帖子位置和IP属地显示 */
+.post-location-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+.post-location-display {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.post-location-icon {
+  flex-shrink: 0;
+}
+.post-ip-region {
+  font-size: 11px;
+  color: var(--text-muted, #999);
+}
+/* 发布框位置UI */
+.post-location-row {
+  margin-top: 4px;
+}
+.post-location-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border-color, #ccc);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.post-location-btn:hover {
+  background: rgba(127, 191, 168, 0.08);
+}
+.post-location-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.post-location-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--text-primary, #333);
+  background: rgba(127, 191, 168, 0.08);
+  border-radius: 8px;
+  margin-top: 6px;
+}
+.post-location-remove {
+  border: none;
+  background: none;
+  color: var(--text-muted, #999);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.post-location-panel {
+  margin-top: 6px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 10px;
+  background: var(--bg-card, #fff);
+  overflow: hidden;
+}
+.post-location-panel-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted, #999);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+.post-location-option {
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  transition: background 0.1s;
+}
+.post-location-option:hover {
+  background: rgba(127, 191, 168, 0.06);
+}
+.post-location-no-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--text-muted, #999);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
         .post-stats-visibility { display:none !important; }
         .post-stats-visibility-public { color:#2b7a57; }
         .post-stats-visibility-private { color:#8a5a22; }
@@ -15052,7 +15158,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
  * 首页 UI 收口（发布框 / 筛选栏 / 统计卡 / 帖子卡）
  * ======================================================== */
 .publish-box,
-#postInput {
+#postInp {
   border-radius: var(--xtj-radius-md);
 }
 
