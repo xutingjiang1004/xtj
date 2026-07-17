@@ -2135,7 +2135,7 @@ async function resolveIpLocationUncached(ip) {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
       try {
-        var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
+        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
         if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
         var data = await resp.json();
         if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
@@ -5687,8 +5687,8 @@ app.get('/api/avatar/public/:userName', rateLimit(60000, 300), async (req, res) 
   } catch (e) { console.error('[API] public avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
-// POST /api/avatar/batch - 批量获取头像（需登录）
-app.post('/api/avatar/batch', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+// POST /api/avatar/batch - 批量获取头像（公开）
+app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
   try {
     var names = req.body && req.body.users;
     if (!Array.isArray(names) || names.length === 0) return res.status(400).json({ error: '缺少用户列表' });
@@ -6855,8 +6855,50 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
 });
 
 // 反向地理编码：经纬度 -> 地址。使用 Nominatim（OSM）。
+const LOCATION_TASK_MARKER = '__location_task__';
+const LOCATION_TASK_MAX_RETRIES = 5;
+const LOCATION_CACHE_TTL = 24 * 60 * 60 * 1000;
+const LOCATION_RATE_LIMIT_MS = 1100;
+// 坐标混淆密钥（服务端常量，不在前端暴露）
+const LOCATION_OBFUSCATION_KEY = 0xA3E7;
+
+var locationCoordCache = new Map();
+var locationLastRequestTime = 0;
+
+function obfuscateCoord(val) {
+  // 将坐标乘以1000000取整后与密钥异或，再转base36
+  var intVal = Math.round(val * 1000000);
+  var obfuscated = intVal ^ LOCATION_OBFUSCATION_KEY;
+  return obfuscated.toString(36);
+}
+
+function deobfuscateCoord(str) {
+  try {
+    var intVal = parseInt(str, 36);
+    return (intVal ^ LOCATION_OBFUSCATION_KEY) / 1000000;
+  } catch(e) { return null; }
+}
+
+function locationCacheKey(lat, lng) {
+  // 4位小数精度缓存（约11米）
+  return Math.round(lat * 10000) / 10000 + ',' + Math.round(lng * 10000) / 10000;
+}
+
 async function resolveLatLngToAddress(latitude, longitude) {
-  var url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + encodeURIComponent(latitude) + '&lon=' + encodeURIComponent(longitude) + '&zoom=18&addressdetails=1&accept-language=zh,en';
+  var cacheKey = locationCacheKey(latitude, longitude);
+  var cached = locationCoordCache.get(cacheKey);
+  if (cached && (Date.now() - cached.time) < LOCATION_CACHE_TTL) {
+    return { address: cached.address, error: null, from_cache: true };
+  }
+  var elapsed = Date.now() - locationLastRequestTime;
+  if (elapsed < LOCATION_RATE_LIMIT_MS) {
+    await new Promise(function(r) { setTimeout(r, LOCATION_RATE_LIMIT_MS - elapsed); });
+  }
+  locationLastRequestTime = Date.now();
+  // 降低精度：仅发送3位小数（约111米精度），保护用户精确位置
+  var roundedLat = Math.round(latitude * 1000) / 1000;
+  var roundedLng = Math.round(longitude * 1000) / 1000;
+  var url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + encodeURIComponent(roundedLat) + '&lon=' + encodeURIComponent(roundedLng) + '&zoom=18&addressdetails=1&accept-language=zh,en';
   var controller = new AbortController();
   var timeout = setTimeout(function() { controller.abort(); }, 10000);
   try {
@@ -6865,14 +6907,139 @@ async function resolveLatLngToAddress(latitude, longitude) {
       signal: controller.signal
     });
     clearTimeout(timeout);
-    if (!response.ok) return { error: 'Nominatim HTTP ' + response.status, address: null };
+    if (!response.ok) return { error: 'Nominatim HTTP ' + response.status, address: null, from_cache: false };
     var data = await response.json();
-    if (data && data.display_name) return { address: data.display_name, error: null };
-    return { address: null, error: 'no_address_in_response' };
+    if (data && data.display_name) {
+      locationCoordCache.set(cacheKey, { address: data.display_name, time: Date.now() });
+      if (locationCoordCache.size > 500) {
+        var now = Date.now();
+        var toDel = [];
+        locationCoordCache.forEach(function(v, k) { if (now - v.time > LOCATION_CACHE_TTL) toDel.push(k); });
+        toDel.forEach(function(k) { locationCoordCache.delete(k); });
+      }
+      return { address: data.display_name, error: null, from_cache: false };
+    }
+    return { address: null, error: 'no_address_in_response', from_cache: false };
   } catch (err) {
     clearTimeout(timeout);
-    return { address: null, error: err.message || 'geocode' };
+    return { address: null, error: err.message || 'geocode', from_cache: false };
   }
+}
+
+async function createLocationTask(userName, pageLoadId, latitude, longitude) {
+  var task = {
+    user_name: userName,
+    page_load_id: pageLoadId,
+    // 混淆存储坐标，防止数据库泄露时直接暴露精确位置
+    lat_obf: obfuscateCoord(latitude),
+    lng_obf: obfuscateCoord(longitude),
+    retry_count: 0,
+    max_retries: LOCATION_TASK_MAX_RETRIES,
+    status: 'pending',
+    error: null,
+    created_at: new Date().toISOString()
+  };
+  await supabase.from('posts').insert([{
+    user_name: userName,
+    media_type: LOCATION_TASK_MARKER,
+    content: JSON.stringify(task),
+    actor_key: 'loc_task_' + pageLoadId + '_' + Date.now()
+  }]);
+  return task;
+}
+
+async function processLocationTasks() {
+  if (locationTaskRunning) return;
+  locationTaskRunning = true;
+  try {
+    var { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, created_at')
+      .eq('media_type', LOCATION_TASK_MARKER)
+      .order('created_at', { ascending: true })
+      .limit(20);
+    if (error || !data || !data.length) return;
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var task = {};
+      try { task = JSON.parse(row.content || '{}'); } catch (_) { continue; }
+      if (task.status === 'completed' || task.status === 'permanent_failed') continue;
+      if (task.retry_count >= task.max_retries) {
+        task.status = 'permanent_failed';
+        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+        continue;
+      }
+      task.retry_count = (task.retry_count || 0) + 1;
+      task.last_attempt_at = new Date().toISOString();
+      task.status = 'processing';
+      await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+      // 解混淆坐标（兼容旧格式：有 lat_obf 用新格式，否则用旧格式 latitude）
+      var taskLat = task.lat_obf ? deobfuscateCoord(task.lat_obf) : task.latitude;
+      var taskLng = task.lng_obf ? deobfuscateCoord(task.lng_obf) : task.longitude;
+      if (taskLat == null || taskLng == null) {
+        task.status = 'permanent_failed';
+        task.error = 'invalid_coordinates';
+        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+        continue;
+      }
+      var geoResult = await resolveLatLngToAddress(taskLat, taskLng);
+      if (geoResult.address) {
+        task.status = 'completed';
+        task.resolved_address = geoResult.address;
+        task.resolved_at = new Date().toISOString();
+        task.error = null;
+        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+        await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
+          resolution_status: 'resolved',
+          resolved_address: geoResult.address,
+          resolve_error: null,
+          resolved_at: task.resolved_at
+        });
+      } else {
+        task.status = 'pending';
+        task.error = geoResult.error || 'unknown';
+        if (task.retry_count >= task.max_retries) {
+          task.status = 'permanent_failed';
+          try {
+            await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
+              resolution_status: 'failed',
+              resolved_address: null,
+              resolve_error: task.error,
+              resolved_at: task.last_attempt_at
+            });
+          } catch (_) {}
+        }
+        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+      }
+    }
+  } catch (e) {
+    console.error('[LOC-TASK] process error:', e && e.message ? e.message : e);
+  } finally {
+    locationTaskRunning = false;
+    try {
+      var { data: allTasks } = await supabase.from('posts')
+        .select('id, content')
+        .eq('media_type', LOCATION_TASK_MARKER)
+        .order('created_at', { ascending: false });
+      if (allTasks && allTasks.length > 100) {
+        var toDelete = allTasks.slice(100).filter(function(row) {
+          var t = {}; try { t = JSON.parse(row.content || '{}'); } catch(_) {}
+          return t.status === 'completed' || t.status === 'permanent_failed';
+        });
+        for (var d = 0; d < toDelete.length; d++) {
+          await supabase.from('posts').delete().eq('id', toDelete[d].id);
+        }
+      }
+    } catch (_) {}
+  }
+}
+
+var locationTaskRunning = false;
+var locationTaskTimer = null;
+
+function startLocationTaskProcessor() {
+  if (locationTaskTimer) clearInterval(locationTaskTimer);
+  locationTaskTimer = setInterval(processLocationTasks, 30000);
+  processLocationTasks();
 }
 
 // Apply an asynchronous reverse-geocode result to the matching page-load
@@ -6977,38 +7144,60 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       resolution_status: 'pending',
       address: null
     });
-    // 异步逆地理编码
+    // 坐标保存成功后创建后台解析任务（不阻塞响应）
     try {
-      var geoResult = await resolveLatLngToAddress(latitude, longitude);
-      var resolvedAddress = geoResult && geoResult.address || null;
-      var resolveError = geoResult && geoResult.error || null;
-      var resolutionStatus = resolvedAddress ? 'resolved' : 'failed';
-      preciseLocation.resolution_status = resolutionStatus;
-      preciseLocation.resolved_address = resolvedAddress;
-      preciseLocation.resolve_error = resolveError;
-      preciseLocation.resolved_at = new Date().toISOString();
-      await mergeResolvedPreciseLocation(req.userName, pageLoadId, {
-        resolution_status: preciseLocation.resolution_status,
-        resolved_address: preciseLocation.resolved_address,
-        resolve_error: preciseLocation.resolve_error,
-        resolved_at: preciseLocation.resolved_at
-      });
-    } catch (geoErr) {
-      console.error('[location] reverse geocode:', geoErr && geoErr.message);
-      preciseLocation.resolution_status = 'failed';
-      preciseLocation.resolve_error = geoErr && geoErr.message || 'geocode_error';
-      preciseLocation.resolved_at = new Date().toISOString();
-      await mergeResolvedPreciseLocation(req.userName, pageLoadId, {
-        resolution_status: preciseLocation.resolution_status,
-        resolved_address: preciseLocation.resolved_address,
-        resolve_error: preciseLocation.resolve_error,
-        resolved_at: preciseLocation.resolved_at
-      });
+      await createLocationTask(req.userName, pageLoadId, latitude, longitude);
+    } catch (taskErr) {
+      console.error('[location] create task:', taskErr && taskErr.message);
     }
     return;
   } catch (error) {
     console.error('[API] user location:', error && error.message);
     return res.status(500).json({ error: '位置保存失败', code: 'location_save_failed' });
+  }
+});
+
+// GET /api/user/location/status?page_load_id=xxx - 查询定位解析状态
+app.get('/api/user/location/status', rateLimit(60000, 30), authenticateUser, async (req, res) => {
+  try {
+    var pageLoadId = String(req.query.page_load_id || '').trim();
+    if (!/^page_[a-z0-9_]{8,80}$/i.test(pageLoadId)) {
+      return res.status(400).json({ error: '页面标识无效', code: 'invalid_page_load_id' });
+    }
+    var lookup = await supabase.from('posts').select('content')
+      .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error) });
+    var info = {};
+    if (lookup.data) { try { info = JSON.parse(lookup.data.content || '{}'); } catch (_) {} }
+    var lastLocation = info.last_precise_location || null;
+    if (!lastLocation || lastLocation.page_load_id !== pageLoadId) {
+      var history = Array.isArray(info.precise_location_history) ? info.precise_location_history : [];
+      lastLocation = history.find(function(item) { return item && item.page_load_id === pageLoadId; }) || null;
+    }
+    if (!lastLocation) return res.json({ ok: true, found: false, status: 'not_found' });
+    // 同时查询任务状态
+    var taskLookup = await supabase.from('posts').select('content')
+      .eq('user_name', req.userName).eq('media_type', LOCATION_TASK_MARKER)
+      .like('actor_key', 'loc_task_' + pageLoadId + '_%')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    var task = null;
+    if (taskLookup.data) { try { task = JSON.parse(taskLookup.data.content || '{}'); } catch (_) {} }
+    return res.json({
+      ok: true,
+      found: true,
+      status: lastLocation.resolution_status || 'pending',
+      resolved_address: lastLocation.resolved_address || null,
+      resolve_error: lastLocation.resolve_error || null,
+      resolved_at: lastLocation.resolved_at || null,
+      latitude: lastLocation.latitude,
+      longitude: lastLocation.longitude,
+      task_status: task ? task.status : null,
+      task_retry_count: task ? task.retry_count : null
+    });
+  } catch (e) {
+    console.error('[API] location status:', e && e.message);
+    return res.status(500).json({ error: '查询失败' });
   }
 });
 
@@ -7057,6 +7246,64 @@ app.post('/admin/user/resolve-location', verifyToken, rateLimit(60000, 10), asyn
   } catch (error) {
     console.error('[API] admin resolve location:', error && error.message);
     return res.status(500).json({ error: '地址解析失败', code: 'resolve_failed' });
+  }
+});
+
+// POST /admin/user/resolve-ip - 管理员手动重新解析用户 IP 地区
+app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var userName = String(req.body && req.body.user_name || '').trim();
+    if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
+
+    // 获取用户最近一次登录事件中的 IP
+    var loginEvent = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1).maybeSingle();
+    if (loginEvent.error) return res.status(500).json({ error: sanitizeError(loginEvent.error) });
+
+    var ip = null;
+    if (loginEvent.data && loginEvent.data.content) {
+      try {
+        var eventData = JSON.parse(loginEvent.data.content);
+        ip = eventData.ip || null;
+      } catch (_) {}
+    }
+    if (!ip) return res.status(404).json({ error: '未找到该用户的 IP 记录', code: 'no_ip' });
+
+    var ipLocation = await resolveIpLocation(ip);
+    if (!ipLocation) return res.status(404).json({ error: 'IP 地区解析失败（所有数据源均不可用）', code: 'resolve_failed' });
+
+    // 更新 user_info
+    var existing = await supabase.from('posts').select('id, content')
+      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error) });
+    var info = {};
+    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
+    info.last_ip_location = ipLocation;
+    info.last_ip = ip;
+    if (existing.data) {
+      await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
+    } else {
+      await supabase.from('posts').insert([{
+        user_name: userName, media_type: USER_INFO_MARKER,
+        content: JSON.stringify(info), actor_key: 'user_info_' + Date.now()
+      }]);
+    }
+
+    await logAdminAudit('resolve_user_ip', req.adminName || 'admin', 'target_user=' + userName + '; ip=' + ip + '; text=' + (ipLocation.text || ''));
+
+    return res.json({
+      ok: true,
+      ip: ip,
+      location: ipLocation
+    });
+  } catch (error) {
+    console.error('[API] admin resolve ip:', error && error.message);
+    return res.status(500).json({ error: 'IP 解析失败', code: 'resolve_ip_failed' });
   }
 });
 
@@ -11214,6 +11461,97 @@ process.on('unhandledRejection', function(reason) {
 
 // ===================== 启动 =====================
 const port = process.env.PORT || 3000;
+
+// ── DM 未读消息邮件通知定时器 ──
+const DM_UNREAD_NOTIFY_INTERVAL = 60 * 1000; // 每60秒检查一次
+const DM_UNREAD_NOTIFY_TIMEOUT = 10 * 60 * 1000; // 10分钟未读即通知
+const ADMIN_DM_NOTIFY_EMAIL = '20051004xtj@gmail.com';
+const ADMIN_DM_NOTIFY_USER = 'xxz';
+var dmUnreadNotifyTimer = null;
+var dmUnreadNotifiedIds = new Set(); // 已通知的消息ID，防止重复发送
+
+async function checkUnreadDmForAdmin() {
+  try {
+    if (!mailTransporter && !getMailTransporter()) return; // 邮件服务未配置
+    var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
+    // 查询未读且未通知的 DM（发给 xxz）
+    var { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, created_at')
+      .eq('media_type', DM_MARKER)
+      .eq('media_url', ADMIN_DM_NOTIFY_USER)
+      .lt('created_at', cutoff)
+      .order('created_at', { ascending: true })
+      .limit(50);
+    if (error || !data || !data.length) return;
+    var unreadMsgs = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      if (dmUnreadNotifiedIds.has(row.id)) continue;
+      var payload = {};
+      try { payload = JSON.parse(row.content || '{}'); } catch (_) { payload = { text: String(row.content || '') }; }
+      if (payload.read_at) continue; // 已读，跳过
+      if (payload.dm_notified_at) { dmUnreadNotifiedIds.add(row.id); continue; }
+      unreadMsgs.push({
+        id: row.id,
+        user_name: row.user_name,
+        text: payload.text || payload.content || '(媒体消息)',
+        created_at: row.created_at
+      });
+    }
+    if (!unreadMsgs.length) return;
+    // 发送邮件
+    var transporter = getMailTransporter();
+    if (!transporter) return;
+    var msgList = unreadMsgs.map(function(m) {
+      var time = new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+      return '<li style="margin-bottom:8px;padding:8px;background:#f5f5f5;border-radius:4px;"><b>' + escapeHtml(m.user_name) + '</b> (' + time + ')<br><span style="color:#333;">' + escapeHtml(m.text.slice(0, 200)) + '</span></li>';
+    }).join('');
+    var htmlBody = [
+      '<div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;">',
+      '<h2 style="color:#4a6cf7;">XTJ 未读消息提醒</h2>',
+      '<p>您有 <b>' + unreadMsgs.length + '</b> 条未读消息超过 10 分钟未回复：</p>',
+      '<ul style="list-style:none;padding:0;">' + msgList + '</ul>',
+      '<p style="color:#999;font-size:12px;">请尽快登录 XTJ 查看并回复用户消息。</p>',
+      '<p style="color:#999;font-size:12px;">此邮件由 XTJ 系统自动发送。</p>',
+      '</div>'
+    ].join('');
+    await transporter.sendMail({
+      from: '"XTJ 消息提醒" <' + GMAIL_USER + '>',
+      to: ADMIN_DM_NOTIFY_EMAIL,
+      subject: '[XTJ] 您有 ' + unreadMsgs.length + ' 条未读消息 - ' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+      html: htmlBody
+    });
+    console.log('[DM-NOTIFY] 已发送未读邮件提醒，共 ' + unreadMsgs.length + ' 条消息');
+    // 标记已通知
+    for (var j = 0; j < unreadMsgs.length; j++) {
+      var msg = unreadMsgs[j];
+      dmUnreadNotifiedIds.add(msg.id);
+      try {
+        var existingPayload = {};
+        var rowData = data.find(function(r) { return r.id === msg.id; });
+        if (rowData) {
+          try { existingPayload = JSON.parse(rowData.content || '{}'); } catch (_) {}
+        }
+        existingPayload.dm_notified_at = new Date().toISOString();
+        await supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+      } catch (e) { /* 静默失败 */ }
+    }
+    // 清理通知集合（超过1000条时清理旧条目）
+    if (dmUnreadNotifiedIds.size > 1000) {
+      var arr = Array.from(dmUnreadNotifiedIds);
+      dmUnreadNotifiedIds = new Set(arr.slice(arr.length - 500));
+    }
+  } catch (e) {
+    console.error('[DM-NOTIFY] 检查失败:', e && e.message ? e.message : e);
+  }
+}
+
+function startDmUnreadNotifier() {
+  if (dmUnreadNotifyTimer) clearInterval(dmUnreadNotifyTimer);
+  dmUnreadNotifyTimer = setInterval(checkUnreadDmForAdmin, DM_UNREAD_NOTIFY_INTERVAL);
+  checkUnreadDmForAdmin(); // 立即执行一次
+}
+
 app.listen(port, () => {
   console.log(`[xtj-admin-api] running on port ${port}`);
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
@@ -11222,4 +11560,8 @@ app.listen(port, () => {
   console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
   console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
   console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
+  startDmUnreadNotifier();
+  console.log('[DM-NOTIFY] 未读消息邮件提醒已启动（间隔' + (DM_UNREAD_NOTIFY_INTERVAL / 1000) + '秒，超时' + (DM_UNREAD_NOTIFY_TIMEOUT / 60000) + '分钟）');
+  startLocationTaskProcessor();
+  console.log('[LOC-TASK] 定位地址解析任务处理器已启动（间隔30秒）');
 });
