@@ -52,8 +52,9 @@ test('device telemetry includes bounded network and capability metadata', () => 
   assert.match(server, /USER_BEHAVIOR_MARKER/);
   assert.match(admin, /用户明确授权的数据/);
   assert.match(admin, /最近用户行为/);
-  assert.match(html, /id="loginPrivacyNotice"/);
-  assert.match(html, /IP 大致地区/);
+  // 隐私提示已移除（登录/注册不再显示隐私声明）
+  assert.doesNotMatch(html, /id="loginPrivacyNotice"/);
+  assert.doesNotMatch(html, /IP 大致地区/);
   // 隐私提示已移除精确位置/通讯录/剪贴板的主动授权描述，改为后台静默
   assert.doesNotMatch(html, /精确位置、通讯录和剪贴板只在你主动授权或点击后读取/);
 });

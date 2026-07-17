@@ -823,6 +823,7 @@ async function initAdminClient() {
             'uservisit': { key: 'users', loaders: ['users', 'logins', 'security-alerts', 'mutes'] },
             'security': { key: 'security-alerts', loaders: ['security-alerts', 'security-settings'] },
             'audit': { key: 'audit-logs' },
+            'behavior': { key: 'behavior', loaders: ['logins'] },
             'errorlog': { key: 'error-logs' },
             'photos': { key: 'photos' },
             'logins': { key: 'login-events' },
@@ -3144,7 +3145,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab;
-        var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','ai'];
+        var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','blacklist','ai'];
         if (allTabs.indexOf(normalized) === -1) return;
         var switchGeneration = ++adminTabSwitchGeneration;
         currentTab = normalized;
@@ -3197,6 +3198,7 @@ async function initAdminClient() {
             case 'photos': renderPhotosTab(el); break;
             case 'stats': renderStatsTab(el); break;
             case 'audit': renderAuditTab(el); break;
+            case 'behavior': renderBehaviorTab(el); break;
             case 'errorlog': renderErrorLogTab(el); break;
             case 'email': renderEmailTab(el); break;
             case 'ai': renderAiTab(el); break;
@@ -3871,6 +3873,172 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
+    // ===================== 用户行为 Tab =====================
+    var behaviorTypeLabels = {
+        'control_click': '点击控件',
+        'visibility': '页面可见性',
+        'page_view': '页面浏览',
+        'scroll': '页面滚动',
+        'input_focus': '输入框聚焦',
+        'input_blur': '输入框失焦',
+        'toggle': '开关切换',
+        'navigation': '页面跳转'
+    };
+    var behaviorVisibilityLabels = {
+        'visible': '页面可见（前台）',
+        'hidden': '页面隐藏（后台）',
+        'prerender': '预渲染中'
+    };
+    var behaviorTargetLabels = {
+        'button': '按钮',
+        'a': '链接',
+        'input': '输入框',
+        'textarea': '文本域',
+        'select': '下拉框'
+    };
+
+    function formatBehaviorType(type) {
+        if (behaviorTypeLabels[type]) return behaviorTypeLabels[type];
+        if (type && type.startsWith('visibility_')) return '可见性: ' + (behaviorVisibilityLabels[type.replace('visibility_','')] || type.replace('visibility_',''));
+        return type || '-';
+    }
+
+    function formatBehaviorTarget(type, target) {
+        if (!target) return '-';
+        if (type === 'visibility') {
+            return behaviorVisibilityLabels[target] || target;
+        }
+        if (type === 'page_view') {
+            if (target === '/') return '首页';
+            if (target === '/admin.html') return '管理后台';
+            return '路径: ' + target;
+        }
+        if (behaviorTargetLabels[target]) return behaviorTargetLabels[target];
+        var idLabels = {
+            'loginSubmitBtn': '登录按钮', 'registerSubmitBtn': '注册按钮',
+            'postSubmitBtn': '发帖按钮', 'postTextarea': '发帖输入框',
+            'themeToggle': '主题切换', 'searchInput': '搜索框',
+            'navHome': '导航-首页', 'navExplore': '导航-探索',
+            'postSearchInput': '帖子搜索', 'postUserFilter': '用户筛选',
+            'dmToggle': '私信开关', 'dmPanel': '私信面板',
+            'profileSettingsBtn': '设置按钮', 'logoutBtn': '退出登录',
+            'adminLoginBtn': '管理登录', 'closeModal': '关闭弹窗',
+            'likeBtn': '点赞按钮', 'commentBtn': '评论按钮',
+            'shareBtn': '分享按钮', 'deleteBtn': '删除按钮',
+            'reportBtn': '举报按钮', 'editBtn': '编辑按钮',
+            'refreshBtn': '刷新按钮', 'loadMoreBtn': '加载更多',
+            'navToggle': '导航切换', 'sidebarToggle': '侧栏切换',
+            'notificationBtn': '通知按钮', 'photoUploadBtn': '上传照片',
+            'avatarUploadBtn': '上传头像', 'filterBtn': '筛选按钮',
+            'sortBtn': '排序按钮', 'exportBtn': '导出按钮',
+            'importBtn': '导入按钮', 'saveBtn': '保存按钮',
+            'cancelBtn': '取消按钮', 'confirmBtn': '确认按钮',
+            'retryBtn': '重试按钮', 'dismissBtn': '关闭按钮',
+            'annDismiss': '公告关闭', 'annReadBtn': '公告已读',
+            'aiChatToggle': 'AI聊天切换', 'aiChatSend': 'AI发送',
+            'banBtn': '封禁按钮', 'muteBtn': '禁言按钮',
+            'unbanBtn': '解封按钮', 'unmuteBtn': '解除禁言',
+            'deletePostBtn': '删除帖子', 'deletePhotoBtn': '删除照片',
+            'deleteUserBtn': '删除用户', 'deleteCommentBtn': '删除评论',
+            'ipDetailBtn': 'IP详情', 'reResolveBtn': '重新解析',
+            'locationDetailBtn': '位置详情', 'clipboardBtn': '剪贴板查看',
+            'behaviorBtn': '行为查看', 'securityBtn': '安全查看',
+            'userDetailBtn': '用户详情', 'userEditBtn': '编辑用户',
+            'postDetailBtn': '帖子详情', 'photoDetailBtn': '照片详情',
+            'dmSendBtn': '发送私信', 'dmCloseBtn': '关闭私信',
+            'pageTopBtn': '回到顶部', 'pageBottomBtn': '滚动到底部',
+            'prevPageBtn': '上一页', 'nextPageBtn': '下一页',
+            'tabAnnBtn': '公告管理Tab', 'tabStatsBtn': '数据统计Tab',
+            'tabUsersBtn': '用户数据Tab', 'tabClipboardBtn': '用户剪贴板Tab',
+            'tabSecurityBtn': '安全中心Tab', 'tabAuditBtn': '操作审计Tab',
+            'tabBehaviorBtn': '用户行为Tab', 'tabErrorLogBtn': '错误日志Tab',
+            'tabPostsBtn': '帖子管理Tab', 'tabLikesBtn': '点赞数据Tab',
+            'tabCommentsBtn': '评论数据Tab', 'tabReportsBtn': '举报管理Tab',
+            'tabBansBtn': '拉黑封禁Tab', 'tabMutesBtn': '禁言管理Tab',
+            'tabPhotosBtn': '照片管理Tab', 'tabEmailBtn': '邮件通知Tab',
+            'tabAiBtn': 'AI管理Tab', 'tabBlacklistBtn': '黑名单Tab'
+        };
+        if (idLabels[target]) return idLabels[target];
+        return target;
+    }
+
+    renderBehaviorTab = function(el) {
+        var allBehaviorItems = [];
+        allBehaviorEvents.forEach(function(row) {
+            try {
+                var parsedBehavior = JSON.parse(row.content || '{}');
+                (parsedBehavior.events || []).forEach(function(event) {
+                    allBehaviorItems.push({
+                        user_name: row.user_name,
+                        type: event.type,
+                        target: event.target,
+                        at: event.at
+                    });
+                });
+            } catch (e) {}
+        });
+        allBehaviorItems.sort(function(a, b) { return toAdminTimeMs(b.at) - toAdminTimeMs(a.at); });
+
+        var h = '<div class="card"><h3>用户行为追踪</h3>';
+        h += '<p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">记录所有用户的点击、浏览、页面切换等操作行为，共 ' + allBehaviorItems.length + ' 条记录</p>';
+
+        if (!allBehaviorItems.length) {
+            h += '<div class="empty">暂无用户行为记录</div>';
+        } else {
+            var uniqueUsers = [];
+            var seenUsers = {};
+            allBehaviorItems.forEach(function(item) {
+                if (!seenUsers[item.user_name]) {
+                    seenUsers[item.user_name] = true;
+                    uniqueUsers.push(item.user_name);
+                }
+            });
+            uniqueUsers.sort();
+
+            h += '<div class="filter-chips" style="margin-bottom:10px;">';
+            h += '<span class="filter-chip active" id="behaviorFilterAll" onclick="window.setBehaviorFilter(\'all\')">全部用户</span>';
+            uniqueUsers.slice(0, 20).forEach(function(u) {
+                h += '<span class="filter-chip" id="behaviorFilter_' + escapeHtml(u) + '" onclick="window.setBehaviorFilter(\'' + safeJsStr(u) + '\')">' + escapeHtml(u) + '</span>';
+            });
+            if (uniqueUsers.length > 20) {
+                h += '<span class="filter-chip" style="opacity:0.5">+ ' + (uniqueUsers.length - 20) + ' 更多...</span>';
+            }
+            h += '</div>';
+
+            var filteredItems = behaviorFilterUser === 'all' ? allBehaviorItems : allBehaviorItems.filter(function(item) { return item.user_name === behaviorFilterUser; });
+
+            h += '<div class="table-wrap"><table><thead><tr><th style="width:140px;">时间</th><th style="width:100px;">用户</th><th style="width:100px;">行为类型</th><th>目标/详情</th></tr></thead><tbody>';
+            filteredItems.slice(0, 200).forEach(function(item) {
+                var typeLabel = formatBehaviorType(item.type);
+                var targetLabel = formatBehaviorTarget(item.type, item.target);
+                var typeColor = item.type === 'control_click' ? 'var(--accent)' : (item.type === 'page_view' ? 'var(--success)' : (item.type === 'visibility' ? 'var(--text-muted)' : 'var(--text-muted)'));
+                h += '<tr>';
+                h += '<td style="font-size:10px;">' + escapeHtml(formatTime(item.at || '')) + '</td>';
+                h += '<td><b>' + escapeHtml(item.user_name) + '</b></td>';
+                h += '<td><span style="color:' + typeColor + ';">' + escapeHtml(typeLabel) + '</span></td>';
+                h += '<td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(targetLabel) + '</td>';
+                h += '</tr>';
+            });
+            h += '</tbody></table></div>';
+            if (filteredItems.length > 200) {
+                h += '<p style="font-size:11px;color:var(--text-muted);margin-top:8px;">仅显示最近 200 条记录（共 ' + filteredItems.length + ' 条）</p>';
+            }
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    window.setBehaviorFilter = function(user) {
+        behaviorFilterUser = user;
+        var allChips = document.querySelectorAll('#tabBehavior .filter-chip');
+        allChips.forEach(function(chip) { chip.classList.remove('active'); });
+        var activeChip = user === 'all' ? document.getElementById('behaviorFilterAll') : document.getElementById('behaviorFilter_' + user);
+        if (activeChip) activeChip.classList.add('active');
+        renderTab('behavior');
+    };
+
+    var behaviorFilterUser = 'all';
+
     window.setErrorLogTypeFilter = function(type) {
         errorLogTypeFilter = type;
         renderTab('errorlog');
@@ -4087,7 +4255,11 @@ async function initAdminClient() {
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(userInfo.last_login ? formatTime(userInfo.last_login) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(fallbackVisit ? formatTime(fallbackVisit) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(fallbackIp || '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">IP 粗略地区</span><br>' + escapeHtml(adminFormatLocation(fallbackLocation) || '暂未解析') + ' <span style="font-size:10px;color:var(--text-muted);">（IP 推测）</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">IP 粗略地区</span><br>' + escapeHtml(adminFormatLocation(fallbackLocation) || '暂未解析') + ' <span style="font-size:10px;color:var(--text-muted);">（IP 推测）</span>';
+        if (fallbackIp) {
+            html += ' <button onclick="adminReResolveIp(\'' + safeJsStr(userName) + '\');return false;" style="font-size:10px;padding:2px 6px;background:var(--primary);color:#fff;border:none;border-radius:3px;cursor:pointer;margin-left:4px;">重新解析IP</button>';
+        }
+        html += '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml(fallbackDevice.slice(0, 40)) + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
@@ -4235,7 +4407,9 @@ async function initAdminClient() {
             behaviorItems.sort(function(a, b) { return toAdminTimeMs(b.at) - toAdminTimeMs(a.at); });
             html += '<h4 style="margin:12px 0 8px;">最近用户行为</h4><div style="max-height:180px;overflow:auto;font-size:11px;">';
             behaviorItems.slice(0, 50).forEach(function(event) {
-                html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);"><span style="color:var(--text-muted);">' + escapeHtml(formatTime(event.at || '')) + '</span> · ' + escapeHtml(event.type || '-') + ' · ' + escapeHtml(event.target || '-') + '</div>';
+                var typeLabel = formatBehaviorType(event.type);
+                var targetLabel = formatBehaviorTarget(event.type, event.target);
+                html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);"><span style="color:var(--text-muted);">' + escapeHtml(formatTime(event.at || '')) + '</span> · ' + escapeHtml(typeLabel) + ' · ' + escapeHtml(targetLabel) + '</div>';
             });
             html += '</div>';
         }
@@ -4309,6 +4483,26 @@ async function initAdminClient() {
             }
         } catch (e) {
             showToast('解析请求失败：' + (e.message || '网络错误'), 'error');
+        }
+    };
+
+    // 管理员手动重新解析用户 IP 地区
+    window.adminReResolveIp = async function(userName) {
+        try {
+            showToast('正在重新解析 IP 地区…', 'info');
+            var res = await apiCall('POST', '/admin/user/resolve-ip', {
+                user_name: userName
+            });
+            if (res && res.ok) {
+                showToast('IP 解析成功：' + (res.location && res.location.text || '已更新'), 'success');
+                if (typeof showUserDetailModal === 'function') {
+                    await showUserDetailModal(userName);
+                }
+            } else {
+                showToast('IP 解析失败：' + ((res && res.error) || '未知错误'), 'error');
+            }
+        } catch (e) {
+            showToast('IP 解析请求失败：' + (e.message || '网络错误'), 'error');
         }
     };
 
