@@ -1038,13 +1038,27 @@ async function initAdminClient() {
         var avatars = document.querySelectorAll('[data-avatar-user]');
         avatars.forEach(function(el) {
             var userName = el.getAttribute('data-avatar-user');
-            if (!userName || adminAvatarCache[userName] === undefined) {
+            if (!userName) return;
+            if (adminAvatarCache[userName] === undefined) {
                 fetchAdminAvatar(userName).then(function(url) {
                     if (url && el && el.parentNode) {
                         el.innerHTML = '<img src="' + escapeHtml(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml((userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                         adminAvatarCache[userName] = url;
+                    } else {
+                        // API不可用时fallback：显示首字母
+                        adminAvatarCache[userName] = null;
+                        el.textContent = (userName || '?').slice(0, 1).toUpperCase();
+                        el.style.cssText = 'display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;';
                     }
-                }).catch(function() {});
+                }).catch(function() {
+                    adminAvatarCache[userName] = null;
+                    el.textContent = (userName || '?').slice(0, 1).toUpperCase();
+                    el.style.cssText = 'display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;';
+                });
+            } else if (adminAvatarCache[userName] === null) {
+                // 已确认API不可用，显示首字母fallback
+                el.textContent = (userName || '?').slice(0, 1).toUpperCase();
+                el.style.cssText = 'display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;';
             }
         });
     }
@@ -2328,13 +2342,11 @@ async function initAdminClient() {
         skeletonHtml += '<input type="date" value="' + escapeHtml(window.statsDateEnd) + '" disabled>';
         skeletonHtml += '</div></div>';
         skeletonHtml += '<div class="stats-row">';
-        var labels = ['用户数量','帖子数量','评论数量','点赞数量','照片数量','访问总次数','被攻击次数','API防火墙拦截'];
+        var labels = ['用户数量','帖子数量','评论数量','点赞数量','照片数量','访问总次数'];
         labels.forEach(function(l) {
             skeletonHtml += '<div class="stat-box skeleton-pulse"><div class="val" style="height:28px;width:60%;background:rgba(255,255,255,0.08);border-radius:6px;">&nbsp;</div><div class="lbl">' + l + '</div></div>';
         });
         skeletonHtml += '</div>';
-        skeletonHtml += '<div class="card"><h3>每日数据趋势</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>攻击类型分布</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
         skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:60px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
         el.innerHTML = skeletonHtml;
 
@@ -2390,110 +2402,10 @@ async function initAdminClient() {
             h += '<div class="stat-box"><div class="val">' + (summary.total_likes || 0) + '</div><div class="lbl">点赞数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
-            h += '<div class="stat-box danger"><div class="val">' + (summary.total_attacks || 0) + '</div><div class="lbl">被攻击次数</div></div>';
-            h += '<div class="stat-box warn"><div class="val">' + (summary.firewall_intercepts || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
             h += '</div>';
 
-            // ===== 每日图表 =====
-            var modes = [
-                { key: 'visits', label: '访问量', color: '#059669' },
-                { key: 'attacks', label: '攻击量', color: '#ff3b60' },
-                { key: 'posts', label: '发帖量', color: '#3b82f6' },
-                { key: 'comments', label: '评论量', color: '#f59e0b' },
-                { key: 'likes', label: '点赞量', color: '#ec4899' },
-                { key: 'new_users', label: '新用户', color: '#8b5cf6' }
-            ];
-
-            h += '<div class="card"><h3>每日数据趋势</h3>';
-            h += '<div class="filter-chips" style="margin-bottom:12px;">';
-            modes.forEach(function(m) {
-                h += '<span class="filter-chip' + (window.statsChartMode === m.key ? ' active' : '') + '" onclick="window.statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
-            });
-            h += '</div>';
-
-            if (daily.length === 0) {
-                h += '<div class="empty" style="padding:24px;text-align:center;color:var(--text-muted);">暂无每日数据，刷新页面后开始记录访问</div>';
-            } else {
-                var maxVal = 0;
-                daily.forEach(function(d) { var v = d[window.statsChartMode] || 0; if (v > maxVal) maxVal = v; });
-                if (maxVal === 0) maxVal = 1;
-
-                var activeMode = modes.find(function(m) { return m.key === window.statsChartMode; }) || modes[0];
-                // 如果数据太多，只显示最近30天以防止图表过密
-                var chartData = daily.length > 30 ? daily.slice(-30) : daily;
-
-                h += '<div class="chart-legend">';
-                h += '<span><span class="dot" style="background:' + activeMode.color + ';"></span>' + activeMode.label + '</span>';
-                h += '<span style="color:var(--text-muted);font-size:11px;">最高: ' + maxVal + '</span>';
-                h += '<span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span>';
-                h += '</div>';
-                h += '<div class="chart-bar-row">';
-                chartData.forEach(function(d) {
-                    var v = d[window.statsChartMode] || 0;
-                    var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
-                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
-                    h += '<span class="bar-tip">' + v + '</span>';
-                    h += '</div>';
-                });
-                h += '</div>';
-
-                var labelStep = chartData.length > 18 ? 2 : 1;
-                h += '<div class="chart-bar-labels">';
-                chartData.forEach(function(d, index) {
-                    var shortDate = d.date ? d.date.slice(5) : '';
-                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === chartData.length - 1) ? escapeHtml(shortDate) : '') + '</div>';
-                });
-                h += '</div>';
-            }
-            h += '</div>';
-
-            // ===== 攻击类型分布 =====
-            if (summary.attack_types && Object.keys(summary.attack_types).length > 0) {
-                h += '<div class="card"><h3>攻击类型分布</h3>';
-                var attackEntries = Object.entries(summary.attack_types).sort(function(a, b) { return b[1] - a[1]; });
-                var attackMax = attackEntries[0] ? attackEntries[0][1] : 1;
-                h += '<div style="display:flex;flex-direction:column;gap:8px;">';
-                attackEntries.forEach(function(entry) {
-                    var pct = Math.round((entry[1] / attackMax) * 100);
-                    h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">';
-                    h += '<span style="width:120px;text-align:right;color:var(--text-muted);">' + escapeHtml(entry[0]) + '</span>';
-                    h += '<div style="flex:1;height:18px;background:rgba(255,59,96,0.1);border-radius:9px;overflow:hidden;">';
-                    h += '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg, #ff3b60, #fb7185);border-radius:9px;transition:width 0.5s ease;"></div>';
-                    h += '</div>';
-                    h += '<span style="width:40px;font-weight:600;">' + entry[1] + '</span>';
-                    h += '</div>';
-                });
-                h += '</div></div>';
-            }
-
-            // ===== 攻击详情占位（异步加载） =====
-            h += '<div id="attackDetailsContainer"></div>';
-            // ===== API防火墙拦截详情占位（异步加载） =====
-            h += '<div id="firewallDetailsContainer"></div>';
-
-            // ===== 每日数据详表 =====
-            if (daily.length > 0) {
-                h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
-                h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
-                var reversed = daily.slice().reverse();
-                reversed.forEach(function(d, idx) {
-                    // 跳过全0行（访问/攻击/帖子/评论/点赞/新用户全为0）
-                    var total = (d.visits || 0) + (d.attacks || 0) + (d.posts || 0) + (d.comments || 0) + (d.likes || 0) + (d.new_users || 0);
-                    if (total === 0) return;
-                    h += '<tr>';
-                    h += '<td><strong>' + escapeHtml(d.date) + '</strong></td>';
-                    h += '<td' + (d.visits ? '' : ' class="zero-val"') + '>' + (d.visits || '') + '</td>';
-                    h += '<td' + (d.attacks ? '' : ' class="zero-val"') + ' style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || '') + '</td>';
-                    h += '<td' + (d.posts ? '' : ' class="zero-val"') + '>' + (d.posts || '') + '</td>';
-                    h += '<td' + (d.comments ? '' : ' class="zero-val"') + '>' + (d.comments || '') + '</td>';
-                    h += '<td' + (d.likes ? '' : ' class="zero-val"') + '>' + (d.likes || '') + '</td>';
-                    h += '<td' + (d.new_users ? '' : ' class="zero-val"') + '>' + (d.new_users || '') + '</td>';
-                    h += '</tr>';
-                    // 每行数据之间加分隔横线
-                    h += '<tr class="divider-row"><td colspan="7"></td></tr>';
-                });
-                h += '</tbody></table></div></div>';
-            }
+            // ===== 用户访问明细占位（异步加载） =====
+            h += '<div id="userVisitStatsContainer"></div>';
 
             if (summary.cached_at) {
                 h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
@@ -2501,160 +2413,10 @@ async function initAdminClient() {
 
             el.innerHTML = h;
 
-            // ===== 异步加载攻击详情 =====
-            loadAttackDetails(el);
-            // ===== 异步加载防火墙拦截详情 =====
-            loadFirewallDetails(el);
             // ===== 异步加载用户访问明细 =====
             loadUserVisitStats(el);
         } catch(e) {
             el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
-        }
-    }
-
-    // ===================== 攻击详情（异步加载） =====================
-    async function loadAttackDetails(el) {
-        var container = document.createElement('div');
-        container.id = 'attackDetailsCard';
-        container.className = 'card';
-        container.innerHTML = '<h3>被攻击详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载攻击记录中...</div>';
-        // 替换占位符
-        var placeholder = document.getElementById('attackDetailsContainer');
-        if (placeholder) placeholder.replaceWith(container);
-
-        try {
-            var attackData;
-
-            if (API_BASE) {
-                attackData = await apiCall('GET', '/admin/stats/attacks?limit=200');
-            }
-
-            if (!attackData || !attackData.data || attackData.data.length === 0) {
-                container.innerHTML = '<h3>被攻击详情</h3><div class="empty">暂无攻击记录</div>';
-                return;
-            }
-
-            var attacks = attackData.data;
-            var h = '<h3>被攻击详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + attackData.total + ' 条记录</span></h3>';
-            h += '<div class="filter-chips" style="margin-bottom:10px;">';
-            // 攻击类型过滤按钮
-            var typeCounts = {};
-            attacks.forEach(function(a) {
-                typeCounts[a.type] = (typeCounts[a.type] || 0) + 1;
-            });
-            var allTypes = Object.keys(typeCounts).sort();
-            h += '<span class="filter-chip active" id="attackFilterAll" onclick="filterAttacks(\'all\')">全部 (' + attacks.length + ')</span>';
-            allTypes.forEach(function(t) {
-                h += '<span class="filter-chip" id="attackFilter_' + escapeHtml(t) + '" onclick="filterAttacks(\'' + encodeURIComponent(t) + '\')">' + escapeHtml(t) + ' (' + typeCounts[t] + ')</span>';
-            });
-            h += '</div>';
-
-            h += '<div class="table-wrap" style="max-height:500px;"><table class="table-modern"><thead><tr>';
-            h += '<th>时间</th><th>IP地址</th><th>攻击类型</th><th>详情</th>';
-            h += '</tr></thead><tbody id="attackTableBody">';
-
-            attacks.forEach(function(a) {
-                var typeColor = a.type === 'CORS' ? '#f59e0b' :
-                               a.type === 'CSRF' ? '#ff3b60' :
-                               a.type === 'RATE_LIMIT' ? '#8b5cf6' :
-                               '#6b7280';
-                var timeStr = a.created_at ? formatTime(a.created_at) : (a.attack_date || '--');
-                h += '<tr class="attack-row" data-type="' + escapeHtml(a.type) + '">';
-                h += '<td style="font-size:11px;white-space:nowrap;">' + timeStr + '</td>';
-                h += '<td><code style="font-size:12px;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;">' + escapeHtml(a.ip) + '</code></td>';
-                h += '<td><span class="badge" style="background:' + typeColor + '20;color:' + typeColor + ';font-size:11px;">' + escapeHtml(a.type) + '</span></td>';
-                h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">' + escapeHtml(a.detail) + '</td>';
-                h += '</tr>';
-            });
-
-            h += '</tbody></table></div>';
-            h += '<div style="font-size:11px;color:var(--text-muted);padding:8px 0 0;text-align:center;">仅显示最近 200 条记录</div>';
-
-            container.innerHTML = h;
-
-            // 添加全局过滤函数
-            if (!window.filterAttacks) {
-                window.filterAttacks = function(type) {
-                    var decodedType = decodeURIComponent(type);
-                    document.querySelectorAll('#attackDetailsCard .filter-chip').forEach(function(c) {
-                        c.classList.remove('active');
-                    });
-                    if (decodedType === 'all') {
-                        document.getElementById('attackFilterAll')?.classList.add('active');
-                    } else {
-                        var btn = document.getElementById('attackFilter_' + decodedType);
-                        if (btn) btn.classList.add('active');
-                    }
-                    document.querySelectorAll('#attackTableBody .attack-row').forEach(function(row) {
-                        if (decodedType === 'all' || row.getAttribute('data-type') === decodedType) {
-                            row.style.display = '';
-                        } else {
-                            row.style.display = 'none';
-                        }
-                    });
-                };
-            }
-        } catch(e) {
-            container.innerHTML = '<h3>被攻击详情</h3><div class="empty">攻击记录加载失败: ' + escapeHtml(e.message) + '</div>';
-        }
-    }
-
-    // ===================== API防火墙拦截详情（异步加载） =====================
-    async function loadFirewallDetails(el) {
-        var container = document.createElement('div');
-        container.id = 'firewallDetailsCard';
-        container.className = 'card';
-        container.innerHTML = '<h3>API防火墙拦截详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载防火墙拦截记录中...</div>';
-        var placeholder = document.getElementById('firewallDetailsContainer');
-        if (placeholder) placeholder.replaceWith(container);
-
-        try {
-            var firewallData;
-
-            if (API_BASE) {
-                // 分别获取CORS和CSRF拦截记录
-                var corsData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CORS');
-                var csrfData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CSRF');
-                firewallData = {
-                    data: (corsData.data || []).concat(csrfData.data || []),
-                    cors_total: corsData.total || 0,
-                    csrf_total: csrfData.total || 0
-                };
-            }
-
-            if (!firewallData || !firewallData.data || firewallData.data.length === 0) {
-                container.innerHTML = '<h3>API防火墙拦截详情</h3><div class="empty">暂无防火墙拦截记录</div>';
-                return;
-            }
-
-            var records = firewallData.data;
-            records.sort(function(a, b) {
-                return (b.created_at || '').localeCompare(a.created_at || '');
-            });
-
-            var h = '<h3>API防火墙拦截详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">CORS: ' + (firewallData.cors_total || 0) + ' 次 | CSRF: ' + (firewallData.csrf_total || 0) + ' 次</span></h3>';
-            h += '<div class="table-wrap" style="max-height:400px;"><table class="table-modern"><thead><tr>';
-            h += '<th>时间</th><th>来源IP</th><th>拦截类型</th><th>详情</th>';
-            h += '</tr></thead><tbody>';
-
-            records.forEach(function(r) {
-                var isCors = r.type === 'CORS';
-                var badgeColor = isCors ? '#f59e0b' : '#ff3b60';
-                var badgeLabel = isCors ? 'CORS跨域' : 'CSRF跨站';
-                var timeStr = r.created_at ? formatTime(r.created_at) : (r.attack_date || '--');
-                h += '<tr>';
-                h += '<td style="font-size:11px;white-space:nowrap;">' + timeStr + '</td>';
-                h += '<td><code style="font-size:12px;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;">' + escapeHtml(r.ip) + '</code></td>';
-                h += '<td><span class="badge" style="background:' + badgeColor + '20;color:' + badgeColor + ';font-size:11px;">' + badgeLabel + '</span></td>';
-                h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">' + escapeHtml(r.detail) + '</td>';
-                h += '</tr>';
-            });
-
-            h += '</tbody></table></div>';
-
-            container.innerHTML = h;
-        } catch(e) {
-            container.innerHTML = '<h3>API防火墙拦截详情</h3><div class="empty">防火墙拦截记录加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
@@ -3430,16 +3192,11 @@ async function initAdminClient() {
     renderStatsTab = async function(el) {
         var skeletonHtml = '<div class="card"><div class="date-filter-row"><div class="skeleton-pulse" style="height:36px;width:100%;background:rgba(255,255,255,0.05);border-radius:12px;"></div></div></div>';
         skeletonHtml += '<div class="stats-row">';
-        ['用户数量', '帖子数量', '评论数量', '点赞数量', '照片数量', '访问总次数', '被攻击次数', 'API防火墙拦截'].forEach(function(l) {
+        ['用户数量', '帖子数量', '评论数量', '点赞数量', '照片数量', '访问总次数'].forEach(function(l) {
             skeletonHtml += '<div class="stat-box skeleton-pulse"><div class="val" style="height:28px;width:60%;background:rgba(255,255,255,0.08);border-radius:6px;">&nbsp;</div><div class="lbl">' + l + '</div></div>';
         });
         skeletonHtml += '</div>';
         skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:100px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>每日数据明细</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>每日数据趋势</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>攻击类型分布</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>被攻击详情</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        skeletonHtml += '<div class="card"><h3>API防火墙拦截详情</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
         el.innerHTML = skeletonHtml;
         try {
             var summary, dailyData;
@@ -3476,78 +3233,11 @@ async function initAdminClient() {
             h += '<div class="stat-box"><div class="val">' + (summary.total_likes || 0) + '</div><div class="lbl">点赞数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
-            h += '<div class="stat-box danger"><div class="val">' + (summary.total_attacks || 0) + '</div><div class="lbl">被攻击次数</div></div>';
-            h += '<div class="stat-box warn"><div class="val">' + (summary.firewall_intercepts || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
             h += '</div>';
             h += '<div id="userVisitStatsContainer"></div>';
-            if (daily.length > 0) {
-                h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
-                h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
-                daily.slice().reverse().forEach(function(d) {
-                    var total = (d.visits || 0) + (d.attacks || 0) + (d.posts || 0) + (d.comments || 0) + (d.likes || 0) + (d.new_users || 0);
-                    if (total === 0) return;
-                    h += '<tr><td><strong>' + escapeHtml(d.date) + '</strong></td>';
-                    h += '<td' + (d.visits ? '' : ' class="zero-val"') + '>' + (d.visits || '') + '</td>';
-                    h += '<td' + (d.attacks ? '' : ' class="zero-val"') + ' style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || '') + '</td>';
-                    h += '<td' + (d.posts ? '' : ' class="zero-val"') + '>' + (d.posts || '') + '</td>';
-                    h += '<td' + (d.comments ? '' : ' class="zero-val"') + '>' + (d.comments || '') + '</td>';
-                    h += '<td' + (d.likes ? '' : ' class="zero-val"') + '>' + (d.likes || '') + '</td>';
-                    h += '<td' + (d.new_users ? '' : ' class="zero-val"') + '>' + (d.new_users || '') + '</td></tr><tr class="divider-row"><td colspan="7"></td></tr>';
-                });
-                h += '</tbody></table></div></div>';
-            }
-            var modes = [
-                { key: 'visits', label: '访问量', color: '#059669' },
-                { key: 'attacks', label: '攻击量', color: '#ff3b60' },
-                { key: 'posts', label: '发帖量', color: '#3b82f6' },
-                { key: 'comments', label: '评论量', color: '#f59e0b' },
-                { key: 'likes', label: '点赞量', color: '#ec4899' },
-                { key: 'new_users', label: '新用户', color: '#8b5cf6' }
-            ];
-            h += '<div class="card"><h3>每日数据趋势</h3><div class="filter-chips" style="margin-bottom:12px;">';
-            modes.forEach(function(m) {
-                h += '<span class="filter-chip' + (window.statsChartMode === m.key ? ' active' : '') + '" onclick="window.statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
-            });
-            h += '</div>';
-            if (daily.length === 0) {
-                h += '<div class="empty" style="padding:24px;text-align:center;color:var(--text-muted);">暂无每日数据，刷新页面后开始记录访问</div>';
-            } else {
-                var maxVal = 1;
-                daily.forEach(function(d) { maxVal = Math.max(maxVal, d[window.statsChartMode] || 0); });
-                var activeMode = modes.find(function(m) { return m.key === window.statsChartMode; }) || modes[0];
-                var chartData = daily.length > 30 ? daily.slice(-30) : daily;
-                h += '<div class="chart-legend"><span><span class="dot" style="background:' + activeMode.color + ';"></span>' + activeMode.label + '</span><span style="color:var(--text-muted);font-size:11px;">最高 ' + maxVal + '</span><span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span></div>';
-                h += '<div class="chart-bar-row">';
-                chartData.forEach(function(d) {
-                    var v = d[window.statsChartMode] || 0;
-                    var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
-                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '"><span class="bar-tip">' + v + '</span></div>';
-                });
-                h += '</div><div class="chart-bar-labels">';
-                var labelStep = chartData.length > 18 ? 2 : 1;
-                chartData.forEach(function(d, index) {
-                    var shortDate = d.date ? d.date.slice(5) : '';
-                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === chartData.length - 1) ? escapeHtml(shortDate) : '') + '</div>';
-                });
-                h += '</div>';
-            }
-            h += '</div>';
-            if (summary.attack_types && Object.keys(summary.attack_types).length > 0) {
-                h += '<div class="card"><h3>攻击类型分布</h3><div style="display:flex;flex-direction:column;gap:8px;">';
-                var attackEntries = Object.entries(summary.attack_types).sort(function(a, b) { return b[1] - a[1]; });
-                var attackMax = attackEntries[0] ? attackEntries[0][1] : 1;
-                attackEntries.forEach(function(entry) {
-                    var pct = Math.round((entry[1] / attackMax) * 100);
-                    h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><span style="width:120px;text-align:right;color:var(--text-muted);">' + escapeHtml(entry[0]) + '</span><div style="flex:1;height:18px;background:rgba(255,59,96,0.1);border-radius:9px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg, #ff3b60, #fb7185);border-radius:9px;transition:width 0.5s ease;"></div></div><span style="width:40px;font-weight:600;">' + entry[1] + '</span></div>';
-                });
-                h += '</div></div>';
-            }
-            h += '<div id="attackDetailsContainer"></div><div id="firewallDetailsContainer"></div>';
             if (summary.cached_at) h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
             el.innerHTML = h;
             loadUserVisitStats(el);
-            loadAttackDetails(el);
-            loadFirewallDetails(el);
         } catch(e) {
             el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
         }
@@ -4214,13 +3904,13 @@ async function initAdminClient() {
         var users = {};
         allClipboardEntries.forEach(function(entry) { if (entry.user_name) users[entry.user_name] = true; });
         var h = '<div class="stats-row"><div class="stat-box"><div class="val">' + adminClipboardTotal + '</div><div class="lbl">授权快照</div></div><div class="stat-box"><div class="val">' + Object.keys(users).length + '</div><div class="lbl">本页授权用户</div></div></div>';
-        h += '<div class="card"><div class="admin-card-title-row"><div><h3>用户剪贴板</h3><p>仅显示用户在前端明确授权并成功上传的文本快照。</p></div><button class="btn-sm" onclick="adminTabDataLoaded.clipboard=false;refreshAdminTab(\'clipboard\')">刷新</button></div>';
+        h += '<div class="card"><div class="admin-card-title-row"><div><h3>用户剪贴板</h3><p>仅显示用户在前端明确授权并成功上传的文本快照。</p></div><div><button class="btn-sm" onclick="adminTabDataLoaded.clipboard=false;refreshAdminTab(\'clipboard\')">刷新</button><button class="btn-sm del" style="margin-left:4px;" onclick="adminDeleteAllClipboard()">清空全部</button></div></div>';
         if (!allClipboardEntries.length) {
             h += '<div class="empty">暂无已授权上传的剪贴板内容</div>';
         } else {
             h += '<div class="admin-clipboard-list">';
             allClipboardEntries.forEach(function(entry, index) {
-                h += '<article class="admin-clipboard-item"><header><strong>' + escapeHtml(entry.user_name || '未知用户') + '</strong><time>' + escapeHtml(entry.captured_at ? formatTime(entry.captured_at) : '时间未知') + '</time></header><pre>' + escapeHtml(entry.text.slice(0, 10000)) + '</pre><footer><span>' + entry.text.length + ' 字符</span><button class="btn-sm" type="button" onclick="adminCopyClipboardSnapshot(' + index + ')">复制</button></footer></article>';
+                h += '<article class="admin-clipboard-item"><header><strong>' + escapeHtml(entry.user_name || '未知用户') + '</strong><time>' + escapeHtml(entry.captured_at ? formatTime(entry.captured_at) : '时间未知') + '</time></header><pre>' + escapeHtml(entry.text.slice(0, 10000)) + '</pre><footer><span>' + entry.text.length + ' 字符</span><button class="btn-sm" type="button" onclick="adminCopyClipboardSnapshot(' + index + ')">复制</button><button class="btn-sm del" type="button" onclick="adminDeleteClipboardUser(\'' + escapeHtml(entry.user_name || '') + '\')">删除该用户</button></footer></article>';
             });
             h += '</div>';
             if (adminClipboardPages > 1) {
@@ -4240,6 +3930,42 @@ async function initAdminClient() {
         } catch (error) {
             showToast('复制失败，请手动选择文本', 'error');
         }
+    };
+
+    window.adminDeleteClipboardUser = async function(userName) {
+        if (!userName) return;
+        if (!confirm('确定要永久删除用户 "' + userName + '" 的所有剪贴板数据吗？此操作不可恢复。')) return;
+        try {
+            var resp = await apiCall('DELETE', '/admin/clipboard-data', { user_name: userName });
+            if (resp && resp.ok) {
+                showToast(resp.message || '已删除', 'success');
+                adminTabDataLoaded.clipboard = false;
+                window.switchTab('clipboard');
+            } else {
+                showToast('删除失败: ' + ((resp && resp.error) || '未知错误'), 'error');
+            }
+        } catch (e) {
+            showToast('删除请求失败: ' + (e && e.message || '网络错误'), 'error');
+        }
+    };
+
+    window.adminDeleteAllClipboard = async function() {
+        if (!confirm('确定要清空所有用户的剪贴板数据吗？此操作不可恢复。')) return;
+        var users = {};
+        allClipboardEntries.forEach(function(e) { if (e.user_name) users[e.user_name] = true; });
+        var userList = Object.keys(users);
+        if (!userList.length) { showToast('没有可删除的剪贴板数据'); return; }
+        var failed = 0;
+        for (var i = 0; i < userList.length; i++) {
+            try {
+                var resp = await apiCall('DELETE', '/admin/clipboard-data', { user_name: userList[i] });
+                if (!resp || !resp.ok) failed++;
+            } catch (e) { failed++; }
+        }
+        var deleted = userList.length - failed;
+        showToast('已删除 ' + deleted + ' 个用户的剪贴板数据' + (failed > 0 ? '，' + failed + ' 个失败' : ''), failed > 0 ? 'error' : 'success');
+        adminTabDataLoaded.clipboard = false;
+        window.switchTab('clipboard');
     };
 
     window.adminChangeClipboardPage = function(page) {

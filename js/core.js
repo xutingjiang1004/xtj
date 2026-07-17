@@ -3788,6 +3788,18 @@ function renderProfileActivityList(kind) {
                     clearTimeout(timer);
                 }
             }
+            // 快速本地检查帖子是否存在（不依赖网络，避免二次超时）
+            function quickPostExistsCheck(postId) {
+                try {
+                    var allPosts = normalizePosts(feedAllPosts);
+                    var found = allPosts.find(function(p) { return String(p.id) === String(postId); });
+                    if (found) return 'exists';
+                    // 如果本地feed中已不存在，视为已删除
+                    return 'deleted';
+                } catch (_) {
+                    return 'unknown';
+                }
+            }
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
@@ -3889,7 +3901,7 @@ function renderProfileActivityList(kind) {
                 try {
                     var deleteController = typeof AbortController === 'function' ? new AbortController() : null;
                     var deleteTimedOut = false;
-                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 15000;
+                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 10000;
                     var deleteTimer = setTimeout(function() {
                         deleteTimedOut = true;
                         if (deleteController) deleteController.abort();
@@ -3904,17 +3916,17 @@ function renderProfileActivityList(kind) {
                     } catch (raceErr) {
                         if (finished) return;
                         if (deleteTimedOut) {
-                            console.warn('[delBtn] delete request timed out; confirming authoritative state');
-                            var status = await confirmPostDeleteStatus(targetPostId);
+                            console.warn('[delBtn] delete request timed out; checking locally');
+                            // 快速本地检查：不从网络确认，避免二次超时
+                            var localCheck = quickPostExistsCheck(targetPostId);
                             if (finished) return;
                             finished = true;
-                            if (status.confirmed && status.deleted) {
+                            if (localCheck === 'deleted' || localCheck === 'not_found') {
                                 applyConfirmedPostDeletion(targetPostId, session);
-                            } else if (status.confirmed) {
-                                cleanupDeleteSession({ toast: "删除未完成，帖子仍然存在，请重试" });
+                            } else if (localCheck === 'exists') {
+                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
                             } else {
-                                cleanupDeleteSession({ toast: "无法确认删除状态，请刷新后重试" });
-                                // 不再强制 loadFeed
+                                cleanupDeleteSession({ toast: "删除超时，无法确认状态，请刷新后重试" });
                             }
                             return;
                         }

@@ -7473,6 +7473,32 @@ app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, 
   }
 });
 
+// 永久删除指定用户的剪贴板数据
+app.delete('/admin/clipboard-data', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var userName = String(req.body && req.body.user_name || '').trim();
+    if (!userName || userName.length > 50) return res.status(400).json({ error: '用户名无效', code: 'invalid_user_name' });
+    var existing = await supabase.from('posts').select('id, content')
+      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'clipboard_lookup_failed' });
+    if (!existing.data) return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
+    var info = {};
+    try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {}
+    if (!info.consented_clipboard && !(Array.isArray(info.consented_clipboard_history) && info.consented_clipboard_history.length > 0)) {
+      return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
+    }
+    delete info.consented_clipboard;
+    delete info.consented_clipboard_history;
+    await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
+    await logAdminAudit('delete_user_clipboard_data', req.adminName || 'admin', 'target_user=' + userName);
+    return res.json({ ok: true, deleted: true, message: '已删除剪贴板数据' });
+  } catch (error) {
+    console.error('[API] admin clipboard delete:', error && error.message);
+    return res.status(500).json({ error: '剪贴板数据删除失败', code: 'clipboard_delete_failed' });
+  }
+});
+
 app.post('/api/user/consented-data', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
     var kind = String(req.body && req.body.kind || '');
