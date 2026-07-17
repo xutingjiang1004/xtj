@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --xtj-radius-sm: 14px;
   --xtj-radius-md: 20px;
   --xtj-radius-lg: 28px;
@@ -395,9 +395,7 @@
 }
 
 #panelChat .dock-chat-container,
-#panelChat .chat-list,
-#panelChat .chat-messages {
-  min-height: calc(100dvh - 150px) !important;
+#panelChat .chat-list {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
