@@ -890,7 +890,7 @@
                     method: 'POST', keepalive: true,
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                     body: JSON.stringify({ events: batch })
-                });
+                }).catch(function() {});
                 removeSentBehaviors(batch);
             } catch (e) {}
         }

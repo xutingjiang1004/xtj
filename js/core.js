@@ -2382,7 +2382,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     
                     // 新头像插入成功，安全删除旧头像记录
                     var oldIds = await sb.from("posts")
-                        .select("id")
+                        .select("id,media_url")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
                         .eq("actor_key", "__avatar__");
@@ -5118,6 +5118,7 @@ function renderProfileActivityList(kind) {
                 if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
                 feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
                 feedAllPosts.unshift(post);
+                feedAllPosts = sortPosts(feedAllPosts);
                 feedVisiblePostsCache = null;
                 feedMapsCache = null;
                 var feed = document.getElementById('feed');
@@ -6694,6 +6695,7 @@ function renderProfileActivityList(kind) {
                 feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
+                if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
 
                 loadAvatarsForUsers(Array.from(allUsers)).then(function() {
                     var feedEl = document.getElementById('feed');
