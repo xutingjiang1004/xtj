@@ -2077,7 +2077,7 @@ async function logAdminLoginEvent(req) {
 }
 
 const IP_LOCATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const IP_LOCATION_NEGATIVE_TTL_MS = 5 * 60 * 1000;
+const IP_LOCATION_NEGATIVE_TTL_MS = 2 * 60 * 1000;
 const IP_LOCATION_CACHE_MAX = 500;
 const ipLocationCache = new Map();
 const ipLocationInflight = new Map();
@@ -2106,29 +2106,41 @@ async function resolveIpLocation(ip) {
 }
 
 // IP 地区解析（优先 HTTPS 数据源，ip-api.com 仅作最后兼容 fallback）
+// ★ 记录每个 Provider 的诊断信息
+var ipProviderDiagnostics = {};
+var IP_CACHE_TTL_OK = 3600000;
+var IP_CACHE_TTL_FAIL = 120000;
 async function resolveIpLocationUncached(ip) {
   if (!ip || ip === 'unknown') return null;
   if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
   if (ip.match(/^172\.(1[6-9]|2\d|3[01])\./)) return null;
   if (ip === '::1' || ip === '::ffff:127.0.0.1') return null;
 
+  var diagnostics = [];
   const fetchers = [
     async function() {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2500);
+      var diag = { provider: 'ipwho.is', resolved_at: new Date().toISOString() };
       try {
         var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip), { signal: controller.signal });
-        if (!resp.ok) throw new Error('ipwho.is HTTP ' + resp.status);
+        diag.http_status = resp.status;
+        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('ipwho.is HTTP ' + resp.status); }
         var data = await resp.json();
-        if (!data.success) throw new Error('ipwho.is not success');
+        diag.response_schema_valid = typeof data === 'object' && data !== null;
+        if (!data.success) { diag.error_code = 'not_success'; throw new Error('ipwho.is not success'); }
         return {
-          provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
+          _diag: diag, provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
           asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
           org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
           is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
           is_hosting: !!(data.security && data.security.hosting)
         };
-      } finally { clearTimeout(timeout); }
+      } catch(e) {
+        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
+        diag.timeout = e.name === 'AbortError';
+        throw e;
+      } finally { clearTimeout(timeout); diagnostics.push(diag); }
     },
     async function() {
       var controller = new AbortController();
@@ -2158,6 +2170,7 @@ async function resolveIpLocationUncached(ip) {
     try {
       var result = await fetchers[i]();
       var parts = [result.country, result.region, result.city].filter(Boolean);
+      ipProviderDiagnostics[ip] = diagnostics;
       return {
         country: result.country,
         region: result.region,
@@ -2177,9 +2190,51 @@ async function resolveIpLocationUncached(ip) {
       console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
     }
   }
+  ipProviderDiagnostics[ip] = diagnostics;
   console.warn('[IP] 所有解析源均失败，返回 null:', ip);
   return null;
 }
+
+// ===================== IP 解析健康检查与手动重试 =====================
+
+// GET /admin/ip-health - 查看 IP 解析 Provider 诊断信息
+app.get('/admin/ip-health', verifyToken, async (req, res) => {
+  try {
+    var result = { cache_size: ipLocationCache.size, cache_max: IP_LOCATION_CACHE_MAX, diagnostics: {} };
+    // 返回最近的诊断信息（最多 20 条）
+    var keys = Object.keys(ipProviderDiagnostics).slice(-20);
+    keys.forEach(function(ip) {
+      result.diagnostics[ip] = ipProviderDiagnostics[ip];
+    });
+    return res.json({ ok: true, data: result });
+  } catch (e) {
+    console.error('[API] ip-health:', e && e.message);
+    return res.status(500).json({ error: '健康检查失败', code: 'ip_health_error' });
+  }
+});
+
+// POST /admin/ip-retry - 手动重试指定 IP 解析
+app.post('/admin/ip-retry', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var ip = String(req.body && req.body.ip || '').trim();
+    if (!ip || ip.length > 45) return res.status(400).json({ error: 'IP 地址无效', code: 'invalid_ip' });
+    // 清除该 IP 的缓存
+    ipLocationCache.delete(ip);
+    delete ipProviderDiagnostics[ip];
+    // 重新解析
+    var result = await resolveIpLocation(ip);
+    var diagnostics = ipProviderDiagnostics[ip] || [];
+    return res.json({
+      ok: true,
+      ip: ip,
+      location: result,
+      diagnostics: diagnostics
+    });
+  } catch (e) {
+    console.error('[API] ip-retry:', e && e.message);
+    return res.status(500).json({ error: 'IP 重试失败', code: 'ip_retry_error' });
+  }
+});
 
 // ===================== 安全检测逻辑 =====================
 
@@ -5818,6 +5873,80 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
   } catch (e) {
     console.error('[API] dm read:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '消息已读状态更新失败', code: 'dm_read_update_failed' });
+  }
+});
+
+// POST /api/dm/send - 发送私信（后端认证写入，禁止前端直连 Supabase）
+app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var sender = req.userName;
+    var targetUser = String(req.body && req.body.target_user || '').trim();
+    var content = String(req.body && req.body.content || '').trim();
+    var mediaType = String(req.body && req.body.media_type || DM_MARKER);
+    var actorKey = String(req.body && req.body.actor_key || '').slice(0, 500);
+
+    // 验证接收用户
+    if (!targetUser || targetUser.length > MAX_USERNAME_LEN) {
+      return res.status(400).json({ error: '接收用户无效', code: 'invalid_target' });
+    }
+    // 禁止给自己发送
+    if (targetUser === sender) {
+      return res.status(400).json({ error: '不能给自己发送消息', code: 'self_send' });
+    }
+    // 验证内容
+    if (!content && mediaType === DM_MARKER) {
+      return res.status(400).json({ error: '消息内容不能为空', code: 'empty_content' });
+    }
+    if (content.length > MAX_CONTENT_LEN) {
+      return res.status(400).json({ error: '消息内容过长（最大' + MAX_CONTENT_LEN + '字符）', code: 'content_too_long' });
+    }
+
+    // 验证接收用户真实存在
+    var { data: targetExists } = await supabase.from('posts')
+      .select('id')
+      .eq('user_name', targetUser)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!targetExists && targetUser !== ADMIN_USERNAME) {
+      return res.status(400).json({ error: '接收用户不存在', code: 'target_not_found' });
+    }
+
+    // 构建消息内容
+    var contentPayload = content;
+    try {
+      // 尝试JSON格式
+      var parsed = JSON.parse(content);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if (!parsed.read_at) parsed.read_at = null;
+        contentPayload = JSON.stringify(parsed);
+      }
+    } catch (_) {
+      // 纯文本，包装为JSON
+      contentPayload = JSON.stringify({ text: content, read_at: null });
+    }
+
+    // 使用 service_role 写入 __dm__ 记录（绕过RLS）
+    var { data: inserted, error: insertErr } = await supabase
+      .from('posts')
+      .insert([{
+        user_name: sender,
+        content: contentPayload,
+        media_type: mediaType,
+        media_url: targetUser,
+        actor_key: actorKey || ('dm_' + Date.now())
+      }])
+      .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
+      .single();
+
+    if (insertErr) {
+      console.error('[API] dm send insert error:', insertErr);
+      return res.status(500).json({ error: sanitizeError(insertErr), code: 'dm_send_failed' });
+    }
+
+    return res.json({ ok: true, message: inserted });
+  } catch (e) {
+    console.error('[API] dm send:', e && e.message);
+    return res.status(500).json({ error: '消息发送失败', code: 'dm_send_error' });
   }
 });
 

@@ -8140,7 +8140,7 @@ function renderProfileActivityList(kind) {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
                 if (!window.currentUser) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
+                    el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">登录后可查看消息</div></div>';
                     setUnreadBadgeCount(0);
                     renderDockChatAiEntry(el);
                     syncDockChatLayoutState();
@@ -8167,7 +8167,7 @@ function renderProfileActivityList(kind) {
                     if (listLoadSeq !== _dockChatListLoadSeq) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
                         renderDockChatAiEntry(el);
@@ -8192,8 +8192,10 @@ function renderProfileActivityList(kind) {
                     window.dockChatListCacheTime = Date.now();
                     renderDockChatAiEntry(el);
                     syncDockChatLayoutState();
-                    // 非阻塞加载头像: 先显示列表, 头像后台补上
-                    hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
+                    // 非阻塞加载头像: 先显示列表, 头像后台补上（包含固定入口 xxz）
+                    var avatarUsers = convs.map(function(c) { return c.other_user; });
+                    if (window.currentUser !== 'xxz') avatarUsers.push('xxz');
+                    hydrateDockChatAvatars(avatarUsers, function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
@@ -8290,10 +8292,11 @@ function renderProfileActivityList(kind) {
                 if (avatarUrl) {
                     var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     if (safeAvatarUrl) {
-                        return '<img src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        return '<img src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                     }
                 }
-                return userName ? escapeHtml(String(userName).slice(0, 1).toUpperCase()) : '?';
+                // 无头像时显示首字母（xxz → X）
+                return escapeHtml(String(userName || '?').slice(0, 1).toUpperCase());
             }
 
             function patchDockChatConversationAvatars(root) {
@@ -8379,19 +8382,19 @@ function renderProfileActivityList(kind) {
             }
 
             // 在聊天列表渲染固定的"AI" 入口 + 管理员"xxz"入口
-            // ★ 始终插入到列表最顶部
+            // ★ 始终插入到列表最顶部，AI永远第一，xxz永远第二
             function renderDockChatAiEntry(el) {
                 if (!el) return;
-                // AI 入口
+                // AI 入口（永远第一）
                 var existingAi = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
                 if (existingAi) {
                     if (el.firstChild !== existingAi) el.insertBefore(existingAi, el.firstChild);
                 } else {
                     var aiHtml = [
                         '<div class="chat-list-item ai-agent-entry" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
-                        '<div class="cli-avatar">🤖</div>',
-                        '<div class="cli-info"><div class="cli-name">AI</div><div class="cli-preview">和AI聊聊天</div></div>',
-                        '<div class="cli-right"><span class="cli-time">AI</span></div>',
+                        '<div class="cli-avatar" style="display:flex;align-items:center;justify-content:center;border-radius:50%;width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;font-size:16px;font-weight:700;">AI</div>',
+                        '<div class="cli-info"><div class="cli-name">AI</div><div class="cli-preview">智能助手</div></div>',
+                        '<div class="cli-right"></div>',
                         '</div>'
                     ].join('');
                     var aiTemplate = document.createElement('template');
@@ -8402,7 +8405,7 @@ function renderProfileActivityList(kind) {
                         aiRow.classList.toggle('is-loading', !!loading);
                         aiRow.classList.toggle('is-error', !!failed);
                         aiRow.setAttribute('aria-busy', loading ? 'true' : 'false');
-                        if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '和AI聊聊天');
+                        if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '智能助手');
                     }
                     aiRow.addEventListener('click', function(e) {
                         e.stopPropagation();
@@ -8433,28 +8436,38 @@ function renderProfileActivityList(kind) {
                     });
                     el.insertBefore(aiRow, el.firstChild);
                 }
-                // 管理员 xxz 入口（固定在 AI 下面）
+                // 管理员 xxz 入口（固定在 AI 下面，永远第二，不参与最近会话排序）
+                // 当前用户是 xxz 本人时不显示
+                if (window.currentUser === 'xxz') {
+                    var selfEntry = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
+                    if (selfEntry) selfEntry.remove();
+                    return;
+                }
                 var existingAdmin = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
                 if (existingAdmin) {
                     var aiEntry = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
                     if (aiEntry && aiEntry.nextSibling !== existingAdmin) {
                         el.insertBefore(existingAdmin, aiEntry.nextSibling);
                     }
+                    // 更新头像（可能已有缓存）
+                    var adminAvatar = existingAdmin.querySelector('.cli-avatar');
+                    if (adminAvatar) adminAvatar.innerHTML = getDockChatAvatarMarkup('xxz');
                 } else {
                     var adminHtml = [
                         '<div class="chat-list-item admin-chat-entry" data-chat-user="xxz" role="button" tabindex="0" style="--xtj-enter-delay:50ms">',
-                        '<div class="cli-avatar" style="background:linear-gradient(135deg,#4a6cf7,#6c5ce7);color:#fff;display:flex;align-items:center;justify-content:center;border-radius:50%;width:36px;height:36px;font-weight:700;font-size:14px;">管</div>',
-                        '<div class="cli-info"><div class="cli-name">xxz · 管理员</div><div class="cli-preview">联系管理员</div></div>',
-                        '<div class="cli-right"><span class="cli-time" style="background:var(--primary);color:#fff;padding:1px 6px;border-radius:3px;font-size:9px;">官方</span></div>',
+                        '<div class="cli-avatar">', getDockChatAvatarMarkup('xxz'), '</div>',
+                        '<div class="cli-info"><div class="cli-name">xxz<span class="admin-tag-mini">管理员</span></div><div class="cli-preview">想我就给我发消息</div></div>',
+                        '<div class="cli-right"></div>',
                         '</div>'
                     ].join('');
                     var adminTemplate = document.createElement('template');
                     adminTemplate.innerHTML = adminHtml.trim();
                     var adminRow = adminTemplate.content.firstElementChild;
+                    // 整行可点击，统一调用 openChat
                     adminRow.addEventListener('click', function(e) {
                         e.stopPropagation();
-                        if (typeof window.dockChatOpenUser === 'function') {
-                            window.dockChatOpenUser('xxz');
+                        if (typeof window.openChat === 'function') {
+                            window.openChat('xxz');
                         }
                     });
                     adminRow.addEventListener('keydown', function(e) {
@@ -8735,6 +8748,7 @@ function renderProfileActivityList(kind) {
                 return;
             }
                 var targetUser = dockChatActiveUser;
+                if (targetUser === currentUser) { showToast('不能给自己发送消息'); return; }
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
@@ -8781,17 +8795,31 @@ function renderProfileActivityList(kind) {
                     renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
                     applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
 
-                    const { data: insertedMessage, error } = await sb.from("posts")
-                        .insert([{ user_name: currentUser, content: contentPayload, media_type: DM_MARKER, media_url: targetUser, actor_key: actorKey }])
-                        .select("id, user_name, media_url, content, created_at, views, actor_key")
-                        .single();
-                    if (error) throw error;
+                    // ★ 通过后端认证接口发送，禁止前端直连 Supabase
+                    var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_user: targetUser,
+                            content: contentPayload,
+                            media_type: DM_MARKER,
+                            actor_key: actorKey
+                        })
+                    });
+                    if (!sendResp.ok) {
+                        var sendErrData = await sendResp.json().catch(function() { return {}; });
+                        throw new Error(sendErrData.error || '发送失败 (HTTP ' + sendResp.status + ')');
+                    }
+                    var sendResult = await sendResp.json();
+                    if (!sendResult.ok || !sendResult.message) throw new Error('服务端未确认发送');
+
+                    var insertedMessage = sendResult.message;
                     touchUserSession(false);
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('message_send', '发送消息给 [' + targetUser + ']'); } catch(e) {}
                     clearDockChatFilePreview(false);
-                    replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
+                    replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    applyDockChatConversationPreview(targetUser, insertedMessage || optimisticMessage, 0);
+                    applyDockChatConversationPreview(targetUser, insertedMessage, 0);
                     scheduleDockChatListRefresh(320);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
@@ -8799,7 +8827,8 @@ function renderProfileActivityList(kind) {
                 } catch(e) {
                     removeDockChatCacheMessage(targetUser, tempId);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    showToast('发送失败 ' + (e?.message || e)); inp.value = capturedContent;
+                    inp.value = capturedContent;
+                    showToast('发送失败: ' + (e && e.message ? e.message : '未知错误'));
                 }
                 finally { dockChatSending = false; }
             }
