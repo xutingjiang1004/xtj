@@ -3487,6 +3487,7 @@ function renderProfileActivityList(kind) {
                     if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
                         loadProfileActivity(true);
                     }
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior(nextLiked ? 'post_like' : 'post_unlike', '赞了帖子 ' + pid.slice(0, 8)); } catch(e) {}
                 } catch (e) {
                     console.error(e);
                     if (likeOperations[pid] && likeOperations[pid].version === version) {
@@ -3787,6 +3788,18 @@ function renderProfileActivityList(kind) {
                     clearTimeout(timer);
                 }
             }
+            // 快速本地检查帖子是否存在（不依赖网络，避免二次超时）
+            function quickPostExistsCheck(postId) {
+                try {
+                    var allPosts = normalizePosts(feedAllPosts);
+                    var found = allPosts.find(function(p) { return String(p.id) === String(postId); });
+                    if (found) return 'exists';
+                    // 如果本地feed中已不存在，视为已删除
+                    return 'deleted';
+                } catch (_) {
+                    return 'unknown';
+                }
+            }
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
@@ -3888,7 +3901,7 @@ function renderProfileActivityList(kind) {
                 try {
                     var deleteController = typeof AbortController === 'function' ? new AbortController() : null;
                     var deleteTimedOut = false;
-                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 15000;
+                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 10000;
                     var deleteTimer = setTimeout(function() {
                         deleteTimedOut = true;
                         if (deleteController) deleteController.abort();
@@ -3903,17 +3916,17 @@ function renderProfileActivityList(kind) {
                     } catch (raceErr) {
                         if (finished) return;
                         if (deleteTimedOut) {
-                            console.warn('[delBtn] delete request timed out; confirming authoritative state');
-                            var status = await confirmPostDeleteStatus(targetPostId);
+                            console.warn('[delBtn] delete request timed out; checking locally');
+                            // 快速本地检查：不从网络确认，避免二次超时
+                            var localCheck = quickPostExistsCheck(targetPostId);
                             if (finished) return;
                             finished = true;
-                            if (status.confirmed && status.deleted) {
+                            if (localCheck === 'deleted' || localCheck === 'not_found') {
                                 applyConfirmedPostDeletion(targetPostId, session);
-                            } else if (status.confirmed) {
-                                cleanupDeleteSession({ toast: "删除未完成，帖子仍然存在，请重试" });
+                            } else if (localCheck === 'exists') {
+                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
                             } else {
-                                cleanupDeleteSession({ toast: "无法确认删除状态，请刷新后重试" });
-                                // 不再强制 loadFeed
+                                cleanupDeleteSession({ toast: "删除超时，无法确认状态，请刷新后重试" });
                             }
                             return;
                         }
@@ -8717,7 +8730,10 @@ function renderProfileActivityList(kind) {
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput && fileInput.files[0];
-                if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
+                if ((!content && !file) || !dockChatActiveUser || dockChatSending) {
+                if (!dockChatActiveUser && content) showToast('请先选择一个聊天对象');
+                return;
+            }
                 var targetUser = dockChatActiveUser;
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
@@ -9132,6 +9148,8 @@ function renderProfileActivityList(kind) {
             if (themeBtn) {
                 themeBtn.addEventListener('click', function() {
                     const isDark = htmlEl.getAttribute('data-theme') === 'dark';
+                    const nextTheme = !isDark ? '深色模式' : '浅色模式';
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('settings_change', '切换主题 → ' + nextTheme); } catch(e) {}
                     animateThemeToggle(!isDark, themeBtn);
                 });
             }
