@@ -1604,13 +1604,21 @@ function buildUserInfoMap(userInfoRows) {
       userInfoMap[userName] = {
         reg_time: info.reg_time || null,
         last_login: info.last_login || null,
-        last_visit: info.last_visit || null
+        last_visit: info.last_visit || null,
+        last_ip_location: info.last_ip_location || null,
+        last_location: info.last_location || null
       };
       return;
     }
     userInfoMap[userName].reg_time = pickEarlierIso(userInfoMap[userName].reg_time, info.reg_time);
     userInfoMap[userName].last_login = pickLaterIso(userInfoMap[userName].last_login, info.last_login);
     userInfoMap[userName].last_visit = pickLaterIso(userInfoMap[userName].last_visit, info.last_visit);
+    if (info.last_ip_location && !userInfoMap[userName].last_ip_location) {
+      userInfoMap[userName].last_ip_location = info.last_ip_location;
+    }
+    if (info.last_location && !userInfoMap[userName].last_location) {
+      userInfoMap[userName].last_location = info.last_location;
+    }
   });
   return userInfoMap;
 }
@@ -1657,7 +1665,9 @@ function buildAdminUsersPayload(authRows, userInfoRows) {
         reg_time: effectiveRegTime,
         auth_created_at: authInfo.auth_created_at || null,
         last_login: info.last_login || null,
-        last_visit: info.last_visit || null
+        last_visit: info.last_visit || null,
+        last_ip_location: info.last_ip_location || null,
+        last_location: info.last_location || null
       })
     };
   }).sort((a, b) => {

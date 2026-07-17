@@ -15391,6 +15391,8 @@ profile content only. Dock stays untouched.
 }
 
 #panelChat .dock-chat-container {
+  display: flex; flex-direction: column;
+  height: calc(100dvh - 178px);
   min-height: calc(100dvh - 178px);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.70), rgba(243, 250, 247, 0.62));
   border: 1px solid rgba(127, 191, 168, 0.16);
@@ -15402,7 +15404,7 @@ profile content only. Dock stays untouched.
 #panelChat #dockChatDetailView,
 #panelChat .chat-view {
   min-height: 0;
-  height: 100%;
+  flex: 1;
 }
 
 #panelChat .chat-list,
