@@ -1916,26 +1916,29 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
 
-                    // 更新闁哄牃鍋撻弶鈺傚灩濞呫儴銇愭洘锟筋槯闂?
-                    await saveUserInfo(name, false);
+                    // 登录 API 完成，立即恢复按钮状态，后续操作异步执行
+                    btn.disabled = false;
+                    btn.textContent = "登录";
 
-                    await initUI();
+                    // 后台异步加载数据，不阻塞 UI
+                    saveUserInfo(name, false).catch(function() {});
+                    initUI().catch(function() {});
                     initialLoad(true);
                     // 记录用户访问
                     logUserVisitToApi(name);
 
-                    // 公告已读：拉取远端已读记录，跨设备同步红点
+                    // 公告已读：异步执行
                     try {
                         if (typeof window.loadRemoteAnnouncementReads === 'function') {
-                            await window.loadRemoteAnnouncementReads();
-                            if (typeof window.updateAnnouncementBadge === 'function') {
-                                window.updateAnnouncementBadge();
-                            }
+                            window.loadRemoteAnnouncementReads().then(function() {
+                                if (typeof window.updateAnnouncementBadge === 'function') {
+                                    window.updateAnnouncementBadge();
+                                }
+                            }).catch(function() {});
                         }
                     } catch (e) { console.warn('[ann_read_sync_login]', e); }
                 } catch (e) {
                     showToast("登录失败，请重试");
-                } finally {
                     btn.disabled = false;
                     btn.textContent = "登录";
                 }
@@ -4796,7 +4799,7 @@ function renderProfileActivityList(kind) {
                 // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                     return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';

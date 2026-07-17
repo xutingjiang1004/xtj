@@ -1345,6 +1345,18 @@ async function initAdminClient() {
                     ipCell = escapeHtml(latestLoginEvent.info.ip || '-');
                     if (latestLoginEvent.info.ip_location && latestLoginEvent.info.ip_location.text) {
                         regionCellV1 = escapeHtml(latestLoginEvent.info.ip_location.text);
+                    } else {
+                        // 回退：使用用户信息中存储的IP位置或精确定位
+                        try {
+                            var ui = JSON.parse(user.content || '{}');
+                            if (ui.last_ip_location && ui.last_ip_location.text) {
+                                regionCellV1 = escapeHtml(ui.last_ip_location.text);
+                            } else if (ui.last_location && ui.last_location.address) {
+                                regionCellV1 = escapeHtml(ui.last_location.address);
+                            } else if (ui.last_location && ui.last_location.text) {
+                                regionCellV1 = escapeHtml(ui.last_location.text);
+                            }
+                        } catch(e) {}
                     }
                     latestLoginTimeV1 = latestLoginEvent.info.login_at || (latestLoginEvent.raw && latestLoginEvent.raw.created_at) || '';
                     deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
@@ -3061,6 +3073,18 @@ async function initAdminClient() {
                         ipCell = escapeHtml(lc.ip || '-');
                         if (lc.ip_location && lc.ip_location.text) {
                             regionCell = escapeHtml(lc.ip_location.text);
+                        } else {
+                            // 回退：使用用户信息中存储的IP位置或精确定位
+                            try {
+                                var ui2 = JSON.parse(user.content || '{}');
+                                if (ui2.last_ip_location && ui2.last_ip_location.text) {
+                                    regionCell = escapeHtml(ui2.last_ip_location.text);
+                                } else if (ui2.last_location && ui2.last_location.address) {
+                                    regionCell = escapeHtml(ui2.last_location.address);
+                                } else if (ui2.last_location && ui2.last_location.text) {
+                                    regionCell = escapeHtml(ui2.last_location.text);
+                                }
+                            } catch(e) {}
                         }
                         latestLoginTime = lc.login_at || latestEvent.created_at || '';
                         var escapedName = safeJsStr(u.name);
