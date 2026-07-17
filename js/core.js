@@ -8633,9 +8633,10 @@ function renderProfileActivityList(kind) {
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
+                if (!inp) return;
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
-                const file = fileInput.files[0];
+                const file = fileInput && fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
                 var targetUser = dockChatActiveUser;
                 var maxFileSize = 50 * 1024 * 1024;
@@ -8709,6 +8710,7 @@ function renderProfileActivityList(kind) {
             function showDockChatFilePreview(file) {
                 const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
+                if (!preview || !input || !thumb || !name) return;
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
                 if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">视频</span>'; }
@@ -8721,8 +8723,10 @@ function renderProfileActivityList(kind) {
                 const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
                 const fileInput = document.getElementById('dockChatFileInp');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
-                preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = '';
-                if (restoreFocus !== false) input.focus();
+                if (preview) preview.classList.add('hidden');
+                if (input) input.classList.remove('hidden');
+                if (fileInput) fileInput.value = '';
+                if (restoreFocus !== false && input) input.focus();
             }
 
             try {

@@ -877,8 +877,8 @@ async function initAdminClient() {
                 adminTabDataLoaded.users = true;
             } else if (dataType === 'logins' || dataType === 'login-events') {
                 var loginRes = await apiCall('GET', '/admin/login-events');
-                allLoginEvents = loginRes.data || [];
-                allBehaviorEvents = loginRes.behavior || [];
+                allLoginEvents = (loginRes && loginRes.data) || [];
+                allBehaviorEvents = (loginRes && loginRes.behavior) || [];
                 adminTabDataLoaded.logins = true;
                 adminTabDataLoaded['login-events'] = true;
             } else if (dataType === 'clipboard') {
@@ -3825,7 +3825,11 @@ async function initAdminClient() {
         userEvents.forEach(function(ev) {
             var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
-            var locText = ev.info.ip_location ? escapeHtml(adminFormatLocation(ev.info.ip_location)) : '暂未解析';
+            var evLoc = ev.info.ip_location;
+            if (!evLoc && userInfo) {
+                evLoc = userInfo.last_ip_location || userInfo.last_location || null;
+            }
+            var locText = evLoc ? escapeHtml(adminFormatLocation(evLoc)) : '暂未解析';
             var fullIp = ev.info.ip || '-';
             var possibleModel = getLoginRecordModelText(ev.info);
             var asnIsp = '-';
@@ -4463,7 +4467,11 @@ async function initAdminClient() {
                 html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
-                html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location ? adminFormatLocation(ev.info.ip_location) : '-')) + '</td>';
+                var evLocV2 = ev.info.ip_location;
+                if (!evLocV2 && userInfo) {
+                    evLocV2 = userInfo.last_ip_location || userInfo.last_location || null;
+                }
+                html += '<td style="padding:4px 6px;">' + escapeHtml(evLocV2 ? adminFormatLocation(evLocV2) : '-') + '</td>';
                 html += '</tr>';
             });
             html += '</tbody></table></div>';
