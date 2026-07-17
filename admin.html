@@ -38,7 +38,7 @@
     <div class="login-card">
         <h1>🔐 xtj 管理后台</h1>
         <p>仅限管理员登录</p>
-        <form id="adminLoginForm">
+        <form id="adminLoginForm" onsubmit="event.preventDefault(); window.doAdminLogin(); return false;">
             <input id="loginName" placeholder="管理员账号" autocomplete="username" />
             <input id="loginPw" type="password" placeholder="管理员密码" autocomplete="current-password" />
             <button type="submit">登录后台</button>
