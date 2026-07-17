@@ -27,6 +27,16 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended(v_owner, 0));
 
   SELECT * INTO v_post FROM public.posts WHERE id = p_post_id FOR UPDATE;
+  IF v_post.id IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'code', 'not_found', 'error', 'Post not found or deleted');
+  END IF;
+  IF NOT (v_post.media_type IS NULL OR v_post.media_type IN ('image','video','text','photo','album')) THEN
+    RETURN jsonb_build_object('ok', false, 'code', 'not_pinnable', 'error', '该类型内容不支持置顶');
+  END IF;
+  IF v_post.user_name IS DISTINCT FROM v_owner THEN
+    v_owner := v_post.user_name;
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_owner, 0));
+  END IF;
   IF NOT COALESCE(p_is_admin, false) AND v_post.user_name IS DISTINCT FROM p_actor_user THEN
     RETURN jsonb_build_object('ok', false, 'code', 'forbidden', 'error', 'Not allowed to pin this post');
   END IF;
