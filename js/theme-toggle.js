@@ -125,25 +125,25 @@
     }, 300);
   }
 
+  function bindElementOnce(el, event, handler) {
+    if (!el || el.dataset.xtjThemeBound === '1') return;
+    el.dataset.xtjThemeBound = '1';
+    el.addEventListener(event, handler);
+  }
+
   function bindThemeToggle() {
-    if (!themeBtn) themeBtn = document.getElementById('themeToggle');
-    if (themeBtn && themeBtn.dataset.xtjThemeBound !== '1') {
-      themeBtn.dataset.xtjThemeBound = '1';
-      themeBtn.addEventListener('click', function (event) {
-        event.preventDefault();
-        switchTheme();
-      });
-    }
-    if (!profileThemeToggle) profileThemeToggle = document.getElementById('profileThemeToggle');
-    if (profileThemeToggle && profileThemeToggle.dataset.xtjThemeBound !== '1') {
-      profileThemeToggle.dataset.xtjThemeBound = '1';
-      profileThemeToggle.addEventListener('change', function () {
-        var that = this;
-        var next = that.checked ? 'dark' : 'light';
-        if (profileThemeToggle._debounceTimer) clearTimeout(profileThemeToggle._debounceTimer);
-        profileThemeToggle._debounceTimer = setTimeout(function() { setTheme(next); }, 100);
-      });
-    }
+    themeBtn = document.getElementById('themeToggle');
+    bindElementOnce(themeBtn, 'click', function (event) {
+      event.preventDefault();
+      switchTheme();
+    });
+    profileThemeToggle = document.getElementById('profileThemeToggle');
+    bindElementOnce(profileThemeToggle, 'change', function () {
+      var that = this;
+      var next = that.checked ? 'dark' : 'light';
+      if (profileThemeToggle._debounceTimer) clearTimeout(profileThemeToggle._debounceTimer);
+      profileThemeToggle._debounceTimer = setTimeout(function() { setTheme(next); }, 100);
+    });
   }
 
   function initThemeController() {

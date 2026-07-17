@@ -38,12 +38,18 @@ async function apiRequest(method, path, body = null) {
   const url = `${API_BASE}${path}`;
   const headers = { "Content-Type": "application/json" };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-  const opts = { method, headers };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  const opts = { method, headers, signal: controller.signal };
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(`API 错误 (${res.status}): ${data.error || JSON.stringify(data)}`);
-  return data;
+  try {
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(`API 错误 (${res.status}): ${data.error || JSON.stringify(data)}`);
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function ensureLoggedIn() {
