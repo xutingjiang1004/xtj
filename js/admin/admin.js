@@ -464,18 +464,32 @@
         var ac = new AbortController();
         var at = setTimeout(function() { ac.abort(); }, timeoutMs);
         opts.signal = ac.signal;
-        opts.credentials = 'same-origin';
         var res;
-        try { res = await fetch(API_BASE + path, opts); } finally { clearTimeout(at); }
-        var data = await res.json();
+        try {
+            res = await fetch(API_BASE + path, opts);
+        } catch (fetchErr) {
+            clearTimeout(at);
+            if (fetchErr && fetchErr.name === 'AbortError') {
+                throw new Error('请求超时（' + (timeoutMs / 1000) + '秒），请检查网络后重试');
+            }
+            throw new Error('网络连接失败，请检查: ' + (fetchErr.message || '未知错误'));
+        }
+        clearTimeout(at);
+        var data;
+        try {
+            data = await res.json();
+        } catch (jsonErr) {
+            throw new Error('后端返回格式异常（HTTP ' + res.status + '），请检查API地址');
+        }
         if (res.status === 401) {
             clearSession();
             try {
                 document.getElementById('dashboard').style.display = 'none';
                 document.getElementById('loginWrap').style.display = 'flex';
             } catch (e) {}
+            throw new Error('登录已过期，请重新登录');
         }
-        if (!res.ok) throw new Error(data.error || '请求失败 (' + res.status + ')');
+        if (!res.ok) throw new Error(data.error || '请求失败 (HTTP ' + res.status + ')');
         saveSession();
         return data;
     }
@@ -684,14 +698,15 @@ async function initAdminClient() {
                 btn.textContent = '登录';
                 return;
             }
-            if (!data.token || typeof data.token !== 'string' || !data.token.trim()) {
+            var loginToken = data.token || data.user_token;
+            if (!loginToken || typeof loginToken !== 'string' || !loginToken.trim()) {
                 err.textContent = '服务端未返回有效 Token，请重试';
                 btn.disabled = false;
                 btn.textContent = '登录';
                 return;
             }
             ADMIN = name;
-            setToken(data.token);
+            setToken(loginToken);
             try {
                 await initAdminClient();
             } catch (initErr) {
@@ -706,7 +721,14 @@ async function initAdminClient() {
             }
         } catch(e) {
             ADMIN = null;
-            err.textContent = 'API 连接失败，请检查网络';
+            var errMsg = (e && e.message) || '未知网络错误';
+            if (errMsg.indexOf('Failed to fetch') >= 0 || errMsg.indexOf('NetworkError') >= 0) {
+                err.textContent = '无法连接后端API，请检查网络或API地址';
+            } else if (errMsg.indexOf('AbortError') >= 0 || errMsg.indexOf('超时') >= 0) {
+                err.textContent = '连接超时，请检查网络后重试';
+            } else {
+                err.textContent = '登录失败: ' + errMsg;
+            }
             btn.disabled = false;
             btn.textContent = '登录';
         }
@@ -721,7 +743,7 @@ async function initAdminClient() {
     window.doAdminLogout = function() {
         if (API_BASE) {
             var _token = getToken();
-            var _opts = { method: 'POST', credentials: 'same-origin' };
+            var _opts = { method: 'POST' };
             if (_token) _opts.headers = { 'Authorization': 'Bearer ' + _token };
             fetch(API_BASE + '/admin/logout', _opts).catch(function() {});
         }
@@ -2374,7 +2396,7 @@ async function initAdminClient() {
             }
 
             if (!summary) {
-                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：无法连接后端 API</div></div>';
+                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：API返回为空</div><div style="font-size:12px;color:var(--text-muted);margin-top:8px;">请检查后端服务是否正常运行</div></div>';
                 return;
             }
 
@@ -3214,7 +3236,7 @@ async function initAdminClient() {
                 dailyData = await apiCall('GET', dailyQuery);
             }
             if (!summary) {
-                el.innerHTML = '<div class="empty-state"><div class="icon">📳</div><div class="text">统计数据加载失败：无法连接后端 API</div></div>';
+                el.innerHTML = '<div class="empty-state"><div class="icon">📳</div><div class="text">统计数据加载失败：API返回为空</div><div style="font-size:12px;color:var(--text-muted);margin-top:8px;">请检查后端服务是否正常运行</div></div>';
                 return;
             }
             var daily = (dailyData && dailyData.daily) || [];
