@@ -841,8 +841,8 @@
                             var t = parseInt(e.style.width) || 10;
                             t < 85 && ee(t + 2);
                         } else clearInterval(o);
-                    }, 150), n = await fetch(e.imageUrl);
-                    if (clearInterval(o), !n.ok) throw new Error("HTTP error " + n.status);
+                    }, 150); var fetchRes = await fetch(e.imageUrl);
+                    if (clearInterval(o), !fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
                     ee(90, "正在保存..."), function(e, t) {
                         try {
                             var o = window.URL.createObjectURL(e), n = document.createElement("a");
@@ -856,15 +856,15 @@
                                 try {
                                     document.body.removeChild(n), window.URL.revokeObjectURL(o);
                                 } catch (e) {}
-                            }, 200), ee(100, "下载成功!"), setTimeout(function() {
+                            }, 4000), ee(100, "下载成功!"), setTimeout(function() {
                                 $(), E = !1, window.showToast("下载成功");
                             }, 800);
                         } catch (e) {
                             console.error("Blob download error:", e), $(), E = !1, window.showToast("下载失败，请重试");
                         }
-                    }(await n.blob(), e.imageUrl);
+                    }(await fetchRes.blob(), e.imageUrl);
                 } catch (t) {
-                    console.error("Download error:", t), $(), E = !1;
+                    clearInterval(o), console.error("Download error:", t), $(), E = !1;
                     try {
                         var i = document.createElement("a");
                         i.href = e.imageUrl, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg",

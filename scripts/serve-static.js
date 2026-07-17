@@ -31,6 +31,16 @@ http.createServer(function (req, res) {
     res.writeHead(403).end('Forbidden');
     return;
   }
+  try {
+    var real = fs.realpathSync(file);
+    if (real !== file && real.indexOf(root + path.sep) !== 0 && real !== root) {
+      res.writeHead(403).end('Forbidden');
+      return;
+    }
+  } catch (_) {
+    res.writeHead(403).end('Forbidden');
+    return;
+  }
   fs.stat(file, function (statError, stat) {
     if (statError || !stat.isFile()) {
       res.writeHead(404).end('Not found');

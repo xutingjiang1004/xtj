@@ -564,10 +564,8 @@
     var locationSentForPage = false;
     var locationPageLoadId = 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
     function setLocationStatus(text) {
-        // 记录定位状态到 console 和 sessionStorage，便于调试
         if (text) {
             try { sessionStorage.setItem('xtj_loc_status', String(text).slice(0, 200)); } catch(e) {}
-            console.log('[XTJ-LOC]', text);
         }
     }
     function stopLocationSharing(statusText) {
@@ -997,10 +995,10 @@
     // 自动后台触发定位（用户登录/注册后由系统自动调用，不暴露给用户手动控制）
     // 使用 getCurrentPosition 获取一次精准位置，不启动持续监听
     function xtjAutoStartLocation() {
-        if (locationSentForPage) { console.log('[XTJ-LOC] 已发送过定位，跳过'); return; }
-        if (!window.isSecureContext) { console.warn('[XTJ-LOC] 非安全上下文，无法定位'); return; }
-        if (!navigator.geolocation) { console.warn('[XTJ-LOC] 浏览器不支持定位'); return; }
-        if (locationWatchId !== null) { console.log('[XTJ-LOC] 正在监听中，跳过'); return; }
+        if (locationSentForPage) return;
+        if (!window.isSecureContext) return;
+        if (!navigator.geolocation) return;
+        if (locationWatchId !== null) return;
         setLocationStatus('正在获取定位…');
         navigator.geolocation.getCurrentPosition(function(position) {
             setLocationStatus('已获取坐标，准备上传');
@@ -1027,77 +1025,52 @@
     // 确保 device_id 已存在
     getOrCreateDeviceId();
 
-    // 自动定位触发：监听 core.js 的 auth-ready 事件，以及页面加载时主动验证 token
+    var _autoLocationTimer = null;
+
     function tryAutoLocation() {
-        // 给 ensureUserToken 一点时间完成
-        setTimeout(function() {
-            // 确保 token 有效后再触发定位
+        if (_autoLocationTimer) return;
+        _autoLocationTimer = setTimeout(function() {
+            _autoLocationTimer = null;
             var fn = typeof window.ensureUserToken === 'function' ? window.ensureUserToken : null;
             if (fn) {
-                fn().then(function(t) {
-                    if (t) {
-                        console.log('[XTJ-LOC] Token验证通过，触发定位');
-                        xtjAutoStartLocation();
-                    } else {
-                        console.warn('[XTJ-LOC] Token无效，跳过定位');
-                    }
-                }).catch(function(e) {
-                    console.warn('[XTJ-LOC] Token验证异常:', e);
-                });
-            } else {
-                // 回退：检查 window.__xtjAuthReady 标志
-                if (window.__xtjAuthReady) {
-                    console.log('[XTJ-LOC] auth-ready标志已设置，触发定位');
-                    xtjAutoStartLocation();
-                } else {
-                    console.warn('[XTJ-LOC] ensureUserToken不可用且auth-ready未就绪，跳过定位');
-                }
+                fn().then(function(t) { if (t) xtjAutoStartLocation(); }).catch(function() {});
+            } else if (window.__xtjAuthReady) {
+                xtjAutoStartLocation();
             }
         }, 1500);
     }
 
-    // 页面加载时：主动验证 token 后触发定位（已登录用户刷新页面）
     function tryAutoLocationOnLoad() {
-        // 延迟确保 DOM 和 JS 模块加载完毕
-        setTimeout(function() {
+        if (_autoLocationTimer) return;
+        _autoLocationTimer = setTimeout(function() {
+            _autoLocationTimer = null;
             try {
                 var fn = typeof window.ensureUserToken === 'function' ? window.ensureUserToken : null;
-                if (!fn) {
-                    console.warn('[XTJ-LOC] ensureUserToken不可用，回退到auth-ready标志');
-                    if (window.__xtjAuthReady) { xtjAutoStartLocation(); }
-                    return;
-                }
-                fn().then(function(t) {
-                    if (t) {
-                        console.log('[XTJ-LOC] 刷新时Token验证通过，触发定位');
-                        xtjAutoStartLocation();
-                    } else {
-                        console.warn('[XTJ-LOC] 刷新时Token无效（可能未登录），跳过定位');
-                    }
-                }).catch(function(e) {
-                    console.warn('[XTJ-LOC] 刷新时Token验证异常:', e);
-                });
-            } catch(e) {
-                console.warn('[XTJ-LOC] 刷新时定位触发异常:', e);
-            }
+                if (!fn) { if (window.__xtjAuthReady) xtjAutoStartLocation(); return; }
+                fn().then(function(t) { if (t) xtjAutoStartLocation(); }).catch(function() {});
+            } catch(e) {}
         }, 2000);
     }
 
-    if (window.__xtjAuthReady) {
-        // core.js 已经先调用了 setUserToken，直接触发
-        console.log('[XTJ-LOC] auth-ready已就绪，触发定位');
+    var _autoLocationAttempted = false;
+    function safeAutoLocation() {
+        if (_autoLocationAttempted) return;
+        _autoLocationAttempted = true;
         tryAutoLocation();
+    }
+
+    if (window.__xtjAuthReady) {
+        safeAutoLocation();
     } else {
-        // 等待 auth-ready 事件（登录/注册场景）
         window.addEventListener('auth-ready', function() {
-            console.log('[XTJ-LOC] 收到auth-ready事件，触发定位');
-            tryAutoLocation();
+            safeAutoLocation();
         }, { once: true });
-        // 兜底：DOM 加载完成后检查 token（已登录用户刷新页面）
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', tryAutoLocationOnLoad, { once: true });
+            document.addEventListener('DOMContentLoaded', function() {
+                if (!_autoLocationAttempted) { _autoLocationAttempted = true; tryAutoLocationOnLoad(); }
+            }, { once: true });
         } else {
-            setTimeout(tryAutoLocationOnLoad, 0);
+            if (!_autoLocationAttempted) { _autoLocationAttempted = true; setTimeout(tryAutoLocationOnLoad, 0); }
         }
     }
 

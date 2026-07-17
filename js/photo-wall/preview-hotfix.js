@@ -1314,13 +1314,16 @@
     window.openPhotoPreview.__xtjHotfixWrapped = true;
   }
 
+  var _navSeq = 0;
   function wrapNavigation(kind) {
     return function () {
       closePhotoInfoInternal(true);
       resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
       var fn = kind === 'next' ? original.nextPhoto : original.prevPhoto;
       var result = withPreviewGuardDisabled(fn, window, arguments);
+      var seq = ++_navSeq;
       window.setTimeout(function () {
+        if (seq !== _navSeq) return;
         var root = overlay();
         if (root && root.classList.contains('active')) {
           resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });

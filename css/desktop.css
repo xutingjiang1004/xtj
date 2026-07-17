@@ -1070,6 +1070,13 @@
   color: rgba(160, 166, 180, 0.72) !important;
 }
 
+/* 大屏单列统计卡片去掉多余左边框 */
+@media (min-width: 1280px) {
+  #panelPosts .stats .stat-card + .stat-card {
+    border-inline-start: none;
+  }
+}
+
 /* ========== Final Desktop Profile Activity Override ========== */
 #profileActivityModal .profile-activity-modal {
   max-width: 840px;

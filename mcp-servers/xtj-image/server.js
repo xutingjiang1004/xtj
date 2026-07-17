@@ -24,14 +24,24 @@ function safeResolve(inputPath) {
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('路径越权：不允许访问 ' + SOURCE_DIR + ' 之外的目录');
   }
+  const real = fs.realpathSync(resolved);
+  const realRelative = path.relative(SOURCE_DIR, real);
+  if (realRelative.startsWith('..')) {
+    throw new Error('路径越权：符号链接指向 ' + SOURCE_DIR + ' 之外的目录');
+  }
   return resolved;
 }
+
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 10000;
 
 function validateFile(filePath) {
   const fp = safeResolve(filePath);
   if (!fs.existsSync(fp)) throw new Error(`文件不存在: ${fp}`);
   const valid = [".jpg",".jpeg",".png",".webp",".avif",".tiff",".gif"];
   if (!valid.includes(path.extname(fp).toLowerCase())) throw new Error(`不支持的格式: ${path.extname(fp)}`);
+  const stat = fs.statSync(fp);
+  if (stat.size > MAX_FILE_SIZE) throw new Error(`文件过大: ${fmtSize(stat.size)}，最大 ${fmtSize(MAX_FILE_SIZE)}`);
   return fp;
 }
 
@@ -57,7 +67,13 @@ server.tool("image_compress", "压缩图片文件", { filepath: z.string(), qual
   const ext = path.extname(fp);
   const out = `${fp.slice(0, -ext.length)}${args.output_suffix||"_compressed"}${ext}`;
   const q = args.quality ?? 80;
-  await sharp(fp).jpeg({quality:q,mozjpeg:true}).png({quality:q,compressionLevel:9}).webp({quality:q}).toFile(out);
+  const fmt = ext.toLowerCase().replace('.', '');
+  let p = sharp(fp);
+  if (fmt === 'jpg' || fmt === 'jpeg') p = p.jpeg({quality:q,mozjpeg:true});
+  else if (fmt === 'png') p = p.png({quality:q,compressionLevel:9});
+  else if (fmt === 'webp') p = p.webp({quality:q});
+  else p = p.jpeg({quality:q,mozjpeg:true});
+  await p.toFile(out);
   const orig = fs.statSync(fp).size;
   const now = fs.statSync(out).size;
   const saved = ((1 - now/orig) * 100).toFixed(1);
@@ -74,12 +90,12 @@ server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { fil
   return { content: [{ type: "text", text: `✅ 转换完成\n  ${path.basename(fp)} → ${path.basename(out)}\n  格式: ${args.format.toUpperCase()}\n  大小: ${fmtSize(fs.statSync(out).size)}\n  尺寸: ${info.width}x${info.height}` }] };
 });
 
-server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width: z.number(), height: z.number().optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
+server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width: z.number().max(MAX_IMAGE_DIMENSION), height: z.number().max(MAX_IMAGE_DIMENSION).optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
   const out = `${fp.slice(0,-ext.length)}${args.output_suffix||"_resized"}${ext}`;
-  const r = { width: args.width };
-  if (args.height) r.height = args.height;
+  const r = { width: Math.min(args.width, MAX_IMAGE_DIMENSION) };
+  if (args.height) r.height = Math.min(args.height, MAX_IMAGE_DIMENSION);
   if (args.fit) r.fit = args.fit;
   const info = await sharp(fp).resize(r).toFile(out);
   return { content: [{ type: "text", text: `✅ 尺寸调整完成\n  输出: ${path.basename(out)}\n  新尺寸: ${info.width}x${info.height}\n  大小: ${fmtSize(fs.statSync(out).size)}` }] };

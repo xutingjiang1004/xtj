@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const DIRS = ['js', 'render-api', 'scripts'];
 const EXCLUDE = ['node_modules', '.git', 'dist', 'build', 'coverage'];
@@ -33,7 +33,7 @@ let passed = 0;
 
 for (const file of allFiles) {
   try {
-    execSync('node --check "' + file + '"', { stdio: 'pipe', timeout: 10000 });
+    execFileSync('node', ['--check', file], { stdio: 'pipe', timeout: 10000 });
     passed++;
   } catch (e) {
     failed++;
