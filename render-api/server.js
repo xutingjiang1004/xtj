@@ -460,7 +460,7 @@ async function executeToolCall(toolCall) {
   switch (name) {
     case 'search_web': {
       var q = String(args.query || '').trim().slice(0, 200);
-      var maxR = Math.min(Math.max(parseInt(args.max_results) || 20, 1), 20);
+      var maxR = Math.min(Math.max(parseInt(args.max_results, 10) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
       try {
         var result = await searchWeb(q, maxR);
@@ -3078,8 +3078,8 @@ app.get('/api/brain/list', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var tag = String(req.query.tag || '').trim();
     var type = String(req.query.type || '').trim();
-    var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
-    var offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    var offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
     var query = supabase.from('brain_nodes').select('*', { count: 'exact' })
       .eq('user_name', userName).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
@@ -5574,7 +5574,7 @@ app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
     if (targetUser !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: '无权查看他人点赞记录', code: 'forbidden' });
     }
-    const limit = parseInt(req.query.limit || '160');
+    const limit = parseInt(req.query.limit, 10) || '160';
     const { data, error } = await supabase.from('likes')
       .select('id, post_id, user_name, actor_key, created_at')
       .eq('user_name', targetUser)
@@ -5798,11 +5798,25 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       return res.json({ ok: true, recorded: false, reason: 'self_view', views: Number(selfView.data && selfView.data.views) || 0 });
     }
     var now = new Date().toISOString();
+    var postText = String(post.content || '');
+    try {
+      var parsed = JSON.parse(postText);
+      if (parsed && typeof parsed === 'object' && parsed.__type === '__xtj_post_v2__') {
+        postText = typeof parsed.text === 'string' ? parsed.text : postText;
+      }
+    } catch (_) {}
     var eventResult = await supabase.from('posts').insert([{
       user_name: req.userName,
       media_type: POST_VIEW_MARKER,
       media_url: String(postId),
-      content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: String(post.content || '').slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
+      var postText = String(post.content || '');
+      try {
+        var parsed = JSON.parse(postText);
+        if (parsed && typeof parsed === 'object' && parsed.__type === '__xtj_post_v2__') {
+          postText = typeof parsed.text === 'string' ? parsed.text : postText;
+        }
+      } catch (_) {}
+      content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: postText.slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
       actor_key: 'pview_' + postId + '_' + Date.now()
     }]).select('id, created_at').single();
     if (eventResult.error) return res.status(500).json({ error: sanitizeError(eventResult.error), code: 'post_view_record_failed' });
@@ -5826,7 +5840,7 @@ app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.params.userName || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
-    const limit = parseInt(req.query.limit || '200');
+    const limit = parseInt(req.query.limit, 10) || '200';
     const { data, error } = await supabase.from('posts')
       .select('id, user_name, content, media_url, media_type, created_at')
       .eq('user_name', targetUser)
@@ -5842,8 +5856,8 @@ app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
 // GET /api/photos/public - 公开照片墙（无需登录，限流）
 app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '0');
-    const limit = parseInt(req.query.limit || '20');
+    const page = parseInt(req.query.page, 10) || '0';
+    const limit2 = parseInt(req.query.limit, 10) || '20';
     const from = page * limit;
     const to = from + limit - 1;
     const { data, error } = await supabase.from('posts')
@@ -6964,8 +6978,8 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
 // 攻击详情 API（返回完整攻击记录，含 IP、时间、类型、详情）
 app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+    const offset = parseInt(req.query.offset, 10) || 0;
     const typeFilter = req.query.type || ''; // 可选，按攻击类型筛选
 
     var query = supabase.from('posts')
@@ -8049,7 +8063,7 @@ app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, re
 // ===================== 安全提醒查询（管理员） =====================
 app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var limit = parseInt(req.query.limit) || 200;
+    var limit = parseInt(req.query.limit, 10) || 200;
     if (limit > 500) limit = 500;
     var query = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
@@ -8260,7 +8274,7 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
 // ===================== 审计日志查询 =====================
 app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var limit = parseInt(req.query.limit) || 200;
+    var limit = parseInt(req.query.limit, 10) || 200;
     if (limit > 500) limit = 500;
     var { data, error } = await supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
@@ -8752,7 +8766,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
 // 管理员：获取邮件发送历史
 app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var limit = Math.min(parseInt(req.query.limit || '50'), 200);
+    var limit = Math.min(parseInt(req.query.limit, 10) || '50', 200);
     var { data, error } = await supabase.from('posts')
       .select('id, content, created_at')
       .eq('media_type', EMAIL_SENT_MARKER)
@@ -8785,7 +8799,7 @@ app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, r
 // 获取历史收件人
 app.get('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var limit = Math.min(parseInt(req.query.limit || '100'), 200);
+    var limit = Math.min(parseInt(req.query.limit, 10) || '100', 200);
     var { data, error } = await supabase.from('posts')
       .select('id, content, media_url, created_at')
       .eq('media_type', EMAIL_RECIPIENT_MARKER)
@@ -8928,7 +8942,7 @@ app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
 
 app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var limit = parseInt(req.query.limit) || 200;
+    var limit = parseInt(req.query.limit, 10) || 200;
     if (limit > 500) limit = 500;
     var query = supabase.from('posts')
       .select('id, content, media_url, created_at')
@@ -10904,7 +10918,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
-    var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
+    var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
     var mode = (req.query.mode || '').trim();
 
     // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
@@ -11078,7 +11092,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var convId = String(req.query.conversation_id || '').trim();
     if (convId && !/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
-    var limit = Math.min(Math.max(parseInt(req.query.limit) || 30, 1), 100);
+    var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     var before = String(req.query.before || '').trim();
 
     // 不带 convId → 先查最近一条 AI 消息的 convId
