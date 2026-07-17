@@ -263,6 +263,12 @@ const ADMIN_NAME = "xxz";
                 if (token) {
                     memoryUserToken = String(token);
                     memoryUserTokenIssuedAt = Date.now();
+                    try { if (typeof rememberBehaviorToken === 'function') rememberBehaviorToken(token); } catch(e) {}
+                    // 通知其他模块用户认证已就绪（用于自动定位等）
+                    try {
+                        window.__xtjAuthReady = true;
+                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { token: String(token) } }));
+                    } catch(e) {}
                 }
             }
 
@@ -4242,6 +4248,10 @@ function renderProfileActivityList(kind) {
                 if (!text) return fallback;
                 if (text.indexOf('閸ュ墽澧') !== -1 || text.indexOf('瑙嗛') !== -1 || text.indexOf('闁搞儱澧') !== -1 || text.indexOf('閻熸瑥妫') !== -1) return VIEW_HISTORY_MEDIA_LABEL;
                 if (text.indexOf('闁哄牜浜') !== -1 || text.indexOf('瀹告彃鍨') !== -1 || text.indexOf('未知') !== -1) return VIEW_HISTORY_DELETED_AUTHOR;
+                // 兼容旧数据：如果存储的是原始 JSON，解析出 text 字段
+                if (text.startsWith('{') && text.indexOf('"__type"') !== -1) {
+                    try { var pc = JSON.parse(text); if (pc && pc.text !== undefined) return pc.text || fallback; } catch(e) {}
+                }
                 return text;
             }
 
@@ -4326,10 +4336,12 @@ function renderProfileActivityList(kind) {
                     }
                     if (currentUser && postInfoCache[postId]) {
                         var rawContent = postInfoCache[postId].content || '';
+                        var displayContent = rawContent;
+                        try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
                         saveViewHistory({
                             user_name: currentUser,
                             post_id: postId,
-                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(图片/视频)'),
+                            post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || '(图片/视频)'),
                             post_author: postInfoCache[postId].user_name || '未知',
                             media_url: postInfoCache[postId].media_url || '',
                             media_type: postInfoCache[postId].media_type || '',
@@ -4404,8 +4416,10 @@ function renderProfileActivityList(kind) {
                         if (result.recorded && currentUser && postInfoCache[postId]) {
                             var cachedPost = postInfoCache[postId];
                             var rawContent = cachedPost.content || '';
+                            var displayContent = rawContent;
+                            try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
                             saveViewHistory({ user_name: currentUser, post_id: postId,
-                                post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || VIEW_HISTORY_MEDIA_LABEL),
+                                post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || VIEW_HISTORY_MEDIA_LABEL),
                                 post_author: cachedPost.user_name || VIEW_HISTORY_DELETED_AUTHOR,
                                 media_url: cachedPost.media_url || '', media_type: cachedPost.media_type || '',
                                 viewed_at: result.viewed_at || new Date().toISOString() });
@@ -8268,63 +8282,95 @@ function renderProfileActivityList(kind) {
                 return nextListSignature;
             }
 
-            // 在聊天列表渲染固定的"徐旭泽的小猫"AI 入口
+            // 在聊天列表渲染固定的"AI" 入口 + 管理员"xxz"入口
             // ★ 始终插入到列表最顶部
             function renderDockChatAiEntry(el) {
                 if (!el) return;
-                var existing = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
-                if (existing) {
-                    if (el.firstChild !== existing) el.insertBefore(existing, el.firstChild);
-                    return;
-                }
-                var html = [
-                    '<div class="chat-list-item ai-agent-entry" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
-                    '<div class="cli-avatar">🐱</div>',
-                    '<div class="cli-info"><div class="cli-name">徐旭泽的小猫</div><div class="cli-preview">和小猫聊聊天</div></div>',
-                    '<div class="cli-right"><span class="cli-time">AI</span></div>',
-                    '</div>'
-                ].join('');
-                var template = document.createElement('template');
-                template.innerHTML = html.trim();
-                var row = template.content.firstElementChild;
-                function setAiEntryLoading(loading, failed) {
-                    var preview = row.querySelector('.cli-preview');
-                    row.classList.toggle('is-loading', !!loading);
-                    row.classList.toggle('is-error', !!failed);
-                    row.setAttribute('aria-busy', loading ? 'true' : 'false');
-                    if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '和小猫聊聊天');
-                }
-                row.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    if (row.getAttribute('aria-busy') === 'true') return;
-                    setAiEntryLoading(true, false);
-                    if (typeof window.__xtjEnsureAiAgentLoaded === 'function') {
-                        window.__xtjEnsureAiAgentLoaded().then(function() {
+                // AI 入口
+                var existingAi = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
+                if (existingAi) {
+                    if (el.firstChild !== existingAi) el.insertBefore(existingAi, el.firstChild);
+                } else {
+                    var aiHtml = [
+                        '<div class="chat-list-item ai-agent-entry" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
+                        '<div class="cli-avatar">🤖</div>',
+                        '<div class="cli-info"><div class="cli-name">AI</div><div class="cli-preview">和AI聊聊天</div></div>',
+                        '<div class="cli-right"><span class="cli-time">AI</span></div>',
+                        '</div>'
+                    ].join('');
+                    var aiTemplate = document.createElement('template');
+                    aiTemplate.innerHTML = aiHtml.trim();
+                    var aiRow = aiTemplate.content.firstElementChild;
+                    function setAiEntryLoading(loading, failed) {
+                        var preview = aiRow.querySelector('.cli-preview');
+                        aiRow.classList.toggle('is-loading', !!loading);
+                        aiRow.classList.toggle('is-error', !!failed);
+                        aiRow.setAttribute('aria-busy', loading ? 'true' : 'false');
+                        if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '和AI聊聊天');
+                    }
+                    aiRow.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        if (aiRow.getAttribute('aria-busy') === 'true') return;
+                        setAiEntryLoading(true, false);
+                        if (typeof window.__xtjEnsureAiAgentLoaded === 'function') {
+                            window.__xtjEnsureAiAgentLoaded().then(function() {
+                                setAiEntryLoading(false, false);
+                                if (typeof window.__xtjOpenAiChat === 'function') {
+                                    window.__xtjOpenAiChat();
+                                } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
+                                    window.__xtjAiAgent.open();
+                                }
+                            }).catch(function(err) {
+                                setAiEntryLoading(false, true);
+                                console.error('[XTJ] failed to open AI chat:', err);
+                                if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
+                            });
+                        } else if (typeof window.__xtjOpenAiChat === 'function') {
                             setAiEntryLoading(false, false);
-                            if (typeof window.__xtjOpenAiChat === 'function') {
-                                window.__xtjOpenAiChat();
-                            } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
-                                window.__xtjAiAgent.open();
-                            }
-                        }).catch(function(err) {
+                            window.__xtjOpenAiChat();
+                        } else {
                             setAiEntryLoading(false, true);
-                            console.error('[XTJ] failed to open AI chat:', err);
-                            if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
-                        });
-                    } else if (typeof window.__xtjOpenAiChat === 'function') {
-                        setAiEntryLoading(false, false);
-                        window.__xtjOpenAiChat();
+                        }
+                    });
+                    aiRow.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); aiRow.click(); }
+                    });
+                    el.insertBefore(aiRow, el.firstChild);
+                }
+                // 管理员 xxz 入口（固定在 AI 下面）
+                var existingAdmin = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
+                if (existingAdmin) {
+                    var aiEntry = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
+                    if (aiEntry && aiEntry.nextSibling !== existingAdmin) {
+                        el.insertBefore(existingAdmin, aiEntry.nextSibling);
+                    }
+                } else {
+                    var adminHtml = [
+                        '<div class="chat-list-item admin-chat-entry" data-chat-user="xxz" role="button" tabindex="0" style="--xtj-enter-delay:50ms">',
+                        '<div class="cli-avatar" style="background:linear-gradient(135deg,#4a6cf7,#6c5ce7);color:#fff;display:flex;align-items:center;justify-content:center;border-radius:50%;width:36px;height:36px;font-weight:700;font-size:14px;">管</div>',
+                        '<div class="cli-info"><div class="cli-name">xxz · 管理员</div><div class="cli-preview">联系管理员</div></div>',
+                        '<div class="cli-right"><span class="cli-time" style="background:var(--primary);color:#fff;padding:1px 6px;border-radius:3px;font-size:9px;">官方</span></div>',
+                        '</div>'
+                    ].join('');
+                    var adminTemplate = document.createElement('template');
+                    adminTemplate.innerHTML = adminHtml.trim();
+                    var adminRow = adminTemplate.content.firstElementChild;
+                    adminRow.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        if (typeof window.dockChatOpenUser === 'function') {
+                            window.dockChatOpenUser('xxz');
+                        }
+                    });
+                    adminRow.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); adminRow.click(); }
+                    });
+                    var aiEntry2 = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
+                    if (aiEntry2) {
+                        el.insertBefore(adminRow, aiEntry2.nextSibling);
                     } else {
-                        setAiEntryLoading(false, true);
+                        el.insertBefore(adminRow, el.firstChild);
                     }
-                });
-                row.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        row.click();
-                    }
-                });
-                el.insertBefore(row, el.firstChild);
+                }
             }
 
             function applyDockChatConversationPreview(otherUser, message, unreadCount) {
