@@ -15404,7 +15404,7 @@ profile content only. Dock stays untouched.
 #panelChat #dockChatDetailView,
 #panelChat .chat-view {
   min-height: 0;
-  height: 100%;
+  flex: 1;
 }
 
 #panelChat .chat-list,
