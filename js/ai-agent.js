@@ -3924,6 +3924,7 @@
 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
+    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息: ' + text.slice(0, 30)); } catch(e) {}
     var displayText = text;
     // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
     if (fileData) {

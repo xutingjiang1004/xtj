@@ -3487,6 +3487,7 @@ function renderProfileActivityList(kind) {
                     if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
                         loadProfileActivity(true);
                     }
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior(nextLiked ? 'post_like' : 'post_unlike', '赞了帖子 ' + pid.slice(0, 8)); } catch(e) {}
                 } catch (e) {
                     console.error(e);
                     if (likeOperations[pid] && likeOperations[pid].version === version) {
@@ -8717,7 +8718,10 @@ function renderProfileActivityList(kind) {
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput && fileInput.files[0];
-                if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
+                if ((!content && !file) || !dockChatActiveUser || dockChatSending) {
+                if (!dockChatActiveUser && content) showToast('请先选择一个聊天对象');
+                return;
+            }
                 var targetUser = dockChatActiveUser;
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
@@ -9132,6 +9136,8 @@ function renderProfileActivityList(kind) {
             if (themeBtn) {
                 themeBtn.addEventListener('click', function() {
                     const isDark = htmlEl.getAttribute('data-theme') === 'dark';
+                    const nextTheme = !isDark ? '深色模式' : '浅色模式';
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('settings_change', '切换主题 → ' + nextTheme); } catch(e) {}
                     animateThemeToggle(!isDark, themeBtn);
                 });
             }
