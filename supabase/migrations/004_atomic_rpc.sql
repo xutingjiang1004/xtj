@@ -81,7 +81,8 @@ BEGIN
   -- 读取 claim_limit
   v_claim_limit := GREATEST(0, COALESCE((v_gift_content->>'claim_limit')::int, (v_gift_content->>'limit')::int, (v_gift_content->>'max_claims')::int, 0));
 
-  -- 检查重复领取
+  -- 检查重复领取（锁住整个claims表防止并发）
+  PERFORM pg_advisory_xact_lock(hashtextextended('pro_claim_' || p_gift_id, 0));
   IF EXISTS (SELECT 1 FROM posts WHERE actor_key = p_actor_key AND media_type = '__pro_gift_claim__' LIMIT 1) THEN
     RETURN jsonb_build_object('ok', false, 'error', '你已经领取过该活动');
   END IF;
