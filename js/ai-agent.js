@@ -818,7 +818,7 @@
       return S.config;
     }
     S.config = S.config || {
-      name: '徐旭泽',
+      name: 'AI',
       avatar: '🙂',
       description: '在线',
       welcome_message: '嗨，来聊天吧。'
@@ -1234,7 +1234,7 @@
     renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     visual.appendChild(emojiSlot);
     empty.appendChild(visual);
-    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '徐旭泽') + ' 聊聊天' }));
+    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || 'AI') + ' 聊聊天' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '嗨，来聊天吧。') }));
     return empty;
   }
@@ -4996,7 +4996,7 @@ function showChatMessages() {
     header.appendChild(avatarEl);
 
     var info = el('div', { class: 'ai-chat-header-info' });
-    info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: '徐旭泽' }));
+    info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: 'AI' }));
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
@@ -5166,7 +5166,7 @@ function showChatMessages() {
     var input = el('textarea', {
       class: 'ai-chat-input',
       id: 'aiChatMsgInput',
-      placeholder: '和徐旭泽说点什么吧…',
+      placeholder: '和AI说点什么吧…',
       rows: '1',
       'aria-label': '聊天输入框',
       inputmode: 'text',
@@ -5295,7 +5295,7 @@ function showChatMessages() {
   async function openAiChat() {
     if (S.active) return;
     if (!window.currentUser) {
-      notify('请先登录后再和徐旭泽聊天');
+      notify('请先登录后再和AI聊天');
       return;
     }
     // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
@@ -5402,18 +5402,18 @@ function showChatMessages() {
     var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
     if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
-    if (nameEl) nameEl.textContent = cfg.name || '徐旭泽';
+    if (nameEl) nameEl.textContent = cfg.name || 'AI';
     updateAiStatus();
 
     var inp = document.getElementById('aiChatMsgInput');
-    if (inp) inp.placeholder = '和 ' + (cfg.name || '徐旭泽') + ' 说点什么吧…';
+    if (inp) inp.placeholder = '和 ' + (cfg.name || 'AI') + ' 说点什么吧…';
 
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
       if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
       var e2 = empty.querySelector('.ai-chat-empty-title');
-      if (e2) e2.textContent = '和 ' + (cfg.name || '徐旭泽') + ' 聊聊天';
+      if (e2) e2.textContent = '和 ' + (cfg.name || 'AI') + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
@@ -5563,8 +5563,8 @@ function showChatMessages() {
     if (!list) return;
     removeAllAiEntries();
 
-    var cfg = S.config || { name: '徐旭泽', avatar: '🙂', description: 'AI 智能体' };
-    var name = cfg.name || '徐旭泽';
+    var cfg = S.config || { name: 'AI', avatar: '🙂', description: 'AI 智能体' };
+    var name = cfg.name || 'AI';
     var avatar = cfg.avatar || '🙂';
     var desc = cfg.description || 'AI 智能体';
 
@@ -5679,7 +5679,7 @@ function showChatMessages() {
       scheduleInsertEntry();
     }).catch(function() {
       S.config = {
-        name: '徐旭泽',
+        name: 'AI',
         avatar: '🙂',
         description: 'AI 智能体',
         welcome_message: '嗨，来聊天吧。'
