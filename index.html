@@ -431,39 +431,6 @@
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
                             <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c0-4 2.5-6 6-6s6 2 6 6"></path><path d="M17 8h4M19 6v4"></path></svg>
-                            </span>
-                            <span class="profile-setting-text">通讯录<small id="profileContactsStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">仅上传你主动选择的联系人</small></span>
-                        </div>
-                        <button type="button" class="btn btn-ghost profile-data-action" onclick="xtjImportContacts()">选择</button>
-                    </div>
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="12" height="16" rx="2"></rect><path d="M9 5V3h6v2M9 10h6M9 14h6"></path></svg>
-                            </span>
-                            <span class="profile-setting-text">剪贴板<small id="profileClipboardStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">每次读取都需要主动确认</small></span>
-                        </div>
-                        <button type="button" class="btn btn-ghost profile-data-action" onclick="xtjUploadClipboard()">读取</button>
-                    </div>
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"></path>
-                                    <circle cx="12" cy="10" r="2.5"></circle>
-                                </svg>
-                            </span>
-                            <span class="profile-setting-text">实时位置<small id="profileLocationStatus" style="display:block;font-size:11px;color:var(--text-muted);font-weight:400;">仅在主动授权后共享</small></span>
-                        </div>
-                        <label class="profile-switch">
-                            <input type="checkbox" id="profileLocationToggle" onchange="xtjSetLocationSharing(this.checked)">
-                            <span class="profile-slider"></span>
-                        </label>
-                    </div>
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
                                 </svg>
@@ -797,7 +764,7 @@
                 <input id="loginNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
                 <label class="sr-only" for="loginPwInp">密码</label>
                 <input id="loginPwInp" class="af-input" type="password" placeholder="密码" />
-                <p id="loginPrivacyNotice" style="font-size:11px;line-height:1.55;color:var(--text-muted);margin:4px 0 10px;">登录后本站会记录服务器获取的 IP、IP 大致地区、浏览器/系统/网络信息及控件操作日志，供管理员查看。精确位置、通讯录和剪贴板只在你主动授权或点击后读取。</p>
+                <p id="loginPrivacyNotice" style="font-size:11px;line-height:1.55;color:var(--text-muted);margin:4px 0 10px;">登录后本站会记录服务器获取的 IP、IP 大致地区、浏览器/系统/网络信息及控件操作日志，供管理员查看。</p>
                 <button class="btn btn-primary af-btn" id="loginSubmitBtn">登录</button>
                 <button type="button" class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">没有账号？去注册</button>
             </div>
@@ -815,7 +782,7 @@
                 <p style="margin:-4px 0 4px 0;font-size:12px;color:#888;text-align:left">有事情我会偷偷发邮箱给你的宝宝（不会骚扰你）</p>
                 <label class="sr-only" for="regPwInp">密码（至少6位）</label>
                 <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少6位）" />
-                <p id="registerPrivacyNotice" style="font-size:11px;line-height:1.55;color:var(--text-muted);margin:4px 0 10px;">注册并登录后本站会记录服务器获取的 IP、IP 大致地区、浏览器/系统/网络信息及控件操作日志，供管理员查看。精确位置、通讯录和剪贴板只在你主动授权或点击后读取。</p>
+                <p id="registerPrivacyNotice" style="font-size:11px;line-height:1.55;color:var(--text-muted);margin:4px 0 10px;">注册并登录后本站会记录服务器获取的 IP、IP 大致地区、浏览器/系统/网络信息及控件操作日志，供管理员查看。</p>
                 <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
                 <button type="button" class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</button>
             </div>
