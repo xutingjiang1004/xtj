@@ -160,10 +160,16 @@
     var to = from + PAGE_SIZE - 1;
     var page = pageIndex;
     var limit = PAGE_SIZE;
-    var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit);
-    var result = await resp.json();
-    if (!resp.ok || !result.ok) throw new Error(result.error || 'fetch failed');
-    return result.data || [];
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 15000);
+    try {
+      var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
+      var result = await resp.json();
+      if (!resp.ok || !result.ok) throw new Error(result.error || 'fetch failed');
+      return result.data || [];
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function loadPhotoWallData(force){
