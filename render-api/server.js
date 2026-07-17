@@ -6890,8 +6890,8 @@ function deobfuscateCoord(str) {
 }
 
 function locationCacheKey(lat, lng) {
-  // 4位小数精度缓存（约11米）
-  return Math.round(lat * 10000) / 10000 + ',' + Math.round(lng * 10000) / 10000;
+  // 3位小数精度缓存，与Nominatim请求精度一致（约111米）
+  return Math.round(lat * 1000) / 1000 + ',' + Math.round(lng * 1000) / 1000;
 }
 
 async function resolveLatLngToAddress(latitude, longitude) {
@@ -6962,64 +6962,81 @@ async function processLocationTasks() {
   if (locationTaskRunning) return;
   locationTaskRunning = true;
   try {
-    var { data, error } = await supabase.from('posts')
-      .select('id, user_name, content, created_at')
-      .eq('media_type', LOCATION_TASK_MARKER)
-      .order('created_at', { ascending: true })
-      .limit(20);
-    if (error || !data || !data.length) return;
-    for (var i = 0; i < data.length; i++) {
-      var row = data[i];
-      var task = {};
-      try { task = JSON.parse(row.content || '{}'); } catch (_) { continue; }
-      if (task.status === 'completed' || task.status === 'permanent_failed') continue;
-      if (task.retry_count >= task.max_retries) {
-        task.status = 'permanent_failed';
-        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
-        continue;
-      }
-      task.retry_count = (task.retry_count || 0) + 1;
-      task.last_attempt_at = new Date().toISOString();
-      task.status = 'processing';
-      await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
-      // 解混淆坐标（兼容旧格式：有 lat_obf 用新格式，否则用旧格式 latitude）
-      var taskLat = task.lat_obf ? deobfuscateCoord(task.lat_obf) : task.latitude;
-      var taskLng = task.lng_obf ? deobfuscateCoord(task.lng_obf) : task.longitude;
-      if (taskLat == null || taskLng == null) {
-        task.status = 'permanent_failed';
-        task.error = 'invalid_coordinates';
-        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
-        continue;
-      }
-      var geoResult = await resolveLatLngToAddress(taskLat, taskLng);
-      if (geoResult.address) {
-        task.status = 'completed';
-        task.resolved_address = geoResult.address;
-        task.resolved_at = new Date().toISOString();
-        task.error = null;
-        await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
-        await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
-          resolution_status: 'resolved',
-          resolved_address: geoResult.address,
-          resolve_error: null,
-          resolved_at: task.resolved_at
-        });
-      } else {
-        task.status = 'pending';
-        task.error = geoResult.error || 'unknown';
+    // 批量拉取任务，在JS层过滤pending/processing，避免任务饥饿
+    // 先拉取50条，如果全部是completed/permanent_failed则继续拉取
+    var batchLimit = 50;
+    var processedCount = 0;
+    var maxBatches = 3; // 最多拉3批，防止无限循环
+    for (var batch = 0; batch < maxBatches; batch++) {
+      var { data, error } = await supabase.from('posts')
+        .select('id, user_name, content, created_at')
+        .eq('media_type', LOCATION_TASK_MARKER)
+        .order('created_at', { ascending: true })
+        .limit(batchLimit);
+      if (error || !data || !data.length) break;
+      
+      var hasPending = false;
+      for (var i = 0; i < data.length; i++) {
+        var row = data[i];
+        var task = {};
+        try { task = JSON.parse(row.content || '{}'); } catch (_) { continue; }
+        if (task.status === 'completed' || task.status === 'permanent_failed') continue;
+        hasPending = true;
+        if (processedCount >= 20) break; // 每轮最多处理20个
+        
         if (task.retry_count >= task.max_retries) {
           task.status = 'permanent_failed';
-          try {
-            await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
-              resolution_status: 'failed',
-              resolved_address: null,
-              resolve_error: task.error,
-              resolved_at: task.last_attempt_at
-            });
-          } catch (_) {}
+          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+          continue;
         }
+        task.retry_count = (task.retry_count || 0) + 1;
+        task.last_attempt_at = new Date().toISOString();
+        task.status = 'processing';
         await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+        // 解混淆坐标（兼容旧格式：有 lat_obf 用新格式，否则用旧格式 latitude）
+        var taskLat = task.lat_obf ? deobfuscateCoord(task.lat_obf) : task.latitude;
+        var taskLng = task.lng_obf ? deobfuscateCoord(task.lng_obf) : task.longitude;
+        if (taskLat == null || taskLng == null) {
+          task.status = 'permanent_failed';
+          task.error = 'invalid_coordinates';
+          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+          continue;
+        }
+        var geoResult = await resolveLatLngToAddress(taskLat, taskLng);
+        if (geoResult.address) {
+          task.status = 'completed';
+          task.resolved_address = geoResult.address;
+          task.resolved_at = new Date().toISOString();
+          task.error = null;
+          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+          await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
+            resolution_status: 'resolved',
+            resolved_address: geoResult.address,
+            resolve_error: null,
+            resolved_at: task.resolved_at
+          });
+        } else {
+          task.status = 'pending';
+          task.error = geoResult.error || 'unknown';
+          if (task.retry_count >= task.max_retries) {
+            task.status = 'permanent_failed';
+            try {
+              await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
+                resolution_status: 'failed',
+                resolved_address: null,
+                resolve_error: task.error,
+                resolved_at: task.last_attempt_at
+              });
+            } catch (_) {}
+          }
+          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
+        }
+        processedCount++;
       }
+      // 如果这批里没有pending任务，继续拉下一批
+      if (!hasPending) continue;
+      // 已处理足够任务，退出
+      if (processedCount >= 20) break;
     }
   } catch (e) {
     console.error('[LOC-TASK] process error:', e && e.message ? e.message : e);
@@ -7091,6 +7108,7 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
     var longitude = Number(body.longitude);
     var accuracy = Number(body.accuracy);
     var pageLoadId = String(body.page_load_id || '').trim();
+    var captureReason = String(body.capture_reason || 'page_refresh').trim().slice(0, 30);
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
         !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
         !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
@@ -7120,6 +7138,7 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       received_at: new Date().toISOString(),
       source: 'browser_geolocation',
       page_load_id: pageLoadId,
+      capture_reason: captureReason,
       resolution_status: 'pending',
       resolved_address: null,
       resolve_error: null,
