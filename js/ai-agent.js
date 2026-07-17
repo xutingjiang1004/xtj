@@ -275,8 +275,9 @@
       // 鈽?U3: 鐢?AbortController 关闭旧的 document 鐩戝惉鍣?
       if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
       _menuAbort = new AbortController();
+      var currentAbort = _menuAbort;
       setTimeout(function() {
-        if (_menuAbort && _menuAbort.signal.aborted) return;
+        if (!currentAbort || currentAbort.signal.aborted) return;
         document.addEventListener('click', function onDoc(ce2) {
           if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
             closeCopyMenu();
@@ -4624,26 +4625,25 @@
               }
             } catch (e) {}
             
-            // 濡傛灉鍚庣鍋氫簡娓呮礂锛屾浛鎹㈠凡娴佸紡杈撳嚭鐨勬皵娉″唴瀹?
+            var _sanitizedRendered = false;
             if (evt.sanitized_content && evt.sanitized_content.length > 0 && aiBubble) {
-              // 鏇挎崲姘旀场涓凡杈撳嚭鐨勫師濮嬪唴瀹逛负娓呮礂鍚庢鏂?
               if (contentRenderer) {
                 try { contentRenderer.cancel(); } catch (e) {}
                 contentRenderer = null;
               }
               aiBubble.innerHTML = '';
               aiBubble.innerHTML = renderMarkdown(evt.sanitized_content);
+              _sanitizedRendered = true;
             }
             
-            // 鏍囪娴佹槸鍚﹀畬鎴?
             var streamInterrupted = evt.interrupted === true;
             var streamComplete = evt.complete === true;
             var streamSaved = evt.saved === true;
             
-            if (aiContent) {
+            if (!_sanitizedRendered && aiContent) {
               ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
-            } else if (aiReasoning) {
+            } else if (!_sanitizedRendered && aiReasoning) {
               if (!aiNode) ensureReasoningNode();
               finishAiMessage(aiNode, '', aiReasoning, evt);
             }

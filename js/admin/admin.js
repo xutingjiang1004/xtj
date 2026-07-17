@@ -1119,7 +1119,7 @@ async function initAdminClient() {
         return users.map(function(name) {
             var activeClass = name === selected ? ' is-selected' : '';
             var escapedName = safeJsStr(name);
-            return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + inputId + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
+            return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + safeJsStr(inputId) + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
         }).join('');
     }
 
@@ -1416,7 +1416,7 @@ async function initAdminClient() {
                     } else {
                         // 回退：使用用户信息中存储的IP位置或精确定位
                         try {
-                            var ui = JSON.parse(user.content || '{}');
+                            var ui = u.info || {};
                             if (ui.last_ip_location && ui.last_ip_location.text) {
                                 regionCellV1 = escapeHtml(ui.last_ip_location.text);
                             } else if (ui.last_location && ui.last_location.address) {
@@ -1518,7 +1518,7 @@ async function initAdminClient() {
     };
 
     async function renderPostsTab(el) {
-        if (API_BASE) {
+        if (API_BASE && (!allPosts.length || !annList.length)) {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
@@ -2887,7 +2887,7 @@ async function initAdminClient() {
                         } else {
                             // 回退：使用用户信息中存储的IP位置或精确定位
                             try {
-                                var ui2 = JSON.parse(user.content || '{}');
+                                var ui2 = u.info || {};
                                 if (ui2.last_ip_location && ui2.last_ip_location.text) {
                                     regionCell = escapeHtml(ui2.last_ip_location.text);
                                 } else if (ui2.last_location && ui2.last_location.address) {

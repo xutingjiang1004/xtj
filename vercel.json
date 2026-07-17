@@ -20,5 +20,20 @@
         { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
       ]
     }
+  ],
+  "rewrites": [
+    { "source": "/package.json", "destination": "/404" },
+    { "source": "/package-lock.json", "destination": "/404" },
+    { "source": "/render.yaml", "destination": "/404" },
+    { "source": "/render-api/(.*)", "destination": "/404" },
+    { "source": "/scripts/(.*)", "destination": "/404" },
+    { "source": "/supabase/(.*)", "destination": "/404" },
+    { "source": "/mcp-servers/(.*)", "destination": "/404" },
+    { "source": "/tests/(.*)", "destination": "/404" },
+    { "source": "/docs/(.*)", "destination": "/404" },
+    { "source": "/.git/(.*)", "destination": "/404" },
+    { "source": "/node_modules/(.*)", "destination": "/404" },
+    { "source": "/.env", "destination": "/404" },
+    { "source": "/.env.*", "destination": "/404" }
   ]
 }
