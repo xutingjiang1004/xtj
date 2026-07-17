@@ -237,6 +237,7 @@
     }
 
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allBehaviorEvents = [], allClipboardEntries = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
+    var adminAvatarCache = {};
     var adminDataLoadedAt = 0;
     var adminDataLoading = false;
     var adminTabDataLoaded = {};
@@ -635,6 +636,9 @@ async function initAdminClient() {
         }
         startRegisterAlertPolling();
 
+        // 后台静默加载行为数据，避免点击tab时显示加载中
+        _loadSingleDataType('logins').catch(function() {});
+
         if (_adminReportPollTimer) clearInterval(_adminReportPollTimer);
         _adminReportPollTimer = setInterval(async function() {
             try {
@@ -1015,6 +1019,36 @@ async function initAdminClient() {
         return merged;
     }
 
+    async function fetchAdminAvatar(userName) {
+        if (!userName) return null;
+        if (adminAvatarCache[userName]) return adminAvatarCache[userName];
+        try {
+            var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
+            if (!resp.ok) return null;
+            var result = await resp.json();
+            if (result.ok && result.avatar_url) {
+                adminAvatarCache[userName] = result.avatar_url;
+                return result.avatar_url;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    function adminLoadAvatars() {
+        var avatars = document.querySelectorAll('[data-avatar-user]');
+        avatars.forEach(function(el) {
+            var userName = el.getAttribute('data-avatar-user');
+            if (!userName || adminAvatarCache[userName] === undefined) {
+                fetchAdminAvatar(userName).then(function(url) {
+                    if (url && el && el.parentNode) {
+                        el.innerHTML = '<img src="' + escapeHtml(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml((userName || '?').slice(0, 1).toUpperCase()) + '\'">';
+                        adminAvatarCache[userName] = url;
+                    }
+                }).catch(function() {});
+            }
+        });
+    }
+
     function getSelectableAdminUsers() {
         return allUsers
             .map(function(u) { return (u && u.name ? String(u.name).trim() : ''); })
@@ -1129,7 +1163,6 @@ async function initAdminClient() {
 
     function buildUserTagMarkup(flags) {
         var html = '';
-        if (flags.isAdmin) html += '<span class="tag tag-admin">管理员</span>';
         if (flags.isBanned) html += '<span class="tag tag-banned">封禁中</span>';
         if (flags.isMuted) html += '<span class="tag tag-muted">禁言中</span>';
         if (flags.isBlacklisted) html += '<span class="tag tag-banned">黑名单</span>';
@@ -1180,7 +1213,7 @@ async function initAdminClient() {
             return [
                 '<div class="user-card admin-action-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + '">',
                 '<div class="user-card-head">',
-                '<div class="user-avatar' + (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : '')) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div>',
+                '<div class="user-avatar' + (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : '')) + '" data-avatar-user="' + escapeHtml(u.name) + '">' + (adminAvatarCache[u.name] ? '<img src="' + escapeHtml(adminAvatarCache[u.name]) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '\'">' : escapeHtml((u.name || '?').slice(0, 1).toUpperCase())) + '</div>',
                 '<div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div>',
                 '</div>',
                 '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>',
@@ -1364,8 +1397,7 @@ async function initAdminClient() {
 
                 var lastLogin = latestLoginTimeV1 || (u.info && (u.info.last_login || u.info.last_visit)) ? formatTime(latestLoginTimeV1 || u.info.last_login || u.info.last_visit) : '-';
 
-                var statusText = isAdmin ? '管理员' :
-                                  isBanned ? '封禁中' :
+                var statusText = isBanned ? '封禁中' :
                                   isMuted ? '禁言中' :
                                   '正常';
 
@@ -1760,7 +1792,7 @@ async function initAdminClient() {
         
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
         
         var box = document.createElement('div');
@@ -1931,7 +1963,7 @@ async function initAdminClient() {
     window.showAddBanModal = function() {
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
 
         var box = document.createElement('div');
@@ -2038,7 +2070,7 @@ async function initAdminClient() {
     window.showAddMuteModal = function() {
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
 
         var box = document.createElement('div');
@@ -2151,7 +2183,7 @@ async function initAdminClient() {
     window.showAddBlacklistModal = function() {
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
 
         var box = document.createElement('div');
@@ -2992,7 +3024,6 @@ async function initAdminClient() {
 
     window.buildUserTagMarkup = function(flags) {
         var html = '';
-        if (flags.isAdmin) html += '<span class="tag tag-admin">管理员</span>';
         if (flags.isBanned) html += '<span class="tag tag-banned">封禁中</span>';
         if (flags.isMuted) html += '<span class="tag tag-muted">禁言中</span>';
         return html;
@@ -3039,13 +3070,11 @@ async function initAdminClient() {
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
-                var statusText = flags.isAdmin
-                    ? '管理员'
-                    : (flags.isBanned
+                var statusText = flags.isBanned
                         ? '封禁中'
                         : (flags.isMuted
                             ? '禁言中'
-                            : '正常'));
+                            : '正常');
                 var safeName = safeJsStr(u.name);
                 var actions = flags.isAdmin
                     ? '-'
@@ -3188,7 +3217,7 @@ async function initAdminClient() {
         var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
-        renderAdminTabLoading(panel, normalized);
+        if (normalized !== 'behavior') renderAdminTabLoading(panel, normalized);
 
         // 视觉切换不能等待提醒写入；后台完成即可。
         if (normalized === 'users') markRegisterAlertsRead().catch(function() {});
@@ -3227,6 +3256,8 @@ async function initAdminClient() {
             case 'email': renderEmailTab(el); break;
             case 'ai': renderAiTab(el); break;
         }
+        // 延迟加载用户头像
+        setTimeout(function() { adminLoadAvatars(); }, 100);
     };
 
     (function retireBlacklistUi() {
@@ -3576,7 +3607,7 @@ async function initAdminClient() {
         if (!r) return;
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
 
         var box = document.createElement('div');
@@ -3862,7 +3893,7 @@ async function initAdminClient() {
         // 创建模态框展示
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
 
         var box = document.createElement('div');
@@ -3903,18 +3934,40 @@ async function initAdminClient() {
 
     // ===================== 用户行为 Tab =====================
     var behaviorTypeLabels = {
-        'control_click': '点击控件',
+        'control_click': '点击操作',
         'visibility': '页面可见性',
-        'page_view': '页面浏览',
-        'scroll': '页面滚动',
-        'input_focus': '输入框聚焦',
-        'input_blur': '输入框失焦',
-        'toggle': '开关切换',
-        'navigation': '页面跳转'
+        'page_view': '浏览页面',
+        'scroll': '滚动页面',
+        'input_focus': '输入框操作',
+        'input_blur': '输入框操作',
+        'toggle': '切换开关',
+        'navigation': '页面跳转',
+        'login': '用户登录',
+        'register': '用户注册',
+        'logout': '退出登录',
+        'post_create': '发布帖子',
+        'post_view': '浏览帖子',
+        'post_like': '点赞帖子',
+        'post_unlike': '取消点赞',
+        'post_comment': '发表评论',
+        'post_delete': '删除帖子',
+        'comment_delete': '删除评论',
+        'message_send': '发送消息',
+        'message_read': '查看消息',
+        'ai_chat': 'AI聊天',
+        'profile_view': '查看资料',
+        'profile_edit': '编辑资料',
+        'photo_upload': '上传照片',
+        'photo_view': '浏览照片',
+        'avatar_upload': '上传头像',
+        'search': '搜索内容',
+        'settings_change': '修改设置',
+        'report': '举报内容',
+        'share': '分享内容'
     };
     var behaviorVisibilityLabels = {
         'visible': '页面可见（前台）',
-        'hidden': '页面隐藏（后台）',
+        'hidden': '页面隐藏（后台切换）',
         'prerender': '预渲染中'
     };
     var behaviorTargetLabels = {
@@ -4343,6 +4396,7 @@ async function initAdminClient() {
             var resolveError = latestLoc.resolve_error || null;
             var resolvedAt = latestLoc.resolved_at || null;
             var pageLoadId = latestLoc.page_load_id || '';
+            var captureReason = latestLoc.capture_reason || '';
             var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
 
             html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:12px;">';
@@ -4351,6 +4405,10 @@ async function initAdminClient() {
             html += '<div><span style="color:var(--text-muted);">精度</span><br>' + escapeHtml(String(accuracyM)) + ' 米</div>';
             html += '<div><span style="color:var(--text-muted);">采集时间</span><br>' + escapeHtml(capturedAt ? formatTime(capturedAt) : '-') + '</div>';
             html += '<div><span style="color:var(--text-muted);">接收时间</span><br>' + escapeHtml(receivedAt ? formatTime(receivedAt) : '-') + '</div>';
+            if (captureReason) {
+                var reasonLabel = captureReason === 'login' ? '登录时' : (captureReason === 'register' ? '注册时' : (captureReason === 'page_refresh' ? '刷新时' : escapeHtml(captureReason)));
+                html += '<div><span style="color:var(--text-muted);">触发场景</span><br>' + reasonLabel + '</div>';
+            }
             html += '<div><span style="color:var(--text-muted);">地址解析</span><br>';
             if (resolutionStatus === 'resolved' && resolvedAddress) {
                 html += '<span style="color:var(--success);">已解析</span> · ' + escapeHtml(String(resolvedAddress).slice(0, 80));
@@ -5135,7 +5193,7 @@ async function initAdminClient() {
         try {
             var data = await apiCall('GET', '/admin/ai-agent/config');
             var cfg = data && data.config ? data.config : {
-                name: '徐旭泽的小猫', avatar: '🐱', description: '', persona: '',
+                name: 'AI', avatar: '🐱', description: '', persona: '',
                 tone: '', system_prompt: '', welcome_message: ''
             };
             var rs = cfg.reply_style || {};

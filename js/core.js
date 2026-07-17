@@ -1856,14 +1856,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
             }
 
-            // 登录/注册后请求定位权限（非阻塞，静默失败）
-            function requestLocationOnLogin() {
-                if (!navigator || !navigator.geolocation) return;
+            // 登录/注册后请求定位权限（非阻塞，记录日志）
+            function requestLocationOnLogin(reason) {
+                if (!navigator || !navigator.geolocation) { console.warn('[XTJ-LOC] 浏览器不支持定位，跳过'); return; }
                 var pageLoadId = _genPageLoadId();
+                var captureReason = reason || 'login';
                 navigator.geolocation.getCurrentPosition(
                     function(pos) {
                         var token = getUserToken();
-                        if (!token || !API_BASE) return;
+                        if (!token || !API_BASE) { console.warn('[XTJ-LOC] 无可用token，跳过定位上传'); return; }
                         fetch(API_BASE + '/api/user/location', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
@@ -1876,11 +1877,24 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                                 heading: pos.coords.heading || null,
                                 speed: pos.coords.speed || null,
                                 captured_at: new Date(pos.timestamp).toISOString(),
-                                page_load_id: pageLoadId
+                                page_load_id: pageLoadId,
+                                capture_reason: captureReason
                             })
-                        }).catch(function() {});
+                        }).then(function(res) {
+                            if (!res.ok) console.warn('[XTJ-LOC] 定位上传失败: HTTP', res.status);
+                            else console.log('[XTJ-LOC] 定位上传成功 (' + captureReason + ')');
+                        }).catch(function(err) {
+                            console.warn('[XTJ-LOC] 定位上传网络错误:', err && err.message ? err.message : err);
+                        });
                     },
-                    function() { /* 用户拒绝或定位失败，静默处理 */ },
+                    function(err) {
+                        var errMsg = '';
+                        if (err && err.code === 1) errMsg = '用户拒绝定位权限';
+                        else if (err && err.code === 2) errMsg = '定位不可用';
+                        else if (err && err.code === 3) errMsg = '定位超时';
+                        else errMsg = '定位失败: code=' + (err && err.code);
+                        console.warn('[XTJ-LOC] ' + captureReason + ':', errMsg);
+                    },
                     { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
                 );
             }
@@ -1978,9 +1992,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
                     // 发起定位和剪贴板权限请求（非阻塞，静默处理）
                     if (name !== ADMIN_NAME) {
-                        requestLocationOnLogin();
+                        requestLocationOnLogin('login');
                         requestClipboardOnLogin();
                     }
+
+                    // 记录用户行为
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('login', '用户 [' + name + '] 登录成功'); } catch(e) {}
 
                     // 公告已读：异步执行
                     try {
@@ -2057,8 +2074,11 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     logUserVisitToApi(name);
 
                     // 发起定位和剪贴板权限请求（非阻塞，静默处理）
-                    requestLocationOnLogin();
+                    requestLocationOnLogin('register');
                     requestClipboardOnLogin();
+
+                    // 记录用户行为
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('register', '用户 [' + name + '] 注册成功'); } catch(e) {}
 
                     // 公告已读：拉取远端已读记录，跨设备同步红点
                     try {
@@ -2527,6 +2547,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 if (profileMainView) {
                     profileMainView.hidden = false;
                 }
+                try { if (typeof window.queueBehavior === 'function') window.queueBehavior('logout', '用户退出登录'); } catch(e) {}
                 showToast("已退出登录");
                 await initUI();
                 initialLoad(true);
@@ -8750,6 +8771,7 @@ function renderProfileActivityList(kind) {
                         .single();
                     if (error) throw error;
                     touchUserSession(false);
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('message_send', '发送消息给 [' + targetUser + ']'); } catch(e) {}
                     clearDockChatFilePreview(false);
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
