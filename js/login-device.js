@@ -458,10 +458,12 @@
             // 加载安全设置，按开关决定是否采集指纹
             getSecuritySettings().then(function(settings) {
                 if (!settings.record_device) bodyObj.device_meta = null;
-                var browserFpPromise = settings.browser_fingerprint ? getBrowserFingerprint() : null;
-                var canvasFpPromise = settings.canvas_fingerprint ? getCanvasFingerprint() : null;
-                var webglFpPromise = settings.webgl_fingerprint ? getWebglFingerprint() : null;
-                var webglMeta = (settings.webgl_fingerprint || settings.advanced_fingerprint) ? getWebglMeta() : null;
+                // advanced_fingerprint 作为主开关：开启时等同启用所有指纹采集
+                var advFp = !!settings.advanced_fingerprint;
+                var browserFpPromise = (advFp || settings.browser_fingerprint) ? getBrowserFingerprint() : null;
+                var canvasFpPromise = (advFp || settings.canvas_fingerprint) ? getCanvasFingerprint() : null;
+                var webglFpPromise = (advFp || settings.webgl_fingerprint) ? getWebglFingerprint() : null;
+                var webglMeta = (advFp || settings.webgl_fingerprint) ? getWebglMeta() : null;
                 var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
@@ -784,26 +786,119 @@
 
     var behaviorQueue = [];
     var behaviorFlushTimer = null;
+    var behaviorPending = false;
+    var behaviorRetryCount = 0;
+    var behaviorMaxRetries = 3;
+    var behaviorRetryBaseMs = 2000;
+
     function queueBehavior(type, target) {
         behaviorQueue.push({ type: String(type || '').slice(0, 30), target: String(target || '').slice(0, 80), at: new Date().toISOString() });
-        if (behaviorQueue.length > 50) behaviorQueue.shift();
-        if (!behaviorFlushTimer) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+        if (behaviorQueue.length > 200) behaviorQueue.shift();
+        if (!behaviorFlushTimer && !behaviorPending) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
     }
+
     async function flushBehavior() {
-        if (behaviorFlushTimer) clearTimeout(behaviorFlushTimer);
-        behaviorFlushTimer = null;
-        if (!behaviorQueue.length) return;
-        var batch = behaviorQueue.splice(0, 50);
+        if (behaviorFlushTimer) { clearTimeout(behaviorFlushTimer); behaviorFlushTimer = null; }
+        if (behaviorPending || !behaviorQueue.length) return;
+        behaviorPending = true;
+        var batch = behaviorQueue.slice(0, 50);
         try {
-            var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-            if (!token) return;
-            await fetch(API_BASE + '/api/user/behavior', {
+            var token = null;
+            try {
+                token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
+            } catch (e) { /* token refresh failed */ }
+            if (!token) {
+                behaviorRetryCount++;
+                if (behaviorRetryCount <= behaviorMaxRetries) {
+                    behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
+                }
+                behaviorPending = false;
+                return;
+            }
+            var resp = await fetch(API_BASE + '/api/user/behavior', {
                 method: 'POST', credentials: 'include', keepalive: true,
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                 body: JSON.stringify({ events: batch })
             });
-        } catch (e) {}
-        if (behaviorQueue.length && !behaviorFlushTimer) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+            if (resp.ok) {
+                removeSentBehaviors(batch);
+                behaviorRetryCount = 0;
+            } else {
+                behaviorRetryCount++;
+                if (resp.status === 401 || resp.status === 429 || resp.status >= 500) {
+                    if (behaviorRetryCount <= behaviorMaxRetries) {
+                        behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
+                    } else {
+                        removeSentBehaviors(batch);
+                    }
+                } else {
+                    removeSentBehaviors(batch);
+                }
+            }
+        } catch (e) {
+            behaviorRetryCount++;
+            if (behaviorRetryCount <= behaviorMaxRetries) {
+                behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
+            }
+        }
+        behaviorPending = false;
+        if (behaviorQueue.length && !behaviorFlushTimer && !behaviorPending) {
+            behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+        }
+    }
+
+    function removeSentBehaviors(batch) {
+        var sentSet = new Set();
+        batch.forEach(function(e) { sentSet.add(e.at + '|' + e.type + '|' + e.target); });
+        var remaining = [];
+        for (var i = 0; i < behaviorQueue.length; i++) {
+            var key = behaviorQueue[i].at + '|' + behaviorQueue[i].type + '|' + behaviorQueue[i].target;
+            if (!sentSet.has(key)) remaining.push(behaviorQueue[i]);
+        }
+        behaviorQueue = remaining;
+    }
+
+    // pagehide 处理：使用 fetch keepalive 或持久化到 localStorage
+    var behaviorLastKnownToken = null;
+    function rememberBehaviorToken(token) {
+        if (token) behaviorLastKnownToken = token;
+    }
+    function handlePagehideBehavior() {
+        if (!behaviorQueue.length) return;
+        var batch = behaviorQueue.slice(0, 50);
+        var token = behaviorLastKnownToken || (typeof window.getToken === 'function' ? window.getToken() : '');
+        if (token && typeof fetch === 'function') {
+            try {
+                // fetch + keepalive 支持自定义请求头，适合 pagehide 场景
+                fetch(API_BASE + '/api/user/behavior', {
+                    method: 'POST', keepalive: true,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ events: batch })
+                });
+                removeSentBehaviors(batch);
+            } catch (e) {}
+        }
+        // 剩余未发送的保存到 localStorage，下次页面打开时恢复
+        if (behaviorQueue.length) {
+            try {
+                localStorage.setItem('xtj_pending_behavior', JSON.stringify(behaviorQueue));
+            } catch (e) {}
+        }
+    }
+    // 页面加载时恢复上次未发送的行为
+    function restorePendingBehavior() {
+        try {
+            var saved = localStorage.getItem('xtj_pending_behavior');
+            if (saved) {
+                var pending = JSON.parse(saved);
+                localStorage.removeItem('xtj_pending_behavior');
+                if (Array.isArray(pending) && pending.length) {
+                    behaviorQueue = pending.concat(behaviorQueue);
+                    if (behaviorQueue.length > 200) behaviorQueue = behaviorQueue.slice(-200);
+                    if (!behaviorFlushTimer && !behaviorPending) behaviorFlushTimer = setTimeout(flushBehavior, 3000);
+                }
+            }
+        } catch (e) { /* ignore */ }
     }
     document.addEventListener('click', function(event) {
         var control = event.target && event.target.closest ? event.target.closest('button, a, [role="button"]') : null;
@@ -815,7 +910,39 @@
     }, true);
     document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
     window.addEventListener('pageshow', function() { queueBehavior('page_view', location.pathname || '/'); });
-    window.addEventListener('pagehide', flushBehavior);
+    window.addEventListener('pagehide', handlePagehideBehavior);
+    // 恢复上次未发送的行为
+    restorePendingBehavior();
+    // 记录开关/复选框切换
+    document.addEventListener('change', function(event) {
+        var el = event.target;
+        if (!el) return;
+        if (el.type === 'checkbox' || el.type === 'radio' || (el.tagName === 'SELECT')) {
+            var elId = el.id || el.name || el.getAttribute('data-action') || el.tagName.toLowerCase();
+            var state = el.type === 'checkbox' ? (el.checked ? '开启' : '关闭') : (el.value || 'changed');
+            queueBehavior('toggle', elId + ' → ' + state);
+        }
+    }, true);
+    // 记录输入框聚焦（仅记录有 id 或有意义的输入框）
+    document.addEventListener('focusin', function(event) {
+        var el = event.target;
+        if (!el || !el.tagName) return;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+            var elId = el.id || el.name || el.getAttribute('data-action') || '';
+            if (elId) queueBehavior('input_focus', elId);
+        }
+    }, true);
+    // 滚动节流记录（每5秒最多记录一次）
+    var lastScrollRecord = 0;
+    document.addEventListener('scroll', function() {
+        var now = Date.now();
+        if (now - lastScrollRecord < 5000) return;
+        lastScrollRecord = now;
+        var scrollY = Math.round(window.scrollY || window.pageYOffset || 0);
+        var maxScroll = Math.max(1, (document.documentElement.scrollHeight || document.body.scrollHeight || 0) - window.innerHeight);
+        var pct = Math.round(scrollY / maxScroll * 100);
+        queueBehavior('scroll', '页面滚动至 ' + pct + '%');
+    }, { passive: true });
 
     // 自动后台触发定位（用户登录/注册后由系统自动调用，不暴露给用户手动控制）
     // 使用 getCurrentPosition 获取一次精准位置，不启动持续监听
@@ -834,29 +961,48 @@
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     }
 
-    function resumeRememberedLocationSharing() {
-        // 每次页面加载自动尝试获取一次定位（后台静默，不依赖用户手动开关）
-        setTimeout(function() {
-            if (typeof window.__xtjUserToken === 'string' && window.__xtjUserToken) {
-                xtjAutoStartLocation();
-            }
-        }, 2000);
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resumeRememberedLocationSharing, { once: true });
-    else setTimeout(resumeRememberedLocationSharing, 0);
-
     // 确保 device_id 已存在
     getOrCreateDeviceId();
 
-    // 监听用户会话建立；认证凭据本身不存储也不拦截。
+    // 自动定位触发：监听 core.js 的 auth-ready 事件（登录/注册/Token恢复时触发）
+    function tryAutoLocation() {
+        setTimeout(function() { xtjAutoStartLocation(); }, 1500);
+    }
+    // 页面加载时，如果已有 token 则尝试定位（已登录用户刷新页面）
+    function tryAutoLocationOnLoad() {
+        setTimeout(function() {
+            try {
+                var fn = typeof window.ensureUserToken === 'function' ? window.ensureUserToken : null;
+                if (!fn) {
+                    // 回退：检查 window.__xtjAuthReady 标志
+                    if (window.__xtjAuthReady) { xtjAutoStartLocation(); }
+                    return;
+                }
+                fn().then(function(t) { if (t) xtjAutoStartLocation(); }).catch(function() {});
+            } catch(e) {}
+        }, 2000);
+    }
+    if (window.__xtjAuthReady) {
+        // core.js 已经先调用了 setUserToken，直接触发
+        tryAutoLocation();
+    } else {
+        // 等待 auth-ready 事件（登录/注册场景）
+        window.addEventListener('auth-ready', function() { tryAutoLocation(); }, { once: true });
+        // 兜底：DOM 加载完成后检查 token（已登录用户刷新页面）
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', tryAutoLocationOnLoad, { once: true });
+        } else {
+            setTimeout(tryAutoLocationOnLoad, 0);
+        }
+    }
+
+    // 监听用户会话建立，用于记录页面访问
     try {
         var _origSetItem = localStorage.setItem.bind(localStorage);
         localStorage.setItem = function(key, value) {
             _origSetItem(key, value);
             if (key === 'xtj_user') {
                 trySendPageVisit();
-                // 用户登录/注册成功后自动触发一次定位
-                setTimeout(function() { xtjAutoStartLocation(); }, 1500);
             }
         };
     } catch(e) {}
@@ -879,6 +1025,9 @@
             if (errorSent[errKey] && (now - errorSent[errKey] < 300000)) return;
             errorSent[errKey] = now;
 
+            // 清理敏感 URL：移除 query、fragment、Blob URL、Supabase 签名参数
+            var cleanUrl = sanitizeUrl(url || (window.location && window.location.href) || '');
+
             try {
                 var xhr = new XMLHttpRequest();
                 xhr.open('POST', API_BASE + '/api/client-error-log', true);
@@ -887,14 +1036,49 @@
                 xhr.send(JSON.stringify({
                     type: type,
                     message: (message || '').slice(0, 500),
-                    stack: (stack || '').slice(0, 1000),
-                    url: (url || (window.location && window.location.href) || '').slice(0, 500),
+                    stack: sanitizeStack(stack || ''),
+                    url: cleanUrl.slice(0, 500),
                     line: line || null,
                     col: col || null,
                     user_agent: (navigator && navigator.userAgent || '').slice(0, 500),
                     timestamp: new Date().toISOString()
                 }));
             } catch(e) {}
+        }
+
+        // 清理 URL 中的敏感信息：query、fragment、Blob URL、签名参数
+        function sanitizeUrl(raw) {
+            if (!raw || typeof raw !== 'string') return '';
+            // Blob URL 完全移除
+            if (/^blob:/i.test(raw)) return '[blob-url]';
+            // data: URL 完全移除
+            if (/^data:/i.test(raw)) return '[data-url]';
+            try {
+                // 移除 fragment（# 及之后）
+                var hashIdx = raw.indexOf('#');
+                if (hashIdx >= 0) raw = raw.substring(0, hashIdx);
+                // 移除 query string（? 及之后），但保留路径
+                var qIdx = raw.indexOf('?');
+                if (qIdx >= 0) {
+                    // 如果路径本身包含敏感信息（如 token=），也一并清理
+                    raw = raw.substring(0, qIdx);
+                }
+                // 限制长度
+                return raw.slice(0, 500);
+            } catch(e) {
+                return (raw || '').slice(0, 200);
+            }
+        }
+
+        // 清理堆栈中的敏感信息：过长堆栈截断，移除动态用户内容
+        function sanitizeStack(stack) {
+            if (!stack || typeof stack !== 'string') return '';
+            var cleaned = stack.slice(0, 1000);
+            // 移除可能包含 token 的 URL 行
+            cleaned = cleaned.replace(/(https?:\/\/[^\s)]+)/g, function(m) {
+                return sanitizeUrl(m);
+            });
+            return cleaned;
         }
 
         // JS Error
@@ -938,7 +1122,8 @@
         document.addEventListener('error', function(event) {
             var target = event && event.target;
             if (target && target.tagName === 'IMG') {
-                sendClientError('img_error', 'Image load failed: ' + ((target.src || '').slice(0, 200)), '', '', null, null);
+                var imgSrc = sanitizeUrl((target.src || '').slice(0, 200));
+                sendClientError('img_error', 'Image load failed: ' + imgSrc, '', '', null, null);
             }
         }, true);
 
