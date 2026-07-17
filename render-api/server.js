@@ -6868,7 +6868,8 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (r
 const LOCATION_TASK_MARKER = '__location_task__';
 const LOCATION_TASK_MAX_RETRIES = 5;
 const LOCATION_CACHE_TTL = 24 * 60 * 60 * 1000;
-const LOCATION_RATE_LIMIT_MS = 1100;
+const LOCATION_RATE_LIMIT_MS = 1500;
+const LOCATION_RATE_LIMIT_429_BACKOFF_MS = 5000;
 // 坐标混淆密钥（服务端常量，不在前端暴露）
 const LOCATION_OBFUSCATION_KEY = 0xA3E7;
 
@@ -6909,34 +6910,89 @@ async function resolveLatLngToAddress(latitude, longitude) {
   var roundedLat = Math.round(latitude * 1000) / 1000;
   var roundedLng = Math.round(longitude * 1000) / 1000;
   var url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + encodeURIComponent(roundedLat) + '&lon=' + encodeURIComponent(roundedLng) + '&zoom=18&addressdetails=1&accept-language=zh,en';
-  var controller = new AbortController();
-  var timeout = setTimeout(function() { controller.abort(); }, 10000);
-  try {
-    var response = await fetch(url, {
-      headers: { 'User-Agent': 'XTJ/1.0 (admin location resolver)' },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (!response.ok) return { error: 'Nominatim HTTP ' + response.status, address: null, from_cache: false };
-    var data = await response.json();
-    if (data && data.display_name) {
-      locationCoordCache.set(cacheKey, { address: data.display_name, time: Date.now() });
-      if (locationCoordCache.size > 500) {
-        var now = Date.now();
-        var toDel = [];
-        locationCoordCache.forEach(function(v, k) { if (now - v.time > LOCATION_CACHE_TTL) toDel.push(k); });
-        toDel.forEach(function(k) { locationCoordCache.delete(k); });
+  // 带429退避的重试循环（最多3次）
+  var maxRetries = 3;
+  var lastError = null;
+  for (var attempt = 0; attempt < maxRetries; attempt++) {
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 10000);
+    try {
+      var response = await fetch(url, {
+        headers: { 'User-Agent': 'XTJ/1.0 (admin location resolver)' },
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        var data = await response.json();
+        if (data && data.display_name) {
+          locationCoordCache.set(cacheKey, { address: data.display_name, time: Date.now() });
+          if (locationCoordCache.size > 500) {
+            var now = Date.now();
+            var toDel = [];
+            locationCoordCache.forEach(function(v, k) { if (now - v.time > LOCATION_CACHE_TTL) toDel.push(k); });
+            toDel.forEach(function(k) { locationCoordCache.delete(k); });
+          }
+          return { address: data.display_name, error: null, from_cache: false };
+        }
+        return { address: null, error: 'no_address_in_response', from_cache: false };
       }
-      return { address: data.display_name, error: null, from_cache: false };
+      // 429限流 → 退避等待后重试
+      if (response.status === 429 && attempt < maxRetries - 1) {
+        lastError = 'Nominatim HTTP 429 (rate limited)';
+        console.warn('[LOC-GEO] 429限流，第' + (attempt + 1) + '次重试，等待' + LOCATION_RATE_LIMIT_429_BACKOFF_MS + 'ms...');
+        await new Promise(function(r) { setTimeout(r, LOCATION_RATE_LIMIT_429_BACKOFF_MS); });
+        // 重置lastRequestTime，让后续请求也有足够的间隔
+        locationLastRequestTime = Date.now();
+        continue;
+      }
+      return { error: 'Nominatim HTTP ' + response.status, address: null, from_cache: false };
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err.message || 'geocode';
+      if (attempt < maxRetries - 1 && (err.name === 'AbortError' || err.message === 'NetworkError' || err.message === 'fetch failed')) {
+        console.warn('[LOC-GEO] 网络错误，第' + (attempt + 1) + '次重试...');
+        await new Promise(function(r) { setTimeout(r, 2000); });
+        continue;
+      }
+      return { address: null, error: lastError, from_cache: false };
     }
-    return { address: null, error: 'no_address_in_response', from_cache: false };
-  } catch (err) {
-    clearTimeout(timeout);
-    return { address: null, error: err.message || 'geocode', from_cache: false };
   }
+  return { address: null, error: lastError || 'geocode', from_cache: false };
 }
 
 async function createLocationTask(userName, pageLoadId, latitude, longitude) {
+  // 去重：检查同一pageLoadId是否已有pending/processing任务
+  var cacheKey = locationCacheKey(latitude, longitude);
+  var { data: existing } = await supabase.from('posts')
+    .select('id, content, created_at')
+    .eq('media_type', LOCATION_TASK_MARKER)
+    .eq('user_name', userName)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (existing && existing.length > 0) {
+    var now = Date.now();
+    for (var i = 0; i < existing.length; i++) {
+      var t = {};
+      try { t = JSON.parse(existing[i].content || '{}'); } catch (_) { continue; }
+      if (t.status === 'completed' || t.status === 'permanent_failed') continue;
+      // 同一pageLoadId有未完成任务 → 跳过
+      if (t.page_load_id === pageLoadId) {
+        console.log('[LOC-TASK] 跳过重复任务: pageLoadId=' + pageLoadId + ' 已有pending/processing任务');
+        return null;
+      }
+      // 同一坐标（3位小数精度）在60秒内有pending任务 → 跳过
+      var tLat = t.lat_obf ? deobfuscateCoord(t.lat_obf) : t.latitude;
+      var tLng = t.lng_obf ? deobfuscateCoord(t.lng_obf) : t.longitude;
+      if (tLat != null && tLng != null) {
+        var tCacheKey = locationCacheKey(tLat, tLng);
+        var tCreatedAt = new Date(t.created_at || 0).getTime();
+        if (tCacheKey === cacheKey && (now - tCreatedAt) < 60000) {
+          console.log('[LOC-TASK] 跳过重复坐标任务: ' + cacheKey + ' 60秒内已有pending任务');
+          return null;
+        }
+      }
+    }
+  }
   var task = {
     user_name: userName,
     page_load_id: pageLoadId,
@@ -7414,6 +7470,32 @@ app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, 
   } catch (error) {
     console.error('[API] admin clipboard data:', error && error.message);
     return res.status(500).json({ error: '剪贴板数据加载失败', code: 'clipboard_data_load_failed' });
+  }
+});
+
+// 永久删除指定用户的剪贴板数据
+app.delete('/admin/clipboard-data', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var userName = String(req.body && req.body.user_name || '').trim();
+    if (!userName || userName.length > 50) return res.status(400).json({ error: '用户名无效', code: 'invalid_user_name' });
+    var existing = await supabase.from('posts').select('id, content')
+      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'clipboard_lookup_failed' });
+    if (!existing.data) return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
+    var info = {};
+    try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {}
+    if (!info.consented_clipboard && !(Array.isArray(info.consented_clipboard_history) && info.consented_clipboard_history.length > 0)) {
+      return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
+    }
+    delete info.consented_clipboard;
+    delete info.consented_clipboard_history;
+    await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
+    await logAdminAudit('delete_user_clipboard_data', req.adminName || 'admin', 'target_user=' + userName);
+    return res.json({ ok: true, deleted: true, message: '已删除剪贴板数据' });
+  } catch (error) {
+    console.error('[API] admin clipboard delete:', error && error.message);
+    return res.status(500).json({ error: '剪贴板数据删除失败', code: 'clipboard_delete_failed' });
   }
 });
 
