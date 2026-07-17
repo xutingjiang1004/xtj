@@ -154,7 +154,7 @@ const urlTests = [
   { input: 'javascript:void(0)', expect: 'block' },
   { input: 'data:image/png;base64,abc', expect: 'pass' },
   { input: 'data:text/html,<script>alert(1)</script>', expect: 'block' },
-  { input: '//evil.com/steal.js', expect: 'pass' },
+  { input: '//evil.com/steal.js', expect: 'block' },
   { input: '/uploads/photo.jpg', expect: 'pass' },
   { input: '" onerror="alert(1)', expect: 'block' },
   { input: 'https://evil.com', expect: 'pass' },

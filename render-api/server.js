@@ -5396,9 +5396,9 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
       var addrName = data.name || data.display_name || '';
       // 构建选项列表
       var options = [];
-      if (province && city) options.push({ level: 'city', name: province + city });
-      if (city && district) options.push({ level: 'district', name: city + district });
-      if (addrName && addrName.length < 40) options.push({ level: 'address', name: addrName });
+      if (province && city) options.push({ level: 'city', name: province + city, province: province, city: city, district: '' });
+      if (city && district) options.push({ level: 'district', name: city + district, province: province, city: city, district: district });
+      if (addrName && addrName.length < 40) options.push({ level: 'address', name: addrName, province: province, city: city, district: district });
       return res.json({
         ok: true,
         province: province,

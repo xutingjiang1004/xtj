@@ -7285,8 +7285,8 @@ function renderProfileActivityList(kind) {
                 var s = String(url == null ? '' : url).trim();
                 // 只允许 http://, https://, data:, blob: 协议
                 if (/^(https?:|data:|blob:)/i.test(s)) return s;
-                // 相对路径也允许（以 / 或 ./ 开头）
-                if (/^[/.]/.test(s)) return s;
+                // 相对路径也允许（以 / 或 ./ 开头，但排除协议相对 URL //）
+                if (/^\./.test(s) || (/^\//.test(s) && !/^\/\//.test(s))) return s;
                 return '';
             }
             window.sanitizeUrl = sanitizeUrl;

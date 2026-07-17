@@ -15158,7 +15158,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
  * 首页 UI 收口（发布框 / 筛选栏 / 统计卡 / 帖子卡）
  * ======================================================== */
 .publish-box,
-#postInput {
+#postInp {
   border-radius: var(--xtj-radius-md);
 }
 

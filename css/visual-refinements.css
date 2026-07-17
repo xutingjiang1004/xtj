@@ -217,7 +217,7 @@
 }
 /* 帖子悬停 — 微妙上浮 */
 .post {
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.18s ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
