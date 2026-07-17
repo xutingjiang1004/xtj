@@ -674,14 +674,32 @@ async function initAdminClient() {
                 body: JSON.stringify({ username: name, password: pw })
             });
             var data = await res.json();
-            if (!res.ok) {
-                err.textContent = data.error || '登录失败';
+            if (!res.ok || !data || data.ok !== true) {
+                err.textContent = data && data.error ? data.error : '登录失败 (' + res.status + ')';
+                btn.disabled = false;
+                btn.textContent = '登录';
+                return;
+            }
+            if (!data.token || typeof data.token !== 'string' || !data.token.trim()) {
+                err.textContent = '服务端未返回有效 Token，请重试';
                 btn.disabled = false;
                 btn.textContent = '登录';
                 return;
             }
             ADMIN = name;
-            await initAdminClient();
+            setToken(data.token);
+            try {
+                await initAdminClient();
+            } catch (initErr) {
+                ADMIN = null;
+                clearToken();
+                err.textContent = '初始化失败：' + (initErr && initErr.message || '未知错误');
+                btn.disabled = false;
+                btn.textContent = '登录';
+                document.getElementById('loginWrap').style.display = 'flex';
+                document.getElementById('dashboard').style.display = 'none';
+                return;
+            }
         } catch(e) {
             ADMIN = null;
             err.textContent = 'API 连接失败，请检查网络';
@@ -3992,13 +4010,24 @@ async function initAdminClient() {
             if (allUsers[i].name === userName) { userObj = allUsers[i]; break; }
         }
         showModal('用户详情', '<div class="empty">正在加载用户授权数据…</div>');
+        var apiFailed = false;
+        var apiErrorText = '';
         try {
             var sensitive = await apiCall('GET', '/admin/user-data?user_name=' + encodeURIComponent(userName));
             if (userObj) userObj.info = mergeAdminUserInfo(userObj.info, sensitive.info || {});
+            else {
+                // userObj 不在 allUsers 中（例如搜索了不在当前页的用户），构建临时对象
+                userObj = { name: userName, info: sensitive.info || {} };
+                allUsers.push(userObj);
+            }
             allLoginEvents = (sensitive.login_events || []).concat(allLoginEvents.filter(function(row) { return row.user_name !== userName; }));
             allBehaviorEvents = (sensitive.behavior_events || []).concat(allBehaviorEvents.filter(function(row) { return row.user_name !== userName; }));
         } catch (error) {
-            showToast('授权数据加载失败，已显示可用摘要', 'error');
+            apiFailed = true;
+            apiErrorText = error && error.message ? error.message : '接口请求失败';
+            showToast('授权数据加载失败：' + apiErrorText + '，显示缓存摘要', 'error');
+            // 如果 userObj 仍然为 null，构建最小的临时对象
+            if (!userObj) userObj = { name: userName, info: {} };
         }
         var userInfo = (userObj && userObj.info) || {};
         var stats = getUserActivityStats(userName);
@@ -4037,6 +4066,13 @@ async function initAdminClient() {
         var html = '<div class="admin-user-detail-content">';
         html += '<h2 style="margin-top:0;">' + escapeHtml(userName) + '</h2>';
         html += buildUserTagMarkup(flags) + '<br><br>';
+
+        if (apiFailed) {
+            html += '<div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--danger);">';
+            html += '&#9888; 授权数据加载失败（' + escapeHtml(apiErrorText) + '），以下显示可能为缓存数据。';
+            html += ' <button onclick="showUserDetailModal(\'' + safeJsStr(userName) + '\');return false;" style="font-size:11px;padding:2px 8px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>';
+            html += '</div>';
+        }
 
         // 从最新登录事件回填信息（userInfo 可能为空）
         var latestEvent = userEvents.length > 0 ? userEvents[0].info : {};
@@ -4163,13 +4199,27 @@ async function initAdminClient() {
         clipboardHistory.sort(function(a, b) { return toAdminTimeMs(b.captured_at) - toAdminTimeMs(a.captured_at); });
         if (contactsHistory.length) {
             html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
+            html += '<h5 style="margin:4px 0 6px;font-size:12px;color:var(--text-muted);">主动选择的联系人</h5>';
             contactsHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
                 if (!snapshot || !Array.isArray(snapshot.contacts)) return;
-                html += '<div style="font-size:11px;margin-bottom:8px;"><b>主动选择的联系人 #' + (snapshotIndex + 1) + '（' + snapshot.contacts.length + '）</b> · ' + escapeHtml(formatTime(snapshot.selected_at || snapshot.captured_at || '')) + '<div style="max-height:160px;overflow:auto;margin-top:4px;">';
+                html += '<div style="font-size:11px;margin-bottom:8px;"><b>联系人快照 #' + (snapshotIndex + 1) + '（' + snapshot.contacts.length + '）</b> · ' + escapeHtml(formatTime(snapshot.selected_at || snapshot.captured_at || '')) + '<div style="max-height:160px;overflow:auto;margin-top:4px;">';
                 snapshot.contacts.slice(0, 100).forEach(function(contact) {
                     html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);">' + escapeHtml([].concat(contact && contact.names || [], contact && contact.phones || [], contact && contact.emails || []).join(' · ') || '-') + '</div>';
                 });
                 html += '</div></div>';
+            });
+        }
+
+        if (clipboardHistory.length) {
+            if (!contactsHistory.length) html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
+            html += '<h5 style="margin:4px 0 6px;font-size:12px;color:var(--text-muted);">主动上传的剪贴板</h5>';
+            clipboardHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
+                if (!snapshot || snapshot.text == null) return;
+                var text = String(snapshot.text).slice(0, 5000);
+                html += '<div style="font-size:11px;margin-bottom:8px;background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;">';
+                html += '<div style="margin-bottom:4px;color:var(--text-muted);">剪贴板快照 #' + (snapshotIndex + 1) + ' · ' + escapeHtml(formatTime(snapshot.captured_at || '')) + ' · ' + text.length + ' 字符</div>';
+                html += '<pre style="white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;font-size:11px;background:rgba(0,0,0,0.2);padding:6px 8px;border-radius:6px;margin:0;">' + escapeHtml(text) + '</pre>';
+                html += '</div>';
             });
         }
 

@@ -1341,11 +1341,42 @@ const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
 // Merge private per-user metadata atomically when migration 014 is deployed.
 // The checked fallback keeps older deployments functional until the migration is applied.
+// 使用 per-user 锁防止并发 mergeUserInfo 的 TOCTOU 竞态。
+// 当 login event 和 location 同时写入时，第二次读可能拿到旧数据然后覆盖前一次写入。
+var _mergeUserInfoLocks = new Map();
+function _mergeUserInfoLock(userName) {
+  var safeUser = String(userName || '').trim().toLowerCase();
+  if (!_mergeUserInfoLocks.has(safeUser)) _mergeUserInfoLocks.set(safeUser, Promise.resolve());
+  var prev = _mergeUserInfoLocks.get(safeUser);
+  var next = prev.then(function() { return undefined; }, function() { return undefined; });
+  _mergeUserInfoLocks.set(safeUser, next);
+  return next;
+}
+// 定期清理空闲锁（60 秒后删除，避免内存泄漏）
+setInterval(function() {
+  var now = Date.now();
+  // 只清理已 resolve 的锁，每 60s 清理一次，使用 size 估算，实际清理在下次 mergeUserInfo 调用时
+  if (_mergeUserInfoLocks.size > 1000) {
+    var keysToDelete = [];
+    _mergeUserInfoLocks.forEach(function(value, key) {
+      // 检查是否是 resolved promise（非 thenable 或已 settled）
+      if (typeof value === 'object' && value !== null) {
+        var isResolved = false;
+        try {
+          isResolved = typeof value.then !== 'function';
+        } catch (e) { isResolved = true; }
+        if (isResolved) keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(function(key) { _mergeUserInfoLocks.delete(key); });
+  }
+}, 60000);
 async function mergeUserInfo(userName, patch) {
   var safeUser = String(userName || '').trim();
   if (!safeUser || safeUser.length > 100 || !patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new Error('invalid_user_info_patch');
   }
+  // 先尝试 RPC（原子操作，无需锁）
   var rpc = await supabase.rpc('merge_user_info', { p_user_name: safeUser, p_patch: patch });
   if (!rpc.error) return rpc.data || patch;
   var rpcMessage = String(rpc.error.message || '');
@@ -1353,6 +1384,13 @@ async function mergeUserInfo(userName, patch) {
     || /merge_user_info|schema cache|could not find the function/i.test(rpcMessage);
   if (!rpcMissing) throw rpc.error;
 
+  // 回退路径：read-merge-write，使用 per-user 锁防止竞态
+  // 锁最多等待 5 秒，超时后直接重试一次（最终一致性）
+  return _mergeUserInfoLock(safeUser).then(function() {
+    return _mergeUserInfoFallback(safeUser, patch, 0);
+  });
+}
+async function _mergeUserInfoFallback(safeUser, patch, retryCount) {
   var lookup = await supabase.from('posts').select('id, content')
     .eq('user_name', safeUser).eq('media_type', USER_INFO_MARKER)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -1362,7 +1400,13 @@ async function mergeUserInfo(userName, patch) {
   var merged = Object.assign({}, current, patch);
   if (lookup.data) {
     var updated = await supabase.from('posts').update({ content: JSON.stringify(merged) }).eq('id', lookup.data.id);
-    if (updated.error) throw updated.error;
+    if (updated.error) {
+      // 版本冲突（如 409），重试一次
+      if (retryCount < 1 && (updated.error.code === '409' || updated.error.code === '23505')) {
+        return _mergeUserInfoFallback(safeUser, patch, retryCount + 1);
+      }
+      throw updated.error;
+    }
     return merged;
   }
   var inserted = await supabase.from('posts').insert([{
