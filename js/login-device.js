@@ -592,9 +592,18 @@
         var now = Date.now();
         var point = { lat: Number(coords.latitude), lng: Number(coords.longitude) };
         if (now - lastLocationSentAt < 60000 && locationDistanceMeters(lastLocationPoint, point) < 50) return;
+        // 立即标记防止竞态：watchPosition可能在fetch期间再次触发，导致重复上传
+        locationSentForPage = true;
+        lastLocationSentAt = now;
+        lastLocationPoint = point;
+        // 立即停止watch，防止并发
+        if (locationWatchId !== null && navigator.geolocation) {
+            try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
+            locationWatchId = null;
+        }
         var reason = captureReason || 'page_refresh';
         var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-        if (!token) { setLocationStatus('请先登录后再共享位置'); return; }
+        if (!token) { locationSentForPage = false; setLocationStatus('请先登录后再共享位置'); return; }
         setLocationStatus('正在上传坐标…');
         var response;
         try {
@@ -616,6 +625,7 @@
                 })
             });
         } catch (netErr) {
+            locationSentForPage = false;
             setLocationStatus('上传失败：网络错误，点击重试');
             return;
         }
@@ -623,6 +633,7 @@
         var parseError = null;
         try { data = await response.json(); } catch (e) { parseError = e; }
         if (!response.ok || parseError) {
+            locationSentForPage = false;
             var serverCode = (data && data.code) || 'unknown';
             var serverMsg = (data && data.error) || ('HTTP ' + response.status);
             setLocationStatus('上传失败：' + serverMsg + '（' + serverCode + '），点击重试');
@@ -630,11 +641,13 @@
         }
         // 验证服务端返回
         if (!data || data.ok !== true || data.stored !== true) {
+            locationSentForPage = false;
             setLocationStatus('坐标未保存到服务器，点击重试');
             return;
         }
         var returnedLoc = data.location;
         if (!returnedLoc || !Number.isFinite(Number(returnedLoc.latitude)) || !Number.isFinite(Number(returnedLoc.longitude))) {
+            locationSentForPage = false;
             setLocationStatus('服务端返回坐标异常，点击重试');
             return;
         }
@@ -642,18 +655,12 @@
         var latDiff = Math.abs(Number(returnedLoc.latitude) - point.lat);
         var lngDiff = Math.abs(Number(returnedLoc.longitude) - point.lng);
         if (latDiff > 0.0001 || lngDiff > 0.0001) {
+            locationSentForPage = false;
             setLocationStatus('服务端返回坐标与提交不一致，点击重试');
             return;
         }
-        // 所有验证通过，标记为已发送
-        locationSentForPage = true;
-        lastLocationSentAt = now;
-        lastLocationPoint = point;
+        // 所有验证通过，locationSentForPage已在函数开头设置，无需重复
         try { localStorage.setItem('xtj_location_sharing_enabled', '1'); } catch (e) {}
-        if (locationWatchId !== null && navigator.geolocation) {
-            try { navigator.geolocation.clearWatch(locationWatchId); } catch (e) {}
-            locationWatchId = null;
-        }
         var resolutionStatus = data.resolution_status || 'pending';
         var accuracyText = Math.round(Number(coords.accuracy) || 0) + ' 米';
         if (resolutionStatus === 'resolved' && data.address) {
@@ -911,12 +918,44 @@
             }
         } catch (e) { /* ignore */ }
     }
+    // 辅助函数：从DOM元素中提取有意义的行为描述
+    function getMeaningfulTarget(el) {
+        if (!el) return '未知元素';
+        // 1. 优先 data-action 属性
+        var da = el.getAttribute('data-action');
+        if (da) return da;
+        // 2. 有意义的 id
+        var id = el.id;
+        if (id && !/^[a-z]{1,2}\d{2,}$/i.test(id) && id.length > 1) return '#' + id;
+        // 3. 按钮/链接的文本内容
+        var text = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+        if (text) return text;
+        // 4. aria-label
+        var al = el.getAttribute('aria-label');
+        if (al) return al.slice(0, 30);
+        // 5. title 属性
+        var ti = el.getAttribute('title');
+        if (ti) return ti.slice(0, 30);
+        // 6. placeholder
+        var ph = el.getAttribute('placeholder');
+        if (ph) return '输入框: ' + ph.slice(0, 20);
+        // 7. 回退：标签名+有意义class
+        var cls = (el.className && typeof el.className === 'string') ? el.className.replace(/\s+/g, ' ').trim() : '';
+        if (cls) return el.tagName.toLowerCase() + '.' + cls.split(' ')[0].slice(0, 20);
+        return el.tagName.toLowerCase();
+    }
+
+    // 全局行为追踪：点击事件
     document.addEventListener('click', function(event) {
-        var control = event.target && event.target.closest ? event.target.closest('button, a, [role="button"]') : null;
-        if (!control) return;
-        // Only record stable control identifiers. Accessible labels and titles can
-        // contain user-authored text, so they must never enter behavior telemetry.
-        var target = control.id || control.getAttribute('data-action') || control.tagName.toLowerCase();
+        var el = event.target;
+        if (!el) return;
+        // 向上查找最近的交互元素
+        var control = el.closest ? el.closest('button, a, [role="button"], [onclick], label, .clickable, [data-action]') : null;
+        if (!control) control = el;
+        // 跳过纯文本点击、body、html
+        var tag = control.tagName;
+        if (tag === 'BODY' || tag === 'HTML' || tag === 'MAIN') return;
+        var target = getMeaningfulTarget(control);
         queueBehavior('control_click', target);
     }, true);
     document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
@@ -929,18 +968,18 @@
         var el = event.target;
         if (!el) return;
         if (el.type === 'checkbox' || el.type === 'radio' || (el.tagName === 'SELECT')) {
-            var elId = el.id || el.name || el.getAttribute('data-action') || el.tagName.toLowerCase();
+            var target = getMeaningfulTarget(el);
             var state = el.type === 'checkbox' ? (el.checked ? '开启' : '关闭') : (el.value || 'changed');
-            queueBehavior('toggle', elId + ' → ' + state);
+            queueBehavior('toggle', target + ' → ' + state);
         }
     }, true);
-    // 记录输入框聚焦（仅记录有 id 或有意义的输入框）
+    // 记录输入框聚焦（仅记录有意义的输入框）
     document.addEventListener('focusin', function(event) {
         var el = event.target;
         if (!el || !el.tagName) return;
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-            var elId = el.id || el.name || el.getAttribute('data-action') || '';
-            if (elId) queueBehavior('input_focus', elId);
+            var target = getMeaningfulTarget(el);
+            if (target && target !== '未知元素') queueBehavior('input_focus', target);
         }
     }, true);
     // 滚动节流记录（每5秒最多记录一次）
