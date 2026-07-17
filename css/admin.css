@@ -644,6 +644,8 @@
     #tabBlacklistBtn { --tab-icon-color: #8d4f5f; --tab-icon-bg: rgba(141,79,95,0.12); --tab-icon-bg-hover: rgba(141,79,95,0.18); }
     #tabPhotosBtn { --tab-icon-color: #14a089; --tab-icon-bg: rgba(20,160,137,0.12); --tab-icon-bg-hover: rgba(20,160,137,0.18); }
     #tabEmailBtn { --tab-icon-color: #e86f2c; --tab-icon-bg: rgba(232,111,44,0.12); --tab-icon-bg-hover: rgba(232,111,44,0.18); }
+    #tabBehaviorBtn { --tab-icon-color: #3b9f8c; --tab-icon-bg: rgba(59,159,140,0.12); --tab-icon-bg-hover: rgba(59,159,140,0.18); }
+    #tabAiBtn { --tab-icon-color: #7c3aed; --tab-icon-bg: rgba(124,58,237,0.12); --tab-icon-bg-hover: rgba(124,58,237,0.18); }
     .dash-header .dh-right button[onclick="toggleTheme()"] {
         --tab-icon-color: #d6a414;
         --tab-icon-bg: rgba(214,164,20,0.12);
@@ -830,11 +832,6 @@
     .btn-sm.del:hover { background: rgba(255,59,96,0.12); }
     .btn-sm.primary { background: var(--primary); color: white; border-color: var(--primary); }
 
-    .modal-overlay {
-        position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-        z-index: 9999; display: flex; align-items: center; justify-content: center;
-        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-    }
     .modal-box {
         background: var(--bg); border-radius: 16px;
         border: 1px solid var(--border);
@@ -1072,7 +1069,7 @@
 
     .modal-overlay {
         position: fixed; inset: 0; z-index: 10001;
-        background: rgba(0,0,0,0.45); backdrop-filter: blur(4px);
+        background: rgba(0,0,0,0.45); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         display: none; align-items: center; justify-content: center;
     }
     .modal-overlay.active { display: flex; animation: fadeIn 0.25s ease; }
