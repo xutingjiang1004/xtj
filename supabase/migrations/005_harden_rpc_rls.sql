@@ -77,6 +77,7 @@ BEGIN
   END IF;
   v_features := COALESCE(v_info->'features', '[]'::jsonb);
 
+  PERFORM pg_advisory_xact_lock(hashtextextended('pro_claim_' || p_gift_id, 0));
   IF EXISTS (SELECT 1 FROM posts WHERE actor_key = 'pro_claim_' || p_gift_id || '_' || p_user_name AND media_type = '__pro_gift_claim__') THEN
     RETURN jsonb_build_object('ok', false, 'error', '你已经领取过该活动');
   END IF;

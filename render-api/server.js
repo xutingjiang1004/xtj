@@ -6078,6 +6078,9 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
+  const { data: existingMutes } = await supabase.from('mutes').select('id').eq('user_name', userNameVal).eq('is_active', true).limit(1);
+  if (existingMutes && existingMutes.length) return res.status(409).json({ error: '该用户已被禁言' });
+  
   let expiresAt = null;
   if (durationHoursVal > 0) {
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
@@ -6108,6 +6111,8 @@ app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
     }
   } catch(e) {}
   const { id } = req.params;
+  const { data: muteRecord } = await supabase.from('mutes').select('id').eq('id', id).maybeSingle();
+  if (!muteRecord) return res.status(404).json({ error: '禁言记录不存在' });
   const { error } = await supabase.from('mutes').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
@@ -6151,8 +6156,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
       duration_hours: durationHoursVal,
       added_by: ADMIN_USERNAME,
       expires_at: expiresAt,
-      is_active: true,
-      created_at: new Date().toISOString()
+      is_active: true
     }).eq('id', existing[0].id);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
   } else {
@@ -6443,7 +6447,7 @@ app.put('/admin/report/:id', verifyToken, async (req, res) => {
     return res.status(400).json({ error: '无效的状态值' });
   }
   // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).maybeSingle();
+  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
   if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
   if (!post) return res.status(404).json({ error: '举报不存在' });
   var c = {};
@@ -6468,7 +6472,7 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
   const responseVal = validateString(response, MAX_CONTENT_LEN, '回复');
   if (responseVal && responseVal.error) return res.status(400).json({ error: responseVal.error });
   // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: post, error: fetchErr } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+  const { data: post, error: fetchErr } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
   if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
   if (!post) return res.status(404).json({ error: '举报不存在' });
   var c = {};
@@ -6491,7 +6495,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     // 从 posts 表获取举报数据（存储在 content JSON 中）
-    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
     if (!reportPost) return res.status(404).json({ error: '举报不存在' });
     var c = {};
     try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
@@ -6543,7 +6547,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { duration_hours } = req.body;
     // 从 posts 表获取举报数据（存储在 content JSON 中）
-    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
     if (!reportPost) return res.status(404).json({ error: '举报不存在' });
     var c = {};
     try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
@@ -6846,7 +6850,7 @@ app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, r
       };
     });
 
-    return res.json({ data: attacks, total: attacks.length });
+    return res.json({ data: attacks, total: typeof count === 'number' ? count : attacks.length });
   } catch (e) {
     console.error('[API] 攻击详情加载失败:', e.message);
     return res.status(500).json({ error: '攻击详情加载失败' });
@@ -7231,7 +7235,8 @@ async function processLocationTasks() {
       var { data: allTasks } = await supabase.from('posts')
         .select('id, content')
         .eq('media_type', LOCATION_TASK_MARKER)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(200);
       if (allTasks && allTasks.length > 100) {
         var toDelete = allTasks.slice(100).filter(function(row) {
           var t = {}; try { t = JSON.parse(row.content || '{}'); } catch(_) {}
@@ -9450,11 +9455,16 @@ async function handleDeepThinkChat(req, res) {
       try {
         sseSend({ type: 'deep_think_stage', stage: 'agent', message: '深度研究遇到问题, 降级为快速回复...' });
         var fallbackCorePrompt = buildAiCorePrompt(config);
-        var fallbackPrompt = fallbackCorePrompt + '\n\n用户问题: ' + message + '\n\n直接给出有深度的答案。';
-        var fallbackResult = await callDeepSeek(
-          [{ role: 'system', content: fallbackPrompt + (buildHistoryContext(ctx, message) || '') }],
-          { thinking_mode: 'low', max_tokens: 4096 }
-        );
+        var fallbackMessages = [{ role: 'system', content: fallbackCorePrompt + '\n\n直接给出有深度的答案。' }];
+        if (ctx && Array.isArray(ctx.history) && ctx.history.length > 0) {
+          var recentHistory = ctx.history.slice(-6);
+          recentHistory.forEach(function(h) {
+            var role = h.role === 'assistant' ? 'assistant' : 'user';
+            fallbackMessages.push({ role: role, content: String(h.content || '').slice(0, 500) });
+          });
+        }
+        fallbackMessages.push({ role: 'user', content: message || '' });
+        var fallbackResult = await callDeepSeek(fallbackMessages, { thinking_mode: 'low', max_tokens: 4096 });
         flowResult = {
           cancelled: false,
           finalContent: (fallbackResult.content || '') + '\n\n（深度研究模式暂时不可用, 以上为降级回复）',

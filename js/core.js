@@ -2490,10 +2490,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             var safeProfileAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
                             profileAvatar.innerHTML = '<img src="' + safeProfileAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                             avatarCache[currentUser] = avatarRes.data[0].media_url;
-                            // 閸氬本顒為柛鎺旀ocalStorage
                             try {
                                 var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                                cv[currentUser] = avatarUrl;
+                                cv[currentUser] = avatarRes.data[0].media_url;
                                 localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
                             } catch(e) {}
                         } else {
@@ -9608,7 +9607,8 @@ function renderProfileActivityList(kind) {
                         if (error) throw error;
 
                         const readIds = getReadAnnouncements();
-                        const filteredReadIds = readIds.filter(id => id !== ann.id);
+                        var annReadId = window.getAnnouncementId ? window.getAnnouncementId(ann) : ('a_' + ann.id);
+                        const filteredReadIds = readIds.filter(id => id !== annReadId);
                         saveReadAnnouncements(filteredReadIds);
 
                         showToast('公告已删除');
@@ -11124,7 +11124,7 @@ function renderProfileActivityList(kind) {
                 var selected = _reportSelectedId === item.id ? ' selected' : '';
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="var card=this.closest(&quot;.report-content-item&quot;); if(card){card.remove();}">'
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';var parent=this.closest(\'.rc-thumb\');if(parent){parent.className=\'rc-thumb rc-thumb--text\';parent.innerHTML=\'<span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span>\'}">'
                     : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;
@@ -11188,9 +11188,12 @@ function renderProfileActivityList(kind) {
 
             try {
                 if (typeof API_BASE !== 'undefined' && API_BASE) {
+                    var reportHeaders = { 'Content-Type': 'application/json' };
+                    var reportToken = getUserToken();
+                    if (reportToken) reportHeaders['Authorization'] = 'Bearer ' + reportToken;
                     var res = await fetch(API_BASE + '/api/report', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: reportHeaders,
                         body: JSON.stringify({
                             reporter_name: currentUser,
                             target_type: _reportType,
@@ -12802,7 +12805,7 @@ function renderProfileActivityList(kind) {
                 if (!usedFastSnapshot || skipCache) {
                     return originalInitialLoad.call(this, skipCache);
                 }
-                loadFeed(true);
+                await loadFeed(true);
             };
             window.initialLoad = initialLoad;
 
