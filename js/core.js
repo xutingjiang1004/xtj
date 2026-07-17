@@ -5082,15 +5082,26 @@ function renderProfileActivityList(kind) {
 
             async function insertPostRecord(payload, fallbackContent) {
                 try {
+                    var body = {
+                        content: payload.content || fallbackContent || '',
+                        media_url: payload.media_url || '',
+                        media_type: payload.media_type || '',
+                        actor_key: payload.actor_key || '',
+                        visibility: payload.visibility || 'public'
+                    };
+                    // 位置字段（可选，用户主动选择）
+                    if (payload.location && payload.location.name) {
+                        body.location = {
+                            name: payload.location.name || '',
+                            province: payload.location.province || '',
+                            city: payload.location.city || '',
+                            district: payload.location.district || '',
+                            level: payload.location.level || ''
+                        };
+                    }
                     var response = await window.xtjProtectedFetch('/api/post/create', {
                         method: 'POST',
-                        body: JSON.stringify({
-                            content: payload.content || fallbackContent || '',
-                            media_url: payload.media_url || '',
-                            media_type: payload.media_type || '',
-                            actor_key: payload.actor_key || '',
-                            visibility: payload.visibility || 'public'
-                        })
+                        body: JSON.stringify(body)
                     });
                     var result = await response.json().catch(function() { return {}; });
                     if (!response.ok || !result.ok || !result.data) {
@@ -5135,6 +5146,7 @@ function renderProfileActivityList(kind) {
                 if (postInp) postInp.value = "";
                 if (fileInp) fileInp.value = "";
                 if (visibilityEl) visibilityEl.value = "public";
+                resetPostLocation();
             }
 
             function buildPostStorageContent(post, text, metaOverrides) {
@@ -5275,6 +5287,22 @@ function renderProfileActivityList(kind) {
                 return actions.join("");
             }
 
+            function buildPostLocationHtml(normalized) {
+                var parts = [];
+                // 用户选择的位置
+                if (normalized.location_name) {
+                    parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(normalized.location_name) + '</div>');
+                }
+                // IP 属地（后端生成，强制显示）
+                var ipText = normalized.ip_region_text || '';
+                if (!ipText && normalized.ip_region_status === 'pending') ipText = '解析中';
+                if (!ipText && normalized.ip_region_status === 'failed') ipText = '未知';
+                if (ipText) {
+                    parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
+                }
+                return parts.length ? '<div class="post-location-info">' + parts.join('') + '</div>' : '';
+            }
+
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
                 var normalized = normalizePost(post);
                 // 安全兜底：content 是登录事件 JSON 则跳过
@@ -5314,6 +5342,7 @@ function renderProfileActivityList(kind) {
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
                   ${mediaMarkup}
+                  ${buildPostLocationHtml(normalized)}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
@@ -6226,6 +6255,143 @@ function renderProfileActivityList(kind) {
                     return;
                 }
             });
+            // ── 帖子位置功能 ──
+            var postLocationData = null;
+            var postLocationRequesting = false;
+
+            window.requestPostLocation = function() {
+                if (postLocationRequesting) return;
+                var btn = document.getElementById('postLocationAddBtn');
+                if (!btn) return;
+                if (!navigator.geolocation) {
+                    showToast('您的浏览器不支持定位功能');
+                    return;
+                }
+                postLocationRequesting = true;
+                btn.disabled = true;
+                btn.textContent = '正在获取位置...';
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude);
+                    },
+                    function(error) {
+                        postLocationRequesting = false;
+                        btn.disabled = false;
+                        btn.textContent = '📍 添加位置';
+                        var msg = '定位失败';
+                        if (error.code === 1) msg = '位置权限被拒绝，请在浏览器设置中允许定位';
+                        else if (error.code === 2) msg = '定位暂时不可用，请稍后重试';
+                        else if (error.code === 3) msg = '定位超时，请重试';
+                        showToast(msg);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+                );
+            };
+
+            async function reverseGeocodePostLocation(lat, lng) {
+                var btn = document.getElementById('postLocationAddBtn');
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/location/reverse', {
+                        method: 'POST',
+                        body: JSON.stringify({ latitude: lat, longitude: lng })
+                    });
+                    var data = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || !data.ok) {
+                        showToast('地址解析失败: ' + (data.error || '请重试'));
+                        postLocationRequesting = false;
+                        if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                        return;
+                    }
+                    showPostLocationOptions(data);
+                } catch (e) {
+                    showToast('地址解析失败，请检查网络');
+                    postLocationRequesting = false;
+                    if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                }
+            }
+
+            function showPostLocationOptions(geoData) {
+                var panel = document.getElementById('postLocationPanel');
+                var optionsEl = document.getElementById('postLocationOptions');
+                if (!panel || !optionsEl) return;
+                optionsEl.innerHTML = '';
+                var options = geoData.options || [];
+                if (options.length === 0) {
+                    if (geoData.province && geoData.city) {
+                        options.push({ level: 'city', name: geoData.province + geoData.city, province: geoData.province, city: geoData.city });
+                    }
+                    if (geoData.city && geoData.district) {
+                        options.push({ level: 'district', name: geoData.city + geoData.district, province: geoData.province, city: geoData.city, district: geoData.district });
+                    }
+                }
+                for (var i = 0; i < options.length; i++) {
+                    var opt = options[i];
+                    var optEl = document.createElement('div');
+                    optEl.className = 'post-location-option';
+                    optEl.textContent = opt.name;
+                    optEl.setAttribute('role', 'button');
+                    optEl.setAttribute('tabindex', '0');
+                    (function(option) {
+                        optEl.addEventListener('click', function() { selectPostLocationOption(option); });
+                        optEl.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectPostLocationOption(option); }
+                        });
+                    })(opt);
+                    optionsEl.appendChild(optEl);
+                }
+                panel.style.display = 'block';
+                var addRow = document.getElementById('postLocationAddRow');
+                if (addRow) addRow.style.display = 'none';
+                postLocationRequesting = false;
+                var btn = document.getElementById('postLocationAddBtn');
+                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+            }
+
+            window.selectPostLocationOption = function(option) {
+                var panel = document.getElementById('postLocationPanel');
+                var addRow = document.getElementById('postLocationAddRow');
+                var preview = document.getElementById('postLocationPreview');
+                var nameEl = document.getElementById('postLocationName');
+                if (panel) panel.style.display = 'none';
+                if (option && option.name) {
+                    postLocationData = {
+                        name: option.name,
+                        province: option.province || '',
+                        city: option.city || '',
+                        district: option.district || '',
+                        level: option.level || ''
+                    };
+                    if (nameEl) nameEl.textContent = option.name;
+                    if (preview) preview.style.display = 'flex';
+                    if (addRow) addRow.style.display = 'none';
+                } else {
+                    postLocationData = null;
+                    if (preview) preview.style.display = 'none';
+                    if (addRow) addRow.style.display = 'block';
+                }
+            };
+
+            window.removePostLocation = function() {
+                postLocationData = null;
+                var preview = document.getElementById('postLocationPreview');
+                var addRow = document.getElementById('postLocationAddRow');
+                if (preview) preview.style.display = 'none';
+                if (addRow) addRow.style.display = 'block';
+            };
+
+            function resetPostLocation() {
+                postLocationData = null;
+                postLocationRequesting = false;
+                var panel = document.getElementById('postLocationPanel');
+                var preview = document.getElementById('postLocationPreview');
+                var addRow = document.getElementById('postLocationAddRow');
+                var btn = document.getElementById('postLocationAddBtn');
+                if (panel) panel.style.display = 'none';
+                if (preview) preview.style.display = 'none';
+                if (addRow) addRow.style.display = 'block';
+                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+            }
+
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var btn = document.getElementById("pubBtn");
@@ -6273,7 +6439,8 @@ function renderProfileActivityList(kind) {
                         visibility: metadata.visibility,
                         is_pinned: false,
                         pinned_at: null,
-                        updated_at: null
+                        updated_at: null,
+                        location: postLocationData || null
                     };
                     var insertRes = await insertPostRecord(payload, contentPayload);
                     if (!insertRes.ok) {

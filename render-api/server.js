@@ -2195,6 +2195,72 @@ async function resolveIpLocationUncached(ip) {
   return null;
 }
 
+// 帖子 IP 属地专用解析（返回简化格式：省份+城市，用于帖子展示）
+var ipRegionCache = new Map();
+var IP_REGION_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7天
+var IP_REGION_CACHE_MAX = 2000;
+
+async function resolveIpRegion(ip) {
+  if (!ip || ip === 'unknown') return { province: '', city: '', text: '', status: 'failed' };
+  if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.') || ip === '::1') {
+    return { province: '', city: '', text: '', status: 'failed' };
+  }
+  // 检查缓存
+  var cached = ipRegionCache.get(ip);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) ipRegionCache.delete(ip);
+
+  try {
+    var location = await resolveIpLocation(ip);
+    if (location && (location.region || location.city || location.country)) {
+      var province = location.region || location.country || '';
+      var city = location.city || '';
+      var text = [province, city].filter(Boolean).join(' ');
+      var result = { province: province, city: city, text: text || '未知', status: 'resolved' };
+      // 写入缓存
+      if (ipRegionCache.size >= IP_REGION_CACHE_MAX) {
+        var oldestKey = ipRegionCache.keys().next().value;
+        if (oldestKey !== undefined) ipRegionCache.delete(oldestKey);
+      }
+      ipRegionCache.set(ip, { value: result, expiresAt: Date.now() + IP_REGION_CACHE_TTL_MS });
+      return result;
+    }
+  } catch (e) {
+    console.warn('[IP Region] 解析失败:', ip, e.message || e);
+  }
+  return { province: '', city: '', text: '', status: 'failed' };
+}
+
+// 异步重试 IP 属地解析（最多3次：发布时→30秒后→5分钟后）
+async function retryIpRegionAsync(postId, ip, attempt) {
+  if (attempt > 3) return;
+  try {
+    var result = await resolveIpRegion(ip);
+    if (result.status === 'resolved') {
+      await supabase.from('posts').update({
+        ip_province: result.province,
+        ip_city: result.city,
+        ip_region_text: result.text,
+        ip_region_status: 'resolved',
+        ip_resolved_at: new Date().toISOString()
+      }).eq('id', postId);
+      return;
+    }
+  } catch (e) {
+    console.warn('[IP Retry] 重试 ' + attempt + ' 失败:', postId, e.message || e);
+  }
+  if (attempt < 3) {
+    var delay = attempt === 1 ? 30000 : 300000;
+    setTimeout(function() { retryIpRegionAsync(postId, ip, attempt + 1); }, delay);
+  } else {
+    try {
+      await supabase.from('posts').update({
+        ip_region_status: 'failed'
+      }).eq('id', postId);
+    } catch (_) {}
+  }
+}
+
 // ===================== IP 解析健康检查与手动重试 =====================
 
 // GET /admin/ip-health - 查看 IP 解析 Provider 诊断信息
@@ -5236,6 +5302,26 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     if (mediaUrl && !/^https:\/\//i.test(mediaUrl)) return res.status(400).json({ error: '媒体地址无效', code: 'invalid_media_url' });
     if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
 
+    // ── 位置字段（可选，用户主动选择） ──
+    var location = req.body && req.body.location;
+    var locationName = null, locationProvince = null, locationCity = null, locationDistrict = null, locationLevel = null;
+    if (location && typeof location === 'object' && !Array.isArray(location)) {
+      locationName = String(location.name || '').slice(0, 80).replace(/<[^>]*>/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim() || null;
+      locationProvince = String(location.province || '').slice(0, 40).replace(/<[^>]*>/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim() || null;
+      locationCity = String(location.city || '').slice(0, 40).replace(/<[^>]*>/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim() || null;
+      locationDistrict = String(location.district || '').slice(0, 40).replace(/<[^>]*>/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim() || null;
+      locationLevel = ['city', 'district', 'address'].indexOf(location.level) >= 0 ? location.level : null;
+    }
+
+    // ── IP 属地（后端强制生成，忽略前端提交的任何 IP 字段） ──
+    var clientIp = getClientIp(req);
+    var ipRegion = { province: '', city: '', text: '', status: 'pending' };
+    try {
+      ipRegion = await resolveIpRegion(clientIp);
+    } catch (_) {
+      // IP 解析失败不阻止发帖
+    }
+
     var payload = {
       user_name: req.userName,
       content: content,
@@ -5245,12 +5331,22 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       visibility: visibility,
       is_pinned: false,
       pinned_at: null,
-      updated_at: null
+      updated_at: null,
+      location_name: locationName,
+      location_province: locationProvince,
+      location_city: locationCity,
+      location_district: locationDistrict,
+      location_level: locationLevel,
+      ip_province: ipRegion.province,
+      ip_city: ipRegion.city,
+      ip_region_text: ipRegion.text,
+      ip_region_status: ipRegion.status,
+      ip_resolved_at: ipRegion.status === 'resolved' ? new Date().toISOString() : null
     };
     var inserted = await supabase.from('posts').insert([payload]).select('*').single();
     if (inserted.error) {
       // Older production schemas may not yet expose the optional feed columns.
-      var schemaMismatch = /visibility|is_pinned|pinned_at|updated_at|column/i.test(String(inserted.error.message || ''));
+      var schemaMismatch = /visibility|is_pinned|pinned_at|updated_at|location_name|ip_province|column/i.test(String(inserted.error.message || ''));
       if (!schemaMismatch) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
       var legacyPayload = {
         user_name: req.userName,
@@ -5262,10 +5358,60 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       inserted = await supabase.from('posts').insert([legacyPayload]).select('*').single();
       if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
     }
+
+    // IP 解析失败时异步重试
+    if (ipRegion.status === 'failed' || ipRegion.status === 'pending') {
+      retryIpRegionAsync(inserted.data.id, clientIp, 1);
+    }
+
     return res.status(201).json({ ok: true, data: inserted.data });
   } catch (e) {
     console.error('[API] post create:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '发布失败', code: 'create_failed' });
+  }
+});
+
+// POST /api/location/reverse - 经纬度反向地址解析（用户发布帖子时选择位置）
+app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var lat = parseFloat(req.body && req.body.latitude);
+    var lng = parseFloat(req.body && req.body.longitude);
+    if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({ error: '经纬度无效', code: 'invalid_coords' });
+    }
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 3000);
+    try {
+      var resp = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng) + '&accept-language=zh&zoom=16', {
+        headers: { 'User-Agent': 'XTJ/1.0 (post-location)' },
+        signal: controller.signal
+      });
+      if (!resp.ok) throw new Error('Nominatim HTTP ' + resp.status);
+      var data = await resp.json();
+      if (!data || data.error) throw new Error('Nominatim error: ' + (data.error || 'empty'));
+      var address = data.address || {};
+      var province = address.province || address.state || '';
+      var city = address.city || address.town || address.county || address.city_district || '';
+      var district = address.district || address.suburb || address.village || address.municipality || '';
+      var addrName = data.name || data.display_name || '';
+      // 构建选项列表
+      var options = [];
+      if (province && city) options.push({ level: 'city', name: province + city });
+      if (city && district) options.push({ level: 'district', name: city + district });
+      if (addrName && addrName.length < 40) options.push({ level: 'address', name: addrName });
+      return res.json({
+        ok: true,
+        province: province,
+        city: city,
+        district: district,
+        address: addrName,
+        options: options
+      });
+    } finally { clearTimeout(timeout); }
+  } catch (e) {
+    console.error('[API] reverse geocode:', e && e.message);
+    if (e && e.name === 'AbortError') return res.status(504).json({ error: '地址解析超时，请重试', code: 'geocode_timeout' });
+    return res.status(502).json({ error: '地址解析失败，请重试', code: 'geocode_failed' });
   }
 });
 
