@@ -472,10 +472,12 @@ test('/api/feed filters system markers and visibility at database level before p
   // 必须先用 neq 排除系统标记，再用分页
   var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
   assert.ok(feedSection.indexOf('.range(from, to)') >= 0, '/api/feed missing range pagination');
-  // 系统标记排除必须在 range 之前
+  // System rows must be excluded before pagination. The current implementation
+  // uses a safe media-type allowlist so NULL post rows are retained.
   var rangeIdx = feedSection.indexOf('.range(from, to)');
   var neqIdx = feedSection.indexOf(".neq('media_type',");
-  assert.ok(neqIdx >= 0 && neqIdx < rangeIdx, '/api/feed system marker filter must appear before range pagination');
+  var allowlistIdx = feedSection.indexOf('media_type.in.');
+  assert.ok((neqIdx >= 0 || allowlistIdx >= 0) && Math.max(neqIdx, allowlistIdx) < rangeIdx, '/api/feed system marker filter must appear before range pagination');
   // 不能使用 JS 层 filter 做二次过滤
   var jsFilterIdx = feedSection.indexOf('SYSTEM_MARKERS.indexOf');
   assert.ok(jsFilterIdx < 0 || jsFilterIdx > rangeIdx, '/api/feed must not use JS-level filter for system markers');

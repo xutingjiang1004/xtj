@@ -3925,7 +3925,12 @@
 
   function renderAiToolCard(messagesEl, card) {
     if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
+    var cardId = String(card.id || '');
+    if (!messagesEl.__xtjAiCardIds) messagesEl.__xtjAiCardIds = {};
+    if (cardId && messagesEl.__xtjAiCardIds[cardId]) return null;
+    if (cardId) messagesEl.__xtjAiCardIds[cardId] = true;
     var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + String(card.type || 'tool_result').replace(/[^a-z_]/g, '') });
+    if (cardId) shell.setAttribute('data-ai-card-id', cardId);
     shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
     var data = card.data || {};
     if (Array.isArray(data.results)) {
@@ -3936,10 +3941,11 @@
         result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
         result.addEventListener('click', function() {
           var target = item.jump_target || {};
-          if ((target.type === 'post' || target.type === 'comment' || target.type === 'photo') && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
+          if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
+          else if (target.type === 'photo' && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
           else if (target.type === 'dm' && typeof window.openChat === 'function') window.openChat(target.user);
-          else if (target.type === 'ai_history' && typeof window.openAiChat === 'function') window.openAiChat(target.conversation_id);
-          else if (target.type === 'user') notify('用户：' + (target.user_name || item.title || ''));
+          else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') window.__xtjAiAgent.openConversation(target.conversation_id);
+          else if (target.type === 'user' && typeof window.openUserProfile === 'function') window.openUserProfile(target.user_name || item.title || '');
         });
         list.appendChild(result);
       });
@@ -3954,7 +3960,7 @@
     } else if (data.task || data.draft || data.message || data.announcement) {
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
     }
-    if (data.confirmation_id) {
+    if (false && data.confirmation_id) {
       var actions = el('div', { class: 'ai-tool-card-actions' });
       ['cancel', 'confirm'].forEach(function(action) {
         var button = el('button', { class: 'ai-tool-card-action ' + action, type: 'button', text: action === 'confirm' ? '确认' : '取消' });
@@ -5736,7 +5742,13 @@ function showChatMessages() {
     close: closeAiChat,
     insertEntry: insertEntry,
     getConfig: function() { return S.config; },
-    getConversationId: function() { return S.conversationId; }
+    getConversationId: function() { return S.conversationId; },
+    openConversation: async function(conversationId) {
+      if (!conversationId) return false;
+      await openAiChat();
+      await switchConversation(conversationId);
+      return true;
+    }
   };
   window.__xtjOpenAiChat = openAiChat;
   window.__xtjCloseAiChat = closeAiChat;

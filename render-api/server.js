@@ -2125,12 +2125,7 @@ const AI_SITE_TOOL_REGISTRY = {
   search_posts: { write: false }, search_comments: { write: false },
   search_photos: { write: false }, search_dm_messages: { write: false },
   search_ai_history: { write: false }, search_users: { write: false },
-  search_everything: { write: false },
-  send_site_message: { write: true }, create_draft: { write: true },
-  update_draft: { write: true }, delete_draft: { write: true },
-  publish_announcement: { write: true, adminOnly: true },
-  create_maintenance_task: { write: true, adminOnly: true },
-  update_maintenance_task: { write: true, adminOnly: true }
+  search_everything: { write: false }
 };
 
 Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
@@ -2138,8 +2133,8 @@ Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
     type: 'function',
     function: {
       name: name,
-      description: name.replace(/_/g, ' ') + '，只能操作当前用户有权访问的站内数据。写入操作会生成确认卡，绝不直接执行。',
-      parameters: { type: 'object', properties: { query: { type: 'string' }, target_user: { type: 'string' }, content: { type: 'string' }, id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, module: { type: 'string' }, severity: { type: 'string' }, status: { type: 'string' } } }
+      description: name.replace(/_/g, ' ') + '，只检索当前用户有权访问的站内数据，不执行写入操作。',
+      parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 40 } }, required: ['query'] }
     }
   });
 });
@@ -5725,13 +5720,6 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       // IP 解析失败不阻止发帖
     }
 
-    if (!ipRegion || !String(ipRegion.text || '').trim()) {
-      var fallbackIpRegion = await fetchLatestUserIpLocationFallback(req.userName);
-      if (fallbackIpRegion) {
-        ipRegion = fallbackIpRegion;
-      }
-    }
-
     var payload = {
       user_name: req.userName,
       content: content,
@@ -5789,7 +5777,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
         location_name: 'location', location_province: 'location', location_city: 'location',
         location_district: 'location', location_level: 'location',
         ip_province: 'ip_region', ip_city: 'ip_region', ip_region_text: 'ip_region',
-        ip_region_status: 'ip_region', ip_resolved_at: 'ip_region',
+        ip_region_status: 'ip_region', ip_resolved_at: 'ip_region', ip_lookup_started_at: 'ip_region', ip_region_error: 'ip_region',
         is_pinned: 'is_pinned', pinned_at: 'is_pinned', updated_at: 'updated_at'
       };
 
@@ -11701,6 +11689,32 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
 });
 
+// Returns authors from posts visible to the current session. The browser must
+// not derive this list from internal authentication marker rows.
+app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    var query = supabase.from('posts').select('user_name,created_at')
+      .or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
+    if (!isAdmin) {
+      query = req.userName
+        ? query.or('visibility.eq.public,user_name.eq.' + req.userName)
+        : query.eq('visibility', 'public');
+    }
+    var result = await query.order('created_at', { ascending: false }).limit(1000);
+    if (result.error) return res.status(500).json({ error: 'authors_query_failed' });
+    var seen = new Set();
+    var authors = (result.data || []).map(function(row) { return String(row.user_name || '').trim(); }).filter(function(name) {
+      if (!name || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    }).sort(function(a, b) { return a.localeCompare(b, 'zh-Hans-CN'); });
+    return res.json({ ok: true, authors: authors });
+  } catch (e) {
+    return res.status(500).json({ error: 'authors_query_failed' });
+  }
+});
+
 // ===================== AI site-tool APIs =====================
 app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
   try {
@@ -11795,6 +11809,7 @@ async function executeAiConfirmedAction(ownerName, actionName, args) {
 }
 
 app.post('/api/agent/actions/:id/confirm', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
   try {
     var id = aiSiteText(req.params.id, 80);
     var now = new Date().toISOString();
@@ -11807,6 +11822,7 @@ app.post('/api/agent/actions/:id/confirm', authenticateUser, rateLimit(60000, 30
 });
 
 app.post('/api/agent/actions/:id/cancel', authenticateUser, async (req, res) => {
+  return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
   try {
     var row = await supabase.from('ai_action_confirmations').update({ status: 'cancelled' }).eq('id', aiSiteText(req.params.id, 80)).eq('owner_name', req.userName).eq('status', 'pending').select('id').maybeSingle();
     if (row.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
