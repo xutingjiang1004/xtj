@@ -2730,7 +2730,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     var cardAttrs = canOpenPost
                         ? ' role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}"'
                         : '';
-                    var titleText = escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子');
+                    var titleText = escapeHtml((typeof currentUser === 'object' && currentUser ? (currentUser.user_metadata?.full_name || currentUser.email) : (typeof currentUser === 'string' ? currentUser : '')) || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子');
                     var metaHtml = [
                         '<div class="profile-activity-record__meta">',
                         '<span class="profile-activity-record__time">' + new Date(item.created_at).toLocaleString() + '</span>',
@@ -6446,7 +6446,7 @@ function renderProfileActivityList(kind) {
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
-                feedPage = firstPage.length ? 1 : 0;
+                // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
                 feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
