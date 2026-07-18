@@ -50,9 +50,9 @@
     <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a9edccb4ae" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f92119d96c" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=b59415fffb">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=23683a07df">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a9edccb4ae">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=fe72a128cb">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=469dd2c5df">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=92963158ad">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=368f8a0a16">
@@ -118,6 +118,19 @@
                             <span class="theme-toggle-core"></span>
                         </span>
                     </button>
+                    <div class="ai-tools-nav" id="aiToolsNav">
+                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 18.5 9.3 5.5h2.2l4.2 13M7.1 13h6.5"></path>
+                                <path d="M15.5 9.5h3.8M17.4 7.6v3.8"></path>
+                            </svg>
+                        </button>
+                        <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
+                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon">AI</span><span><b>AI 聊天</b><small>对话与历史记录</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="research"><span class="ai-tools-menu-icon">R</span><span><b>深度研究</b><small>多阶段分析与研究</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon">S</span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
+                        </div>
+                    </div>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
                     <button class="announcement-btn posts-nav-icon-btn" id="announcementBtn" title="公告" aria-label="公告">
@@ -1040,7 +1053,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=71865ee7a0"></script>
+    <script defer src="js/core.min.js?v=361d485383"></script>
     <script defer src="js/login-device.min.js?v=692788a700"></script>
     <script defer src="js/theme-toggle.min.js?v=e8639a6cfd"></script>
 
