@@ -3931,3 +3931,18 @@
 .perf-lite .ai-cat-aura {
   filter: none;
 }
+
+/* Server-validated AI site-tool cards. Kept inside the AI transcript only. */
+.ai-tool-card { margin: 10px 0; padding: 12px; border: 1px solid rgba(74, 128, 124, .28); border-radius: 14px; background: rgba(241, 249, 247, .72); color: var(--text-primary, #203633); }
+.ai-tool-card-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.ai-tool-card-list { display: grid; gap: 7px; }
+.ai-tool-result { width: 100%; padding: 8px; border: 0; border-radius: 9px; text-align: left; background: rgba(255,255,255,.72); color: inherit; cursor: pointer; }
+.ai-tool-result b, .ai-tool-result span { display: block; }
+.ai-tool-result span, .ai-tool-card-summary { margin-top: 3px; white-space: pre-line; font-size: 12px; line-height: 1.45; color: var(--text-secondary, #5f7772); }
+.ai-tool-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+.ai-tool-card-action { border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.ai-tool-card-action.confirm { background: #397a70; color: #fff; }
+.ai-tool-card-action.cancel { background: rgba(65, 92, 87, .12); color: inherit; }
+.ai-tool-card-complete { opacity: .72; }
+[data-theme="dark"] .ai-tool-card { background: rgba(24, 52, 48, .72); border-color: rgba(137, 207, 194, .24); }
+[data-theme="dark"] .ai-tool-result { background: rgba(8, 28, 26, .46); }
