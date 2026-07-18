@@ -1166,3 +1166,47 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+/* ============================================================
+   Dock 桌面端间距优化
+   仅在屏幕宽度 >= 900px 时生效，移动端完全不受影响
+   ============================================================ */
+@media (min-width: 900px) {
+  /* 扩大 Dock 整体宽度，水平居中 */
+  .dock-bar {
+    width: clamp(480px, 38vw, 620px) !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    gap: 0 !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* 四个入口等宽布局，中心点均匀分布 */
+  .dock-bar .dock-tab {
+    flex: 1 1 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+
+  /* 激活态不得改变任何尺寸属性 */
+  .dock-bar .dock-tab.active {
+    flex: 1 1 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 4px 10px !important;
+  }
+
+  /* 花朵入口（AI）保持等宽，仅不显示文字标签 */
+  .dock-bar .dock-tab[data-tab="ai"] {
+    flex: 1 1 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+  .dock-bar .dock-tab[data-tab="ai"] .dt-label {
+    display: none;
+  }
+}
