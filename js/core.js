@@ -783,7 +783,7 @@ const ADMIN_NAME = "xxz";
                 getPostDwellObserver().observe(post);
             });
         }
-        const CACHE_KEY = "xtj_feed_cache_v6";
+        const CACHE_KEY = "xtj_feed_cache_v7";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
@@ -5057,20 +5057,44 @@ function renderProfileActivityList(kind) {
                 if (normalized.location_name) {
                     parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(normalized.location_name) + '</div>');
                 }
-                // IP 属地（后端生成，强制显示）
+                // IP 属地（仅真正启动了解析的帖子才显示，防止历史帖子误显）
                 var ipText = normalized.ip_region_text || '';
-                if (!ipText && normalized.ip_region_status === 'pending') ipText = '解析中';
-                if (!ipText && normalized.ip_region_status === 'failed') ipText = '未知';
+                var hasLookupStarted = !!normalized.ip_lookup_started_at;
+                if (hasLookupStarted) {
+                    if (!ipText && normalized.ip_region_status === 'pending') ipText = '解析中';
+                    if (!ipText && normalized.ip_region_status === 'failed') ipText = '未知';
+                }
                 if (ipText) {
                     parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
                 }
                 return parts.length ? '<div class="post-location-info">' + parts.join('') + '</div>' : '';
             }
 
+            function looksLikeSystemTelemetry(content) {
+                if (!content) return false;
+                try {
+                    var obj = JSON.parse(String(content).trim());
+                    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+                    var telemetryKeys = [
+                        'page_load_id', 'last_attempt_at', 'resolved_address', 'resolved_at',
+                        'capture_reason', 'precise_location_history',
+                        'device_id', 'browser_fingerprint_hash', 'canvas_fingerprint_hash',
+                        'webgl_fingerprint_hash'
+                    ];
+                    var matchCount = 0;
+                    for (var i = 0; i < telemetryKeys.length; i++) {
+                        if (telemetryKeys[i] in obj) matchCount++;
+                    }
+                    return matchCount >= 2;
+                } catch (e) {
+                    return false;
+                }
+            }
+
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
                 var normalized = normalizePost(post);
-                // 安全兜底：content 是登录事件 JSON 则跳过
-                if (normalized.content && /^\s*\{[^}]*"(?:device_id|ip|login_at|device_type|os|browser|ip_location)"[^}]*\}\s*$/i.test(String(normalized.content).trim())) {
+                // 安全兜底：content 是系统遥测/定位 JSON 则跳过
+                if (looksLikeSystemTelemetry(normalized.content)) {
                     return '';
                 }
                 var pLikes = likeMap[normalized.id] || [];
