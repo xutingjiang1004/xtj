@@ -6046,12 +6046,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 
     // 白名单过滤：只允许正常帖子 media_type（NULL 或已知类型）
     // 即使系统记录的 marker 被写错，白名单也能兜底过滤
+    // 白名单已覆盖正常类型，不再需要单独排除系统标记
+    // 注意：不要用 neq/not.in，它们会误杀 media_type IS NULL 的行
     query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
-
-    // 数据库层排除系统标记
-    SYSTEM_MARKERS.forEach(function(marker) {
-      query = query.neq('media_type', marker);
-    });
 
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
