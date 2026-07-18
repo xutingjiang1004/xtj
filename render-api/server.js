@@ -74,12 +74,141 @@ const supabase = createClient(
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_MODEL_REASONER = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+const DEEPSEEK_MODEL_FLASH = 'deepseek-v4-flash';
+const DEEPSEEK_MODEL_PRO = 'deepseek-v4-pro';
+function normalizeDeepSeekModelName(model) {
+  var key = String(model || '').trim().toLowerCase();
+  if (!key) return '';
+  if (key === 'deepseek-chat' || key === 'deepseek-reasoner') return DEEPSEEK_MODEL_FLASH;
+  if (key === DEEPSEEK_MODEL_FLASH || key === DEEPSEEK_MODEL_PRO) return key;
+  return key;
+}
+function getPreferredDeepSeekModel(model) {
+  var normalized = normalizeDeepSeekModelName(model) || DEEPSEEK_MODEL_FLASH;
+  var catalog = deepseekModelCatalog || {};
+  var available = catalog.availableSet;
+  if (!available || !available.size) return normalized;
+  if (available.has(normalized)) return normalized;
+  if (available.has(DEEPSEEK_MODEL_FLASH)) return DEEPSEEK_MODEL_FLASH;
+  if (available.has(DEEPSEEK_MODEL_PRO)) return DEEPSEEK_MODEL_PRO;
+  return normalized;
+}
+function normalizeDeepSeekUsageModel(model, fallbackModel) {
+  var preferred = normalizeDeepSeekModelName(model);
+  if (preferred) return getPreferredDeepSeekModel(preferred);
+  return getPreferredDeepSeekModel(fallbackModel || DEEPSEEK_MODEL_FLASH);
+}
+function normalizeDeepSeekConfig(config) {
+  var cloned = JSON.parse(JSON.stringify(config || {}));
+  if (!cloned.model || typeof cloned.model !== 'object') cloned.model = {};
+  cloned.model.reasoner_model = normalizeDeepSeekUsageModel(cloned.model.reasoner_model, DEEPSEEK_MODEL_FLASH);
+  cloned.version = 2;
+  return cloned;
+}
+const DEEPSEEK_MODEL_REASONER = normalizeDeepSeekModelName(process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || DEEPSEEK_MODEL_FLASH) || DEEPSEEK_MODEL_FLASH;
+const DEEPSEEK_MODELS_URL = 'https://api.deepseek.com/models';
+let deepseekModelCatalog = {
+  fetchedAt: 0,
+  status: 'idle',
+  error: '',
+  models: [],
+  availableSet: new Set()
+};
+let deepseekModelProbePromise = null;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
 // 文件解析库按需加载，避免服务启动阶段加载大体积解析依赖
+function extractDeepSeekModels(payload) {
+  var source = [];
+  if (Array.isArray(payload)) {
+    source = payload;
+  } else if (payload && Array.isArray(payload.data)) {
+    source = payload.data;
+  } else if (payload && Array.isArray(payload.models)) {
+    source = payload.models;
+  }
+  var seen = {};
+  var models = [];
+  source.forEach(function(item) {
+    var raw = '';
+    if (typeof item === 'string') raw = item;
+    else if (item && typeof item === 'object') raw = item.id || item.name || item.model || '';
+    raw = normalizeDeepSeekModelName(raw);
+    if (!raw || seen[raw]) return;
+    seen[raw] = true;
+    models.push(raw);
+  });
+  return models;
+}
+async function refreshDeepSeekModelCatalog(force) {
+  if (!DEEPSEEK_API_KEY) {
+    deepseekModelCatalog = {
+      fetchedAt: Date.now(),
+      status: 'skipped',
+      error: 'missing_api_key',
+      models: [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO],
+      availableSet: new Set([DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO])
+    };
+    return deepseekModelCatalog;
+  }
+  if (!force && deepseekModelCatalog.fetchedAt && (Date.now() - deepseekModelCatalog.fetchedAt) < 10 * 60 * 1000 && deepseekModelCatalog.models.length) {
+    return deepseekModelCatalog;
+  }
+  if (deepseekModelProbePromise) return deepseekModelProbePromise;
+  deepseekModelProbePromise = (async function() {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 12000);
+    try {
+      var resp = await fetch(DEEPSEEK_MODELS_URL, {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+        signal: controller.signal
+      });
+      var data = null;
+      try { data = await resp.json(); } catch (e) { data = null; }
+      var models = extractDeepSeekModels(data);
+      if (!resp.ok) {
+        throw new Error('HTTP ' + resp.status + (models.length ? ' (' + models.join(', ') + ')' : ''));
+      }
+      if (!models.length) {
+        throw new Error('模型列表为空');
+      }
+      deepseekModelCatalog = {
+        fetchedAt: Date.now(),
+        status: 'ready',
+        error: '',
+        models: models,
+        availableSet: new Set(models)
+      };
+      return deepseekModelCatalog;
+    } catch (e) {
+      var prev = deepseekModelCatalog || {};
+      deepseekModelCatalog = {
+        fetchedAt: Date.now(),
+        status: 'error',
+        error: String(e && e.message || 'probe_failed').slice(0, 200),
+        models: Array.isArray(prev.models) && prev.models.length ? prev.models : [],
+        availableSet: prev.availableSet instanceof Set ? prev.availableSet : new Set(Array.isArray(prev.models) ? prev.models : [])
+      };
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      deepseekModelProbePromise = null;
+    }
+  })();
+  return deepseekModelProbePromise;
+}
+function getDeepSeekProbeSnapshot() {
+  return {
+    fetchedAt: deepseekModelCatalog.fetchedAt || 0,
+    status: deepseekModelCatalog.status || 'idle',
+    error: deepseekModelCatalog.error || '',
+    models: Array.isArray(deepseekModelCatalog.models) ? deepseekModelCatalog.models.slice() : [],
+    preferred_model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
+  };
+}
 let pdfParser = null, mammothParser = null, xlsxParser = null;
 let pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
 function loadFileParser(name) {
@@ -165,7 +294,7 @@ function buildAiCacheKey(userName, message, ctx, reqBody) {
     String(message || '').trim(),
     String(reqBody.thinking_mode || ''),
     String(reqBody.chat_mode || ''),
-    String(reqBody.model || ''),
+    String(normalizeDeepSeekUsageModel(reqBody.model || '', reqBody.model || DEEPSEEK_MODEL_REASONER) || ''),
     String(reqBody.config_version || '')
   ];
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
@@ -1100,7 +1229,7 @@ async function finishStream(res, opt) {
   var finishReason = opt.finishReason || 'upstream_closed';
   var thinkingMode = opt.thinkingMode || 'off';
   var useThinking = opt.useThinking || false;
-  var usedModel = opt.usedModel || DEEPSEEK_MODEL_REASONER;
+  var usedModel = normalizeDeepSeekUsageModel(opt.usedModel || DEEPSEEK_MODEL_REASONER, opt.usedModel || DEEPSEEK_MODEL_REASONER);
   var isComplete = finishReason === 'stop' || finishReason === 'length' || (hasContent && finishReason === 'upstream_closed') || finishReason === 'idle_timeout' || finishReason === 'partial_content';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
   var searchMeta = opt.searchMeta || null;
@@ -1955,10 +2084,34 @@ function getRealIp(req) {
 
 // 获取客户端 IP（信任 req.ip，由 trust proxy 解析 X-Forwarded-For，用于登录事件记录）
 function getClientIp(req) {
-  var ip = String(req.ip || req.socket.remoteAddress || 'unknown').trim();
-  if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
-  if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
-  return ip || 'unknown';
+  function normalizeClientIpValue(value) {
+    var ip = String(value || '').trim();
+    if (!ip) return '';
+    if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
+    var colonCount = (ip.match(/:/g) || []).length;
+    if (colonCount === 1 && ip.indexOf(']') < 0 && ip.indexOf('::') < 0) {
+      var hostPortMatch = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+      if (hostPortMatch) ip = hostPortMatch[1];
+    }
+    if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
+    return ip;
+  }
+  var headers = req && req.headers ? req.headers : {};
+  var candidates = [
+    headers['cf-connecting-ip'],
+    headers['x-real-ip'],
+    headers['x-client-ip'],
+    headers['fly-client-ip'],
+    headers['x-vercel-forwarded-for'],
+    headers['x-forwarded-for'],
+    req && req.ip,
+    req && req.socket && req.socket.remoteAddress
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    var ip = normalizeClientIpValue(candidates[i]);
+    if (ip) return ip;
+  }
+  return 'unknown';
 }
 
 // UA 解析（后端用，与前端 js/login-device.js 规则一致）
@@ -3005,7 +3158,7 @@ async function callDeepSeekAI(opts) {
   var system = opts.system || '';
   var jsonMode = opts.jsonMode === true;
   var stream = opts.stream === true;
-  var model = opts.model || DEEPSEEK_MODEL_REASONER;
+  var model = getPreferredDeepSeekModel(opts.model || DEEPSEEK_MODEL_REASONER);
   var thinkingMode = opts.thinking_mode || 'low';
   var maxTokens = opts.max_tokens || 2048;
   var temperature = opts.temperature ?? 0.3;
@@ -3180,8 +3333,7 @@ async function callDeepSeek(messages, options) {
 
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
-  var model = DEEPSEEK_MODEL_REASONER;
-  if (options && options.model) model = options.model;
+  var model = getPreferredDeepSeekModel((options && options.model) || DEEPSEEK_MODEL_REASONER);
   var reasoningEffort = useThinking ? thinkingLevel : '';
   var useTools = !!(options && options.tools && Array.isArray(options.tools) && options.tools.length > 0);
   var toolChoice = (options && options.tool_choice) || (useTools ? 'auto' : null);
@@ -3371,6 +3523,7 @@ async function callDeepSeek(messages, options) {
           var r = message.reasoning_content;
           if (typeof r === 'string' && r) finalReasoning = r;
         }
+        finalModel = normalizeDeepSeekUsageModel(data.model || message.model || finalModel, model);
       }
 
       // 没 tool_calls：最终回复
@@ -3478,7 +3631,7 @@ async function callDeepSeek(messages, options) {
 
     // off 模式强制清空 reasoning
     if (!useThinking) finalReasoning = '';
-    finalModel = model;
+    finalModel = normalizeDeepSeekUsageModel(finalModel, model);
 
     // 组装 usage（和单次调用返回结构一致）
     var usage = null;
@@ -3592,7 +3745,7 @@ async function runMultiAgentFlow(opts) {
       ],
       {
         thinking_mode: deepThinkThinkingMode,
-        model: DEEPSEEK_MODEL_REASONER,
+        model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
         // ★ P3 修复 bug 2: max_tokens 2048→4096, 防止 max 思考消耗完 token 导致 Planner 输出空 agents:[] 触发退路
         max_tokens: 4096,
         response_format: { type: 'json_object' },
@@ -3677,11 +3830,11 @@ async function runMultiAgentFlow(opts) {
       var fakePlanner = { complexity: 'medium', reasoning: '深度模式直接分析', agent_count: 1, agents: [{ role: 'AI 研究员', need_search: false }] };
       return {
         cancelled: false, finalContent: directResult.content || '', planner: fakePlanner, worker_results: [],
-        thinking_log: thinkingLog, usage: directResult.usage, model: directResult.model || DEEPSEEK_MODEL_REASONER,
+        thinking_log: thinkingLog, usage: directResult.usage, model: normalizeDeepSeekUsageModel(directResult.model || DEEPSEEK_MODEL_REASONER, directResult.model || DEEPSEEK_MODEL_REASONER),
         search_count: 0, search_results: [], search_query: '', sources: [], queries: []
       };
     } catch (e) {
-      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: DEEPSEEK_MODEL_REASONER, search_count: 0, search_results: [], sources: [], queries: [] };
+      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
     }
   }
 
@@ -3757,7 +3910,7 @@ async function runMultiAgentFlow(opts) {
 
   var synthContent = '';
   var synthUsage = null;
-  var synthModel = DEEPSEEK_MODEL_REASONER;
+  var synthModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
   try {
     // ★ U3: Synthesizer 超时机制
     var synthPromise = callDeepSeek(synthMessages, {
@@ -3771,7 +3924,7 @@ async function runMultiAgentFlow(opts) {
     var synthResult = await Promise.race([synthPromise, synthTimeout]);
     synthContent = synthResult.content || '';
     synthUsage = synthResult.usage;
-    synthModel = synthResult.model || DEEPSEEK_MODEL_REASONER;
+    synthModel = normalizeDeepSeekUsageModel(synthResult.model || DEEPSEEK_MODEL_REASONER, synthResult.model || DEEPSEEK_MODEL_REASONER);
   } catch (e) {
     console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
     // ★ U3 修复: Synthesizer 失败时 fallback 拼接 worker 结果, 不让用户看到空内容
@@ -3901,7 +4054,7 @@ async function runDeepThinkAgent(opts) {
   var finalContent = '';
   var finalReasoning = '';
   var usage = null;
-  var finalModel = DEEPSEEK_MODEL_REASONER;
+  var finalModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
   var toolCallsInfo = [];
   // V2: thinking chunk 节流缓冲区 — 首包立即推 + 后续 80ms 合并 (更流畅, 更低延迟)
   var _thinkingChunkBuf = '';
@@ -3971,7 +4124,7 @@ async function runDeepThinkAgent(opts) {
 
     finalContent = result.content || '';
     usage = result.usage;
-    finalModel = result.model || DEEPSEEK_MODEL_REASONER;
+    finalModel = normalizeDeepSeekUsageModel(result.model || DEEPSEEK_MODEL_REASONER, result.model || DEEPSEEK_MODEL_REASONER);
     toolCallsInfo = result.tool_calls_info || [];
     // ★ V2: 推送最后残留的 thinking + answer chunk buffer
     _flushThinkingChunk();
@@ -5388,6 +5541,40 @@ function normalizePostId(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : '';
 }
 
+function normalizeFallbackIpLocation(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    var text = String(value).trim().replace(/[\x00-\x1f\x7f]/g, '');
+    if (!text) return null;
+    return { province: '', city: '', text: text, status: 'resolved' };
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  var province = String(value.province || value.region || '').trim();
+  var city = String(value.city || '').trim();
+  var textValue = String(value.text || value.label || '').trim();
+  if (!textValue) textValue = [province, city].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  if (!textValue) return null;
+  return { province: province, city: city, text: textValue, status: 'resolved' };
+}
+
+async function fetchLatestUserIpLocationFallback(userName) {
+  var name = String(userName || '').trim();
+  if (!name) return null;
+  var lookup = await supabase
+    .from('posts')
+    .select('content, created_at')
+    .eq('user_name', name)
+    .eq('media_type', USER_INFO_MARKER)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!lookup || lookup.error || !lookup.data) return null;
+  var info = null;
+  try { info = JSON.parse(lookup.data.content || '{}'); } catch (_) { return null; }
+  if (!info) return null;
+  return normalizeFallbackIpLocation(info.last_ip_location || info.last_ip || null);
+}
+
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     var content = String(req.body && req.body.content || '');
@@ -5418,6 +5605,13 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ipRegion = await resolveIpRegion(clientIp);
     } catch (_) {
       // IP 解析失败不阻止发帖
+    }
+
+    if (!ipRegion || !String(ipRegion.text || '').trim()) {
+      var fallbackIpRegion = await fetchLatestUserIpLocationFallback(req.userName);
+      if (fallbackIpRegion) {
+        ipRegion = fallbackIpRegion;
+      }
     }
 
     var payload = {
@@ -9286,7 +9480,17 @@ function genConvId() {
 function parseMsgMeta(r) {
   var raw = r.media_url || '';
   if (raw.indexOf('{') === 0) {
-    try { return JSON.parse(raw); } catch(e) { return { role: 'user' }; }
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.usage && typeof parsed.usage === 'object') {
+        parsed.usage = Object.assign({}, parsed.usage, {
+          model: normalizeDeepSeekUsageModel(parsed.usage.model || parsed.model || '', parsed.usage.model || parsed.model || DEEPSEEK_MODEL_REASONER)
+        });
+      } else if (parsed && parsed.model) {
+        parsed.model = normalizeDeepSeekUsageModel(parsed.model, parsed.model);
+      }
+      return parsed;
+    } catch(e) { return { role: 'user' }; }
   }
   return { role: raw === 'assistant' ? 'assistant' : 'user' };
 }
@@ -9385,7 +9589,9 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
           min_workers: (config.deep_think && parseInt(config.deep_think.min_workers)) || 0
         },
         model: {
-          default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max'
+          reasoner_model: normalizeDeepSeekUsageModel(config.model && config.model.reasoner_model, DEEPSEEK_MODEL_REASONER),
+          default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max',
+          probe: getDeepSeekProbeSnapshot()
         }
       }
     });
@@ -9550,7 +9756,7 @@ const AI_DEFAULT_CONFIG = {
   // ★ M: default_thinking_mode 从 low 改成 max
   //   用户要求: 普通聊天也用 max 思考程度
   //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
-  model: { reasoner_model: '', default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
+  model: { reasoner_model: DEEPSEEK_MODEL_REASONER, default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
   // ★ P 新增: 深度思考模式子配置 (与普通聊天分开, 管理员独立切换)
   deep_think: {
     enabled: true,                    // 是否启用深度思考模式 (前端 toggle 可用)
@@ -9575,8 +9781,7 @@ const AI_DEFAULT_CONFIG = {
 
 // 将旧版 config 升级到完整 v2 schema
 function migrateConfig(config) {
-  if (!config || typeof config !== 'object') return JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
-  if (config.version === 2) return config;
+  if (!config || typeof config !== 'object') return normalizeDeepSeekConfig(AI_DEFAULT_CONFIG);
   var merged = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
   Object.keys(config).forEach(function(k) {
     if (k === 'version') return;
@@ -9601,8 +9806,7 @@ function migrateConfig(config) {
       merged[k] = config[k];
     }
   });
-  merged.version = 2;
-  return merged;
+  return normalizeDeepSeekConfig(merged);
 }
 
 async function getAiConfig() {
@@ -9610,7 +9814,7 @@ async function getAiConfig() {
   if (aiConfigCache && (now - aiConfigFetchedAt) < 30000) return aiConfigCache;
   try {
     var { data: row } = await supabase.from('posts')
-      .select('content, media_url, created_at')
+      .select('id, content, media_url, created_at')
       .eq('media_type', AI_AGENT_CONFIG_MARKER)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -9619,8 +9823,19 @@ async function getAiConfig() {
       try {
         var cfg = JSON.parse(row.media_url);
         if (cfg && cfg.name) {
-          aiConfigCache = migrateConfig(cfg);
+          var normalizedCfg = migrateConfig(cfg);
+          aiConfigCache = normalizedCfg;
           aiConfigFetchedAt = now;
+          if (JSON.stringify(cfg) !== JSON.stringify(normalizedCfg) && row.id) {
+            try {
+              await supabase.from('posts').update({
+                content: normalizedCfg.name || row.content || '',
+                media_url: JSON.stringify(normalizedCfg)
+              }).eq('id', row.id);
+            } catch (persistErr) {
+              console.warn('[AI-CONFIG] migration persist failed:', persistErr && persistErr.message);
+            }
+          }
           return aiConfigCache;
         }
       } catch (e) { /* fall through */ }
@@ -9907,7 +10122,7 @@ async function handleDeepThinkChat(req, res) {
           worker_results: [{ role: 'AI 智能体', status: 'success', elapsed_ms: 0, content: fallbackResult.content || '' }],
           thinking_log: [],
           usage: fallbackResult.usage,
-          model: fallbackResult.model || DEEPSEEK_MODEL_REASONER,
+          model: normalizeDeepSeekUsageModel(fallbackResult.model || DEEPSEEK_MODEL_REASONER, fallbackResult.model || DEEPSEEK_MODEL_REASONER),
           search_count: 0, search_results: [], search_query: '',
           sources: [], queries: [], synth_usage: fallbackResult.usage
         };
@@ -9946,7 +10161,7 @@ async function handleDeepThinkChat(req, res) {
     var synthUsage = flowResult.synth_usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
       thinking_mode: finalThinkingMode,
-      model: flowResult.model || DEEPSEEK_MODEL_REASONER,
+        model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
       deep_think: true,
       agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
     });
@@ -10028,7 +10243,7 @@ async function handleDeepThinkChat(req, res) {
         conversation_id: convId,
         deep_think: true,
         thinking_mode: finalThinkingMode,
-        model: flowResult.model || DEEPSEEK_MODEL_REASONER,
+        model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
         usage: synthUsage,
         agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
         planner: flowResult.planner || null,
@@ -10211,7 +10426,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
     // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
-    var usedModel = (result && result.model) || DEEPSEEK_MODEL_REASONER;
+    var usedModel = normalizeDeepSeekUsageModel((result && result.model) || DEEPSEEK_MODEL_REASONER, (result && result.model) || DEEPSEEK_MODEL_REASONER);
     var usageToStore = Object.assign({}, usage || {}, {
       thinking_mode: thinkingMode,
       model: usedModel
@@ -10433,7 +10648,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。回答时间相关问题时以此为准，不能编造其他日期。';
     }
 
-    var usedModel = DEEPSEEK_MODEL_REASONER;
+    var usedModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
     if (aborted) return safeEnd();
 
     messages.push({ role: 'user', content: message });
@@ -11493,7 +11708,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
 app.get('/admin/ai-agent/config', verifyToken, async (req, res) => {
   try {
     var config = await getAiConfig();
-    return res.json({ ok: true, config: config });
+    return res.json({ ok: true, config: config, deepseek_models: getDeepSeekProbeSnapshot() });
   } catch (e) {
     console.error('[ADMIN-AI] GET config error:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -11964,7 +12179,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         cache_miss_tokens: conv.cache_miss_tokens,
         cache_hit_rate: hitRate(conv.cache_hit_tokens, conv.cache_miss_tokens),
         total_cost: Math.round(conv.total_cost * 1000000) / 1000000,
-        model: conv.model || DEEPSEEK_MODEL_REASONER,
+        model: normalizeDeepSeekUsageModel(conv.model || DEEPSEEK_MODEL_REASONER, conv.model || DEEPSEEK_MODEL_REASONER),
         last_thinking_mode: conv.last_thinking_mode || 'off'
       };
     });
@@ -12246,6 +12461,16 @@ app.listen(port, () => {
   console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
   console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
   console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
+  void refreshDeepSeekModelCatalog(true).then(function() {
+    console.log('[AI-CONFIG] /models probe ready:', JSON.stringify(getDeepSeekProbeSnapshot()));
+  }).catch(function(err) {
+    console.warn('[AI-CONFIG] /models probe failed:', err && err.message ? err.message : err);
+  });
+  setInterval(function() {
+    refreshDeepSeekModelCatalog(false).catch(function(err) {
+      console.warn('[AI-CONFIG] /models refresh failed:', err && err.message ? err.message : err);
+    });
+  }, 6 * 60 * 60 * 1000);
   startDmUnreadNotifier();
   console.log('[DM-NOTIFY] 未读消息邮件提醒已启动（间隔' + (DM_UNREAD_NOTIFY_INTERVAL / 1000) + '秒，超时' + (DM_UNREAD_NOTIFY_TIMEOUT / 60000) + '分钟）');
   startLocationTaskProcessor();
