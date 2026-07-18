@@ -4551,64 +4551,7 @@ function renderProfileActivityList(kind) {
             let feedVisiblePostsCache = null; // 缓存过滤后的帖子
             let feedMapsCache = null; // 缓存 buildPostMaps 结果
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?412琛屾湁锟斤拷锟斤拷鐗堟湰 ======
-            async function loadFeed(forceRefresh = false) {
-                const now = Date.now();
-                if (forceRefresh) {
-                    // 闁插秶鐤嗗垎椤电姸鎬?
-                    feedPage = 0;
-                    feedEndReached = false;
-                    feedAllPosts = [];
-                    feedAllComments = [];
-                    feedAllLikes = [];
-                }
-                if (!forceRefresh) {
-                    const cached = localStorage.getItem(CACHE_KEY);
-                    if (cached) {
-                        try {
-                            const parsed = JSON.parse(cached);
-                            if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
-                                // 缂撳瓨加载閿涘苯鎮撻弮璺哄灥婵瀵插垎椤电姸??
-                                feedAllPosts = parsed.data.posts || [];
-                                feedAllComments = parsed.data.comments || [];
-                                feedAllLikes = parsed.data.likes || [];
-                                await renderFeed(parsed.data);
-                                // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
-                                setupFeedInfiniteScroll();
-                                return;
-                            }
-                        } catch(e){}
-                    }
-                }
-                const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
-                try {
-                    const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").neq("media_type", "__user_style__").neq("media_type", "__revoked_token__").neq("media_type", "__refresh_token__").order("created_at", { ascending: false }).limit(500),
-                        sb.from("comments").select("*").order("created_at").limit(2000),
-                        sb.from("likes").select("*").limit(3000)
-                    ]);
-                    if (postRes.error || commRes.error || likeRes.error) {
-                        const errMsg = (postRes.error || commRes.error || likeRes.error).message || '数据加载失败';
-                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${escapeHtml(errMsg)}</div>`;
-                        return;
-                    }
-                    const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
-                    // 濞ｅ洦绻傞悺銊╂倵閻熺増婀伴柡鍡稻閺嗙喖骞戦鐣岀懝婵炴垶锚閻庤顪冮妶鍛倎濠电偛娲幃?
-                    feedAllPosts = data.posts;
-                    feedAllComments = data.comments;
-                    feedAllLikes = data.likes;
-                    // 閿熸枻鎷烽敓鏂ゆ嫹閺冭埖甯撻梽銈呫仈閸嶅繐鎷伴敓鐭紮鎷锋穱鈩冧紖閿熸枻鎷峰綍閿涘矂妲诲顣坅se64婢堆冩禈閹炬垹鍨巐ocalStorage
-                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__user_style__' && p.media_type !== '__revoked_token__' && p.media_type !== '__refresh_token__' && p.media_type !== '__ai_english_learning__');
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
-                    await renderFeed(data);
-                    // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
-                    setupFeedInfiniteScroll();
-                } catch(e) {
-                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>`;
-                    console.error(e);
-                }
-            }
+            // 无限滚动监听
 
             // 娴犺锟?锛氳缃棤闄愭粴鍔ㄨ瀵燂拷??
             function setupFeedInfiniteScroll() {
@@ -4635,186 +4578,6 @@ function renderProfileActivityList(kind) {
                 feedScrollObserver = observer;
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?479琛屾湁锟斤拷锟斤拷鐗堟湰 ======
-            function loadMoreFeedPosts() {
-                if (feedEndReached) return;
-                
-                const feed = document.getElementById('feed');
-                if (!feedVisiblePostsCache) {
-                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__ai_english_learning__' && p.user_name);
-                }
-                const visiblePosts = feedVisiblePostsCache;
-                
-                const startIdx = feedPage * FEED_PAGE_SIZE;
-                const endIdx = startIdx + FEED_PAGE_SIZE;
-                
-                if (startIdx >= visiblePosts.length) {
-                    feedEndReached = true;
-                    // 閿熸枻鎷风ず濞屸剝婀侀弴鏉戭樋锟?
-                    let noMore = document.getElementById('feedNoMore');
-                    if (!noMore) {
-                        noMore = document.createElement('div');
-                        noMore.id = 'feedNoMore';
-                        noMore.className = 'loading';
-                        noMore.textContent = '没有更多帖子';
-                        noMore.style.padding = '30px';
-                        noMore.style.textAlign = 'center';
-                        feed.appendChild(noMore);
-                    }
-                    return;
-                }
-                
-                const nextPosts = visiblePosts.slice(startIdx, endIdx);
-                if (!feedMapsCache) {
-                    feedMapsCache = buildPostMaps(feedAllComments, feedAllLikes);
-                }
-                appendMorePosts(nextPosts, feedMapsCache);
-                feedPage++;
-            }
-
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?503琛屾湁锟斤拷锟斤拷鐗堟湰 ======
-            function appendMorePosts(posts, mapsOrComments, likes) {
-                const feed = document.getElementById('feed');
-                var commentMap, likeMap, likeUserMap;
-                // 兼容旧调用：如果传了3个参数，说明是旧的 (posts, comments, likes) 格式
-                if (likes !== undefined) {
-                    var maps = buildPostMaps(mapsOrComments, likes);
-                    commentMap = maps.commentMap;
-                    likeMap = maps.likeMap;
-                    likeUserMap = maps.likeUserMap;
-                } else {
-                    // 新格式: (posts, mapsObj)
-                    commentMap = (mapsOrComments && mapsOrComments.commentMap) || {};
-                    likeMap = (mapsOrComments && mapsOrComments.likeMap) || {};
-                    likeUserMap = (mapsOrComments && mapsOrComments.likeUserMap) || {};
-                }
-                
-                const postsHtml = posts.map(p => {
-                    const pLikes = likeMap[p.id] || [];
-                    const pComms = commentMap[p.id] || [];
-                    const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
-                    const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                    return `
-                <div class="post glass" data-post-id="${escapeHtml(p.id)}">
-                  <div class="post-header">
-                    ${getAvatarHtml(p.user_name)}
-                    <div class="user-info">
-                      <span class="user-name">${escapeHtml(p.user_name)}</span>
-                      <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
-                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
-                  <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" aria-pressed="${isLiked ? 'true' : 'false'}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'已赞':'点赞'}</button>
-                    <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
-                  </div>
-                  ${pComms.length?`
-                  <div class="comments">
-                    ${pComms.map(c=>`
-                    <div class="comment-item" data-comment-id="${escapeHtml(c.id)}">
-                      <div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div>
-                    </div>
-                    `).join('')}
-                  </div>
-                  `:''}
-                </div>
-              `;
-                }).join('');
-                
-                // 閸?sentinel 涔嬪墠鎻掑叆鏂板笘子
-                const sentinel = document.getElementById('feedSentinel');
-                const tempContainer = document.createElement('div');
-                tempContainer.innerHTML = postsHtml;
-                
-                while (tempContainer.firstChild) {
-                    feed.insertBefore(tempContainer.firstChild, sentinel);
-                }
-                
-                // 娑撶儤鏌婂笘瀛愬ǎ璇插閿熸枻鎷烽敓鏂ゆ嫹閸斻劎鏁鹃敓妗旇鎷烽敍鍫濐槻閻劌鍙忕仦顫嫹閯勯敓钘夋珤閿?
-                const newPosts = feed.querySelectorAll('.post:not(.visible)');
-                observePostViewportState(newPosts);
-                
-                // 更新缁熻
-                updateFeedStats();
-            }
-
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532琛屾湁锟斤拷锟斤拷鐗堟湰 ======
-            async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__ai_english_learning__' && p.user_name);
-                feedVisiblePostsCache = visiblePosts; // 缓存
-                feedMapsCache = buildPostMaps(comments, likes); // 缓存
-
-                // 填充帖子信息缓存
-                visiblePosts.forEach(p => {
-                    postInfoCache[p.id] = {
-                        content: p.content,
-                        user_name: p.user_name,
-                        media_url: p.media_url || '',
-                        media_type: p.media_type || '',
-                        created_at: p.created_at || '',
-                        views: Number(p.views || 0)
-                    };
-                });
-
-                // 收集所有需要加载头像的用户名，去重后批量请求
-                const allUsers = new Set();
-                visiblePosts.forEach(p => allUsers.add(p.user_name));
-                comments.forEach(c => allUsers.add(c.user_name));
-
-                // 先渲染内容（此时头像为字母占位），再后台加载真实头像并更新 DOM
-                const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
-                feedPage = 1;
-                try {
-                    renderFeedWithAvatars(firstPage, comments, likes);
-                } catch (e) {
-                    console.error('[renderFeed] render error, retrying with reduced page:', e || e.message);
-                    // 尝试逐个安全渲染：跳过坏帖
-                    var safePosts = [];
-                    firstPage.forEach(function(p) {
-                        try {
-                            var np = normalizePost(p);
-                            if (np && np.id) safePosts.push(p);
-                        } catch (e2) {
-                            console.warn('[renderFeed] skip bad post', p && p.id, e2 && e2.message);
-                        }
-                    });
-                    if (!safePosts.length) {
-                        var feed = document.getElementById('feed');
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
-                        return;
-                    }
-                    renderFeedWithAvatars(safePosts, comments, likes);
-                }
-
-                // 渲染成功后才更新统计计数，避免计数与内容不同步
-                document.getElementById("sPosts").textContent = visiblePosts.length;
-                document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
-                document.getElementById("sLikes").textContent = likes.length + comments.length;
-                
-                // 后台异步加载真实头像，不阻塞内容渲染
-                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
-                    var feedEl = document.getElementById('feed');
-                    if (!feedEl) return;
-                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
-                    avatars.forEach(function(avatarEl) {
-                        var username = avatarEl.getAttribute('onclick') || '';
-                        username = username.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
-                        if (!username || avatarEl.querySelector('img')) return; // 已有 img 无需替换
-                        var avatarUrl = avatarCache[username];
-                        if (avatarUrl) {
-                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                        }
-                    });
-                });
-                
-                // 预加载统计数据
-                setTimeout(function() { prefetchStatData(); }, 1000);
-            }
-            window.renderFeed = renderFeed;
 
             // 妫板嫭鐎楦跨槑鐠佸搫鎷伴敓鏂ゆ嫹閿熸枻鎷烽惃鍕Ё鐏忓嫯銆冮敍灞惧絹閸楀洦瑕嗛弻鎾粹偓褑锟?
             function buildPostMaps(comments, likes) {
@@ -5848,16 +5611,48 @@ function renderProfileActivityList(kind) {
 
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
                 var start = Math.max(0, Number(offset) || 0);
-                var end = start + FEED_PAGE_SIZE - 1;
-                var postRes = await getFeedBasePostQuery().range(start, end);
-                if (requestId && requestId !== feedLoadRequestId) return null;
-                if (postRes.error) throw postRes.error;
-                var posts = normalizePosts(postRes.data || []);
-                var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
+                var page = Math.floor(start / FEED_PAGE_SIZE);
+                var posts = [];
                 var comments = [];
                 var likes = [];
+                var endReached = false;
+                var usedApi = false;
+
+                // 优先使用后端 API（支持私密帖子可见性过滤）
+                try {
+                    var apiResp = await fetch(API_BASE + '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE, {
+                        credentials: 'include'
+                    });
+                    if (apiResp.ok) {
+                        var apiData = await apiResp.json();
+                        if (apiData && apiData.ok) {
+                            posts = normalizePosts(apiData.posts || []);
+                            comments = apiData.comments || [];
+                            likes = apiData.likes || [];
+                            endReached = apiData.endReached || false;
+                            usedApi = true;
+                        }
+                    }
+                } catch (apiErr) {
+                    console.warn('[feed] API unavailable, fallback to Supabase:', apiErr && apiErr.message);
+                }
+
+                if (!usedApi) {
+                    // 回退：Supabase 直连（RLS 仅返回公开帖子）
+                    var end = start + FEED_PAGE_SIZE - 1;
+                    var postRes = await getFeedBasePostQuery().range(start, end);
+                    if (requestId && requestId !== feedLoadRequestId) return null;
+                    if (postRes.error) throw postRes.error;
+                    posts = normalizePosts(postRes.data || []);
+                    endReached = posts.length < FEED_PAGE_SIZE;
+                }
+
+                if (requestId && requestId !== feedLoadRequestId) return null;
+                var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
                 var relatedPromise = null;
-                if (postIds.length) {
+
+                if (postIds.length && !usedApi) {
+                    // 仅 Supabase 直连时需要单独获取评论和点赞
                     relatedPromise = Promise.all([
                         sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
                         sb.from("likes").select("*").in("post_id", postIds)
@@ -5869,7 +5664,7 @@ function renderProfileActivityList(kind) {
                             comments: comments,
                             likes: likes,
                             nextOffset: start + posts.length,
-                            endReached: posts.length < FEED_PAGE_SIZE,
+                            endReached: endReached,
                             postIds: postIds,
                             relatedPromise: relatedPromise
                         };
@@ -5882,13 +5677,14 @@ function renderProfileActivityList(kind) {
                     comments = related[0].data || [];
                     likes = related[1].data || [];
                 }
+
                 return {
                     offset: start,
                     posts: posts,
                     comments: comments,
                     likes: likes,
                     nextOffset: start + posts.length,
-                    endReached: posts.length < FEED_PAGE_SIZE,
+                    endReached: endReached,
                     postIds: postIds
                 };
             }
@@ -6049,76 +5845,6 @@ function renderProfileActivityList(kind) {
                 }
             }
 
-            window.togglePostPin = async function(postId, btn) {
-                if (!postId) {
-                    showToast('置顶失败: postId 为空');
-                    return;
-                }
-                var originalText = btn ? btn.textContent : '';
-                var nextPinned = false;
-                var didSucceed = false;
-                try {
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.textContent = '处理中..';
-                    }
-                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) throw fetchRes.error;
-                    if (!fetchRes.data) throw new Error('未找到对应帖子');
-
-                    var dbPost = normalizePost(fetchRes.data);
-                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        showToast('无权置顶');
-                        return;
-                    }
-                    nextPinned = !dbPost.is_pinned;
-                    var nextPinnedAt = nextPinned ? new Date().toISOString() : null;
-                    var nextUpdatedAt = new Date().toISOString();
-                    if (btn) btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-
-                    var updateRes = await updatePostRecord(fetchRes.data, {
-                        is_pinned: nextPinned,
-                        pinned_at: nextPinnedAt,
-                        updated_at: nextUpdatedAt
-                    });
-                    if (!updateRes.ok) {
-                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
-                        return;
-                    }
-
-                    var fallbackRow = Object.assign({}, fetchRes.data, {
-                        is_pinned: nextPinned,
-                        pinned_at: nextPinnedAt,
-                        updated_at: nextUpdatedAt,
-                        content: buildPostStorageContent(fetchRes.data, normalizePost(fetchRes.data).content, {
-                            is_pinned: nextPinned,
-                            pinned_at: nextPinnedAt,
-                            updated_at: nextUpdatedAt
-                        })
-                    });
-                    var synced = syncPinnedPostIntoFeedState(updateRes.data || fallbackRow);
-                    writeFeedCacheSnapshot();
-                    if (synced) {
-                        await rebuildFeedFromCurrentState();
-                        await refreshPostDetailIfActive(postId);
-                    } else {
-                        clearFeedCache();
-                        await loadFeed(true);
-                    }
-
-                    didSucceed = true;
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                    verifyPinnedPostInBackground(postId, nextPinned);
-                } catch (e) {
-                    console.error('[togglePostPin final override] error:', e);
-                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
-                } finally {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
-                    }
-                }
-            };
 
             // Final pin action: server-side RPC enforces one pinned post per author.
             window.togglePostPin = async function(postId, btn) {
@@ -6722,23 +6448,7 @@ function renderProfileActivityList(kind) {
             //      导致删除卡死、连续删除卡死。
             // 真正生效的 handler 在 line 2602 区域（带锁 + 超时 + 乐观删除 + 入口强制解锁）。
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?668琛屾湁锟斤拷锟斤拷鐗堟湰 ======
-            window.prefetchStatData = async function() {
-                if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
-                try {
-                    var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
-                    sb.from("comments").select("*").order("created_at"),
-                    sb.from("likes").select("*").order("created_at", { ascending: false })
-                    ]);
-                    statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
-                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== ADMIN_META_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && post.media_type !== "__login_event__" && post.media_type !== "__security_alert__" && post.media_type !== "__admin_audit__" && post.media_type !== "__client_error__" && post.media_type !== "__email_sent__" && post.media_type !== "__vip__" && post.media_type !== "__vip_order__" && post.media_type !== "__user_style__" && post.media_type !== "__ai_agent_profile__" && post.media_type !== "__ai_agent_msg__" && post.media_type !== "__ai_agent_memory__" && post.media_type !== "__ai_agent_config__" && post.media_type !== "**ai_agent_memory_box**" && post.media_type !== "**ai_agent_conv_summary**" && post.media_type !== "**ai_agent_memory_log**" && post.media_type !== "__ai_english_learning__" && canViewPost(post);
-                    });
-                    statAllComments = results[1].data || [];
-                    statAllLikes = results[2].data || [];
-                    statCacheTime = Date.now();
-                } catch (e) {}
-            };
+            // 统计预加载（使用后端快照接口，避免全量读取）
 
             // ===================== 数据缁熻璇︽儏功能 =====================
             // 存储锟斤拷前鐨勭粺锟铰ゎ潒鍥剧姸锟?

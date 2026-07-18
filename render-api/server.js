@@ -5344,19 +5344,23 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ip_resolved_at: ipRegion.status === 'resolved' ? new Date().toISOString() : null
     };
     var inserted = await supabase.from('posts').insert([payload]).select('*').single();
+    var degraded = false;
     if (inserted.error) {
-      // Older production schemas may not yet expose the optional feed columns.
-      var schemaMismatch = /visibility|is_pinned|pinned_at|updated_at|location_name|ip_province|column/i.test(String(inserted.error.message || ''));
+      // 仅当明确是数据库缺少字段时才降级，避免掩盖其他错误
+      var schemaMismatch = /does not exist|column.*not found/i.test(String(inserted.error.message || ''));
       if (!schemaMismatch) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      // 降级：使用旧字段结构重新插入，保留 visibility 等核心字段
       var legacyPayload = {
         user_name: req.userName,
         content: content,
         media_url: mediaUrl,
         media_type: mediaType,
-        actor_key: payload.actor_key
+        actor_key: payload.actor_key,
+        visibility: visibility
       };
       inserted = await supabase.from('posts').insert([legacyPayload]).select('*').single();
       if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      degraded = true;
     }
 
     // IP 解析失败时异步重试
@@ -5364,7 +5368,12 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       retryIpRegionAsync(inserted.data.id, clientIp, 1);
     }
 
-    return res.status(201).json({ ok: true, data: inserted.data });
+    return res.status(201).json({
+      ok: true,
+      data: inserted.data,
+      degraded: degraded || undefined,
+      degraded_fields: degraded ? ['location', 'ip_region', 'is_pinned', 'updated_at'] : undefined
+    });
   } catch (e) {
     console.error('[API] post create:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '发布失败', code: 'create_failed' });
@@ -5372,28 +5381,53 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
 });
 
 // POST /api/location/reverse - 经纬度反向地址解析（用户发布帖子时选择位置）
+// 超时 8 秒，最多重试 2 次，区分超时/无结果/接口错误
 app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async (req, res) => {
-  try {
-    var lat = parseFloat(req.body && req.body.latitude);
-    var lng = parseFloat(req.body && req.body.longitude);
-    if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return res.status(400).json({ error: '经纬度无效', code: 'invalid_coords' });
+  var lat = parseFloat(req.body && req.body.latitude);
+  var lng = parseFloat(req.body && req.body.longitude);
+  if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: '经纬度无效', code: 'invalid_coords' });
+  }
+
+  var lastError = null;
+  var lastErrorType = '';
+
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      // 重试前等待 1 秒
+      await new Promise(function(r) { setTimeout(r, 1000); });
     }
     var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 3000);
+    var timeout = setTimeout(function() { controller.abort(); }, 8000);
     try {
       var resp = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng) + '&accept-language=zh&zoom=16', {
         headers: { 'User-Agent': 'XTJ/1.0 (post-location)' },
         signal: controller.signal
       });
-      if (!resp.ok) throw new Error('Nominatim HTTP ' + resp.status);
+      if (!resp.ok) {
+        lastError = new Error('Nominatim HTTP ' + resp.status);
+        lastErrorType = resp.status === 429 ? 'rate_limited' : 'api_error';
+        continue;
+      }
       var data = await resp.json();
-      if (!data || data.error) throw new Error('Nominatim error: ' + (data.error || 'empty'));
+      if (!data || data.error) {
+        lastError = new Error('Nominatim empty: ' + (data && data.error || 'no result'));
+        lastErrorType = 'no_result';
+        continue;
+      }
       var address = data.address || {};
       var province = address.province || address.state || '';
       var city = address.city || address.town || address.county || address.city_district || '';
       var district = address.district || address.suburb || address.village || address.municipality || '';
       var addrName = data.name || data.display_name || '';
+
+      // 如果没有解析出任何有效信息，区分"无结果"
+      if (!province && !city && !district && !addrName) {
+        lastError = new Error('Nominatim no address data');
+        lastErrorType = 'no_result';
+        continue;
+      }
+
       // 构建选项列表
       var options = [];
       if (province && city) options.push({ level: 'city', name: province + city, province: province, city: city, district: '' });
@@ -5405,14 +5439,19 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
         city: city,
         district: district,
         address: addrName,
-        options: options
+        options: options,
+        retries: attempt
       });
+    } catch (e) {
+      lastError = e;
+      lastErrorType = e && e.name === 'AbortError' ? 'timeout' : 'network_error';
     } finally { clearTimeout(timeout); }
-  } catch (e) {
-    console.error('[API] reverse geocode:', e && e.message);
-    if (e && e.name === 'AbortError') return res.status(504).json({ error: '地址解析超时，请重试', code: 'geocode_timeout' });
-    return res.status(502).json({ error: '地址解析失败，请重试', code: 'geocode_failed' });
   }
+
+  console.error('[API] reverse geocode failed after 3 attempts:', lastErrorType, lastError && lastError.message);
+  if (lastErrorType === 'timeout') return res.status(504).json({ error: '地址解析超时，请重试', code: 'geocode_timeout' });
+  if (lastErrorType === 'no_result') return res.status(404).json({ error: '该位置无法解析地址', code: 'geocode_no_result' });
+  return res.status(502).json({ error: '地址解析失败，请重试', code: 'geocode_failed' });
 });
 
 app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req, res) => {
@@ -5809,13 +5848,6 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       user_name: req.userName,
       media_type: POST_VIEW_MARKER,
       media_url: String(postId),
-      var postText = String(post.content || '');
-      try {
-        var parsed = JSON.parse(postText);
-        if (parsed && typeof parsed === 'object' && parsed.__type === '__xtj_post_v2__') {
-          postText = typeof parsed.text === 'string' ? parsed.text : postText;
-        }
-      } catch (_) {}
       content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: postText.slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
       actor_key: 'pview_' + postId + '_' + Date.now()
     }]).select('id, created_at').single();
@@ -5831,6 +5863,81 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
   } catch (e) {
     console.error('[API] post view:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '浏览记录失败', code: 'post_view_record_failed' });
+  }
+});
+
+// ===================== 帖子列表接口（统一可见性过滤） ======================
+// GET /api/feed - 获取帖子列表，根据认证用户身份过滤可见性
+// 普通用户：公开帖子 + 自己的私密帖子
+// 管理员：全部帖子
+// 未登录用户：仅公开帖子
+app.get('/api/feed', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var page = Math.max(0, parseInt(req.query.page, 10) || 0);
+    var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || FEED_PAGE_SIZE));
+    var from = page * limit;
+    var to = from + limit - 1;
+
+    var isAdmin = req.userName === ADMIN_USERNAME;
+
+    // 系统标记过滤列表
+    var SYSTEM_MARKERS = [
+      '__auth__', '__auth_admin__', '__admin_meta__', '__dm__', '__report__',
+      '__avatar__', '__user_info__', '__photo_wall__', '__visit__',
+      '__attack__', '__user_visit__', '__post_view__', '__ann__', '__ann_read__',
+      '__vip__', '__vip_order__', '__vip_plan__', '__user_style__',
+      '__pro_gift__', '__pro_gift_claim__',
+      '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__',
+      '__email_sent__', '__email_recipient_history__',
+      '__refresh_token__', '__revoked_token__',
+      '__ai_agent_profile__', '__ai_agent_msg__', '__ai_agent_memory__', '__ai_agent_config__',
+      '**ai_agent_memory_box**', '**ai_agent_conv_summary**', '**ai_agent_memory_log**',
+      '__ai_english_learning__'
+    ];
+
+    // 使用 service_role 查询所有帖子，然后按可见性过滤
+    var query = supabase.from('posts').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+
+    // 分页
+    var { data: allPosts, error: postsErr, count: totalCount } = await query.range(from, to);
+
+    if (postsErr) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
+
+    var posts = (allPosts || []).filter(function(post) {
+      // 过滤系统标记
+      if (SYSTEM_MARKERS.indexOf(post.media_type) >= 0) return false;
+      // 可见性过滤：管理员看全部，普通用户看公开 + 自己的私密
+      if (isAdmin) return true;
+      if (post.visibility === 'private' && post.user_name !== req.userName) return false;
+      return true;
+    });
+
+    // 获取相关评论和点赞
+    var postIds = posts.map(function(p) { return p.id; });
+    var comments = [];
+    var likes = [];
+    if (postIds.length) {
+      var [commRes, likeRes] = await Promise.all([
+        supabase.from('comments').select('*').in('post_id', postIds).order('created_at'),
+        supabase.from('likes').select('*').in('post_id', postIds)
+      ]);
+      if (!commRes.error) comments = commRes.data || [];
+      if (!likeRes.error) likes = likeRes.data || [];
+    }
+
+    return res.json({
+      ok: true,
+      posts: posts,
+      comments: comments,
+      likes: likes,
+      offset: from,
+      page: page,
+      limit: limit,
+      endReached: posts.length < limit
+    });
+  } catch (e) {
+    console.error('[API] feed:', e && e.message);
+    return res.status(500).json({ error: '获取帖子列表失败', code: 'feed_failed' });
   }
 });
 
@@ -5857,8 +5964,8 @@ app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
 app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || '0';
-    const limit2 = parseInt(req.query.limit, 10) || '20';
-    const from = page * limit;
+    const limit = parseInt(req.query.limit, 10) || '20';
+    const from = Math.max(page, 0) * limit;
     const to = from + limit - 1;
     const { data, error } = await supabase.from('posts')
       .select('id, user_name, media_url, content, created_at, views, actor_key')
