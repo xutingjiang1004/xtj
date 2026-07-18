@@ -4496,6 +4496,26 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
+// 可选认证：成功则设置 req.userName，失败不阻止请求
+async function optionalAuth(req, res, next) {
+  try {
+    var token = _getTokenFromRequest(req);
+    if (!token) return next();
+    var payload = verifyUserAccessToken(token);
+    if (!payload || !payload.user_name || isTokenRevoked(token)) return next();
+    var { data: userExists } = await supabase.from('posts')
+      .select('id')
+      .eq('user_name', payload.user_name)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!userExists && payload.user_name !== ADMIN_USERNAME) return next();
+    req.userName = payload.user_name;
+  } catch (_) {
+    // 认证失败不阻止请求
+  }
+  next();
+}
+
 const AUTH_VERIFIER_PREFIX = 'scrypt:v1:';
 function safeTextEqual(left, right) {
   var leftBuf = Buffer.from(String(left || ''));
@@ -5345,11 +5365,43 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     };
     var inserted = await supabase.from('posts').insert([payload]).select('*').single();
     var degraded = false;
+    var degradedFields = [];
     if (inserted.error) {
-      // 仅当明确是数据库缺少字段时才降级，避免掩盖其他错误
-      var schemaMismatch = /does not exist|column.*not found/i.test(String(inserted.error.message || ''));
-      if (!schemaMismatch) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
-      // 降级：使用旧字段结构重新插入，保留 visibility 等核心字段
+      // 检测具体缺失的列名，仅对可选字段降级
+      var errMsg = String(inserted.error.message || '');
+      var missingCols = [];
+      var colMatch = errMsg.match(/column "(\w+)" does not exist|column (\w+) .*not exist|column ([\w]+) of relation/i);
+      if (colMatch) {
+        var colName = (colMatch[1] || colMatch[2] || colMatch[3] || '').toLowerCase();
+        if (colName) missingCols.push(colName);
+      }
+
+      // 核心字段（不可降级）：visibility, user_name, content, media_url, media_type, actor_key
+      var CORE_COLS = ['visibility', 'user_name', 'content', 'media_url', 'media_type', 'actor_key'];
+      var hasCoreMissing = missingCols.some(function(c) { return CORE_COLS.indexOf(c) >= 0; });
+
+      // 如果错误不是字段缺失或缺少核心字段，直接返回错误
+      if (hasCoreMissing || !missingCols.length) {
+        if (hasCoreMissing) {
+          return res.status(500).json({
+            error: '数据库缺少核心字段，请执行迁移',
+            code: 'post_schema_migration_required',
+            missing_column: missingCols[0]
+          });
+        }
+        return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      }
+
+      // 可选字段映射
+      var OPTIONAL_FIELDS = {
+        location_name: 'location', location_province: 'location', location_city: 'location',
+        location_district: 'location', location_level: 'location',
+        ip_province: 'ip_region', ip_city: 'ip_region', ip_region_text: 'ip_region',
+        ip_region_status: 'ip_region', ip_resolved_at: 'ip_region',
+        is_pinned: 'is_pinned', pinned_at: 'is_pinned', updated_at: 'updated_at'
+      };
+
+      // 构建降级负载：移除所有可选字段，只保留核心字段
       var legacyPayload = {
         user_name: req.userName,
         content: content,
@@ -5358,8 +5410,21 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
         actor_key: payload.actor_key,
         visibility: visibility
       };
+
+      // 收集实际被移除的字段类别
+      var removedCategories = {};
+      missingCols.forEach(function(col) {
+        var cat = OPTIONAL_FIELDS[col];
+        if (cat) removedCategories[cat] = true;
+      });
+      // 同时移除所有可选字段（因为不知道哪些列存在）
+      degradedFields = Object.keys(removedCategories);
+
       inserted = await supabase.from('posts').insert([legacyPayload]).select('*').single();
-      if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      if (inserted.error) {
+        // 降级仍然失败，返回错误
+        return res.status(500).json({ error: sanitizeError(inserted.error), code: 'create_failed' });
+      }
       degraded = true;
     }
 
@@ -5372,7 +5437,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ok: true,
       data: inserted.data,
       degraded: degraded || undefined,
-      degraded_fields: degraded ? ['location', 'ip_region', 'is_pinned', 'updated_at'] : undefined
+      degraded_fields: degraded ? degradedFields : undefined
     });
   } catch (e) {
     console.error('[API] post create:', e && e.message ? e.message : e);
@@ -5868,10 +5933,10 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
 
 // ===================== 帖子列表接口（统一可见性过滤） ======================
 // GET /api/feed - 获取帖子列表，根据认证用户身份过滤可见性
+// 未登录用户：仅公开帖子
 // 普通用户：公开帖子 + 自己的私密帖子
 // 管理员：全部帖子
-// 未登录用户：仅公开帖子
-app.get('/api/feed', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(0, parseInt(req.query.page, 10) || 0);
     var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || FEED_PAGE_SIZE));
@@ -5879,8 +5944,9 @@ app.get('/api/feed', authenticateUser, rateLimit(60000, 60), async (req, res) =>
     var to = from + limit - 1;
 
     var isAdmin = req.userName === ADMIN_USERNAME;
+    var isLoggedIn = !!req.userName;
 
-    // 系统标记过滤列表
+    // 系统标记过滤列表（在数据库层排除）
     var SYSTEM_MARKERS = [
       '__auth__', '__auth_admin__', '__admin_meta__', '__dm__', '__report__',
       '__avatar__', '__user_info__', '__photo_wall__', '__visit__',
@@ -5895,22 +5961,30 @@ app.get('/api/feed', authenticateUser, rateLimit(60000, 60), async (req, res) =>
       '__ai_english_learning__'
     ];
 
-    // 使用 service_role 查询所有帖子，然后按可见性过滤
-    var query = supabase.from('posts').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+    // 构建查询：数据库层排除系统标记 + 可见性过滤 + 分页
+    var query = supabase.from('posts').select('*', { count: 'exact' });
 
-    // 分页
-    var { data: allPosts, error: postsErr, count: totalCount } = await query.range(from, to);
+    // 数据库层排除系统标记
+    SYSTEM_MARKERS.forEach(function(marker) {
+      query = query.neq('media_type', marker);
+    });
+
+    // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
+    if (!isAdmin) {
+      if (isLoggedIn) {
+        query = query.or('visibility.eq.public,user_name.eq.' + req.userName);
+      } else {
+        query = query.eq('visibility', 'public');
+      }
+    }
+
+    query = query.order('created_at', { ascending: false }).range(from, to);
+
+    var { data: posts, error: postsErr, count: totalCount } = await query;
 
     if (postsErr) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
 
-    var posts = (allPosts || []).filter(function(post) {
-      // 过滤系统标记
-      if (SYSTEM_MARKERS.indexOf(post.media_type) >= 0) return false;
-      // 可见性过滤：管理员看全部，普通用户看公开 + 自己的私密
-      if (isAdmin) return true;
-      if (post.visibility === 'private' && post.user_name !== req.userName) return false;
-      return true;
-    });
+    posts = posts || [];
 
     // 获取相关评论和点赞
     var postIds = posts.map(function(p) { return p.id; });
@@ -5925,15 +5999,18 @@ app.get('/api/feed', authenticateUser, rateLimit(60000, 60), async (req, res) =>
       if (!likeRes.error) likes = likeRes.data || [];
     }
 
+    // 基于数据库过滤后的数量判断是否到达末尾
+    var endReached = posts.length < limit;
+
     return res.json({
       ok: true,
       posts: posts,
       comments: comments,
       likes: likes,
-      offset: from,
       page: page,
       limit: limit,
-      endReached: posts.length < limit
+      next_offset: posts.length ? from + posts.length : from,
+      endReached: endReached
     });
   } catch (e) {
     console.error('[API] feed:', e && e.message);
