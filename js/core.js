@@ -5657,6 +5657,7 @@ function renderProfileActivityList(kind) {
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
+                            if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
                             // 使用服务器返回的 next_offset，不自行计算
                             start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
                             usedApi = true;
@@ -6426,7 +6427,8 @@ function renderProfileActivityList(kind) {
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
-                document.getElementById("sPosts").textContent = filteredPosts.length;
+                var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
+                document.getElementById("sPosts").textContent = totalPosts;
                 document.getElementById("sViews").textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
                 var visiblePostIds = new Set();
                 filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
