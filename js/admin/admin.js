@@ -4754,7 +4754,7 @@ async function initAdminClient() {
     function selOpts(selected, options) {
         var html = '';
         for (var i = 0; i < options.length; i++) {
-            html += '<option value="' + options[i].val + '"' + (selected === options[i].val ? ' selected' : '') + '>' + options[i].label + '</option>';
+            html += '<option value="' + escapeHtml(String(options[i].val)) + '"' + (selected === options[i].val ? ' selected' : '') + '>' + escapeHtml(String(options[i].label || '')) + '</option>';
         }
         return html;
     }
@@ -5258,7 +5258,7 @@ async function initAdminClient() {
                     var created = c.created_at ? new Date(c.created_at).toLocaleString() : '';
                     var lastAt = c.last_at ? new Date(c.last_at).toLocaleString() : '';
                     html.push('<div class="ai-conversation-item" data-conv-id="' + cid + '">');
-                    html.push('<div><div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : c.conversation_id.slice(0, 14)) + '</div>');
+                    html.push('<div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : (c.conversation_id ? String(c.conversation_id).slice(0, 14) : '-')) + '</div>');
                     html.push('<div class="ai-conv-time">' + created + '</div></div>');
                     html.push('<div class="conv-stats">');
                     html.push('<span>' + c.message_count + ' 条</span>');

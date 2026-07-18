@@ -1,5 +1,7 @@
 .vercel
 .env
+.env.local
+.env.*
 node_modules/
 .trae/
 *.log
