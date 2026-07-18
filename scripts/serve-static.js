@@ -47,6 +47,11 @@ http.createServer(function (req, res) {
       return;
     }
     res.writeHead(200, { 'Content-Type': mime[path.extname(file).toLowerCase()] || 'application/octet-stream' });
-    fs.createReadStream(file).pipe(res);
+    var stream = fs.createReadStream(file);
+    stream.on('error', function() {
+      if (!res.headersSent) res.writeHead(404).end('Not found');
+      else res.destroy();
+    });
+    stream.pipe(res);
   });
 }).listen(4173, '127.0.0.1');
