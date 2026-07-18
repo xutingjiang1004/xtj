@@ -3980,6 +3980,47 @@
     return shell;
   }
 
+  function bindTopAiTools() {
+    var nav = document.getElementById('aiToolsNav');
+    var trigger = document.getElementById('aiToolsBtn');
+    var menu = document.getElementById('aiToolsMenu');
+    if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+    nav.__xtjAiToolsBound = true;
+    function setOpen(open) {
+      nav.classList.toggle('is-open', !!open);
+      menu.hidden = !open;
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    trigger.addEventListener('click', function(event) {
+      event.stopPropagation();
+      setOpen(menu.hidden);
+    });
+    menu.addEventListener('click', async function(event) {
+      var button = event.target.closest('[data-ai-tool]');
+      if (!button) return;
+      setOpen(false);
+      var tool = button.getAttribute('data-ai-tool');
+      if (tool === 'research') {
+        await openDeepThinkPage();
+      } else {
+        await openAiChat();
+        if (tool === 'search') {
+          var input = S.inputEl || document.querySelector('#aiChatRoot textarea');
+          if (input) {
+            input.placeholder = '例如：我在哪里提到过广州旅行？';
+            input.focus();
+          }
+        }
+      }
+    });
+    document.addEventListener('click', function(event) {
+      if (!nav.contains(event.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') setOpen(false);
+    });
+  }
+
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息: ' + text.slice(0, 30)); } catch(e) {}
@@ -5743,6 +5784,15 @@ function showChatMessages() {
     insertEntry: insertEntry,
     getConfig: function() { return S.config; },
     getConversationId: function() { return S.conversationId; },
+    openDeepThink: openDeepThinkPage,
+    openSiteSearch: async function() {
+      await openAiChat();
+      var input = S.inputEl || document.querySelector('#aiChatRoot textarea');
+      if (input) {
+        input.placeholder = '例如：我在哪里提到过广州旅行？';
+        input.focus();
+      }
+    },
     openConversation: async function(conversationId) {
       if (!conversationId) return false;
       await openAiChat();
@@ -5767,6 +5817,7 @@ function showChatMessages() {
       };
       scheduleInsertEntry();
     });
+    bindTopAiTools();
     hookChatList();
     hookAiTabVisibility();
     bindDeepThinkPageEvents();
