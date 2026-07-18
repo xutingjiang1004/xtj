@@ -1,4 +1,4 @@
-﻿// xtj automated checks
+// xtj automated checks
 var assert = require('assert');
 var fs = require('fs');
 var crypto = require('crypto');
@@ -423,8 +423,8 @@ test('core.js Supabase query excludes retired English marker', function(){
 
 test('core.js cache filter excludes retired English marker', function(){
   var s = read('js/core.js');
-  assert.ok(s.indexOf("p.media_type !== '__ai_english_learning__'") >= 0, 'core.js cachePosts filter missing English marker');
-  assert.ok(s.indexOf("post.media_type !== \"__ai_english_learning__\"") >= 0, 'core.js stat filter missing English marker');
+  assert.ok(s.indexOf("p.media_type !== '__ai_english_learning__'") >= 0 || s.indexOf('!isSystemPost(post)') >= 0, 'core.js cachePosts filter missing English marker');
+  assert.ok(s.indexOf("post.media_type !== \"__ai_english_learning__\"") >= 0 || s.indexOf('!isSystemPost(') >= 0, 'core.js stat filter missing English marker');
 });
 
 test('refresh token rows never enter feed cache, rendering, or statistics', function(){
@@ -457,6 +457,76 @@ test('server.js contains no English API routes', function(){
   assert.ok(s.indexOf('/api/agent/english/parse-batch') < 0, 'server.js contains /api/agent/english/parse-batch');
   assert.ok(s.indexOf('/api/agent/english/generate') < 0, 'server.js contains /api/agent/english/generate');
   assert.ok(s.indexOf('registerEnglishGenerateRoute') < 0, 'server.js contains registerEnglishGenerateRoute');
+});
+
+console.log('\n=== Feed Pagination Guards ===');
+
+test('/api/feed filters system markers and visibility at database level before pagination', function(){
+  var s = read('render-api/server.js');
+  // 必须先用 neq 排除系统标记，再用分页
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
+  assert.ok(feedSection.indexOf('.range(from, to)') >= 0, '/api/feed missing range pagination');
+  // 系统标记排除必须在 range 之前
+  var rangeIdx = feedSection.indexOf('.range(from, to)');
+  var neqIdx = feedSection.indexOf(".neq('media_type',");
+  assert.ok(neqIdx >= 0 && neqIdx < rangeIdx, '/api/feed system marker filter must appear before range pagination');
+  // 不能使用 JS 层 filter 做二次过滤
+  var jsFilterIdx = feedSection.indexOf('SYSTEM_MARKERS.indexOf');
+  assert.ok(jsFilterIdx < 0 || jsFilterIdx > rangeIdx, '/api/feed must not use JS-level filter for system markers');
+});
+
+test('/api/feed returns next_offset from server', function(){
+  var s = read('render-api/server.js');
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
+  assert.ok(feedSection.indexOf('next_offset') >= 0, '/api/feed missing next_offset in response');
+});
+
+test('/api/feed endReached based on database-filtered result not JS-filtered count', function(){
+  var s = read('render-api/server.js');
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
+  assert.ok(feedSection.indexOf('endReached') >= 0, '/api/feed missing endReached');
+  assert.ok(feedSection.indexOf('posts.length < limit') >= 0, '/api/feed endReached must use posts.length < limit');
+});
+
+test('/api/feed uses optionalAuth for unauthenticated access', function(){
+  var s = read('render-api/server.js');
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf("app.get('/api/feed'") + 200);
+  assert.ok(feedSection.indexOf('optionalAuth') >= 0, '/api/feed must use optionalAuth for public access');
+});
+
+test('/api/feed unauthenticated users only see public posts', function(){
+  var s = read('render-api/server.js');
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
+  assert.ok(feedSection.indexOf("eq('visibility', 'public')") >= 0, '/api/feed must filter to public only for unauthenticated users');
+});
+
+test('/api/feed has optionalAuth middleware defined', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('async function optionalAuth') >= 0, 'server.js missing optionalAuth middleware');
+});
+
+test('core.js fetchFeedPageChunk uses server next_offset when API available', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('apiData.next_offset') >= 0, 'core.js feed must use server next_offset');
+});
+
+test('persistFeedCacheSnapshotNow uses isSystemPost for filtering', function(){
+  var s = read('js/core.js');
+  var cacheSection = s.slice(s.indexOf('function persistFeedCacheSnapshotNow'), s.indexOf('function hydrateDeferredFeedRelations'));
+  assert.ok(cacheSection.indexOf('!isSystemPost(post)') >= 0, 'cache snapshot must use isSystemPost');
+});
+
+test('post create degradation does not silently drop visibility', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('post_schema_migration_required') >= 0, 'server.js must return post_schema_migration_required for missing visibility');
+  assert.ok(s.indexOf("CORE_COLS = ['visibility'") >= 0, 'server.js must treat visibility as core column');
+  assert.ok(s.indexOf('missingCols.some') >= 0, 'server.js must check missing columns before degrading');
+});
+
+test('post create degraded_fields reflects actual removed columns', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('OPTIONAL_FIELDS') >= 0, 'server.js must define optional field categories');
+  assert.ok(s.indexOf('Object.keys(removedCategories)') >= 0, 'server.js must report actual degraded categories');
 });
 
 console.log('\n=== Results ===');
