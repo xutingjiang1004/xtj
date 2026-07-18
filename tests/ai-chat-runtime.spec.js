@@ -32,13 +32,12 @@ test('AI entry renders a visible state while history is slow and offers retry on
     window.currentUser = 'tester';
     window.ensureUserToken = async () => 'test-token';
     window.ensureProtectedOperationAuth = async () => ({ ok: true, token: 'test-token' });
-    window.switchDockTab('chat', true);
-    if (typeof window.renderDockChatList === 'function') window.renderDockChatList();
+    window.switchDockTab('posts', true);
   });
 
-  const entry = page.locator('.ai-agent-entry').first();
-  await expect(entry).toBeVisible();
-  await entry.click();
+  await expect(page.locator('.ai-agent-entry')).toHaveCount(0);
+  await page.locator('#aiToolsBtn').click();
+  await page.getByRole('menuitem', { name: /AI/ }).first().click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#aiChatMessagesArea')).toContainText('正在加载聊天记录');
   await expect(page.locator('.ai-history-retry')).toBeVisible({ timeout: 4000 });
