@@ -9,7 +9,7 @@ const server = fs.readFileSync('render-api/server.js', 'utf8');
 
 test('user detail loads every backing dataset before rendering', () => {
   assert.match(admin, /'users': \{ key: 'users', loaders: \['users', 'logins', 'security-alerts', 'mutes'\] \}/);
-  assert.match(admin, /allBehaviorEvents = loginRes\.behavior \|\| \[\]/);
+  assert.match(admin, /allBehaviorEvents = \(loginRes && loginRes\.behavior\) \|\| \[\]/);
   assert.match(admin, /window\.showUserDetailModal = async function/);
   assert.match(admin, /\/admin\/user-data\?user_name=/);
   assert.match(server, /app\.get\('\/admin\/user-data', verifyToken/);
@@ -56,7 +56,7 @@ test('IP geolocation prefers TLS providers and de-duplicates repeated lookups', 
   assert.match(server, /const ipLocationCache = new Map\(\)/);
   assert.match(server, /const ipLocationInflight = new Map\(\)/);
   assert.match(server, /if \(ipLocationInflight\.has\(normalizedIp\)\) return ipLocationInflight\.get\(normalizedIp\)/);
-  assert.ok(server.indexOf("https://ipwho.is/") < server.indexOf("http://ip-api.com/"));
+  assert.ok(server.indexOf("https://ipwho.is/") < server.indexOf("https://ip-api.com/"));
   assert.match(server, /provider: result\.provider/);
   assert.match(server, /precision: 'approximate_city'/);
 });

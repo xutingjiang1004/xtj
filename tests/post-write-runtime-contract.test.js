@@ -23,7 +23,7 @@ test('publish is authenticated and the server ignores client ownership', () => {
   const route = between(server, "app.post('/api/post/create'", "app.post('/api/post/update'");
   assert.match(route, /authenticateUser/);
   assert.match(route, /user_name: req\.userName/);
-  assert.match(route, /status\(201\)\.json\(\{ ok: true, data: inserted\.data \}\)/);
+  assert.match(route, /status\(201\)\.json\(\{\s*ok: true,\s*data: inserted\.data/);
 });
 
 test('edit does not accidentally invoke the dedicated pin contract', () => {
