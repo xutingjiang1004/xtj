@@ -6044,9 +6044,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     // 构建查询：数据库层排除系统标记 + 可见性过滤 + 分页
     var query = supabase.from('posts').select('*', { count: 'exact' });
 
-    // 白名单过滤：只允许正常帖子 media_type（空值 = NULL 或空字符串）
+    // 白名单过滤：只允许正常帖子 media_type（NULL 或已知类型）
     // 即使系统记录的 marker 被写错，白名单也能兜底过滤
-    query = query.or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
+    query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
 
     // 数据库层排除系统标记
     SYSTEM_MARKERS.forEach(function(marker) {
