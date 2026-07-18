@@ -580,11 +580,15 @@ const AI_TOOLS = [
 ];
 
 // Function Calling 工具执行器
-async function executeToolCall(toolCall) {
+async function executeToolCall(toolCall, context) {
   var name = toolCall.function && toolCall.function.name ? toolCall.function.name : '';
   var rawArgs = toolCall.function && toolCall.function.arguments ? toolCall.function.arguments : '{}';
   var args;
   try { args = JSON.parse(rawArgs); } catch (e) { args = {}; }
+
+  if (AI_SITE_TOOL_REGISTRY[name]) {
+    return executeAiSiteTool(name, args, context || {});
+  }
 
   switch (name) {
     case 'search_web': {
@@ -2112,6 +2116,120 @@ function getClientIp(req) {
     if (ip) return ip;
   }
   return 'unknown';
+}
+
+// AI site tools deliberately keep model selection separate from authorization.
+// The model can request a tool, but this registry validates every input and
+// returns a confirmation request for every state-changing operation.
+const AI_SITE_TOOL_REGISTRY = {
+  search_posts: { write: false }, search_comments: { write: false },
+  search_photos: { write: false }, search_dm_messages: { write: false },
+  search_ai_history: { write: false }, search_users: { write: false },
+  search_everything: { write: false },
+  send_site_message: { write: true }, create_draft: { write: true },
+  update_draft: { write: true }, delete_draft: { write: true },
+  publish_announcement: { write: true, adminOnly: true },
+  create_maintenance_task: { write: true, adminOnly: true },
+  update_maintenance_task: { write: true, adminOnly: true }
+};
+
+Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
+  AI_TOOLS.push({
+    type: 'function',
+    function: {
+      name: name,
+      description: name.replace(/_/g, ' ') + '，只能操作当前用户有权访问的站内数据。写入操作会生成确认卡，绝不直接执行。',
+      parameters: { type: 'object', properties: { query: { type: 'string' }, target_user: { type: 'string' }, content: { type: 'string' }, id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, module: { type: 'string' }, severity: { type: 'string' }, status: { type: 'string' } } }
+    }
+  });
+});
+
+function aiSiteText(value, max) {
+  return String(value || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max || 500);
+}
+
+function aiSiteIsAdmin(context) {
+  return !!(context && context.userName && context.userName === ADMIN_USERNAME);
+}
+
+function aiSiteCard(type, title, data, actions) {
+  return { protocol: 'xtj.ai.ui.v1', id: 'card_' + crypto.randomUUID(), type: type, title: title, data: data || {}, actions: actions || [] };
+}
+
+async function aiSitePersistResults(ownerName, results) {
+  if (!results.length) return results;
+  var rows = results.slice(0, 40).map(function(item) {
+    return { owner_name: ownerName, source: item.source, source_id: String(item.source_id || ''), title: item.title || '', snippet: item.snippet || '', jump_target: item.jump_target || {} };
+  });
+  var saved = await supabase.from('ai_search_results').insert(rows).select('id, source, source_id, title, snippet, jump_target, created_at');
+  if (saved.error) throw new Error('AI 工具数据表尚未迁移');
+  return saved.data || [];
+}
+
+function aiSiteSnippet(value, query) {
+  var text = aiSiteText(value, 700);
+  var idx = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (idx > 100) text = text.slice(Math.max(0, idx - 90));
+  return text.slice(0, 240);
+}
+
+async function aiSiteSearch(source, query, userName, limit) {
+  var q = aiSiteText(query, 120);
+  if (!q) return [];
+  var take = Math.min(Math.max(Number(limit) || 20, 1), 40);
+  var pattern = '%' + q.replace(/[%_]/g, '\\$&') + '%';
+  var rows = [];
+  if (source === 'posts') {
+    var postRes = await applyPublicPostExclusions(supabase.from('posts').select('id,user_name,content,created_at,visibility').ilike('content', pattern)).order('created_at', { ascending: false }).limit(take);
+    rows = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return { source: 'posts', source_id: p.id, title: p.user_name + ' 的帖子', snippet: aiSiteSnippet(p.content, q), created_at: p.created_at, jump_target: { type: 'post', post_id: p.id } }; });
+  } else if (source === 'comments') {
+    var commentRes = await supabase.from('comments').select('id,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var comments = commentRes.data || [];
+    var commentPostIds = comments.map(function(c) { return c.post_id; }).filter(Boolean);
+    var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type').in('id', commentPostIds) : { data: [] };
+    var visibleCommentPosts = new Set((commentPosts.data || []).filter(function(p) {
+      return p.media_type !== '__dm__' && (p.visibility !== 'private' || p.user_name === userName);
+    }).map(function(p) { return String(p.id); }));
+    rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) { return { source: 'comments', source_id: c.id, title: c.user_name + ' 的评论', snippet: aiSiteSnippet(c.content, q), created_at: c.created_at, jump_target: { type: 'comment', post_id: c.post_id, comment_id: c.id } }; });
+  } else if (source === 'photos') {
+    var photoRes = await supabase.from('posts').select('id,user_name,content,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return { source: 'photos', source_id: p.id, title: p.user_name + ' 的照片', snippet: aiSiteSnippet(p.content, q), created_at: p.created_at, jump_target: { type: 'photo', post_id: p.id } }; });
+  } else if (source === 'dm') {
+    var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + userName + ',media_url.eq.' + userName).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    rows = (dmRes.data || []).map(function(m) { var peer = m.user_name === userName ? m.media_url : m.user_name; return { source: 'dm', source_id: m.id, title: '与 ' + peer + ' 的聊天', snippet: aiSiteSnippet(m.content, q), created_at: m.created_at, jump_target: { type: 'dm', user: peer, message_id: m.id } }; });
+  } else if (source === 'ai_history') {
+    var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return { source: 'ai_history', source_id: m.id, title: 'AI 对话', snippet: aiSiteSnippet(m.content, q), created_at: m.created_at, jump_target: { type: 'ai_history', conversation_id: meta.convId || '' } }; });
+  } else if (source === 'users') {
+    var userRes = await supabase.from('posts').select('user_name,created_at').eq('media_type', AUTH_MARKER).ilike('user_name', pattern).order('created_at', { ascending: false }).limit(take);
+    rows = (userRes.data || []).map(function(u) { return { source: 'users', source_id: u.user_name, title: u.user_name, snippet: '公开用户资料', created_at: u.created_at, jump_target: { type: 'user', user_name: u.user_name } }; });
+  }
+  return rows;
+}
+
+async function aiSiteCreateConfirmation(userName, actionName, payload) {
+  var inserted = await supabase.from('ai_action_confirmations').insert([{ owner_name: userName, action_name: actionName, payload: payload }]).select('id, expires_at').single();
+  if (inserted.error || !inserted.data) throw new Error('AI 工具数据表尚未迁移');
+  return inserted.data;
+}
+
+async function executeAiSiteTool(name, args, context) {
+  var userName = aiSiteText(context && context.userName, 100);
+  if (!userName) return { tool_name: name, error: '缺少用户上下文' };
+  var definition = AI_SITE_TOOL_REGISTRY[name];
+  if (!definition) return { tool_name: name, error: '未知站内工具' };
+  if (definition.adminOnly && !aiSiteIsAdmin(context)) return { tool_name: name, error: '此操作仅管理员可用' };
+  if (!definition.write) {
+    var sources = name === 'search_everything' ? ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'] : [name.replace('search_', '').replace('_messages', '').replace('_history', '')];
+    var lookup = { posts: 'posts', comments: 'comments', photos: 'photos', dm: 'dm', ai: 'ai_history', users: 'users' };
+    var found = await Promise.all(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, args.query, userName, args.limit); }));
+    var stored = await aiSitePersistResults(userName, [].concat.apply([], found).slice(0, 40));
+    return { tool_name: name, query: aiSiteText(args.query, 120), results_count: stored.length, results: stored, cards: [aiSiteCard('search_results', '站内搜索结果', { results: stored })] };
+  }
+  var payload = { args: args, requested_by: userName };
+  var confirmation = await aiSiteCreateConfirmation(userName, name, payload);
+  var cardType = name === 'send_site_message' ? 'message_confirmation' : (name === 'publish_announcement' ? 'announcement_confirmation' : (name.indexOf('maintenance') >= 0 ? 'maintenance_task' : 'draft'));
+  return { tool_name: name, pending_confirmation_id: confirmation.id, cards: [aiSiteCard(cardType, '请确认操作', { action_name: name, confirmation_id: confirmation.id, expires_at: confirmation.expires_at, payload: payload }, [{ id: 'confirm', label: '确认' }, { id: 'cancel', label: '取消' }])] };
 }
 
 // UA 解析（后端用，与前端 js/login-device.js 规则一致）
@@ -10374,14 +10492,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 收集 search_web 的真实 results（用于 1 天后徽章 + 结果列表展示）
     var searchResultsCollected = [];
     var searchQueriesCollected = [];
-    var deepSeekOptions = { thinking_mode: thinkingMode };
-    if (allowWebSearch) {
-      deepSeekOptions.tools = AI_TOOLS;
-      deepSeekOptions.tool_choice = 'auto';
-      deepSeekOptions.max_tool_rounds = 4;
+    var deepSeekOptions = {
+      thinking_mode: thinkingMode,
+      tools: AI_TOOLS,
+      tool_choice: 'auto',
+      max_tool_rounds: 4,
       // ★ wrapper：拦截 search_web 的真实 results 数组
-      deepSeekOptions.tool_executor = async function(toolCall) {
-        var res = await executeToolCall(toolCall);
+      tool_executor: async function(toolCall) {
+        var res = await executeToolCall(toolCall, { userName: userName });
         if (res && res.tool_name === 'search_web') {
           if (res.content) {
             try {
@@ -10400,8 +10518,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           } catch (e) {}
         }
         return res;
-      };
-    }
+      }
+    };
     try {
       var result = await callDeepSeek(messages, deepSeekOptions);
       if (aborted) return;
@@ -10603,6 +10721,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
+    // DeepSeek cannot safely combine reasoning mode with tools. Station actions
+    // are routed through function calling, so select the non-thinking path.
+    if (/搜索|查找|找一下|私信|发送消息|草稿|公告|维修任务/i.test(message)) thinkingMode = 'off';
     var useThinking = thinkingMode !== 'off';
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
 
@@ -10719,7 +10840,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
             // 并行执行所有工具调用
             var toolResults = await Promise.all(fcMessage.tool_calls.map(function(tc) {
-              return executeToolCall(tc).then(function(tr) {
+              return executeToolCall(tc, { userName: userName }).then(function(tr) {
                 return { toolCallId: tc.id, toolResult: tr };
               });
             }));
@@ -10741,6 +10862,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 query: item.toolResult.query || null,
                 items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
               }) + '\n\n');
+              if (Array.isArray(item.toolResult.cards)) {
+                item.toolResult.cards.forEach(function(card) { writeSse(res, { type: 'card', card: card }); });
+              }
             }
 
             // 自动补全 + 搜索扩展：像多 Agent 并行工作
@@ -11112,7 +11236,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
     // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
-    if (allowSearch && !useThinking) {
+    if (!useThinking) {
       apiBody.tools = AI_TOOLS;
     }
     
@@ -11305,11 +11429,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         return { name: t.name, args: args };
       });
       res.write('data: ' + JSON.stringify({ type: 'tool_calls', tools: toolsInfo }) + '\n\n');
+      toolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', tool_name: tool.name }); });
       
       // 并行执行所有工具
       var toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
         var tcExec = { function: { name: tc.name, arguments: tc.args } };
-        return { result: await executeToolCall(tcExec), id: tc.id, name: tc.name };
+        return { result: await executeToolCall(tcExec, { userName: userName }), id: tc.id, name: tc.name };
       }));
       for (var ti = 0; ti < toolResults.length; ti++) {
         var toolResult = toolResults[ti].result;
@@ -11335,6 +11460,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           query: toolResult.query || '',
           error: toolResult.error || null
         }) + '\n\n');
+        if (toolResult.error) writeSse(res, { type: 'tool_error', tool_name: toolResult.tool_name || '', error: toolResult.error });
+        if (Array.isArray(toolResult.cards)) {
+          toolResult.cards.forEach(function(card) { writeSse(res, { type: 'card', card: card }); });
+        }
         
         roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
       }
@@ -11349,7 +11478,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
            messages: freshMsgs,
            stream: true
          };
-         if (allowSearch) {
+         if (!useThinking) {
            apiBody.tools = AI_TOOLS;
          }
        }
@@ -11570,6 +11699,119 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
+});
+
+// ===================== AI site-tool APIs =====================
+app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
+  try {
+    var query = aiSiteText(req.body && req.body.query, 120);
+    var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
+    var allowed = ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
+    var selected = sources.filter(function(s) { return allowed.indexOf(s) >= 0; });
+    if (!query) return res.status(400).json({ error: '搜索关键词不能为空' });
+    if (!selected.length) return res.status(400).json({ error: '搜索范围无效' });
+    var limit = Math.min(Math.max(Number(req.body && req.body.limit) || 40, 1), 40);
+    var batches = await Promise.all(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit); }));
+    var results = await aiSitePersistResults(req.userName, [].concat.apply([], batches).slice(0, limit));
+    return res.json({ ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }) });
+  } catch (e) {
+    return res.status(503).json({ error: e && e.message ? e.message : '搜索失败' });
+  }
+});
+
+app.get('/api/agent/search-result/:id', authenticateUser, async (req, res) => {
+  try {
+    var id = aiSiteText(req.params.id, 80);
+    var lookup = await supabase.from('ai_search_results').select('id,source,source_id,title,snippet,jump_target,created_at,expires_at').eq('id', id).eq('owner_name', req.userName).gt('expires_at', new Date().toISOString()).maybeSingle();
+    if (lookup.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
+    if (!lookup.data) return res.status(404).json({ error: '搜索结果不存在或已过期' });
+    return res.json({ ok: true, result: lookup.data });
+  } catch (e) { return res.status(500).json({ error: '查询失败' }); }
+});
+
+app.get('/api/agent/drafts', authenticateUser, async (req, res) => {
+  try {
+    var rows = await supabase.from('ai_drafts').select('id,kind,title,body,status,created_at,updated_at').eq('owner_name', req.userName).neq('status', 'deleted').order('updated_at', { ascending: false }).limit(100);
+    if (rows.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
+    return res.json({ ok: true, drafts: rows.data || [] });
+  } catch (e) { return res.status(500).json({ error: '查询失败' }); }
+});
+
+app.get('/api/agent/maintenance-tasks', authenticateUser, async (req, res) => {
+  if (req.userName !== ADMIN_USERNAME) return res.status(403).json({ error: '仅管理员可用' });
+  try {
+    var rows = await supabase.from('ai_maintenance_tasks').select('*').order('updated_at', { ascending: false }).limit(200);
+    if (rows.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
+    return res.json({ ok: true, tasks: rows.data || [] });
+  } catch (e) { return res.status(500).json({ error: '查询失败' }); }
+});
+
+async function executeAiConfirmedAction(ownerName, actionName, args) {
+  args = args || {};
+  if (actionName === 'send_site_message') {
+    var target = aiSiteText(args.target_user, MAX_USERNAME_LEN);
+    var content = aiSiteText(args.content, MAX_CONTENT_LEN);
+    if (!target || !content || target === ownerName) throw new Error('私信参数无效');
+    var exists = await supabase.from('posts').select('id').eq('user_name', target).eq('media_type', AUTH_MARKER).maybeSingle();
+    if (!exists.data && target !== ADMIN_USERNAME) throw new Error('收件人不存在');
+    var insertDm = await supabase.from('posts').insert([{ user_name: ownerName, content: JSON.stringify({ text: content, read_at: null }), media_type: DM_MARKER, media_url: target, actor_key: 'ai_dm_' + Date.now() }]).select('id,created_at').single();
+    if (insertDm.error) throw new Error('发送失败');
+    return { type: 'message', message: insertDm.data };
+  }
+  if (actionName === 'create_draft') {
+    var kind = args.kind === 'announcement' ? 'announcement' : 'post';
+    if (kind === 'announcement' && ownerName !== ADMIN_USERNAME) throw new Error('仅管理员可创建公告草稿');
+    var draft = await supabase.from('ai_drafts').insert([{ owner_name: ownerName, kind: kind, title: aiSiteText(args.title, 160), body: aiSiteText(args.body || args.content, 50000) }]).select('*').single();
+    if (draft.error) throw new Error('草稿创建失败');
+    return { type: 'draft', draft: draft.data };
+  }
+  if (actionName === 'update_draft' || actionName === 'delete_draft') {
+    var draftId = aiSiteText(args.id, 80);
+    var changes = actionName === 'delete_draft' ? { status: 'deleted', updated_at: new Date().toISOString() } : { title: aiSiteText(args.title, 160), body: aiSiteText(args.body || args.content, 50000), updated_at: new Date().toISOString() };
+    var updated = await supabase.from('ai_drafts').update(changes).eq('id', draftId).eq('owner_name', ownerName).select('*').maybeSingle();
+    if (updated.error || !updated.data) throw new Error('草稿不存在或无权限');
+    return { type: 'draft', draft: updated.data };
+  }
+  if (actionName === 'publish_announcement') {
+    if (ownerName !== ADMIN_USERNAME) throw new Error('仅管理员可发布公告');
+    var announcement = await supabase.from('posts').insert([{ user_name: ADMIN_USERNAME, content: JSON.stringify({ title: aiSiteText(args.title, 160), content: aiSiteText(args.body || args.content, 50000) }), media_type: '__ann__', media_url: '', actor_key: 'ai_announcement_' + Date.now() }]).select('id,created_at').single();
+    if (announcement.error) throw new Error('公告发布失败');
+    return { type: 'announcement', announcement: announcement.data };
+  }
+  if (actionName === 'create_maintenance_task') {
+    if (ownerName !== ADMIN_USERNAME) throw new Error('仅管理员可创建维修任务');
+    var created = await supabase.from('ai_maintenance_tasks').insert([{ created_by: ownerName, module: aiSiteText(args.module, 160) || '未分类', severity: ['low', 'medium', 'high'].indexOf(args.severity) >= 0 ? args.severity : 'medium', detail: aiSiteText(args.detail || args.content, 3000) }]).select('*').single();
+    if (created.error) throw new Error('维修任务创建失败');
+    return { type: 'maintenance_task', task: created.data };
+  }
+  if (actionName === 'update_maintenance_task') {
+    if (ownerName !== ADMIN_USERNAME) throw new Error('仅管理员可更新维修任务');
+    var status = ['pending', 'in_progress', 'resolved'].indexOf(args.status) >= 0 ? args.status : 'pending';
+    var task = await supabase.from('ai_maintenance_tasks').update({ status: status, detail: aiSiteText(args.detail || args.content, 3000), updated_at: new Date().toISOString() }).eq('id', aiSiteText(args.id, 80)).select('*').maybeSingle();
+    if (task.error || !task.data) throw new Error('维修任务不存在');
+    return { type: 'maintenance_task', task: task.data };
+  }
+  throw new Error('不支持的确认操作');
+}
+
+app.post('/api/agent/actions/:id/confirm', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var id = aiSiteText(req.params.id, 80);
+    var now = new Date().toISOString();
+    var claim = await supabase.from('ai_action_confirmations').update({ status: 'executed', executed_at: now }).eq('id', id).eq('owner_name', req.userName).eq('status', 'pending').gt('expires_at', now).select('*').maybeSingle();
+    if (claim.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
+    if (!claim.data) return res.status(409).json({ error: '确认单已处理或已过期' });
+    var result = await executeAiConfirmedAction(req.userName, claim.data.action_name, claim.data.payload && claim.data.payload.args);
+    return res.json({ ok: true, result: result, card: aiSiteCard('tool_result', '操作已完成', result) });
+  } catch (e) { return res.status(400).json({ error: e && e.message ? e.message : '操作失败' }); }
+});
+
+app.post('/api/agent/actions/:id/cancel', authenticateUser, async (req, res) => {
+  try {
+    var row = await supabase.from('ai_action_confirmations').update({ status: 'cancelled' }).eq('id', aiSiteText(req.params.id, 80)).eq('owner_name', req.userName).eq('status', 'pending').select('id').maybeSingle();
+    if (row.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
+    return res.json({ ok: true, cancelled: !!row.data });
+  } catch (e) { return res.status(500).json({ error: '取消失败' }); }
 });
 
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
