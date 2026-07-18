@@ -3923,6 +3923,57 @@
     }
   }
 
+  function renderAiToolCard(messagesEl, card) {
+    if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
+    var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + String(card.type || 'tool_result').replace(/[^a-z_]/g, '') });
+    shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
+    var data = card.data || {};
+    if (Array.isArray(data.results)) {
+      var list = el('div', { class: 'ai-tool-card-list' });
+      data.results.slice(0, 20).forEach(function(item) {
+        var result = el('button', { class: 'ai-tool-result', type: 'button' });
+        result.appendChild(el('b', { text: String(item.title || item.source || '结果') }));
+        result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
+        result.addEventListener('click', function() {
+          var target = item.jump_target || {};
+          if ((target.type === 'post' || target.type === 'comment' || target.type === 'photo') && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
+          else if (target.type === 'dm' && typeof window.openChat === 'function') window.openChat(target.user);
+          else if (target.type === 'ai_history' && typeof window.openAiChat === 'function') window.openAiChat(target.conversation_id);
+          else if (target.type === 'user') notify('用户：' + (target.user_name || item.title || ''));
+        });
+        list.appendChild(result);
+      });
+      shell.appendChild(list);
+    } else if (data.payload && data.payload.args) {
+      var args = data.payload.args;
+      var summary = [];
+      ['target_user', 'title', 'module', 'severity', 'status', 'content', 'body'].forEach(function(key) {
+        if (args[key]) summary.push(key + '：' + String(args[key]).slice(0, 240));
+      });
+      if (summary.length) shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: summary.join('\n') }));
+    } else if (data.task || data.draft || data.message || data.announcement) {
+      shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
+    }
+    if (data.confirmation_id) {
+      var actions = el('div', { class: 'ai-tool-card-actions' });
+      ['cancel', 'confirm'].forEach(function(action) {
+        var button = el('button', { class: 'ai-tool-card-action ' + action, type: 'button', text: action === 'confirm' ? '确认' : '取消' });
+        button.addEventListener('click', async function() {
+          button.disabled = true;
+          var result = await apiRequest('POST', '/actions/' + encodeURIComponent(data.confirmation_id) + '/' + action, {});
+          if (!result.ok) { button.disabled = false; notify(result.error || '操作失败'); return; }
+          shell.classList.add('ai-tool-card-complete');
+          actions.textContent = action === 'confirm' ? '已确认并执行' : '已取消';
+        });
+        actions.appendChild(button);
+      });
+      shell.appendChild(actions);
+    }
+    messagesEl.appendChild(shell);
+    scrollToBottom(messagesEl, false);
+    return shell;
+  }
+
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息: ' + text.slice(0, 30)); } catch(e) {}
@@ -4461,6 +4512,23 @@
             continue;
           }
           
+          if (evt.type === 'card') {
+            try { renderAiToolCard(messagesEl, evt.card); } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
+            continue;
+          }
+
+          if (evt.type === 'tool_pending') {
+            var pendingBar = messagesEl.querySelector('.ai-tool-status');
+            if (!pendingBar) { pendingBar = el('div', { class: 'ai-tool-status' }); messagesEl.appendChild(pendingBar); }
+            pendingBar.textContent = 'AI 正在准备：' + (evt.tool_name || '站内工具');
+            continue;
+          }
+
+          if (evt.type === 'tool_error') {
+            notify((evt.tool_name || 'AI 工具') + '：' + (evt.error || '执行失败'));
+            continue;
+          }
+
           if (evt.type === 'tool_result') {
             var toolBar2 = messagesEl.querySelector('.ai-tool-status');
             if (!toolBar2) {
