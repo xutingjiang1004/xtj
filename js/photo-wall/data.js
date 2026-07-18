@@ -279,11 +279,11 @@
     var id = item.id || item.cloudId;
     // 立即从本地 UI 移除 + 缓存清除（不等云端返回）
     removePhotoLocal(id, opts.render !== false);
-    addDeletedPhotoId(id);
     var deleteResult = null;
     try { deleteResult = await deleteCloudPhoto(item); } catch (err) { console.warn('[PhotoWall] cloud delete failed', err); }
     if (!deleteResult) {
-      removeDeletedPhotoId(id);
+      removePhotoLocal(id, opts.render !== false); // 撤销本地移除
+      // 注意：addDeletedPhotoId 只在云端删除成功后才调用，防止浏览器崩溃后永久丢失照片
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
       if (opts.render !== false && typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
@@ -292,6 +292,8 @@
       toast('云端删除失败，请稍后重试');
       return { ok:false, error:'cloud_delete_failed' };
     }
+    // 云端删除成功后才标记为已删除，防止浏览器崩溃后永久丢失照片
+    addDeletedPhotoId(id);
     broadcastSync('photo_deleted', { photoId: id });
     try { await loadPhotoWallData(true); } catch (_) {}
     if (deleteResult.cleanup_pending) {

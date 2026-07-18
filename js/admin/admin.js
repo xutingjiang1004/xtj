@@ -2131,7 +2131,7 @@ async function initAdminClient() {
             await apiCall('POST', '/admin/blacklist', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
             await loadBlacklistData();
-            renderTab('blacklist');
+            renderTab('bans');
             showToast('已加入黑名单 ' + userName, 'success');
         } catch(e) { showToast('加入黑名单失败: ' + e.message, 'error'); }
     };
@@ -2141,7 +2141,7 @@ async function initAdminClient() {
             try {
                 await apiCall('PUT', '/admin/blacklist/' + id + '/lift');
                 await loadBlacklistData();
-                renderTab('blacklist');
+                renderTab('bans');
                 showToast('已解除黑名单', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
         });
@@ -2387,7 +2387,7 @@ async function initAdminClient() {
                     reason: '管理员操作'
                 });
                 await loadBlacklistData();
-                renderTab('blacklist');
+                renderTab('bans');
                 showToast('已拉黑 ' + userName, 'success');
             } catch(e) {
                 showToast('拉黑失败: ' + e.message, 'error');
