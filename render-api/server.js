@@ -6053,10 +6053,6 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       query = query.neq('media_type', marker);
     });
 
-    // 白名单过滤：只允许正常帖子 media_type（空值 = NULL 或空字符串）
-    // 即使系统记录的 marker 被写错，白名单也能兜底过滤
-    query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
-
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
       if (isLoggedIn) {
