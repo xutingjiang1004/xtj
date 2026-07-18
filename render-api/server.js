@@ -1289,7 +1289,7 @@ function getMailTransporter() {
   var isSecure = mailTransporterPort === '465';
   mailTransporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: parseInt(mailTransporterPort),
+    port: parseInt(mailTransporterPort, 10),
     secure: isSecure,
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
     connectionTimeout: 15000,
@@ -2834,6 +2834,16 @@ function rateLimit(windowMs, maxRequests) {
 // 使用 Supabase 作为共享原子存储，防止分布式/多进程绕过
 const DB_RATE_LIMIT_MARKER = '__rate_limit__';
 const persistenceRateLimitCache = new Map(); // 本地缓存，减少 DB 查询
+
+// 每 10 分钟清理过期缓存条目，防止内存无限增长
+setInterval(function() {
+  var now = Date.now();
+  var expired = [];
+  persistenceRateLimitCache.forEach(function(value, key) {
+    if (value.resetAt <= now) expired.push(key);
+  });
+  expired.forEach(function(key) { persistenceRateLimitCache.delete(key); });
+}, 600000).unref();
 
 async function checkPersistentRateLimit(key, windowMs, maxRequests) {
   var now = Date.now();
@@ -6030,9 +6040,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       query = query.neq('media_type', marker);
     });
 
-    // 白名单过滤：只允许正常帖子 media_type
+    // 白名单过滤：只允许正常帖子 media_type（空值 = NULL 或空字符串）
     // 即使系统记录的 marker 被写错，白名单也能兜底过滤
-    query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
+    query = query.or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
 
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
