@@ -305,6 +305,12 @@ test('Dock changes stay inside the approved selection-feedback scope', function(
   var forbidden = changedLines.filter(function(line) {
     if (/\.dock-tab\.is-switch-feedback\s+\.dt-icon/.test(line)) return false;
     if (/^-.*html\.xtj-pro-active\s+\.dock-tab\.active/.test(line)) return false;
+    // 桌面端 Dock 间距优化（用户明确要求）
+    if (/@media\s*\(min-width:\s*900px\)/.test(line)) return false;
+    if (/\.dock-bar\s*\{/.test(line)) return false;
+    if (/\.dock-bar\s+\.dock-tab\s*\{/.test(line)) return false;
+    if (/\.dock-bar\s+\.dock-tab\.active\s*\{/.test(line)) return false;
+    if (/\.dock-bar\s+\.dock-tab\[data-tab="ai"\]/.test(line)) return false;
     return /\.dock-(?:bar|tab|indicator|liquid-lens|liquid-shine)\b|data-tab/.test(line);
   });
   assert.deepStrictEqual(forbidden, [], 'Dock structure, geometry or navigation selector changed');
