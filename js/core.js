@@ -1003,6 +1003,44 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
         }
         window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
 
+        function bindTopAiToolsLauncher() {
+            var nav = document.getElementById('aiToolsNav');
+            var trigger = document.getElementById('aiToolsBtn');
+            var menu = document.getElementById('aiToolsMenu');
+            if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+            nav.__xtjAiToolsBound = true;
+            function setOpen(open) {
+                nav.classList.toggle('is-open', !!open);
+                menu.hidden = !open;
+                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            trigger.addEventListener('click', function(event) {
+                event.stopPropagation();
+                setOpen(menu.hidden);
+            });
+            menu.addEventListener('click', function(event) {
+                var button = event.target.closest('[data-ai-tool]');
+                if (!button) return;
+                var tool = button.getAttribute('data-ai-tool');
+                setOpen(false);
+                ensureAiAgentLoaded().then(function() {
+                    if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
+                    if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
+                    if (typeof window.__xtjOpenAiChat === 'function') return window.__xtjOpenAiChat();
+                }).catch(function(error) {
+                    console.error('[XTJ] top AI tools load failed:', error);
+                    if (typeof window.showToast === 'function') window.showToast('AI 工具加载失败，请重试');
+                });
+            });
+            document.addEventListener('click', function(event) {
+                if (!nav.contains(event.target)) setOpen(false);
+            });
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') setOpen(false);
+            });
+        }
+        bindTopAiToolsLauncher();
+
         function ensureCoreAnimationsLoaded() {
             return loadXtjModule('enhancements');
         }
