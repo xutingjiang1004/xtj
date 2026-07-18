@@ -44,7 +44,15 @@ async function apiRequest(method, path, body = null) {
   if (body) opts.body = JSON.stringify(body);
   try {
     const res = await fetch(url, opts);
-    const data = await res.json();
+    var data;
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      // 非 JSON 响应（如 502 HTML 页面）
+      var text = '';
+      try { text = await res.text(); } catch (_) {}
+      throw new Error(`API 返回非 JSON (${res.status}): ${text.slice(0, 200)}`);
+    }
     if (!res.ok) throw new Error(`API 错误 (${res.status}): ${data.error || JSON.stringify(data)}`);
     return data;
   } finally {

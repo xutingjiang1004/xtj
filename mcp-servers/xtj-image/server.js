@@ -65,7 +65,10 @@ server.tool("image_analyze", "分析图片信息（尺寸、格式、文件大�
 server.tool("image_compress", "压缩图片文件", { filepath: z.string(), quality: z.number().optional(), output_suffix: z.string().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
-  const out = `${fp.slice(0, -ext.length)}${args.output_suffix||"_compressed"}${ext}`;
+  var suffix = String(args.output_suffix || '_compressed');
+  // 防止路径遍历：移除 ../ 和 ..\
+  suffix = suffix.replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_');
+  const out = `${fp.slice(0, -ext.length)}${suffix}${ext}`;
   const q = args.quality ?? 80;
   const fmt = ext.toLowerCase().replace('.', '');
   let p = sharp(fp);
@@ -93,7 +96,10 @@ server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { fil
 server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width: z.number().max(MAX_IMAGE_DIMENSION), height: z.number().max(MAX_IMAGE_DIMENSION).optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
-  const out = `${fp.slice(0,-ext.length)}${args.output_suffix||"_resized"}${ext}`;
+  var suffix = String(args.output_suffix || '_resized');
+  // 防止路径遍历
+  suffix = suffix.replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_');
+  const out = `${fp.slice(0,-ext.length)}${suffix}${ext}`;
   const r = { width: Math.min(args.width, MAX_IMAGE_DIMENSION) };
   if (args.height) r.height = Math.min(args.height, MAX_IMAGE_DIMENSION);
   if (args.fit) r.fit = args.fit;
@@ -109,7 +115,9 @@ server.tool("image_generate_thumbnails", "生成多尺寸响应式缩略图", { 
   const base = fp.slice(0,-path.extname(fp).length);
   const results = [];
   for (const size of sizes) {
-    const out = `${base}_${size.label}.${fmt}`;
+    // 防止路径遍历：label 中的特殊字符替换为安全字符
+    var safeLabel = String(size.label || '').replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_');
+    const out = `${base}_${safeLabel}.${fmt}`;
     let p = sharp(fp).resize({width:size.width});
     switch(fmt){case"webp":p=p.webp({quality:q});break;case"avif":p=p.avif({quality:q});break;case"jpeg":p=p.jpeg({quality:q});break;}
     await p.toFile(out);
