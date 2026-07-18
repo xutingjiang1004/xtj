@@ -16,6 +16,8 @@
   var loading = false;
   var realtimeChannel = null;
   var bc = null;
+  var lastLoadedAt = 0;
+  var LOAD_CACHE_TTL_MS = 20000;
 
   function byId(id){ return document.getElementById(id); }
 
@@ -174,6 +176,7 @@
 
   async function loadPhotoWallData(force){
     if (loading && !force) return window.photoWallData;
+    if (!force && Array.isArray(window.photoWallData) && window.photoWallData.length && lastLoadedAt && Date.now() - lastLoadedAt < LOAD_CACHE_TTL_MS) return window.photoWallData;
     loading = true;
     page = 0;
     more = true;
@@ -195,12 +198,16 @@
       var cloud = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
       window.photoWallData = mergePhotoLists(cloud, []);
       saveLocalPhotoWallData();
+      lastLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastLoadedAt;
       setPhotoWallSyncStatus('synced', '已同步');
       subscribePhotoWallRealtime();
       return window.photoWallData;
     } catch (err) {
       console.error('[PhotoWall] load failed', err);
       window.photoWallData = mergePhotoLists([], loadLocalPhotoWallData());
+      lastLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastLoadedAt;
       setPhotoWallSyncStatus('error', '同步失败');
       return window.photoWallData;
     } finally {
@@ -217,6 +224,8 @@
       var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
       window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
       saveLocalPhotoWallData();
+      lastLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastLoadedAt;
       return items;
     } catch (err) {
       console.warn('[PhotoWall] load more failed', err);
@@ -244,6 +253,8 @@
       return String(item.id) !== key && String(item.cloudId || '') !== key;
     });
     saveLocalPhotoWallData();
+    lastLoadedAt = Date.now();
+    window.photoWallDataLoadedAt = lastLoadedAt;
     if (shouldRender !== false && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
       window.renderPhotoWallWithoutReload();
     }
@@ -286,6 +297,8 @@
       // 注意：addDeletedPhotoId 只在云端删除成功后才调用，防止浏览器崩溃后永久丢失照片
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
+      lastLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastLoadedAt;
       if (opts.render !== false && typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       // 云端删除失败，但本地已移除 —— 下次同步时会重新出现
       setPhotoWallSyncStatus('error', '删除同步失败');
