@@ -5,6 +5,9 @@ DROP POLICY IF EXISTS posts_public_feed_read ON public.posts;
 DROP POLICY IF EXISTS avatar_insert_own ON public.posts;
 DROP POLICY IF EXISTS avatar_userinfo_select ON public.posts;
 
+-- Grant INSERT base privilege first (REVOKE ALL FROM PUBLIC removed it)
+GRANT INSERT ON public.posts TO anon, authenticated;
+
 -- Recreate the public feed read policy with __avatar__ and __user_info__ added
 CREATE POLICY posts_public_feed_read ON public.posts
 FOR SELECT TO anon, authenticated
