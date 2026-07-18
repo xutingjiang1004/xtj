@@ -3954,7 +3954,7 @@
     } else if (data.task || data.draft || data.message || data.announcement) {
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
     }
-    if (data.confirmation_id) {
+    if (false && data.confirmation_id) {
       var actions = el('div', { class: 'ai-tool-card-actions' });
       ['cancel', 'confirm'].forEach(function(action) {
         var button = el('button', { class: 'ai-tool-card-action ' + action, type: 'button', text: action === 'confirm' ? '确认' : '取消' });
