@@ -1268,6 +1268,11 @@
     }
     var node = buildMessageNode(msg, messagesEl);
     messagesEl.appendChild(node);
+    if (msg && msg.role === 'assistant' && Array.isArray(msg.site_cards)) {
+      msg.site_cards.forEach(function(card) {
+        try { renderAiToolCard(messagesEl, card); } catch (e) {}
+      });
+    }
     return node;
   }
 
@@ -3939,10 +3944,21 @@
         var result = el('button', { class: 'ai-tool-result', type: 'button' });
         result.appendChild(el('b', { text: String(item.title || item.source || '结果') }));
         result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
+        var resultMeta = [];
+        if (item.source) resultMeta.push(String(item.source));
+        if (item.created_at) {
+          var created = new Date(item.created_at);
+          if (!isNaN(created.getTime())) resultMeta.push(created.toLocaleString('zh-CN'));
+        }
+        if (Array.isArray(item.matched_keywords) && item.matched_keywords.length) resultMeta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
+        if (typeof item.relevance === 'number' && item.relevance > 0) resultMeta.push('相关度 ' + Math.round(item.relevance * 100) + '%');
+        if (resultMeta.length) result.appendChild(el('small', { class: 'ai-tool-result-meta', text: resultMeta.join(' · ') }));
         result.addEventListener('click', function() {
           var target = item.jump_target || {};
           if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
-          else if (target.type === 'photo' && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
+          else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
+            window.openPhotoPreview(0, { photos: [{ id: String(target.post_id || item.source_id || 'search-photo'), cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
+          } else if (target.type === 'photo' && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
           else if (target.type === 'dm' && typeof window.openChat === 'function') window.openChat(target.user);
           else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') window.__xtjAiAgent.openConversation(target.conversation_id);
           else if (target.type === 'user' && typeof window.openUserProfile === 'function') window.openUserProfile(target.user_name || item.title || '');
@@ -4897,14 +4913,15 @@
       if (!before) {
         S.messages = msgs;
         messagesEl.innerHTML = '';
-        msgs.forEach(function(m) { messagesEl.appendChild(buildMessageNode(m, messagesEl)); });
+        msgs.forEach(function(m) { appendMessage(messagesEl, m); });
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
       } else {
         var oldScroll = messagesEl.scrollHeight;
         var frag = document.createDocumentFragment();
         for (var mi = 0; mi < msgs.length; mi++) {
-          frag.appendChild(buildMessageNode(msgs[mi], messagesEl));
+          var node = buildMessageNode(msgs[mi], messagesEl);
+          frag.appendChild(node);
         }
         messagesEl.insertBefore(frag, messagesEl.firstChild);
         try {

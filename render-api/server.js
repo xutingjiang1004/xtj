@@ -1266,7 +1266,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [] }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -2158,7 +2158,36 @@ async function aiSitePersistResults(ownerName, results) {
   });
   var saved = await supabase.from('ai_search_results').insert(rows).select('id, source, source_id, title, snippet, jump_target, created_at');
   if (saved.error) throw new Error('AI 工具数据表尚未迁移');
-  return saved.data || [];
+  return (saved.data || []).map(aiSitePresentResult);
+}
+
+// Search-result rows are server owned. Keep content metadata in jump_target so
+// the short-lived result table remains backwards-compatible with its migration.
+function aiSitePresentResult(item) {
+  item = item || {};
+  var target = item.jump_target && typeof item.jump_target === 'object' ? item.jump_target : {};
+  return Object.assign({}, item, {
+    jump_target: target,
+    created_at: target.source_created_at || item.created_at || null,
+    matched_keywords: Array.isArray(target.matched_keywords) ? target.matched_keywords : [],
+    relevance: typeof target.relevance === 'number' ? target.relevance : 0
+  });
+}
+
+function aiSiteResult(source, sourceId, title, snippet, createdAt, target, query) {
+  target = Object.assign({}, target || {}, {
+    source_created_at: createdAt || null,
+    matched_keywords: query ? [query] : [],
+    relevance: 1
+  });
+  return { source: source, source_id: sourceId, title: title, snippet: snippet, created_at: createdAt || null, jump_target: target };
+}
+
+function aiSitePhotoUrl(value) {
+  try {
+    var url = new URL(String(value || ''));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : '';
+  } catch (e) { return ''; }
 }
 
 function aiSiteSnippet(value, query) {
@@ -2176,7 +2205,7 @@ async function aiSiteSearch(source, query, userName, limit) {
   var rows = [];
   if (source === 'posts') {
     var postRes = await applyPublicPostExclusions(supabase.from('posts').select('id,user_name,content,created_at,visibility').ilike('content', pattern)).order('created_at', { ascending: false }).limit(take);
-    rows = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return { source: 'posts', source_id: p.id, title: p.user_name + ' 的帖子', snippet: aiSiteSnippet(p.content, q), created_at: p.created_at, jump_target: { type: 'post', post_id: p.id } }; });
+    rows = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return aiSiteResult('posts', p.id, p.user_name + ' 的帖子', aiSiteSnippet(p.content, q), p.created_at, { type: 'post', post_id: p.id }, q); });
   } else if (source === 'comments') {
     var commentRes = await supabase.from('comments').select('id,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
     var comments = commentRes.data || [];
@@ -2185,19 +2214,19 @@ async function aiSiteSearch(source, query, userName, limit) {
     var visibleCommentPosts = new Set((commentPosts.data || []).filter(function(p) {
       return p.media_type !== '__dm__' && (p.visibility !== 'private' || p.user_name === userName);
     }).map(function(p) { return String(p.id); }));
-    rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) { return { source: 'comments', source_id: c.id, title: c.user_name + ' 的评论', snippet: aiSiteSnippet(c.content, q), created_at: c.created_at, jump_target: { type: 'comment', post_id: c.post_id, comment_id: c.id } }; });
+    rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) { return aiSiteResult('comments', c.id, c.user_name + ' 的评论', aiSiteSnippet(c.content, q), c.created_at, { type: 'comment', post_id: c.post_id, comment_id: c.id }, q); });
   } else if (source === 'photos') {
-    var photoRes = await supabase.from('posts').select('id,user_name,content,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return { source: 'photos', source_id: p.id, title: p.user_name + ' 的照片', snippet: aiSiteSnippet(p.content, q), created_at: p.created_at, jump_target: { type: 'photo', post_id: p.id } }; });
+    var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q); });
   } else if (source === 'dm') {
     var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + userName + ',media_url.eq.' + userName).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (dmRes.data || []).map(function(m) { var peer = m.user_name === userName ? m.media_url : m.user_name; return { source: 'dm', source_id: m.id, title: '与 ' + peer + ' 的聊天', snippet: aiSiteSnippet(m.content, q), created_at: m.created_at, jump_target: { type: 'dm', user: peer, message_id: m.id } }; });
+    rows = (dmRes.data || []).map(function(m) { var peer = m.user_name === userName ? m.media_url : m.user_name; return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q); });
   } else if (source === 'ai_history') {
     var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return { source: 'ai_history', source_id: m.id, title: 'AI 对话', snippet: aiSiteSnippet(m.content, q), created_at: m.created_at, jump_target: { type: 'ai_history', conversation_id: meta.convId || '' } }; });
+    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return aiSiteResult('ai_history', m.id, 'AI 对话', aiSiteSnippet(m.content, q), m.created_at, { type: 'ai_history', conversation_id: meta.convId || '' }, q); });
   } else if (source === 'users') {
     var userRes = await supabase.from('posts').select('user_name,created_at').eq('media_type', AUTH_MARKER).ilike('user_name', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (userRes.data || []).map(function(u) { return { source: 'users', source_id: u.user_name, title: u.user_name, snippet: '公开用户资料', created_at: u.created_at, jump_target: { type: 'user', user_name: u.user_name } }; });
+    rows = (userRes.data || []).map(function(u) { return aiSiteResult('users', u.user_name, u.user_name, '公开用户资料', u.created_at, { type: 'user', user_name: u.user_name }, q); });
   }
   return rows;
 }
@@ -9653,6 +9682,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     if (extra.planner) obj.planner = extra.planner;
     if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
     if (Array.isArray(extra.thinking_log)) obj.thinking_log = extra.thinking_log;
+    if (Array.isArray(extra.site_cards) && extra.site_cards.length) obj.site_cards = extra.site_cards;
     if (typeof extra.think_duration_ms === 'number' && extra.think_duration_ms > 0) {
       obj.think_duration_ms = extra.think_duration_ms;
     }
@@ -10781,6 +10811,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
     var hasCalledTools = false;
+    // Only persist server-generated cards. The model never supplies executable UI.
+    var siteToolCards = [];
     var hasFCFallbackContent = false;
     var fcFallbackContent = null;
     var fcFallbackUsage = null;
@@ -10851,7 +10883,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
               }) + '\n\n');
               if (Array.isArray(item.toolResult.cards)) {
-                item.toolResult.cards.forEach(function(card) { writeSse(res, { type: 'card', card: card }); });
+                item.toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
               }
             }
 
@@ -10977,7 +11009,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           streamSeq: streamSeq,
           ctx: ctx,
           reasoningStartedAt: reasoningStartedAt,
-          searchMeta: _sharedSearchMeta || null
+          searchMeta: _sharedSearchMeta || null,
+          siteCards: siteToolCards
         });
       }
       return safeEnd();
@@ -11304,6 +11337,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   useThinking: useThinking,
                   usedModel: usedModel,
                   searchMeta: _toolSearchMeta || _sharedSearchMeta,
+                  siteCards: siteToolCards,
                   finishReason: 'idle_timeout',
                   userName: userName,
                   convId: convId,
@@ -11331,7 +11365,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (!aborted) {
             var pc = contentBuffer && contentBuffer.length > 0;
             if (pc) {
-              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt });
+              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt });
             } else {
               writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
             }
@@ -11450,7 +11484,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }) + '\n\n');
         if (toolResult.error) writeSse(res, { type: 'tool_error', tool_name: toolResult.tool_name || '', error: toolResult.error });
         if (Array.isArray(toolResult.cards)) {
-          toolResult.cards.forEach(function(card) { writeSse(res, { type: 'card', card: card }); });
+          toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
         }
         
         roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
@@ -11490,6 +11524,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           useThinking: useThinking,
           usedModel: usedModel,
           searchMeta: _toolSearchMeta || _sharedSearchMeta,
+          siteCards: siteToolCards,
           finishReason: 'upstream_closed',
           userName: userName,
           convId: convId,
@@ -11739,7 +11774,7 @@ app.get('/api/agent/search-result/:id', authenticateUser, async (req, res) => {
     var lookup = await supabase.from('ai_search_results').select('id,source,source_id,title,snippet,jump_target,created_at,expires_at').eq('id', id).eq('owner_name', req.userName).gt('expires_at', new Date().toISOString()).maybeSingle();
     if (lookup.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
     if (!lookup.data) return res.status(404).json({ error: '搜索结果不存在或已过期' });
-    return res.json({ ok: true, result: lookup.data });
+    return res.json({ ok: true, result: aiSitePresentResult(lookup.data) });
   } catch (e) { return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -11944,6 +11979,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           //   1 天后只显示徽章，内容标记过期
           search_results: Array.isArray(m.search_results) ? m.search_results : [],
           search_expires_at: typeof m.search_expires_at === 'number' ? m.search_expires_at : 0,
+          site_cards: Array.isArray(m.site_cards) ? m.site_cards : [],
           thinking_elapsed_ms: m.thinking_elapsed_ms || 0,
           // ★ 深度思考消息恢复所需字段
           deep_think: m.deep_think === true,
