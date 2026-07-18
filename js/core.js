@@ -7701,6 +7701,7 @@ function renderProfileActivityList(kind) {
                             if (typeof window.initialLoad === 'function') {
                                 rebuildFeedFromCurrentState()
                                     .then(function() {
+                                        isRefreshing[tab] = false;
                                         return syncFeedDataInBackground();
                                     })
                                     .catch(function(err) {

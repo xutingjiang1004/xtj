@@ -5215,7 +5215,8 @@ async function hardDeleteContent(params) {
     var commentDelete = await supabase.from('comments').delete().eq('post_id', params.postId);
     if (commentDelete.error) return { error: commentDelete.error };
     var related = await supabase.from('posts').select('id, media_type, media_url, content')
-      .in('media_type', ['__post_view__', '__report__']);
+      .in('media_type', ['__post_view__', '__report__'])
+      .limit(5000);  // 防止全表扫描 OOM
     if (related.error) return { error: related.error };
     var relatedIds = (related.data || []).filter(function(row) {
       if (row.media_type === '__post_view__') return String(row.media_url || '') === String(params.postId);
@@ -11985,7 +11986,8 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
         .select('id, user_name, content, media_url, created_at')
         .eq('user_name', targetUser)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .limit(5000);
       // 按纯字符串 media_url 过滤（旧数据 media_url 是'user'或'assistant'）
       var legacyRows = (rows || []).filter(function(r) {
         var raw = r.media_url || '';
