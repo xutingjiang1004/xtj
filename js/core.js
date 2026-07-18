@@ -8346,7 +8346,7 @@ function renderProfileActivityList(kind) {
                 if (!window.currentUser) {
                     el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">登录后可查看消息</div></div>';
                     setUnreadBadgeCount(0);
-                    renderDockChatAiEntry(el);
+                    renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                     return;
                 }
@@ -8374,7 +8374,7 @@ function renderProfileActivityList(kind) {
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
-                        renderDockChatAiEntry(el);
+                        renderDockChatFixedEntry(el);
                         syncDockChatLayoutState();
                         return;
                     }
@@ -8394,7 +8394,7 @@ function renderProfileActivityList(kind) {
                     }, 0));
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
-                    renderDockChatAiEntry(el);
+                    renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                     // 非阻塞加载头像: 先显示列表, 头像后台补上（包含固定入口 xxz）
                     var avatarUsers = convs.map(function(c) { return c.other_user; });
@@ -8417,7 +8417,7 @@ function renderProfileActivityList(kind) {
                         loadDockChatList();
                     }, { once: true });
                     el.appendChild(retry);
-                    renderDockChatAiEntry(el);
+                    renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                 }
             }
@@ -8585,63 +8585,11 @@ function renderProfileActivityList(kind) {
                 return nextListSignature;
             }
 
-            // 在聊天列表渲染固定的"AI" 入口 + 管理员"xxz"入口
-            // ★ 始终插入到列表最顶部，AI永远第一，xxz永远第二
-            function renderDockChatAiEntry(el) {
+            // The chat list contains real direct-message contacts only. AI is
+            // intentionally launched from the homepage AI tools button.
+            function renderDockChatFixedEntry(el) {
                 if (!el) return;
-                // AI 入口（永远第一）
-                var existingAi = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
-                if (existingAi) {
-                    if (el.firstChild !== existingAi) el.insertBefore(existingAi, el.firstChild);
-                } else {
-                    var aiHtml = [
-                        '<div class="chat-list-item ai-agent-entry" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
-                        '<div class="cli-avatar" style="display:flex;align-items:center;justify-content:center;border-radius:50%;width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;font-size:16px;font-weight:700;">AI</div>',
-                        '<div class="cli-info"><div class="cli-name">AI</div><div class="cli-preview">智能助手</div></div>',
-                        '<div class="cli-right"></div>',
-                        '</div>'
-                    ].join('');
-                    var aiTemplate = document.createElement('template');
-                    aiTemplate.innerHTML = aiHtml.trim();
-                    var aiRow = aiTemplate.content.firstElementChild;
-                    function setAiEntryLoading(loading, failed) {
-                        var preview = aiRow.querySelector('.cli-preview');
-                        aiRow.classList.toggle('is-loading', !!loading);
-                        aiRow.classList.toggle('is-error', !!failed);
-                        aiRow.setAttribute('aria-busy', loading ? 'true' : 'false');
-                        if (preview) preview.textContent = loading ? '正在打开…' : (failed ? '加载失败，点击重试' : '智能助手');
-                    }
-                    aiRow.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        if (aiRow.getAttribute('aria-busy') === 'true') return;
-                        setAiEntryLoading(true, false);
-                        if (typeof window.__xtjEnsureAiAgentLoaded === 'function') {
-                            window.__xtjEnsureAiAgentLoaded().then(function() {
-                                setAiEntryLoading(false, false);
-                                if (typeof window.__xtjOpenAiChat === 'function') {
-                                    window.__xtjOpenAiChat();
-                                } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
-                                    window.__xtjAiAgent.open();
-                                }
-                            }).catch(function(err) {
-                                setAiEntryLoading(false, true);
-                                console.error('[XTJ] failed to open AI chat:', err);
-                                if (typeof window.showToast === 'function') window.showToast('AI 模块加载失败，请稍后重试');
-                            });
-                        } else if (typeof window.__xtjOpenAiChat === 'function') {
-                            setAiEntryLoading(false, false);
-                            window.__xtjOpenAiChat();
-                        } else {
-                            setAiEntryLoading(false, true);
-                        }
-                    });
-                    aiRow.addEventListener('keydown', function(e) {
-                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); aiRow.click(); }
-                    });
-                    el.insertBefore(aiRow, el.firstChild);
-                }
-                // 管理员 xxz 入口（固定在 AI 下面，永远第二，不参与最近会话排序）
-                // 当前用户是 xxz 本人时不显示
+                // The administrator contact remains a normal direct-message entry.
                 if (window.currentUser === 'xxz') {
                     var selfEntry = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
                     if (selfEntry) selfEntry.remove();
@@ -8649,10 +8597,7 @@ function renderProfileActivityList(kind) {
                 }
                 var existingAdmin = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
                 if (existingAdmin) {
-                    var aiEntry = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
-                    if (aiEntry && aiEntry.nextSibling !== existingAdmin) {
-                        el.insertBefore(existingAdmin, aiEntry.nextSibling);
-                    }
+                    if (el.firstChild !== existingAdmin) el.insertBefore(existingAdmin, el.firstChild);
                     // 更新头像（可能已有缓存）
                     var adminAvatar = existingAdmin.querySelector('.cli-avatar');
                     if (adminAvatar) adminAvatar.innerHTML = getDockChatAvatarMarkup('xxz');
@@ -8677,12 +8622,7 @@ function renderProfileActivityList(kind) {
                     adminRow.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); adminRow.click(); }
                     });
-                    var aiEntry2 = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
-                    if (aiEntry2) {
-                        el.insertBefore(adminRow, aiEntry2.nextSibling);
-                    } else {
-                        el.insertBefore(adminRow, el.firstChild);
-                    }
+                    el.insertBefore(adminRow, el.firstChild);
                 }
             }
 
