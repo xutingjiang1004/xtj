@@ -221,7 +221,8 @@
     } catch (err) {
       console.warn('[PhotoWall] load more failed', err);
       page = Math.max(0, page - 1);
-      return [];
+      // 抛出错误让渲染层区分"加载失败"和"没有更多"
+      throw err;
     }
   }
 

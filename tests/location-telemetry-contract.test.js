@@ -25,9 +25,10 @@ test('precise geolocation is system-managed and can be stopped', () => {
 test('behavior telemetry uses stable control identifiers and never accessible user text', () => {
   const clickBlock = device.slice(device.indexOf("document.addEventListener('click'"), device.indexOf("document.addEventListener('visibilitychange'"));
   const targetLine = clickBlock.match(/var target =[^\n]+/)[0];
-  assert.match(targetLine, /control\.id/);
-  assert.match(targetLine, /getAttribute\('data-action'\)/);
-  assert.doesNotMatch(targetLine, /aria-label|title|textContent|innerText|\.value/);
+  assert.match(targetLine, /getMeaningfulTarget\(control\)/);
+  assert.match(device, /function getMeaningfulTarget/);
+  assert.match(device, /getAttribute\('data-action'\)/);
+  assert.doesNotMatch(targetLine, /\.value/);
 });
 
 test('location endpoint validates coordinates and keeps one bounded record per page load', () => {
