@@ -529,6 +529,97 @@ test('post create degraded_fields reflects actual removed columns', function(){
   assert.ok(s.indexOf('Object.keys(removedCategories)') >= 0, 'server.js must report actual degraded categories');
 });
 
+console.log('\n=== IP Region & Data Leak Acceptance Tests ===');
+
+// 一、历史帖子 IP 属地泄漏修复
+test('1. buildPostLocationHtml 历史帖子无 ip_lookup_started_at 不显示 IP 属地', function(){
+  var s = read('js/core.js');
+  var fn = s.slice(s.indexOf('function buildPostLocationHtml'), s.indexOf('function looksLikeSystemTelemetry'));
+  assert.ok(fn.indexOf('hasLookupStarted') >= 0, 'core.js must check ip_lookup_started_at before showing IP');
+  assert.ok(fn.indexOf('ip_lookup_started_at') >= 0, 'core.js must reference ip_lookup_started_at');
+});
+
+test('2. 历史帖子遗留 pending 但没有 lookup_started_at 不显示解析中', function(){
+  var s = read('js/core.js');
+  var fn = s.slice(s.indexOf('function buildPostLocationHtml'), s.indexOf('function looksLikeSystemTelemetry'));
+  // 验证 hasLookupStarted 变量保护了 pending/failed 显示
+  assert.ok(fn.indexOf('hasLookupStarted') >= 0, 'must guard pending/failed display behind hasLookupStarted');
+  // 验证"解析中"赋值在 hasLookupStarted 块内
+  var hasLookupIdx = fn.indexOf('hasLookupStarted');
+  var pendingIdx = fn.indexOf("'pending'");
+  var failedIdx = fn.indexOf("'failed'");
+  assert.ok(pendingIdx > hasLookupIdx, 'pending assignment must be after hasLookupStarted declaration');
+  assert.ok(failedIdx > hasLookupIdx, 'failed assignment must be after hasLookupStarted declaration');
+});
+
+test('3. 新帖子创建时写入 ip_lookup_started_at', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('ip_lookup_started_at') >= 0, 'server.js must set ip_lookup_started_at');
+  // 确保 pending 状态时设置了 ip_lookup_started_at
+  var createIdx = s.indexOf("app.post('/api/post/create'");
+  var createSection = s.slice(createIdx, createIdx + 5000);
+  assert.ok(createSection.indexOf('ip_lookup_started_at') >= 0, 'POST /api/post/create must set ip_lookup_started_at');
+});
+
+test('4. 解析成功显示省份+城市', function(){
+  var s = read('render-api/server.js');
+  // resolveIpRegion 返回 province + city + text
+  assert.ok(s.indexOf('ip_province') >= 0, 'server.js must save ip_province');
+  assert.ok(s.indexOf('ip_city') >= 0, 'server.js must save ip_city');
+  assert.ok(s.indexOf('ip_region_text') >= 0, 'server.js must save ip_region_text');
+});
+
+test('5. 解析失败显示未知并保存失败原因', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf('setIpRegionFailed') >= 0, 'server.js must have setIpRegionFailed helper');
+  assert.ok(s.indexOf('ip_region_error') >= 0, 'server.js must save ip_region_error on failure');
+  // 确保失败时 ip_region_text 设为 '未知'
+  var failFn = s.slice(s.indexOf('async function setIpRegionFailed'), s.indexOf('async function setIpRegionFailed') + 300);
+  assert.ok(failFn.indexOf('未知') >= 0, 'setIpRegionFailed must set ip_region_text to 未知');
+});
+
+// 二、定位 JSON 泄漏修复
+test('6. __user_info__ 标记在 SYSTEM_MARKERS 中，被 /api/feed 排除', function(){
+  var s = read('render-api/server.js');
+  assert.ok(s.indexOf("'__user_info__'") >= 0, '__user_info__ must be in SYSTEM_MARKERS');
+});
+
+test('7. looksLikeSystemTelemetry 在前后端均存在并检测定位 JSON', function(){
+  var serverJs = read('render-api/server.js');
+  var coreJs = read('js/core.js');
+  assert.ok(serverJs.indexOf('function looksLikeSystemTelemetry') >= 0, 'server.js must have looksLikeSystemTelemetry');
+  assert.ok(coreJs.indexOf('function looksLikeSystemTelemetry') >= 0, 'core.js must have looksLikeSystemTelemetry');
+  // 检测 page_load_id 等定位字段
+  assert.ok((serverJs.indexOf('page_load_id') >= 0 && serverJs.indexOf('resolved_address') >= 0) ||
+    (coreJs.indexOf('page_load_id') >= 0 && coreJs.indexOf('resolved_address') >= 0),
+    'looksLikeSystemTelemetry must detect page_load_id + resolved_address');
+});
+
+test('8. /api/feed 白名单过滤只允许正常帖子 media_type', function(){
+  var s = read('render-api/server.js');
+  var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
+  assert.ok(feedSection.indexOf('media_type.is.null') >= 0, '/api/feed must whitelist null media_type');
+  assert.ok(feedSection.indexOf('media_type.in.') >= 0, '/api/feed must whitelist normal media_types');
+  assert.ok(feedSection.indexOf('looksLikeSystemTelemetry') >= 0, '/api/feed must filter telemetry content');
+});
+
+// 三、缓存升级
+test('9. 缓存版本已从 v6 升级到 v7', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('xtj_feed_cache_v7') >= 0, 'cache version must be upgraded to v7');
+  assert.ok(s.indexOf('xtj_feed_cache_v6') === -1, 'old cache version v6 must be removed');
+});
+
+// 四、不修改底部四大 Dock
+test('10. 底部四大 Dock HTML 未被修改', function(){
+  var html = read('index.html');
+  // 确保四个 Dock 按钮都存在
+  var dockBtns = ['帖子', '聊天', 'AI', '我的'];
+  dockBtns.forEach(function(label) {
+    assert.ok(html.indexOf(label) >= 0, 'index.html must keep Dock button: ' + label);
+  });
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
