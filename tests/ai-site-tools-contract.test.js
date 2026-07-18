@@ -47,3 +47,10 @@ test('AI tool registry exposes searches only', () => {
   assert.doesNotMatch(registry, /send_site_message|create_draft|update_draft|delete_draft|publish_announcement|maintenance_task/);
   assert.match(server, /ai_write_tools_disabled/);
 });
+
+test('search cards deduplicate SSE retries and use real application jump handlers', () => {
+  assert.match(client, /messagesEl\.__xtjAiCardIds/);
+  assert.match(client, /openUserProfile/);
+  assert.match(client, /openConversation/);
+  assert.doesNotMatch(client, /window\.openAiChat/);
+});
