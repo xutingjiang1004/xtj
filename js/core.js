@@ -6190,7 +6190,7 @@ function renderProfileActivityList(kind) {
                         user_name: currentUser,
                         content: contentPayload,
                         media_url: media_url,
-                        media_type: media_type,
+                        media_type: media_type || null,
                         actor_key: deviceId,
                         visibility: metadata.visibility,
                         is_pinned: false,
