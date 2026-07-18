@@ -1,5 +1,11 @@
 -- xtj Supabase Row Level Security baseline (2026 hardened version)
 -- Backend routes use service_role; anon must not write posts directly.
+--
+-- ⚠️ 警告：此文件仅作参考文档，请勿在当前数据库上直接执行！
+-- 当前数据库已通过 migration 012 回收了 anon 和 authenticated 角色
+-- 对 likes/comments 表的写入权限。执行此文件会重新打开这些权限，
+-- 绕过后端鉴权，造成严重安全漏洞。
+-- 所有 RLS 变更必须通过 supabase/migrations/ 目录下的迁移文件管理。
 
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 REVOKE INSERT, UPDATE, DELETE ON posts FROM anon;

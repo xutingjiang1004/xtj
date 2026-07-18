@@ -57,6 +57,11 @@ services:
       - key: SMTP_PORT
         sync: false
 
+      # Gmail GAS Web App URL（备选邮件通道，用于绕过 SMTP 限制）
+      # 在 Render Dashboard 手动设置
+      - key: GMAIL_GAS_URL
+        sync: false
+
 # 部署后验证：
 # 1. 打开 https://你的服务名.onrender.com/health → 应返回 {"ok":true}
 # 2. 打开 https://你的服务名.onrender.com/admin.html → 应显示登录页面
