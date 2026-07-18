@@ -2232,8 +2232,12 @@ async function resolveIpRegion(ip) {
 }
 
 // 异步重试 IP 属地解析（最多3次：发布时→30秒后→5分钟后）
+// 超过 2 分钟仍未解析的 pending 状态转为 failed
 async function retryIpRegionAsync(postId, ip, attempt) {
-  if (attempt > 3) return;
+  if (attempt > 3) {
+    await setIpRegionFailed(postId, 'max_retries_exceeded');
+    return;
+  }
   try {
     var result = await resolveIpRegion(ip);
     if (result.status === 'resolved') {
@@ -2242,24 +2246,56 @@ async function retryIpRegionAsync(postId, ip, attempt) {
         ip_city: result.city,
         ip_region_text: result.text,
         ip_region_status: 'resolved',
-        ip_resolved_at: new Date().toISOString()
+        ip_resolved_at: new Date().toISOString(),
+        ip_region_error: null
       }).eq('id', postId);
+      return;
+    }
+    // resolveIpRegion 返回 failed，但可能还有重试机会
+    if (attempt === 3 && result.status === 'failed') {
+      await setIpRegionFailed(postId, result.error || 'resolve_returned_failed');
       return;
     }
   } catch (e) {
     console.warn('[IP Retry] 重试 ' + attempt + ' 失败:', postId, e.message || e);
+    if (attempt === 3) {
+      await setIpRegionFailed(postId, e.message || 'retry_error');
+      return;
+    }
   }
   if (attempt < 3) {
     var delay = attempt === 1 ? 30000 : 300000;
     setTimeout(function() { retryIpRegionAsync(postId, ip, attempt + 1); }, delay);
-  } else {
-    try {
-      await supabase.from('posts').update({
-        ip_region_status: 'failed'
-      }).eq('id', postId);
-    } catch (_) {}
   }
 }
+
+// 统一设置 IP 解析失败状态
+async function setIpRegionFailed(postId, errorMsg) {
+  try {
+    await supabase.from('posts').update({
+      ip_region_status: 'failed',
+      ip_region_text: '未知',
+      ip_region_error: String(errorMsg || 'unknown').slice(0, 500)
+    }).eq('id', postId);
+  } catch (_) {}
+}
+
+// 每 60 秒检查一次超时的 pending 状态（超过 2 分钟未解析的转为 failed）
+setInterval(async function() {
+  try {
+    var cutoff = new Date(Date.now() - 120000).toISOString();
+    var { data: stalePosts } = await supabase.from('posts')
+      .select('id')
+      .eq('ip_region_status', 'pending')
+      .lt('ip_lookup_started_at', cutoff)
+      .limit(50);
+    if (stalePosts && stalePosts.length) {
+      for (var i = 0; i < stalePosts.length; i++) {
+        await setIpRegionFailed(stalePosts[i].id, 'timeout_2min');
+      }
+    }
+  } catch (_) {}
+}, 60000);
 
 // ===================== IP 解析健康检查与手动重试 =====================
 
@@ -4496,6 +4532,29 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
+// 服务端检测系统遥测/定位 JSON 数据
+// 防止 media_type 被写错的系统记录泄漏到前端
+function looksLikeSystemTelemetry(content) {
+  if (!content) return false;
+  try {
+    var obj = JSON.parse(String(content).trim());
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+    var telemetryKeys = [
+      'page_load_id', 'last_attempt_at', 'resolved_address', 'resolved_at',
+      'capture_reason', 'precise_location_history',
+      'device_id', 'browser_fingerprint_hash', 'canvas_fingerprint_hash',
+      'webgl_fingerprint_hash'
+    ];
+    var matchCount = 0;
+    for (var i = 0; i < telemetryKeys.length; i++) {
+      if (telemetryKeys[i] in obj) matchCount++;
+    }
+    return matchCount >= 2;
+  } catch (e) {
+    return false;
+  }
+}
+
 // 可选认证：成功则设置 req.userName，失败不阻止请求
 async function optionalAuth(req, res, next) {
   try {
@@ -5361,7 +5420,9 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ip_city: ipRegion.city,
       ip_region_text: ipRegion.text,
       ip_region_status: ipRegion.status,
-      ip_resolved_at: ipRegion.status === 'resolved' ? new Date().toISOString() : null
+      ip_resolved_at: ipRegion.status === 'resolved' ? new Date().toISOString() : null,
+      ip_lookup_started_at: ipRegion.status === 'pending' ? new Date().toISOString() : null,
+      ip_region_error: null
     };
     var inserted = await supabase.from('posts').insert([payload]).select('*').single();
     var degraded = false;
@@ -5969,6 +6030,10 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       query = query.neq('media_type', marker);
     });
 
+    // 白名单过滤：只允许正常帖子 media_type
+    // 即使系统记录的 marker 被写错，白名单也能兜底过滤
+    query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
+
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
       if (isLoggedIn) {
@@ -5985,6 +6050,12 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     if (postsErr) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
 
     posts = posts || [];
+
+    // 服务端内容过滤：排除 content 为系统遥测/定位 JSON 的异常记录
+    // 即使 media_type 被写错，内容检测也能兜底
+    posts = posts.filter(function(p) {
+      return !looksLikeSystemTelemetry(p.content);
+    });
 
     // 获取相关评论和点赞
     var postIds = posts.map(function(p) { return p.id; });
