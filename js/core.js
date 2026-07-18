@@ -5430,10 +5430,7 @@ function renderProfileActivityList(kind) {
                     var cachePosts = (feedAllPosts || []).filter(function(post) {
                         return post &&
                             firstPageIds.has(String(post.id || '')) &&
-                            post.media_type !== '__avatar__' &&
-                            post.media_type !== '__user_info__' &&
-                            post.media_type !== '__photo_wall__' &&
-                            post.media_type !== ADMIN_META_MARKER;
+                            !isSystemPost(post);
                     }).map(toLightweightFeedPost);
                     var cacheComments = (feedAllComments || []).filter(function(comment) {
                         return comment && firstPageIds.has(String(comment.post_id || ''));
@@ -5630,6 +5627,8 @@ function renderProfileActivityList(kind) {
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
+                            // 使用服务器返回的 next_offset，不自行计算
+                            start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
                             usedApi = true;
                         }
                     }
