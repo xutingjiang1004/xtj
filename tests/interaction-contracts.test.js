@@ -79,13 +79,13 @@ test('pin request serializes a UUID string and a boolean', () => {
   assert.match(pin, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*is_pinned:\s*(?:!!|Boolean\()nextPinned\)? \}\)/);
 });
 
-test('failed lazy AI loads clear their cached promise and expose retry state', () => {
+test('AI stays in the homepage tools center instead of the direct-message list', () => {
   const loader = between(core, 'function loadXtjModule(name)', 'function ensurePhotoWallLoaded');
   assert.match(loader, /delete xtjModulePromises\[moduleName\]/);
-  const entry = between(core, 'function renderDockChatAiEntry', 'async function loadDockChatMessages');
-  assert.match(entry, /aria-busy/);
-  assert.match(entry, /加载失败，点击重试/);
-  assert.match(entry, /setAiEntryLoading\(false,\s*true\)/);
+  const entry = between(core, 'function renderDockChatFixedEntry', 'async function loadDockChatMessages');
+  assert.match(entry, /administrator contact remains a normal direct-message entry/);
+  assert.doesNotMatch(entry, /__ai_agent__/);
+  assert.match(core, /bindTopAiToolsLauncher/);
 });
 
 test('publishing exposes busy state and inserts the created post without full feed reload', () => {

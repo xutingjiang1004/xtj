@@ -28,6 +28,7 @@ test('top AI tools menu sits between theme and notifications and opens chat or r
     return !!theme && !!ai && !!announcement && !!(theme.compareDocumentPosition(ai) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(ai.compareDocumentPosition(announcement) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
   expect(order).toBe(true);
+  await expect(page.locator('#aiToolsBtn .ai-tools-trigger-label')).toHaveText('AI');
 
   await page.locator('#aiToolsBtn').click();
   await expect(page.locator('#aiToolsMenu')).toBeVisible();
@@ -55,6 +56,8 @@ test('top AI tools menu remains within a mobile viewport', async ({ page }) => {
   expect(bounds).not.toBeNull();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await page.getByRole('menuitem', { name: /AI 聊天/ }).click();
+  await expect(page.locator('#aiChatRoot')).toBeVisible();
 });
 
 test('restored site-search cards retain source metadata and open a photo preview', async ({ page }) => {
