@@ -58,9 +58,12 @@ async function initProvider() {
     const nodemailer = (await import("nodemailer")).default;
     sendFn = async (o) => {
       const t = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: parseInt(process.env.SMTP_PORT||"587"), secure: process.env.SMTP_PORT==="465", auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-      await t.verify();
-      await t.sendMail({ from: `"${FROM_NAME}" <${FROM_EMAIL}>`, to: o.to, subject: o.subject, text: o.text, html: o.html });
-      await t.close();
+      try {
+        await t.verify();
+        await t.sendMail({ from: `"${FROM_NAME}" <${FROM_EMAIL}>`, to: o.to, subject: o.subject, text: o.text, html: o.html });
+      } finally {
+        await t.close();
+      }
     };
   } else throw new Error(`不支持: ${PROVIDER}`);
 }
