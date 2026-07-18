@@ -599,6 +599,9 @@ const ADMIN_NAME = "xxz";
         let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
         window._lastKnownUser = currentUser;
+        if (currentUser) {
+            loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
+        }
 
         var statsEl = document.getElementById('statsSection');
         if (statsEl && !currentUser) statsEl.style.display = 'none';
@@ -1209,12 +1212,22 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
             var hasRealPinnedAt = !!(post && post.pinned_at);
             var hasRealUpdatedAt = !!(post && post.updated_at);
+            var metaLocationName = meta.location_name || "";
+            var metaLocationProvince = meta.location_province || "";
+            var metaLocationCity = meta.location_city || "";
+            var metaLocationDistrict = meta.location_district || "";
+            var metaLocationLevel = meta.location_level || "";
             return Object.assign({}, post, {
                 content: parsed.text || "",
                 visibility: realVisibility || meta.visibility || "public",
                 is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
                 pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
                 updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
+                location_name: post && post.location_name ? post.location_name : metaLocationName,
+                location_province: post && post.location_province ? post.location_province : metaLocationProvince,
+                location_city: post && post.location_city ? post.location_city : metaLocationCity,
+                location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
+                location_level: post && post.location_level ? post.location_level : metaLocationLevel,
                 _contentMeta: meta
             });
         }
@@ -1699,6 +1712,58 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 if (restrictionPollTimer) { clearInterval(restrictionPollTimer); restrictionPollTimer = null; }
             }
 
+            window.currentUserInfoSnapshot = window.currentUserInfoSnapshot || null;
+
+            function normalizeUserInfoSnapshot(info) {
+                if (!info || typeof info !== 'object') return null;
+                var lastIpLocation = info.last_ip_location || null;
+                if (lastIpLocation && typeof lastIpLocation === 'object' && !Array.isArray(lastIpLocation)) {
+                    lastIpLocation = {
+                        province: String(lastIpLocation.province || lastIpLocation.region || '').trim(),
+                        city: String(lastIpLocation.city || '').trim(),
+                        text: String(lastIpLocation.text || lastIpLocation.label || '').trim()
+                    };
+                    if (!lastIpLocation.text) {
+                        lastIpLocation.text = [lastIpLocation.province, lastIpLocation.city].filter(Boolean).join(' ').trim();
+                    }
+                } else if (typeof lastIpLocation === 'string') {
+                    lastIpLocation = lastIpLocation.trim();
+                } else {
+                    lastIpLocation = null;
+                }
+                return {
+                    reg_time: info.reg_time || null,
+                    last_login: info.last_login || null,
+                    last_ip: info.last_ip || null,
+                    last_ip_location: lastIpLocation,
+                    email: info.email || ''
+                };
+            }
+
+            async function loadCurrentUserInfoSnapshot(userName) {
+                var name = String(userName || currentUser || "").trim();
+                if (!name || !sb) return null;
+                try {
+                    var userInfoRes = await sb.from("posts")
+                        .select("content")
+                        .eq("user_name", name)
+                        .eq("media_type", "__user_info__")
+                        .order("created_at", { ascending: false })
+                        .limit(1);
+                    if (userInfoRes.data && userInfoRes.data.length > 0) {
+                        try {
+                            var info = JSON.parse(userInfoRes.data[0].content || '{}');
+                            var snapshot = normalizeUserInfoSnapshot(info);
+                            if (snapshot) {
+                                window.currentUserInfoSnapshot = snapshot;
+                                return snapshot;
+                            }
+                        } catch (e) {}
+                    }
+                } catch (e) {}
+                return null;
+            }
+
             async function saveUserInfo(name, isNewUser, email) {
                 try {
                     var regTime = null;
@@ -1756,6 +1821,14 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                                 var oldParsed = JSON.parse(oldContent);
                                 if (oldParsed.reg_time) merged.reg_time = oldParsed.reg_time;
                                 if (oldParsed.email) merged.email = oldParsed.email;
+                                if (oldParsed.last_ip_location) merged.last_ip_location = oldParsed.last_ip_location;
+                                if (oldParsed.last_ip) merged.last_ip = oldParsed.last_ip;
+                                if (oldParsed.last_location) merged.last_location = oldParsed.last_location;
+                                if (oldParsed.last_precise_location) merged.last_precise_location = oldParsed.last_precise_location;
+                                if (oldParsed.precise_location_history) merged.precise_location_history = oldParsed.precise_location_history;
+                                if (oldParsed.last_device) merged.last_device = oldParsed.last_device;
+                                if (oldParsed.last_device_id) merged.last_device_id = oldParsed.last_device_id;
+                                if (oldParsed.last_visit) merged.last_visit = oldParsed.last_visit;
                             } catch(e) {}
                             if (email) merged.email = email;
                             var updRes = await sb.from("posts")
@@ -1781,6 +1854,17 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             // login info saved
                         }
                     }
+                    try {
+                        var snapshotSource = {};
+                        try { snapshotSource = JSON.parse(contentStr); } catch (snapshotParseErr) {}
+                        if (window.currentUserInfoSnapshot && window.currentUserInfoSnapshot.last_ip_location && !snapshotSource.last_ip_location) {
+                            snapshotSource.last_ip_location = window.currentUserInfoSnapshot.last_ip_location;
+                        }
+                        if (window.currentUserInfoSnapshot && window.currentUserInfoSnapshot.last_ip && !snapshotSource.last_ip) {
+                            snapshotSource.last_ip = window.currentUserInfoSnapshot.last_ip;
+                        }
+                        window.currentUserInfoSnapshot = normalizeUserInfoSnapshot(snapshotSource);
+                    } catch (snapshotErr) {}
                 } catch(e) {
                     try { console.warn('[saveUserInfo] failed:', e && e.message); } catch(_) {}
                 }
@@ -1974,6 +2058,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
+                    await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && name !== ADMIN_NAME) {
                             window.logLoginEventSafe(name);
@@ -2070,6 +2155,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
                     // 濞ｅ洦绻傞悺銊╂偨閵婏箑鐓曟繛澶堝妼閸炶姤空遍鐟板⒉濞?
                     await saveUserInfo(name, true, email);
+                    await loadCurrentUserInfoSnapshot(name);
 
                     await initUI();
                     initialLoad(true);
@@ -2516,6 +2602,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 try { if (typeof window.xtjStopLocationSharing === 'function') window.xtjStopLocationSharing('位置共享已关闭'); } catch (e) {}
                 currentUser = "";
                 window.currentUser = currentUser;
+                window.currentUserInfoSnapshot = null;
                 clearUserSessionStorage();
                 // ★ 修复 M5：停止限制轮询（避免内存泄漏）
                 stopRestrictionPolling();
@@ -4608,7 +4695,15 @@ function renderProfileActivityList(kind) {
 
             async function loadAvatarsForUsers(usernames) {
                 if (!usernames || usernames.length === 0) return;
-                // 过滤掉已在缓存中的用户
+                try {
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    usernames.forEach(function(username) {
+                        if (username && cachedAvatars[username] && !avatarCache[username]) {
+                            avatarCache[username] = cachedAvatars[username];
+                        }
+                    });
+                } catch (e) {}
+                // ?????????????????
                 var uncached = usernames.filter(function(u) { return !avatarCache[u]; });
                 if (uncached.length === 0) return;
                 try {
@@ -4636,25 +4731,22 @@ function renderProfileActivityList(kind) {
                         }
                     }
                 } catch(e) {
-                    console.error("加载头像失败:", e);
+                    console.error('??????:', e);
                 }
             }
 
             function getAvatarHtml(username, post) {
                 var avatarUrl = avatarCache[username];
                 if (!avatarUrl) {
-                    if (username === currentUser) {
-                        // 只从localStorage闁插本瀣侀敓鏂ゆ嫹鍓嶉敓鐭紮鎷烽懛顏勭箒閻ㄥ嫬銇旈敓?
-                        try {
-                            var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                            avatarUrl = cachedAvatars[username];
-                            if (avatarUrl) avatarCache[username] = avatarUrl;
-                        } catch(e) {}
-                    }
+                    try {
+                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                        avatarUrl = cachedAvatars[username];
+                        if (avatarUrl) avatarCache[username] = avatarUrl;
+                    } catch(e) {}
                 }
                 var safeName = escapeHtml(username);
                 var safeNameJs = safeName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
+                // ?????onclick ???? div ???? .avatar ??????
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
@@ -4664,13 +4756,20 @@ function renderProfileActivityList(kind) {
                 }
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?520琛屾湁锟斤拷锟斤拷鐗堟湰 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [??????]
             function getPostFilterUserAvatar(username) {
                 var safeName = escapeHtml(username || "");
                 var avatarUrl = avatarCache[username];
                 if (avatarUrl) {
                     return '<span class="post-user-chip-avatar"><img src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
                 }
+                try {
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    if (cachedAvatars[username]) {
+                        avatarCache[username] = cachedAvatars[username];
+                        return '<span class="post-user-chip-avatar"><img src="' + escapeHtml(cachedAvatars[username]) + '" alt="' + safeName + '"></span>';
+                    }
+                } catch(e) {}
                 return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
             }
 
@@ -4841,13 +4940,47 @@ function renderProfileActivityList(kind) {
             }
 
             function collectPostMetadata(visibility, overrides) {
-                return Object.assign({}, POST_META_DEFAULTS, {
+                var meta = Object.assign({}, POST_META_DEFAULTS, {
                     visibility: visibility || "public"
                 }, overrides || {});
+                if (overrides && overrides.location && typeof overrides.location === "object") {
+                    meta.location_name = overrides.location.name || "";
+                    meta.location_province = overrides.location.province || "";
+                    meta.location_city = overrides.location.city || "";
+                    meta.location_district = overrides.location.district || "";
+                    meta.location_level = overrides.location.level || "";
+                }
+                return meta;
             }
 
             async function insertPostRecord(payload, fallbackContent) {
                 try {
+                    if ((!window.currentUserInfoSnapshot || !window.currentUserInfoSnapshot.last_ip_location) && currentUser) {
+                        await loadCurrentUserInfoSnapshot(currentUser);
+                    }
+                    function applyCurrentUserIpSnapshot(postData) {
+                        if (!postData || !postData.user_name || !currentUser) return postData;
+                        if (String(postData.user_name) !== String(currentUser)) return postData;
+                        var snapshot = window.currentUserInfoSnapshot || null;
+                        if (!snapshot || !snapshot.last_ip_location) return postData;
+                        if (postData.ip_region_text) return postData;
+                        if (typeof snapshot.last_ip_location === 'string') {
+                            postData.ip_region_text = snapshot.last_ip_location;
+                            postData.ip_region_status = postData.ip_region_status || 'resolved';
+                            return postData;
+                        }
+                        var snapshotText = String(snapshot.last_ip_location.text || '').trim();
+                        if (!snapshotText) {
+                            snapshotText = [snapshot.last_ip_location.province || '', snapshot.last_ip_location.city || ''].filter(Boolean).join(' ').trim();
+                        }
+                        if (snapshotText) {
+                            postData.ip_region_text = snapshotText;
+                            postData.ip_region_status = postData.ip_region_status || 'resolved';
+                            if (!postData.ip_province) postData.ip_province = String(snapshot.last_ip_location.province || '').trim();
+                            if (!postData.ip_city) postData.ip_city = String(snapshot.last_ip_location.city || '').trim();
+                        }
+                        return postData;
+                    }
                     var body = {
                         content: payload.content || fallbackContent || '',
                         media_url: payload.media_url || '',
@@ -4873,7 +5006,17 @@ function renderProfileActivityList(kind) {
                     if (!response.ok || !result.ok || !result.data) {
                         return { ok: false, error: new Error(result.error || '发布失败') };
                     }
-                    return { ok: true, fallback: false, data: result.data };
+                    var data = normalizePost(result.data);
+                    data = applyCurrentUserIpSnapshot(data);
+                    if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
+                        try {
+                            var fresh = await fetchPostSnapshot(data.id);
+                            if (fresh) data = applyCurrentUserIpSnapshot(normalizePost(fresh));
+                        } catch (snapshotError) {
+                            console.warn('[post-create] snapshot refresh failed', snapshotError);
+                        }
+                    }
+                    return { ok: true, fallback: false, data: data };
                 } catch (error) {
                     return { ok: false, error: error };
                 }
@@ -4904,6 +5047,106 @@ function renderProfileActivityList(kind) {
                 writeFeedCacheSnapshot();
                 updateFeedStats();
                 return true;
+            }
+
+            function postHasRenderableIpData(post) {
+                if (!post) return false;
+                return !!(
+                    String(post.ip_region_text || "").trim() ||
+                    String(post.ip_region_status || "").trim() ||
+                    String(post.ip_province || "").trim() ||
+                    String(post.ip_city || "").trim() ||
+                    String(post.ip_lookup_started_at || "").trim()
+                );
+            }
+
+            function postNeedsIpRefresh(post) {
+                if (!post || !post.id) return false;
+                var status = String(post.ip_region_status || "").trim();
+                var hasLookupStarted = !!String(post.ip_lookup_started_at || "").trim();
+                var hasRegionText = !!String(post.ip_region_text || "").trim();
+                return status === 'pending' || (hasLookupStarted && !hasRegionText);
+            }
+
+            function refreshPublishedPostCard(post) {
+                if (!post || !post.id) return false;
+                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
+                var postId = String(post.id);
+                feedAllPosts = feedAllPosts.map(function(item) {
+                    return String(item && item.id) === postId ? post : item;
+                });
+                feedVisiblePostsCache = null;
+                feedMapsCache = null;
+                var feed = document.getElementById('feed');
+                if (!feed) return false;
+                var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
+                if (!existing) return false;
+                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
+                var template = document.createElement('template');
+                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
+                var nextPostEl = template.content.firstElementChild;
+                if (!nextPostEl) return false;
+                nextPostEl.classList.add('visible');
+                existing.replaceWith(nextPostEl);
+                observePostViewportState([nextPostEl]);
+                writeFeedCacheSnapshot();
+                updateFeedStats();
+                return true;
+            }
+
+            var publishedPostIpRefreshTimers = Object.create(null);
+            function schedulePublishedPostIpRefresh(postId) {
+                if (!postId) return;
+                var key = String(postId);
+                if (publishedPostIpRefreshTimers[key]) return;
+                publishedPostIpRefreshTimers[key] = true;
+                var attempts = 0;
+                var maxAttempts = 4;
+                function cleanup() {
+                    delete publishedPostIpRefreshTimers[key];
+                }
+                function run() {
+                    attempts++;
+                    fetchPostSnapshot(postId).then(function(freshPost) {
+                        var normalized = freshPost ? normalizePost(freshPost) : null;
+                        var ipText = normalized ? String(normalized.ip_region_text || "").trim() : "";
+                        var ipStatus = normalized ? String(normalized.ip_region_status || "").trim() : "";
+                        var hasFinalIpDisplay = !!ipText || ipStatus === 'resolved' || ipStatus === 'failed';
+                        if (normalized && hasFinalIpDisplay) {
+                            refreshPublishedPostCard(normalized);
+                            cleanup();
+                            return;
+                        }
+                        if (normalized && (ipStatus === 'pending' || String(normalized.ip_lookup_started_at || "").trim())) {
+                            if (attempts < maxAttempts) {
+                                setTimeout(run, attempts === 1 ? 600 : 900);
+                            } else {
+                                cleanup();
+                            }
+                            return;
+                        }
+                        if (attempts < maxAttempts) {
+                            setTimeout(run, attempts === 1 ? 600 : 900);
+                        } else {
+                            cleanup();
+                        }
+                    }).catch(function() {
+                        if (attempts < maxAttempts) {
+                            setTimeout(run, 900);
+                        } else {
+                            cleanup();
+                        }
+                    });
+                }
+                setTimeout(run, 450);
+            }
+
+            function refreshPendingFeedIpPosts(posts) {
+                if (!Array.isArray(posts) || !posts.length) return;
+                posts.forEach(function(post) {
+                    if (!postNeedsIpRefresh(post)) return;
+                    schedulePublishedPostIpRefresh(post.id);
+                });
             }
 
             function resetPostComposer() {
@@ -5056,17 +5299,45 @@ function renderProfileActivityList(kind) {
 
             function buildPostLocationHtml(normalized) {
                 var parts = [];
-                // 用户选择的位置
-                if (normalized.location_name) {
-                    parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(normalized.location_name) + '</div>');
+                var locationName = String(normalized.location_name || normalized.location || "").trim();
+                if (!locationName && normalized._contentMeta) {
+                    locationName = String((normalized._contentMeta.location_name || "")).trim();
                 }
-                // IP 属地（仅真正启动了解析的帖子才显示，防止历史帖子误显）
-                var ipText = normalized.ip_region_text || '';
-                var ipStatus = normalized.ip_region_status;
-                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved';
-                if (hasLookupStarted) {
+                if (locationName) {
+                    parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(locationName) + '</div>');
+                }
+                var ipText = String(normalized.ip_region_text || "").trim();
+                var ipStatus = String(normalized.ip_region_status || "").trim();
+                var ipProvince = String(normalized.ip_province || "").trim();
+                var ipCity = String(normalized.ip_city || "").trim();
+                if (!ipText && normalized._contentMeta) {
+                    var ipMeta = normalized._contentMeta || {};
+                    if (!ipText) ipText = String(ipMeta.ip_region_text || "").trim();
+                    if (!ipStatus) ipStatus = String(ipMeta.ip_region_status || "").trim();
+                    if (!ipProvince) ipProvince = String(ipMeta.ip_province || "").trim();
+                    if (!ipCity) ipCity = String(ipMeta.ip_city || "").trim();
+                }
+                if (!ipText && normalized.user_name && currentUser && String(normalized.user_name) === String(currentUser)) {
+                    var snapshot = window.currentUserInfoSnapshot || null;
+                    if (snapshot && snapshot.last_ip_location) {
+                        if (typeof snapshot.last_ip_location === 'string') {
+                            ipText = snapshot.last_ip_location;
+                        } else {
+                            ipText = String(snapshot.last_ip_location.text || "").trim();
+                            if (!ipText) {
+                                ipText = [snapshot.last_ip_location.province || "", snapshot.last_ip_location.city || ""].filter(Boolean).join(' ').trim();
+                            }
+                        }
+                    }
+                }
+                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved' || ipStatus === 'pending' || ipStatus === 'failed';
+                if (!ipText && (ipProvince || ipCity)) {
+                    ipText = [ipProvince, ipCity].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+                }
+                if (hasLookupStarted || ipText) {
                     if (!ipText && ipStatus === 'pending') ipText = '解析中';
-                    if (!ipText && ipStatus === 'failed') ipText = '未知';
+                    if (!ipText && (ipStatus === 'failed' || ipStatus === 'resolved')) ipText = '未知';
+                    if (!ipText) ipText = '未知';
                 }
                 if (ipText) {
                     parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
@@ -6185,7 +6456,7 @@ function renderProfileActivityList(kind) {
                         media_type = file.type.startsWith("image/") ? "image" : (file.type.startsWith("audio/") ? "audio" : "video");
                     }
                     var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility) : { visibility: visibility || "public" };
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: postLocationData || null }) : { visibility: visibility || "public" };
                     var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
                         user_name: currentUser,
@@ -6218,6 +6489,9 @@ function renderProfileActivityList(kind) {
                         await loadFeed(true);
                     } else {
                         writeFeedCacheSnapshot();
+                    }
+                    if (insertRes.data && insertRes.data.id) {
+                        schedulePublishedPostIpRefresh(insertRes.data.id);
                     }
                     loadProfileActivity(true);
                 } catch (e) {
@@ -6451,6 +6725,7 @@ function renderProfileActivityList(kind) {
                 // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
                 feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
+                refreshPendingFeedIpPosts(firstPage);
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
 
