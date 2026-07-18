@@ -52,5 +52,18 @@ test('search cards deduplicate SSE retries and use real application jump handler
   assert.match(client, /messagesEl\.__xtjAiCardIds/);
   assert.match(client, /openUserProfile/);
   assert.match(client, /openConversation/);
+  assert.match(client, /target\.image_url.*window\.openPhotoPreview/s);
+  assert.match(client, /matched_keywords/);
   assert.doesNotMatch(client, /window\.openAiChat/);
+});
+
+test('site search preserves source metadata and restored cards without exposing raw tables', () => {
+  assert.match(server, /function aiSitePresentResult/);
+  assert.match(server, /source_created_at/);
+  assert.match(server, /matched_keywords/);
+  assert.match(server, /function aiSitePhotoUrl/);
+  assert.match(server, /site_cards: Array\.isArray\(m\.site_cards\)/);
+  assert.match(server, /siteCards: siteToolCards/);
+  assert.match(client, /Array\.isArray\(msg\.site_cards\)/);
+  assert.doesNotMatch(server, /schedule_action|cancel_scheduled_action/);
 });
