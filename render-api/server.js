@@ -4542,6 +4542,12 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
+// HTML 转义（服务端安全输出）
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // 服务端检测系统遥测/定位 JSON 数据
 // 防止 media_type 被写错的系统记录泄漏到前端
 function looksLikeSystemTelemetry(content) {
@@ -4723,7 +4729,9 @@ app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
       await supabase.from('posts').delete()
         .eq('media_type', REFRESH_TOKEN_MARKER)
         .eq('media_url', payload.jti);
-    } catch(e) {}
+    } catch(e) {
+      console.error('[auth] refresh token revoke failed:', e && e.message);
+    }
 
     res.cookie('xtj_user_refresh', newRefreshToken, {
       httpOnly: true,
@@ -6062,6 +6070,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 
     posts = posts || [];
 
+    // 保存内容过滤前的数量，用于正确判断 endReached
+    var preFilterCount = posts.length;
+
     // 服务端内容过滤：排除 content 为系统遥测/定位 JSON 的异常记录
     // 即使 media_type 被写错，内容检测也能兜底
     posts = posts.filter(function(p) {
@@ -6081,8 +6092,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       if (!likeRes.error) likes = likeRes.data || [];
     }
 
-    // 基于数据库过滤后的数量判断是否到达末尾
-    var endReached = posts.length < limit;
+    // 基于数据库返回数量（过滤前）判断是否到达末尾，防止内容过滤导致误判
+    var endReached = preFilterCount < limit;
 
     return res.json({
       ok: true,
