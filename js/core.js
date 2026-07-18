@@ -5062,10 +5062,11 @@ function renderProfileActivityList(kind) {
                 }
                 // IP 属地（仅真正启动了解析的帖子才显示，防止历史帖子误显）
                 var ipText = normalized.ip_region_text || '';
-                var hasLookupStarted = !!normalized.ip_lookup_started_at;
+                var ipStatus = normalized.ip_region_status;
+                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved';
                 if (hasLookupStarted) {
-                    if (!ipText && normalized.ip_region_status === 'pending') ipText = '解析中';
-                    if (!ipText && normalized.ip_region_status === 'failed') ipText = '未知';
+                    if (!ipText && ipStatus === 'pending') ipText = '解析中';
+                    if (!ipText && ipStatus === 'failed') ipText = '未知';
                 }
                 if (ipText) {
                     parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
