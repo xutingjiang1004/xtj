@@ -327,7 +327,11 @@
     if (!window.pwAlbumView) {
       window.pwCurrentSortedPhotos = photos.slice();
       if (!photos.length) {
-        grid.innerHTML = emptyHtml();
+        var syncWrap = document.getElementById('photoSyncStatus');
+        var isError = syncWrap && syncWrap.classList.contains('is-error');
+        grid.innerHTML = isError
+          ? '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div></div>'
+          : emptyHtml();
         return;
       }
       grid.innerHTML = photoCardHtml(photos, 0);
