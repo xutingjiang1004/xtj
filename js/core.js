@@ -5,6 +5,9 @@
                 SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
                 SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA"
             };
+            if (!window.XTJ_CONFIG) {
+                console.warn('[XTJ] config.js 未加载，使用默认配置');
+            }
             window.XTJ_CONFIG = XTJ_RUNTIME_CONFIG;
             const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
             const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
@@ -9094,6 +9097,17 @@ function renderProfileActivityList(kind) {
             } else {
                 setThemeState(false);
             }
+            // 监听系统主题变化
+            try {
+                var mqDark = window.matchMedia('(prefers-color-scheme: dark)');
+                if (mqDark && mqDark.addEventListener) {
+                    mqDark.addEventListener('change', function(e) {
+                        if (!localStorage.getItem(THEME_STORAGE_KEY)) {
+                            setThemeState(e.matches);
+                        }
+                    });
+                }
+            } catch (_) {}
             }
 
             function applyPerformanceMode() {

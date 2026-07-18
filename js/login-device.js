@@ -437,7 +437,7 @@
                 var headers = { 'Content-Type': 'application/json' };
                 var token = '';
                 if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
-                else if (typeof getUserToken === 'function') token = getUserToken();
+                else if (typeof window.getUserToken === 'function') token = window.getUserToken();
                 if (!token) { lastSendAtByKey[sentKey] = 0; return; }
                 headers['Authorization'] = 'Bearer ' + token;
                 fetch(API_BASE + '/api/log-login-event', {
@@ -514,8 +514,8 @@
             if (sessionStorage.getItem(sentKey)) return;
         } catch(e) {}
         var userToken = '';
-        if (typeof getUserToken === 'function') {
-            userToken = getUserToken();
+        if (typeof window.getUserToken === 'function') {
+            userToken = window.getUserToken();
         }
         if (!userToken && typeof window.ensureUserToken !== 'function') return;
         var src = source || 'login_success';
@@ -537,7 +537,7 @@
             } catch(e) { return; }
 
             if (!userName || !deviceId) return;
-            var userToken = typeof getUserToken === 'function' ? getUserToken() : '';
+            var userToken = typeof window.getUserToken === 'function' ? window.getUserToken() : '';
             if (!userToken && typeof window.ensureUserToken !== 'function') return;
 
             // 15s localStorage 冷却
