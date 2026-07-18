@@ -6100,7 +6100,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       page: page,
       limit: limit,
       next_offset: posts.length ? from + posts.length : from,
-      endReached: endReached
+      endReached: endReached,
+      total_post_count: totalCount
     });
   } catch (e) {
     console.error('[API] feed:', e && e.message);
