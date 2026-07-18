@@ -5739,6 +5739,10 @@ function showChatMessages() {
 
   var insertTimer = null;
   function scheduleInsertEntry() {
+    // AI is launched only from the homepage tools menu. This keeps cached
+    // chat-list DOM from retaining the retired AI pseudo-contact.
+    removeAllAiEntries();
+    return;
     if (insertTimer) {
       try { clearTimeout(insertTimer); } catch (e) {}
     }
