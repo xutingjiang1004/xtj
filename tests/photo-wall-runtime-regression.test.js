@@ -40,7 +40,8 @@ function createPhotoDataRuntime(fetchImpl) {
     Set,
     console,
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    AbortController
   };
   vm.runInNewContext(dataSource, context, { filename: 'data.js' });
   return { window, storage, windowListeners, documentListeners };

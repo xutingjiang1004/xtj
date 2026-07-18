@@ -35,8 +35,8 @@ test('delete timeout aborts the request and confirms authoritative server state'
   const deletion = between('async function confirmPostDeleteStatus', 'window.openModal = function');
   assert.match(deletion, /AbortController/);
   assert.match(deletion, /\/api\/post\/delete-status/);
-  assert.match(deletion, /delete request timed out; confirming authoritative state/);
-  assert.match(deletion, /status\.confirmed && status\.deleted/);
-  assert.match(deletion, /删除未完成，帖子仍然存在，请重试/);
+  assert.match(deletion, /delete request timed out; checking locally/);
+  assert.match(deletion, /result\.deleted === true && result\.exists === false/);
+  assert.match(deletion, /删除超时，帖子仍然存在，请重试/);
   assert.doesNotMatch(deletion, /Promise\.race\(\[deletePromise, requestTimeout\]\)/);
 });
