@@ -4006,6 +4006,18 @@ function renderProfileActivityList(kind) {
                         if (finished) return;
                         if (deleteTimedOut) {
                             console.warn('[delBtn] delete request timed out; checking locally');
+                            // The delete request may have reached the server before this
+                            // browser timed out. Confirm with the authoritative endpoint
+                            // before deciding whether to restore the optimistic UI.
+                            var authoritativeStatus = await confirmPostDeleteStatus(targetPostId);
+                            if (finished) return;
+                            finished = true;
+                            if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
+                                applyConfirmedPostDeletion(targetPostId, session);
+                            } else {
+                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
+                            }
+                            return;
                             // 快速本地检查：不从网络确认，避免二次超时
                             var localCheck = quickPostExistsCheck(targetPostId);
                             if (finished) return;
