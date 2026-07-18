@@ -597,10 +597,24 @@
   inline-size: 44px;
 }
 
+#panelPosts.active .ai-tools-nav.is-open {
+  z-index: 25;
+}
+
 #panelPosts.active .ai-tools-trigger {
   background: linear-gradient(135deg, rgba(54, 141, 112, .14), rgba(72, 116, 170, .11));
   border-color: rgba(50, 130, 102, .28);
   color: rgb(37, 114, 88);
+}
+
+#panelPosts.active .ai-tools-trigger-label {
+  display: block;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -.08em;
+  line-height: 1;
+  transform: translateX(-.5px);
 }
 
 #panelPosts.active .ai-tools-trigger:hover,
@@ -790,7 +804,7 @@
 }
 
 @media (max-width: 639.98px) {
-  #panelPosts.active .posts-nav { gap: 6px; padding-inline: 12px; }
+  #panelPosts.active .posts-nav { position: relative; z-index: 20; overflow: visible; gap: 6px; padding-inline: 12px; }
   #panelPosts.active .posts-nav .nav-auth { min-width: 0; }
   #panelPosts.active .posts-nav .user-pill #myName { max-inline-size: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #panelPosts .stats { gap: 8px; }
