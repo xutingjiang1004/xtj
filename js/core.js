@@ -4006,6 +4006,18 @@ function renderProfileActivityList(kind) {
                         if (finished) return;
                         if (deleteTimedOut) {
                             console.warn('[delBtn] delete request timed out; checking locally');
+                            // The delete request may have reached the server before this
+                            // browser timed out. Confirm with the authoritative endpoint
+                            // before deciding whether to restore the optimistic UI.
+                            var authoritativeStatus = await confirmPostDeleteStatus(targetPostId);
+                            if (finished) return;
+                            finished = true;
+                            if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
+                                applyConfirmedPostDeletion(targetPostId, session);
+                            } else {
+                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
+                            }
+                            return;
                             // 快速本地检查：不从网络确认，避免二次超时
                             var localCheck = quickPostExistsCheck(targetPostId);
                             if (finished) return;
@@ -4823,15 +4835,13 @@ function renderProfileActivityList(kind) {
                     renderPostFilterUsers();
                 }, 2400);
                 try {
-                    var authRes = await sb.from("posts")
-                        .select("user_name")
-                        .eq("media_type", AUTH_MARKER)
-                        .eq("actor_key", AUTH_MARKER)
-                        .order("created_at", { ascending: false });
-                    if (authRes.error) throw authRes.error;
+                    var authRes = await fetch(API_BASE + '/api/feed/authors', { credentials: 'include' });
+                    if (!authRes.ok) throw new Error('authors_query_failed');
+                    var authorPayload = await authRes.json();
+                    if (!authorPayload || !authorPayload.ok) throw new Error('authors_query_failed');
                     var seen = {};
-                    postFilterUsers = (authRes.data || []).map(function(row) {
-                        return row && row.user_name ? String(row.user_name).trim() : "";
+                    postFilterUsers = (authorPayload.authors || []).map(function(name) {
+                        return String(name || "").trim();
                     }).filter(function(name) {
                         if (!name || seen[name]) return false;
                         seen[name] = true;
@@ -4955,32 +4965,6 @@ function renderProfileActivityList(kind) {
 
             async function insertPostRecord(payload, fallbackContent) {
                 try {
-                    if ((!window.currentUserInfoSnapshot || !window.currentUserInfoSnapshot.last_ip_location) && currentUser) {
-                        await loadCurrentUserInfoSnapshot(currentUser);
-                    }
-                    function applyCurrentUserIpSnapshot(postData) {
-                        if (!postData || !postData.user_name || !currentUser) return postData;
-                        if (String(postData.user_name) !== String(currentUser)) return postData;
-                        var snapshot = window.currentUserInfoSnapshot || null;
-                        if (!snapshot || !snapshot.last_ip_location) return postData;
-                        if (postData.ip_region_text) return postData;
-                        if (typeof snapshot.last_ip_location === 'string') {
-                            postData.ip_region_text = snapshot.last_ip_location;
-                            postData.ip_region_status = postData.ip_region_status || 'resolved';
-                            return postData;
-                        }
-                        var snapshotText = String(snapshot.last_ip_location.text || '').trim();
-                        if (!snapshotText) {
-                            snapshotText = [snapshot.last_ip_location.province || '', snapshot.last_ip_location.city || ''].filter(Boolean).join(' ').trim();
-                        }
-                        if (snapshotText) {
-                            postData.ip_region_text = snapshotText;
-                            postData.ip_region_status = postData.ip_region_status || 'resolved';
-                            if (!postData.ip_province) postData.ip_province = String(snapshot.last_ip_location.province || '').trim();
-                            if (!postData.ip_city) postData.ip_city = String(snapshot.last_ip_location.city || '').trim();
-                        }
-                        return postData;
-                    }
                     var body = {
                         content: payload.content || fallbackContent || '',
                         media_url: payload.media_url || '',
@@ -5007,11 +4991,10 @@ function renderProfileActivityList(kind) {
                         return { ok: false, error: new Error(result.error || '发布失败') };
                     }
                     var data = normalizePost(result.data);
-                    data = applyCurrentUserIpSnapshot(data);
                     if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
                         try {
                             var fresh = await fetchPostSnapshot(data.id);
-                            if (fresh) data = applyCurrentUserIpSnapshot(normalizePost(fresh));
+                            if (fresh) data = normalizePost(fresh);
                         } catch (snapshotError) {
                             console.warn('[post-create] snapshot refresh failed', snapshotError);
                         }
@@ -5316,19 +5299,6 @@ function renderProfileActivityList(kind) {
                     if (!ipStatus) ipStatus = String(ipMeta.ip_region_status || "").trim();
                     if (!ipProvince) ipProvince = String(ipMeta.ip_province || "").trim();
                     if (!ipCity) ipCity = String(ipMeta.ip_city || "").trim();
-                }
-                if (!ipText && normalized.user_name && currentUser && String(normalized.user_name) === String(currentUser)) {
-                    var snapshot = window.currentUserInfoSnapshot || null;
-                    if (snapshot && snapshot.last_ip_location) {
-                        if (typeof snapshot.last_ip_location === 'string') {
-                            ipText = snapshot.last_ip_location;
-                        } else {
-                            ipText = String(snapshot.last_ip_location.text || "").trim();
-                            if (!ipText) {
-                                ipText = [snapshot.last_ip_location.province || "", snapshot.last_ip_location.city || ""].filter(Boolean).join(' ').trim();
-                            }
-                        }
-                    }
                 }
                 var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved' || ipStatus === 'pending' || ipStatus === 'failed';
                 if (!ipText && (ipProvince || ipCity)) {
@@ -6298,30 +6268,40 @@ function renderProfileActivityList(kind) {
                 postLocationRequesting = true;
                 btn.disabled = true;
                 btn.textContent = '正在获取位置...';
-                navigator.geolocation.getCurrentPosition(
-                    function(position) {
-                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude);
-                    },
-                    function(error) {
-                        postLocationRequesting = false;
-                        btn.disabled = false;
-                        btn.textContent = '📍 添加位置';
-                        var msg = '定位失败';
-                        if (error.code === 1) msg = '位置权限被拒绝，请在浏览器设置中允许定位';
-                        else if (error.code === 2) msg = '定位暂时不可用，请稍后重试';
-                        else if (error.code === 3) msg = '定位超时，请重试';
-                        showToast(msg);
-                    },
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-                );
+                function requestPostLocationFix(options, onError) {
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+                    }, onError, options);
+                }
+                function finishLocationRequest(error) {
+                    postLocationRequesting = false;
+                    btn.disabled = false;
+                    btn.textContent = '添加位置';
+                    showToast(error && error.code === 1 ? '位置权限被拒绝，请在浏览器设置中允许定位' : '定位失败，请重试');
+                }
+                requestPostLocationFix({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }, function(error) {
+                    if (error && error.code !== 1) {
+                        // A timeout or unavailable GPS fix gets one bounded fallback request.
+                        btn.textContent = '正在尝试备用定位...';
+                        requestPostLocationFix({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }, function(fallbackError) {
+                            postLocationRequesting = false;
+                            btn.disabled = false;
+                            btn.textContent = '馃搷 娣诲姞浣嶇疆';
+                            showToast('定位失败，请重试');
+                        });
+                        return;
+                    }
+                    finishLocationRequest(error);
+                    return;
+                });
             };
 
-            async function reverseGeocodePostLocation(lat, lng) {
+            async function reverseGeocodePostLocation(lat, lng, accuracy) {
                 var btn = document.getElementById('postLocationAddBtn');
                 try {
                     var resp = await window.xtjProtectedFetch('/api/location/reverse', {
                         method: 'POST',
-                        body: JSON.stringify({ latitude: lat, longitude: lng })
+                        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy: Number(accuracy) || null })
                     });
                     var data = await resp.json().catch(function() { return {}; });
                     if (!resp.ok || !data.ok) {
@@ -6330,6 +6310,7 @@ function renderProfileActivityList(kind) {
                         if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
                         return;
                     }
+                    data.accuracy = Number(accuracy) || null;
                     showPostLocationOptions(data);
                 } catch (e) {
                     showToast('地址解析失败，请检查网络');
