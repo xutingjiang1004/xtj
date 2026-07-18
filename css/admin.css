@@ -728,7 +728,7 @@
     }
     .chart-bar-row {
         display: flex; align-items: flex-end; gap: 4px; height: 200px;
-        padding: 12px 8px 10px; overflow-x: hidden; overflow-y: hidden;
+        padding: 12px 8px 10px; overflow: visible;
         border-radius: 18px;
         background: rgba(255,255,255,0.14);
         border: 1px solid var(--border);
@@ -790,7 +790,7 @@
     th { font-weight: 600; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
     td { color: var(--text); }
     tr:hover td { background: rgba(5,150,105,0.03); }
-    .table-wrap { max-height: 400px; overflow-y: auto; border-radius: var(--radius); }
+    .table-wrap { max-height: 400px; overflow: auto; border-radius: var(--radius); }
     .table-wrap table thead th {
         position: sticky;
         top: 0;
