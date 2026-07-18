@@ -5598,7 +5598,8 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "**ai_agent_conv_summary**")
                     .neq("media_type", "**ai_agent_memory_log**")
                     .neq("media_type", "__refresh_token__")
-                    .neq("media_type", "__ai_english_learning__");  // 退役模块，保留过滤防止旧数据泄漏
+                    .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
+                    .neq("media_type", "__location_task__");
             }
             window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
 
@@ -5618,6 +5619,7 @@ function renderProfileActivityList(kind) {
                     "__refresh_token__", "__revoked_token__",
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
                     "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
+                    "__location_task__",
                     "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
                 ];
                 return SYSTEM_MARKERS.indexOf(mt) >= 0;

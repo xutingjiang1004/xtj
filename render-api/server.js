@@ -6019,7 +6019,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       '__refresh_token__', '__revoked_token__',
       '__ai_agent_profile__', '__ai_agent_msg__', '__ai_agent_memory__', '__ai_agent_config__',
       '**ai_agent_memory_box**', '**ai_agent_conv_summary**', '**ai_agent_memory_log**',
-      '__ai_english_learning__'
+      '__ai_english_learning__', '__location_task__'
     ];
 
     // 构建查询：数据库层排除系统标记 + 可见性过滤 + 分页
