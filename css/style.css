@@ -15496,10 +15496,14 @@ profile content only. Dock stays untouched.
   padding: 18px 16px !important;
 }
 
+#panelChat {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
 #panelChat .dock-chat-container {
   display: flex; flex-direction: column;
-  height: calc(100dvh - 178px);
-  min-height: calc(100dvh - 178px);
+  height: calc(100dvh - 56px);
+  min-height: calc(100dvh - 56px);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.70), rgba(243, 250, 247, 0.62));
   border: 1px solid rgba(127, 191, 168, 0.16);
   border-radius: 18px;
