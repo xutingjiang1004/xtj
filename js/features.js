@@ -79,7 +79,10 @@
     var original = window.showToast;
     window.showToast = function () {
       var args = Array.prototype.slice.call(arguments);
-      args[0] = fixText(args[0] == null ? '' : String(args[0])).trim() || '操作成功';
+      if (args.length > 0 && args[0] != null) {
+        args[0] = fixText(String(args[0])).trim();
+        if (!args[0]) return; // skip empty messages, don't show "操作成功"
+      }
       return original.apply(this, args);
     };
     window.showToast.__xtjPatchedV10 = true;
