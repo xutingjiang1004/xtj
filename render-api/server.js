@@ -2223,7 +2223,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     rows = (dmRes.data || []).map(function(m) { var peer = m.user_name === userName ? m.media_url : m.user_name; return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q); });
   } else if (source === 'ai_history') {
     var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return aiSiteResult('ai_history', m.id, 'AI 对话', aiSiteSnippet(m.content, q), m.created_at, { type: 'ai_history', conversation_id: meta.convId || '' }, q); });
+    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return aiSiteResult('ai_history', m.id, meta.chat_mode === 'deep_think' ? '深度研究' : 'AI 对话', aiSiteSnippet(m.content, q), m.created_at, { type: 'ai_history', conversation_id: meta.convId || '', mode: meta.chat_mode === 'deep_think' ? 'deep_think' : 'normal' }, q); });
   } else if (source === 'users') {
     var userRes = await supabase.from('posts').select('user_name,created_at').eq('media_type', AUTH_MARKER).ilike('user_name', pattern).order('created_at', { ascending: false }).limit(take);
     rows = (userRes.data || []).map(function(u) { return aiSiteResult('users', u.user_name, u.user_name, '公开用户资料', u.created_at, { type: 'user', user_name: u.user_name }, q); });
@@ -11874,19 +11874,31 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
     var convId = String(req.query.conversation_id || '').trim();
+    var mode = String(req.query.mode || '').trim();
     if (convId && !/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
+    if (mode && mode !== 'normal' && mode !== 'deep_think') return res.status(400).json({ error: 'mode 参数无效' });
     var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     var before = String(req.query.before || '').trim();
 
+    function matchesMode(row) {
+      if (!mode) return true;
+      var meta = parseMsgMeta(row);
+      return mode === 'deep_think' ? meta.chat_mode === 'deep_think' : meta.chat_mode !== 'deep_think';
+    }
+
     // 不带 convId → 先查最近一条 AI 消息的 convId
     if (!convId) {
-      var { data: latest } = await supabase.from('posts')
+      var { data: latestRows, error: latestError } = await supabase.from('posts')
         .select('media_url')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(200);
+      if (latestError) {
+        console.error('[AGENT-CHAT] latest history query error:', latestError.message);
+        return res.status(500).json({ error: '查询失败' });
+      }
+      var latest = (latestRows || []).find(matchesMode);
       if (latest) {
         var meta = parseMsgMeta(latest);
         if (meta && meta.convId) convId = meta.convId;
@@ -11906,7 +11918,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(limit + 1);
+      // Older records can predate chat_mode. Read a small bounded buffer before
+      // filtering so a mixed legacy conversation cannot leak into the other UI.
+      .limit(Math.min(limit + 101, 200));
     if (before) {
       query = query.lt('created_at', before);
     }
@@ -11920,7 +11934,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     // 过滤用户已删除的消息
     var filteredRows = (rows || []).filter(function(r2) {
       var meta = parseMsgMeta(r2);
-      return !(meta && meta.deleted);
+      return !(meta && meta.deleted) && matchesMode(r2);
     });
 
     // 判断是否还有更多（filteredRows 超过 limit 表示有下一页）
