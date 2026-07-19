@@ -45,10 +45,10 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" />
+    <link rel="stylesheet" href="css/style.min.css?v=c6eb5f1241" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a47802aab6" /></noscript>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f92119d96c" />
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=c6eb5f1241" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a47802aab6" /></noscript>
+    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f315ff43c7" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=cba0c34cbc">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a47802aab6">
@@ -751,26 +751,6 @@
         </div>
     </div>
 
-    <div class="modal-overlay post-action-modal" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
-        <div class="modal-box glass post-action-box post-edit-modal" onclick="event.stopPropagation()">
-            <h3 class="post-action-title">编辑帖子</h3>
-            <textarea id="editPostInp" class="post-edit-textarea" placeholder="修改帖子内容..."></textarea>
-            <div class="post-edit-controls">
-                <label class="post-compose-label">可见范围</label>
-                <div class="post-vis-toggle" id="editPostVisibility">
-                    <button type="button" class="vis-btn vis-public active" data-vis="public" onclick="document.getElementById('editPostVisibilityVal').value='public';document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-vis')==='public');})">公开</button>
-                    <button type="button" class="vis-btn vis-private" data-vis="private" onclick="document.getElementById('editPostVisibilityVal').value='private';document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-vis')==='private');})">私密</button>
-                </div>
-                <input type="hidden" id="editPostVisibilityVal" value="public" />
-            </div>
-            <div class="post-edit-note">媒体文件会保留，本次只编辑正文和可见范围。</div>
-            <div class="post-edit-actions">
-                <button class="btn btn-ghost" type="button" onclick="closeModal('editPostModal')">取消</button>
-                <button class="btn btn-primary" type="button" id="saveEditPostBtn" onclick="saveEditPost()">保存修改</button>
-            </div>
-        </div>
-    </div>
-
     <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()">
         <div class="pp-confirm-dialog" onclick="event.stopPropagation()">
             <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
@@ -1051,7 +1031,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=16acfaa809"></script>
+    <script defer src="js/core.min.js?v=862e7932e7"></script>
     <script defer src="js/login-device.min.js?v=692788a700"></script>
     <script defer src="js/theme-toggle.min.js?v=e8639a6cfd"></script>
 
