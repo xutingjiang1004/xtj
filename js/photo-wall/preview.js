@@ -422,6 +422,8 @@
                 function T() {
                     P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h),
                     h = null), m.clear(), v = null, y = null, B.isActive = !1;
+                    // 移除 resize 监听器，防止内存泄漏
+                    if (d._ppResizeHandler) { window.removeEventListener("resize", d._ppResizeHandler); d._ppResizeHandler = null; }
                 }
                 d._cleanupPreview = T, d.addEventListener("pointerdown", function(e) {
                     var n = e.target, i = n.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
@@ -578,15 +580,17 @@
                         }
                     }
                 }), d.addEventListener("pointercancel", function(e) {
-                    if (P && (clearTimeout(P), P = null), m.clear(), v = null, y = null, B.isActive) {
+                    // 仅删除被 cancel 的指针，保留其他手指的状态，避免双指缩放卡死
+                    if (P && (clearTimeout(P), P = null), m.delete(e.pointerId), v = null, y = null, B.isActive) {
                         var t = document.getElementById("photoPreviewImage");
                         t && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", t.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)",
                         d.style.opacity = 1, t.style.transform = ""), B.isActive = !1;
                     }
                     o.scale <= 1.01 && A(0);
-                }), window.addEventListener("resize", function() {
-                    e && (M(), O(i), q());
                 });
+                // 将 resize handler 存为具名引用，便于 _cleanupPreview 时移除，防止内存泄漏
+                d._ppResizeHandler = function() { e && (M(), O(i), q()); };
+                window.addEventListener("resize", d._ppResizeHandler);
             }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
             var S = n[b];
             S && S.imageUrl && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
