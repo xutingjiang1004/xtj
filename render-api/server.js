@@ -11852,6 +11852,83 @@ app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res
 });
 
 // ===================== AI site-tool APIs =====================
+const postTranslationCache = new Map();
+
+function postToolContent(post) {
+  var raw = String(post && post.content || '');
+  try {
+    var parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return String(parsed.content || parsed.text || parsed.body || '');
+  } catch (e) {}
+  return raw;
+}
+
+function postToolContentHash(text) {
+  return crypto.createHash('sha256').update(String(text || '')).digest('hex').slice(0, 24);
+}
+
+async function loadPostToolPost(postId, userName) {
+  var found = await supabase.from('posts').select('id,user_name,content,visibility,media_type,created_at,updated_at').eq('id', postId).maybeSingle();
+  if (found.error) throw new Error('post_lookup_failed');
+  var post = found.data;
+  if (!post || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
+  if (post.visibility === 'private' && post.user_name !== userName && userName !== ADMIN_USERNAME) throw new Error('post_not_visible');
+  return post;
+}
+
+app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var postId = aiSiteText(req.body && req.body.post_id, 80);
+    var action = aiSiteText(req.body && req.body.action, 32);
+    if (!postId || ['translate', 'report_scan'].indexOf(action) < 0) return res.status(400).json({ error: 'invalid_post_tool_request' });
+    var post = await loadPostToolPost(postId, req.userName);
+    var content = postToolContent(post).trim();
+    if (!content) return res.status(400).json({ error: 'post_has_no_text' });
+    if (action === 'translate') {
+      var chinese = (content.match(/[\u4e00-\u9fff]/g) || []).length;
+      var letters = (content.match(/[A-Za-z]/g) || []).length;
+      if (chinese >= Math.max(4, letters)) return res.json({ ok: true, already_chinese: true, translation: '该帖子已经是中文。' });
+      var cacheKey = 'post_translation:' + post.id + ':' + postToolContentHash(content) + ':zh-CN:v1';
+      var cached = postTranslationCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) return res.json({ ok: true, cached: true, translation: cached.translation });
+      var translation = await callDeepSeekAI({ system: 'Translate the supplied post into concise Simplified Chinese only. Preserve paragraphing, punctuation, emoji, names, and tone. Do not add commentary.', messages: [{ role: 'user', content: content }], max_tokens: 1600, thinking_mode: 'off' });
+      if (!translation) return res.status(502).json({ error: 'translation_failed' });
+      postTranslationCache.set(cacheKey, { translation: translation, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
+      return res.json({ ok: true, translation: translation });
+    }
+    var scanRaw = await callDeepSeekAI({ system: 'Review this post only for a user report form. Return JSON with suspected(boolean), risk_level(low|medium|high), categories(string array), summary(string), evidence(string array), suggested_reason(string). Do not recommend enforcement.', messages: [{ role: 'user', content: content }], jsonMode: true, max_tokens: 700, thinking_mode: 'off' });
+    return res.json({ ok: true, scan: scanRaw || { suspected: false, risk_level: 'low', categories: [], summary: 'AI 检测暂不可用。', evidence: [], suggested_reason: '' } });
+  } catch (e) {
+    var code = String(e && e.message || 'post_tool_failed');
+    return res.status(code === 'post_not_found' ? 404 : (code === 'post_not_visible' ? 403 : 502)).json({ error: code });
+  }
+});
+
+app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), async (req, res) => {
+  var closed = false;
+  req.on('close', function() { closed = true; });
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    var postId = aiSiteText(req.body && req.body.post_id, 80);
+    var initial = req.body && req.body.initial === true;
+    var followup = aiSiteText(req.body && req.body.message, 1200);
+    if (!postId || (!initial && !followup)) throw new Error('invalid_post_chat_request');
+    var post = await loadPostToolPost(postId, req.userName);
+    var content = postToolContent(post).trim();
+    var prompt = initial
+      ? '请分析并毒舌锐评下面这条帖子。先说明字面意思、语气情绪、潜台词或可能意图、矛盾或水分之处，再给简短尖锐但不虚构背景的锐评。'
+      : followup;
+    var reply = await callDeepSeekAI({ system: 'You are XTJ post assistant. Answer in natural Chinese. Do not invent facts not present in the post. The requested sharp critique can be witty but must not target protected traits.', messages: [{ role: 'system', content: '帖子作者：' + String(post.user_name || '') + '\n帖子正文：\n' + content }, { role: 'user', content: prompt }], max_tokens: 1800, thinking_mode: 'low' });
+    if (!closed) res.write('event: message\ndata: ' + JSON.stringify({ post_id: post.id, conversation_id: aiSiteText(req.body && req.body.conversation_id, 80) || genConvId(), content: reply || '暂时无法生成分析。' }) + '\n\n');
+    if (!closed) res.write('event: done\ndata: {}\n\n');
+  } catch (e) {
+    if (!closed) res.write('event: error\ndata: ' + JSON.stringify({ error: String(e && e.message || 'post_chat_failed') }) + '\n\n');
+  }
+  res.end();
+});
+
 app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
   try {
     var query = aiSiteText(req.body && req.body.query, 120);
