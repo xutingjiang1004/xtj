@@ -959,6 +959,9 @@
         var latestLcpMs = null;
         var firstInputMs = null;
         var clsValue = 0;
+        var scheduleFrame = typeof window.requestAnimationFrame === 'function'
+            ? window.requestAnimationFrame.bind(window)
+            : function(callback) { return window.setTimeout(callback, 16); };
 
         function queueScrollMilestone() {
             var scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
@@ -973,7 +976,7 @@
         }
         window.addEventListener('scroll', function() {
             if (lastScrollTick) return;
-            lastScrollTick = requestAnimationFrame(function() { lastScrollTick = 0; queueScrollMilestone(); });
+            lastScrollTick = scheduleFrame(function() { lastScrollTick = 0; queueScrollMilestone(); });
         }, { passive: true });
 
         document.addEventListener('click', function(event) {
