@@ -4038,6 +4038,13 @@
       panel.setAttribute('aria-hidden', 'true');
     }
     updateSecondaryPageState(false, 'site-search');
+    // cancel any ongoing search request
+    if (S.siteSearchCtrl) {
+      try { S.siteSearchCtrl.abort(); } catch (e) {}
+      S.siteSearchCtrl = null;
+    }
+    S.siteSearchRequestId = (S.siteSearchRequestId || 0) + 1;
+    S.siteSearchLifecycleId = (S.siteSearchLifecycleId || 0) + 1;
   }
 
   function selectedSiteSearchSources() {
@@ -4095,21 +4102,41 @@
       if (status) status.textContent = '请至少选择一个搜索范围。';
       return;
     }
+    // cancel previous search
+    if (S.siteSearchCtrl) { try { S.siteSearchCtrl.abort(); } catch (e) {} }
+    S.siteSearchCtrl = new AbortController();
+    S.siteSearchRequestId = (S.siteSearchRequestId || 0) + 1;
+    var requestId = S.siteSearchRequestId;
+    var lifecycleId = S.siteSearchLifecycleId;
+    var querySnapshot = query;
+    var sourcesSnapshot = sources.slice();
     if (submit) submit.disabled = true;
     renderSiteSearchLoading();
     if (status) status.textContent = '正在检索站内内容…';
+    var startTime = Date.now();
     try {
       var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 });
+      // guard: check if this request is still valid
+      if (requestId !== S.siteSearchRequestId || lifecycleId !== S.siteSearchLifecycleId || query !== querySnapshot || sources.join(',') !== sourcesSnapshot.join(',')) return;
       var data = response && response.data;
       if (!response || !response.ok || !data || !data.ok) throw new Error(response && response.error || data && data.error || '搜索失败');
+      var elapsed = Date.now() - startTime;
+      // guard again before rendering
+      if (requestId !== S.siteSearchRequestId || lifecycleId !== S.siteSearchLifecycleId) return;
       renderSiteSearchResults(data.results);
-      if (status) status.textContent = data.results && data.results.length ? '找到 ' + data.results.length + ' 条相关内容。' : '没有找到相关内容。';
+      var msg = data.results && data.results.length ? '找到 ' + data.results.length + ' 条相关内容（' + elapsed + 'ms）。' : '没有找到相关内容。';
+      if (data.source_errors && data.source_errors.length) {
+        msg += ' 部分范围搜索失败：' + data.source_errors.map(function(e) { return e.message; }).join('；');
+      }
+      if (status) status.textContent = msg;
     } catch (e) {
+      if (e && e.name === 'AbortError') { if (status) status.textContent = ''; return; }
       renderSiteSearchResults([]);
       var message = (e && e.message) || '';
       if (message === 'AI 工具数据表尚未迁移') message = '搜索服务正在初始化，请稍后重试。';
       if (status) status.textContent = message || '搜索暂不可用，请重试。';
     } finally {
+      if (S.siteSearchCtrl && S.siteSearchCtrl.signal === (S.siteSearchCtrl._signal || S.siteSearchCtrl.signal)) S.siteSearchCtrl = null;
       var results = document.getElementById('aiSiteSearchResults');
       if (results) {
         results.classList.remove('is-loading');
