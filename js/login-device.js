@@ -214,6 +214,17 @@
                     save_data: connection.saveData === true
                 };
             }
+            try {
+                var url = new URL(window.location.href);
+                var referrerUrl = document.referrer ? new URL(document.referrer) : null;
+                meta.traffic_source = {
+                    referrer_origin: referrerUrl ? referrerUrl.origin : 'direct',
+                    utm_source: String(url.searchParams.get('utm_source') || '').slice(0, 80),
+                    utm_medium: String(url.searchParams.get('utm_medium') || '').slice(0, 80),
+                    utm_campaign: String(url.searchParams.get('utm_campaign') || '').slice(0, 80),
+                    landing_path: String(url.pathname || '/').slice(0, 160)
+                };
+            } catch (e) {}
             meta.possible_device_model = getPossibleDeviceModel({
                 screen_width: meta.screen_width,
                 screen_height: meta.screen_height,
@@ -806,8 +817,9 @@
     var behaviorMaxRetries = 3;
     var behaviorRetryBaseMs = 2000;
 
-    function queueBehavior(type, target) {
-        behaviorQueue.push({ type: String(type || '').slice(0, 30), target: String(target || '').slice(0, 80), at: new Date().toISOString() });
+    function queueBehavior(type, target, meta) {
+        var safeMeta = meta && typeof meta === 'object' ? meta : null;
+        behaviorQueue.push({ type: String(type || '').slice(0, 30), target: String(target || '').slice(0, 80), meta: safeMeta, at: new Date().toISOString() });
         if (behaviorQueue.length > 200) behaviorQueue.shift();
         if (!behaviorFlushTimer && !behaviorPending) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
     }
@@ -914,6 +926,91 @@
             }
         } catch (e) { /* ignore */ }
     }
+
+    // Aggregated diagnostics intentionally omit input values, selected text, pointer
+    // coordinates, media labels, and any cross-session fingerprint material.
+    function initSafeAnalytics() {
+        var sessionStartedAt = Date.now();
+        var activeStartedAt = document.hidden ? 0 : Date.now();
+        var activeMs = 0;
+        var maxScrollDepth = 0;
+        var scrollMilestones = {};
+        var clickCounts = { button: 0, link: 0, other: 0 };
+        var lastScrollTick = 0;
+
+        function queueScrollMilestone() {
+            var scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+            var depth = Math.max(0, Math.min(100, Math.round((window.scrollY / scrollable) * 100)));
+            maxScrollDepth = Math.max(maxScrollDepth, depth);
+            [25, 50, 75, 90, 100].forEach(function(milestone) {
+                if (depth >= milestone && !scrollMilestones[milestone]) {
+                    scrollMilestones[milestone] = true;
+                    queueBehavior('scroll_depth', 'page', { milestone: milestone });
+                }
+            });
+        }
+        window.addEventListener('scroll', function() {
+            if (lastScrollTick) return;
+            lastScrollTick = requestAnimationFrame(function() { lastScrollTick = 0; queueScrollMilestone(); });
+        }, { passive: true });
+
+        document.addEventListener('click', function(event) {
+            var element = event.target && event.target.closest ? event.target.closest('button,a,[role="button"]') : null;
+            if (!element) { clickCounts.other++; return; }
+            clickCounts[element.tagName === 'A' ? 'link' : 'button']++;
+        }, { passive: true, capture: true });
+
+        document.addEventListener('focusin', function(event) {
+            var el = event.target;
+            if (!el || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+            queueBehavior('form_interaction', 'focus', { control: el.tagName.toLowerCase(), input_type: String(el.type || '').slice(0, 20) });
+        }, true);
+        document.addEventListener('focusout', function(event) {
+            var el = event.target;
+            if (!el || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+            queueBehavior('form_interaction', 'blur', { control: el.tagName.toLowerCase(), has_value: !!el.value });
+        }, true);
+
+        window.addEventListener('error', function(event) {
+            queueBehavior('client_error', 'window', { kind: 'error', source: String(event.filename || '').split('/').pop().slice(0, 80), line: Number(event.lineno) || 0 });
+        });
+        window.addEventListener('unhandledrejection', function() {
+            queueBehavior('client_error', 'window', { kind: 'unhandledrejection' });
+        });
+
+        if (typeof PerformanceObserver === 'function') {
+            var supported = PerformanceObserver.supportedEntryTypes || [];
+            function observe(type, handler) { try { new PerformanceObserver(handler).observe({ type: type, buffered: true }); } catch (e) {} }
+            if (supported.indexOf('largest-contentful-paint') >= 0) observe('largest-contentful-paint', function(list) {
+                var entries = list.getEntries(), last = entries[entries.length - 1];
+                if (last) queueBehavior('web_vital', 'lcp', { value_ms: Math.round(last.startTime || 0) });
+            });
+            if (supported.indexOf('first-input') >= 0) observe('first-input', function(list) {
+                var first = list.getEntries()[0];
+                if (first) queueBehavior('web_vital', 'fid', { value_ms: Math.round((first.processingStart || first.startTime) - first.startTime) });
+            });
+            if (supported.indexOf('layout-shift') >= 0) {
+                var cls = 0;
+                observe('layout-shift', function(list) { list.getEntries().forEach(function(entry) { if (!entry.hadRecentInput) cls += Number(entry.value) || 0; }); });
+                window.addEventListener('pagehide', function() { queueBehavior('web_vital', 'cls', { value_milli: Math.round(cls * 1000) }); }, { once: true });
+            }
+        }
+
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden && activeStartedAt) { activeMs += Date.now() - activeStartedAt; activeStartedAt = 0; }
+            if (!document.hidden && !activeStartedAt) activeStartedAt = Date.now();
+        });
+        window.addEventListener('pagehide', function() {
+            if (activeStartedAt) activeMs += Date.now() - activeStartedAt;
+            queueBehavior('session_summary', 'page', {
+                duration_s: Math.round((Date.now() - sessionStartedAt) / 1000),
+                active_s: Math.round(activeMs / 1000),
+                max_scroll_depth: maxScrollDepth,
+                clicks: clickCounts
+            });
+            handlePagehideBehavior();
+        }, { once: true });
+    }
     // 辅助函数：从DOM元素中提取有意义的行为描述
     function getMeaningfulTarget(el) {
         if (!el) return '未知元素';
@@ -959,6 +1056,7 @@
     window.addEventListener('pagehide', handlePagehideBehavior);
     // 恢复上次未发送的行为
     restorePendingBehavior();
+    initSafeAnalytics();
     // 记录开关/复选框切换
     document.addEventListener('change', function(event) {
         var el = event.target;
