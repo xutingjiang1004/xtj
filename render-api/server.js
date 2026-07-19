@@ -1,18 +1,6 @@
 // xtj Admin API service for Render deployment.
 const express = require('express');
 
-// Monkey patch Express router to catch async errors automatically
-const Layer = require('express/lib/router/layer');
-const originalHandleRequest = Layer.prototype.handle_request;
-Layer.prototype.handle_request = function handle(req, res, next) {
-    var fn = this.handle;
-    if (fn.length > 3) { return originalHandleRequest.apply(this, arguments); }
-    try {
-        var ret = originalHandleRequest.apply(this, arguments);
-        if (ret && ret.catch) { ret.catch(next); }
-    } catch (err) { next(err); }
-};
-
 const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
