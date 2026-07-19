@@ -3914,7 +3914,12 @@ async function processCatReplyJob(job) {
 
     if (aiComment.error) {
       console.error('[CAT_AI] insert ai comment error:', aiComment.error);
-      await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'comment insert failed: ' + aiComment.error.message, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      // 唯一键冲突 = 已有 AI 回复，标记为完成不报错
+      if (aiComment.error.code === '23505') {
+        await supabase.from('ai_comment_reply_jobs').update({ status: 'completed', generated_reply: 'duplicate', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      } else {
+        await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'comment insert failed: ' + aiComment.error.message, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      }
       return;
     }
 
@@ -9159,7 +9164,8 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         .eq('media_url', 'security_settings')
         .maybeSingle();
       if (settingsData && settingsData.content) {
-        var parsed = JSON.parse(settingsData.content);
+        var parsed = {};
+        try { parsed = JSON.parse(settingsData.content); } catch (_) { parsed = {}; }
         if (typeof parsed.record_device === 'boolean') securitySettings.record_device = parsed.record_device;
         if (typeof parsed.browser_fingerprint === 'boolean') securitySettings.browser_fingerprint = parsed.browser_fingerprint;
         if (typeof parsed.canvas_fingerprint === 'boolean') securitySettings.canvas_fingerprint = parsed.canvas_fingerprint;

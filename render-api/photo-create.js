@@ -184,9 +184,9 @@ async function createPhotoRecord(options) {
   // 真正失败: 清理 storage (幂等)
   if (thumbnail && thumbnail.path) await cleanupStorageFile(options.supabase, thumbnail.path, options.logger);
   await cleanupStorageFile(options.supabase, storagePath, options.logger);
-  const errMsg = (insertResult && insertResult.error && (insertResult.error.message || insertResult.error.details)) ? String(insertResult.error.message || insertResult.error.details) : '保存失败';
-  const code = (insertResult && insertResult.error && insertResult.error.code === '23505') ? 'CONFLICT' : 'UPSTREAM_ERROR';
-  return { status: 500, body: { ok: false, error: errMsg, code: code } };
+  const isConflict = insertResult && insertResult.error && insertResult.error.code === '23505';
+  const code = isConflict ? 'CONFLICT' : 'UPSTREAM_ERROR';
+  return { status: 500, body: { ok: false, error: isConflict ? '数据已存在' : '照片保存失败', code: code } };
 }
 
 module.exports = {

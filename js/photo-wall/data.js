@@ -368,6 +368,15 @@
     }
   }
 
+  function unsubscribePhotoWallRealtime(){
+    if (realtimeChannel) {
+      try { realtimeChannel.unsubscribe(); } catch(e) {}
+      realtimeChannel = null;
+    }
+  }
+  window.addEventListener('beforeunload', unsubscribePhotoWallRealtime);
+  window.addEventListener('pagehide', unsubscribePhotoWallRealtime);
+
   function subscribePhotoWallRealtime(){
     if (!window.sb || realtimeChannel) return;
     try {
@@ -402,13 +411,16 @@
     try {
       bc = new BroadcastChannel('xtj_photo_sync');
       bc.onmessage = function(event){ handleExternalSync(event.data); };
+      // 有 BroadcastChannel 时不重复监听 storage 事件
     } catch (_) { bc = null; }
   }
 
-  window.addEventListener('storage', function(event){
-    if (event.key !== SYNC_KEY || !event.newValue) return;
-    try { handleExternalSync(JSON.parse(event.newValue)); } catch (_) {}
-  });
+  if (!bc) {
+    window.addEventListener('storage', function(event){
+      if (event.key !== SYNC_KEY || !event.newValue) return;
+      try { handleExternalSync(JSON.parse(event.newValue)); } catch (_) {}
+    });
+  }
 
   // Tab 聚焦/切回时自动重新同步（防止离线期间错过删除事件）
   var _lastVisibilitySync = 0;

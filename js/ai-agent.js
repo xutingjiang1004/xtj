@@ -520,10 +520,11 @@ window.throttleRAF = function(fn) {
     function onResize() {
       syncAiHeaderButtons(histBtn, newBtn);
     }
-    window.addEventListener('resize', window.throttleRAF(onResize));
+    var _onResizeWrapped = window.throttleRAF(onResize);
+    window.addEventListener('resize', _onResizeWrapped);
     onResize();
     return function() {
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('resize', _onResizeWrapped);
     };
   }
 
