@@ -177,7 +177,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         if (v === null) return fallback;
         return JSON.parse(v);
     } catch(e) {
-        try { localStorage.removeItem(key); } catch(ex) {}
+        localStorage.removeItem(key);
         return fallback;
     }
 };
@@ -3490,7 +3490,7 @@ function renderProfileActivityList(kind) {
             function setLikeButtonState(btn, liked) {
                 if (!btn) return;
                 btn.classList.toggle('liked', !!liked);
-                btn.innerHTML = (liked ? '<svg class="like-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>已赞' : '<svg class="like-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>点赞');
+                btn.textContent = liked ? '已赞' : '点赞';
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
@@ -3518,11 +3518,10 @@ function renderProfileActivityList(kind) {
             }
 
             function getPostLikeButtons(postId) {
-                var pid = String(postId || '').trim();
-                if (!pid) return [];
+                var pid = String(postId || '');
                 var buttons = [];
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '').trim() !== pid) return;
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
                     if (likeBtn) buttons.push(likeBtn);
                 });
@@ -3538,7 +3537,7 @@ function renderProfileActivityList(kind) {
             }
 
             function updatePostLikeUi(postId, liked, likeRecord) {
-                var pid = String(postId || '').trim();
+                var pid = String(postId || '');
                 if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
                 feedAllLikes = feedAllLikes.filter(function(item) {
                     return !isLikeOwnedByCurrentUser(item, pid);
@@ -3553,18 +3552,11 @@ function renderProfileActivityList(kind) {
                 persistFeedLikesCache();
 
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '').trim() !== pid) return;
-                    var likeButtons = postEl.querySelectorAll('.action-btn.like-btn, [data-action="like"]');
-                    if (!likeButtons || likeButtons.length === 0) {
-                        var fb = postEl.querySelector('.actions .action-btn');
-                        if (fb) likeButtons = [fb];
-                    }
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
                     var statsEl = postEl.querySelector('.post-stats-text');
-                    var stateChanged = false;
-                    likeButtons.forEach(function(likeBtn) {
-                        if (likeBtn.classList.contains('liked') !== !!liked) stateChanged = true;
-                        setLikeButtonState(likeBtn, liked);
-                    });
+                    var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
+                    setLikeButtonState(likeBtn, liked);
                     if (stateChanged) updateLikeStatsText(statsEl, liked);
                 });
             }
@@ -3594,33 +3586,13 @@ function renderProfileActivityList(kind) {
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
-                var pid = String(postId || '').trim();
-                if (!btn || !pid) return;
-
-                // 防死锁逻辑：若之前的点赞操作存在且超过4秒，自动解锁
-                if (likeOperations[pid]) {
-                    if (likeOperations[pid].ts && (Date.now() - likeOperations[pid].ts > 4000)) {
-                        delete likeOperations[pid];
-                        setPostLikePending(pid, false);
-                    } else {
-                        return;
-                    }
-                }
-
+                var pid = String(postId || '');
+                if (!btn || !pid || likeOperations[pid]) return;
                 var wasLiked = btn.classList.contains("liked");
                 var version = (likeOperationVersions[pid] || 0) + 1;
                 likeOperationVersions[pid] = version;
-                likeOperations[pid] = { version: version, ts: Date.now() };
+                likeOperations[pid] = { version: version };
                 setPostLikePending(pid, true);
-
-                // 安全兜底定时器（5秒）
-                var safetyTimer = setTimeout(function() {
-                    if (likeOperations[pid] && likeOperations[pid].version === version) {
-                        delete likeOperations[pid];
-                        setPostLikePending(pid, false);
-                    }
-                }, 5000);
-
                 var previousOwnedLikes = (feedAllLikes || []).filter(function(item) {
                     return isLikeOwnedByCurrentUser(item, pid);
                 });
@@ -3632,7 +3604,7 @@ function renderProfileActivityList(kind) {
                     updateFeedStats();
                     animatePostLikeFeedback(pid, nextLiked);
                     if (nextLiked) createHeartParticles(btn);
-                    var normalizedPostId = pid.toLowerCase();
+                    var normalizedPostId = pid.trim().toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
                     var likeResponse = await window.xtjProtectedFetch('/api/post/like', {
                         method: 'POST',
@@ -3661,9 +3633,10 @@ function renderProfileActivityList(kind) {
                     scheduleLikeStatRefresh();
                     showToast('点赞操作失败');
                 } finally {
-                    clearTimeout(safetyTimer);
-                    delete likeOperations[pid];
-                    setPostLikePending(pid, false);
+                    if (likeOperations[pid] && likeOperations[pid].version === version) {
+                        delete likeOperations[pid];
+                        setPostLikePending(pid, false);
+                    }
                 }
             };
 
@@ -3671,33 +3644,27 @@ function renderProfileActivityList(kind) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-                if (!btn) return;
-
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                
-                // create pulse ring
-                const ring = document.createElement('div');
-                ring.className = 'pulse-ring';
-                ring.style.left = cx + 'px';
-                ring.style.top = cy + 'px';
-                document.body.appendChild(ring);
-                setTimeout(() => ring.remove(), 600);
-
-                const emojis = ["❤","✨","💖","⭐","💗"];
-                for(let i=0; i<8; i++){
-                    const el = document.createElement('div');
-                    el.className = 'heart-particle';
-                    el.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-                    el.style.left = cx + 'px';
-                    el.style.top = cy + 'px';
-                    const ang = (Math.random()*Math.PI*2);
-                    const dst = 30 + Math.random()*40;
-                    el.style.setProperty('--tx', Math.cos(ang)*dst + 'px');
-                    el.style.setProperty('--ty', Math.sin(ang)*dst + 'px');
-                    document.body.appendChild(el);
-                    setTimeout(()=>el.remove(), 800);
+                const emojis = ["❤","♥","❤","♡","♥","❤"];
+                const burstCount = perfProfile === 'balanced' ? 4 : 6;
+                for (let i=0; i<burstCount; i++) {
+                    const heart = document.createElement('div');
+                    heart.className = 'heart-particle';
+                    heart.setAttribute('aria-hidden', 'true');
+                    heart.textContent = emojis[i % emojis.length];
+                    const angle = (-Math.PI * 0.9) + (Math.PI * 0.8 * i / Math.max(1, burstCount - 1)) + (Math.random()-0.5)*0.18;
+                    const distance = 26 + Math.random()*24;
+                    heart.style.left = cx+'px';
+                    heart.style.top = cy+'px';
+                    heart.style.setProperty('--heart-x', Math.cos(angle)*distance+'px');
+                    heart.style.setProperty('--heart-y', Math.sin(angle)*distance+'px');
+                    heart.style.setProperty('--heart-rotate', ((Math.random()-0.5)*32)+'deg');
+                    heart.style.setProperty('--heart-delay', (i*18)+'ms');
+                    document.body.appendChild(heart);
+                    heart.addEventListener('animationend', function() { heart.remove(); }, { once: true });
+                    setTimeout(function() { heart.remove(); }, 900);
                 }
             }
 
@@ -4563,19 +4530,21 @@ function renderProfileActivityList(kind) {
 
             function saveViewHistory(entry) {
                 const history = getViewHistory();
+                // 閬垮厤閲嶅閿熸枻鎷峰綍閿涘牆鎮撴稉顫嫹閿熺煫浼欐嫹閸氬奔绔村笘瀛愰崣顏囶唶褰曚竴锟解槄锟?
                 const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
                 if (!exists) {
                     history.unshift(normalizeViewHistoryEntry(entry));
+                    // 只保留最??00锟?
                     if (history.length > 500) history.length = 500;
-                    window.safeLocalStorageSet(VIEW_HISTORY_KEY, JSON.stringify(history));
+                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
             }
 
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
-                if (!window.safeLocalStorageGet(key, null) && !viewTracked.has(postId)) {
+                if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
-                    window.safeLocalStorageSet(key, "1");
+                    localStorage.setItem(key, "1");
                     var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
                     if (postEl) {
                         var statsEl = postEl.querySelector('.post-stats-text');
@@ -4975,7 +4944,7 @@ function renderProfileActivityList(kind) {
                         const pComms = commentMap[p.id] || [];
                         const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                         const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
                     } catch (e) {
                         console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
                     }
@@ -4993,38 +4962,21 @@ function renderProfileActivityList(kind) {
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
-            function updateFeedStats(postsData, commentsData, likesData) {
-                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
-                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
-                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
-                if (!sPosts && !sViews && !sLikes) return;
-
-                if (Array.isArray(postsData)) {
-                    var totalViews = 0;
-                    postsData.forEach(function(p) { if (p && p.views) totalViews += (Number(p.views) || 0); });
-                    var totalLikesCount = Array.isArray(likesData) ? likesData.length : 0;
-                    var totalCommentsCount = Array.isArray(commentsData) ? commentsData.length : 0;
-                    if (sPosts) sPosts.textContent = postsData.length;
-                    if (sViews) sViews.textContent = totalViews;
-                    if (sLikes) sLikes.textContent = totalLikesCount + totalCommentsCount;
-                    return;
-                }
-
+            function updateFeedStats() {
                 var posts = document.querySelectorAll('.post');
                 var totalLikes = 0, totalComments = 0, totalViews = 0;
                 posts.forEach(function(p) {
-                    var statsText = (p.querySelector('.post-stats-text') || {}).textContent || '';
-                    if (!statsText) return;
-                    var parts = statsText.split('|');
-                    parts.forEach(function(part) {
-                        var digits = part.replace(/\D/g, '');
-                        if (!digits) return;
-                        var val = parseInt(digits, 10) || 0;
-                        if (part.indexOf('浏览') >= 0) totalViews += val;
-                        else if (part.indexOf('点赞') >= 0) totalLikes += val;
-                        else if (part.indexOf('评论') >= 0) totalComments += val;
-                    });
+                    var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
+                    var vm = text.match(/浏览 (\d+)/);
+                    var lm = text.match(/点赞 (\d+)/);
+                    var cm = text.match(/评论 (\d+)/);
+                    if (vm) totalViews += parseInt(vm[1]);
+                    if (lm) totalLikes += parseInt(lm[1]);
+                    if (cm) totalComments += parseInt(cm[1]);
                 });
+                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
+                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
+                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
                 if (sPosts) sPosts.textContent = posts.length;
                 if (sViews) sViews.textContent = totalViews;
                 if (sLikes) sLikes.textContent = totalLikes + totalComments;
@@ -5367,7 +5319,7 @@ function renderProfileActivityList(kind) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
@@ -7970,40 +7922,32 @@ function renderProfileActivityList(kind) {
                     document.addEventListener('pointercancel', onDragCancel);
                 });
 
-                let dragRaf = null;
                 function onDragMove(e) {
-                    if (!drag || (e.pointerId != null && e.pointerId !== drag.id)) return;
-                    if (e.cancelable) e.preventDefault();
-                    var clientX = e.clientX, clientY = e.clientY;
-                    if (dragRaf) return;
-                    dragRaf = requestAnimationFrame(function() {
-                        dragRaf = null;
-                        if (!drag) return;
-                        if (drag.vertical) {
-                            var dy = clientY - drag.sy;
-                            if (Math.abs(dy) > 2) drag.moved = true;
-                            var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
-                            drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
-                            drag.cy = ny;
-                        } else {
-                            var dx = clientX - drag.sx;
-                            if (Math.abs(dx) > 2) drag.moved = true;
-                            var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
-                            drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
-                            drag.cx = nx;
-                        }
-                    });
+                    if (!drag || e.pointerId !== drag.id) return;
+                    e.preventDefault();
+                    if (drag.vertical) {
+                        var dy = e.clientY - drag.sy;
+                        if (Math.abs(dy) > 2) drag.moved = true;
+                        var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
+                        drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
+                        drag.cy = ny;
+                    } else {
+                        var dx = e.clientX - drag.sx;
+                        if (Math.abs(dx) > 2) drag.moved = true;
+                        var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
+                        drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
+                        drag.cx = nx;
+                    }
                 }
 
                 function cleanupDrag() {
-                    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = null; }
                     document.removeEventListener('pointermove', onDragMove);
                     document.removeEventListener('pointerup', onDragUp);
                     document.removeEventListener('pointercancel', onDragCancel);
                 }
 
                 function onDragUp(e) {
-                    if (!drag) { cleanupDrag(); return; }
+                    if (!drag || e.pointerId !== drag.id) return;
                     var state = drag;
                     drag = null;
                     cleanupDrag();
@@ -8020,6 +7964,7 @@ function renderProfileActivityList(kind) {
                 }
 
                 function onDragCancel(e) {
+                    if (!drag || e.pointerId !== drag.id) return;
                     drag = null;
                     cleanupDrag();
                     requestAnimationFrame(syncDockIndicator);

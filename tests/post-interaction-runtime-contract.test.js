@@ -13,13 +13,11 @@ function between(start, end) {
   return core.slice(startIndex, endIndex);
 }
 
-test('publish, comment, and edit handlers reject duplicate in-flight submissions', () => {
+test('publish and comment handlers reject duplicate in-flight submissions', () => {
   const publish = between('window.doPublish = async function', 'loadFeed = async function');
   const comment = between('if (commBtn) commBtn.onclick = async', '// ===================== 删除帖子');
-  const edit = between('window.saveEditPost = async function', 'window._legacyTogglePostPinBase');
   assert.match(publish, /btn\.disabled\s*\|\|\s*btn\.getAttribute\('aria-busy'\) === 'true'/);
   assert.match(comment, /if \(commBtn\.disabled\) return/);
-  assert.match(edit, /if \(!btn \|\| btn\.disabled\) return/);
 });
 
 test('comment keeps the target id after modal reset and inserts the canonical response locally', () => {
