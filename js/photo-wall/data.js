@@ -28,7 +28,7 @@
 
   function readJson(key, fallback){
     try {
-      var raw = localStorage.getItem(key);
+      var raw = window.safeStorage.get(key);
       return raw ? JSON.parse(raw) : fallback;
     } catch (_) {
       return fallback;
@@ -36,7 +36,7 @@
   }
 
   function writeJson(key, value){
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+    try { window.safeStorage.set(key, JSON.stringify(value)); } catch (_) {}
   }
 
   function getDeletedIds(){
@@ -239,7 +239,7 @@
 
   function broadcastSync(type, payload){
     var message = Object.assign({ type: type, ts: Date.now() }, payload || {});
-    try { localStorage.setItem(SYNC_KEY, JSON.stringify(message)); } catch (_) {}
+    try { window.safeStorage.set(SYNC_KEY, JSON.stringify(message)); } catch (_) {}
     if (bc) {
       try { bc.postMessage(message); } catch (_) {}
     }
@@ -340,9 +340,9 @@
     if (!item || !item.cloudId || !window.sb) return;
     var key = 'xtj_pwv_' + item.cloudId;
     var now = Date.now();
-    var last = Number(localStorage.getItem(key) || 0) || 0;
+    var last = Number(window.safeStorage.get(key) || 0) || 0;
     if (last && now - last < 5 * 60 * 1000) return;
-    try { localStorage.setItem(key, String(now)); } catch (_) {}
+    try { window.safeStorage.set(key, String(now)); } catch (_) {}
     item.views = Number(item.views || 0) + 1;
     updatePhotoViewDisplays(item);
     try { await window.sb.rpc('increment_post_views', { p_post_id: item.cloudId }); } catch (_) {}
@@ -429,7 +429,7 @@
 
   window.setPhotoWallSyncStatus = setPhotoWallSyncStatus;
   window.addDeletedPhotoId = addDeletedPhotoId;
-  window.cleanDeletedIds = function(){ try { localStorage.removeItem(DELETED_KEY); } catch (_) {} };
+  window.cleanDeletedIds = function(){ try { window.safeStorage.remove(DELETED_KEY); } catch (_) {} };
   window.saveLocalPhotoWallData = saveLocalPhotoWallData;
   window.normalizePhotoWallRow = normalizePhotoWallRow;
   window.extractStoragePath = extractStoragePath;

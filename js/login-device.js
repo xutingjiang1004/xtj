@@ -31,7 +31,7 @@
     // 获取或生成 device_id
     function getOrCreateDeviceId() {
         try {
-            var id = localStorage.getItem('xtj_device_id');
+            var id = window.safeStorage.get('xtj_device_id');
             if (id) return id;
         } catch(e) {}
         id = id || '';
@@ -40,7 +40,7 @@
         } else {
             id = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
         }
-        try { localStorage.setItem('xtj_device_id', id); } catch(e) {}
+        window.safeStorage.set('xtj_device_id', id);
         return id;
     }
 
@@ -521,7 +521,7 @@
         var src = source || 'login_success';
         // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
         var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
-        try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
+        window.safeStorage.set(visitKey, String(Date.now()));
         doSend(userName, deviceId, sentKey, src);
     };
 
@@ -532,8 +532,8 @@
             debounceTimer = null;
             var userName, deviceId;
             try {
-                userName = localStorage.getItem('xtj_user');
-                deviceId = localStorage.getItem('xtj_device_id');
+                userName = window.safeStorage.get('xtj_user');
+                deviceId = window.safeStorage.get('xtj_device_id');
             } catch(e) { return; }
 
             if (!userName || !deviceId) return;
@@ -543,9 +543,9 @@
             // 15s localStorage 冷却
             var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
             var lastAt = 0;
-            try { lastAt = parseInt(localStorage.getItem(visitKey)) || 0; } catch(e) {}
+            try { lastAt = parseInt(window.safeStorage.get(visitKey)) || 0; } catch(e) {}
             if (Date.now() - lastAt < VISIT_COOLDOWN_MS) return;
-            try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
+            window.safeStorage.set(visitKey, String(Date.now()));
 
             var sentKey = 'xtj_login_visit_' + userName + '_' + deviceId;
             doSend(userName, deviceId, sentKey, 'page_visit');
@@ -658,7 +658,7 @@
             return;
         }
         // 所有验证通过，locationSentForPage已在函数开头设置，无需重复
-        try { localStorage.setItem('xtj_location_sharing_enabled', '1'); } catch (e) {}
+        window.safeStorage.set('xtj_location_sharing_enabled', '1');
         var resolutionStatus = data.resolution_status || 'pending';
         var accuracyText = Math.round(Number(coords.accuracy) || 0) + ' 米';
         if (resolutionStatus === 'resolved' && data.address) {
@@ -673,7 +673,7 @@
     }
     window.xtjSetLocationSharing = function(enabled) {
         if (!enabled) {
-            try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+            try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
             stopLocationSharing('位置共享已关闭');
             return;
         }
@@ -710,7 +710,7 @@
                     var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
                     console.warn('[XTJ-LOC] watch错误:', message);
                     if (error && error.code === 1) {
-                        try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+                        try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
                     }
                     stopLocationSharing(message);
                 }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
@@ -718,7 +718,7 @@
         }, function(error) {
             var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
             if (error && error.code === 1) {
-                try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+                try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
             }
             stopLocationSharing(message);
         }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
@@ -896,18 +896,16 @@
         }
         // 剩余未发送的保存到 localStorage，下次页面打开时恢复
         if (behaviorQueue.length) {
-            try {
-                localStorage.setItem('xtj_pending_behavior', JSON.stringify(behaviorQueue));
-            } catch (e) {}
+            window.safeStorage.set('xtj_pending_behavior', JSON.stringify(behaviorQueue));
         }
     }
     // 页面加载时恢复上次未发送的行为
     function restorePendingBehavior() {
         try {
-            var saved = localStorage.getItem('xtj_pending_behavior');
+            var saved = window.safeStorage.get('xtj_pending_behavior');
             if (saved) {
                 var pending = JSON.parse(saved);
-                localStorage.removeItem('xtj_pending_behavior');
+                window.safeStorage.remove('xtj_pending_behavior');
                 if (Array.isArray(pending) && pending.length) {
                     behaviorQueue = pending.concat(behaviorQueue);
                     if (behaviorQueue.length > 200) behaviorQueue = behaviorQueue.slice(-200);
@@ -1012,7 +1010,7 @@
             if (error) {
                 if (error.code === 1) {
                     errMsg = '用户拒绝定位权限';
-                    try { localStorage.removeItem('xtj_location_sharing_enabled'); } catch (e) {}
+                    try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
                 } else if (error.code === 2) errMsg = '定位不可用（设备GPS关闭或信号弱）';
                 else if (error.code === 3) errMsg = '定位超时（10秒内未获取到位置）';
                 else errMsg = '定位错误: code=' + (error.code || '?') + ' msg=' + (error.message || '');
