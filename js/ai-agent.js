@@ -3987,7 +3987,7 @@ window.throttleRAF = function(fn) {
     var meta = [];
     if (item && item.source) meta.push(String(item.source));
     if (item && item.created_at) {
-      var created = new Date(item.created_at);
+      var created = new Date(String(item.created_at).replace(/-/g, \'/\'));
       if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
     }
     if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
