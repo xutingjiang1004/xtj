@@ -817,9 +817,28 @@
     var behaviorMaxRetries = 3;
     var behaviorRetryBaseMs = 2000;
 
+    function sanitizeBehaviorMeta(type, meta) {
+        meta = meta && typeof meta === 'object' ? meta : {};
+        var safe = {};
+        if (type === 'scroll_depth' && Number.isFinite(Number(meta.milestone))) safe.milestone = Math.max(0, Math.min(100, Math.round(Number(meta.milestone))));
+        if (type === 'web_vital') {
+            if (Number.isFinite(Number(meta.value_ms))) safe.value_ms = Math.max(0, Math.min(120000, Math.round(Number(meta.value_ms))));
+            if (Number.isFinite(Number(meta.value_milli))) safe.value_milli = Math.max(0, Math.min(100000, Math.round(Number(meta.value_milli))));
+        }
+        if (type === 'session_summary') {
+            ['duration_s', 'active_s', 'max_scroll_depth'].forEach(function(key) {
+                if (Number.isFinite(Number(meta[key]))) safe[key] = Math.max(0, Math.min(key === 'max_scroll_depth' ? 100 : 86400, Math.round(Number(meta[key]))));
+            });
+            if (meta.clicks && typeof meta.clicks === 'object') safe.clicks = { button: Math.max(0, Math.min(10000, Number(meta.clicks.button) || 0)), link: Math.max(0, Math.min(10000, Number(meta.clicks.link) || 0)), other: Math.max(0, Math.min(10000, Number(meta.clicks.other) || 0)) };
+        }
+        if (type === 'form_interaction') safe = { control: ['input', 'textarea', 'select'].indexOf(String(meta.control || '')) >= 0 ? String(meta.control) : '', input_type: String(meta.input_type || '').slice(0, 20), has_value: meta.has_value === true };
+        if (type === 'client_error') safe = { kind: String(meta.kind || '').slice(0, 40), source: String(meta.source || '').split('/').pop().slice(0, 80), line: Math.max(0, Math.min(1000000, Number(meta.line) || 0)) };
+        return safe;
+    }
     function queueBehavior(type, target, meta) {
-        var safeMeta = meta && typeof meta === 'object' ? meta : null;
-        behaviorQueue.push({ type: String(type || '').slice(0, 30), target: String(target || '').slice(0, 80), meta: safeMeta, at: new Date().toISOString() });
+        type = String(type || '').slice(0, 30);
+        var safeMeta = sanitizeBehaviorMeta(type, meta);
+        behaviorQueue.push({ type: type, target: String(target || '').slice(0, 80), meta: safeMeta, at: new Date().toISOString() });
         if (behaviorQueue.length > 200) behaviorQueue.shift();
         if (!behaviorFlushTimer && !behaviorPending) behaviorFlushTimer = setTimeout(flushBehavior, 5000);
     }
@@ -937,6 +956,9 @@
         var scrollMilestones = {};
         var clickCounts = { button: 0, link: 0, other: 0 };
         var lastScrollTick = 0;
+        var latestLcpMs = null;
+        var firstInputMs = null;
+        var clsValue = 0;
 
         function queueScrollMilestone() {
             var scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
@@ -983,16 +1005,14 @@
             function observe(type, handler) { try { new PerformanceObserver(handler).observe({ type: type, buffered: true }); } catch (e) {} }
             if (supported.indexOf('largest-contentful-paint') >= 0) observe('largest-contentful-paint', function(list) {
                 var entries = list.getEntries(), last = entries[entries.length - 1];
-                if (last) queueBehavior('web_vital', 'lcp', { value_ms: Math.round(last.startTime || 0) });
+                if (last) latestLcpMs = Math.round(last.startTime || 0);
             });
             if (supported.indexOf('first-input') >= 0) observe('first-input', function(list) {
                 var first = list.getEntries()[0];
-                if (first) queueBehavior('web_vital', 'fid', { value_ms: Math.round((first.processingStart || first.startTime) - first.startTime) });
+                if (first && firstInputMs === null) firstInputMs = Math.round((first.processingStart || first.startTime) - first.startTime);
             });
             if (supported.indexOf('layout-shift') >= 0) {
-                var cls = 0;
-                observe('layout-shift', function(list) { list.getEntries().forEach(function(entry) { if (!entry.hadRecentInput) cls += Number(entry.value) || 0; }); });
-                window.addEventListener('pagehide', function() { queueBehavior('web_vital', 'cls', { value_milli: Math.round(cls * 1000) }); }, { once: true });
+                observe('layout-shift', function(list) { list.getEntries().forEach(function(entry) { if (!entry.hadRecentInput) clsValue += Number(entry.value) || 0; }); });
             }
         }
 
@@ -1002,6 +1022,9 @@
         });
         window.addEventListener('pagehide', function() {
             if (activeStartedAt) activeMs += Date.now() - activeStartedAt;
+            if (latestLcpMs !== null) queueBehavior('web_vital', 'lcp', { value_ms: latestLcpMs });
+            if (firstInputMs !== null) queueBehavior('web_vital', 'fid', { value_ms: firstInputMs });
+            queueBehavior('web_vital', 'cls', { value_milli: Math.round(clsValue * 1000) });
             queueBehavior('session_summary', 'page', {
                 duration_s: Math.round((Date.now() - sessionStartedAt) / 1000),
                 active_s: Math.round(activeMs / 1000),
