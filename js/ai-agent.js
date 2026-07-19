@@ -1,3 +1,19 @@
+
+window.throttleRAF = function(fn) {
+    var ticking = false, args, ctx;
+    return function() {
+        args = arguments;
+        ctx = this;
+        if (!ticking) {
+            ticking = true;
+            requestAnimationFrame(function() {
+                fn.apply(ctx, args);
+                ticking = false;
+            });
+        }
+    };
+};
+
 (function() {
   'use strict';
 
@@ -504,7 +520,7 @@
     function onResize() {
       syncAiHeaderButtons(histBtn, newBtn);
     }
-    window.addEventListener('resize', onResize);
+    window.addEventListener('resize', window.throttleRAF(onResize));
     onResize();
     return function() {
       window.removeEventListener('resize', onResize);
@@ -1583,10 +1599,10 @@
 
     var vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener('resize', onViewportChange);
-      vv.addEventListener('scroll', onViewportChange);
+      vv.addEventListener('resize', window.throttleRAF(onViewportChange));
+      vv.addEventListener('scroll', window.throttleRAF(onViewportChange));
     }
-    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('resize', window.throttleRAF(onViewportChange));
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
     applyViewport();
@@ -2063,7 +2079,7 @@
     }
 
     resize();
-    window.addEventListener('resize', resize);
+    window.addEventListener('resize', window.throttleRAF(resize));
     document.addEventListener('visibilitychange', handleVisibility);
     if (window.IntersectionObserver) {
       state.observer = new IntersectionObserver(handleIntersection, { threshold: 0.08 });
@@ -5453,12 +5469,12 @@ function showChatMessages() {
     root.appendChild(header);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
-    messagesEl.addEventListener('scroll', function() {
+    messagesEl.addEventListener('scroll', window.throttleRAF(function() {
       S.autoScrollPinned = isNearBottom(messagesEl, 84);
       if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
         loadHistory(messagesEl, S.oldestCursor);
       }
-    });
+    }));
     root.appendChild(messagesEl);
 
     // 鍘嗗彶浼氳瘽鎻愮ず鏍?
