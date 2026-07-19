@@ -1,7 +1,7 @@
 -- 小猫 AI 评论区自动回复系统
 -- 为现有 comments 表增加子评论和 AI 生成标记字段
 ALTER TABLE IF EXISTS public.comments
-  ADD COLUMN IF NOT EXISTS parent_comment_id uuid REFERENCES public.comments(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS parent_comment_id bigint REFERENCES public.comments(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS generated_by_ai boolean NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS comments_parent_idx ON public.comments (parent_comment_id);
