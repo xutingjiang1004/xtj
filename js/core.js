@@ -3490,7 +3490,7 @@ function renderProfileActivityList(kind) {
             function setLikeButtonState(btn, liked) {
                 if (!btn) return;
                 btn.classList.toggle('liked', !!liked);
-                btn.textContent = liked ? '已赞' : '点赞';
+                btn.innerHTML = (liked ? '<svg class="like-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>已赞' : '<svg class="like-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>点赞');
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
@@ -3518,12 +3518,18 @@ function renderProfileActivityList(kind) {
             }
 
             function getPostLikeButtons(postId) {
-                var pid = String(postId || '');
+                var pid = String(postId || '').trim();
+                if (!pid) return [];
                 var buttons = [];
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .action-btn');
-                    if (likeBtn) buttons.push(likeBtn);
+                    if (String(postEl.getAttribute('data-post-id') || '').trim() !== pid) return;
+                    var found = postEl.querySelectorAll('.action-btn.like-btn, [data-action="like"]');
+                    if (found && found.length > 0) {
+                        found.forEach(function(b) { buttons.push(b); });
+                    } else {
+                        var fallbackBtn = postEl.querySelector('.actions .action-btn');
+                        if (fallbackBtn) buttons.push(fallbackBtn);
+                    }
                 });
                 return buttons;
             }
@@ -3537,7 +3543,7 @@ function renderProfileActivityList(kind) {
             }
 
             function updatePostLikeUi(postId, liked, likeRecord) {
-                var pid = String(postId || '');
+                var pid = String(postId || '').trim();
                 if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
                 feedAllLikes = feedAllLikes.filter(function(item) {
                     return !isLikeOwnedByCurrentUser(item, pid);
@@ -3552,11 +3558,18 @@ function renderProfileActivityList(kind) {
                 persistFeedLikesCache();
 
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .action-btn');
+                    if (String(postEl.getAttribute('data-post-id') || '').trim() !== pid) return;
+                    var likeButtons = postEl.querySelectorAll('.action-btn.like-btn, [data-action="like"]');
+                    if (!likeButtons || likeButtons.length === 0) {
+                        var fb = postEl.querySelector('.actions .action-btn');
+                        if (fb) likeButtons = [fb];
+                    }
                     var statsEl = postEl.querySelector('.post-stats-text');
-                    var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
-                    setLikeButtonState(likeBtn, liked);
+                    var stateChanged = false;
+                    likeButtons.forEach(function(likeBtn) {
+                        if (likeBtn.classList.contains('liked') !== !!liked) stateChanged = true;
+                        setLikeButtonState(likeBtn, liked);
+                    });
                     if (stateChanged) updateLikeStatsText(statsEl, liked);
                 });
             }
@@ -3586,13 +3599,33 @@ function renderProfileActivityList(kind) {
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
-                var pid = String(postId || '');
-                if (!btn || !pid || likeOperations[pid]) return;
+                var pid = String(postId || '').trim();
+                if (!btn || !pid) return;
+
+                // 防死锁逻辑：若之前的点赞操作存在且超过4秒，自动解锁
+                if (likeOperations[pid]) {
+                    if (likeOperations[pid].ts && (Date.now() - likeOperations[pid].ts > 4000)) {
+                        delete likeOperations[pid];
+                        setPostLikePending(pid, false);
+                    } else {
+                        return;
+                    }
+                }
+
                 var wasLiked = btn.classList.contains("liked");
                 var version = (likeOperationVersions[pid] || 0) + 1;
                 likeOperationVersions[pid] = version;
-                likeOperations[pid] = { version: version };
+                likeOperations[pid] = { version: version, ts: Date.now() };
                 setPostLikePending(pid, true);
+
+                // 安全兜底定时器（5秒）
+                var safetyTimer = setTimeout(function() {
+                    if (likeOperations[pid] && likeOperations[pid].version === version) {
+                        delete likeOperations[pid];
+                        setPostLikePending(pid, false);
+                    }
+                }, 5000);
+
                 var previousOwnedLikes = (feedAllLikes || []).filter(function(item) {
                     return isLikeOwnedByCurrentUser(item, pid);
                 });
@@ -3604,7 +3637,7 @@ function renderProfileActivityList(kind) {
                     updateFeedStats();
                     animatePostLikeFeedback(pid, nextLiked);
                     if (nextLiked) createHeartParticles(btn);
-                    var normalizedPostId = pid.trim().toLowerCase();
+                    var normalizedPostId = pid.toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
                     var likeResponse = await window.xtjProtectedFetch('/api/post/like', {
                         method: 'POST',
@@ -3633,10 +3666,9 @@ function renderProfileActivityList(kind) {
                     scheduleLikeStatRefresh();
                     showToast('点赞操作失败');
                 } finally {
-                    if (likeOperations[pid] && likeOperations[pid].version === version) {
-                        delete likeOperations[pid];
-                        setPostLikePending(pid, false);
-                    }
+                    clearTimeout(safetyTimer);
+                    delete likeOperations[pid];
+                    setPostLikePending(pid, false);
                 }
             };
 
@@ -3644,27 +3676,58 @@ function renderProfileActivityList(kind) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-                const rect = btn.getBoundingClientRect();
-                const cx = rect.left + rect.width/2;
-                const cy = rect.top + rect.height/2;
-                const emojis = ["❤","♥","❤","♡","♥","❤"];
-                const burstCount = perfProfile === 'balanced' ? 4 : 6;
-                for (let i=0; i<burstCount; i++) {
-                    const heart = document.createElement('div');
-                    heart.className = 'heart-particle';
-                    heart.setAttribute('aria-hidden', 'true');
-                    heart.textContent = emojis[i % emojis.length];
-                    const angle = (-Math.PI * 0.9) + (Math.PI * 0.8 * i / Math.max(1, burstCount - 1)) + (Math.random()-0.5)*0.18;
-                    const distance = 26 + Math.random()*24;
-                    heart.style.left = cx+'px';
-                    heart.style.top = cy+'px';
-                    heart.style.setProperty('--heart-x', Math.cos(angle)*distance+'px');
-                    heart.style.setProperty('--heart-y', Math.sin(angle)*distance+'px');
-                    heart.style.setProperty('--heart-rotate', ((Math.random()-0.5)*32)+'deg');
-                    heart.style.setProperty('--heart-delay', (i*18)+'ms');
-                    document.body.appendChild(heart);
-                    heart.addEventListener('animationend', function() { heart.remove(); }, { once: true });
-                    setTimeout(function() { heart.remove(); }, 900);
+                if (!btn) return;
+
+                var rect = btn.getBoundingClientRect();
+                var cx = rect.left + rect.width / 2;
+                var cy = rect.top + rect.height / 2;
+
+                // 1. 冲击波发光环
+                var wave = document.createElement('div');
+                wave.className = 'like-shockwave';
+                wave.style.left = cx + 'px';
+                wave.style.top = cy + 'px';
+                document.body.appendChild(wave);
+                setTimeout(function() { if (wave && wave.parentNode) wave.remove(); }, 600);
+
+                // 2. 浪漫爆裂爱心 + 星芒粒子
+                var items = [
+                    { char: '❤', color: '#ff4757', size: 20 },
+                    { char: '💖', color: '#ff6b81', size: 18 },
+                    { char: '✨', color: '#ffd32a', size: 16 },
+                    { char: '♥', color: '#ff3838', size: 22 },
+                    { char: '💗', color: '#ff758f', size: 18 },
+                    { char: '⭐', color: '#fffa65', size: 14 },
+                    { char: '❤', color: '#ff4d4d', size: 19 },
+                    { char: '✨', color: '#70a1ff', size: 15 }
+                ];
+
+                var burstCount = perfProfile === 'balanced' ? 6 : 10;
+                for (var i = 0; i < burstCount; i++) {
+                    var p = items[i % items.length];
+                    var el = document.createElement('div');
+                    el.className = 'heart-particle burst-enhanced';
+                    el.setAttribute('aria-hidden', 'true');
+                    el.textContent = p.char;
+
+                    var angle = (-Math.PI * 0.95) + (Math.PI * 0.9 * i / Math.max(1, burstCount - 1)) + (Math.random() - 0.5) * 0.25;
+                    var distance = 35 + Math.random() * 40;
+
+                    el.style.left = cx + 'px';
+                    el.style.top = cy + 'px';
+                    el.style.fontSize = (p.size || 18) + 'px';
+                    if (p.color) el.style.color = p.color;
+
+                    el.style.setProperty('--heart-x', Math.cos(angle) * distance + 'px');
+                    el.style.setProperty('--heart-y', Math.sin(angle) * distance + 'px');
+                    el.style.setProperty('--heart-rotate', ((Math.random() - 0.5) * 50) + 'deg');
+                    el.style.setProperty('--heart-scale', (0.8 + Math.random() * 0.5).toFixed(2));
+                    el.style.setProperty('--heart-delay', (i * 15) + 'ms');
+
+                    document.body.appendChild(el);
+                    (function(node) {
+                        setTimeout(function() { if (node && node.parentNode) node.remove(); }, 850);
+                    })(el);
                 }
             }
 
