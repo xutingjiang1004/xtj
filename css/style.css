@@ -1072,45 +1072,6 @@
         }
         .action-btn {
             background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.7);
-            padding: 0 10px; border-radius: 99px; font-size: 12px; color: var(--text-muted);
-            cursor: pointer; transition: var(--trans-smooth); font-weight: 600;
-            position: relative; overflow: visible !important;
-            min-width: 0; min-height: 40px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.02);
-            white-space: nowrap;
-        }
-        .action-btn:hover { background: rgba(255,255,255,0.7); }
-
-        .action-btn.liked {
-            background: rgba(255, 59, 96, 0.15); color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.3);
-        }
-
-        .heart-particle {
-            position: fixed;
-            width: 16px;
-            height: 16px;
-            margin: -8px 0 0 -8px;
-            display: grid;
-            place-items: center;
-            color: #ff496f;
-            font-size: 15px;
-            line-height: 1;
-            pointer-events: none;
-            animation: heartFly 620ms cubic-bezier(.18,.72,.28,1) var(--heart-delay, 0ms) forwards;
-            z-index: 9999;
-            text-shadow: 0 2px 5px rgba(255, 59, 96, 0.24);
-        }
-        @keyframes heartFly {
-            0%   { transform: translate3d(0, 2px, 0) scale(.55) rotate(0); opacity: 0; }
-            18%  { opacity: 1; }
-            72%  { opacity: .9; }
-            100% { transform: translate3d(var(--heart-x), var(--heart-y), 0) scale(.9) rotate(var(--heart-rotate)); opacity: 0; }
-        }
-
-        .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: 0; }
-        .action-btn.del:hover { background: rgba(255,59,96,0.06); }
-        .action-btn.pin {
             color: #b45309;
         }
         .action-btn.pin:hover {
