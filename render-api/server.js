@@ -2139,16 +2139,24 @@ Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
   });
 });
 
-function aiSiteText(value, max) {
-  var raw = String(value || '');
-  // extract text from JSON metadata wrapper (e.g. {"__type":"xtj_post_v1","text":"..."})
-  try {
-    if (raw.charAt(0) === '{' && raw.indexOf('"text"') >= 0) {
+function extractPostPlainText(content) {
+  if (!content) return '';
+  var raw = String(content);
+  if (raw.charAt(0) === '{') {
+    try {
       var parsed = JSON.parse(raw);
-      if (parsed && parsed.text && typeof parsed.text === 'string') raw = parsed.text;
-    }
-  } catch (e) {}
-  return raw.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max || 500);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.text && typeof parsed.text === 'string') return String(parsed.text);
+        if (parsed.content && typeof parsed.content === 'string') return String(parsed.content);
+        if (parsed.body && typeof parsed.body === 'string') return String(parsed.body);
+      }
+    } catch (e) {}
+  }
+  return raw.replace(/[\x00-\x1f\x7f]/g, ' ').trim();
+}
+
+function aiSiteText(value, max) {
+  return extractPostPlainText(value).slice(0, max || 500);
 }
 function aiSiteContainsText(value, query) {
   var text = aiSiteText(value, 10000);
@@ -2156,23 +2164,69 @@ function aiSiteContainsText(value, query) {
   if (!q) return false;
   return text.toLowerCase().indexOf(q.toLowerCase()) >= 0;
 }
-function aiSiteMatchScore(text, query) {
+function aiSiteMatchScore(text, query, author) {
   var t = text.toLowerCase();
   var q = query.toLowerCase();
-  var idx = t.indexOf(q);
-  if (idx < 0) return 0;
-  // earlier match = higher score; shorter text = higher relevance
-  var posScore = Math.max(0, 1 - idx / Math.max(t.length, 1));
-  var densityScore = Math.min(1, q.length / Math.max(t.length, 1));
-  return Math.round((posScore * 0.6 + densityScore * 0.4) * 100) / 100;
+  if (!q || !t) return 0;
+  var keywords = q.split(/\s+/).filter(Boolean);
+  var exactPhrase = false;
+  var allKeywords = true;
+  var matchedCount = 0;
+  var authorScore = 0;
+  for (var i = 0; i < keywords.length; i++) {
+    if (t.indexOf(keywords[i]) >= 0) matchedCount++;
+    else allKeywords = false;
+  }
+  if (t.indexOf(q) >= 0) exactPhrase = true;
+  if (author && t.indexOf(author.toLowerCase()) >= 0) authorScore = 0.2;
+  var base = 0;
+  if (exactPhrase) base = 0.8;
+  else if (allKeywords && matchedCount > 0) base = 0.6;
+  else if (matchedCount > 0) base = 0.3 * (matchedCount / Math.max(keywords.length, 1));
+  return base + authorScore;
 }
 function aiSiteNormalizeQuery(query) {
   return String(query || '')
-    .replace(/[\u3000]/g, ' ')   // full-width space
-    .replace(/[，。！？；：""''【】《》（）]/g, '')  // common Chinese punctuation
-    .replace(/[,!?;:"'[\]()]/g, '')  // common English punctuation
-    .replace(/\s+/g, ' ')        // collapse whitespace
+    .replace(/[\u3000]/g, ' ')
+    .replace(/[，。！？；：、""''【】《》（）\[\]\(\)]/g, ' ')
+    .replace(/[,!?;:&"'()\[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+var AI_SEARCH_NOISE = ['我在哪里提到过','帮我找一下','搜索一下','哪些帖子','之前有没有说过','帮我找','找一下','查一下','帮我查','搜索','有没有','在哪里','请帮我','能不能','可以帮我','我想找','寻找','搜索关于','在哪个帖子','说过什么','提到过什么','写过什么','发过什么'];
+
+function parseSearchQuery(query) {
+  var raw = String(query || '').trim();
+  if (!raw) return { keywords: [], sources: ['posts'], required_keywords: [], excluded_keywords: [], author: '', date_from: '', date_to: '' };
+  var cleaned = raw;
+  var lowered = cleaned.toLowerCase();
+  for (var i = 0; i < AI_SEARCH_NOISE.length; i++) {
+    if (lowered.indexOf(AI_SEARCH_NOISE[i]) >= 0) {
+      cleaned = cleaned.replace(new RegExp(AI_SEARCH_NOISE[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ').trim();
+    }
+  }
+  var author = '';
+  var authorMatch = cleaned.match(/([^\s]{1,20})\s*(?:发布|说|的|提到|写|发|po)/);
+  if (authorMatch) {
+    author = authorMatch[1].replace(/[的之说发布提到写发po]/g, '').trim();
+    cleaned = cleaned.replace(authorMatch[0], ' ').trim();
+  }
+  var dateFrom = ''; var dateTo = '';
+  var dateMatch = cleaned.match(/(\d{4})[年-](\d{1,2})[月-]?(\d{1,2})?[日号]?/);
+  if (dateMatch) {
+    var y = dateMatch[1]; var m = String(Number(dateMatch[2])).padStart(2, '0'); var d = dateMatch[3] ? String(Number(dateMatch[3])).padStart(2, '0') : '01';
+    dateFrom = y + '-' + m + '-' + d + 'T00:00:00Z';
+    dateTo = y + '-' + m + '-' + (dateMatch[3] ? d : '31') + 'T23:59:59Z';
+    cleaned = cleaned.replace(dateMatch[0], ' ').trim();
+  }
+  var normalized = aiSiteNormalizeQuery(cleaned);
+  var keywords = normalized.split(/\s+/).filter(function(k) { return k.length >= 1; });
+  var sources = ['posts'];
+  if (/聊天|私信|消息|dm|对话/i.test(raw)) sources.push('dm');
+  if (/照片|图片|photo|图/i.test(raw)) sources.push('photos');
+  if (/用户|作者|谁|profile/i.test(raw)) sources.push('users');
+  return { keywords: keywords, sources: sources, required_keywords: [], excluded_keywords: [], author: author, date_from: dateFrom, date_to: dateTo, semantic_query: normalized };
 }
 
 function aiSiteIsAdmin(context) {
@@ -2234,9 +2288,9 @@ function aiSiteSnippet(value, query) {
   return text.slice(0, 240);
 }
 
-async function aiSiteSearch(source, query, userName, limit) {
+async function aiSiteSearch(source, query, userName, limit, isAdmin) {
   var q = aiSiteNormalizeQuery(query);
-  if (!q) return [];
+  if (!q) return { results: [], error: null };
   var take = Math.min(Math.max(Number(limit) || 20, 1), 40);
   var pattern = '%' + q.replace(/[%_]/g, '\\$&') + '%';
   // multi-keyword: split by whitespace, each word must match
@@ -2255,7 +2309,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     }
     postQuery = postQuery.or(postOrParts.join(','));
     var postRes = await postQuery.order('created_at', { ascending: false }).limit(take);
-    if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return []; }
+    if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return { results: [], error: { code: 'posts_query_failed', message: '帖子搜索暂时不可用' } }; }
     var candidates = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; });
     // client-side filter: check extracted text content (not just raw JSON)
     if (keywords.length > 0) {
@@ -2273,7 +2327,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     });
   } else if (source === 'comments') {
     var commentRes = await supabase.from('comments').select('id,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (commentRes.error) { console.error('[aiSiteSearch] comments query error:', commentRes.error); return []; }
+    if (commentRes.error) { console.error('[aiSiteSearch] comments query error:', commentRes.error); return { results: [], error: { code: 'comments_query_failed', message: '评论搜索暂时不可用' } }; }
     var comments = commentRes.data || [];
     var commentPostIds = comments.map(function(c) { return c.post_id; }).filter(Boolean);
     var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type').in('id', commentPostIds) : { data: [], error: null };
@@ -2288,7 +2342,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     });
   } else if (source === 'photos') {
     var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return []; }
+    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
     rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -2296,7 +2350,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     });
   } else if (source === 'dm') {
     var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + userName + ',media_url.eq.' + userName).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (dmRes.error) { console.error('[aiSiteSearch] dm query error:', dmRes.error); return []; }
+    if (dmRes.error) { console.error('[aiSiteSearch] dm query error:', dmRes.error); return { results: [], error: { code: 'dm_query_failed', message: '聊天搜索暂时不可用' } }; }
     rows = (dmRes.data || []).map(function(m) {
       var text = aiSiteText(m.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -2305,7 +2359,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     });
   } else if (source === 'ai_history') {
     var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (aiRes.error) { console.error('[aiSiteSearch] ai_history query error:', aiRes.error); return []; }
+    if (aiRes.error) { console.error('[aiSiteSearch] ai_history query error:', aiRes.error); return { results: [], error: { code: 'ai_history_query_failed', message: 'AI 历史搜索暂时不可用' } }; }
     rows = (aiRes.data || []).map(function(m) {
       var meta = parseMsgMeta(m);
       var text = aiSiteText(m.content, 10000);
@@ -2314,7 +2368,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     });
   } else if (source === 'users') {
     var userRes = await supabase.from('posts').select('user_name,created_at').eq('media_type', AUTH_MARKER).ilike('user_name', pattern).order('created_at', { ascending: false }).limit(take);
-    if (userRes.error) { console.error('[aiSiteSearch] users query error:', userRes.error); return []; }
+    if (userRes.error) { console.error('[aiSiteSearch] users query error:', userRes.error); return { results: [], error: { code: 'users_query_failed', message: '用户搜索暂时不可用' } }; }
     rows = (userRes.data || []).map(function(u) {
       return aiSiteResult('users', u.user_name, u.user_name, '公开用户资料', u.created_at, { type: 'user', user_name: u.user_name }, q, 0.5);
     });
@@ -2327,7 +2381,7 @@ async function aiSiteSearch(source, query, userName, limit) {
     seen[key] = true;
     return true;
   });
-  return rows;
+  return { results: rows, error: null };
 }
 
 async function aiSiteCreateConfirmation(userName, actionName, payload) {
@@ -2347,7 +2401,11 @@ async function executeAiSiteTool(name, args, context) {
     var lookup = { posts: 'posts', comments: 'comments', photos: 'photos', dm: 'dm', ai: 'ai_history', users: 'users' };
     var settled = await Promise.allSettled(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, args.query, userName, args.limit); }));
     var found = [];
-    settled.forEach(function(s) { if (s.status === 'fulfilled') found = found.concat(s.value || []); });
+    var errors = [];
+    settled.forEach(function(s) {
+      if (s.status === 'fulfilled' && s.value && Array.isArray(s.value.results)) found = found.concat(s.value.results);
+      else if (s.status === 'rejected') errors.push({ source: s.reason && s.reason.message || 'unknown' });
+    });
     var stored = await aiSitePersistResults(userName, [].concat.apply([], [found]).slice(0, 40));
     return { tool_name: name, query: aiSiteText(args.query, 120), results_count: stored.length, results: stored, cards: [aiSiteCard('search_results', '站内搜索结果', { results: stored })] };
   }
@@ -11948,22 +12006,25 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
 app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
   try {
     var query = aiSiteText(req.body && req.body.query, 120);
-    var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
+    var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts'];
     var allowed = ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
     var selected = sources.filter(function(s) { return allowed.indexOf(s) >= 0; });
     if (!query) return res.status(400).json({ error: '搜索关键词不能为空' });
     if (!selected.length) return res.status(400).json({ error: '搜索范围无效' });
     var limit = Math.min(Math.max(Number(req.body && req.body.limit) || 40, 1), 40);
-    // use allSettled so one failing source doesn't discard results from others
-    var settled = await Promise.allSettled(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit); }));
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    var settled = await Promise.allSettled(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit, isAdmin); }));
     var sourceErrors = [];
     var batches = [];
     settled.forEach(function(s, i) {
-      if (s.status === 'fulfilled') { batches.push(s.value || []); }
-      else { sourceErrors.push({ source: selected[i], error: String(s.reason && s.reason.message || 'search_failed').slice(0, 200) }); }
+      if (s.status === 'fulfilled' && s.value && Array.isArray(s.value.results)) {
+        batches.push(s.value.results);
+        if (s.value.error) sourceErrors.push({ source: selected[i], code: s.value.error.code, message: s.value.error.message });
+      } else if (s.status === 'rejected') {
+        sourceErrors.push({ source: selected[i], code: 'search_unexpected_error', message: '搜索服务暂时不可用' });
+      }
     });
     var results = [].concat.apply([], batches).slice(0, limit);
-    // persist asynchronously — don't block the response
     aiSitePersistResults(req.userName, results).catch(function(e) { console.error('[site-search] persist failed:', e && e.message); });
     var response = { ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }) };
     if (sourceErrors.length) response.source_errors = sourceErrors;
