@@ -3605,7 +3605,7 @@ setInterval(function() { processNextJob().catch(function() {}); }, 5000);
 const CAT_AI_USERNAME = 'cat_ai';
 const CAT_AI_DISPLAY_NAME = '小猫';
 const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
-const CAT_AI_MENTION_PATTERN = /@小猫\b/;
+const CAT_AI_MENTION_PATTERN = /@小猫(?=\s|$|[^\w\u4e00-\u9fa5])/;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_MAX_CONCURRENT = 3;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
@@ -3849,14 +3849,23 @@ async function processCatReplyJob(job) {
       request: context.request
     });
 
+    var abortController = new AbortController();
+    var abortTimer = setTimeout(() => abortController.abort(), 45000);
+
     // 调用 DeepSeek
-    var result = await callDeepSeekAI({
-      messages: [{ role: 'user', content: userMessage }],
-      system: CAT_AI_COMMENT_PROMPT + '\n\n返回 JSON 格式：\n{\n  "should_reply": true/false,\n  "reply": "你的回复内容",\n  "risk_type": null 或 "privacy|harassment|sexual|illegal|self_harm|prompt_injection|insufficient_context|spam|unsupported_claim"\n}\n\n如果 should_reply 为 false，reply 留空字符串。',
-      jsonMode: true,
-      max_tokens: 512,
-      temperature: 0.8
-    });
+    var result;
+    try {
+      result = await callDeepSeekAI({
+        messages: [{ role: 'user', content: userMessage }],
+        system: CAT_AI_COMMENT_PROMPT + '\n\n返回 JSON 格式：\n{\n  "should_reply": true/false,\n  "reply": "你的回复内容",\n  "risk_type": null 或 "privacy|harassment|sexual|illegal|self_harm|prompt_injection|insufficient_context|spam|unsupported_claim"\n}\n\n如果 should_reply 为 false，reply 留空字符串。',
+        jsonMode: true,
+        max_tokens: 512,
+        temperature: 0.8,
+        signal: abortController.signal
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
 
     if (!result) {
       // 失败后重试逻辑
@@ -3944,13 +3953,22 @@ async function recoverStaleCatJobs() {
   } catch (e) { /* non-critical */ }
 }
 
+let currentCatAiWorkers = 0;
+const MAX_CAT_AI_WORKERS = 3;
+
 // 处理下一个 pending 小猫任务
 async function processNextCatJob() {
+  if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) return;
   try {
     var { data: jobs } = await supabase.from('ai_comment_reply_jobs')
       .select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(1);
     if (!jobs || !jobs.length) return;
-    await processCatReplyJob(jobs[0]);
+    currentCatAiWorkers++;
+    try {
+      await processCatReplyJob(jobs[0]);
+    } finally {
+      currentCatAiWorkers--;
+    }
   } catch (e) { console.error('[CAT_AI] processNext error:', e && e.message); }
 }
 
@@ -3991,6 +4009,9 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     var job = jobRes.data;
     var status = job.status;
     var message = '';
+    if (status === 'failed' && ['user_limit', 'post_limit', 'global_busy'].includes(jobRes.data.error_message)) {
+      return res.json({ status: 'rate_limited', message: '小猫今天被叫得有点烦，稍后再试' });
+    }
     if (status === 'pending' || status === 'processing') message = '小猫正在组织毒液……';
     else if (status === 'completed') {
       var replyRes = await supabase.from('comments').select('id').eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
@@ -6794,6 +6815,18 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
         if (job) await recordCatRateLimit(req.userName, postId);
+      } else {
+        // 限流时记录 failed 任务以便前端 poll 能收到 rate_limited 状态
+        await supabase.from('ai_comment_reply_jobs').insert({
+          source_comment_id: inserted.data.id,
+          post_id: postId,
+          request_user_id: req.userName,
+          bot_user_id: CAT_AI_USERNAME,
+          status: 'failed',
+          error_message: rateLimit.reason,
+          model: DEEPSEEK_MODEL_REASONER || 'deepseek-chat',
+          attempts: 1
+        });
       }
       // 限流时评论仍正常发布，不报错
     }
