@@ -692,7 +692,6 @@
   }
 
   /* 中等 modal 600px */
-  #editPostModal .modal-box,
   #commentModal .modal-box,
   #announcementModal .modal-box {
     max-width: 600px;
