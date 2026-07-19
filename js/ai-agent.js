@@ -3324,11 +3324,7 @@ window.throttleRAF = function(fn) {
           try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
         } catch (e) {}
       };
-      requestAnimationFrame(function() {
-        requestAnimationFrame(function() {
-          setTimeout(scrollToEnd, 50);
-        });
-      });
+      requestAnimationFrame(scrollToEnd);
     }
 
     var input = document.getElementById('dtInput');
