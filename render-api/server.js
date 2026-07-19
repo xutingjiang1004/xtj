@@ -1,5 +1,18 @@
 // xtj Admin API service for Render deployment.
 const express = require('express');
+
+// Monkey patch Express router to catch async errors automatically
+const Layer = require('express/lib/router/layer');
+const originalHandleRequest = Layer.prototype.handle_request;
+Layer.prototype.handle_request = function handle(req, res, next) {
+    var fn = this.handle;
+    if (fn.length > 3) { return originalHandleRequest.apply(this, arguments); }
+    try {
+        var ret = originalHandleRequest.apply(this, arguments);
+        if (ret && ret.catch) { ret.catch(next); }
+    } catch (err) { next(err); }
+};
+
 const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -2059,12 +2072,20 @@ app.use(express.static(path.join(__dirname, '..'), {
 
 // 频率限制中间件
 const rateLimitStore = new Map();
-// 每5分钟清理过期的限流记录，防止内存泄漏
+// ÿ5ڵ¼ֹڴй©
 setInterval(function() {
-  var now = Date.now();
-  rateLimitStore.forEach(function(record, key) {
-    if (now > record.resetAt) rateLimitStore.delete(key);
-  });
+    var now = Date.now();
+    rateLimitStore.forEach(function(record, key) {
+        if (now > record.resetAt) rateLimitStore.delete(key);
+    });
+    // Add size limit to prevent OOM
+    if (rateLimitStore.size > 10000) {
+        let count = 0;
+        for (let key of rateLimitStore.keys()) {
+            if (count++ > 5000) break;
+            rateLimitStore.delete(key);
+        }
+    }
 }, 300000);
 function getRealIp(req) {
   // trust proxy 已配置，req.ip 返回真实客户端 IP
