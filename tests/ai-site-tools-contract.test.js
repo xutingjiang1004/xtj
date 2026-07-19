@@ -6,6 +6,8 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 const client = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
+const core = fs.readFileSync(path.join(root, 'js', 'core.js'), 'utf8');
+const features = fs.readFileSync(path.join(root, 'js', 'features.js'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '018_ai_site_tools.sql'), 'utf8');
 
@@ -98,4 +100,97 @@ test('AI tool navigation uses accessible SVG icons and site search has a lightwe
   assert.match(page, /data-ai-search-source="posts"><svg/);
   assert.match(client, /function renderSiteSearchLoading/);
   assert.match(client, /ai-site-search-skeleton/);
+});
+
+// ===================== 新增回归测试 =====================
+
+test('aiSiteText extracts text from JSON-wrapped content', () => {
+  assert.match(server, /aiSiteText/);
+  assert.match(server, /parsed && parsed\.text/);
+  assert.match(server, /function aiSiteContainsText/);
+  assert.match(server, /function aiSiteMatchScore/);
+  assert.match(server, /function aiSiteNormalizeQuery/);
+});
+
+test('aiSiteSearch checks query errors on all sources', () => {
+  assert.match(server, /if \(postRes\.error\)/);
+  assert.match(server, /if \(commentRes\.error\)/);
+  assert.match(server, /if \(photoRes\.error\)/);
+  assert.match(server, /if \(dmRes\.error\)/);
+  assert.match(server, /if \(aiRes\.error\)/);
+  assert.match(server, /if \(userRes\.error\)/);
+});
+
+test('aiSiteSearch deduplicates by source_id', () => {
+  assert.match(server, /var seen = \{\}/);
+  assert.match(server, /var key = r\.source \+ ':' \+ r\.source_id/);
+  assert.match(server, /if \(seen\[key\]\) return false/);
+});
+
+test('aiSiteMatchScore calculates real relevance instead of always 1', () => {
+  assert.match(server, /function aiSiteMatchScore/);
+  assert.match(server, /posScore/);
+  assert.match(server, /densityScore/);
+  assert.doesNotMatch(server, /relevance: 1\b/);
+});
+
+test('aiSiteNormalizeQuery normalizes input: full-width spaces, punctuation, whitespace', () => {
+  assert.match(server, /function aiSiteNormalizeQuery/);
+  assert.match(server, /\\u3000/);
+  assert.match(server, /\\s\+/);
+});
+
+test('site-search route uses Promise.allSettled for partial failure tolerance', () => {
+  assert.match(server, /Promise\.allSettled/);
+  assert.match(server, /source_errors/);
+  assert.match(server, /s\.status === 'fulfilled'/);
+});
+
+test('site-search route persists results asynchronously without blocking response', () => {
+  assert.match(server, /aiSitePersistResults\(req\.userName, results\)\.catch/);
+  assert.match(server, /persist asynchronously/i);
+});
+
+test('aiSitePersistResults does not throw on error, returns original results', () => {
+  assert.match(server, /async function aiSitePersistResults/);
+  // extract the function body and verify it catches errors
+  var fnStart = server.indexOf('async function aiSitePersistResults');
+  var fnEnd = server.indexOf('\n}', fnStart);
+  var fnNext = server.indexOf('\n}', fnEnd + 1);
+  var fnBody = server.slice(fnStart, fnNext + 1);
+  assert.doesNotMatch(fnBody, /throw new Error\('AI 工具数据表尚未迁移'\)/);
+  assert.match(fnBody, /catch \(e\)/);
+  assert.match(fnBody, /return results/);
+});
+
+test('patchToast skips empty messages instead of showing "操作成功"', () => {
+  assert.match(features, /function patchToast/);
+  assert.doesNotMatch(features, /\|\| '操作成功'/);
+  assert.match(features, /if \(!args\[0\]\) return/);
+});
+
+test('scheduleAiPreload is defined and called for lazy AI module loading', () => {
+  assert.match(core, /function scheduleAiPreload/);
+  assert.match(core, /scheduleAiPreload\(\);/);
+  assert.match(core, /requestIdleCallback/);
+});
+
+test('openSiteSearchPage shows page immediately before auth check', () => {
+  assert.match(client, /function openSiteSearchPage/);
+  // page is shown before auth check
+  const siteSearchFn = client.slice(client.indexOf('async function openSiteSearchPage()'), client.indexOf('function bindTopAiTools()'));
+  // panel must be shown before ensureUserAuthOrNotify
+  const panelShowIdx = siteSearchFn.indexOf('panel.classList.remove');
+  const authIdx = siteSearchFn.indexOf('ensureUserAuthOrNotify');
+  assert.ok(panelShowIdx > 0, 'panel should be shown');
+  assert.ok(authIdx > 0, 'auth check should be called');
+  assert.ok(panelShowIdx < authIdx, 'panel should be shown BEFORE auth check');
+});
+
+test('site search results remain navigable to posts, photos, chat and AI history', () => {
+  assert.match(client, /function openAiSearchTarget/);
+  assert.match(client, /target\.type === 'post'/);
+  assert.match(client, /target\.type === 'photo'/);
+  assert.match(client, /openConversation/);
+  assert.match(client, /openUserProfile/);
 });
