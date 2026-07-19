@@ -4139,8 +4139,6 @@
       notify('请先登录后再使用站内搜索');
       return;
     }
-    var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
     try { closeAiChat(); } catch (e) {}
     try { closeDeepThinkPage(); } catch (e2) {}
     var panel = document.getElementById('aiSiteSearchPanel');
@@ -4152,6 +4150,8 @@
     updateSecondaryPageState(true, 'site-search');
     var input = document.getElementById('aiSiteSearchInput');
     if (input) setTimeout(function() { try { input.focus(); } catch (e3) {} }, 50);
+    // verify auth in background — don't block page visibility
+    ensureUserAuthOrNotify().catch(function(e) { console.error('[site-search] auth check failed:', e && e.message); });
   }
 
   function bindTopAiTools() {

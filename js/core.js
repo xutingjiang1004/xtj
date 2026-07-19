@@ -1041,6 +1041,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             });
         }
         bindTopAiToolsLauncher();
+        scheduleAiPreload();
 
         function ensureCoreAnimationsLoaded() {
             return loadXtjModule('enhancements');
