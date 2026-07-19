@@ -17,6 +17,7 @@ test('safe analytics records aggregate events without raw interaction payloads',
   assert.match(segment, /handlePagehideBehavior\(\)/);
   assert.match(client, /function sanitizeBehaviorMeta/);
   assert.match(segment, /latestLcpMs/);
+  assert.match(segment, /scheduleFrame/);
   assert.doesNotMatch(segment, /clientX|clientY|clipboard|window\.getSelection|mediaDevices|AudioContext/);
 });
 
