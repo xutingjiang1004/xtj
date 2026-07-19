@@ -1,3 +1,31 @@
+
+window.safeStorage = {
+    set: function(key, value) {
+        try { window.safeStorage.set(key, value); } catch(e) { console.warn('Storage set failed', e); }
+    },
+    get: function(key) {
+        try { return window.safeStorage.get(key); } catch(e) { return null; }
+    },
+    remove: function(key) {
+        try { window.safeStorage.remove(key); } catch(e) { console.warn('Storage remove failed', e); }
+    }
+};
+
+window.throttleRAF = function(fn) {
+    var ticking = false, args, ctx;
+    return function() {
+        args = arguments;
+        ctx = this;
+        if (!ticking) {
+            ticking = true;
+            requestAnimationFrame(function() {
+                fn.apply(ctx, args);
+                ticking = false;
+            });
+        }
+    };
+};
+
 // console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
@@ -173,26 +201,24 @@
 
 window.safeLocalStorageGetJSON = function(key, fallback) {
     try {
-        var v = localStorage.getItem(key);
+        var v = window.safeStorage.get(key);
         if (v === null) return fallback;
         return JSON.parse(v);
     } catch(e) {
-        localStorage.removeItem(key);
+        window.safeStorage.remove(key);
         return fallback;
     }
 };
 window.safeLocalStorageGet = function(key, fallback) {
     try {
-        var v = localStorage.getItem(key);
+        var v = window.safeStorage.get(key);
         return v !== null ? v : fallback;
     } catch(e) {
         return fallback;
     }
 };
 window.safeLocalStorageSet = function(key, value) {
-    try {
-        localStorage.setItem(key, String(value));
-    } catch(e) {}
+    window.safeStorage.set(key, String(value));
 };
 
 function xtjLoadingEscapeHtml(str) {
@@ -278,16 +304,16 @@ const ADMIN_NAME = "xxz";
             function setPersistentAuth(enabled) {
                 try {
                     if (enabled) {
-                        localStorage.setItem(PERSISTENT_AUTH_KEY, '1');
+                        window.safeStorage.set(PERSISTENT_AUTH_KEY, '1');
                     } else {
-                        localStorage.removeItem(PERSISTENT_AUTH_KEY);
+                        window.safeStorage.remove(PERSISTENT_AUTH_KEY);
                     }
                 } catch(e) {}
             }
 
             function isPersistentAuth() {
                 try {
-                    return localStorage.getItem(PERSISTENT_AUTH_KEY) === '1';
+                    return window.safeStorage.get(PERSISTENT_AUTH_KEY) === '1';
                 } catch(e) { return false; }
             }
 
@@ -296,9 +322,9 @@ const ADMIN_NAME = "xxz";
                 memoryUserTokenIssuedAt = 0;
                 try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
                 try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { localStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
-                try { localStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { localStorage.removeItem(PERSISTENT_AUTH_KEY); } catch(e) {}
+                try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
+                try { window.safeStorage.remove(USER_TOKEN_TS_KEY); } catch(e) {}
+                try { window.safeStorage.remove(PERSISTENT_AUTH_KEY); } catch(e) {}
             }
 
             // Clear all browser-side authentication state in one place. Password
@@ -308,9 +334,9 @@ const ADMIN_NAME = "xxz";
                 var tokenForRevocation = getUserToken();
                 clearUserToken();
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
-                try { localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
-                try { localStorage.removeItem('xtj_user'); } catch(e) {}
-                try { localStorage.removeItem(USER_SESSION_KEY); } catch(e) {}
+                try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
+                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
                 // Explicit logout revokes the refresh cookie. An expired session
@@ -429,7 +455,7 @@ const ADMIN_NAME = "xxz";
                         else if (currentUser && currentUser.user_name) userName = currentUser.user_name;
                     } catch (e) { userName = ''; }
                     if (!userName) {
-                        try { userName = localStorage.getItem('xtj_user') || ''; } catch (e) {}
+                        try { userName = window.safeStorage.get('xtj_user') || ''; } catch (e) {}
                     }
                     userName = String(userName || '').trim();
                     if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
@@ -507,7 +533,7 @@ const ADMIN_NAME = "xxz";
 
         function readUserSession() {
             try {
-                var raw = localStorage.getItem(USER_SESSION_KEY);
+                var raw = window.safeStorage.get(USER_SESSION_KEY);
                 if (!raw) return null;
                 var parsed = JSON.parse(raw);
                 return parsed && typeof parsed === "object" ? parsed : null;
@@ -529,21 +555,21 @@ const ADMIN_NAME = "xxz";
                 login_at: loginAt,
                 last_active_at: now
             };
-            try { localStorage.setItem(USER_SESSION_KEY, JSON.stringify(next)); } catch (e) {}
-            try { localStorage.setItem("xtj_user", name); } catch (e) {}
+            window.safeStorage.set(USER_SESSION_KEY, JSON.stringify(next));
+            window.safeStorage.set("xtj_user", name);
             lastUserSessionWriteAt = now;
             return next;
         }
 
         // Remove credentials left by earlier clients; ongoing sessions are renewed
         // exclusively through the HttpOnly refresh cookie.
-        try { sessionStorage.removeItem('xtj_pw_hash'); localStorage.removeItem('xtj_pw_hash'); } catch(e) {}
+        try { sessionStorage.removeItem('xtj_pw_hash'); window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
 
         function clearUserSessionStorage() {
-            try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
-            try { localStorage.removeItem("xtj_user"); } catch (e) {}
+            try { window.safeStorage.remove(USER_SESSION_KEY); } catch (e) {}
+            try { window.safeStorage.remove("xtj_user"); } catch (e) {}
             try { sessionStorage.removeItem("xtj_pw_hash"); } catch (e) {}
-            try { localStorage.removeItem("xtj_pw_hash"); } catch (e) {}
+            try { window.safeStorage.remove("xtj_pw_hash"); } catch (e) {}
             lastUserSessionWriteAt = 0;
         }
 
@@ -552,7 +578,7 @@ const ADMIN_NAME = "xxz";
             var session = readUserSession();
             if (!session) {
                 var legacyUser = "";
-                try { legacyUser = localStorage.getItem("xtj_user") || ""; } catch (e) { legacyUser = ""; }
+                try { legacyUser = window.safeStorage.get("xtj_user") || ""; } catch (e) { legacyUser = ""; }
                 legacyUser = String(legacyUser || "").trim();
                 if (legacyUser) {
                     writeUserSession(legacyUser, { resetLoginAt: true });
@@ -574,7 +600,7 @@ const ADMIN_NAME = "xxz";
                     login_at: loginAt,
                     last_active_at: now
                 }));
-                localStorage.setItem("xtj_user", userName);
+                window.safeStorage.set("xtj_user", userName);
             } catch (e) {}
             lastUserSessionWriteAt = now;
             return userName;
@@ -689,10 +715,10 @@ const ADMIN_NAME = "xxz";
         let dockChatListCacheTime = 0;
         const DOCK_CHAT_CACHE_DURATION = 120000;
         let deviceId;
-        try { deviceId = localStorage.getItem("xtj_device_id"); } catch(e) { deviceId = null; }
+        try { deviceId = window.safeStorage.get("xtj_device_id"); } catch(e) { deviceId = null; }
         if (!deviceId) {
             try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
-            localStorage.setItem("xtj_device_id", deviceId);
+            window.safeStorage.set("xtj_device_id", deviceId);
         }
         window.deviceId = deviceId;
 
@@ -832,7 +858,7 @@ const ADMIN_NAME = "xxz";
 
 function isAdmin() { return currentUser === ADMIN_NAME; }
         function clearFeedCache() {
-            try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+            try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
             feedVisiblePostsCache = null;
             feedMapsCache = null;
         }
@@ -2099,7 +2125,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
                     currentUser = name;
                     window.currentUser = currentUser;
-                    localStorage.setItem("xtj_user", currentUser);
+                    window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
@@ -2186,7 +2212,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     setUserToken(registerData.token);
                     currentUser = name;
                     window.currentUser = currentUser;
-                    localStorage.setItem("xtj_user", currentUser);
+                    window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -2408,7 +2434,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         try {
                             var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             cv[currentUser] = avatarUrl;
-                            localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                            window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cv));
                         } catch(e) {}
                     } else if (!avatarCache[currentUser]) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
@@ -2536,12 +2562,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
-                        localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                     } catch(e) {}
                     updateAllAvatarElements(avatarUrl);
                     
                     showToast('头像更新成功');
-                    localStorage.removeItem(CACHE_KEY);
+                    window.safeStorage.remove(CACHE_KEY);
                     await loadFeed(true);
                     avatarCache[currentUser] = avatarUrl;
                     updateAllAvatarElements(avatarUrl);
@@ -2625,7 +2651,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             try {
                                 var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                                 cv[currentUser] = avatarRes.data[0].media_url;
-                                localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cv));
                             } catch(e) {}
                         } else {
                             profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
@@ -2659,7 +2685,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     }
                 }
                 xtjKeys.forEach(function(k) {
-                    try { localStorage.removeItem(k); } catch(e) {}
+                    try { window.safeStorage.remove(k); } catch(e) {}
                 });
                 // 也清理 sessionStorage 中的密码 hash
                 try { sessionStorage.removeItem("xtj_pw_hash"); } catch(e) {}
@@ -3439,7 +3465,7 @@ function renderProfileActivityList(kind) {
                             avatarCache[currentUser] = avatarUrl;
                             try {
                                 cachedAvatars[currentUser] = avatarUrl;
-                                localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                             } catch(e) {}
                             updateAllAvatarElements(avatarUrl);
                         } else {
@@ -3496,14 +3522,14 @@ function renderProfileActivityList(kind) {
 
             function persistFeedLikesCache() {
                 try {
-                    var raw = localStorage.getItem(CACHE_KEY);
+                    var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return;
                     var parsed = JSON.parse(raw);
                     if (!parsed || typeof parsed !== 'object') return;
                     if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
                     parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
                     parsed.timestamp = Date.now();
-                    localStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
+                    window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
                 } catch (e) {}
             }
 
@@ -4522,7 +4548,7 @@ function renderProfileActivityList(kind) {
                         return keep;
                     });
                     if (changed) {
-                        try { localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(filtered)); } catch (e) {}
+                        window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(filtered));
                     }
                     return filtered;
                 } catch(e) { return []; }
@@ -4536,15 +4562,15 @@ function renderProfileActivityList(kind) {
                     history.unshift(normalizeViewHistoryEntry(entry));
                     // 只保留最??00锟?
                     if (history.length > 500) history.length = 500;
-                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
             }
 
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
-                if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
+                if (!window.safeStorage.get(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
-                    localStorage.setItem(key, "1");
+                    window.safeStorage.set(key, "1");
                     var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
                     if (postEl) {
                         var statsEl = postEl.querySelector('.post-stats-text');
@@ -4594,7 +4620,7 @@ function renderProfileActivityList(kind) {
                 if (!exists) {
                     history.unshift(normalized);
                     if (history.length > 500) history.length = 500;
-                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
             };
 
@@ -4602,7 +4628,7 @@ function renderProfileActivityList(kind) {
                 const key = `xtj_v_${postId}`;
                 const now = Date.now();
                 var last = 0;
-                try { last = Number(localStorage.getItem(key) || 0); } catch (e) { last = 0; }
+                try { last = Number(window.safeStorage.get(key) || 0); } catch (e) { last = 0; }
                 if (viewTracked.has(postId) && now - last < VIEW_TRACK_TTL) return false;
                 if (last && now - last < VIEW_TRACK_TTL) return false;
                 return true;
@@ -4634,7 +4660,7 @@ function renderProfileActivityList(kind) {
                             }
                             if (postInfoCache[postId]) postInfoCache[postId].views = authoritativeViews;
                         }
-                        localStorage.setItem(key, String(Date.now()));
+                        window.safeStorage.set(key, String(Date.now()));
                         if (result.recorded && currentUser && postInfoCache[postId]) {
                             var cachedPost = postInfoCache[postId];
                             var rawContent = cachedPost.content || '';
@@ -4649,7 +4675,7 @@ function renderProfileActivityList(kind) {
                         updateFeedStats();
                     } catch (e) {
                         viewTracked.delete(postId);
-                        try { localStorage.removeItem(key); } catch (_) {}
+                        try { window.safeStorage.remove(key); } catch (_) {}
                         console.error(e);
                     }
                 }, 1000);
@@ -4963,17 +4989,17 @@ function renderProfileActivityList(kind) {
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
             function updateFeedStats() {
-                var posts = document.querySelectorAll('.post');
-                var totalLikes = 0, totalComments = 0, totalViews = 0;
-                posts.forEach(function(p) {
-                    var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-                    var vm = text.match(/浏览 (\d+)/);
-                    var lm = text.match(/点赞 (\d+)/);
-                    var cm = text.match(/评论 (\d+)/);
-                    if (vm) totalViews += parseInt(vm[1]);
-                    if (lm) totalLikes += parseInt(lm[1]);
-                    if (cm) totalComments += parseInt(cm[1]);
-                });
+    var posts = document.querySelectorAll('.post');
+    var totalLikes = 0, totalComments = 0, totalViews = 0;
+    posts.forEach(function(p) {
+        var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
+        var vIdx = text.indexOf('浏览 ');
+        if(vIdx !== -1) totalViews += parseInt(text.slice(vIdx + 3)) || 0;
+        var lIdx = text.indexOf('点赞 ');
+        if(lIdx !== -1) totalLikes += parseInt(text.slice(lIdx + 3)) || 0;
+        var cIdx = text.indexOf('评论 ');
+        if(cIdx !== -1) totalComments += parseInt(text.slice(cIdx + 3)) || 0;
+    });
                 var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
                 var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
@@ -4984,7 +5010,7 @@ function renderProfileActivityList(kind) {
 
             async function initialLoad(skipCache = false) {
                 if (!skipCache) {
-                    const cached = localStorage.getItem(CACHE_KEY);
+                    const cached = window.safeStorage.get(CACHE_KEY);
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
@@ -6584,7 +6610,7 @@ function renderProfileActivityList(kind) {
                 bindPostFilterEvents();
                 if (!forceRefresh) {
                     try {
-                        var cached = localStorage.getItem(CACHE_KEY);
+                        var cached = window.safeStorage.get(CACHE_KEY);
                         if (cached) {
                             var parsed = JSON.parse(cached);
                             if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
@@ -6659,7 +6685,7 @@ function renderProfileActivityList(kind) {
                     if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
                     try {
-                        var fallbackRaw = localStorage.getItem(CACHE_KEY);
+                        var fallbackRaw = window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
                             if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
@@ -7271,7 +7297,7 @@ function renderProfileActivityList(kind) {
 
             function showNotification(userName, message) {
                 if (!userName || !message) return;
-                if (localStorage.getItem('xtj-notif') === 'off') return;
+                if (window.safeStorage.get('xtj-notif') === 'off') return;
                 if (currentDockTab === 'chat' && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
@@ -7700,7 +7726,7 @@ function renderProfileActivityList(kind) {
                     body: JSON.stringify({})
                 }).then(function(response) {
                     if (!response.ok) throw new Error('report_mark_read_failed');
-                localStorage.setItem('xtj_report_reply_check', String(Date.now()));
+                window.safeStorage.set('xtj_report_reply_check', String(Date.now()));
                 var badge = document.getElementById('navReportBadge');
                 if (badge) {
                     badge.classList.remove('show');
@@ -7725,7 +7751,7 @@ function renderProfileActivityList(kind) {
             };
 
             // ========== Dock 閸掑洦宕?==========
-            let currentDockTab = localStorage.getItem('xtj_current_tab') || 'posts';
+            let currentDockTab = window.safeStorage.get('xtj_current_tab') || 'posts';
             let lastTabTapTime = {};
             let lastTabTapCount = {};
             let isRefreshing = {};
@@ -7917,7 +7943,8 @@ function renderProfileActivityList(kind) {
                     drag.indicator.style.transition = 'none';
                     drag.indicator.style.opacity = '1';
                     drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + drag.iy + 'px,0)';
-                    document.addEventListener('pointermove', onDragMove, {passive: false});
+                    if(!window._throttledDragMove) window._throttledDragMove = window.throttleRAF(onDragMove);
+                    document.addEventListener('pointermove', window._throttledDragMove, {passive: false});
                     document.addEventListener('pointerup', onDragUp);
                     document.addEventListener('pointercancel', onDragCancel);
                 });
@@ -7941,13 +7968,14 @@ function renderProfileActivityList(kind) {
                 }
 
                 function cleanupDrag() {
-                    document.removeEventListener('pointermove', onDragMove);
+                    document.removeEventListener('pointermove', window._throttledDragMove || onDragMove);
                     document.removeEventListener('pointerup', onDragUp);
                     document.removeEventListener('pointercancel', onDragCancel);
                 }
 
                 function onDragUp(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
+                    if (!drag) { cleanupDrag(); return; }
+                    if (e.pointerId !== drag.id) return;
                     var state = drag;
                     drag = null;
                     cleanupDrag();
@@ -7964,7 +7992,8 @@ function renderProfileActivityList(kind) {
                 }
 
                 function onDragCancel(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
+                    if (!drag) { cleanupDrag(); return; }
+                    if (e.pointerId !== drag.id) return;
                     drag = null;
                     cleanupDrag();
                     requestAnimationFrame(syncDockIndicator);
@@ -8035,7 +8064,7 @@ function renderProfileActivityList(kind) {
                             window.showToast('正在刷新...');
                             // 娓呴櫎缂傛挸鐡ㄦ鐐茬埣閸ｅ憡鏌婃晶鐐差潱閺?
                             try {
-                                localStorage.removeItem(CACHE_KEY);
+                                window.safeStorage.remove(CACHE_KEY);
                             } catch(e) {}
                             if (typeof window.initialLoad === 'function') {
                                 rebuildFeedFromCurrentState()
@@ -8110,7 +8139,7 @@ function renderProfileActivityList(kind) {
                 }
                 var previousPanel = document.querySelector('.dock-panel.active');
                 currentDockTab = tab;
-                localStorage.setItem('xtj_current_tab', tab);
+                window.safeStorage.set('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
                 if (dockPanelTransitionTimer) clearTimeout(dockPanelTransitionTimer);
@@ -9194,7 +9223,7 @@ function renderProfileActivityList(kind) {
                         .catch(function(e) { console.warn('[ann_read_sync_boot]', e); });
                 }
                 // 鎭㈠娑撳﹥保存閻ㄥ嫭鐖ｇ粵楣冿拷?
-                const savedTab = localStorage.getItem('xtj_current_tab');
+                const savedTab = window.safeStorage.get('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
                     switchDockTab(savedTab, true);
                 }
@@ -9216,14 +9245,14 @@ function renderProfileActivityList(kind) {
                         themeBtn.setAttribute('aria-label', '切换到浅色模式');
                         themeBtn.setAttribute('title', '切换到浅色模式');
                     }
-                    localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+                    window.safeStorage.set(THEME_STORAGE_KEY, 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
                     if (themeBtn) {
                         themeBtn.setAttribute('aria-label', '切换到深色模式');
                         themeBtn.setAttribute('title', '切换到深色模式');
                     }
-                    localStorage.setItem(THEME_STORAGE_KEY, 'light');
+                    window.safeStorage.set(THEME_STORAGE_KEY, 'light');
                 }
             }
 
@@ -9369,7 +9398,7 @@ function renderProfileActivityList(kind) {
                 });
             }
             // 鍒濓拷顫愰崠鏍﹀瘜妫版﹫绱伴敓鏂ゆ嫹閿熸枻锟?localStorage锛屽叾锟斤紕閮寸紒鐔蜂焊閿?
-            const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+            const savedTheme = window.safeStorage.get(THEME_STORAGE_KEY);
             if (savedTheme === 'dark') {
                 setThemeState(true);
             } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -9382,7 +9411,7 @@ function renderProfileActivityList(kind) {
                 var mqDark = window.matchMedia('(prefers-color-scheme: dark)');
                 if (mqDark && mqDark.addEventListener) {
                     mqDark.addEventListener('change', function(e) {
-                        if (!localStorage.getItem(THEME_STORAGE_KEY)) {
+                        if (!window.safeStorage.get(THEME_STORAGE_KEY)) {
                             setThemeState(e.matches);
                         }
                     });
@@ -9457,7 +9486,7 @@ function renderProfileActivityList(kind) {
             // 读取本地已读公告 id 集合（仅当前用户）
             window.getLocalAnnouncementReadSet = function() {
                 try {
-                    var raw = localStorage.getItem(getAnnouncementReadKey());
+                    var raw = window.safeStorage.get(getAnnouncementReadKey());
                     if (!raw) return new Set();
                     var obj = JSON.parse(raw);
                     var keys = obj && typeof obj === 'object' ? Object.keys(obj) : [];
@@ -9472,7 +9501,7 @@ function renderProfileActivityList(kind) {
                 if (!Array.isArray(ids) || !ids.length) return;
                 try {
                     var key = getAnnouncementReadKey();
-                    var raw = localStorage.getItem(key);
+                    var raw = window.safeStorage.get(key);
                     var obj = {};
                     try { obj = raw ? (JSON.parse(raw) || {}) : {}; } catch (_) { obj = {}; }
                     var now = new Date().toISOString();
@@ -9487,7 +9516,7 @@ function renderProfileActivityList(kind) {
                         }
                     });
                     if (changed) {
-                        localStorage.setItem(key, JSON.stringify(obj));
+                        window.safeStorage.set(key, JSON.stringify(obj));
                     }
                 } catch (e) {}
             };
@@ -9577,7 +9606,7 @@ function renderProfileActivityList(kind) {
             // 旧函数名（保留兼容）
             function getReadAnnouncements() { return window.getReadAnnouncementIds(); }
             function saveReadAnnouncements(arr) {
-                try { localStorage.setItem(ANN_READ_KEY_PREFIX + 'legacy', JSON.stringify(arr || [])); } catch(e) {}
+                window.safeStorage.set(ANN_READ_KEY_PREFIX + 'legacy', JSON.stringify(arr || []));
             }
             function updateAnnouncementBadgeOld() { window.updateAnnouncementBadge(); }
 
@@ -12496,7 +12525,7 @@ function renderProfileActivityList(kind) {
 
             function readFeedSnapshotCache() {
                 try {
-                    var raw = localStorage.getItem(CACHE_KEY);
+                    var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return null;
                     var parsed = JSON.parse(raw);
                     return normalizeFeedSnapshotCache(parsed);
@@ -12507,7 +12536,7 @@ function renderProfileActivityList(kind) {
 
             function readAnnouncementCache() {
                 try {
-                    var raw = localStorage.getItem(ANN_CACHE_KEY);
+                    var raw = window.safeStorage.get(ANN_CACHE_KEY);
                     if (!raw) return null;
                     var parsed = JSON.parse(raw);
                     if (!parsed || !Array.isArray(parsed.data)) return null;
