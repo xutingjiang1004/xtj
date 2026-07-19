@@ -11999,22 +11999,25 @@ function renderProfileActivityList(kind) {
                 if (modal) modal.classList.add('active');
 
                 try {
-                    const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").eq("id", postId).maybeSingle(),
-                        sb.from("comments").select("*").eq("post_id", postId).order("created_at"),
-                        sb.from("likes").select("*").eq("post_id", postId).order("created_at", {ascending: false})
-                    ]);
-                    const post = normalizePost(postRes.data);
-                    if (!post) {
-                        if (body) body.innerHTML = '<div class="stat-empty">帖子不存在或已删除</div>';
+                    var apiUrl = (window.API_BASE || '') + '/api/post/detail/' + encodeURIComponent(postId);
+                    var apiRes = await fetch(apiUrl, { credentials: 'include' });
+                    var apiData = await apiRes.json();
+                    if (!apiRes.ok || !apiData || !apiData.ok) {
+                        var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
+                        if (body) body.innerHTML = '<div class="stat-empty">' + errMsg + '</div>';
                         return;
                     }
-                    if (!canViewPost(post)) {
-                        if (body) body.innerHTML = '<div class="stat-empty">无权查看这条帖子</div>';
+                    var post = apiData.post;
+                    var likes = apiData.likes || [];
+                    var comments = apiData.comments || [];
+                    // normalize to match renderPostDetail expectations
+                    post.views = post.view_count || 0;
+                    if (!post.user_name || !post.created_at) {
+                        if (body) body.innerHTML = '<div class="stat-empty">该帖子不存在、已删除或不可查看。</div>';
                         return;
                     }
                     trackView(postId);
-                    renderPostDetail(post, likeRes.data || [], commRes.data || []);
+                    renderPostDetail(post, likes, comments);
                 } catch (e) {
                     if (body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
