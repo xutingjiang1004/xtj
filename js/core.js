@@ -177,7 +177,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         if (v === null) return fallback;
         return JSON.parse(v);
     } catch(e) {
-        localStorage.removeItem(key);
+        try { localStorage.removeItem(key); } catch(ex) {}
         return fallback;
     }
 };
@@ -3523,13 +3523,8 @@ function renderProfileActivityList(kind) {
                 var buttons = [];
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
                     if (String(postEl.getAttribute('data-post-id') || '').trim() !== pid) return;
-                    var found = postEl.querySelectorAll('.action-btn.like-btn, [data-action="like"]');
-                    if (found && found.length > 0) {
-                        found.forEach(function(b) { buttons.push(b); });
-                    } else {
-                        var fallbackBtn = postEl.querySelector('.actions .action-btn');
-                        if (fallbackBtn) buttons.push(fallbackBtn);
-                    }
+                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
+                    if (likeBtn) buttons.push(likeBtn);
                 });
                 return buttons;
             }
@@ -3678,56 +3673,31 @@ function renderProfileActivityList(kind) {
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
                 if (!btn) return;
 
-                var rect = btn.getBoundingClientRect();
-                var cx = rect.left + rect.width / 2;
-                var cy = rect.top + rect.height / 2;
+                const rect = btn.getBoundingClientRect();
+                const cx = rect.left + rect.width/2;
+                const cy = rect.top + rect.height/2;
+                
+                // create pulse ring
+                const ring = document.createElement('div');
+                ring.className = 'pulse-ring';
+                ring.style.left = cx + 'px';
+                ring.style.top = cy + 'px';
+                document.body.appendChild(ring);
+                setTimeout(() => ring.remove(), 600);
 
-                // 1. 冲击波发光环
-                var wave = document.createElement('div');
-                wave.className = 'like-shockwave';
-                wave.style.left = cx + 'px';
-                wave.style.top = cy + 'px';
-                document.body.appendChild(wave);
-                setTimeout(function() { if (wave && wave.parentNode) wave.remove(); }, 600);
-
-                // 2. 浪漫爆裂爱心 + 星芒粒子
-                var items = [
-                    { char: '❤', color: '#ff4757', size: 20 },
-                    { char: '💖', color: '#ff6b81', size: 18 },
-                    { char: '✨', color: '#ffd32a', size: 16 },
-                    { char: '♥', color: '#ff3838', size: 22 },
-                    { char: '💗', color: '#ff758f', size: 18 },
-                    { char: '⭐', color: '#fffa65', size: 14 },
-                    { char: '❤', color: '#ff4d4d', size: 19 },
-                    { char: '✨', color: '#70a1ff', size: 15 }
-                ];
-
-                var burstCount = perfProfile === 'balanced' ? 6 : 10;
-                for (var i = 0; i < burstCount; i++) {
-                    var p = items[i % items.length];
-                    var el = document.createElement('div');
-                    el.className = 'heart-particle burst-enhanced';
-                    el.setAttribute('aria-hidden', 'true');
-                    el.textContent = p.char;
-
-                    var angle = (-Math.PI * 0.95) + (Math.PI * 0.9 * i / Math.max(1, burstCount - 1)) + (Math.random() - 0.5) * 0.25;
-                    var distance = 35 + Math.random() * 40;
-
+                const emojis = ["❤","✨","💖","⭐","💗"];
+                for(let i=0; i<8; i++){
+                    const el = document.createElement('div');
+                    el.className = 'heart-particle';
+                    el.textContent = emojis[Math.floor(Math.random()*emojis.length)];
                     el.style.left = cx + 'px';
                     el.style.top = cy + 'px';
-                    el.style.fontSize = (p.size || 18) + 'px';
-                    if (p.color) el.style.color = p.color;
-
-                    el.style.setProperty('--heart-x', Math.cos(angle) * distance + 'px');
-                    el.style.setProperty('--heart-y', Math.sin(angle) * distance + 'px');
-                    el.style.setProperty('--heart-rotate', ((Math.random() - 0.5) * 50) + 'deg');
-                    el.style.setProperty('--heart-scale', (0.8 + Math.random() * 0.5).toFixed(2));
-                    el.style.setProperty('--heart-delay', (i * 15) + 'ms');
-
+                    const ang = (Math.random()*Math.PI*2);
+                    const dst = 30 + Math.random()*40;
+                    el.style.setProperty('--tx', Math.cos(ang)*dst + 'px');
+                    el.style.setProperty('--ty', Math.sin(ang)*dst + 'px');
                     document.body.appendChild(el);
-                    (function(node) {
-                        setTimeout(function() { if (node && node.parentNode) node.remove(); }, 850);
-                    })(el);
+                    setTimeout(()=>el.remove(), 800);
                 }
             }
 
@@ -4593,21 +4563,19 @@ function renderProfileActivityList(kind) {
 
             function saveViewHistory(entry) {
                 const history = getViewHistory();
-                // 閬垮厤閲嶅閿熸枻鎷峰綍閿涘牆鎮撴稉顫嫹閿熺煫浼欐嫹閸氬奔绔村笘瀛愰崣顏囶唶褰曚竴锟解槄锟?
                 const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
                 if (!exists) {
                     history.unshift(normalizeViewHistoryEntry(entry));
-                    // 只保留最??00锟?
                     if (history.length > 500) history.length = 500;
-                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                    window.safeLocalStorageSet(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
             }
 
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
-                if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
+                if (!window.safeLocalStorageGet(key, null) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
-                    localStorage.setItem(key, "1");
+                    window.safeLocalStorageSet(key, "1");
                     var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
                     if (postEl) {
                         var statsEl = postEl.querySelector('.post-stats-text');
@@ -5007,7 +4975,7 @@ function renderProfileActivityList(kind) {
                         const pComms = commentMap[p.id] || [];
                         const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                         const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
                     } catch (e) {
                         console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
                     }
@@ -5025,21 +4993,38 @@ function renderProfileActivityList(kind) {
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
-            function updateFeedStats() {
-                var posts = document.querySelectorAll('.post');
-                var totalLikes = 0, totalComments = 0, totalViews = 0;
-                posts.forEach(function(p) {
-                    var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-                    var vm = text.match(/浏览 (\d+)/);
-                    var lm = text.match(/点赞 (\d+)/);
-                    var cm = text.match(/评论 (\d+)/);
-                    if (vm) totalViews += parseInt(vm[1]);
-                    if (lm) totalLikes += parseInt(lm[1]);
-                    if (cm) totalComments += parseInt(cm[1]);
-                });
+            function updateFeedStats(postsData, commentsData, likesData) {
                 var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
                 var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
+                if (!sPosts && !sViews && !sLikes) return;
+
+                if (Array.isArray(postsData)) {
+                    var totalViews = 0;
+                    postsData.forEach(function(p) { if (p && p.views) totalViews += (Number(p.views) || 0); });
+                    var totalLikesCount = Array.isArray(likesData) ? likesData.length : 0;
+                    var totalCommentsCount = Array.isArray(commentsData) ? commentsData.length : 0;
+                    if (sPosts) sPosts.textContent = postsData.length;
+                    if (sViews) sViews.textContent = totalViews;
+                    if (sLikes) sLikes.textContent = totalLikesCount + totalCommentsCount;
+                    return;
+                }
+
+                var posts = document.querySelectorAll('.post');
+                var totalLikes = 0, totalComments = 0, totalViews = 0;
+                posts.forEach(function(p) {
+                    var statsText = (p.querySelector('.post-stats-text') || {}).textContent || '';
+                    if (!statsText) return;
+                    var parts = statsText.split('|');
+                    parts.forEach(function(part) {
+                        var digits = part.replace(/\D/g, '');
+                        if (!digits) return;
+                        var val = parseInt(digits, 10) || 0;
+                        if (part.indexOf('浏览') >= 0) totalViews += val;
+                        else if (part.indexOf('点赞') >= 0) totalLikes += val;
+                        else if (part.indexOf('评论') >= 0) totalComments += val;
+                    });
+                });
                 if (sPosts) sPosts.textContent = posts.length;
                 if (sViews) sViews.textContent = totalViews;
                 if (sLikes) sLikes.textContent = totalLikes + totalComments;
@@ -5382,7 +5367,7 @@ function renderProfileActivityList(kind) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
+                    '<button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
@@ -7985,32 +7970,40 @@ function renderProfileActivityList(kind) {
                     document.addEventListener('pointercancel', onDragCancel);
                 });
 
+                let dragRaf = null;
                 function onDragMove(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
-                    e.preventDefault();
-                    if (drag.vertical) {
-                        var dy = e.clientY - drag.sy;
-                        if (Math.abs(dy) > 2) drag.moved = true;
-                        var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
-                        drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
-                        drag.cy = ny;
-                    } else {
-                        var dx = e.clientX - drag.sx;
-                        if (Math.abs(dx) > 2) drag.moved = true;
-                        var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
-                        drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
-                        drag.cx = nx;
-                    }
+                    if (!drag || (e.pointerId != null && e.pointerId !== drag.id)) return;
+                    if (e.cancelable) e.preventDefault();
+                    var clientX = e.clientX, clientY = e.clientY;
+                    if (dragRaf) return;
+                    dragRaf = requestAnimationFrame(function() {
+                        dragRaf = null;
+                        if (!drag) return;
+                        if (drag.vertical) {
+                            var dy = clientY - drag.sy;
+                            if (Math.abs(dy) > 2) drag.moved = true;
+                            var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
+                            drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
+                            drag.cy = ny;
+                        } else {
+                            var dx = clientX - drag.sx;
+                            if (Math.abs(dx) > 2) drag.moved = true;
+                            var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
+                            drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
+                            drag.cx = nx;
+                        }
+                    });
                 }
 
                 function cleanupDrag() {
+                    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = null; }
                     document.removeEventListener('pointermove', onDragMove);
                     document.removeEventListener('pointerup', onDragUp);
                     document.removeEventListener('pointercancel', onDragCancel);
                 }
 
                 function onDragUp(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
+                    if (!drag) { cleanupDrag(); return; }
                     var state = drag;
                     drag = null;
                     cleanupDrag();
@@ -8027,7 +8020,6 @@ function renderProfileActivityList(kind) {
                 }
 
                 function onDragCancel(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
                     drag = null;
                     cleanupDrag();
                     requestAnimationFrame(syncDockIndicator);
