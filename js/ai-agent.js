@@ -1,4 +1,4 @@
-﻿
+
 window.throttleRAF = function(fn) {
     var ticking = false, args, ctx;
     return function() {
@@ -835,8 +835,8 @@ window.throttleRAF = function(fn) {
       return S.config;
     }
     S.config = S.config || {
-      name: 'AI',
-      avatar: '🙂',
+      name: '小猫',
+      avatar: '🐈',
       description: '在线',
       welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
     };
@@ -3987,7 +3987,7 @@ window.throttleRAF = function(fn) {
     var meta = [];
     if (item && item.source) meta.push(String(item.source));
     if (item && item.created_at) {
-      var created = new Date(String(item.created_at).replace(/-/g, '/'));
+      var created = new Date(item.created_at);
       if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
     }
     if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
@@ -5870,9 +5870,9 @@ function showChatMessages() {
     if (!list) return;
     removeAllAiEntries();
 
-    var cfg = S.config || { name: 'AI', avatar: '🙂', description: 'AI 智能体' };
-    var name = cfg.name || 'AI';
-    var avatar = cfg.avatar || '🙂';
+    var cfg = S.config || { name: '小猫', avatar: '🐈', description: '小猫 智能体' };
+    var name = cfg.name || '小猫';
+    var avatar = cfg.avatar || '🐈';
     var desc = cfg.description || 'AI 智能体';
 
     var item = el('div', {
@@ -6004,8 +6004,8 @@ function showChatMessages() {
       scheduleInsertEntry();
     }).catch(function() {
       S.config = {
-        name: 'AI',
-        avatar: '🙂',
+        name: '小猫',
+        avatar: '🐈',
         description: 'AI 智能体',
         welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
       };
