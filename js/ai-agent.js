@@ -3247,17 +3247,16 @@
       var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
       msgs.appendChild(loadHint);
       try {
-        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30');
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think');
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
-          var fallback = await apiRequest('GET', '/chat/history?limit=30');
-          if (fallback && fallback.ok && Array.isArray(fallback.data && fallback.data.messages) && fallback.data.messages.length > 0) {
-            hist = fallback;
-            hasMessages = true;
-            if (fallback.data.conversation_id) {
-              S.dtConversationId = fallback.data.conversation_id;
-              saveDtConvId();
-            }
+          S.dtConversationId = null;
+          saveDtConvId();
+          resetDeepThinkPageEmpty();
+          var newConversation = await apiRequest('POST', '/chat/new', null);
+          if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
+            S.dtConversationId = newConversation.data.conversation_id;
+            saveDtConvId();
           }
         }
         if (hasMessages) {
@@ -3956,7 +3955,7 @@
       window.openChat(target.user);
     } else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') {
       try { closeSiteSearch(); } catch (e3) {}
-      window.__xtjAiAgent.openConversation(target.conversation_id);
+      window.__xtjAiAgent.openConversation(target.conversation_id, target.mode);
     } else if (target.type === 'user' && typeof window.openUserProfile === 'function') {
       closeSecondary();
       window.openUserProfile(target.user_name || item.title || '');
@@ -4066,6 +4065,21 @@
     });
   }
 
+  function renderSiteSearchLoading() {
+    var host = document.getElementById('aiSiteSearchResults');
+    if (!host) return;
+    host.innerHTML = '';
+    host.classList.add('is-loading');
+    host.setAttribute('aria-busy', 'true');
+    for (var i = 0; i < 3; i++) {
+      var row = el('div', { class: 'ai-site-search-skeleton', 'aria-hidden': 'true' });
+      row.appendChild(el('i'));
+      row.appendChild(el('i'));
+      row.appendChild(el('i'));
+      host.appendChild(row);
+    }
+  }
+
   async function runSiteSearch() {
     var input = document.getElementById('aiSiteSearchInput');
     var status = document.getElementById('aiSiteSearchStatus');
@@ -4082,7 +4096,8 @@
       return;
     }
     if (submit) submit.disabled = true;
-    if (status) status.textContent = '正在搜索…';
+    renderSiteSearchLoading();
+    if (status) status.textContent = '正在检索站内内容…';
     try {
       var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 });
       var data = response && response.data;
@@ -4091,8 +4106,15 @@
       if (status) status.textContent = data.results && data.results.length ? '找到 ' + data.results.length + ' 条相关内容。' : '没有找到相关内容。';
     } catch (e) {
       renderSiteSearchResults([]);
-      if (status) status.textContent = (e && e.message) || '搜索失败，请稍后重试。';
+      var message = (e && e.message) || '';
+      if (message === 'AI 工具数据表尚未迁移') message = '搜索服务正在初始化，请稍后重试。';
+      if (status) status.textContent = message || '搜索暂不可用，请重试。';
     } finally {
+      var results = document.getElementById('aiSiteSearchResults');
+      if (results) {
+        results.classList.remove('is-loading');
+        results.removeAttribute('aria-busy');
+      }
       if (submit) submit.disabled = false;
     }
   }
@@ -5014,6 +5036,7 @@
       var qs = '?limit=' + HISTORY_PAGE_SIZE;
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
+      qs += '&mode=normal';
       var r = await apiRequest('GET', '/chat/history' + qs);
 
       if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
@@ -5181,7 +5204,7 @@
     setAiRootState('ai-loading');
     
     try {
-      var r = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=' + HISTORY_PAGE_SIZE);
+      var r = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=' + HISTORY_PAGE_SIZE + '&mode=normal');
       if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
       if (r && r.ok && r.data && r.data.messages) {
         S.messages = r.data.messages;
@@ -5628,7 +5651,7 @@ function showChatMessages() {
     // fallback: localStorage 鐨?convId 鏃犳晥锛堟病鏈夊巻鍙叉秷鎭級锛屽皾璇曞姞杞芥渶杩戜細璇?
     if (!S.messages.length && S.conversationId) {
       try {
-        var convR = await apiRequest('GET', '/chat/conversations?limit=1');
+        var convR = await apiRequest('GET', '/chat/conversations?limit=1&mode=normal');
         if (convR && convR.ok && convR.data && convR.data.conversations && convR.data.conversations.length) {
           var recent = convR.data.conversations[0];
           if (recent && recent.conversation_id && recent.conversation_id !== S.conversationId) {
@@ -5909,8 +5932,14 @@ function showChatMessages() {
     getConversationId: function() { return S.conversationId; },
     openDeepThink: openDeepThinkPage,
     openSiteSearch: openSiteSearchPage,
-    openConversation: async function(conversationId) {
+    openConversation: async function(conversationId, mode) {
       if (!conversationId) return false;
+      if (mode === 'deep_think') {
+        S.dtConversationId = conversationId;
+        saveDtConvId();
+        await openDeepThinkPage();
+        return true;
+      }
       await openAiChat();
       await switchConversation(conversationId);
       return true;
