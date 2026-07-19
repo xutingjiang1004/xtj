@@ -2140,7 +2140,39 @@ Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
 });
 
 function aiSiteText(value, max) {
-  return String(value || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max || 500);
+  var raw = String(value || '');
+  // extract text from JSON metadata wrapper (e.g. {"__type":"xtj_post_v1","text":"..."})
+  try {
+    if (raw.charAt(0) === '{' && raw.indexOf('"text"') >= 0) {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.text && typeof parsed.text === 'string') raw = parsed.text;
+    }
+  } catch (e) {}
+  return raw.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max || 500);
+}
+function aiSiteContainsText(value, query) {
+  var text = aiSiteText(value, 10000);
+  var q = aiSiteText(query, 120);
+  if (!q) return false;
+  return text.toLowerCase().indexOf(q.toLowerCase()) >= 0;
+}
+function aiSiteMatchScore(text, query) {
+  var t = text.toLowerCase();
+  var q = query.toLowerCase();
+  var idx = t.indexOf(q);
+  if (idx < 0) return 0;
+  // earlier match = higher score; shorter text = higher relevance
+  var posScore = Math.max(0, 1 - idx / Math.max(t.length, 1));
+  var densityScore = Math.min(1, q.length / Math.max(t.length, 1));
+  return Math.round((posScore * 0.6 + densityScore * 0.4) * 100) / 100;
+}
+function aiSiteNormalizeQuery(query) {
+  return String(query || '')
+    .replace(/[\u3000]/g, ' ')   // full-width space
+    .replace(/[，。！？；：""''【】《》（）]/g, '')  // common Chinese punctuation
+    .replace(/[,!?;:"'[\]()]/g, '')  // common English punctuation
+    .replace(/\s+/g, ' ')        // collapse whitespace
+    .trim();
 }
 
 function aiSiteIsAdmin(context) {
@@ -2156,9 +2188,14 @@ async function aiSitePersistResults(ownerName, results) {
   var rows = results.slice(0, 40).map(function(item) {
     return { owner_name: ownerName, source: item.source, source_id: String(item.source_id || ''), title: item.title || '', snippet: item.snippet || '', jump_target: item.jump_target || {} };
   });
-  var saved = await supabase.from('ai_search_results').insert(rows).select('id, source, source_id, title, snippet, jump_target, created_at');
-  if (saved.error) throw new Error('AI 工具数据表尚未迁移');
-  return (saved.data || []).map(aiSitePresentResult);
+  try {
+    var saved = await supabase.from('ai_search_results').insert(rows).select('id, source, source_id, title, snippet, jump_target, created_at');
+    if (saved.error) { console.error('[aiSitePersistResults] insert error:', saved.error); return results; }
+    return (saved.data || []).map(aiSitePresentResult);
+  } catch (e) {
+    console.error('[aiSitePersistResults] persist failed:', e && e.message);
+    return results;
+  }
 }
 
 // Search-result rows are server owned. Keep content metadata in jump_target so
@@ -2174,11 +2211,11 @@ function aiSitePresentResult(item) {
   });
 }
 
-function aiSiteResult(source, sourceId, title, snippet, createdAt, target, query) {
+function aiSiteResult(source, sourceId, title, snippet, createdAt, target, query, score) {
   target = Object.assign({}, target || {}, {
     source_created_at: createdAt || null,
-    matched_keywords: query ? [query] : [],
-    relevance: 1
+    matched_keywords: query ? aiSiteNormalizeQuery(query).split(/\s+/).filter(Boolean).slice(0, 5) : [],
+    relevance: typeof score === 'number' ? score : (query ? aiSiteMatchScore(snippet || '', query) : 0)
   });
   return { source: source, source_id: sourceId, title: title, snippet: snippet, created_at: createdAt || null, jump_target: target };
 }
@@ -2198,36 +2235,98 @@ function aiSiteSnippet(value, query) {
 }
 
 async function aiSiteSearch(source, query, userName, limit) {
-  var q = aiSiteText(query, 120);
+  var q = aiSiteNormalizeQuery(query);
   if (!q) return [];
   var take = Math.min(Math.max(Number(limit) || 20, 1), 40);
   var pattern = '%' + q.replace(/[%_]/g, '\\$&') + '%';
+  // multi-keyword: split by whitespace, each word must match
+  var keywords = q.split(/\s+/).filter(Boolean);
   var rows = [];
   if (source === 'posts') {
-    var postRes = await applyPublicPostExclusions(supabase.from('posts').select('id,user_name,content,created_at,visibility').ilike('content', pattern)).order('created_at', { ascending: false }).limit(take);
-    rows = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return aiSiteResult('posts', p.id, p.user_name + ' 的帖子', aiSiteSnippet(p.content, q), p.created_at, { type: 'post', post_id: p.id }, q); });
+    // search both content and user_name, also handle JSON-wrapped content
+    var postQuery = supabase.from('posts').select('id,user_name,content,created_at,visibility');
+    postQuery = applyPublicPostExclusions(postQuery);
+    var postOrParts = keywords.map(function(k) { return 'content.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%'; });
+    if (keywords.length > 1) {
+      // also search user_name for multi-keyword queries
+      keywords.forEach(function(k) {
+        postOrParts.push('user_name.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%');
+      });
+    }
+    postQuery = postQuery.or(postOrParts.join(','));
+    var postRes = await postQuery.order('created_at', { ascending: false }).limit(take);
+    if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return []; }
+    var candidates = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; });
+    // client-side filter: check extracted text content (not just raw JSON)
+    if (keywords.length > 0) {
+      candidates = candidates.filter(function(p) {
+        var text = aiSiteText(p.content, 10000);
+        var userMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+        var contentMatch = keywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+        return contentMatch || (keywords.length === 1 && userMatch);
+      });
+    }
+    rows = candidates.map(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var score = aiSiteMatchScore(text, q);
+      return aiSiteResult('posts', p.id, p.user_name + ' 的帖子', aiSiteSnippet(p.content, q), p.created_at, { type: 'post', post_id: p.id }, q, score);
+    });
   } else if (source === 'comments') {
     var commentRes = await supabase.from('comments').select('id,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    if (commentRes.error) { console.error('[aiSiteSearch] comments query error:', commentRes.error); return []; }
     var comments = commentRes.data || [];
     var commentPostIds = comments.map(function(c) { return c.post_id; }).filter(Boolean);
-    var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type').in('id', commentPostIds) : { data: [] };
+    var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type').in('id', commentPostIds) : { data: [], error: null };
+    if (commentPosts.error) { console.error('[aiSiteSearch] comment posts lookup error:', commentPosts.error); }
     var visibleCommentPosts = new Set((commentPosts.data || []).filter(function(p) {
       return p.media_type !== '__dm__' && (p.visibility !== 'private' || p.user_name === userName);
     }).map(function(p) { return String(p.id); }));
-    rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) { return aiSiteResult('comments', c.id, c.user_name + ' 的评论', aiSiteSnippet(c.content, q), c.created_at, { type: 'comment', post_id: c.post_id, comment_id: c.id }, q); });
+    rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) {
+      var text = aiSiteText(c.content, 10000);
+      var score = aiSiteMatchScore(text, q);
+      return aiSiteResult('comments', c.id, c.user_name + ' 的评论', aiSiteSnippet(c.content, q), c.created_at, { type: 'comment', post_id: c.post_id, comment_id: c.id }, q, score);
+    });
   } else if (source === 'photos') {
     var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) { return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q); });
+    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return []; }
+    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var score = aiSiteMatchScore(text, q);
+      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
+    });
   } else if (source === 'dm') {
     var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + userName + ',media_url.eq.' + userName).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (dmRes.data || []).map(function(m) { var peer = m.user_name === userName ? m.media_url : m.user_name; return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q); });
+    if (dmRes.error) { console.error('[aiSiteSearch] dm query error:', dmRes.error); return []; }
+    rows = (dmRes.data || []).map(function(m) {
+      var text = aiSiteText(m.content, 10000);
+      var score = aiSiteMatchScore(text, q);
+      var peer = m.user_name === userName ? m.media_url : m.user_name;
+      return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q, score);
+    });
   } else if (source === 'ai_history') {
     var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (aiRes.data || []).map(function(m) { var meta = parseMsgMeta(m); return aiSiteResult('ai_history', m.id, meta.chat_mode === 'deep_think' ? '深度研究' : 'AI 对话', aiSiteSnippet(m.content, q), m.created_at, { type: 'ai_history', conversation_id: meta.convId || '', mode: meta.chat_mode === 'deep_think' ? 'deep_think' : 'normal' }, q); });
+    if (aiRes.error) { console.error('[aiSiteSearch] ai_history query error:', aiRes.error); return []; }
+    rows = (aiRes.data || []).map(function(m) {
+      var meta = parseMsgMeta(m);
+      var text = aiSiteText(m.content, 10000);
+      var score = aiSiteMatchScore(text, q);
+      return aiSiteResult('ai_history', m.id, meta.chat_mode === 'deep_think' ? '深度研究' : 'AI 对话', aiSiteSnippet(m.content, q), m.created_at, { type: 'ai_history', conversation_id: meta.convId || '', mode: meta.chat_mode === 'deep_think' ? 'deep_think' : 'normal' }, q, score);
+    });
   } else if (source === 'users') {
     var userRes = await supabase.from('posts').select('user_name,created_at').eq('media_type', AUTH_MARKER).ilike('user_name', pattern).order('created_at', { ascending: false }).limit(take);
-    rows = (userRes.data || []).map(function(u) { return aiSiteResult('users', u.user_name, u.user_name, '公开用户资料', u.created_at, { type: 'user', user_name: u.user_name }, q); });
+    if (userRes.error) { console.error('[aiSiteSearch] users query error:', userRes.error); return []; }
+    rows = (userRes.data || []).map(function(u) {
+      return aiSiteResult('users', u.user_name, u.user_name, '公开用户资料', u.created_at, { type: 'user', user_name: u.user_name }, q, 0.5);
+    });
   }
+  // deduplicate by source_id
+  var seen = {};
+  rows = rows.filter(function(r) {
+    var key = r.source + ':' + r.source_id;
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
   return rows;
 }
 
@@ -2246,8 +2345,10 @@ async function executeAiSiteTool(name, args, context) {
   if (!definition.write) {
     var sources = name === 'search_everything' ? ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'] : [name.replace('search_', '').replace('_messages', '').replace('_history', '')];
     var lookup = { posts: 'posts', comments: 'comments', photos: 'photos', dm: 'dm', ai: 'ai_history', users: 'users' };
-    var found = await Promise.all(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, args.query, userName, args.limit); }));
-    var stored = await aiSitePersistResults(userName, [].concat.apply([], found).slice(0, 40));
+    var settled = await Promise.allSettled(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, args.query, userName, args.limit); }));
+    var found = [];
+    settled.forEach(function(s) { if (s.status === 'fulfilled') found = found.concat(s.value || []); });
+    var stored = await aiSitePersistResults(userName, [].concat.apply([], [found]).slice(0, 40));
     return { tool_name: name, query: aiSiteText(args.query, 120), results_count: stored.length, results: stored, cards: [aiSiteCard('search_results', '站内搜索结果', { results: stored })] };
   }
   var payload = { args: args, requested_by: userName };
@@ -11760,9 +11861,20 @@ app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
     if (!query) return res.status(400).json({ error: '搜索关键词不能为空' });
     if (!selected.length) return res.status(400).json({ error: '搜索范围无效' });
     var limit = Math.min(Math.max(Number(req.body && req.body.limit) || 40, 1), 40);
-    var batches = await Promise.all(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit); }));
-    var results = await aiSitePersistResults(req.userName, [].concat.apply([], batches).slice(0, limit));
-    return res.json({ ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }) });
+    // use allSettled so one failing source doesn't discard results from others
+    var settled = await Promise.allSettled(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit); }));
+    var sourceErrors = [];
+    var batches = [];
+    settled.forEach(function(s, i) {
+      if (s.status === 'fulfilled') { batches.push(s.value || []); }
+      else { sourceErrors.push({ source: selected[i], error: String(s.reason && s.reason.message || 'search_failed').slice(0, 200) }); }
+    });
+    var results = [].concat.apply([], batches).slice(0, limit);
+    // persist asynchronously — don't block the response
+    aiSitePersistResults(req.userName, results).catch(function(e) { console.error('[site-search] persist failed:', e && e.message); });
+    var response = { ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }) };
+    if (sourceErrors.length) response.source_errors = sourceErrors;
+    return res.json(response);
   } catch (e) {
     return res.status(503).json({ error: e && e.message ? e.message : '搜索失败' });
   }
