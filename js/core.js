@@ -1026,6 +1026,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 ensureAiAgentLoaded().then(function() {
                     if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
                     if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
+                    if (tool === 'chat' && window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') return window.__xtjAiAgent.open();
                     if (typeof window.__xtjOpenAiChat === 'function') return window.__xtjOpenAiChat();
                 }).catch(function(error) {
                     console.error('[XTJ] top AI tools load failed:', error);
@@ -1115,6 +1116,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             };
             lazyAiChatLauncher._realOpen = window.__xtjOpenAiChat;
         }
+        lazyAiChatLauncher();
 
         function getAiChatSkeleton() {
             return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
