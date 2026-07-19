@@ -19,8 +19,11 @@ test('post tools are server-authoritative and expose an SSE post chat endpoint',
   assert.match(server, /app\.post\('\/api\/agent\/post-tools', authenticateUser/);
   assert.match(server, /app\.post\('\/api\/agent\/post-chat\/stream', authenticateUser/);
   assert.match(server, /loadPostToolPost\(postId, req\.userName\)/);
+  assert.match(server, /post\.is_deleted === true/);
   assert.match(server, /already_chinese/);
   assert.match(server, /event: message/);
+  assert.match(server, /event: delta/);
+  assert.match(server, /requestAbort\.abort\(\)/);
 });
 
 test('Dock source is not part of this change surface', () => {

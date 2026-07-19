@@ -3414,6 +3414,7 @@ async function callDeepSeekAI(opts) {
     max_tokens: maxTokens,
     temperature: temperature
   };
+  if (opts.signal) apiOpts.signal = opts.signal;
   if (jsonMode) apiOpts.response_format = { type: 'json_object' };
   if (stream) {
     apiOpts.onThinkingChunk = opts.onThinkingChunk;
@@ -11868,10 +11869,10 @@ function postToolContentHash(text) {
 }
 
 async function loadPostToolPost(postId, userName) {
-  var found = await supabase.from('posts').select('id,user_name,content,visibility,media_type,created_at,updated_at').eq('id', postId).maybeSingle();
+  var found = await supabase.from('posts').select('id,user_name,content,visibility,media_type,is_deleted,created_at,updated_at').eq('id', postId).maybeSingle();
   if (found.error) throw new Error('post_lookup_failed');
   var post = found.data;
-  if (!post || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
+  if (!post || post.is_deleted === true || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
   if (post.visibility === 'private' && post.user_name !== userName && userName !== ADMIN_USERNAME) throw new Error('post_not_visible');
   return post;
 }
@@ -11906,7 +11907,8 @@ app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async 
 
 app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), async (req, res) => {
   var closed = false;
-  req.on('close', function() { closed = true; });
+  var requestAbort = new AbortController();
+  req.on('close', function() { closed = true; requestAbort.abort(); });
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -11920,8 +11922,22 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
     var prompt = initial
       ? '请分析并毒舌锐评下面这条帖子。先说明字面意思、语气情绪、潜台词或可能意图、矛盾或水分之处，再给简短尖锐但不虚构背景的锐评。'
       : followup;
-    var reply = await callDeepSeekAI({ system: 'You are XTJ post assistant. Answer in natural Chinese. Do not invent facts not present in the post. The requested sharp critique can be witty but must not target protected traits.', messages: [{ role: 'system', content: '帖子作者：' + String(post.user_name || '') + '\n帖子正文：\n' + content }, { role: 'user', content: prompt }], max_tokens: 1800, thinking_mode: 'low' });
-    if (!closed) res.write('event: message\ndata: ' + JSON.stringify({ post_id: post.id, conversation_id: aiSiteText(req.body && req.body.conversation_id, 80) || genConvId(), content: reply || '暂时无法生成分析。' }) + '\n\n');
+    var conversationId = aiSiteText(req.body && req.body.conversation_id, 80) || genConvId();
+    var streamed = false;
+    var reply = await callDeepSeekAI({
+      system: 'You are XTJ post assistant. Answer in natural Chinese. Do not invent facts not present in the post. The requested sharp critique can be witty but must not target protected traits.',
+      messages: [{ role: 'system', content: '帖子作者：' + String(post.user_name || '') + '\n帖子正文：\n' + content }, { role: 'user', content: prompt }],
+      max_tokens: 1800,
+      thinking_mode: 'low',
+      signal: requestAbort.signal,
+      stream: true,
+      onContentChunk: function(chunk) {
+        if (closed || !chunk) return;
+        streamed = true;
+        res.write('event: delta\ndata: ' + JSON.stringify({ post_id: post.id, conversation_id: conversationId, content: String(chunk) }) + '\n\n');
+      }
+    });
+    if (!closed && !streamed) res.write('event: message\ndata: ' + JSON.stringify({ post_id: post.id, conversation_id: conversationId, content: reply || '暂时无法生成分析。' }) + '\n\n');
     if (!closed) res.write('event: done\ndata: {}\n\n');
   } catch (e) {
     if (!closed) res.write('event: error\ndata: ' + JSON.stringify({ error: String(e && e.message || 'post_chat_failed') }) + '\n\n');

@@ -5363,6 +5363,7 @@ function renderProfileActivityList(kind) {
                 activePostToolsMenu = { menu: menu, trigger: trigger };
             }
             window.closePostToolsMenu = closePostToolsMenu;
+            window.addEventListener('pagehide', closePostToolsMenu);
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
@@ -5412,7 +5413,10 @@ function renderProfileActivityList(kind) {
                             var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
                             if (!dataLine || !activePostAiSession || activePostAiSession !== session || requestId !== session.requestId) return;
                             var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
-                            if (data.content) { session.conversationId = data.conversation_id || session.conversationId; session.output.textContent = data.content; }
+                            if (data.content) {
+                                session.conversationId = data.conversation_id || session.conversationId;
+                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在分析...' ? '' : session.output.textContent) + data.content : data.content;
+                            }
                             if (data.error) session.output.textContent = 'AI 暂时不可用。';
                         });
                         return read();
