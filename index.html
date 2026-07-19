@@ -47,12 +47,12 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=db4398dc6e" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a47802aab6" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f92119d96c" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=62f50f618c">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=db4398dc6e">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=c428abb66d">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=cba0c34cbc">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a47802aab6">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=f62bdf6378">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=92963158ad">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=368f8a0a16">
@@ -120,12 +120,13 @@
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
                         <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false">
-                            <span class="ai-tools-trigger-label" aria-hidden="true">AI</span>
+                            <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
+                            <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
                         <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
-                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon">AI</span><span><b>AI 聊天</b><small>对话与历史记录</small></span></button>
-                            <button type="button" role="menuitem" data-ai-tool="research"><span class="ai-tools-menu-icon">R</span><span><b>深度研究</b><small>多阶段分析与研究</small></span></button>
-                            <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon">S</span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18.5 3.5 21l4.1-1.3A8.4 8.4 0 1 0 4 16.4"></path><path d="M8 12h.01M12 12h.01M16 12h.01"></path></svg></span><span><b>AI 聊天</b><small>对话与历史记录</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="research"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="2"></circle><circle cx="17" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="m8.7 8.5 2.1 6M15.3 8.5l-2.1 6M9 7h6"></path></svg></span><span><b>深度研究</b><small>多阶段分析与研究</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="5.8"></circle><path d="m15.2 15.2 4.3 4.3M8.5 10.8h4.6M10.8 8.5v4.6"></path></svg></span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
                         </div>
                     </div>
                 </div>
@@ -1107,12 +1108,12 @@
                 </div>
             </form>
             <div class="ai-site-search-sources" aria-label="搜索范围">
-                <button type="button" class="is-selected" data-ai-search-source="posts">帖子</button>
-                <button type="button" class="is-selected" data-ai-search-source="comments">评论</button>
-                <button type="button" class="is-selected" data-ai-search-source="photos">照片</button>
-                <button type="button" class="is-selected" data-ai-search-source="dm">聊天</button>
-                <button type="button" class="is-selected" data-ai-search-source="ai_history">AI 历史</button>
-                <button type="button" class="is-selected" data-ai-search-source="users">用户</button>
+                <button type="button" class="is-selected" data-ai-search-source="posts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3 3V20H6zM9 10h6M9 14h6"></path></svg><span>帖子</span></button>
+                <button type="button" class="is-selected" data-ai-search-source="comments"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H9l-4 4zM9 9h6M9 12h4"></path></svg><span>评论</span></button>
+                <button type="button" class="is-selected" data-ai-search-source="photos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"></rect><circle cx="9" cy="10" r="1.4"></circle><path d="m6.5 17 4.3-4 2.7 2.3 2.2-2.1 2.3 3.8"></path></svg><span>照片</span></button>
+                <button type="button" class="is-selected" data-ai-search-source="dm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3zM8 10.5h8M8 13.5h5"></path></svg><span>聊天</span></button>
+                <button type="button" class="is-selected" data-ai-search-source="ai_history"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 7.7v4.7l3.1 1.8"></path></svg><span>AI 历史</span></button>
+                <button type="button" class="is-selected" data-ai-search-source="users"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"></circle><path d="M5.5 20c.7-3.3 3-5.1 6.5-5.1s5.8 1.8 6.5 5.1"></path></svg><span>用户</span></button>
             </div>
             <p class="ai-site-search-status" id="aiSiteSearchStatus" aria-live="polite">输入关键词后搜索帖子、聊天和 AI 历史。</p>
             <div class="ai-site-search-results" id="aiSiteSearchResults"></div>
