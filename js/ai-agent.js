@@ -3197,11 +3197,19 @@
     ]));
   }
 
-  function updateSecondaryPageState(open) {
+  var secondaryPageOwners = {};
+
+  function updateSecondaryPageState(open, owner) {
+    owner = owner || 'deep-think';
     try {
       if (window.XTJSecondaryPageState) {
-        if (open) window.XTJSecondaryPageState.open('deep-think');
-        else window.XTJSecondaryPageState.close('deep-think');
+        if (open && !secondaryPageOwners[owner]) {
+          window.XTJSecondaryPageState.open(owner);
+          secondaryPageOwners[owner] = true;
+        } else if (!open && secondaryPageOwners[owner]) {
+          window.XTJSecondaryPageState.close(owner);
+          delete secondaryPageOwners[owner];
+        }
       } else if (window.restoreMainNavigationState) {
         window.restoreMainNavigationState();
       }
@@ -3928,6 +3936,45 @@
     }
   }
 
+  function openAiSearchTarget(item) {
+    var target = item && item.jump_target || {};
+    var closeSecondary = function() {
+      try { closeSiteSearch(); } catch (e) {}
+      try { closeAiChat(); } catch (e2) {}
+    };
+    if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') {
+      closeSecondary();
+      window.openPostDetail(target.post_id);
+    } else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
+      closeSecondary();
+      window.openPhotoPreview(0, { photos: [{ id: String(target.post_id || item.source_id || 'search-photo'), cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
+    } else if (target.type === 'photo' && typeof window.openPostDetail === 'function') {
+      closeSecondary();
+      window.openPostDetail(target.post_id);
+    } else if (target.type === 'dm' && typeof window.openChat === 'function') {
+      closeSecondary();
+      window.openChat(target.user);
+    } else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') {
+      try { closeSiteSearch(); } catch (e3) {}
+      window.__xtjAiAgent.openConversation(target.conversation_id);
+    } else if (target.type === 'user' && typeof window.openUserProfile === 'function') {
+      closeSecondary();
+      window.openUserProfile(target.user_name || item.title || '');
+    }
+  }
+
+  function buildAiSearchMeta(item) {
+    var meta = [];
+    if (item && item.source) meta.push(String(item.source));
+    if (item && item.created_at) {
+      var created = new Date(item.created_at);
+      if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
+    }
+    if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
+    if (item && typeof item.relevance === 'number' && item.relevance > 0) meta.push('相关度 ' + Math.round(item.relevance * 100) + '%');
+    return meta.join(' · ');
+  }
+
   function renderAiToolCard(messagesEl, card) {
     if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
     var cardId = String(card.id || '');
@@ -3944,24 +3991,10 @@
         var result = el('button', { class: 'ai-tool-result', type: 'button' });
         result.appendChild(el('b', { text: String(item.title || item.source || '结果') }));
         result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
-        var resultMeta = [];
-        if (item.source) resultMeta.push(String(item.source));
-        if (item.created_at) {
-          var created = new Date(item.created_at);
-          if (!isNaN(created.getTime())) resultMeta.push(created.toLocaleString('zh-CN'));
-        }
-        if (Array.isArray(item.matched_keywords) && item.matched_keywords.length) resultMeta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
-        if (typeof item.relevance === 'number' && item.relevance > 0) resultMeta.push('相关度 ' + Math.round(item.relevance * 100) + '%');
-        if (resultMeta.length) result.appendChild(el('small', { class: 'ai-tool-result-meta', text: resultMeta.join(' · ') }));
+        var resultMeta = buildAiSearchMeta(item);
+        if (resultMeta) result.appendChild(el('small', { class: 'ai-tool-result-meta', text: resultMeta }));
         result.addEventListener('click', function() {
-          var target = item.jump_target || {};
-          if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
-          else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
-            window.openPhotoPreview(0, { photos: [{ id: String(target.post_id || item.source_id || 'search-photo'), cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
-          } else if (target.type === 'photo' && typeof window.openPostDetail === 'function') window.openPostDetail(target.post_id);
-          else if (target.type === 'dm' && typeof window.openChat === 'function') window.openChat(target.user);
-          else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') window.__xtjAiAgent.openConversation(target.conversation_id);
-          else if (target.type === 'user' && typeof window.openUserProfile === 'function') window.openUserProfile(target.user_name || item.title || '');
+          openAiSearchTarget(item);
         });
         list.appendChild(result);
       });
@@ -3996,6 +4029,109 @@
     return shell;
   }
 
+  var AI_SEARCH_SOURCES = ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
+
+  function closeSiteSearch() {
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.classList.remove('active');
+      panel.setAttribute('aria-hidden', 'true');
+    }
+    updateSecondaryPageState(false, 'site-search');
+  }
+
+  function selectedSiteSearchSources() {
+    var selected = [];
+    var buttons = document.querySelectorAll('[data-ai-search-source].is-selected');
+    for (var i = 0; i < buttons.length; i++) {
+      var source = buttons[i].getAttribute('data-ai-search-source');
+      if (AI_SEARCH_SOURCES.indexOf(source) >= 0) selected.push(source);
+    }
+    return selected;
+  }
+
+  function renderSiteSearchResults(results) {
+    var host = document.getElementById('aiSiteSearchResults');
+    if (!host) return;
+    host.innerHTML = '';
+    (Array.isArray(results) ? results : []).slice(0, 40).forEach(function(item) {
+      var result = el('button', { type: 'button', class: 'ai-site-search-result' });
+      result.appendChild(el('b', { text: String(item.title || item.source || '搜索结果') }));
+      if (item.snippet) result.appendChild(el('span', { text: String(item.snippet).slice(0, 280) }));
+      var meta = buildAiSearchMeta(item);
+      if (meta) result.appendChild(el('small', { text: meta }));
+      result.addEventListener('click', function() { openAiSearchTarget(item); });
+      host.appendChild(result);
+    });
+  }
+
+  async function runSiteSearch() {
+    var input = document.getElementById('aiSiteSearchInput');
+    var status = document.getElementById('aiSiteSearchStatus');
+    var submit = document.querySelector('#aiSiteSearchForm button[type="submit"]');
+    var query = String(input && input.value || '').trim();
+    var sources = selectedSiteSearchSources();
+    if (!query) {
+      if (status) status.textContent = '请输入要查找的关键词。';
+      if (input) input.focus();
+      return;
+    }
+    if (!sources.length) {
+      if (status) status.textContent = '请至少选择一个搜索范围。';
+      return;
+    }
+    if (submit) submit.disabled = true;
+    if (status) status.textContent = '正在搜索…';
+    try {
+      var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 });
+      var data = response && response.data;
+      if (!response || !response.ok || !data || !data.ok) throw new Error(response && response.error || data && data.error || '搜索失败');
+      renderSiteSearchResults(data.results);
+      if (status) status.textContent = data.results && data.results.length ? '找到 ' + data.results.length + ' 条相关内容。' : '没有找到相关内容。';
+    } catch (e) {
+      renderSiteSearchResults([]);
+      if (status) status.textContent = (e && e.message) || '搜索失败，请稍后重试。';
+    } finally {
+      if (submit) submit.disabled = false;
+    }
+  }
+
+  function bindSiteSearchPage() {
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (!panel || panel.__xtjAiSearchBound) return;
+    panel.__xtjAiSearchBound = true;
+    var form = document.getElementById('aiSiteSearchForm');
+    var back = document.getElementById('aiSiteSearchBack');
+    if (form) form.addEventListener('submit', function(event) { event.preventDefault(); runSiteSearch(); });
+    if (back) back.addEventListener('click', closeSiteSearch);
+    panel.addEventListener('click', function(event) {
+      var button = event.target.closest('[data-ai-search-source]');
+      if (!button) return;
+      button.classList.toggle('is-selected');
+    });
+  }
+
+  async function openSiteSearchPage() {
+    if (!window.currentUser) {
+      notify('请先登录后再使用站内搜索');
+      return;
+    }
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) return;
+    try { closeAiChat(); } catch (e) {}
+    try { closeDeepThinkPage(); } catch (e2) {}
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (!panel) return;
+    bindSiteSearchPage();
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    updateSecondaryPageState(true, 'site-search');
+    var input = document.getElementById('aiSiteSearchInput');
+    if (input) setTimeout(function() { try { input.focus(); } catch (e3) {} }, 50);
+  }
+
   function bindTopAiTools() {
     var nav = document.getElementById('aiToolsNav');
     var trigger = document.getElementById('aiToolsBtn');
@@ -4018,15 +4154,10 @@
       var tool = button.getAttribute('data-ai-tool');
       if (tool === 'research') {
         await openDeepThinkPage();
+      } else if (tool === 'search') {
+        await openSiteSearchPage();
       } else {
         await openAiChat();
-        if (tool === 'search') {
-          var input = S.inputEl || document.querySelector('#aiChatRoot textarea');
-          if (input) {
-            input.placeholder = '例如：我在哪里提到过广州旅行？';
-            input.focus();
-          }
-        }
       }
     });
     document.addEventListener('click', function(event) {
@@ -5446,25 +5577,23 @@ function showChatMessages() {
 
     S.autoScrollPinned = true;
 
-    if (typeof window.switchDockTab === 'function') {
-      try { window.switchDockTab('chat', true); } catch (e) {}
+    try { closeSiteSearch(); } catch (e) {}
+    var aiPanel = document.getElementById('panelAiChat');
+    if (!aiPanel) {
+      S.active = false;
+      window.__xtjAiChatActive = false;
+      notify('AI 页面未加载，请刷新后重试');
+      return;
     }
-
-    var listView = document.getElementById('dockChatListView');
-    var detailView = document.getElementById('dockChatDetailView');
-    var panelChat = document.getElementById('panelChat');
-    if (listView) listView.classList.add('hidden');
-    if (detailView) {
-      detailView.classList.remove('hidden');
-      detailView.classList.add('ai-mode');
-      // 清理原有的聊天内容，避免与AI鏍硅妭鐐瑰啿绐?
-      var oldMsg = document.getElementById('dockChatMessages');
-      if (oldMsg) oldMsg.style.display = 'none';
-    }
-    if (panelChat) panelChat.classList.add('ai-mode');
+    aiPanel.classList.remove('hidden');
+    aiPanel.classList.add('active');
+    aiPanel.setAttribute('aria-hidden', 'false');
+    aiPanel.removeAttribute('aria-busy');
+    aiPanel.innerHTML = '';
+    updateSecondaryPageState(true, 'ai-chat');
 
     var r = renderAiRoot();
-    if (detailView) detailView.appendChild(r.root);
+    aiPanel.appendChild(r.root);
     S.rootEl = r.root;
     S.messagesEl = r.messagesEl;
     S.inputBarEl = r.inputBar;
@@ -5509,19 +5638,6 @@ function showChatMessages() {
           }
         }
       } catch (e5) {}
-    }
-
-    try {
-      var hdr = document.querySelector('#dockChatContainer .chat-header');
-      if (hdr) hdr.style.display = 'none';
-      var ina = document.querySelector('#dockChatDetailView .chat-input-area');
-      if (ina) ina.style.display = 'none';
-      var dcm = document.getElementById('dockChatMessages');
-      if (dcm) dcm.style.display = 'none';
-    } catch (e5) {}
-
-    if (typeof window.stopDMPolling === 'function') {
-      try { window.stopDMPolling(); } catch (e6) {}
     }
 
     setTimeout(function() {
@@ -5583,7 +5699,6 @@ function showChatMessages() {
     clearReplyTimer();
     abortCurrentRequest(); // 鍐呴儴宸茶皟鐢?clearStreamCleanup
     // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
-    try { closeDeepThinkPage(); } catch (e) {}
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
@@ -5632,10 +5747,13 @@ function showChatMessages() {
       S.headerButtonsCleanup = null;
     }
 
-    var panelChat = document.getElementById('panelChat');
-    var detailView = document.getElementById('dockChatDetailView');
-    if (panelChat) panelChat.classList.remove('ai-mode');
-    if (detailView) detailView.classList.remove('ai-mode');
+    var aiPanel = document.getElementById('panelAiChat');
+    if (aiPanel) {
+      aiPanel.classList.add('hidden');
+      aiPanel.classList.remove('active');
+      aiPanel.setAttribute('aria-hidden', 'true');
+    }
+    updateSecondaryPageState(false, 'ai-chat');
 
     if (S.rootEl) {
       try { S.rootEl.remove(); } catch (e6) {}
@@ -5645,22 +5763,6 @@ function showChatMessages() {
     S.inputBarEl = null;
     S.inputEl = null;
     S.sendBtnEl = null;
-
-    try {
-      var hdr = document.querySelector('#dockChatContainer .chat-header');
-      if (hdr) hdr.style.display = '';
-      var ina = document.querySelector('#dockChatDetailView .chat-input-area');
-      if (ina) ina.style.display = '';
-      var dcm = document.getElementById('dockChatMessages');
-      if (dcm) dcm.style.display = '';
-    } catch (e7) {}
-
-    if (detailView) detailView.classList.add('hidden');
-    var listView = document.getElementById('dockChatListView');
-    if (listView) listView.classList.remove('hidden');
-
-    var titleEl = document.getElementById('dockChatTitle');
-    if (titleEl) titleEl.textContent = '消息';
 
     // Clean up any active text renderers
     try { window.__xtjActiveRenderers = null; } catch (e) {}
@@ -5806,14 +5908,7 @@ function showChatMessages() {
     getConfig: function() { return S.config; },
     getConversationId: function() { return S.conversationId; },
     openDeepThink: openDeepThinkPage,
-    openSiteSearch: async function() {
-      await openAiChat();
-      var input = S.inputEl || document.querySelector('#aiChatRoot textarea');
-      if (input) {
-        input.placeholder = '例如：我在哪里提到过广州旅行？';
-        input.focus();
-      }
-    },
+    openSiteSearch: openSiteSearchPage,
     openConversation: async function(conversationId) {
       if (!conversationId) return false;
       await openAiChat();
