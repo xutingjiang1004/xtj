@@ -764,16 +764,16 @@
     }
   }
 
-  async function apiRequest(method, path, body) {
+  async function apiRequest(method, path, body, opts) {
     if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
-    var first = await sendOnce(method, path, body, { forceNoToken: false });
+    var first = await sendOnce(method, path, body, Object.assign({ forceNoToken: false }, opts || {}));
     if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
     if (first && first.status === 401) {
       if (typeof window.refreshUserToken === 'function') {
         try {
           var refreshed = await window.refreshUserToken(true);
           if (refreshed) {
-            var third = await sendOnce(method, path, body, { forceNoToken: false, retry: true });
+            var third = await sendOnce(method, path, body, Object.assign({ forceNoToken: false, retry: true }, opts || {}));
             try { if (AI_DEBUG) console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e5) {}
             return third;
           }
@@ -3942,6 +3942,15 @@
       try { closeAiChat(); } catch (e2) {}
     };
     if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') {
+      // validate: source must be posts, source_id must be valid UUID
+      if (target.type === 'post' && item.source !== 'posts') {
+        console.warn('[site-search] blocked invalid post result', { source: item.source, source_id: item.source_id });
+        return;
+      }
+      if (target.type === 'post' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(target.post_id || item.source_id || ''))) {
+        console.warn('[site-search] blocked invalid post_id', target.post_id || item.source_id);
+        return;
+      }
       closeSecondary();
       window.openPostDetail(target.post_id);
     } else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
@@ -4104,7 +4113,8 @@
     }
     // cancel previous search
     if (S.siteSearchCtrl) { try { S.siteSearchCtrl.abort(); } catch (e) {} }
-    S.siteSearchCtrl = new AbortController();
+    var controller = new AbortController();
+    S.siteSearchCtrl = controller;
     S.siteSearchRequestId = (S.siteSearchRequestId || 0) + 1;
     var requestId = S.siteSearchRequestId;
     var lifecycleId = S.siteSearchLifecycleId;
@@ -4115,7 +4125,7 @@
     if (status) status.textContent = '正在检索站内内容…';
     var startTime = Date.now();
     try {
-      var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 });
+      var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 }, { signal: S.siteSearchCtrl.signal });
       // guard: check if this request is still valid
       if (requestId !== S.siteSearchRequestId || lifecycleId !== S.siteSearchLifecycleId || query !== querySnapshot || sources.join(',') !== sourcesSnapshot.join(',')) return;
       var data = response && response.data;
@@ -4136,7 +4146,7 @@
       if (message === 'AI 工具数据表尚未迁移') message = '搜索服务正在初始化，请稍后重试。';
       if (status) status.textContent = message || '搜索暂不可用，请重试。';
     } finally {
-      if (S.siteSearchCtrl && S.siteSearchCtrl.signal === (S.siteSearchCtrl._signal || S.siteSearchCtrl.signal)) S.siteSearchCtrl = null;
+      if (S.siteSearchCtrl && S.siteSearchCtrl === controller) S.siteSearchCtrl = null;
       var results = document.getElementById('aiSiteSearchResults');
       if (results) {
         results.classList.remove('is-loading');
