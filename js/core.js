@@ -1,4 +1,4 @@
-
+﻿
 window.safeStorage = {
     set: function(key, value) {
         try { localStorage.setItem(key, String(value)); } catch(e) { console.warn('Storage set failed', e); }
@@ -40,6 +40,14 @@ window.throttleRAF = function(fn) {
                 console.warn('[XTJ] config.js 未加载，使用默认配置');
             }
             window.XTJ_CONFIG = XTJ_RUNTIME_CONFIG;
+            // 小猫 AI 统一身份配置
+            window.XTJ_AI_IDENTITY = {
+              name: '小猫',
+              badge: 'AI',
+              description: '徐旭泽的犀利毒舌 AI 分身',
+              avatar: 'cat_ai',
+              username: 'cat_ai'
+            };
             const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
             const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
@@ -1366,8 +1374,8 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 var pa = normalizePost(a);
                 var pb = normalizePost(b);
                 if (!!pa.is_pinned !== !!pb.is_pinned) return pa.is_pinned ? -1 : 1;
-                if (pa.is_pinned && pb.is_pinned) return new Date(String(pb.pinned_at || pb.created_at || 0).replace(/-/g, \'/\')) - new Date(String(pa.pinned_at || pa.created_at || 0).replace(/-/g, \'/\'));
-                return new Date(String(pb.created_at || 0).replace(/-/g, \'/\')) - new Date(String(pa.created_at || 0).replace(/-/g, \'/\'));
+                if (pa.is_pinned && pb.is_pinned) return new Date(String(pb.pinned_at || pb.created_at || 0).replace(/-/g, '/')) - new Date(String(pa.pinned_at || pa.created_at || 0).replace(/-/g, '/'));
+                return new Date(String(pb.created_at || 0).replace(/-/g, '/')) - new Date(String(pa.created_at || 0).replace(/-/g, '/'));
             });
         }
         window.sortPosts = sortPosts;
@@ -2892,7 +2900,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     var titleText = escapeHtml((typeof currentUser === 'object' && currentUser ? (currentUser.user_metadata?.full_name || currentUser.email) : (typeof currentUser === 'string' ? currentUser : '')) || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子');
                     var metaHtml = [
                         '<div class="profile-activity-record__meta">',
-                        '<span class="profile-activity-record__time">' + new Date(String(item.created_at).replace(/-/g, \'/\')).toLocaleString() + '</span>',
+                        '<span class="profile-activity-record__time">' + new Date(String(item.created_at).replace(/-/g, '/')).toLocaleString() + '</span>',
                         canOpenPost ? '<span class="profile-activity-record__hint">点击查看详情</span>' : '<span class="profile-activity-record__hint is-muted">当前不可查看详情</span>',
                         '</div>'
                     ].join('');
@@ -3378,6 +3386,110 @@ function renderProfileActivityList(kind) {
                 }
             };
 
+            // ===================== 小猫 AI 自动回复状态轮询 =====================
+            window.__catAiPollTimers = window.__catAiPollTimers || {};
+            window.__catAiPollStatus = window.__catAiPollStatus || {};
+
+            function pollCatAiReply(commentId, postId) {
+                if (window.__catAiPollTimers[commentId]) {
+                    clearTimeout(window.__catAiPollTimers[commentId]);
+                }
+                var startTime = Date.now();
+                var maxDuration = 30000; // 最多轮询30秒
+                var interval = 2000; // 每2秒一次
+
+                // 显示临时状态
+                showCatAiStatus(commentId, '小猫正在组织毒液……');
+
+                function poll() {
+                    if (Date.now() - startTime > maxDuration) {
+                        removeCatAiStatus(commentId);
+                        delete window.__catAiPollTimers[commentId];
+                        return;
+                    }
+                    if (document.hidden) {
+                        removeCatAiStatus(commentId);
+                        delete window.__catAiPollTimers[commentId];
+                        return;
+                    }
+                    window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentId))
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.status === 'completed') {
+                                removeCatAiStatus(commentId);
+                                delete window.__catAiPollTimers[commentId];
+                                // 重新加载评论以显示 AI 回复
+                                if (typeof loadFeed === 'function') loadFeed(true).catch(function() {});
+                            } else if (data.status === 'failed' || data.status === 'blocked') {
+                                if (data.status === 'failed') {
+                                    showCatAiStatus(commentId, '小猫暂时不想说话', true);
+                                } else {
+                                    removeCatAiStatus(commentId);
+                                }
+                                delete window.__catAiPollTimers[commentId];
+                            } else if (data.status === 'processing' || data.status === 'pending') {
+                                window.__catAiPollTimers[commentId] = setTimeout(poll, interval);
+                            } else {
+                                removeCatAiStatus(commentId);
+                                delete window.__catAiPollTimers[commentId];
+                            }
+                        })
+                        .catch(function() {
+                            removeCatAiStatus(commentId);
+                            delete window.__catAiPollTimers[commentId];
+                        });
+                }
+                window.__catAiPollTimers[commentId] = setTimeout(poll, interval);
+            }
+
+            function showCatAiStatus(commentId, message, fadeOut) {
+                var existing = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
+                if (existing) {
+                    existing.textContent = message;
+                    if (fadeOut) {
+                        existing.classList.add('cat-ai-fade-out');
+                        setTimeout(function() { if (existing.parentNode) existing.parentNode.removeChild(existing); }, 3000);
+                    }
+                    return;
+                }
+                var commentEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
+                if (!commentEl) return;
+                var statusEl = document.createElement('div');
+                statusEl.className = 'cat-ai-status';
+                statusEl.setAttribute('data-comment-id', commentId);
+                statusEl.textContent = message;
+                statusEl.style.cssText = 'font-size:12px;color:var(--text-muted);padding:4px 0 4px 8px;font-style:italic;margin-left:36px;animation:catAiPulse 1.5s ease-in-out infinite;';
+                if (fadeOut) {
+                    statusEl.classList.add('cat-ai-fade-out');
+                    setTimeout(function() { if (statusEl.parentNode) statusEl.parentNode.removeChild(statusEl); }, 3000);
+                }
+                commentEl.parentNode.insertBefore(statusEl, commentEl.nextSibling);
+            }
+
+            function removeCatAiStatus(commentId) {
+                var el = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+            }
+
+            // ===================== 小猫 AI 评论渲染 =====================
+            function renderCatAiComment(comment) {
+                if (!comment || comment.user_name !== 'cat_ai' || !comment.generated_by_ai) return null;
+                var div = document.createElement('div');
+                div.className = 'comment-item cat-ai-comment';
+                div.setAttribute('data-comment-id', comment.id);
+                div.setAttribute('data-parent-comment-id', comment.parent_comment_id || '');
+                var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
+                var badgeHtml = '<span class="cat-ai-badge">AI</span>';
+                div.innerHTML = '<div class="comment-item-inner">' +
+                    avatarHtml +
+                    '<div class="comment-item-body">' +
+                    '<div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml +
+                    '<span class="comment-item-time">刚刚</span></div>' +
+                    '<div class="comment-item-content">' + (comment.content || '') + '</div>' +
+                    '</div></div>';
+                return div;
+            }
+
             var __xtjDeferredWarmupQueued = false;
             function queueDeferredStartupTasks() {
                 if (!currentUser || __xtjDeferredWarmupQueued) return;
@@ -3833,6 +3945,10 @@ function renderProfileActivityList(kind) {
                 } finally {
                     btn.textContent = "发布评论";
                     btn.disabled = false;
+                }
+                // 小猫 AI 自动回复轮询
+                if (content && /@小猫\b/.test(content) && insertedComment) {
+                    pollCatAiReply(insertedComment.id, targetPostId);
                 }
             };
 
@@ -4986,7 +5102,7 @@ function renderProfileActivityList(kind) {
                         const pComms = commentMap[p.id] || [];
                         const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                         const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(String(p.created_at).replace(/-/g, \'/\')).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(String(p.created_at).replace(/-/g, '/')).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
                     } catch (e) {
                         console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
                     }
@@ -5331,7 +5447,7 @@ function renderProfileActivityList(kind) {
 
             function formatPostTime(post) {
                 var normalized = normalizePost(post);
-                var time = normalized.created_at ? new Date(String(normalized.created_at).replace(/-/g, \'/\')).toLocaleString() : "";
+                var time = normalized.created_at ? new Date(String(normalized.created_at).replace(/-/g, '/')).toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
                 return time;
@@ -5608,6 +5724,9 @@ function renderProfileActivityList(kind) {
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
+                    if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                      return `<div class="comment-item cat-ai-comment" data-comment-id="${escapeHtml(c.id)}" data-parent-comment-id="${escapeHtml(c.parent_comment_id || '')}"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">${escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚')}</span></div><div class="comment-item-content">${escapeHtml(c.content)}</div></div></div></div>`;
+                    }
                     return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
                   }).join('')}</div>` : ''}
                 </div>`;
@@ -7085,7 +7204,7 @@ function renderProfileActivityList(kind) {
                     <div class="post-detail-header">
                         <div class="pdh-left">
                             <div class="pdh-name">${escapeHtml(post.user_name)}</div>
-                            <div class="pdh-time">${new Date(String(post.created_at).replace(/-/g, \'/\')).toLocaleString()}</div>
+                            <div class="pdh-time">${new Date(String(post.created_at).replace(/-/g, '/')).toLocaleString()}</div>
                         </div>
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
@@ -7099,7 +7218,7 @@ function renderProfileActivityList(kind) {
                                     <div class="sli-info">
                                         <div class="sli-user">${escapeHtml(l.user_name)}</div>
                                     </div>
-                                    <span class="sli-time">${new Date(String(l.created_at).replace(/-/g, \'/\')).toLocaleString()}</span>
+                                    <span class="sli-time">${new Date(String(l.created_at).replace(/-/g, '/')).toLocaleString()}</span>
                                 </div>
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
@@ -7111,7 +7230,7 @@ function renderProfileActivityList(kind) {
                                         <div class="sci-user">${escapeHtml(c.user_name)}</div>
                                         <div class="sci-target">${escapeHtml(c.content)}</div>
                                     </div>
-                                    <span class="sci-time">${new Date(String(c.created_at).replace(/-/g, \'/\')).toLocaleString()}</span>
+                                    <span class="sci-time">${new Date(String(c.created_at).replace(/-/g, '/')).toLocaleString()}</span>
                                 </div>
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
                         </div>
@@ -7143,7 +7262,7 @@ function renderProfileActivityList(kind) {
                             ${fmt.tag}
                         </span>
                         ${fmt.thumbUrl ? `<img class="spi-thumb" loading="lazy" decoding="async" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
-                        <span class="spi-time">${new Date(String(p.created_at).replace(/-/g, \'/\')).toLocaleString()}</span>
+                        <span class="spi-time">${new Date(String(p.created_at).replace(/-/g, '/')).toLocaleString()}</span>
                     </div>
                 `;
             }
@@ -7245,7 +7364,7 @@ function renderProfileActivityList(kind) {
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
                                 <div class="sli-target">点赞了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'} 的内容：${postContent}</div>
                             </div>
-                            <span class="sli-time">${new Date(String(l.created_at).replace(/-/g, \'/\')).toLocaleString()}</span>
+                            <span class="sli-time">${new Date(String(l.created_at).replace(/-/g, '/')).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
@@ -7267,7 +7386,7 @@ function renderProfileActivityList(kind) {
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
                                 <div class="sci-target">评论了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'}：${escapeHtml(c.content)}</div>
                             </div>
-                            <span class="sci-time">${new Date(String(c.created_at).replace(/-/g, \'/\')).toLocaleString()}</span>
+                            <span class="sci-time">${new Date(String(c.created_at).replace(/-/g, '/')).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
@@ -8468,14 +8587,14 @@ function renderProfileActivityList(kind) {
                     const convMap = {};
                     allMsgs.forEach(m => {
                         const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
-                        if (!convMap[other] || new Date(String(m.created_at).replace(/-/g, \'/\')) > new Date(String(convMap[other].last_time).replace(/-/g, \'/\'))) {
+                        if (!convMap[other] || new Date(String(m.created_at).replace(/-/g, '/')) > new Date(String(convMap[other].last_time).replace(/-/g, '/'))) {
                             convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
                         }
                         if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
                             convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
                         }
                     });
-                    const convs = Object.values(convMap).sort((a, b) => new Date(String(b.last_time).replace(/-/g, \'/\')) - new Date(String(a.last_time).replace(/-/g, \'/\')));
+                    const convs = Object.values(convMap).sort((a, b) => new Date(String(b.last_time).replace(/-/g, '/')) - new Date(String(a.last_time).replace(/-/g, '/')));
                     setUnreadBadgeCount(convs.reduce(function(total, item) {
                         return total + (item && item.unread ? item.unread : 0);
                     }, 0));
@@ -8568,8 +8687,8 @@ function renderProfileActivityList(kind) {
                     list.push(row);
                 });
                 list.sort(function(a, b) {
-                    var at = new Date(String(a && a.created_at ? a.created_at : 0).replace(/-/g, \'/\')).getTime();
-                    var bt = new Date(String(b && b.created_at ? b.created_at : 0).replace(/-/g, \'/\')).getTime();
+                    var at = new Date(String(a && a.created_at ? a.created_at : 0).replace(/-/g, '/')).getTime();
+                    var bt = new Date(String(b && b.created_at ? b.created_at : 0).replace(/-/g, '/')).getTime();
                     return ascending ? (at - bt) : (bt - at);
                 });
                 if (limit && list.length > limit) {
@@ -8750,7 +8869,7 @@ function renderProfileActivityList(kind) {
 
             function sortDockChatMessages(msgs) {
                 return (Array.isArray(msgs) ? msgs.slice() : []).sort(function(a, b) {
-                    return new Date(String(a && a.created_at ? a.created_at : 0).replace(/-/g, \'/\')).getTime() - new Date(String(b && b.created_at ? b.created_at : 0).replace(/-/g, \'/\')).getTime();
+                    return new Date(String(a && a.created_at ? a.created_at : 0).replace(/-/g, '/')).getTime() - new Date(String(b && b.created_at ? b.created_at : 0).replace(/-/g, '/')).getTime();
                 });
             }
 
@@ -9705,7 +9824,7 @@ function renderProfileActivityList(kind) {
 
                 var annData = parseAnnData(ann);
                 document.getElementById('announcementDetailTitle').textContent = annData.title;
-                document.getElementById('announcementDetailTime').textContent = new Date(String(ann.created_at).replace(/-/g, \'/\')).toLocaleString('zh-CN');
+                document.getElementById('announcementDetailTime').textContent = new Date(String(ann.created_at).replace(/-/g, '/')).toLocaleString('zh-CN');
                 document.getElementById('announcementDetailContent').textContent = annData.content;
                 
                 // 设置发布閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
@@ -9804,7 +9923,7 @@ function renderProfileActivityList(kind) {
                                 ${!isRead ? '<span class="unread-dot"></span>' : ''}
                                 ${escapeHtml(displayTitle)}
                             </div>
-                            <div class="announcement-item-time">${new Date(String(ann.created_at).replace(/-/g, \'/\')).toLocaleString('zh-CN')}</div>
+                            <div class="announcement-item-time">${new Date(String(ann.created_at).replace(/-/g, '/')).toLocaleString('zh-CN')}</div>
                         </div>
                         ${previewContent ? `<div class="announcement-item-preview">${escapeHtml(previewContent)}</div>` : ''}
                     `;
@@ -11670,7 +11789,7 @@ function renderProfileActivityList(kind) {
                     '        <div class="post-detail-avatar">' + escapeHtml(String(normalizedPost.user_name || '?').slice(0, 1).toUpperCase()) + '</div>',
                     '        <div class="post-detail-owner-copy">',
                     '          <div class="pdh-name">' + escapeHtml(normalizedPost.user_name || '未知用户') + '</div>',
-                    '          <div class="pdh-time">' + new Date(String(normalizedPost.created_at).replace(/-/g, \'/\')).toLocaleString() + '</div>',
+                    '          <div class="pdh-time">' + new Date(String(normalizedPost.created_at).replace(/-/g, '/')).toLocaleString() + '</div>',
                     '        </div>',
                     '      </div>',
                     '      <span class="post-detail-visibility">' + visibilityLabel + '</span>',
@@ -11683,13 +11802,13 @@ function renderProfileActivityList(kind) {
                     '  <section class="post-detail-panel post-detail-panel--stack">',
                     '    <div class="post-detail-panel-title">点赞用户 <span>' + likes.length + '</span></div>',
                     likes.length ? likes.map(function(l) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + new Date(String(l.created_at).replace(/-/g, \'/\')).toLocaleString() + '</span></article>';
+                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + new Date(String(l.created_at).replace(/-/g, '/')).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack">',
                     '    <div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>',
                     comments.length ? comments.map(function(c) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + new Date(String(c.created_at).replace(/-/g, \'/\')).toLocaleString() + '</span></article>';
+                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + new Date(String(c.created_at).replace(/-/g, '/')).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无评论</div>',
                     '  </section>',
                     '</article>'
@@ -11865,7 +11984,7 @@ function renderProfileActivityList(kind) {
                     statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-main">',
                     '<div class="stat-row-title">' + (display ? escapeHtml(display) : escapeHtml(statPostSummary(normalized, 'plain'))) + '</div>',
-                    '<div class="stat-row-meta"><span>' + new Date(String(normalized.created_at).replace(/-/g, \'/\')).toLocaleString() + '</span>' + tag + '</div>',
+                    '<div class="stat-row-meta"><span>' + new Date(String(normalized.created_at).replace(/-/g, '/')).toLocaleString() + '</span>' + tag + '</div>',
                     '</div>',
                     '<button type="button" class="spi-open-btn stat-row-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>',
                     '</article>'
@@ -11896,7 +12015,7 @@ function renderProfileActivityList(kind) {
                 body.innerHTML = entries.map(function(entry, index) {
                     var name = entry[0];
                     var posts = sortPosts(entry[1] || []);
-                    var latest = posts[0] ? new Date(String(posts[0].created_at).replace(/-/g, \'/\')).toLocaleString() : '--';
+                    var latest = posts[0] ? new Date(String(posts[0].created_at).replace(/-/g, '/')).toLocaleString() : '--';
                     var nameJs = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     var previewMedia = posts.filter(function(post) {
                         return !!(post && post.media_url);
@@ -11939,7 +12058,7 @@ function renderProfileActivityList(kind) {
                 var mediaOnclick = post ? "event.stopPropagation();openStatPostMedia('" + safePostId + "')" : '';
                 var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                 var actorName = escapeHtml(item.user_name || '匿名用户');
-                var timeText = new Date(String(item.created_at).replace(/-/g, \'/\')).toLocaleString();
+                var timeText = new Date(String(item.created_at).replace(/-/g, '/')).toLocaleString();
                 var summary = post ? statPostSummary(post, 'bracket') : '（帖子已删除）';
                 var cardAttrs = post
                     ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"'

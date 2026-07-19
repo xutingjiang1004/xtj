@@ -47,12 +47,12 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=4c6cbae545" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=4c6cbae545" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a47802aab6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=4c6cbae545" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9c78a64625" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f315ff43c7" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=cba0c34cbc">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a47802aab6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=85eb1b82d8">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=9c78a64625">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=65088c3e2a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=d1d0e77410">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=368f8a0a16">
@@ -124,7 +124,7 @@
                             <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
                         <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
-                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18.5 3.5 21l4.1-1.3A8.4 8.4 0 1 0 4 16.4"></path><path d="M8 12h.01M12 12h.01M16 12h.01"></path></svg></span><span><b>AI 聊天</b><small>对话与历史记录</small></span></button>
+                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18.5 3.5 21l4.1-1.3A8.4 8.4 0 1 0 4 16.4"></path><path d="M8 12h.01M12 12h.01M16 12h.01"></path></svg></span><span><b>小猫</b><small>对话与历史记录</small></span></button>
                             <button type="button" role="menuitem" data-ai-tool="research"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="2"></circle><circle cx="17" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="m8.7 8.5 2.1 6M15.3 8.5l-2.1 6M9 7h6"></path></svg></span><span><b>深度研究</b><small>多阶段分析与研究</small></span></button>
                             <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="5.8"></circle><path d="m15.2 15.2 4.3 4.3M8.5 10.8h4.6M10.8 8.5v4.6"></path></svg></span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
                         </div>
@@ -1031,7 +1031,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=47aa536992"></script>
+    <script defer src="js/core.min.js?v=347ba135bc"></script>
     <script defer src="js/login-device.min.js?v=921fa945e7"></script>
     <script defer src="js/theme-toggle.min.js?v=e8639a6cfd"></script>
 
@@ -1092,10 +1092,10 @@
                 <button type="button" data-ai-search-source="comments"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H9l-4 4zM9 9h6M9 12h4"></path></svg><span>评论</span></button>
                 <button type="button" data-ai-search-source="photos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"></rect><circle cx="9" cy="10" r="1.4"></circle><path d="m6.5 17 4.3-4 2.7 2.3 2.2-2.1 2.3 3.8"></path></svg><span>照片</span></button>
                 <button type="button" data-ai-search-source="dm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3zM8 10.5h8M8 13.5h5"></path></svg><span>聊天</span></button>
-                <button type="button" data-ai-search-source="ai_history"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 7.7v4.7l3.1 1.8"></path></svg><span>AI 历史</span></button>
+                <button type="button" data-ai-search-source="ai_history"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 7.7v4.7l3.1 1.8"></path></svg><span>小猫历史</span></button>
                 <button type="button" data-ai-search-source="users"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"></circle><path d="M5.5 20c.7-3.3 3-5.1 6.5-5.1s5.8 1.8 6.5 5.1"></path></svg><span>用户</span></button>
             </div>
-            <p class="ai-site-search-status" id="aiSiteSearchStatus" aria-live="polite">输入关键词后搜索帖子、聊天和 AI 历史。</p>
+            <p class="ai-site-search-status" id="aiSiteSearchStatus" aria-live="polite">输入关键词后搜索帖子、聊天和小猫历史。</p>
             <div class="ai-site-search-results" id="aiSiteSearchResults"></div>
         </main>
     </div>

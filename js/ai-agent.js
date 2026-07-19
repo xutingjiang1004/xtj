@@ -1,4 +1,4 @@
-
+﻿
 window.throttleRAF = function(fn) {
     var ticking = false, args, ctx;
     return function() {
@@ -804,12 +804,12 @@ window.throttleRAF = function(fn) {
     if (!r) return fallback || '请求失败';
     if (r.status === 401) {
       try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e) {}
-      return '凭据异常，请重新登录后再使用 AI 聊天';
+      return '凭据异常，请重新登录后再和小猫聊天';
     }
     if (r.status === 403) return '当前账号没有执行此操作的权限';
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
-    if (r.status === 429) return 'AI 聊天次数已达上限，请稍后再试';
+    if (r.status === 429) return '小猫调用次数已达上限，请稍后再试';
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
     if (r.status === 500) return '服务端错误，请稍后再试';
     if (r.status === 0) return '网络异常，请检查连接';
@@ -838,7 +838,7 @@ window.throttleRAF = function(fn) {
       name: 'AI',
       avatar: '🙂',
       description: '在线',
-      welcome_message: '嗨，来聊天吧。'
+      welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
     };
     return S.config;
   }
@@ -1251,7 +1251,7 @@ window.throttleRAF = function(fn) {
     renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     visual.appendChild(emojiSlot);
     empty.appendChild(visual);
-    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || 'AI') + ' 聊聊天' }));
+    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '小猫') + ' 聊聊天' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '嗨，来聊天吧。') }));
     return empty;
   }
@@ -2394,7 +2394,7 @@ window.throttleRAF = function(fn) {
       if (auth && auth.ok) return true;
       var reason = auth && auth.reason;
       if (reason === 'no_user') {
-        notify('请先登录后再使用 AI 聊天');
+        notify('请先登录后再和小猫聊天');
         return false;
       }
     } catch (e) {
@@ -3987,7 +3987,7 @@ window.throttleRAF = function(fn) {
     var meta = [];
     if (item && item.source) meta.push(String(item.source));
     if (item && item.created_at) {
-      var created = new Date(String(item.created_at).replace(/-/g, \'/\'));
+      var created = new Date(String(item.created_at).replace(/-/g, '/'));
       if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
     }
     if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
@@ -5332,7 +5332,7 @@ function showChatMessages() {
     header.appendChild(avatarEl);
 
     var info = el('div', { class: 'ai-chat-header-info' });
-    info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: 'AI' }));
+    info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: '小猫' }));
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
@@ -5502,7 +5502,7 @@ function showChatMessages() {
     var input = el('textarea', {
       class: 'ai-chat-input',
       id: 'aiChatMsgInput',
-      placeholder: '和AI说点什么吧…',
+      placeholder: '问问小猫……',
       rows: '1',
       'aria-label': '聊天输入框',
       inputmode: 'text',
@@ -5631,7 +5631,7 @@ function showChatMessages() {
   async function openAiChat() {
     if (S.active) return;
     if (!window.currentUser) {
-      notify('请先登录后再和AI聊天');
+      notify('请先登录后再和小猫聊天');
       return;
     }
     // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
@@ -5727,7 +5727,7 @@ function showChatMessages() {
     updateAiStatus();
 
     var inp = document.getElementById('aiChatMsgInput');
-    if (inp) inp.placeholder = '和 ' + (cfg.name || 'AI') + ' 说点什么吧…';
+    if (inp) inp.placeholder = '和 ' + (cfg.name || '小猫') + ' 说点什么吧…';
 
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
@@ -6007,7 +6007,7 @@ function showChatMessages() {
         name: 'AI',
         avatar: '🙂',
         description: 'AI 智能体',
-        welcome_message: '嗨，来聊天吧。'
+        welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
       };
       scheduleInsertEntry();
     });
