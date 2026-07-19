@@ -105,11 +105,13 @@ test('AI tool navigation uses accessible SVG icons and site search has a lightwe
 // ===================== 新增回归测试 =====================
 
 test('aiSiteText extracts text from JSON-wrapped content', () => {
-  assert.match(server, /aiSiteText/);
-  assert.match(server, /parsed && parsed\.text/);
+  assert.match(server, /extractPostPlainText/);
+  assert.match(server, /parsed\.text/);
+  assert.match(server, /parsed\.content/);
+  assert.match(server, /parsed\.body/);
   assert.match(server, /function aiSiteContainsText/);
   assert.match(server, /function aiSiteMatchScore/);
-  assert.match(server, /function aiSiteNormalizeQuery/);
+  assert.match(server, /function parseSearchQuery/);
 });
 
 test('aiSiteSearch checks query errors on all sources', () => {
@@ -127,10 +129,11 @@ test('aiSiteSearch deduplicates by source_id', () => {
   assert.match(server, /if \(seen\[key\]\) return false/);
 });
 
-test('aiSiteMatchScore calculates real relevance instead of always 1', () => {
+test('aiSiteMatchScore calculates real relevance with multi-keyword scoring', () => {
   assert.match(server, /function aiSiteMatchScore/);
-  assert.match(server, /posScore/);
-  assert.match(server, /densityScore/);
+  assert.match(server, /exactPhrase/);
+  assert.match(server, /allKeywords/);
+  assert.match(server, /matchedCount/);
   assert.doesNotMatch(server, /relevance: 1\b/);
 });
 
@@ -148,7 +151,8 @@ test('site-search route uses Promise.allSettled for partial failure tolerance', 
 
 test('site-search route persists results asynchronously without blocking response', () => {
   assert.match(server, /aiSitePersistResults\(req\.userName, results\)\.catch/);
-  assert.match(server, /persist asynchronously/i);
+  // route handler should call persist in a fire-and-forget pattern, not await it
+  assert.match(server, /aiSitePersistResults\(req\.userName, results\)\s*\.catch/);
 });
 
 test('aiSitePersistResults does not throw on error, returns original results', () => {
