@@ -4423,6 +4423,7 @@ function renderProfileActivityList(kind) {
                 }
             }, { passive: false });
 
+            var _ivMoveTicking = false;
             ivViewerEl.addEventListener('touchmove', function (e) {
                 if (ivIsZooming && e.touches.length === 2) {
                     e.preventDefault();
@@ -4435,15 +4436,27 @@ function renderProfileActivityList(kind) {
                     ivZoomState.scale = newScale;
                     ivZoomState.tx = cx - window.innerWidth / 2 - ivPinchAnchorX * newScale;
                     ivZoomState.ty = cy - window.innerHeight / 2 - ivPinchAnchorY * newScale;
-                    ivApplyTransform();
-                    ivShowHint();
+                    if (!_ivMoveTicking) {
+                        _ivMoveTicking = true;
+                        requestAnimationFrame(function() {
+                            ivApplyTransform();
+                            ivShowHint();
+                            _ivMoveTicking = false;
+                        });
+                    }
                 } else if (ivIsPanning && e.touches.length === 1) {
                     e.preventDefault();
                     const dx = e.touches[0].clientX - ivPanStartX;
                     const dy = e.touches[0].clientY - ivPanStartY;
                     ivZoomState.tx = ivStartTx + dx;
                     ivZoomState.ty = ivStartTy + dy;
-                    ivApplyTransform();
+                    if (!_ivMoveTicking) {
+                        _ivMoveTicking = true;
+                        requestAnimationFrame(function() {
+                            ivApplyTransform();
+                            _ivMoveTicking = false;
+                        });
+                    }
                 }
             }, { passive: false });
 
@@ -9186,8 +9199,18 @@ function renderProfileActivityList(kind) {
                         }
                     });
                     if (window.visualViewport) {
-                        window.visualViewport.addEventListener('resize', updateIOSViewport);
-                        window.visualViewport.addEventListener('scroll', updateIOSViewport);
+                        var _iosVvTicking = false;
+                        function _iosVvHandler() {
+                            if (!_iosVvTicking) {
+                                _iosVvTicking = true;
+                                requestAnimationFrame(function() {
+                                    updateIOSViewport();
+                                    _iosVvTicking = false;
+                                });
+                            }
+                        }
+                        window.visualViewport.addEventListener('resize', _iosVvHandler);
+                        window.visualViewport.addEventListener('scroll', _iosVvHandler);
                     }
                     window.addEventListener('orientationchange', function() {
                         setTimeout(updateIOSViewport, 180);
