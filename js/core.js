@@ -6916,12 +6916,15 @@ function renderProfileActivityList(kind) {
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
                 var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
-                document.getElementById("sPosts").textContent = totalPosts;
-                document.getElementById("sViews").textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
+                var sPostsEl = document.getElementById("sPosts");
+                if (sPostsEl) sPostsEl.textContent = totalPosts;
+                var sViewsEl = document.getElementById("sViews");
+                if (sViewsEl) sViewsEl.textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
                 var visiblePostIds = new Set();
                 filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
                 var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
-                document.getElementById("sLikes").textContent = scopedLikes.length + visibleComments.length;
+                var sLikesEl = document.getElementById("sLikes");
+                if (sLikesEl) sLikesEl.textContent = scopedLikes.length + visibleComments.length;
                 filteredPosts.forEach(function(post) {
                     postInfoCache[post.id] = {
                         content: post.content,
