@@ -32,7 +32,7 @@ test('top AI tools menu opens independent pages without switching away from post
 
   await page.locator('#aiToolsBtn').click();
   await expect(page.locator('#aiToolsMenu')).toBeVisible();
-  await page.getByRole('menuitem', { name: /AI 聊天/ }).click();
+  await page.getByRole('menuitem', { name: /小猫/ }).click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
   await expect(page.locator('#panelChat')).not.toHaveClass(/active/);
@@ -59,7 +59,7 @@ test('top AI tools menu remains within a mobile viewport', async ({ page }) => {
   expect(bounds).not.toBeNull();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-  await page.getByRole('menuitem', { name: /AI 聊天/ }).click();
+  await page.getByRole('menuitem', { name: /小猫/ }).click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 });
@@ -163,7 +163,7 @@ test('restored site-search cards retain source metadata and open a photo preview
   });
 
   await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /AI 聊天/ }).click();
+  await page.getByRole('menuitem', { name: /小猫/ }).click();
   await expect(page.locator('.ai-tool-card')).toBeVisible();
   await expect(page.locator('.ai-tool-result-meta')).toContainText(/photos/);
   await page.locator('.ai-tool-result').click();
