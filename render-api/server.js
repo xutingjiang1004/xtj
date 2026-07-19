@@ -8647,12 +8647,25 @@ app.post('/api/user/consented-data', rateLimit(60000, 10), authenticateUser, asy
 
 app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    var allowedTypes = ['page_view', 'control_click', 'visibility'];
+    var allowedTypes = ['page_view', 'control_click', 'visibility', 'scroll_depth', 'session_summary', 'web_vital', 'client_error', 'form_interaction'];
     var events = (Array.isArray(req.body && req.body.events) ? req.body.events : []).slice(0, 50).map(function(event) {
       var type = String(event && event.type || '');
       if (allowedTypes.indexOf(type) < 0) return null;
       var at = new Date(String(event && event.at || ''));
-      return { type: type, target: String(event && event.target || '').slice(0, 80), at: Number.isFinite(at.getTime()) ? at.toISOString() : new Date().toISOString() };
+      var rawMeta = event && event.meta && typeof event.meta === 'object' ? event.meta : {};
+      var meta = {};
+      if (type === 'scroll_depth' && Number.isFinite(Number(rawMeta.milestone))) meta.milestone = Math.max(0, Math.min(100, Math.round(Number(rawMeta.milestone))));
+      if (type === 'web_vital') {
+        if (Number.isFinite(Number(rawMeta.value_ms))) meta.value_ms = Math.max(0, Math.min(120000, Math.round(Number(rawMeta.value_ms))));
+        if (Number.isFinite(Number(rawMeta.value_milli))) meta.value_milli = Math.max(0, Math.min(100000, Math.round(Number(rawMeta.value_milli))));
+      }
+      if (type === 'session_summary') {
+        ['duration_s', 'active_s', 'max_scroll_depth'].forEach(function(key) { if (Number.isFinite(Number(rawMeta[key]))) meta[key] = Math.max(0, Math.min(key === 'max_scroll_depth' ? 100 : 86400, Math.round(Number(rawMeta[key])))); });
+        if (rawMeta.clicks && typeof rawMeta.clicks === 'object') meta.clicks = { button: Math.max(0, Math.min(10000, Number(rawMeta.clicks.button) || 0)), link: Math.max(0, Math.min(10000, Number(rawMeta.clicks.link) || 0)), other: Math.max(0, Math.min(10000, Number(rawMeta.clicks.other) || 0)) };
+      }
+      if (type === 'form_interaction') { meta.control = ['input', 'textarea', 'select'].indexOf(String(rawMeta.control || '')) >= 0 ? String(rawMeta.control) : ''; meta.input_type = String(rawMeta.input_type || '').slice(0, 20); meta.has_value = rawMeta.has_value === true; }
+      if (type === 'client_error') { meta.kind = String(rawMeta.kind || '').slice(0, 40); meta.source = String(rawMeta.source || '').slice(0, 80); meta.line = Math.max(0, Math.min(1000000, Number(rawMeta.line) || 0)); }
+      return { type: type, target: String(event && event.target || '').slice(0, 80), meta: meta, at: Number.isFinite(at.getTime()) ? at.toISOString() : new Date().toISOString() };
     }).filter(Boolean);
     if (!events.length) return res.status(400).json({ error: '行为事件为空', code: 'empty_events' });
     var insert = await supabase.from('posts').insert([{
