@@ -1153,96 +1153,6 @@
             contain: layout paint style;
         }
         .modal-overlay.active .modal-box { transform: translateY(0); opacity: 1; }
-        .post-edit-modal {
-            width: min(520px, calc(100vw - 32px));
-            max-width: 520px;
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-            contain: layout style !important; /* Remove paint containment to allow native select dropdown to render */
-        }
-        .post-edit-textarea {
-            width: 100%;
-            min-height: 160px;
-            border: 1px solid rgba(255,255,255,0.62);
-            border-radius: 18px;
-            background: rgba(255,255,255,0.5);
-            padding: 16px;
-            font: inherit;
-            color: var(--text-main);
-            resize: vertical;
-            outline: none;
-        }
-        .post-edit-textarea:focus {
-            border-color: rgba(5,150,105,0.34);
-            box-shadow: 0 0 0 3px rgba(5,150,105,0.08);
-        }
-        .post-edit-controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .post-edit-note {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-        .post-edit-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-        .post-vis-toggle {
-            display: inline-flex;
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid rgba(0,0,0,0.1);
-            background: rgba(0,0,0,0.04);
-        }
-        [data-theme="dark"] .post-vis-toggle {
-            border-color: rgba(255,255,255,0.1);
-            background: rgba(255,255,255,0.06);
-        }
-        .post-vis-toggle .vis-btn {
-            padding: 6px 16px;
-            font-size: 13px;
-            border: none;
-            cursor: pointer;
-            background: transparent;
-            color: var(--text-muted, #666);
-            transition: all 0.2s;
-            position: relative;
-            z-index: 1;
-            pointer-events: auto !important;
-        }
-        .post-vis-toggle .vis-btn.active {
-            background: var(--primary, #4F46E5);
-            color: #fff;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(79,70,229,0.25);
-        }
-        .post-vis-toggle .vis-btn:not(.active):hover {
-            background: rgba(0,0,0,0.06);
-        }
-        [data-theme="dark"] .post-vis-toggle .vis-btn:not(.active):hover {
-            background: rgba(255,255,255,0.08);
-        }
-        /* Remove old select-based styles above — now a custom toggle */
-        /* Ensure the edit modal box doesn't block select interaction via backdrop-filter */
-        /* High specificity to override .perf-balanced .glass and .perf-lite .glass */
-        .modal-box.post-edit-modal,
-        .modal-box.glass.post-edit-modal {
-            -webkit-backdrop-filter: none !important;
-            backdrop-filter: none !important;
-            background: rgba(255,255,255,0.85) !important;
-        }
-        [data-theme="dark"] .modal-box.post-edit-modal,
-        [data-theme="dark"] .modal-box.glass.post-edit-modal {
-            -webkit-backdrop-filter: none !important;
-            backdrop-filter: none !important;
-            background: rgba(25,25,45,0.95) !important;
-        }
-
         .auth-form { display: flex; flex-direction: column; gap: 16px; }
         .sr-only {
             position: absolute !important;
@@ -10501,30 +10411,9 @@ body.ios-chat-keyboard-open .chat-input-area {
   .filter-toggle-btn.active,
   .photo-wall-btn.active,
   .post-vis-toggle .vis-btn.active,
-  .profile-activity-btn.is-danger,
-  #saveEditPostBtn.is-submitting,
-  #saveEditPostBtn.is-success
+  .profile-activity-btn.is-danger
 ) {
   box-shadow: 0 10px 22px rgba(26, 71, 48, 0.14);
-}
-
-#saveEditPostBtn.is-submitting {
-  transform: translateY(0) scale(0.98);
-  opacity: 0.92;
-}
-
-#saveEditPostBtn.is-success {
-  background: linear-gradient(135deg, rgba(107, 196, 141, 0.98), rgba(67, 170, 111, 0.98)) !important;
-  border-color: rgba(90, 174, 122, 0.82) !important;
-  color: #fff !important;
-}
-
-#editPostVisibility.is-switching .vis-btn.active {
-  transform: translateY(-1px) scale(1.02);
-}
-
-#editPostVisibility.is-saved .vis-btn.active {
-  box-shadow: 0 10px 22px rgba(26, 71, 48, 0.16);
 }
 
 #profileLikesCard,
@@ -14202,8 +14091,53 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 /* ========== Final Post Action Modal Override ========== */
+
+/* Post tools are rendered in a fixed layer so they stay usable in every feed page. */
+.post-tools-menu {
+  position: fixed;
+  z-index: 1400;
+  min-width: 156px;
+  padding: 6px;
+  border: 1px solid rgba(171, 215, 196, 0.92);
+  border-radius: 16px;
+  background: rgba(248, 253, 250, 0.98);
+  box-shadow: 0 14px 32px rgba(26, 72, 55, 0.16);
+  backdrop-filter: blur(14px);
+}
+.post-tools-menu button {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #214638;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.post-tools-menu button:hover,
+.post-tools-menu button:focus-visible { background: #e6f6ee; outline: none; }
+[data-theme="dark"] .post-tools-menu { background: rgba(19, 30, 27, 0.98); border-color: rgba(153, 213, 185, 0.34); }
+[data-theme="dark"] .post-tools-menu button { color: #e3f4eb; }
+[data-theme="dark"] .post-tools-menu button:hover,
+[data-theme="dark"] .post-tools-menu button:focus-visible { background: rgba(87, 164, 130, 0.22); }
+.post-tool-translation { margin: 10px 0 0; padding: 10px 12px; border-left: 3px solid #69b88e; border-radius: 10px; background: #eef9f2; color: #275240; white-space: pre-wrap; }
+.post-tool-translation.is-error { border-color: #d48a7c; background: #fff3f1; color: #7d372c; }
+.post-ai-overlay { position: fixed; inset: 0; z-index: 1450; display: grid; place-items: center; padding: 16px; background: rgba(12, 33, 25, 0.22); backdrop-filter: blur(6px); }
+.post-ai-dialog { position: relative; width: min(560px, 100%); max-height: min(680px, calc(100vh - 32px)); overflow: auto; padding: 22px; border: 1px solid rgba(151, 211, 183, 0.82); border-radius: 22px; background: #f9fdf9; box-shadow: 0 24px 60px rgba(19, 70, 48, 0.22); }
+.post-ai-dialog h3 { margin: 0 34px 14px 0; color: #214638; }
+.post-ai-close { position: absolute; top: 14px; right: 14px; width: 32px; height: 32px; border: 0; border-radius: 50%; background: #e9f6ee; color: #214638; font-size: 22px; cursor: pointer; }
+.post-ai-context { padding: 10px 12px; border-radius: 12px; background: #f0f7f2; color: #47665a; }
+.post-ai-context p, .post-ai-output { margin: 7px 0 0; white-space: pre-wrap; line-height: 1.65; }
+.post-ai-output { min-height: 100px; padding: 16px 2px; color: #263f34; }
+.post-ai-followup { display: flex; gap: 8px; }
+.post-ai-followup input { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid #9bcfb2; border-radius: 12px; font: inherit; }
+.post-ai-followup button { padding: 0 16px; border: 0; border-radius: 12px; background: #3d9a6c; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.report-ai-scan { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: #eef8f1; color: #345b48; font-size: 13px; line-height: 1.5; }
 #commentModal.modal-overlay,
-#editPostModal.modal-overlay,
 #delModal.modal-overlay {
   background: rgba(14, 20, 18, 0.2) !important;
   backdrop-filter: blur(8px) saturate(128%) !important;
@@ -14213,17 +14147,14 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 #commentModal.modal-overlay.active,
-#editPostModal.modal-overlay.active,
 #delModal.modal-overlay.active {
   opacity: 1 !important;
   pointer-events: all !important;
 }
 
 #commentModal .post-action-box,
-#editPostModal .post-action-box,
 #delModal .post-action-box,
 #commentModal .modal-box.glass,
-#editPostModal .modal-box.glass.post-edit-modal,
 #delModal .modal-box.glass {
   background: rgba(248, 251, 248, 0.8) !important;
   border: 1px solid rgba(255, 255, 255, 0.72) !important;
@@ -14235,7 +14166,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 #commentModal .post-action-box,
-#editPostModal .post-action-box,
 #delModal .post-action-box {
   width: min(620px, calc(100vw - 28px)) !important;
   border-radius: 28px !important;
@@ -14345,7 +14275,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 #commentModal .btn.btn-ghost,
-#editPostModal .btn.btn-ghost,
 #delModal .btn.btn-ghost {
   background: rgba(255,255,255,0.56) !important;
   border-color: rgba(255,255,255,0.76) !important;
@@ -14353,34 +14282,11 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   box-shadow: 0 10px 24px rgba(121, 162, 138, 0.1) !important;
 }
 
-#commentModal .btn.btn-primary,
-#editPostModal .btn.btn-primary {
+#commentModal .btn.btn-primary {
   box-shadow: 0 10px 24px rgba(47, 157, 121, 0.18) !important;
 }
 
-#editPostModal .post-edit-controls {
-  margin-top: 2px !important;
-}
-
-#editPostModal .post-vis-toggle {
-  background: rgba(255,255,255,0.46) !important;
-  border-color: rgba(197, 225, 209, 0.9) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.72) !important;
-}
-
-#editPostModal .post-vis-toggle .vis-btn {
-  min-width: 72px !important;
-  min-height: 40px !important;
-  font-weight: 700 !important;
-}
-
-#editPostModal .post-compose-label {
-  color: #24523c !important;
-  font-weight: 700 !important;
-}
-
 [data-theme="dark"] #commentModal.modal-overlay,
-[data-theme="dark"] #editPostModal.modal-overlay,
 [data-theme="dark"] #delModal.modal-overlay {
   background: rgba(2, 4, 7, 0.2) !important;
   backdrop-filter: blur(8px) saturate(132%) !important;
@@ -14388,10 +14294,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 }
 
 [data-theme="dark"] #commentModal .post-action-box,
-[data-theme="dark"] #editPostModal .post-action-box,
 [data-theme="dark"] #delModal .post-action-box,
 [data-theme="dark"] #commentModal .modal-box.glass,
-[data-theme="dark"] #editPostModal .modal-box.glass.post-edit-modal,
 [data-theme="dark"] #delModal .modal-box.glass {
   background: rgba(18, 20, 28, 0.84) !important;
   border-color: rgba(255, 255, 255, 0.1) !important;
@@ -14405,10 +14309,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 
 [data-theme="dark"] .post-delete-message,
 [data-theme="dark"] .post-edit-note,
-[data-theme="dark"] #editPostModal .post-compose-label {
-  color: rgba(212, 221, 232, 0.8) !important;
-}
-
 [data-theme="dark"] .post-delete-message {
   background: rgba(9, 12, 18, 0.56) !important;
   border-color: rgba(255,255,255,0.08) !important;
@@ -14428,14 +14328,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   color: rgba(180, 192, 208, 0.62) !important;
 }
 
-[data-theme="dark"] #editPostModal .post-vis-toggle {
-  background: rgba(255,255,255,0.05) !important;
-  border-color: rgba(255,255,255,0.1) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03) !important;
-}
-
 [data-theme="dark"] #commentModal .btn.btn-ghost,
-[data-theme="dark"] #editPostModal .btn.btn-ghost,
 [data-theme="dark"] #delModal .btn.btn-ghost {
   background: rgba(255,255,255,0.08) !important;
   border-color: rgba(255,255,255,0.14) !important;
@@ -14449,7 +14342,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   }
 
   #commentModal .post-action-box,
-  #editPostModal .post-action-box,
   #delModal .post-action-box {
     padding: 20px 18px 18px !important;
     border-radius: 18px !important;
