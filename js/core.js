@@ -3536,11 +3536,11 @@ function renderProfileActivityList(kind) {
             function updateLikeStatsText(statsEl, liked) {
                 if (!statsEl) return;
                 var text = statsEl.textContent || '';
-                var match = text.match(/点赞 (\d+)/);
+                var match = text.match(/(?:点赞|❤)\s*(\d+)/);
                 if (!match) return;
                 var current = parseInt(match[1], 10) || 0;
                 var next = liked ? current + 1 : Math.max(0, current - 1);
-                statsEl.textContent = text.replace(/点赞 \d+/, '点赞 ' + next);
+                statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
             }
 
             function getPostLikeButtons(postId) {
@@ -5006,12 +5006,12 @@ function renderProfileActivityList(kind) {
     var totalLikes = 0, totalComments = 0, totalViews = 0;
     posts.forEach(function(p) {
         var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-        var vIdx = text.indexOf('浏览 ');
-        if(vIdx !== -1) totalViews += parseInt(text.slice(vIdx + 3)) || 0;
-        var lIdx = text.indexOf('点赞 ');
-        if(lIdx !== -1) totalLikes += parseInt(text.slice(lIdx + 3)) || 0;
-        var cIdx = text.indexOf('评论 ');
-        if(cIdx !== -1) totalComments += parseInt(text.slice(cIdx + 3)) || 0;
+        var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
+        if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
+        var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
+        if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
+        var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
+        if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
     });
                 var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
