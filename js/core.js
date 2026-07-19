@@ -1,13 +1,13 @@
 
 window.safeStorage = {
     set: function(key, value) {
-        try { window.safeStorage.set(key, value); } catch(e) { console.warn('Storage set failed', e); }
+        try { localStorage.setItem(key, String(value)); } catch(e) { console.warn('Storage set failed', e); }
     },
     get: function(key) {
-        try { return window.safeStorage.get(key); } catch(e) { return null; }
+        try { return localStorage.getItem(key); } catch(e) { return null; }
     },
     remove: function(key) {
-        try { window.safeStorage.remove(key); } catch(e) { console.warn('Storage remove failed', e); }
+        try { localStorage.removeItem(key); } catch(e) { console.warn('Storage remove failed', e); }
     }
 };
 
@@ -19,8 +19,11 @@ window.throttleRAF = function(fn) {
         if (!ticking) {
             ticking = true;
             requestAnimationFrame(function() {
-                fn.apply(ctx, args);
-                ticking = false;
+                try {
+                    fn.apply(ctx, args);
+                } finally {
+                    ticking = false;
+                }
             });
         }
     };
