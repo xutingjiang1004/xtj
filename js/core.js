@@ -1,13 +1,13 @@
 
 window.safeStorage = {
     set: function(key, value) {
-        try { window.safeStorage.set(key, value); } catch(e) { console.warn('Storage set failed', e); }
+        try { localStorage.setItem(key, String(value)); } catch(e) { console.warn('Storage set failed', e); }
     },
     get: function(key) {
-        try { return window.safeStorage.get(key); } catch(e) { return null; }
+        try { return localStorage.getItem(key); } catch(e) { return null; }
     },
     remove: function(key) {
-        try { window.safeStorage.remove(key); } catch(e) { console.warn('Storage remove failed', e); }
+        try { localStorage.removeItem(key); } catch(e) { console.warn('Storage remove failed', e); }
     }
 };
 
@@ -19,8 +19,11 @@ window.throttleRAF = function(fn) {
         if (!ticking) {
             ticking = true;
             requestAnimationFrame(function() {
-                fn.apply(ctx, args);
-                ticking = false;
+                try {
+                    fn.apply(ctx, args);
+                } finally {
+                    ticking = false;
+                }
             });
         }
     };
@@ -2276,7 +2279,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
+                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + userName[0].toUpperCase() + '</span>';
                 }
@@ -2307,7 +2310,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cv[currentUser])) + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser])) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -2323,7 +2326,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarUrl;
-                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像">';
+                            avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像">';
                         }
                     }
                     
@@ -2413,14 +2416,14 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
-                        avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" alt="头像">';
+                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" alt="头像">';
                         return;
                     }
                 } catch(e) {}
                 
                 // 鍏煎牏锟姐倝宕橀崨顓犳憼缂傛挸鐡ㄩ弰鍓э拷?
                 if (avatarCache[currentUser]) {
-                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarCache[currentUser])) + '" alt="头像">';
+                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarCache[currentUser])) + '" alt="头像">';
                 }
                 
                 try {
@@ -2428,7 +2431,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     
                     if (avatarUrl) {
                         var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                        avatarEl.innerHTML = '<img src="' + safeAvatarUrl + '" alt="头像">';
+                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" alt="头像">';
                         avatarCache[currentUser] = avatarUrl;
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
@@ -2582,7 +2585,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             function updateAllAvatarElements(avatarUrl) {
                 var safeUrl = escapeHtml(sanitizeUrl(avatarUrl));
                 if (!safeUrl) return;
-                var imgHtml = '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                var imgHtml = '<img loading="lazy" decoding="async" src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
@@ -2627,7 +2630,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         const profileAvatar = document.getElementById('profileAvatar');
                         if (profileAvatar) {
-                            profileAvatar.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            profileAvatar.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                         }
                         return;
                     }
@@ -2646,7 +2649,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     if (profileAvatar) {
                         if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
                             var safeProfileAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
-                            profileAvatar.innerHTML = '<img src="' + safeProfileAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            profileAvatar.innerHTML = '<img loading="lazy" decoding="async" src="' + safeProfileAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                             avatarCache[currentUser] = avatarRes.data[0].media_url;
                             try {
                                 var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -3536,11 +3539,11 @@ function renderProfileActivityList(kind) {
             function updateLikeStatsText(statsEl, liked) {
                 if (!statsEl) return;
                 var text = statsEl.textContent || '';
-                var match = text.match(/点赞 (\d+)/);
+                var match = text.match(/(?:点赞|❤)\s*(\d+)/);
                 if (!match) return;
                 var current = parseInt(match[1], 10) || 0;
                 var next = liked ? current + 1 : Math.max(0, current - 1);
-                statsEl.textContent = text.replace(/点赞 \d+/, '点赞 ' + next);
+                statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
             }
 
             function getPostLikeButtons(postId) {
@@ -4847,7 +4850,7 @@ function renderProfileActivityList(kind) {
                 // ?????onclick ???? div ???? .avatar ??????
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var innerHtml = '<div class="avatar clickable"><img loading="lazy" decoding="async" src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                     return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
@@ -4859,13 +4862,13 @@ function renderProfileActivityList(kind) {
                 var safeName = escapeHtml(username || "");
                 var avatarUrl = avatarCache[username];
                 if (avatarUrl) {
-                    return '<span class="post-user-chip-avatar"><img src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
+                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
                 }
                 try {
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[username]) {
                         avatarCache[username] = cachedAvatars[username];
-                        return '<span class="post-user-chip-avatar"><img src="' + escapeHtml(cachedAvatars[username]) + '" alt="' + safeName + '"></span>';
+                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username]) + '" alt="' + safeName + '"></span>';
                     }
                 } catch(e) {}
                 return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
@@ -5006,12 +5009,12 @@ function renderProfileActivityList(kind) {
     var totalLikes = 0, totalComments = 0, totalViews = 0;
     posts.forEach(function(p) {
         var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-        var vIdx = text.indexOf('浏览 ');
-        if(vIdx !== -1) totalViews += parseInt(text.slice(vIdx + 3)) || 0;
-        var lIdx = text.indexOf('点赞 ');
-        if(lIdx !== -1) totalLikes += parseInt(text.slice(lIdx + 3)) || 0;
-        var cIdx = text.indexOf('评论 ');
-        if(cIdx !== -1) totalComments += parseInt(text.slice(cIdx + 3)) || 0;
+        var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
+        if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
+        var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
+        if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
+        var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
+        if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
     });
                 var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
@@ -6839,7 +6842,7 @@ function renderProfileActivityList(kind) {
                         if (!username || avatarEl.querySelector('img')) return;
                         var avatarUrl = avatarCache[username];
                         if (avatarUrl) {
-                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                         }
                     });
                 });
@@ -6938,7 +6941,7 @@ function renderProfileActivityList(kind) {
                     '<div class="spi-content-row"><span class="spi-content">' + escapeHtml(display) + '</span>' + tag + '</div>',
                     '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">查看详情</span></div>',
                     '</div>',
-                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" alt="" />' : (hasVid ? '<div class="spi-thumb spi-thumb--video">VIDEO</div>' : ''),
+                    hasImg ? '<img class="spi-thumb" loading="lazy" decoding="async" src="' + escapeHtml(post.media_url) + '" alt="" />' : (hasVid ? '<div class="spi-thumb spi-thumb--video">VIDEO</div>' : ''),
                     '</div>'
                 ].join('');
             }
@@ -7139,7 +7142,7 @@ function renderProfileActivityList(kind) {
                             ${escapeHtml(fmt.display)}
                             ${fmt.tag}
                         </span>
-                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
+                        ${fmt.thumbUrl ? `<img class="spi-thumb" loading="lazy" decoding="async" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
                         <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
                     </div>
                 `;
@@ -7320,7 +7323,7 @@ function renderProfileActivityList(kind) {
                 bubble.className = 'notification-bubble';
 
                 const avatarHtml = avatarCache[userName] ? 
-                    `<img src="${avatarCache[userName]}" alt="${userName}">` : 
+                    `<img loading="lazy" decoding="async" src="${avatarCache[userName]}" alt="${userName}">` : 
                     userName[0].toUpperCase();
 
                 const truncatedMsg = message.length > 50 ? message.slice(0, 50) + '...' : message;
@@ -8580,7 +8583,7 @@ function renderProfileActivityList(kind) {
                 if (avatarUrl) {
                     var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     if (safeAvatarUrl) {
-                        return '<img src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
+                        return '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                     }
                 }
                 // 无头像时显示首字母（xxz → X）
@@ -9710,7 +9713,7 @@ function renderProfileActivityList(kind) {
                 if (userInfoEl) {
                     var avUrl = avatarCache[ann.user_name];
                     var avatarHtml = avUrl
-                        ? '<div class="announcement-detail-avatar"><img src="' + avUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
+                        ? '<div class="announcement-detail-avatar"><img loading="lazy" decoding="async" src="' + avUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
                         : '<div class="announcement-detail-avatar">' + ann.user_name.charAt(0).toUpperCase() + '</div>';
                     userInfoEl.innerHTML = avatarHtml + '<div class="announcement-detail-name">' + escapeHtml(ann.user_name) + '</div>';
                 }
@@ -12160,7 +12163,7 @@ function renderProfileActivityList(kind) {
 
             function renderStatThumb(summary) {
                 if (summary && summary.hasImg && summary.thumbUrl) {
-                    return '<img class="spi-thumb" src="' + escapeHtml(summary.thumbUrl) + '" alt="帖子缩略图" loading="lazy">';
+                    return '<img class="spi-thumb" loading="lazy" decoding="async" src="' + escapeHtml(summary.thumbUrl) + '" alt="帖子缩略图" loading="lazy">';
                 }
                 if (summary && summary.hasVid) {
                     return '<div class="spi-thumb spi-thumb--video" aria-hidden="true">视频</div>';
