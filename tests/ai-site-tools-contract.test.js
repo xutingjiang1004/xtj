@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 const client = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
+const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '018_ai_site_tools.sql'), 'utf8');
 
 test('AI site-tool registry keeps scheduling out of scope', () => {
@@ -66,4 +67,15 @@ test('site search preserves source metadata and restored cards without exposing 
   assert.match(server, /siteCards: siteToolCards/);
   assert.match(client, /Array\.isArray\(msg\.site_cards\)/);
   assert.doesNotMatch(server, /schedule_action|cancel_scheduled_action/);
+});
+
+test('AI tools keep chat and site search as independent pages instead of changing the Dock tab', () => {
+  assert.match(page, /id="panelAiChat"/);
+  assert.match(page, /id="aiSiteSearchPanel"/);
+  assert.match(client, /function openSiteSearchPage/);
+  assert.match(client, /apiRequest\('POST', '\/site-search'/);
+  assert.match(client, /openSiteSearch: openSiteSearchPage/);
+  const openAiChat = client.slice(client.indexOf('async function openAiChat()'), client.indexOf('function applyConfigToUI'));
+  assert.doesNotMatch(openAiChat, /switchDockTab\('chat'/);
+  assert.match(openAiChat, /aiPanel\.appendChild\(r\.root\)/);
 });

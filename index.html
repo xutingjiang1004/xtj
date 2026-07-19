@@ -47,12 +47,12 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=7505cfd23b" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=4fc3bc587e" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=ebdb908afa" /><link rel="stylesheet" href="css/ai-agent.min.css?v=db4398dc6e" /></noscript>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=f92119d96c" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=b75c1e01ad">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=dc00239a34">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=7505cfd23b">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=99d2b06a61">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=62f50f618c">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=db4398dc6e">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=c428abb66d">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=5206892a46">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=92963158ad">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=368f8a0a16">
@@ -1050,7 +1050,7 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=e5547b229c"></script>
+    <script defer src="js/core.min.js?v=a0504e84c7"></script>
     <script defer src="js/login-device.min.js?v=692788a700"></script>
     <script defer src="js/theme-toggle.min.js?v=e8639a6cfd"></script>
 
@@ -1084,6 +1084,41 @@
         </div>
     </div>
 </div>
+
+<!-- AI 聊天作为独立二级页面，不复用底部私聊面板。 -->
+<div class="ai-secondary-panel hidden" id="panelAiChat" aria-hidden="true"></div>
+
+<!-- 站内搜索拥有独立界面，结果只通过已验证的服务端搜索接口加载。 -->
+<section class="ai-site-search-panel hidden" id="aiSiteSearchPanel" aria-hidden="true" aria-labelledby="aiSiteSearchTitle">
+    <div class="ai-site-search-page">
+        <header class="ai-site-search-header">
+            <button type="button" class="ai-site-search-back" id="aiSiteSearchBack" aria-label="返回帖子">返回</button>
+            <div>
+                <p>AI 工具</p>
+                <h2 id="aiSiteSearchTitle">站内搜索</h2>
+            </div>
+        </header>
+        <main class="ai-site-search-content">
+            <form class="ai-site-search-form" id="aiSiteSearchForm" role="search">
+                <label for="aiSiteSearchInput">搜索你的站内内容</label>
+                <div class="ai-site-search-input-row">
+                    <input id="aiSiteSearchInput" type="search" maxlength="120" autocomplete="off" placeholder="例如：我在哪里提到过广州旅行？" />
+                    <button type="submit">搜索</button>
+                </div>
+            </form>
+            <div class="ai-site-search-sources" aria-label="搜索范围">
+                <button type="button" class="is-selected" data-ai-search-source="posts">帖子</button>
+                <button type="button" class="is-selected" data-ai-search-source="comments">评论</button>
+                <button type="button" class="is-selected" data-ai-search-source="photos">照片</button>
+                <button type="button" class="is-selected" data-ai-search-source="dm">聊天</button>
+                <button type="button" class="is-selected" data-ai-search-source="ai_history">AI 历史</button>
+                <button type="button" class="is-selected" data-ai-search-source="users">用户</button>
+            </div>
+            <p class="ai-site-search-status" id="aiSiteSearchStatus" aria-live="polite">输入关键词后搜索帖子、聊天和 AI 历史。</p>
+            <div class="ai-site-search-results" id="aiSiteSearchResults"></div>
+        </main>
+    </div>
+</section>
 </body>
 </html>
 
