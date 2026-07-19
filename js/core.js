@@ -4690,9 +4690,31 @@ function renderProfileActivityList(kind) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
             let feedLoadRequestId = 0;
+            let feedStateVersion = 0;
             let feedNextOffset = 0;
             let feedLoadedPages = [];
             let feedPageFetchPending = false;
+
+            function markFeedStateChanged() {
+                feedStateVersion += 1;
+                feedVisiblePostsCache = null;
+                feedMapsCache = null;
+                return feedStateVersion;
+            }
+
+            function syncPostInfoCache(post) {
+                var normalized = normalizePost(post || {});
+                if (!normalized || !normalized.id) return;
+                postInfoCache[normalized.id] = {
+                    id: normalized.id,
+                    content: normalized.content || '',
+                    user_name: normalized.user_name || '',
+                    media_url: normalized.media_url || '',
+                    media_type: normalized.media_type || '',
+                    created_at: normalized.created_at || '',
+                    views: Number(normalized.views || 0)
+                };
+            }
             let feedVisiblePostsCache = null; // 缓存过滤后的帖子
             let feedMapsCache = null; // 缓存 buildPostMaps 结果
 
@@ -5050,12 +5072,19 @@ function renderProfileActivityList(kind) {
 
             function insertPublishedPostIntoFeed(post) {
                 if (!post || !post.id) return false;
+                post = normalizePost(post);
                 if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
                 feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
                 feedAllPosts.unshift(post);
                 feedAllPosts = sortPosts(feedAllPosts);
-                feedVisiblePostsCache = null;
-                feedMapsCache = null;
+                syncPostInfoCache(post);
+                var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
+                if (firstPage) {
+                    firstPage.postIds = [String(post.id)].concat((firstPage.postIds || []).filter(function(id) { return String(id) !== String(post.id); }));
+                } else {
+                    feedLoadedPages = [{ offset: 0, postIds: [String(post.id)] }].concat(feedLoadedPages || []);
+                }
+                markFeedStateChanged();
                 var feed = document.getElementById('feed');
                 if (!feed) return false;
                 var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
@@ -5101,8 +5130,8 @@ function renderProfileActivityList(kind) {
                 feedAllPosts = feedAllPosts.map(function(item) {
                     return String(item && item.id) === postId ? post : item;
                 });
-                feedVisiblePostsCache = null;
-                feedMapsCache = null;
+                syncPostInfoCache(post);
+                markFeedStateChanged();
                 var feed = document.getElementById('feed');
                 if (!feed) return false;
                 var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
@@ -6048,6 +6077,8 @@ function renderProfileActivityList(kind) {
                 }
                 feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset || 0);
                 if (chunk.endReached) feedEndReached = true;
+                (chunk.posts || []).forEach(syncPostInfoCache);
+                markFeedStateChanged();
             }
 
             function hasActiveFeedFilters() {
@@ -6535,6 +6566,7 @@ function renderProfileActivityList(kind) {
             loadFeed = async function(forceRefresh) {
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
+                var stateVersionAtRequest = feedStateVersion;
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
@@ -6577,14 +6609,17 @@ function renderProfileActivityList(kind) {
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
                     if (!chunk) return;
                     if (requestId !== feedLoadRequestId) return;
-                    feedAllPosts = [];
-                    feedAllComments = [];
-                    feedAllLikes = [];
-                    feedLoadedPages = [];
-                    feedNextOffset = 0;
-                    feedEndReached = false;
-                    feedVisiblePostsCache = null;
-                    feedMapsCache = null;
+                    // A publish may finish while this request is in flight.
+                    // Preserve current state and merge this page when that happens.
+                    if (stateVersionAtRequest === feedStateVersion) {
+                        feedAllPosts = [];
+                        feedAllComments = [];
+                        feedAllLikes = [];
+                        feedLoadedPages = [];
+                        feedNextOffset = 0;
+                        feedEndReached = false;
+                        markFeedStateChanged();
+                    }
                     if (chunk.posts.length) mergeFeedPageIntoState(chunk);
                     else feedEndReached = true;
                     writeFeedCacheSnapshot();

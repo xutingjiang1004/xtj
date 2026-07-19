@@ -54,6 +54,58 @@ test('publish button sends once, shows busy state, and inserts the returned post
   expect(pageErrors).toEqual([]);
 });
 
+test('a delayed feed refresh merges instead of removing a newly published post', async ({ page }) => {
+  const createdId = '12121212-1212-4121-8121-121212121212';
+  let releaseFeed;
+  const delayedFeed = new Promise(resolve => { releaseFeed = resolve; });
+  let deleteCalls = 0;
+  await page.addInitScript(() => {
+    localStorage.setItem('xtj_user', 'race-publisher');
+    localStorage.setItem('xtj_device_id', 'race_publish_device');
+  });
+  await page.route('**/api/user/refresh', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ token: 'race-token' })
+  }));
+  await page.route('**/api/feed**', async route => {
+    await delayedFeed;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, posts: [], comments: [], likes: [], next_offset: 0, endReached: true, total_post_count: 0 })
+    });
+  });
+  await page.route('**/api/post/create', route => {
+    const payload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: {
+        id: createdId,
+        user_name: 'race-publisher',
+        content: payload.content,
+        media_url: '', media_type: '', actor_key: 'race_publish_device',
+        visibility: 'public', views: 0, created_at: new Date().toISOString()
+      } })
+    });
+  });
+  await page.route('**/api/post/delete**', route => {
+    deleteCalls += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof window.doPublish === 'function');
+  await page.locator('#postInp').fill('发布期间遇到旧列表回包');
+  await page.locator('#pubBtn').click();
+  await expect(page.locator(`.post[data-post-id="${createdId}"]`)).toBeVisible();
+  releaseFeed();
+  await page.waitForTimeout(350);
+  await expect(page.locator(`.post[data-post-id="${createdId}"]`)).toHaveCount(1);
+  expect(deleteCalls).toBe(0);
+});
+
 test('comment submission keeps its target after modal close and sends once', async ({ page }) => {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
