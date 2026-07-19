@@ -1072,9 +1072,11 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     // 清理旧状态
                     if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
                     if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
+                    aiChatPanel.classList.remove('hidden');
                     aiChatPanel.style.display = '';
                     aiChatPanel.innerHTML = getAiChatSkeleton();
                     aiChatPanel.classList.add('active');
+                    aiChatPanel.setAttribute('aria-hidden', 'false');
                     aiChatPanel.setAttribute('aria-busy', 'true');
                 }
 
