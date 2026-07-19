@@ -1558,42 +1558,27 @@ const ERROR_LOG_RETENTION_DAYS = 30;
 // 集中处理普通帖子 / 总动态 / 后台管理 / 统计 端点需要排除的 system media_type
 // 与前端 applyVisiblePostQueryFilters 保持一致（22 个 marker）
 // 必须放在所有 marker 常量定义之后、路由定义之前
+// 正常帖子白名单：只允许这些 media_type 作为帖子出现在搜索结果中
+var NORMAL_POST_MEDIA_TYPES = ['', 'text', 'image', 'video', 'audio', 'photo', 'album'];
+function isNormalPost(row) {
+  if (!row) return false;
+  var mt = row.media_type;
+  if (mt === null || mt === undefined) return true;
+  return NORMAL_POST_MEDIA_TYPES.indexOf(String(mt).toLowerCase()) >= 0;
+}
+
+function applyNormalPostAllowlist(query) {
+  if (!query || typeof query.or !== 'function') return query;
+  // 使用 .in() 查询非NULL类型，再用 .is() 查 NULL
+  // 注意：PostgREST 连续 .or() 可能覆盖，所以只用 .or() 一次
+  return query.or(
+    'media_type.is.null,' +
+    NORMAL_POST_MEDIA_TYPES.map(function(t) { return t === '' ? 'media_type.eq.' : 'media_type.eq.' + t; }).join(',')
+  );
+}
+
 function applyPublicPostExclusions(query) {
-  if (!query || typeof query.neq !== 'function') return query;
-  return query
-    .neq('media_type', AUTH_MARKER)
-    .neq('media_type', ADMIN_AUTH_MARKER)
-    .neq('media_type', ADMIN_META_MARKER)
-    .neq('media_type', DM_MARKER)
-    .neq('media_type', REPORT_MARKER)
-    .neq('media_type', '__avatar__')
-    .neq('media_type', USER_INFO_MARKER)
-    .neq('media_type', '__photo_wall__')
-    .neq('media_type', VISIT_MARKER)
-    .neq('media_type', ATTACK_MARKER)
-    .neq('media_type', USER_VISIT_MARKER)
-    .neq('media_type', POST_VIEW_MARKER)
-    .neq('media_type', '__ann__')
-    .neq('media_type', '__vip__')
-    .neq('media_type', '__vip_order__')
-    .neq('media_type', '__vip_plan__')
-    .neq('media_type', '__user_style__')
-    .neq('media_type', '__pro_gift__')
-    .neq('media_type', '__pro_gift_claim__')
-    .neq('media_type', LOGIN_EVENT_MARKER)
-    .neq('media_type', USER_BEHAVIOR_MARKER)
-    .neq('media_type', SECURITY_ALERT_MARKER)
-    .neq('media_type', AUDIT_LOG_MARKER)
-    .neq('media_type', CLIENT_ERROR_MARKER)
-    .neq('media_type', EMAIL_SENT_MARKER)
-    .neq('media_type', EMAIL_RECIPIENT_MARKER)
-    .neq('media_type', ANN_READ_MARKER)
-    .neq('media_type', AI_AGENT_PROFILE_MARKER)
-    .neq('media_type', AI_AGENT_MESSAGE_MARKER)
-    .neq('media_type', AI_AGENT_CONFIG_MARKER)
-    .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
-    .neq('media_type', AI_ENGLISH_LEARNING_MARKER)
-    .neq('media_type', REVOKED_TOKEN_MARKER);
+  return applyNormalPostAllowlist(query);
 }
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
@@ -2239,12 +2224,13 @@ function aiSiteCard(type, title, data, actions) {
 
 async function aiSitePersistResults(ownerName, results) {
   if (!results.length) return results;
+  var batchId = 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   var rows = results.slice(0, 40).map(function(item) {
-    return { owner_name: ownerName, source: item.source, source_id: String(item.source_id || ''), title: item.title || '', snippet: item.snippet || '', jump_target: item.jump_target || {} };
+    return { owner_name: ownerName, source: item.source, source_id: String(item.source_id || ''), title: item.title || '', snippet: item.snippet || '', jump_target: item.jump_target || {}, query_hash: batchId, search_batch_id: batchId };
   });
   try {
-    var saved = await supabase.from('ai_search_results').insert(rows).select('id, source, source_id, title, snippet, jump_target, created_at');
-    if (saved.error) { console.error('[aiSitePersistResults] insert error:', saved.error); return results; }
+    var saved = await supabase.from('ai_search_results').upsert(rows, { onConflict: 'owner_name,query_hash,source,source_id', ignoreDuplicates: false }).select('id, source, source_id, title, snippet, jump_target, created_at');
+    if (saved.error) { console.error('[aiSitePersistResults] upsert error:', saved.error); return results; }
     return (saved.data || []).map(aiSitePresentResult);
   } catch (e) {
     console.error('[aiSitePersistResults] persist failed:', e && e.message);
@@ -2288,7 +2274,7 @@ function aiSiteSnippet(value, query) {
   return text.slice(0, 240);
 }
 
-async function aiSiteSearch(source, query, userName, limit, isAdmin) {
+async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan) {
   var q = aiSiteNormalizeQuery(query);
   if (!q) return { results: [], error: null };
   var take = Math.min(Math.max(Number(limit) || 20, 1), 40);
@@ -2297,20 +2283,29 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin) {
   var keywords = q.split(/\s+/).filter(Boolean);
   var rows = [];
   if (source === 'posts') {
-    // search both content and user_name, also handle JSON-wrapped content
-    var postQuery = supabase.from('posts').select('id,user_name,content,created_at,visibility');
-    postQuery = applyPublicPostExclusions(postQuery);
+    var postQuery = supabase.from('posts').select('id,user_name,content,created_at,visibility,media_type');
+    postQuery = applyNormalPostAllowlist(postQuery);
     var postOrParts = keywords.map(function(k) { return 'content.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%'; });
     if (keywords.length > 1) {
-      // also search user_name for multi-keyword queries
       keywords.forEach(function(k) {
         postOrParts.push('user_name.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%');
       });
     }
     postQuery = postQuery.or(postOrParts.join(','));
-    var postRes = await postQuery.order('created_at', { ascending: false }).limit(take);
+    // author filter
+    if (searchPlan && searchPlan.author) {
+      postQuery = postQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\$&') + '%');
+    }
+    // date range
+    if (searchPlan && searchPlan.date_from) postQuery = postQuery.gte('created_at', searchPlan.date_from);
+    if (searchPlan && searchPlan.date_to) postQuery = postQuery.lte('created_at', searchPlan.date_to);
+    var postRes = await postQuery.order('created_at', { ascending: false }).limit(take * 3);
     if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return { results: [], error: { code: 'posts_query_failed', message: '帖子搜索暂时不可用' } }; }
-    var candidates = (postRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; });
+    var candidates = (postRes.data || []).filter(function(p) {
+      if (!isNormalPost(p)) return false;
+      if (p.visibility === 'private' && !isAdmin && p.user_name !== userName) return false;
+      return true;
+    });
     // client-side filter: check extracted text content (not just raw JSON)
     if (keywords.length > 0) {
       candidates = candidates.filter(function(p) {
@@ -2383,6 +2378,48 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin) {
   });
   return { results: rows, error: null };
 }
+
+function validateSearchResult(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (item.source === 'posts') {
+    return item.jump_target && item.jump_target.type === 'post' && item.source_id && String(item.source_id).length > 0;
+  }
+  return true;
+}
+
+// ===================== 帖子详情 API =====================
+app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
+  try {
+    var postId = req.params.id;
+    if (!postId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postId)) {
+      return res.status(400).json({ ok: false, error: 'invalid_post_id', message: '无效的帖子ID' });
+    }
+    var postRes = await supabase.from('posts').select('*').eq('id', postId).maybeSingle();
+    if (postRes.error) return res.status(500).json({ ok: false, error: 'query_failed', message: '查询失败' });
+    if (!postRes.data) return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
+    var post = postRes.data;
+    if (!isNormalPost(post)) return res.status(422).json({ ok: false, error: 'not_normal_post', message: '该帖子不存在、已删除或不可查看。' });
+    if (post.visibility === 'private' && post.user_name !== (req.userName || '')) {
+      return res.status(403).json({ ok: false, error: 'post_not_visible', message: '该帖子不存在、已删除或不可查看。' });
+    }
+    var likesRes = await supabase.from('likes').select('id,user_name,created_at').eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
+    var commentsRes = await supabase.from('comments').select('id,user_name,content,created_at').eq('post_id', postId).order('created_at', { ascending: true }).limit(50);
+    return res.json({
+      ok: true,
+      post: {
+        id: post.id, user_name: post.user_name || '匿名用户',
+        content: post.content || '', media_type: post.media_type || null,
+        media_url: post.media_url || null, visibility: post.visibility || 'public',
+        created_at: post.created_at, view_count: post.view_count || 0,
+        like_count: post.like_count || 0, comment_count: post.comment_count || 0
+      },
+      likes: (likesRes.data || []).map(function(l) { return { id: l.id, user_name: l.user_name, created_at: l.created_at }; }),
+      comments: (commentsRes.data || []).map(function(c) { return { id: c.id, user_name: c.user_name, content: c.content, created_at: c.created_at }; })
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'internal_error', message: '服务器内部错误' });
+  }
+});
 
 async function aiSiteCreateConfirmation(userName, actionName, payload) {
   var inserted = await supabase.from('ai_action_confirmations').insert([{ owner_name: userName, action_name: actionName, payload: payload }]).select('id, expires_at').single();
@@ -12005,15 +12042,17 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
 
 app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
   try {
-    var query = aiSiteText(req.body && req.body.query, 120);
+    var rawQuery = String(req.body && req.body.query || '').trim();
     var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts'];
     var allowed = ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
     var selected = sources.filter(function(s) { return allowed.indexOf(s) >= 0; });
-    if (!query) return res.status(400).json({ error: '搜索关键词不能为空' });
+    if (!rawQuery) return res.status(400).json({ error: '搜索关键词不能为空' });
     if (!selected.length) return res.status(400).json({ error: '搜索范围无效' });
     var limit = Math.min(Math.max(Number(req.body && req.body.limit) || 40, 1), 40);
     var isAdmin = req.userName === ADMIN_USERNAME;
-    var settled = await Promise.allSettled(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit, isAdmin); }));
+    var plan = parseSearchQuery(rawQuery);
+    var query = plan.semantic_query || aiSiteNormalizeQuery(rawQuery);
+    var settled = await Promise.allSettled(selected.map(function(source) { return aiSiteSearch(source, query, req.userName, limit, isAdmin, plan); }));
     var sourceErrors = [];
     var batches = [];
     settled.forEach(function(s, i) {
@@ -12024,9 +12063,18 @@ app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
         sourceErrors.push({ source: selected[i], code: 'search_unexpected_error', message: '搜索服务暂时不可用' });
       }
     });
-    var results = [].concat.apply([], batches).slice(0, limit);
+    var results = [].concat.apply([], batches);
+    // validate and sort: by relevance descending, then created_at descending
+    results = results.filter(validateSearchResult);
+    results.sort(function(a, b) {
+      var ra = (a.jump_target && a.jump_target.relevance) || 0;
+      var rb = (b.jump_target && b.jump_target.relevance) || 0;
+      if (rb !== ra) return rb - ra;
+      return (b.created_at || '').localeCompare(a.created_at || '');
+    });
+    results = results.slice(0, limit);
     aiSitePersistResults(req.userName, results).catch(function(e) { console.error('[site-search] persist failed:', e && e.message); });
-    var response = { ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }) };
+    var response = { ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }), search_plan: { keywords: plan.keywords, author: plan.author, date_from: plan.date_from, date_to: plan.date_to, sources: plan.sources } };
     if (sourceErrors.length) response.source_errors = sourceErrors;
     return res.json(response);
   } catch (e) {
