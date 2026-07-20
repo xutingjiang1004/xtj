@@ -391,27 +391,39 @@
         throw createPhotoUploadError('cancelled');
       }
       if (timedOut) {
-        // ★ 超时不确定：先查询服务端是否已提交记录
+        // 超时不确定：先查询服务端是否已提交记录
         fetchError.photoUploadCode = 'timeout';
         fetchError.photoUploadStage = 'uncertain';
         try {
+          var statusController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          var statusTimeout = statusController ? setTimeout(function() { statusController.abort(); }, 10000) : null;
           var statusRes = await fetch(apiUrl('/api/photo/status'), {
             method: 'POST',
             headers: buildPhotoCreateHeaders(headers),
             body: JSON.stringify({ upload_id: uploadId }),
-            signal: (typeof AbortController !== 'undefined' ? (new AbortController()).signal : undefined)
+            signal: statusController ? statusController.signal : undefined
           });
+          if (statusTimeout) clearTimeout(statusTimeout);
           var statusData = await statusRes.json().catch(function(){ return {}; });
           if (statusData && statusData.status === 'committed' && statusData.data) {
             // 服务端已提交，视为成功，不删除 Storage
             return statusData.data;
           }
+          if (statusData && statusData.status === 'not_found') {
+            // 明确未提交，清理 Storage
+            await cleanupStorage(path);
+            throw fetchError;
+          }
+          // 状态不确定（processing / 网络错误等），不删除 Storage，保存为待确认
+          fetchError.photoUploadStage = 'pending';
+          fetchError._pendingRetry = true;
+          throw fetchError;
         } catch(statusErr) {
-          // 状态查询失败，继续清理流程
+          // 状态查询失败，不删除 Storage，保存为待确认
+          fetchError.photoUploadStage = 'pending';
+          fetchError._pendingRetry = true;
+          throw fetchError;
         }
-        // 未提交才清理 Storage
-        await cleanupStorage(path);
-        throw fetchError;
       } else {
         fetchError.photoUploadCode = 'backend_unreachable';
       }
@@ -528,7 +540,9 @@
         var item = window.normalizePhotoWallRow(row);
         if (item && item.imageUrl) {
           window.photoWallData = Array.isArray(window.photoWallData) ? window.photoWallData : [];
-          window.photoWallData.unshift(item);
+          var newId = item.id || item.cloudId;
+          var exists = window.photoWallData.some(function(p) { return (p.id && newId && String(p.id) === String(newId)) || (p.cloudId && newId && String(p.cloudId) === String(newId)); });
+          if (!exists) window.photoWallData.unshift(item);
         }
       }
       if (window.broadcastSync && row && row.id) window.broadcastSync('photo_added', { photoId: row.id });
