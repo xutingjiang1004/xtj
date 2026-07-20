@@ -251,6 +251,12 @@ function xtjLoadingEscapeHtml(str) {
 function buildXtjLoadingHtmlFallback(title, subtitle, type) {
     var safeTitle = xtjLoadingEscapeHtml(title || '加载中..');
     var safeSubtitle = subtitle ? xtjLoadingEscapeHtml(subtitle) : '';
+    if (type === 'feed') {
+        return '<div class="xtj-loading-skeleton">' +
+               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
+               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
+               '</div>';
+    }
     return '<div class="xtj-magic-loading loading" style="display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;text-align:center;color:var(--text-muted);">'
         + '<div><div style="font-size:28px;line-height:1;margin-bottom:10px;">!</div>'
         + '<div>' + safeTitle + '</div>'
@@ -3522,7 +3528,7 @@ function renderProfileActivityList(kind) {
                 var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
                 var badgeHtml = '<span class="cat-ai-badge">AI</span>';
                 var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>' : '';
-                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">刚刚</span>' + delBtn + '</div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
+                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">刚刚</span>' + delBtn + '</div><div class="comment-item-content"><span class="ai-typing-indicator"></span>' + escapeHtml(comment.content || '') + '</div></div></div></div>';
             }
 
             var __xtjDeferredWarmupQueued = false;
@@ -3764,6 +3770,8 @@ function renderProfileActivityList(kind) {
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
                 var pid = String(postId || '');
                 if (!btn || !pid || likeOperations[pid]) return;
+                btn.classList.add('like-heart-anim');
+                setTimeout(function() { btn.classList.remove('like-heart-anim'); }, 400);
                 var wasLiked = btn.classList.contains("liked");
                 var version = (likeOperationVersions[pid] || 0) + 1;
                 likeOperationVersions[pid] = version;
@@ -4464,10 +4472,12 @@ function renderProfileActivityList(kind) {
                     ivResetZoom(true);
                     img.src = src;
                     wrapper.classList.add('open-anim');
+                    viewer.classList.add('img-transition');
                     img.classList.add('instant');
                     void img.offsetWidth;
                     img.classList.remove('instant');
                     viewer.classList.add('active');
+                    setTimeout(function() { viewer.classList.add('show'); }, 10);
                     document.body.style.overflow = 'hidden';
                 }
                 if ((typeof window.openPhotoPreview !== 'function' || window.openPhotoPreview === lazyOpenPhotoPreview) && typeof ensurePhotoWallPreviewLoaded === 'function') {
@@ -4487,7 +4497,11 @@ function renderProfileActivityList(kind) {
                 const wrapper = document.getElementById('ivWrapper');
                 ivResetZoom(true);
                 wrapper.classList.remove('open-anim');
-                viewer.classList.remove('active');
+                viewer.classList.remove('show');
+                setTimeout(function() {
+                    viewer.classList.remove('active');
+                    viewer.classList.remove('img-transition');
+                }, 300);
                 document.body.style.overflow = '';
             };
 
@@ -5126,6 +5140,34 @@ function renderProfileActivityList(kind) {
                 window.applyPostFilters();
             };
 
+            window.toggleReadMore = function(btn) {
+                var wrap = btn.closest('.post-content-wrap');
+                if (!wrap) return;
+                if (wrap.classList.contains('expanded')) {
+                    wrap.classList.remove('expanded');
+                    wrap.querySelector('.post-content-visible').style.display = 'inline';
+                    wrap.querySelector('.post-content-hidden').style.display = 'none';
+                    btn.textContent = '展开全文';
+                } else {
+                    wrap.classList.add('expanded');
+                    wrap.querySelector('.post-content-visible').style.display = 'none';
+                    wrap.querySelector('.post-content-hidden').style.display = 'inline';
+                    btn.textContent = '收起';
+                }
+            };
+            function buildPostContentHtml(content) {
+                if (!content) return '';
+                var maxLen = 180;
+                if (content.length <= maxLen) return escapeHtml(content);
+                var visible = escapeHtml(content.slice(0, maxLen)) + '...';
+                var hidden = escapeHtml(content.slice(maxLen));
+                return '<div class="post-content-wrap">' +
+                       '<span class="post-content-visible">' + visible + '</span>' +
+                       '<span class="post-content-hidden" style="display:none">' + hidden + '</span>' +
+                       '<button type="button" class="read-more-btn" onclick="window.toggleReadMore(this)">展开全文</button>' +
+                       '</div>';
+            }
+
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -5160,7 +5202,7 @@ function renderProfileActivityList(kind) {
                                 return html;
                             }).join('') + '\n                  </div>\n                  ';
                         }
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + buildPostContentHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
                     } catch (e) {
                         console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
                     }
@@ -13279,4 +13321,24 @@ function renderProfileActivityList(kind) {
                     throw e;
                 }
             };
+            
+            // Add sticky header behavior and class
+            var _navHeader = document.querySelector('.posts-nav');
+            if (_navHeader) _navHeader.classList.add('sticky-header');
+            
+            var _panelPosts = document.getElementById('panelPosts');
+            var _scrollTarget = _panelPosts || window;
+            _scrollTarget.addEventListener('scroll', window.throttleRAF(function() {
+                var header = document.querySelector('.posts-nav.sticky-header');
+                if (!header) return;
+                var currentScrollY = _scrollTarget.scrollTop || window.scrollY;
+                if (typeof window._lastHeaderScrollY === 'undefined') window._lastHeaderScrollY = 0;
+                if (currentScrollY > 50 && currentScrollY > window._lastHeaderScrollY) {
+                    header.classList.add('hidden-header');
+                } else {
+                    header.classList.remove('hidden-header');
+                }
+                window._lastHeaderScrollY = currentScrollY;
+            }));
+            
         })();
