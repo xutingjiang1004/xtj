@@ -3961,7 +3961,7 @@ function renderProfileActivityList(kind) {
                 
                 // 移除其他帖子下可能打开的内联输入框，保持界面整洁
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
-                    el.style.maxHeight = '0px';
+                    el.style.gridTemplateRows = '0fr';
                     el.style.opacity = '0';
                     setTimeout(() => el.remove(), 300);
                 });
@@ -3969,14 +3969,17 @@ function renderProfileActivityList(kind) {
                 // 创建内联评论框容器 (带动画)
                 var box = document.createElement('div');
                 box.className = 'inline-comment-box';
-                box.style.maxHeight = '0px';
+                box.style.display = 'grid';
+                box.style.gridTemplateRows = '0fr';
                 box.style.opacity = '0';
-                box.style.marginTop = '8px';
-                box.style.overflow = 'hidden';
+                box.style.marginTop = '0px';
                 box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
                 box.style.background = 'transparent'; // 修复底色不统一的问题
                 box.style.borderBottomLeftRadius = '16px';
                 box.style.borderBottomRightRadius = '16px';
+                
+                var gridInner = document.createElement('div');
+                gridInner.style.overflow = 'hidden';
                 
                 var innerWrap = document.createElement('div');
                 innerWrap.style.padding = '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
@@ -4075,7 +4078,8 @@ function renderProfileActivityList(kind) {
                 
                 innerWrap.appendChild(inp);
                 innerWrap.appendChild(btn);
-                box.appendChild(innerWrap);
+                gridInner.appendChild(innerWrap);
+                box.appendChild(gridInner);
                 
                 var actionsEl = postEl.querySelector('.actions');
                 if (actionsEl) {
