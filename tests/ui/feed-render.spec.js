@@ -1,101 +1,56 @@
 const { test, expect } = require('@playwright/test');
 
-test.describe('Feed Rendering & Resiliency', () => {
-    test('renders feed correctly with fault tolerance', async ({ page }) => {
-        const jsErrors = [];
-        page.on('pageerror', err => jsErrors.push(err));
-        page.on('console', msg => {
-            if (msg.type() === 'error') {
-                jsErrors.push(new Error(msg.text()));
-            }
-        });
+const validPost = {
+  id: 'feed-healthy-post',
+  user_name: 'Alice',
+  content: 'A normal post that must remain visible.',
+  created_at: '2026-07-20T08:00:00.000Z',
+  visibility: 'public',
+  views: 3
+};
 
-        // 1 & 2. Mock /api/feed
-        await page.route('**/api/feed*', async route => {
-            await route.fulfill({
-                json: {
-                    ok: true,
-                    posts: [
-                        {
-                            id: 'post-1',
-                            user_name: 'Alice',
-                            content: 'Normal short post',
-                            created_at: new Date().toISOString()
-                        },
-                        {
-                            id: 'post-2',
-                            user_name: null, // Faulty post 
-                            content: 'This post is missing a user_name',
-                            created_at: new Date().toISOString()
-                        },
-                        {
-                            id: 'post-3',
-                            user_name: 'Bob',
-                            content: 'A'.repeat(180) + ' HiddenContent', // Long post
-                            created_at: new Date().toISOString()
-                        },
-                        {
-                            id: 'post-4',
-                            user_name: 'Charlie',
-                            content: 'Emoji test 👨‍👩‍👧‍👦', // Emoji
-                            created_at: new Date().toISOString()
-                        }
-                    ],
-                    endReached: true
-                }
-            });
-        });
+test('feed remains usable when an avatar request and one post render fail', async ({ page }) => {
+  const pageErrors = [];
+  let feedRequests = 0;
+  page.on('pageerror', error => pageErrors.push(error.message));
 
-        // 3. Mock /api/avatar/batch 500 Error
-        await page.route('**/api/avatar/batch', async route => {
-            await route.fulfill({ status: 500 });
-        });
-
-        // Go to page
-        await page.goto('/');
-
-        // Wait for feed to render
-        await page.waitForSelector('#feed .post');
-
-        // Check posts rendered
-        const posts = await page.locator('#feed .post').all();
-        // Since post-2 fails validation (no username/content/etc or caught by try-catch depending on logic), 
-        // we might have 3 or 4 posts.
-        // Wait, normalizePost assigns 'Unknown User' to empty usernames? 
-        // We just need to make sure the page didn't crash.
-        expect(posts.length).toBeGreaterThan(0);
-
-        // 5. Long text expands
-        const readMoreBtn = page.locator('.read-more-btn');
-        if (await readMoreBtn.count() > 0) {
-            await expect(page.locator('.post-content-hidden').first()).toBeHidden();
-            await readMoreBtn.first().click();
-            await expect(page.locator('.post-content-hidden').first()).toBeVisible();
-        }
-
-        // 6. Emoji text rendered without corruption
-        const feedContent = await page.locator('#feed').innerText();
-        expect(feedContent).toContain('Emoji test 👨‍👩‍👧‍👦');
-
-        // 7. Refresh feed
-        const refreshBtn = page.locator('.bottom-nav-item').first(); // Assumes first tab is home/refresh
-        if (await refreshBtn.isVisible()) {
-            await refreshBtn.click();
-            await page.waitForTimeout(500); // give time for refresh
-            expect(await page.locator('#feed .post').count()).toBeGreaterThan(0);
-        }
-
-        // 8. Ensure core.min.js was loaded
-        const scripts = await page.evaluate(() => Array.from(document.scripts).map(s => s.src));
-        const hasCoreMinJs = scripts.some(src => src.includes('core.min.js'));
-        expect(hasCoreMinJs).toBeTruthy();
-
-        // 9 & 10. No crash errors
-        const crashErrors = jsErrors.filter(e => 
-            e.message.includes('buildPostContentHtml is not defined') ||
-            e.message.includes('Cannot read properties of null (reading \'0\')') ||
-            e.message.includes('Cannot read properties of undefined (reading \'0\')')
-        );
-        expect(crashErrors).toHaveLength(0);
+  await page.route('**/api/feed**', route => {
+    feedRequests += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        posts: [
+          validPost,
+          { id: 'feed-missing-user', user_name: null, content: 'Incomplete legacy row', created_at: '2026-07-20T08:01:00.000Z' },
+          { id: 'feed-long-unicode', user_name: 'Bob', content: `${'x'.repeat(180)}😀Z`, created_at: '2026-07-20T08:02:00.000Z', visibility: 'public' }
+        ],
+        comments: [],
+        likes: [],
+        next_offset: 3,
+        endReached: true,
+        total_post_count: 3
+      })
     });
+  });
+  await page.route('**/api/avatar/batch', route => route.fulfill({ status: 500, body: 'unavailable' }));
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#feed .post[data-post-id="feed-healthy-post"]')).toBeVisible();
+  await expect(page.locator('#feed')).not.toContainText('加载失败');
+  await expect(page.locator('#feed .post[data-post-id="feed-healthy-post"] .avatar.clickable')).toHaveText('A');
+
+  const readMore = page.locator('.read-more-btn');
+  await expect(readMore).toHaveCount(1);
+  await readMore.click();
+  await expect(page.locator('.post-content-hidden')).toContainText('😀Z');
+
+  await page.evaluate(() => window.loadFeed(true));
+  await expect.poll(() => feedRequests).toBeGreaterThan(1);
+  await expect(page.locator('#feed .post[data-post-id="feed-healthy-post"]')).toBeVisible();
+
+  const scripts = await page.evaluate(() => Array.from(document.scripts, script => script.src));
+  expect(scripts.some(src => src.includes('core.min.js'))).toBe(true);
+  expect(pageErrors.filter(message => /buildPostContentHtml is not defined|reading ['\"]0['\"]/.test(message))).toEqual([]);
 });
