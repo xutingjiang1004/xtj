@@ -811,25 +811,21 @@
     .divider-row:hover td { background: transparent !important; }
 
     .btn-sm {
-        padding: 4px 12px; border-radius: 12px; border: 1px solid var(--border);
-        background: rgba(255,255,255,0.1); cursor: pointer; font-size: 12px;
+        padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+        background: var(--card-bg); cursor: pointer; font-size: 12px; font-weight: 500;
         color: var(--text); margin: 2px;
-        transition:
-            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-        transform: translateY(0) scale(1);
-        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.04);
     }
     .btn-sm:hover {
-        background: rgba(255,255,255,0.18);
+        background: var(--bg-secondary, rgba(0,0,0,0.03));
+        border-color: rgba(5,150,105,0.3);
+        color: var(--primary);
         transform: translateY(-1px);
-        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.06);
     }
     .btn-sm.del { color: var(--danger); border-color: rgba(255,59,96,0.3); }
-    .btn-sm.del:hover { background: rgba(255,59,96,0.12); }
+    .btn-sm.del:hover { background: rgba(255,59,96,0.05); color: var(--danger); }
     .btn-sm.primary { background: var(--primary); color: white; border-color: var(--primary); }
 
     .modal-box {

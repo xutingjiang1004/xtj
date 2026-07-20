@@ -5531,51 +5531,58 @@ async function initAdminClient() {
             h += '</tbody></table></div></div>';
         }
         // IP 历史
+        var tableWrapStyle = 'padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px;margin-bottom:24px';
+        var thStyle = 'padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500;background:var(--bg-secondary)';
+        var tdStyle = 'padding:12px 16px;color:var(--text-secondary);border-bottom:1px solid var(--border)';
+        
         if (p.unique_ips && p.unique_ips.length > 0) {
-            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udccd IP 历史 (' + p.unique_ips.length + ')</h4>';
-            h += '<div class="table-wrap"><table><thead><tr><th>IP</th><th>位置</th><th>次数</th><th>首次</th><th>最后</th></tr></thead><tbody>';
+            h += '<h4 style="margin:0 0 12px 0;font-size:16px;display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;display:flex">' + adminIcons.mapPin + '</span> IP 历史 <span style="font-size:12px;background:var(--bg-secondary);padding:2px 8px;border-radius:10px;color:var(--text-secondary)">' + p.unique_ips.length + '</span></h4>';
+            h += '<div class="card" style="' + tableWrapStyle + '"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead><tr><th style="'+thStyle+'">IP</th><th style="'+thStyle+'">位置</th><th style="'+thStyle+'">次数</th><th style="'+thStyle+'">首次</th><th style="'+thStyle+'">最后</th></tr></thead><tbody>';
             p.unique_ips.forEach(function(ip) {
-                h += '<tr><td style="font-family:monospace">' + escapeHtml(ip.ip) + '</td>';
-                h += '<td>' + escapeHtml(ip.location && ip.location.text || '') + '</td>';
-                h += '<td>' + ip.count + '</td>';
-                h += '<td>' + formatTime(ip.first_seen) + '</td>';
-                h += '<td>' + formatTime(ip.last_seen) + '</td></tr>';
+                h += '<tr style="border-bottom:1px solid var(--border)"><td style="' + tdStyle + ';font-family:var(--font-mono, monospace);font-size:13px">' + escapeHtml(ip.ip) + '</td>';
+                h += '<td style="' + tdStyle + '">' + escapeHtml(ip.location && ip.location.text || '') + '</td>';
+                h += '<td style="' + tdStyle + ';font-family:system-ui;font-weight:500;color:var(--text)">' + ip.count + '</td>';
+                h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(ip.first_seen) + '</td>';
+                h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(ip.last_seen) + '</td></tr>';
             });
             h += '</tbody></table></div></div>';
         }
         // 设备历史
         if (p.unique_devices && p.unique_devices.length > 0) {
-            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udcf1 设备历史 (' + p.unique_devices.length + ')</h4>';
-            h += '<div class="table-wrap"><table><thead><tr><th>设备</th><th>OS</th><th>浏览器</th><th>型号</th><th>次数</th></tr></thead><tbody>';
+            h += '<h4 style="margin:0 0 12px 0;font-size:16px;display:flex;align-items:center;gap:8px"><span style="color:#3b82f6;display:flex">' + adminIcons.history + '</span> 设备历史 <span style="font-size:12px;background:var(--bg-secondary);padding:2px 8px;border-radius:10px;color:var(--text-secondary)">' + p.unique_devices.length + '</span></h4>';
+            h += '<div class="card" style="' + tableWrapStyle + '"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead><tr><th style="'+thStyle+'">设备</th><th style="'+thStyle+'">OS</th><th style="'+thStyle+'">浏览器</th><th style="'+thStyle+'">型号</th><th style="'+thStyle+'">次数</th></tr></thead><tbody>';
             p.unique_devices.forEach(function(d) {
-                h += '<tr><td>' + escapeHtml(d.device_type || '') + '</td>';
-                h += '<td>' + escapeHtml(d.os || '') + '</td>';
-                h += '<td>' + escapeHtml(d.browser || '') + '</td>';
-                h += '<td>' + escapeHtml(d.model || '') + '</td>';
-                h += '<td>' + d.count + '</td></tr>';
+                h += '<tr style="border-bottom:1px solid var(--border)"><td style="' + tdStyle + '">' + escapeHtml(d.device_type || '') + '</td>';
+                h += '<td style="' + tdStyle + '">' + escapeHtml(d.os || '') + '</td>';
+                h += '<td style="' + tdStyle + '">' + escapeHtml(d.browser || '') + '</td>';
+                h += '<td style="' + tdStyle + '">' + escapeHtml(d.model || '') + '</td>';
+                h += '<td style="' + tdStyle + ';font-family:system-ui;font-weight:500;color:var(--text)">' + d.count + '</td></tr>';
             });
             h += '</tbody></table></div></div>';
         }
         // 指纹
         if (p.fingerprints && Object.keys(p.fingerprints).length > 0) {
-            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udd11 指纹信息</h4>';
+            h += '<h4 style="margin:0 0 12px 0;font-size:16px;display:flex;align-items:center;gap:8px"><span style="color:#f59e0b;display:flex">' + adminIcons.fingerprint + '</span> 指纹信息</h4>';
+            h += '<div class="card" style="margin:0 0 24px 0;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">';
             Object.keys(p.fingerprints).forEach(function(key) {
-                var label = key.replace(/_hash$/, '').replace(/_/g, ' ');
-                h += '<p><b>' + escapeHtml(label) + ':</b></p>';
+                var label = key.replace(/_hash$/, '').replace(/_/g, ' ').toUpperCase();
+                h += '<div><p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);font-weight:600;letter-spacing:0.5px">' + escapeHtml(label) + '</p>';
                 p.fingerprints[key].forEach(function(fp) {
-                    h += '<code style="font-size:11px;word-break:break-all;display:block;margin:2px 0;padding:4px 8px;background:var(--bg);border-radius:4px">' + escapeHtml(fp) + '</code>';
+                    h += '<code style="font-size:12px;font-family:var(--font-mono, monospace);word-break:break-all;display:block;margin:4px 0;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text)">' + escapeHtml(fp) + '</code>';
                 });
+                h += '</div>';
             });
             h += '</div>';
         }
         // 位置历史
         if (p.location_history && p.location_history.length > 0) {
-            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udccd 位置历史</h4>';
-            h += '<div class="table-wrap"><table><thead><tr><th>位置</th><th>IP</th><th>时间</th></tr></thead><tbody>';
+            h += '<h4 style="margin:0 0 12px 0;font-size:16px;display:flex;align-items:center;gap:8px"><span style="color:#10b981;display:flex">' + adminIcons.mapPin + '</span> 位置历史 <span style="font-size:12px;background:var(--bg-secondary);padding:2px 8px;border-radius:10px;color:var(--text-secondary)">' + p.location_history.length + '</span></h4>';
+            h += '<div class="card" style="' + tableWrapStyle + '"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead><tr><th style="'+thStyle+'">位置</th><th style="'+thStyle+'">IP</th><th style="'+thStyle+'">时间</th></tr></thead><tbody>';
             p.location_history.forEach(function(loc) {
-                h += '<tr><td>' + escapeHtml(loc.location || '') + '</td>';
-                h += '<td>' + escapeHtml(loc.ip || '') + '</td>';
-                h += '<td>' + formatTime(loc.time) + '</td></tr>';
+                h += '<tr style="border-bottom:1px solid var(--border)">';
+                h += '<td style="' + tdStyle + ';font-weight:500;color:var(--text)">' + escapeHtml(loc.location || '') + '</td>';
+                h += '<td style="' + tdStyle + ';font-family:var(--font-mono, monospace);font-size:13px">' + escapeHtml(loc.ip || '') + '</td>';
+                h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(loc.time) + '</td></tr>';
             });
             h += '</tbody></table></div></div>';
         }
