@@ -2005,13 +2005,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     return false;
                 });
             });
-            document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
-            document.getElementById('loginPwInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') doLogin();
-            });
-            document.getElementById('loginNickInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') document.getElementById('loginPwInp').focus();
-            });
+            var btn = document.getElementById('loginSubmitBtn');
+            if (btn) btn.addEventListener('click', doLogin);
+            var pwInp = document.getElementById('loginPwInp');
+            if (pwInp) pwInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+            var nickInp = document.getElementById('loginNickInp');
+            if (nickInp) nickInp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && pwInp) pwInp.focus(); });
 
             // API 请求辅助函数（用于管理员登录等需要后端 API 的场景）
             async function apiCall(method, path, body) {
@@ -2565,7 +2564,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     }]);
                     
                     if (error) {
-                        // 新头像插入失败——不删旧头像，保证用户至少有一个头像
+                        supabase.storage.from('photo-wall').remove([newAvatarPath]);
                         showToast('上传失败: ' + error.message);
                         return;
                     }
@@ -5846,12 +5845,25 @@ function renderProfileActivityList(kind) {
                   ${buildPostLocationHtml(normalized)}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
-                  ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
-                    if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                      return `<div class="comment-item cat-ai-comment" data-comment-id="${escapeHtml(c.id)}" data-parent-comment-id="${escapeHtml(c.parent_comment_id || '')}"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">${escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚')}</span></div><div class="comment-item-content">${escapeHtml(c.content)}</div></div></div></div>`;
-                    }
-                    return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
-                  }).join('')}</div>` : ''}
+                  ${pComms.length ? `<div class="comments">${(function(){
+                      var roots = pComms.filter(function(c) { return !c.parent_comment_id; });
+                      var children = pComms.filter(function(c) { return c.parent_comment_id; });
+                      var html = '';
+                      roots.forEach(function(r) {
+                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>';
+                        var replies = children.filter(function(c) { return c.parent_comment_id === r.id; });
+                        if (replies.length > 0) {
+                          html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
+                            if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span></div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                            }
+                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div></div>';
+                          }).join('') + '</div>';
+                        }
+                        html += '</div>';
+                      });
+                      return html;
+                  })()}</div>` : ''}
                 </div>`;
             }
 
