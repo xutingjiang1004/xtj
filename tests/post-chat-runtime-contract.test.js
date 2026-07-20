@@ -26,5 +26,13 @@ test('chat detail ignores stale conversations and deduplicates retry controls', 
   const detail = between(core, 'async function loadDockChatMessages(userName, forceScroll)', 'function renderDockMessages');
   assert.match(detail, /loadSeq\s*=\s*\+\+_dockChatLoadSeq/);
   assert.match(detail, /loadSeq !== _dockChatLoadSeq \|\| dockChatActiveUser !== userName/);
+  assert.match(detail, /requestController/);
+  assert.match(detail, /12000/);
   assert.match(detail, /querySelector\('\.chat-load-retry'\)[\s\S]*previousRetry\.remove\(\)/);
+});
+
+test('opening a chat does not immediately duplicate the detail request through polling', () => {
+  const openChat = between(core, 'window.openChat = function(userName)', 'async function loadDockChatList()');
+  assert.match(openChat, /startDMPolling\(60000, true\)/);
+  assert.match(core, /startDMPolling\(300000, !!\(options && options\.source === 'openChat'\)\)/);
 });
