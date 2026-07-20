@@ -1409,7 +1409,11 @@ window.throttleRAF = function(fn) {
         // 鐢?data 璁剧疆鏂囨湰锛岄珮鏁?
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        targetEl.innerHTML = renderMarkdown(rendered);
+        var now = Date.now();
+        if (!targetEl._lastRender || now - targetEl._lastRender > 50 || !pending) {
+          targetEl.innerHTML = renderMarkdown(rendered);
+          targetEl._lastRender = now;
+        }
       }
       ensureCursor();
       if (typeof options.onRender === 'function') {
