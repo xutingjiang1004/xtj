@@ -5396,9 +5396,9 @@ async function initAdminClient() {
     }
     async function loadOnlineData(el) {
         try {
-            var resp = await window.xtjProtectedFetch('/admin/stats/online');
-            var data = await resp.json();
-            if (!resp.ok) { el.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(data.error || '加载失败') + '</div></div>'; return; }
+            // The standalone admin page owns its authenticated request path.
+            // Do not depend on the frontend-only xtjProtectedFetch helper here.
+            var data = await apiCall('GET', '/admin/stats/online');
             var h = '<div class="card">';
             h += '<h3>\ud83d\udfe2 实时在线用户</h3>';
             h += '<p style="color:var(--text-secondary);margin-bottom:16px">最近5分钟有活动的用户 \u00b7 每30秒自动刷新</p>';
@@ -5439,9 +5439,7 @@ async function initAdminClient() {
         if (!panel) return;
         panel.innerHTML = '<div class="card"><div class="skeleton-block" style="height:400px"></div></div>';
         try {
-            var resp = await window.xtjProtectedFetch('/admin/user-profile?user_name=' + encodeURIComponent(userName));
-            var profile = await resp.json();
-            if (!resp.ok) { panel.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(profile.error || '加载失败') + '</div></div>'; return; }
+            var profile = await apiCall('GET', '/admin/user-profile?user_name=' + encodeURIComponent(userName));
             renderUserProfile(panel, profile);
         } catch(e) {
             panel.innerHTML = '<div class="card"><div class="empty">加载失败: ' + escapeHtml(e.message || '') + '</div></div>';
