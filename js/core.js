@@ -8505,9 +8505,35 @@ function renderProfileActivityList(kind) {
                         renderPhotoWallLockedState();
                     } else {
                         setPhotoWallLockedState(false);
-                        ensurePhotoWallVisibleContent().catch(function(err) {
-                            console.warn('[photo-wall] initial open render fallback failed', err);
+                        ensurePhotoWallLoaded().then(function() {
+                            if (typeof window.initPhotoWall !== 'function') {
+                                throw new Error('photo_wall_init_missing');
+                            }
+                            return window.initPhotoWall();
+                        }).catch(function(error) {
+                            var grid = document.getElementById('photoGrid');
+                            if (grid) {
+                                grid.innerHTML =
+                                    '<div class="photo-wall-empty">' +
+                                    '<div>照片墙模块加载失败，请重试</div>' +
+                                    '</div>';
+                            }
+                            console.error('[PhotoWall] module load failed:', error);
                         });
+                        // 自动兜底：延迟 100ms 检查 photoGrid 是否仍为空
+                        setTimeout(function() {
+                            var grid = document.getElementById('photoGrid');
+                            if (!grid || grid.children.length > 0) return;
+                            if (typeof window.renderPhotoWall === 'function') {
+                                window.renderPhotoWall().catch(function(e) {
+                                    console.error('[PhotoWall] auto-fallback render failed:', e);
+                                });
+                            } else if (typeof window.initPhotoWall === 'function') {
+                                window.initPhotoWall(true).catch(function(e) {
+                                    console.error('[PhotoWall] auto-fallback init failed:', e);
+                                });
+                            }
+                        }, 100);
                     }
                 }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
