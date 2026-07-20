@@ -2125,6 +2125,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             }
                             if (!loginRes.user_token) {
                                 showToast("管理员用户会话建立失败", "error");
+                                btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
                             setUserToken(loginRes.user_token);
@@ -2143,6 +2144,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
                             showToast(tokenData.error || "账号或密码错误", "error");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         setUserToken(tokenData.token);

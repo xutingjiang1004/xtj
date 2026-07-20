@@ -5797,6 +5797,7 @@ app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, r
 });
 
 app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
+  try {
   const { id } = req.params;
   const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
   const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
@@ -5806,6 +5807,7 @@ app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] delete_announcement:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 // ===================== 公告已读（跨设备同步） ======================
@@ -6014,6 +6016,7 @@ app.post('/api/report/notifications/mark-read', authenticateUser, async (req, re
 
 // ===================== 照片管理 ======================
 app.get('/admin/photos', verifyToken, async (req, res) => {
+  try {
   const { data, error } = await supabase.from('posts')
     .select('id, user_name, content, media_url, actor_key, created_at, views, is_deleted, deleted_at, deleted_by')
     .eq('media_type', '__photo_wall__')
@@ -6022,6 +6025,7 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
     .limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ data });
+  } catch (e) { console.error('[admin] photos:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
@@ -6153,8 +6157,9 @@ async function hardDeleteContent(params) {
     var commentDelete = await supabase.from('comments').delete().eq('post_id', params.postId);
     if (commentDelete.error) return { error: commentDelete.error };
     var related = await supabase.from('posts').select('id, media_type, media_url, content')
+      .or('media_url.eq.' + params.postId + ',content.ilike.%' + params.postId.replace(/'/g, "''") + '%')
       .in('media_type', ['__post_view__', '__report__'])
-      .limit(5000);  // 防止全表扫描 OOM
+      .limit(5000);
     if (related.error) return { error: related.error };
     var relatedIds = (related.data || []).filter(function(row) {
       if (row.media_type === '__post_view__') return String(row.media_url || '') === String(params.postId);
@@ -7376,9 +7381,11 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 
 // ===================== 封禁管理 ======================
 app.get('/admin/bans', verifyToken, async (req, res) => {
+  try {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ data });
+  } catch (e) { console.error('[admin] bans:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
@@ -7455,6 +7462,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
 });
 
 app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
+  try {
   var auditUser = 'unknown';
   try {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -7471,13 +7479,16 @@ app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   await logAdminAudit('unban_user', auditUser, 'ban_id:' + id);
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] unban:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 // ===================== 禁言管理 ======================
 app.get('/admin/mutes', verifyToken, async (req, res) => {
+  try {
   const { data, error } = await supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ data });
+  } catch (e) { console.error('[admin] mutes:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
@@ -7525,6 +7536,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
 });
 
 app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
+  try {
   var auditUser = 'unknown';
   try {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -7543,13 +7555,16 @@ app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   await logAdminAudit('unmute_user', auditUser, 'mute_id:' + id);
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] unmute:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 // ===================== 黑名单管理 ======================
 app.get('/admin/blacklist', verifyToken, async (req, res) => {
+  try {
   const { data, error } = await supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ data });
+  } catch (e) { console.error('[admin] blacklist:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res) => {
@@ -7599,6 +7614,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
 });
 
 app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
+  try {
   const { id } = req.params;
   const { data: target } = await supabase.from('blacklist').select('user_name').eq('id', id).maybeSingle();
   const { error } = await supabase.from('blacklist').update({
@@ -7607,6 +7623,7 @@ app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   if (target) await logAdminAudit('unblacklist_user', ADMIN_USERNAME, 'user:' + target.user_name + ' blacklist_id:' + id);
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] unblacklist:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 // ===================== 管理员删除用户账号 =====================
@@ -7656,7 +7673,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
             var url = p.media_url;
             var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
             if (pathMatch) {
-              var p = pathMatch[1];
+              var p = decodeURIComponent(pathMatch[1]);
               if (p.indexOf('..') === -1 && p.indexOf('/') === -1) storagePaths.push(p);
             }
           }
@@ -12113,6 +12130,25 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
       }
       if (finishReason === 'tool_calls') break;
+      if (finishReason === 'stop' || finishReason === 'length') {
+        await finishStream(res, {
+          contentBuffer: contentBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
+          thinkingMode: thinkingMode,
+          useThinking: useThinking,
+          usedModel: usedModel,
+          searchMeta: _toolSearchMeta || _sharedSearchMeta,
+          siteCards: siteToolCards,
+          finishReason: finishReason,
+          userName: userName,
+          convId: convId,
+          message: message,
+          streamSeq: streamSeq,
+          ctx: ctx,
+          reasoningStartedAt: reasoningStartedAt
+        });
+        return safeEnd();
+      }
     }
     
     // 处理 tool calls

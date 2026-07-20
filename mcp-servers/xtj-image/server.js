@@ -130,7 +130,8 @@ server.tool("image_batch_optimize", "批量优化目录下所有图片", { direc
   const dir = safeResolve(args.directory);
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`目录不存在: ${dir}`);
   const g = args.glob||"*.{jpg,jpeg,png,webp}";
-  const exts = g.replace("{","").replace("}","").split(",").map(s=>path.extname(s.trim().replace("*","")).toLowerCase());
+  const braceMatch = g.match(/\{([^}]+)\}/);
+  const exts = braceMatch ? braceMatch[1].split(",").map(s => "." + s.trim().toLowerCase()) : [path.extname(g).toLowerCase()];
   const files = fs.readdirSync(dir).filter(f => exts.includes(path.extname(f).toLowerCase()));
   if (!files.length) return { content: [{ type: "text", text: `⚠️ 未找到匹配图片 (${g})` }] };
   const fmt = args.format||"webp"; const q = args.quality??80; const mw = args.max_width||1920;
