@@ -15,7 +15,7 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
     if (!key.startsWith('/admin/')) return route.continue();
     counts[key] = (counts[key] || 0) + 1;
 
-    if (key === '/admin/login') return json(route, { ok: true });
+    if (key === '/admin/login') return json(route, { ok: true, token: 'test-admin-token' });
     if (key === '/admin/data') return json(route, {
       posts: [], likes: [], comments: [], announcements: [], bans: []
     });
