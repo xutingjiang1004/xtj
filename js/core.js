@@ -3937,68 +3937,126 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                 }
-                closeOtherPostActionModals('commentModal');
-                activePostId = postId;
-                var input = document.getElementById("commInp");
-                if (input) input.value = "";
-                openModal("commentModal");
-                setTimeout(() => document.getElementById("commInp").focus(), 100);
-            };
-            var commBtn = document.getElementById("commBtn");
-            if (commBtn) commBtn.onclick = async () => {
-                if (commBtn.disabled) return;
-                if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
-                const content = document.getElementById("commInp").value.trim();
-                if (!content) { showToast("请输入评论内容"); return; }
-                const btn = document.getElementById("commBtn");
-                const targetPostId = String(activePostId || '').trim().toLowerCase();
-                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
-                    showToast("帖子参数无效");
+                
+                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                if (!postEl) return;
+                
+                // 如果已经存在，则收起（切换显示状态）
+                var existingBox = postEl.querySelector('.inline-comment-box');
+                if (existingBox) {
+                    existingBox.remove();
                     return;
                 }
-                btn.textContent = "提交中..";
-                btn.disabled = true;
-                try {
-                    const response = await window.xtjProtectedFetch('/api/post/comment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ post_id: targetPostId, content: content })
-                    });
-                    const result = await response.json().catch(function() { return {}; });
-                    if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
-                    touchUserSession(false);
-                    closeModal("commentModal");
-                    showToast("评论成功");
-                    var scrollEl = document.getElementById('panelPosts');
-                    var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
-                    var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
-                    if (insertedComment) {
-                        feedAllComments = (feedAllComments || []).filter(function(item) {
-                            return !(item && item.id != null && String(item.id) === String(insertedComment.id));
-                        }).concat([insertedComment]);
-                        writeFeedCacheSnapshot();
-                        await renderFeedFromMemoryState();
-                    } else {
-                        await loadFeed(true);
+                
+                // 移除其他帖子下可能打开的内联输入框，保持界面整洁
+                document.querySelectorAll('.inline-comment-box').forEach(function(el) {
+                    el.remove();
+                });
+                
+                // 创建内联评论框
+                var box = document.createElement('div');
+                box.className = 'inline-comment-box';
+                box.style.padding = '12px 16px';
+                box.style.borderTop = '1px solid var(--border)';
+                box.style.display = 'flex';
+                box.style.gap = '8px';
+                box.style.alignItems = 'center';
+                box.style.background = 'var(--bg)';
+                box.style.borderBottomLeftRadius = '16px';
+                box.style.borderBottomRightRadius = '16px';
+                box.style.marginTop = '-8px';
+                
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.className = 'inline-comment-inp';
+                inp.placeholder = '写下你的想法...';
+                inp.style.flex = '1';
+                inp.style.padding = '8px 12px';
+                inp.style.border = '1px solid var(--border)';
+                inp.style.borderRadius = '20px';
+                inp.style.background = 'var(--bg-secondary)';
+                inp.style.outline = 'none';
+                inp.style.fontSize = '14px';
+                
+                var btn = document.createElement('button');
+                btn.className = 'btn-sm btn-primary';
+                btn.textContent = '发送';
+                btn.style.borderRadius = '20px';
+                btn.style.padding = '6px 14px';
+                
+                btn.onclick = async function() {
+                    if (btn.disabled) return;
+                    if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
+                    var content = inp.value.trim();
+                    if (!content) { showToast("请输入评论内容"); return; }
+                    var targetPostId = String(postId || '').trim().toLowerCase();
+                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
+                        showToast("帖子参数无效");
+                        return;
                     }
-                    requestAnimationFrame(function() {
-                        var p = document.getElementById('panelPosts');
-                        if (p && savedScroll > 0) p.scrollTop = savedScroll;
-                        var postEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
-                        if (postEl) postEl.classList.add('visible');
-                    });
-                    loadProfileActivity(true);
-                } catch (e) {
-                    showToast("评论失败: " + (e.message || "未知错误"));
-                    console.error(e);
-                } finally {
-                    btn.textContent = "发布评论";
-                    btn.disabled = false;
+                    
+                    btn.disabled = true;
+                    btn.textContent = "发送中..";
+                    try {
+                        const response = await window.xtjProtectedFetch('/api/post/comment', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ post_id: targetPostId, content: content })
+                        });
+                        const result = await response.json().catch(function() { return {}; });
+                        if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
+                        
+                        touchUserSession(false);
+                        showToast("评论成功");
+                        box.remove();
+                        
+                        var scrollEl = document.getElementById('panelPosts');
+                        var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
+                        var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
+                        
+                        if (insertedComment) {
+                            feedAllComments = (feedAllComments || []).filter(function(item) {
+                                return !(item && item.id != null && String(item.id) === String(insertedComment.id));
+                            }).concat([insertedComment]);
+                            writeFeedCacheSnapshot();
+                            await renderFeedFromMemoryState();
+                        } else {
+                            await loadFeed(true);
+                        }
+                        
+                        requestAnimationFrame(function() {
+                            var p = document.getElementById('panelPosts');
+                            if (p && savedScroll > 0) p.scrollTop = savedScroll;
+                            var newEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
+                            if (newEl) newEl.classList.add('visible');
+                        });
+                        loadProfileActivity(true);
+                        
+                        // 小猫 AI 自动回复轮询
+                        if (content && /@小猫(?=\s|$|[^\w\u4e00-\u9fa5])/.test(content) && insertedComment) {
+                            pollCatAiReply(insertedComment.id, targetPostId);
+                        }
+                    } catch (e) {
+                        showToast("评论失败: " + (e.message || "未知错误"));
+                        btn.disabled = false;
+                        btn.textContent = '发送';
+                    }
+                };
+                
+                inp.onkeydown = function(e) {
+                    if (e.key === 'Enter') btn.click();
+                };
+                
+                box.appendChild(inp);
+                box.appendChild(btn);
+                
+                var actionsEl = postEl.querySelector('.actions');
+                if (actionsEl) {
+                    actionsEl.parentNode.insertBefore(box, actionsEl.nextSibling);
+                } else {
+                    postEl.appendChild(box);
                 }
-                // 小猫 AI 自动回复轮询
-                if (content && /@小猫(?=\s|$|[^\w\u4e00-\u9fa5])/.test(content) && insertedComment) {
-                    pollCatAiReply(insertedComment.id, targetPostId);
-                }
+                inp.focus();
             };
 
             // ===================== 删除帖子 =====================

@@ -728,17 +728,6 @@
         </div>
     </div>
 
-    <!-- ========== 模态框(保留) ========== -->
-    <div class="modal-overlay post-action-modal" id="commentModal" onclick="if(event.target===this)closeModal('commentModal')">
-        <div class="modal-box glass post-action-box post-comment-modal" onclick="event.stopPropagation()">
-            <h3 class="post-action-title">发表评论</h3>
-            <textarea id="commInp" class="post-comment-textarea" placeholder="写下你的想法..."></textarea>
-            <div class="post-action-actions">
-                <button class="btn btn-ghost" onclick="closeModal('commentModal')">取消</button>
-                <button class="btn btn-primary" id="commBtn">发布评论</button>
-            </div>
-        </div>
-    </div>
 
     <div class="modal-overlay post-action-modal" id="delModal" onclick="if(event.target===this)closeModal('delModal')">
         <div class="modal-box glass post-action-box post-delete-modal" onclick="event.stopPropagation()">
