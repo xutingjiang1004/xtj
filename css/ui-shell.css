@@ -1172,6 +1172,14 @@
    three-column grid after the original mobile rule. Keep every post surface
    inside the visual viewport on narrow touch screens. */
 @media (max-width: 767.98px) {
+  /* The active panel selector is more specific than the legacy vertical
+     baseline. Restore the original three side-by-side statistic cards. */
+  #panelPosts .stats,
+  #panelPosts.active .stats {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
   #panelPosts .wrap,
   #panelPosts.active .wrap,
   #panelPosts #publishBox,
