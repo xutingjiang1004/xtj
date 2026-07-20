@@ -2350,7 +2350,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarUrl;
-                            avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像">';
+                            var imgHtml = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
+                            avatarEl.innerHTML = imgHtml;
+                            // 写入本地缓存
+                            if (userName === currentUser) {
+                                try { var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {}); cv[currentUser] = url; window.safeLocalStorageSetJSON(AVATAR_CACHE_KEY, cv); } catch(_) {}
+                            }
                         }
                     }
                     
@@ -7140,15 +7145,14 @@ function renderProfileActivityList(kind) {
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
-                    const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
-                    sb.from("comments").select("*").order("created_at"),
-                    sb.from("likes").select("*").order("created_at", { ascending: false })
-                    ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== '__user_style__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__ai_english_learning__' && canViewPost(p); });
-                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
-                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
-                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
+                    var snapshotRes = await fetch(apiUrl('/api/stats/snapshot?limit=500'));
+                    if (!snapshotRes.ok) return;
+                    var snapshot = await snapshotRes.json();
+                    if (!snapshot || !snapshot.ok) return;
+                    statAllPosts = snapshot.posts || [];
+                    statAllComments = snapshot.comments || [];
+                    statAllLikes = snapshot.likes || [];
+                    statViewEvents = snapshot.view_events || [];
                     statCacheTime = Date.now();
                 } catch(e) {}
             };
