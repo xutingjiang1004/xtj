@@ -4988,15 +4988,16 @@ function renderProfileActivityList(kind) {
             }
 
             function getAvatarHtml(username, post) {
-                var avatarUrl = avatarCache[username];
-                if (!avatarUrl) {
+                var safeUser = username || '';
+                var avatarUrl = avatarCache[safeUser];
+                if (!avatarUrl && safeUser) {
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                        avatarUrl = cachedAvatars[username];
-                        if (avatarUrl) avatarCache[username] = avatarUrl;
+                        avatarUrl = cachedAvatars[safeUser];
+                        if (avatarUrl) avatarCache[safeUser] = avatarUrl;
                     } catch(e) {}
                 }
-                var safeName = escapeHtml(username);
+                var safeName = escapeHtml(safeUser);
                 var safeNameJs = safeName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 // ?????onclick ???? div ???? .avatar ??????
                 if (avatarUrl) {
@@ -6159,6 +6160,11 @@ function renderProfileActivityList(kind) {
             window.isSystemPost = isSystemPost;
 
             function getFeedBasePostQuery() {
+                if (!sb) {
+                    return {
+                        range: function() { return Promise.resolve({ data: [], error: null }); }
+                    };
+                }
                 return applyVisiblePostQueryFilters(
                     sb.from("posts").select("*")
                 ).order("created_at", { ascending: false });
@@ -6211,10 +6217,14 @@ function renderProfileActivityList(kind) {
 
                 if (postIds.length && !usedApi) {
                     // 仅 Supabase 直连时需要单独获取评论和点赞
-                    relatedPromise = Promise.all([
-                        sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
-                        sb.from("likes").select("*").in("post_id", postIds)
-                    ]);
+                    if (!sb) {
+                        relatedPromise = Promise.resolve([ { data: [], error: null }, { data: [], error: null } ]);
+                    } else {
+                        relatedPromise = Promise.all([
+                            sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
+                            sb.from("likes").select("*").in("post_id", postIds)
+                        ]);
+                    }
                     if (deferRelated) {
                         return {
                             offset: start,
