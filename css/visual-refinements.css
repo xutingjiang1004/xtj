@@ -296,24 +296,6 @@
 }
 
 /* ========== 11. 长文本丝滑展开 (Smooth Read-More) ========== */
-.read-more-wrap {
-  display: inline;
-}
-.read-more-hidden {
-  display: none;
-}
-.read-more-btn {
-  color: var(--primary, #16a085);
-  cursor: pointer;
-  font-weight: 600;
-  margin-left: 4px;
-  font-size: var(--xtj-font-small);
-  transition: opacity 0.2s;
-}
-.read-more-btn:hover {
-  opacity: 0.8;
-  text-decoration: underline;
-}
 
 /* ========== 12. 图片查看器过渡 (Image Viewer Transition) ========== */
 .img-viewer.img-transition {
