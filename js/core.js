@@ -5181,9 +5181,10 @@ function renderProfileActivityList(kind) {
             function buildPostContentHtml(content) {
                 if (!content) return '';
                 var maxLen = 180;
-                if (content.length <= maxLen) return escapeHtml(content);
-                var visible = escapeHtml(content.slice(0, maxLen)) + '...';
-                var hidden = escapeHtml(content.slice(maxLen));
+                var chars = Array.from(String(content));
+                if (chars.length <= maxLen) return escapeHtml(String(content));
+                var visible = escapeHtml(chars.slice(0, maxLen).join('')) + '...';
+                var hidden = escapeHtml(chars.slice(maxLen).join(''));
                 return '<div class="post-content-wrap">' +
                        '<span class="post-content-visible">' + visible + '</span>' +
                        '<span class="post-content-hidden" style="display:none">' + hidden + '</span>' +
@@ -5858,6 +5859,20 @@ function renderProfileActivityList(kind) {
                     return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
                   }).join('')}</div>` : ''}
                 </div>`;
+            }
+
+            // A malformed legacy record must not take down the complete feed.
+            function renderPostCardSafely(post, commentMap, likeMap, likeUserMap) {
+                try {
+                    return renderPostCard(post, commentMap, likeMap, likeUserMap);
+                } catch (error) {
+                    console.error('[feed-render] failed post:', {
+                        postId: post && post.id,
+                        userName: post && post.user_name,
+                        error: error
+                    });
+                    return '';
+                }
             }
 
             function updatePostFilterStateFromDom() {
@@ -7026,7 +7041,7 @@ function renderProfileActivityList(kind) {
                 var feed = document.getElementById("feed");
                 var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
                 var postsHtml = posts.map(function(post) {
-                    return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                    return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
                 }).join("");
                 var sentinel = document.getElementById("feedSentinel");
                 var tempContainer = document.createElement("div");
@@ -7048,7 +7063,7 @@ function renderProfileActivityList(kind) {
                 var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
                 if (visiblePosts.length) {
                     feed.innerHTML = visiblePosts.map(function(post) {
-                        return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                        return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
                     }).join("");
                 } else {
                     feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
