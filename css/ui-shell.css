@@ -1168,6 +1168,43 @@
   border-inline-start: 1px solid var(--xtj-content-line) !important;
 }
 
+/* This is deliberately last: older shell layers reintroduced a desktop
+   three-column grid after the original mobile rule. Keep every post surface
+   inside the visual viewport on narrow touch screens. */
+@media (max-width: 767.98px) {
+  #panelPosts .wrap,
+  #panelPosts.active .wrap,
+  #panelPosts #publishBox,
+  #panelPosts #postFilterBar,
+  #panelPosts #feed {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+  }
+
+  #panelPosts .wrap,
+  #panelPosts.active .wrap {
+    gap: 16px !important;
+    padding-inline: 0 !important;
+  }
+
+  #panelPosts .publish-box {
+    padding: 18px !important;
+  }
+
+  #panelPosts .post-filter-toggle-row {
+    min-width: 0;
+  }
+
+  #panelPosts .post-filter-summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 #panelProfile .dock-profile-container {
   padding-bottom: calc(154px + env(safe-area-inset-bottom)) !important;
   scroll-padding-bottom: calc(154px + env(safe-area-inset-bottom));
