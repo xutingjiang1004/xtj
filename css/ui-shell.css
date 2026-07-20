@@ -364,14 +364,22 @@
 
 #panelPosts .stats,
 #panelPosts.active .stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0;
   overflow: clip;
   border: 1px solid var(--xtj-content-line) !important;
   border-radius: var(--xtj-content-radius) !important;
   background: var(--xtj-content-surface) !important;
   box-shadow: 0 10px 26px rgba(56, 112, 93, 0.06) !important;
+}
+
+@media (min-width: 768px) {
+  #panelPosts .stats,
+  #panelPosts.active .stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 #panelPosts .stat-card,
@@ -770,10 +778,18 @@
 }
 
 #panelProfile .profile-totals-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: row;
+  justify-content: space-around;
   padding: 14px 8px !important;
   text-align: center;
+}
+
+@media (min-width: 768px) {
+  #panelProfile .profile-totals-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 #panelProfile .profile-total-sep {
