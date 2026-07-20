@@ -1173,6 +1173,15 @@
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
             transition: var(--trans-smooth);
         }
+        .comment-del-btn {
+            background: none; border: none; color: #ef4444; font-size: 12px;
+            cursor: pointer; padding: 4px 8px; border-radius: 4px; opacity: 0.8;
+            transition: opacity 0.2s, background 0.2s;
+            margin-left: auto; white-space: nowrap; flex-shrink: 0;
+        }
+        .comment-del-btn:hover { opacity: 1; background: rgba(239, 68, 68, 0.1); }
+        [data-theme="dark"] .comment-del-btn { color: #f87171; }
+        [data-theme="dark"] .comment-del-btn:hover { background: rgba(248, 113, 113, 0.15); }
 .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.4);
             display: flex; align-items: center; justify-content: center; z-index: 100;
