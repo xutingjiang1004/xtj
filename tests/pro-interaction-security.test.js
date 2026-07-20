@@ -39,7 +39,8 @@ test('comment writes derive identity from the authenticated server session', () 
   const remove = routeBlock("app.delete('/api/post/comment/:commentId'", '// Set the authenticated user');
   assert.match(remove, /existing\.data\.user_name !== req\.userName/);
   assert.match(remove, /req\.userName !== ADMIN_USERNAME/);
-  assert.match(remove, /Comment still exists after delete/);
+  assert.match(remove, /delete\(\)\.eq\('id', commentId\)[\s\S]*\.select\('id'\)/);
+  assert.match(remove, /Comment delete was not confirmed/);
   assert.match(core, /xtjProtectedFetch\('\/api\/post\/comment'/);
   assert.doesNotMatch(core, /sb\.from\(["']comments["']\)\.insert/);
 });
