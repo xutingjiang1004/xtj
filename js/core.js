@@ -3367,15 +3367,20 @@ function renderProfileActivityList(kind) {
             window.deleteFeedComment = async function(commentId, btn) {
                 if (!confirm('确定要永久删除这条评论吗？')) return;
                 var originalText = btn ? btn.textContent : '删除';
+                var controller = typeof AbortController === 'function' ? new AbortController() : null;
+                var timeout = setTimeout(function() {
+                    if (controller) controller.abort();
+                }, 10000);
                 try {
                     if (btn) {
                         btn.disabled = true;
                         btn.textContent = '删除中..';
                     }
                     var response = await window.xtjProtectedFetch('/api/post/comment/' + encodeURIComponent(commentId), {
-                        method: 'DELETE'
+                        method: 'DELETE',
+                        signal: controller ? controller.signal : undefined
                     });
-                    var result = await response.json();
+                    var result = await response.json().catch(function() { return {}; });
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
                     feedAllComments = (feedAllComments || []).filter(function(item) {
@@ -3390,11 +3395,13 @@ function renderProfileActivityList(kind) {
                     showToast('评论已删除');
                 } catch (e) {
                     console.error('deleteFeedComment error:', e);
-                    showToast(e.message || '删除失败');
+                    showToast(e && e.name === 'AbortError' ? '删除超时，请重试' : (e.message || '删除失败'));
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = originalText;
                     }
+                } finally {
+                    clearTimeout(timeout);
                 }
             };
 
