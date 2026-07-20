@@ -18,7 +18,12 @@ function createPhotoDataRuntime(fetchImpl) {
     photoWallData: [],
     pwCurrentSortedPhotos: [],
     addEventListener(type, handler) { windowListeners[type] = handler; },
-    getUserAuthHeaders: async () => ({ Authorization: 'Bearer test-token' })
+    getUserAuthHeaders: async () => ({ Authorization: 'Bearer test-token' }),
+    safeStorage: {
+      get: key => storage.has(key) ? storage.get(key) : null,
+      set: (key, value) => storage.set(key, String(value)),
+      remove: key => storage.delete(key)
+    }
   };
   const context = {
     window,
@@ -41,10 +46,11 @@ function createPhotoDataRuntime(fetchImpl) {
     console,
     setTimeout,
     clearTimeout,
-    AbortController
+    AbortController,
+    Date
   };
   vm.runInNewContext(dataSource, context, { filename: 'data.js' });
-  return { window, storage, windowListeners, documentListeners };
+  return { window, storage, windowListeners, documentListeners, context };
 }
 
 test('public photo API loads even when window.sb is unavailable', async () => {
@@ -154,4 +160,93 @@ test('photo deletion converges after resume and reports durable cleanup state', 
 test('compact photo preview preserves 44px coarse-pointer controls', () => {
   const css = fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8');
   assert.match(css, /@media \(max-width: 375px\) and \(pointer: coarse\) \{[\s\S]*?#photoPreviewOverlay \.pp-preview-toolbar > button,[\s\S]*?min-width: 44px !important;[\s\S]*?min-height: 44px !important;/);
+});
+
+test('realtime channel recovers properly after pagehide and visibility changes', async () => {
+  let fetchedCount = 0;
+  const runtime = createPhotoDataRuntime(async () => {
+    fetchedCount++;
+    return { ok: true, json: async () => ({ ok: true, data: [] }) };
+  });
+
+  let unsubscribedCount = 0;
+  let subscribedCount = 0;
+  let mockChannel = null;
+
+  runtime.window.sb = {
+    channel: (name) => {
+      subscribedCount++;
+      const ch = {
+        name,
+        state: 'SUBSCRIBED',
+        handlers: {},
+        on: function(event, options, callback) {
+          if (event === 'postgres_changes') {
+            this.handlers.postgres_changes = callback;
+          }
+          return this;
+        },
+        subscribe: function(cb) {
+          if (cb) cb('SUBSCRIBED');
+          return this;
+        },
+        unsubscribe: () => { unsubscribedCount++; }
+      };
+      mockChannel = ch;
+      return ch;
+    }
+  };
+
+  assert.equal(subscribedCount, 0, '初始只创建一个 Realtime channel(此时还未加载)');
+
+  // 1. 初次加载触发订阅
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal(subscribedCount, 1);
+  assert.ok(mockChannel);
+  
+  // 2. pagehide 调用 unsubscribe 并清空
+  runtime.windowListeners.pagehide();
+  assert.equal(unsubscribedCount, 1, 'pagehide 后调用 unsubscribe');
+  
+  // 3. pageshow 重新创建 channel 和对账
+  let preFetch = fetchedCount;
+  // 模拟时间流逝绕过 5 秒节流
+  const realDateNow = Date.now;
+  Date.now = () => realDateNow() + 6000;
+  
+  await runtime.windowListeners.pageshow();
+  Date.now = realDateNow; // 恢复
+  
+  assert.equal(subscribedCount, 2, 'pageshow 后重新创建 channel');
+  assert.equal(fetchedCount, preFetch + 1, 'pageshow 后执行 loadPhotoWallData(true)');
+  
+  // 4. 多次 pageshow 不创建重复 channel
+  Date.now = () => realDateNow() + 12000;
+  await runtime.windowListeners.pageshow();
+  Date.now = realDateNow;
+  
+  assert.equal(subscribedCount, 2, '多次 pageshow 不创建重复 channel');
+  
+  // 5. 重新订阅后可处理远端 DELETE
+  runtime.window.photoWallData = [{ id: 'test1', cloudId: 'test1', imageUrl: 'url1', username: 'u' }];
+  let renderCalled = false;
+  runtime.window.renderPhotoWallWithoutReload = () => { renderCalled = true; };
+  
+  mockChannel.handlers.postgres_changes({
+    eventType: 'DELETE',
+    old: { id: 'test1' }
+  });
+  
+  // mock handlers sync calls set timeout
+  await new Promise(r => setTimeout(r, 150));
+  assert.equal(runtime.window.photoWallData.length, 0, '重新订阅后可处理远端 DELETE');
+  
+  // 6. CHANNEL_ERROR 等状态后允许重新订阅
+  mockChannel.state = 'CHANNEL_ERROR';
+  Date.now = () => realDateNow() + 18000;
+  await runtime.documentListeners.visibilitychange();
+  Date.now = realDateNow;
+  
+  assert.equal(unsubscribedCount, 2, '遇到 CHANNEL_ERROR 先取消订阅');
+  assert.equal(subscribedCount, 3, '遇到 CHANNEL_ERROR 允许重新订阅');
 });
