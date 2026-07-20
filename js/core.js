@@ -4031,8 +4031,9 @@ function renderProfileActivityList(kind) {
                         
                         touchUserSession(false);
                         showToast("评论成功");
-                        box.style.maxHeight = '0px';
+                        box.style.gridTemplateRows = '0fr';
                         box.style.opacity = '0';
+                        box.style.marginTop = '0px';
                         setTimeout(() => box.remove(), 300);
                         
                         var scrollEl = document.getElementById('panelPosts');
@@ -4086,8 +4087,9 @@ function renderProfileActivityList(kind) {
                 // 触发展开动画
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        box.style.maxHeight = '80px';
+                        box.style.gridTemplateRows = '1fr';
                         box.style.opacity = '1';
+                        box.style.marginTop = '8px';
                     });
                 });
                 
@@ -6643,13 +6645,14 @@ function renderProfileActivityList(kind) {
                     var currentPost = normalizePosts(feedAllPosts).find(function(item) {
                         return String(item.id).toLowerCase() === normalizedPostId;
                     });
-                    if (!currentPost) throw new Error('帖子不存在，请刷新后重试');
-                    var post = normalizePost(currentPost);
-                    if (currentUser !== post.user_name && currentUser !== ADMIN_NAME) {
+                    
+                    // Allow pinning even if not in feedAllPosts (e.g. detail view)
+                    var isOwner = currentPost && String(currentUser || '').toLowerCase() === String(currentPost.user_name || '').toLowerCase();
+                    if (currentPost && !isOwner && currentUser !== ADMIN_NAME) {
                         showToast('无权置顶此帖子');
                         return;
                     }
-                    nextPinned = !post.is_pinned;
+                    nextPinned = currentPost ? !currentPost.is_pinned : true; // default to true if unknown
                     var response = await window.xtjProtectedFetch('/api/post/pin', {
                         method: 'POST',
                         body: JSON.stringify({ post_id: normalizedPostId, is_pinned: Boolean(nextPinned) })
@@ -6666,9 +6669,62 @@ function renderProfileActivityList(kind) {
                     (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
                         syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
                     });
+                    
+                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var feedContainer = document.getElementById('panelPosts');
+                    
                     if (!syncPinnedPostIntoFeedState(result.data)) {
                         clearFeedCache();
                         await loadFeed(true);
+                    } else if (postEl) {
+                        // 克隆元素实现飞行动画
+                        var rect = postEl.getBoundingClientRect();
+                        var clone = postEl.cloneNode(true);
+                        clone.style.cssText = '';
+                        clone.style.position = 'fixed';
+                        clone.style.top = rect.top + 'px';
+                        clone.style.left = rect.left + 'px';
+                        clone.style.width = rect.width + 'px';
+                        clone.style.height = rect.height + 'px';
+                        clone.style.margin = '0';
+                        clone.style.zIndex = '9999';
+                        clone.style.pointerEvents = 'none';
+                        clone.style.boxShadow = '0 20px 40px rgba(0,0,0,0.15)';
+                        clone.style.transition = 'transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.7s ease';
+                        
+                        document.body.appendChild(clone);
+                        postEl.style.opacity = '0';
+                        
+                        var destTop = feedContainer ? (feedContainer.getBoundingClientRect().top + 16) : 0;
+                        var deltaY = destTop - rect.top;
+                        
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                if (nextPinned) {
+                                    clone.style.transform = 'translate(0px, ' + deltaY + 'px) scale(0.95)';
+                                    if (feedContainer) feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                                } else {
+                                    clone.style.transform = 'scale(0.8)';
+                                    clone.style.opacity = '0';
+                                }
+                            });
+                        });
+                        
+                        await new Promise(resolve => setTimeout(resolve, 600));
+                        clone.remove();
+                        
+                        writeFeedCacheSnapshot();
+                        await rebuildFeedFromCurrentState();
+                        await refreshPostDetailIfActive(normalizedPostId);
+                        
+                        if (nextPinned) {
+                            var newEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                            if (newEl) {
+                                newEl.style.transition = 'background-color 0.8s';
+                                newEl.style.backgroundColor = 'var(--bg-secondary)';
+                                setTimeout(() => newEl.style.backgroundColor = '', 800);
+                            }
+                        }
                     } else {
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
