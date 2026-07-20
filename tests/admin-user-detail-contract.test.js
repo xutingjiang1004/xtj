@@ -60,3 +60,18 @@ test('IP geolocation prefers TLS providers and de-duplicates repeated lookups', 
   assert.match(server, /provider: result\.provider/);
   assert.match(server, /precision: 'approximate_city'/);
 });
+
+test('online users use latest login telemetry and profile tab exposes the complete user directory', () => {
+  assert.match(server, /app\.get\('\/admin\/stats\/online', verifyToken, rateLimit/);
+  assert.match(server, /var activeByUser = \{\}/);
+  assert.match(server, /eq\('media_type', LOGIN_EVENT_MARKER\)[\s\S]{0,180}\.in\('user_name', activeNames\)/);
+  assert.match(server, /eq\('media_type', USER_INFO_MARKER\)[\s\S]{0,180}\.in\('user_name', activeNames\)/);
+  assert.match(server, /function normalizeDeviceSnapshot/);
+  assert.match(server, /function onlineDeviceCategory/);
+  assert.match(server, /requestUserAgent = String\(req\.get\('user-agent'\)/);
+  assert.match(admin, /device_label \|\| \[u\.device_type, u\.os, u\.browser, u\.model\]/);
+  assert.match(admin, /async function loadProfileDirectory/);
+  assert.match(admin, /apiCall\('GET', '\/admin\/users'\)/);
+  assert.match(admin, /window\.filterProfileDirectory/);
+  assert.match(admin, /id="profileDirectoryRows"/);
+});
