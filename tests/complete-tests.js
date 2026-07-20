@@ -701,6 +701,47 @@ test('照片墙合并时按 id/cloudId 去重', function(){
   assert.ok(s.indexOf('按 id/cloudId 去重') >= 0, 'must have deduplication comment');
 });
 
+console.log('\n=== Photo Wall Init Guards ===');
+test('initPhotoWall 不在成功前设置 initialized=true', function(){
+  var s = read('js/photo-wall/photo-wall.js');
+  var lines = s.split('\n');
+  var initLine = -1, renderLine = -1, initTrueLine = -1;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf('window.initPhotoWall') >= 0 && initLine < 0) initLine = i;
+    if (lines[i].indexOf('renderPhotoWall') >= 0 && renderLine < 0) renderLine = i;
+    if (lines[i].indexOf('initialized = true') >= 0 && initTrueLine < 0) initTrueLine = i;
+  }
+  // initialized = true must be inside the function body, AFTER renderPhotoWall succeeds
+  assert.ok(initTrueLine > renderLine, 'initialized=true must be after renderPhotoWall, found at line ' + (initTrueLine + 1) + ' but renderPhotoWall at ' + (renderLine + 1));
+  // initialized = true must NOT be at module level (before the function definition)
+  assert.ok(initTrueLine > initLine, 'initialized=true must be inside function, not at module level');
+  assert.ok(s.indexOf('initializingPromise') >= 0, 'must have initializingPromise for dedup');
+  assert.ok(s.indexOf('initialized = false') >= 0, 'must reset initialized on failure');
+});
+test('initPhotoWall 错误时显示重新加载按钮', function(){
+  var s = read('js/photo-wall/photo-wall.js');
+  assert.ok(s.indexOf('重新加载') >= 0, 'must show retry button on error');
+  assert.ok(s.indexOf('window.initPhotoWall(true)') >= 0, 'must call initPhotoWall(true) on retry');
+});
+test('renderPhotoWall 错误时显示重新加载按钮', function(){
+  var s = read('js/photo-wall/render.js');
+  assert.ok(s.indexOf('重新加载') >= 0 && s.indexOf('window.initPhotoWall(true)') >= 0, 'renderPhotoWall error must have retry button');
+});
+test('Dock 打开照片墙有自动兜底检查', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('auto-fallback') >= 0 || s.indexOf('自动兜底') >= 0, 'must have auto-fallback check');
+  assert.ok(s.indexOf('photoGrid') >= 0 && s.indexOf('children.length') >= 0, 'must check grid children');
+});
+test('fetchPhotoPage 支持 timeoutMs 参数', function(){
+  var s = read('js/photo-wall/data.js');
+  assert.ok(s.indexOf('function fetchPhotoPage(pageIndex, timeoutMs)') >= 0, 'fetchPhotoPage must accept timeoutMs');
+  assert.ok(s.indexOf('hasCache ? 10000 : 25000') >= 0, 'must use 25s first load, 10s cached');
+});
+test('Dock 调用链 sequence: ensurePhotoWallLoaded → initPhotoWall', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('ensurePhotoWallLoaded()') >= 0 && s.indexOf('initPhotoWall') >= 0, 'must call ensurePhotoWallLoaded then initPhotoWall');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
