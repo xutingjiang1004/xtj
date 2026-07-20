@@ -2726,6 +2726,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 document.getElementById("regNickInp").value = "";
                 document.getElementById("regPwInp").value = "";
                 if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
+                if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; }
                 if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; }
                 stopDMPolling();
                 _chatCache = {};
@@ -3548,6 +3549,7 @@ function renderProfileActivityList(kind) {
                     try { loadAnnouncements(); } catch(_) {}
                     try { startRestrictionPolling(); } catch(_) {}
                     try { subscribeToMessages(); } catch(_) {}
+                    try { subscribeToComments(); } catch(_) {}
                     try { startDMPolling(); } catch(_) {}
                     try { subscribeToAnnouncements(); } catch(_) {}
                     try { startReportReplyPolling(); } catch(_) {}
@@ -5891,6 +5893,10 @@ function renderProfileActivityList(kind) {
                 var pComms = commentMap[normalized.id] || [];
                 var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
                 var canDelete = canDeletePost(normalized);
+                function commentDeleteButton(comment) {
+                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
+                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
+                }
                 var mediaDataAttrs = [
                     'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
                     'data-media-url="' + escapeHtml(String(normalized.media_url || "")) + '"',
@@ -5928,14 +5934,14 @@ function renderProfileActivityList(kind) {
                       var children = pComms.filter(function(c) { return c.parent_comment_id; });
                       var html = '';
                       roots.forEach(function(r) {
-                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>';
+                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
                         var replies = children.filter(function(c) { return c.parent_comment_id === r.id; });
                         if (replies.length > 0) {
                           html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
                             if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span></div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
                             }
-                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div></div>';
+                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
                           }).join('') + '</div>';
                         }
                         html += '</div>';
@@ -7757,6 +7763,7 @@ function renderProfileActivityList(kind) {
 
             // ===================== 閼卞﹤銇夌化鑽ょ埠 (Dock 鍏煎锟? =====================
             let chatRealtime = null;
+            let commentRealtime = null;
             let dmpollTimer = null;
             let dmpollInterval = null;
 
@@ -8000,6 +8007,40 @@ function renderProfileActivityList(kind) {
                     .subscribe(function(status, err) {
                         if (err) { console.error('[CHAT-REALTIME]', err); }
                         else if (status === 'SUBSCRIBED') { console.log('[CHAT-REALTIME] 已连接'); }
+                    });
+            }
+
+            function subscribeToComments() {
+                if (!sb) return;
+                if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; }
+                commentRealtime = sb.channel('feed-comments')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
+                        var row = payload.new || payload.old;
+                        if (!row || row.id == null) return;
+                        var commentId = String(row.id);
+                        if (payload.eventType === 'DELETE') {
+                            feedAllComments = (feedAllComments || []).filter(function(comment) {
+                                return String(comment && comment.id) !== commentId;
+                            });
+                            profileActivityState.comments = (profileActivityState.comments || []).filter(function(comment) {
+                                return String(comment && comment.id) !== commentId;
+                            });
+                        } else {
+                            var postIsVisible = (feedAllPosts || []).some(function(post) {
+                                return String(post && post.id) === String(row.post_id);
+                            });
+                            if (!postIsVisible) return;
+                            feedAllComments = (feedAllComments || []).filter(function(comment) {
+                                return String(comment && comment.id) !== commentId;
+                            });
+                            feedAllComments.push(row);
+                        }
+                        if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                        if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                        if (typeof renderProfileActivity === 'function') renderProfileActivity();
+                    })
+                    .subscribe(function(status, err) {
+                        if (err) console.error('[COMMENT-REALTIME]', err);
                     });
             }
 

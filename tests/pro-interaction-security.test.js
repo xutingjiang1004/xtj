@@ -38,8 +38,21 @@ test('comment writes derive identity from the authenticated server session', () 
 
   const remove = routeBlock("app.delete('/api/post/comment/:commentId'", '// Set the authenticated user');
   assert.match(remove, /existing\.data\.user_name !== req\.userName/);
+  assert.match(remove, /req\.userName !== ADMIN_USERNAME/);
+  assert.match(remove, /Comment still exists after delete/);
   assert.match(core, /xtjProtectedFetch\('\/api\/post\/comment'/);
   assert.doesNotMatch(core, /sb\.from\(["']comments["']\)\.insert/);
+});
+
+test('comment deletion is rendered only for its author or an administrator and synchronizes realtime deletes', () => {
+  const card = core.slice(core.indexOf('function renderPostCard(post'), core.indexOf('function renderPostCardSafely'));
+  assert.match(card, /isAdmin\(\) \|\| String\(comment\.user_name \|\| ''\) === String\(currentUser\)/);
+  assert.match(core, /function subscribeToComments\(\)/);
+  assert.match(core, /payload\.eventType === 'DELETE'/);
+  assert.match(core, /feedAllComments = \(feedAllComments \|\| \[\]\)\.filter/);
+  assert.match(core, /subscribeToComments\(\)/);
+  assert.match(migration, /REVOKE INSERT, UPDATE, DELETE ON public\.comments FROM PUBLIC, anon, authenticated/);
+  assert.match(fs.readFileSync('supabase/migrations/022_enable_comment_delete_realtime.sql', 'utf8'), /REPLICA IDENTITY FULL/);
 });
 
 test('profile interactions use protected APIs instead of anonymous Data API writes', () => {

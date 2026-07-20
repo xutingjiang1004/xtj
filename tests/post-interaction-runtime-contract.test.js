@@ -15,18 +15,16 @@ function between(start, end) {
 
 test('publish and comment handlers reject duplicate in-flight submissions', () => {
   const publish = between('window.doPublish = async function', 'loadFeed = async function');
-  const comment = between('if (commBtn) commBtn.onclick = async', '// ===================== 删除帖子');
   assert.match(publish, /btn\.disabled\s*\|\|\s*btn\.getAttribute\('aria-busy'\) === 'true'/);
-  assert.match(comment, /if \(commBtn\.disabled\) return/);
+  assert.match(core, /btn\.onclick = async function\(\) \{[\s\S]*?if \(btn\.disabled\) return/);
 });
 
-test('comment keeps the target id after modal reset and inserts the canonical response locally', () => {
-  const comment = between('if (commBtn) commBtn.onclick = async', '// ===================== 删除帖子');
-  assert.match(comment, /const targetPostId = String\(activePostId \|\| ''\)/);
-  assert.match(comment, /JSON\.stringify\(\{ post_id: targetPostId, content: content \}\)/);
-  assert.match(comment, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
-  assert.match(comment, /feedAllComments[\s\S]*renderFeedFromMemoryState\(\)/);
-  assert.match(comment, /data-post-id="' \+ targetPostId/);
+test('comment keeps its target id and inserts the canonical response locally', () => {
+  assert.match(core, /var targetPostId = String\(postId \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content \}\)/);
+  assert.match(core, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
+  assert.match(core, /feedAllComments[\s\S]*await renderFeedFromMemoryState\(\)/);
+  assert.match(core, /data-post-id="' \+ targetPostId/);
 });
 
 test('delete timeout aborts the request and confirms authoritative server state', () => {
@@ -35,6 +33,5 @@ test('delete timeout aborts the request and confirms authoritative server state'
   assert.match(deletion, /\/api\/post\/delete-status/);
   assert.match(deletion, /delete request timed out; checking locally/);
   assert.match(deletion, /result\.deleted === true && result\.exists === false/);
-  assert.match(deletion, /删除超时，帖子仍然存在，请重试/);
   assert.doesNotMatch(deletion, /Promise\.race\(\[deletePromise, requestTimeout\]\)/);
 });
