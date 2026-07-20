@@ -10,8 +10,8 @@ CREATE INDEX IF NOT EXISTS comments_generated_by_ai_idx ON public.comments (gene
 -- AI 评论回复任务表
 CREATE TABLE IF NOT EXISTS public.ai_comment_reply_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  source_comment_id uuid NOT NULL REFERENCES public.comments(id) ON DELETE CASCADE,
-  post_id uuid NOT NULL,
+  source_comment_id bigint NOT NULL REFERENCES public.comments(id) ON DELETE CASCADE,
+  post_id bigint NOT NULL,
   request_user_id text NOT NULL,
   bot_user_id text NOT NULL DEFAULT 'cat_ai',
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'blocked')),

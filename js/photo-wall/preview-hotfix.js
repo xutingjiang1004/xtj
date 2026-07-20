@@ -713,7 +713,13 @@
   function fetchPhotoFileSize(photo) {
     if (!photo) return Promise.resolve(null);
     if (photo.fileSize) return Promise.resolve(photo.fileSize);
-    return Promise.resolve(null);
+    if (!photo.imageUrl) return Promise.resolve(null);
+    return fetch(photo.imageUrl, { method: 'HEAD' })
+      .then(function(res) {
+        var cl = res.headers.get('content-length');
+        return cl ? parseInt(cl, 10) : null;
+      })
+      .catch(function() { return null; });
   }
 
   function bindInfoModal() {
