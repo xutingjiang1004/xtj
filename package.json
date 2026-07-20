@@ -34,7 +34,6 @@
     "csso-cli": "^4.0.2",
     "express": "^5.1.0",
     "iconv-lite": "^0.7.2",
-    "jsdom": "^29.1.1",
     "mammoth": "^1.12.0",
     "nodemailer": "^6.9.16",
     "pdf-parse": "^2.4.5",
