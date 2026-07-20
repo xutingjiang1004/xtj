@@ -3953,8 +3953,9 @@ function renderProfileActivityList(kind) {
                 // 如果已经存在，则收起（切换显示状态）
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
-                    existingBox.style.maxHeight = '0px';
+                    existingBox.style.gridTemplateRows = '0fr';
                     existingBox.style.opacity = '0';
+                    existingBox.style.marginTop = '0px';
                     setTimeout(() => existingBox.remove(), 300);
                     return;
                 }
@@ -3963,6 +3964,7 @@ function renderProfileActivityList(kind) {
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
                     el.style.gridTemplateRows = '0fr';
                     el.style.opacity = '0';
+                    el.style.marginTop = '0px';
                     setTimeout(() => el.remove(), 300);
                 });
                 
