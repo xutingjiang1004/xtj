@@ -6084,11 +6084,11 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
   try {
     var uploadId = (req.body && req.body.upload_id) || '';
     if (!uploadId) return res.status(400).json({ error: '缺少 upload_id' });
-    // 按 upload_id 查询（actor_key 格式: photo_upload_${uploadId}）
+    // 按 upload_id 查询（actor_key 格式: photo_${uploadId}）
     var { data: photo } = await supabase.from('posts')
       .select('id, media_url, created_at, content')
       .eq('media_type', '__photo_wall__')
-      .eq('actor_key', 'photo_upload_' + uploadId)
+      .eq('actor_key', 'photo_' + uploadId)
       .eq('user_name', req.userName)
       .maybeSingle();
     if (!photo) return res.json({ status: 'not_found' });
