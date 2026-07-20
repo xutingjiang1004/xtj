@@ -3351,6 +3351,40 @@ function renderProfileActivityList(kind) {
                 }
             };
 
+            window.deleteFeedComment = async function(commentId, btn) {
+                if (!confirm('确定要永久删除这条评论吗？')) return;
+                var originalText = btn ? btn.textContent : '删除';
+                try {
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = '删除中..';
+                    }
+                    var response = await window.xtjProtectedFetch('/api/post/comment/' + encodeURIComponent(commentId), {
+                        method: 'DELETE'
+                    });
+                    var result = await response.json();
+                    if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
+                    
+                    feedAllComments = (feedAllComments || []).filter(function(item) {
+                        return String(item.id) !== String(commentId);
+                    });
+                    if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                    if (typeof renderFeedFromMemoryState === 'function') {
+                        renderFeedFromMemoryState();
+                    } else if (typeof rebuildFeedFromCurrentState === 'function') {
+                        rebuildFeedFromCurrentState().catch(function() {});
+                    }
+                    showToast('评论已删除');
+                } catch (e) {
+                    console.error('deleteFeedComment error:', e);
+                    showToast(e.message || '删除失败');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
+                }
+            };
+
             window.deleteProfileComment = async function(commentId, postId, btn) {
                 if (!currentUser || !commentId) return;
                 var originalText = btn ? btn.textContent : '';
@@ -3487,7 +3521,8 @@ function renderProfileActivityList(kind) {
                 if (!comment || comment.user_name !== 'cat_ai' || !comment.generated_by_ai) return '';
                 var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
                 var badgeHtml = '<span class="cat-ai-badge">AI</span>';
-                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">刚刚</span></div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
+                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>' : '';
+                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">刚刚</span>' + delBtn + '</div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
             }
 
             var __xtjDeferredWarmupQueued = false;
@@ -5113,7 +5148,8 @@ function renderProfileActivityList(kind) {
                                 }
                             });
                             commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
-                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    ';
+                                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(c.id) + '\', this)">删除</button>' : '';
+                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    </div>\n                    ';
                                 var aiReplies = aiCommentMap[c.id] || [];
                                 aiReplies.forEach(function(reply) {
                                     if (typeof renderCatAiComment === 'function') {
