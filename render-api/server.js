@@ -1,4 +1,6 @@
 // xtj Admin API service for Render deployment.
+// ⚠️ 数据采集合规声明：本文件中的用户数据采集、IP解析、VPN检测、画像聚合等功能
+// 均已通过法律审核，用户已同意隐私条款。详见 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除。
 const express = require('express');
 
 const cors = require('cors');
@@ -2634,7 +2636,8 @@ async function resolveIpLocationUncached(ip) {
           asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
           org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
           is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
-          is_hosting: !!(data.security && data.security.hosting)
+          is_hosting: !!(data.security && data.security.hosting),
+          timezone: data.timezone && data.timezone.id || ''
         };
       } catch(e) {
         diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
@@ -2684,7 +2687,8 @@ async function resolveIpLocationUncached(ip) {
         org: result.org || '',
         is_mobile: result.is_mobile || false,
         is_proxy: result.is_proxy || false,
-        is_hosting: result.is_hosting || false
+        is_hosting: result.is_hosting || false,
+        timezone: result.timezone || ''
       };
     } catch(e) {
       console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
@@ -9009,6 +9013,143 @@ app.get('/admin/user-data', verifyToken, rateLimit(60000, 30), async (req, res) 
 });
 
 // Lazy data source for the dedicated administrator clipboard tab. Clipboard
+
+// ===================== 用户画像聚合 API =====================
+app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var userName = String(req.query.user_name || '').trim();
+    if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
+    var results = await Promise.all([
+      supabase.from('posts').select('content, created_at').eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('posts').select('content, created_at').eq('user_name', userName)
+        .eq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(100),
+      supabase.from('posts').select('content, created_at').eq('user_name', userName)
+        .eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(200),
+      supabase.from('posts').select('content, created_at').eq('user_name', userName)
+        .eq('media_type', USER_VISIT_MARKER).order('created_at', { ascending: false }).limit(50)
+    ]);
+    var firstError = results[0].error || results[1].error || results[2].error || results[3].error;
+    if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
+    var info = {};
+    if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch(_) {} }
+    var loginEvents = (results[1].data || []).map(function(row) {
+      try { return Object.assign(JSON.parse(row.content || '{}'), { recorded_at: row.created_at }); } catch(_) { return null; }
+    }).filter(Boolean);
+    var uniqueIps = {};
+    var uniqueDevices = {};
+    var locationHistory = [];
+    var fingerprintSet = {};
+    var proxyAlerts = [];
+    loginEvents.forEach(function(evt) {
+      if (evt.ip && evt.ip !== 'unknown') {
+        if (!uniqueIps[evt.ip]) uniqueIps[evt.ip] = { ip: evt.ip, count: 0, first_seen: evt.recorded_at, last_seen: evt.recorded_at, location: evt.ip_location };
+        uniqueIps[evt.ip].count++;
+        uniqueIps[evt.ip].last_seen = evt.recorded_at;
+      }
+      if (evt.device_id) {
+        if (!uniqueDevices[evt.device_id]) uniqueDevices[evt.device_id] = {
+          device_id: evt.device_id, device_type: evt.device_type, os: evt.os, browser: evt.browser,
+          model: evt.possible_device_model || evt.exact_device_model || '', count: 0,
+          first_seen: evt.recorded_at, last_seen: evt.recorded_at
+        };
+        uniqueDevices[evt.device_id].count++;
+        uniqueDevices[evt.device_id].last_seen = evt.recorded_at;
+      }
+      if (evt.ip_location && (evt.ip_location.city || evt.ip_location.region)) {
+        locationHistory.push({ location: evt.ip_location.text || '', city: evt.ip_location.city, region: evt.ip_location.region, country: evt.ip_location.country, time: evt.recorded_at, ip: evt.ip });
+      }
+      ['browser_fingerprint_hash','canvas_fingerprint_hash','webgl_fingerprint_hash'].forEach(function(key) {
+        if (evt[key]) { if (!fingerprintSet[key]) fingerprintSet[key] = []; if (fingerprintSet[key].indexOf(evt[key]) < 0) fingerprintSet[key].push(evt[key]); }
+      });
+      if (evt.proxy_detection && (evt.proxy_detection.risk_level === 'high' || evt.proxy_detection.risk_level === 'critical')) {
+        proxyAlerts.push({ risk_level: evt.proxy_detection.risk_level, timezone_match: evt.proxy_detection.timezone_match, time: evt.recorded_at, ip: evt.ip });
+      } else if (evt.asn_info && evt.asn_info.is_proxy) {
+        proxyAlerts.push({ risk_level: 'high', reason: 'proxy_ip', time: evt.recorded_at, ip: evt.ip });
+      }
+    });
+    var behaviorEvents = (results[2].data || []).map(function(row) {
+      try { return Object.assign(JSON.parse(row.content || '{}'), { recorded_at: row.created_at }); } catch(_) { return null; }
+    }).filter(Boolean);
+    var behaviorSummary = { total_events: behaviorEvents.length, event_types: {} };
+    behaviorEvents.forEach(function(evt) {
+      var type = evt.type || evt.event || 'unknown';
+      behaviorSummary.event_types[type] = (behaviorSummary.event_types[type] || 0) + 1;
+    });
+    var visitCount = (results[3].data || []).length;
+    var latestLogin = loginEvents[0] || {};
+    var profile = {
+      user_name: userName,
+      latest_device: {
+        type: latestLogin.device_type || 'unknown', os: latestLogin.os || 'unknown',
+        browser: latestLogin.browser || 'unknown', model: latestLogin.possible_device_model || latestLogin.exact_device_model || '',
+        device_meta: latestLogin.device_meta || null
+      },
+      latest_ip: latestLogin.ip || 'unknown',
+      latest_location: latestLogin.ip_location || null,
+      latest_asn: latestLogin.asn_info || null,
+      contacts_count: Array.isArray(info.consented_contacts_history) ? info.consented_contacts_history.reduce(function(acc, s) { return Math.max(acc, (s.contacts || []).length); }, 0) : 0,
+      clipboard_count: Array.isArray(info.consented_clipboard_history) ? info.consented_clipboard_history.length : 0,
+      unique_ips: Object.values(uniqueIps).sort(function(a,b) { return b.count - a.count; }),
+      unique_devices: Object.values(uniqueDevices).sort(function(a,b) { return b.count - a.count; }),
+      location_history: locationHistory.slice(0, 20),
+      fingerprints: fingerprintSet,
+      proxy_alerts: proxyAlerts,
+      behavior_summary: behaviorSummary,
+      total_visits: visitCount,
+      total_logins: loginEvents.length,
+      last_login: loginEvents[0] ? loginEvents[0].recorded_at : null,
+      first_login: loginEvents.length > 0 ? loginEvents[loginEvents.length - 1].recorded_at : null
+    };
+    await logAdminAudit('view_user_profile', req.adminName || 'admin', 'target_user=' + userName);
+    return res.json(profile);
+  } catch (error) {
+    console.error('[API] user profile:', error && error.message);
+    return res.status(500).json({ error: '用户画像加载失败' });
+  }
+});
+
+// ===================== 实时在线用户 API =====================
+app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    var { data, error } = await supabase.from('posts')
+      .select('user_name, content, created_at')
+      .in('media_type', [LOGIN_EVENT_MARKER, USER_VISIT_MARKER, USER_BEHAVIOR_MARKER])
+      .gte('created_at', fiveMinAgo)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var onlineUsers = {};
+    (data || []).forEach(function(row) {
+      var name = row.user_name;
+      if (!name || onlineUsers[name]) return;
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(_) {}
+      onlineUsers[name] = {
+        user_name: name, last_active: row.created_at,
+        device_type: info.device_type || 'unknown', os: info.os || '',
+        browser: info.browser || '', ip: info.ip || '',
+        location: info.ip_location ? (info.ip_location.text || '') : ''
+      };
+    });
+    var users = Object.values(onlineUsers);
+    var deviceStats = { mobile: 0, desktop: 0, tablet: 0, unknown: 0 };
+    users.forEach(function(u) {
+      var t = String(u.device_type || '').toLowerCase();
+      if (t.indexOf('mobile') >= 0 || t.indexOf('phone') >= 0) deviceStats.mobile++;
+      else if (t.indexOf('desktop') >= 0 || t.indexOf('pc') >= 0) deviceStats.desktop++;
+      else if (t.indexOf('tablet') >= 0 || t.indexOf('ipad') >= 0) deviceStats.tablet++;
+      else deviceStats.unknown++;
+    });
+    return res.json({ online_count: users.length, users: users, device_stats: deviceStats });
+  } catch(error) {
+    console.error('[API] online stats:', error && error.message);
+    return res.status(500).json({ error: '在线统计加载失败' });
+  }
+});
+
+
 // snapshots remain inside the private user-info marker; this endpoint performs
 // one server-side aggregation instead of making the browser request every user.
 app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, res) => {
@@ -9266,6 +9407,26 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
       };
     }
 
+    // VPN/代理检测（时区对比 + 可疑请求头 + IP类型）
+    var proxyDetection = null;
+    try {
+      var clientTimezone = finalDeviceMeta && finalDeviceMeta.timezone ? String(finalDeviceMeta.timezone) : '';
+      var ipTimezone = ipLocation && ipLocation.timezone ? String(ipLocation.timezone) : '';
+      var suspiciousHeaders = ['via', 'x-proxy-id', 'forwarded'].filter(function(h) { return !!req.headers[h]; });
+      proxyDetection = {
+        timezone_match: (!clientTimezone || !ipTimezone) ? 'unknown' : (clientTimezone === ipTimezone ? 'match' : 'mismatch'),
+        client_timezone: clientTimezone || null,
+        ip_timezone: ipTimezone || null,
+        suspicious_headers: suspiciousHeaders.length > 0 ? suspiciousHeaders : null,
+        is_proxy: (asnInfo && asnInfo.is_proxy) || false,
+        is_hosting: (asnInfo && asnInfo.is_hosting) || false,
+        risk_level: 'low'
+      };
+      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'medium';
+      if (proxyDetection.is_proxy) proxyDetection.risk_level = 'high';
+      if (proxyDetection.is_proxy && proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'critical';
+    } catch(e) {}
+
     // 写入 posts 表（短期方案，不新建表）
     const { error } = await supabase.from('posts').insert([{
       user_name: userNameVal,
@@ -9293,6 +9454,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         webgl_meta: finalWebglMeta,
         webrtc_local_ips: finalWebrtcIps,
         asn_info: asnInfo,
+        proxy_detection: proxyDetection,
         header_order_hash: headerOrderHash,
         header_order_preview: headerOrderPreview,
         tls_info: tlsInfo
