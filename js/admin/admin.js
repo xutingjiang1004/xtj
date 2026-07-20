@@ -2828,7 +2828,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab;
-        var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','blacklist','ai'];
+        var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','blacklist','ai','online','profile'];
         if (allTabs.indexOf(normalized) === -1) return;
         var switchGeneration = ++adminTabSwitchGeneration;
         currentTab = normalized;
@@ -2885,6 +2885,8 @@ async function initAdminClient() {
             case 'errorlog': renderErrorLogTab(el); break;
             case 'email': renderEmailTab(el); break;
             case 'ai': renderAiTab(el); break;
+            case 'online': renderOnlineTab(el); break;
+            case 'profile': renderProfileTab(el); break;
         }
         // 延迟加载用户头像
         setTimeout(function() { adminLoadAvatars(); }, 100);
@@ -5381,4 +5383,194 @@ async function initAdminClient() {
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
+
+    // ===================== 实时在线仪表盘 =====================
+    var onlineRefreshTimer = null;
+    function renderOnlineTab(el) {
+        loadOnlineData(el);
+        if (onlineRefreshTimer) clearInterval(onlineRefreshTimer);
+        onlineRefreshTimer = setInterval(function() {
+            if (currentTab === 'online') loadOnlineData(el);
+            else { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
+        }, 30000);
+    }
+    async function loadOnlineData(el) {
+        try {
+            var resp = await adminFetch('/admin/stats/online');
+            var data = await resp.json();
+            if (!resp.ok) { el.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(data.error || '加载失败') + '</div></div>'; return; }
+            var h = '<div class="card">';
+            h += '<h3>\ud83d\udfe2 实时在线用户</h3>';
+            h += '<p style="color:var(--text-secondary);margin-bottom:16px">最近5分钟有活动的用户 \u00b7 每30秒自动刷新</p>';
+            h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">';
+            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:32px;font-weight:700;color:var(--primary)">' + (data.online_count || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">在线人数</div></div>';
+            var ds = data.device_stats || {};
+            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udcf1 ' + (ds.mobile || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">手机</div></div>';
+            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udcbb ' + (ds.desktop || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">电脑</div></div>';
+            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udccb ' + (ds.tablet || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">平板</div></div>';
+            h += '</div>';
+            if (data.users && data.users.length > 0) {
+                h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>设备</th><th>IP</th><th>位置</th><th>最后活动</th><th>操作</th></tr></thead><tbody>';
+                data.users.forEach(function(u) {
+                    h += '<tr><td><b>' + escapeHtml(u.user_name) + '</b></td>';
+                    h += '<td>' + escapeHtml((u.device_type || '') + ' ' + (u.os || '')) + '</td>';
+                    h += '<td style="font-family:monospace;font-size:12px">' + escapeHtml(u.ip || '') + '</td>';
+                    h += '<td>' + escapeHtml(u.location || '') + '</td>';
+                    h += '<td>' + formatTime(u.last_active) + '</td>';
+                    h += '<td><button class="btn-sm" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\');switchTab(\'profile\')">画像</button></td></tr>';
+                });
+                h += '</tbody></table></div>';
+            } else {
+                h += '<div class="empty">当前没有在线用户</div>';
+            }
+            h += '</div>';
+            el.innerHTML = h;
+        } catch(e) {
+            el.innerHTML = '<div class="card"><div class="empty">加载失败: ' + escapeHtml(e.message || '') + '</div></div>';
+        }
+    }
+
+    // ===================== 用户画像聚合页 =====================
+    var profileCurrentUser = '';
+    window.loadUserProfile = async function(userName) {
+        if (!userName) return;
+        profileCurrentUser = userName;
+        var panel = document.getElementById('tabProfile');
+        if (!panel) return;
+        panel.innerHTML = '<div class="card"><div class="skeleton-block" style="height:400px"></div></div>';
+        try {
+            var resp = await adminFetch('/admin/user-profile?user_name=' + encodeURIComponent(userName));
+            var profile = await resp.json();
+            if (!resp.ok) { panel.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(profile.error || '加载失败') + '</div></div>'; return; }
+            renderUserProfile(panel, profile);
+        } catch(e) {
+            panel.innerHTML = '<div class="card"><div class="empty">加载失败: ' + escapeHtml(e.message || '') + '</div></div>';
+        }
+    };
+    function renderUserProfile(el, p) {
+        var h = '<div class="card" style="margin-bottom:16px">';
+        h += '<h3>\ud83d\udc64 ' + escapeHtml(p.user_name) + ' \u2014 用户画像</h3>';
+        h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:16px 0">';
+        // 设备卡片
+        h += '<div class="card" style="margin:0"><h4>\ud83d\udcf1 最新设备</h4>';
+        var dev = p.latest_device || {};
+        h += '<p><b>类型:</b> ' + escapeHtml(dev.type || 'unknown') + '</p>';
+        h += '<p><b>OS:</b> ' + escapeHtml(dev.os || '') + '</p>';
+        h += '<p><b>浏览器:</b> ' + escapeHtml(dev.browser || '') + '</p>';
+        h += '<p><b>型号:</b> ' + escapeHtml(dev.model || '未知') + '</p>';
+        if (dev.device_meta) {
+            var dm = dev.device_meta;
+            if (dm.screen) h += '<p><b>屏幕:</b> ' + escapeHtml(dm.screen) + '</p>';
+            if (dm.hardware_concurrency) h += '<p><b>CPU:</b> ' + dm.hardware_concurrency + '核</p>';
+            if (dm.device_memory_gb) h += '<p><b>内存:</b> ' + dm.device_memory_gb + 'GB</p>';
+            if (dm.battery_info) {
+                var bat = dm.battery_info;
+                h += '<p><b>\ud83d\udd0b:</b> ' + Math.round((bat.level || 0) * 100) + '% ' + (bat.charging ? '\u26a1充电中' : '') + '</p>';
+            }
+            if (dm.storage_estimate) {
+                h += '<p><b>\ud83d\udcbe:</b> ' + ((dm.storage_estimate.quota || 0) / 1073741824).toFixed(1) + 'GB</p>';
+            }
+            if (dm.network) {
+                h += '<p><b>\ud83d\udce1:</b> ' + escapeHtml(dm.network.effective_type || '') + ' / ' + (dm.network.downlink_mbps || '?') + 'Mbps</p>';
+            }
+        }
+        h += '</div>';
+        // 网络卡片
+        h += '<div class="card" style="margin:0"><h4>\ud83c\udf10 网络信息</h4>';
+        h += '<p><b>IP:</b> ' + escapeHtml(p.latest_ip || '') + '</p>';
+        if (p.latest_location) h += '<p><b>位置:</b> ' + escapeHtml(p.latest_location.text || '') + '</p>';
+        if (p.latest_asn) {
+            h += '<p><b>ISP:</b> ' + escapeHtml(p.latest_asn.isp || '') + '</p>';
+            h += '<p><b>ASN:</b> ' + escapeHtml(p.latest_asn.asn || '') + '</p>';
+            if (p.latest_asn.is_proxy) h += '<p style="color:var(--danger)"><b>\u26a0\ufe0f 代理/VPN:</b> 是</p>';
+            if (p.latest_asn.is_hosting) h += '<p style="color:var(--warning)"><b>数据中心IP:</b> 是</p>';
+        }
+        h += '</div>';
+        // 统计卡片
+        h += '<div class="card" style="margin:0"><h4>\ud83d\udcca 活动概览</h4>';
+        h += '<p><b>总访问:</b> ' + (p.total_visits || 0) + ' 次</p>';
+        h += '<p><b>总登录:</b> ' + (p.total_logins || 0) + ' 次</p>';
+        h += '<p><b>首次登录:</b> ' + formatTime(p.first_login) + '</p>';
+        h += '<p><b>最后登录:</b> ' + formatTime(p.last_login) + '</p>';
+        h += '<p><b>通讯录:</b> ' + (p.contacts_count || 0) + ' 人</p>';
+        h += '<p><b>剪贴板:</b> ' + (p.clipboard_count || 0) + ' 条</p>';
+        h += '</div></div>';
+        // 代理警报
+        if (p.proxy_alerts && p.proxy_alerts.length > 0) {
+            h += '<div class="card" style="margin:12px 0;border-left:3px solid var(--danger)"><h4>\u26a0\ufe0f 代理/VPN 警报 (' + p.proxy_alerts.length + ')</h4>';
+            h += '<div class="table-wrap"><table><thead><tr><th>风险</th><th>IP</th><th>时区</th><th>时间</th></tr></thead><tbody>';
+            p.proxy_alerts.forEach(function(a) {
+                var color = a.risk_level === 'critical' ? 'var(--danger)' : 'var(--warning)';
+                h += '<tr><td style="color:' + color + ';font-weight:600">' + escapeHtml(a.risk_level) + '</td>';
+                h += '<td>' + escapeHtml(a.ip || '') + '</td>';
+                h += '<td>' + escapeHtml(a.timezone_match || a.reason || '') + '</td>';
+                h += '<td>' + formatTime(a.time) + '</td></tr>';
+            });
+            h += '</tbody></table></div></div>';
+        }
+        // IP 历史
+        if (p.unique_ips && p.unique_ips.length > 0) {
+            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udccd IP 历史 (' + p.unique_ips.length + ')</h4>';
+            h += '<div class="table-wrap"><table><thead><tr><th>IP</th><th>位置</th><th>次数</th><th>首次</th><th>最后</th></tr></thead><tbody>';
+            p.unique_ips.forEach(function(ip) {
+                h += '<tr><td style="font-family:monospace">' + escapeHtml(ip.ip) + '</td>';
+                h += '<td>' + escapeHtml(ip.location && ip.location.text || '') + '</td>';
+                h += '<td>' + ip.count + '</td>';
+                h += '<td>' + formatTime(ip.first_seen) + '</td>';
+                h += '<td>' + formatTime(ip.last_seen) + '</td></tr>';
+            });
+            h += '</tbody></table></div></div>';
+        }
+        // 设备历史
+        if (p.unique_devices && p.unique_devices.length > 0) {
+            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udcf1 设备历史 (' + p.unique_devices.length + ')</h4>';
+            h += '<div class="table-wrap"><table><thead><tr><th>设备</th><th>OS</th><th>浏览器</th><th>型号</th><th>次数</th></tr></thead><tbody>';
+            p.unique_devices.forEach(function(d) {
+                h += '<tr><td>' + escapeHtml(d.device_type || '') + '</td>';
+                h += '<td>' + escapeHtml(d.os || '') + '</td>';
+                h += '<td>' + escapeHtml(d.browser || '') + '</td>';
+                h += '<td>' + escapeHtml(d.model || '') + '</td>';
+                h += '<td>' + d.count + '</td></tr>';
+            });
+            h += '</tbody></table></div></div>';
+        }
+        // 指纹
+        if (p.fingerprints && Object.keys(p.fingerprints).length > 0) {
+            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udd11 指纹信息</h4>';
+            Object.keys(p.fingerprints).forEach(function(key) {
+                var label = key.replace(/_hash$/, '').replace(/_/g, ' ');
+                h += '<p><b>' + escapeHtml(label) + ':</b></p>';
+                p.fingerprints[key].forEach(function(fp) {
+                    h += '<code style="font-size:11px;word-break:break-all;display:block;margin:2px 0;padding:4px 8px;background:var(--bg);border-radius:4px">' + escapeHtml(fp) + '</code>';
+                });
+            });
+            h += '</div>';
+        }
+        // 位置历史
+        if (p.location_history && p.location_history.length > 0) {
+            h += '<div class="card" style="margin:12px 0"><h4>\ud83d\udccd 位置历史</h4>';
+            h += '<div class="table-wrap"><table><thead><tr><th>位置</th><th>IP</th><th>时间</th></tr></thead><tbody>';
+            p.location_history.forEach(function(loc) {
+                h += '<tr><td>' + escapeHtml(loc.location || '') + '</td>';
+                h += '<td>' + escapeHtml(loc.ip || '') + '</td>';
+                h += '<td>' + formatTime(loc.time) + '</td></tr>';
+            });
+            h += '</tbody></table></div></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+    function renderProfileTab(el) {
+        var h = '<div class="card">';
+        h += '<h3>\ud83d\udc64 用户画像查询</h3>';
+        h += '<div class="search-bar" style="margin-bottom:16px">';
+        h += '<input id="profileSearchInp" placeholder="输入用户名查看完整画像..." value="' + escapeHtml(profileCurrentUser) + '" ';
+        h += 'onkeydown="if(event.key===\'Enter\')loadUserProfile(this.value)" />';
+        h += '<button class="btn-sm" onclick="loadUserProfile(document.getElementById(\'profileSearchInp\').value)" style="margin-left:8px">查询</button>';
+        h += '</div>';
+        if (!profileCurrentUser) h += '<div class="empty">输入用户名并点击查询，查看完整的用户画像聚合数据</div>';
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
 })();

@@ -67,6 +67,8 @@
             <button id="tabBlacklistBtn" onclick="switchTab('blacklist')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 8.5 7 7"/></svg></span><span class="admin-tab-label">黑名单</span></button>
             <button id="tabPhotosBtn" onclick="switchTab('photos')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.5"/></svg></span><span class="admin-tab-label">照片管理</span></button>
             <button id="tabEmailBtn" onclick="switchTab('email')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><span class="admin-tab-label">邮件通知</span></button>
+            <button id="tabOnlineBtn" onclick="switchTab('online')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="#4ade80"/><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="admin-tab-label">实时在线</span></button>
+            <button id="tabProfileBtn" onclick="switchTab('profile')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5z"/><path d="M2 20c0-3.3 4-6 10-6s10 2.7 10 6"/></svg></span><span class="admin-tab-label">用户画像</span></button>
             <button id="tabAiBtn" onclick="switchTab('ai')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg></span><span class="admin-tab-label">AI管理</span></button>
             <button onclick="toggleTheme()" title="切换主题"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v2.5"/><path d="M12 18.5V21"/><path d="m5.64 5.64 1.77 1.77"/><path d="m16.59 16.59 1.77 1.77"/><path d="M3 12h2.5"/><path d="M18.5 12H21"/><path d="m5.64 18.36 1.77-1.77"/><path d="m16.59 7.41 1.77-1.77"/><circle cx="12" cy="12" r="4"/></svg></span><span class="admin-tab-label">主题</span></button>
             <button class="danger" onclick="confirmLogout()"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></span><span class="admin-tab-label">退出</span></button>
@@ -90,6 +92,8 @@
         <div class="tab-panel" id="tabAudit"></div>
         <div class="tab-panel" id="tabBehavior"></div>
         <div class="tab-panel" id="tabErrorLog"></div>
+        <div class="tab-panel" id="tabOnline"></div>
+        <div class="tab-panel" id="tabProfile"></div>
         <div class="tab-panel" id="tabAi"></div>
     </div>
 </div>
