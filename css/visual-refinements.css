@@ -316,14 +316,19 @@
 }
 
 /* ========== 12. 图片查看器过渡 (Image Viewer Transition) ========== */
-.modal-box.img-transition {
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s ease;
-  transform: scale(0.95);
-  opacity: 0;
+.img-viewer.img-transition {
+    transition: opacity 0.3s ease;
+    opacity: 0;
 }
-.modal-box.img-transition.show {
-  transform: scale(1);
-  opacity: 1;
+.img-viewer.img-transition.show {
+    opacity: 1;
+}
+.img-viewer.img-transition img {
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform: scale(0.8);
+}
+.img-viewer.img-transition.show img {
+    transform: scale(1);
 }
 
 /* ========== 13. 骨架屏优化 (Skeleton Loading) ========== */
