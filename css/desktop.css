@@ -313,8 +313,8 @@
     display: flex;
   }
 
-  #panelChat .dock-chat-container.desktop-split #dockChatListView.chat-view.hidden,
-  #panelChat .dock-chat-container.desktop-split #dockChatDetailView.chat-view.hidden {
+  #panelChat .dock-chat-container.desktop-split #dockChatListView.chat-view:not(.hidden),
+  #panelChat .dock-chat-container.desktop-split #dockChatDetailView.chat-view:not(.hidden) {
     display: flex !important;
   }
 

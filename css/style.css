@@ -1139,10 +1139,6 @@
             50% { transform: scale(1.15); }
             100% { transform: scale(1); }
         }
-            18%  { opacity: 1; }
-            72%  { opacity: .9; }
-            100% { transform: translate3d(var(--heart-x), var(--heart-y), 0) scale(.9) rotate(var(--heart-rotate)); opacity: 0; }
-        }
 
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: 0; }
         .action-btn.del:hover { background: rgba(255,59,96,0.06); }

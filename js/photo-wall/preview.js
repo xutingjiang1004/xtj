@@ -815,15 +815,17 @@
             });
         }
     }, window.ppRotatePhoto = function() {
-        b = (b + 90) % 360;
         var slide = document.querySelector(".pp-slide-img.pp-active");
         if (slide) {
+          var currentRotation = parseInt(slide.getAttribute('data-rotation') || '0', 10);
+          var nextRotation = (currentRotation + 90) % 360;
+          slide.setAttribute('data-rotation', nextRotation);
           var currentTransform = slide.style.transform || '';
           var scaleMatch = currentTransform.match(/scale\(([^)]+)\)/);
           var scalePart = scaleMatch ? ' scale(' + scaleMatch[1] + ')' : '';
-          slide.style.transform = 'rotate(' + b + 'deg)' + scalePart;
+          slide.style.transform = 'rotate(' + nextRotation + 'deg)' + scalePart;
+          window.showToast && window.showToast("已旋转 " + nextRotation + "°");
         }
-        window.showToast && window.showToast("已旋转 " + b + "°");
     }, window.ppCancelDownload = function() {
         try {
             te();

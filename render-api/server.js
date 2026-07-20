@@ -3684,10 +3684,6 @@ async function checkCatRateLimit(userName, postId) {
       .eq('post_id', postId).gte('created_at', oneHourAgo);
     if (postCount >= CAT_AI_POST_HOURLY_LIMIT) return { allowed: false, reason: 'post_limit' };
   }
-  // 全局并发限制
-  var { count: globalCount } = await supabase.from('ai_comment_reply_jobs')
-    .select('*', { count: 'exact', head: true }).eq('status', 'processing');
-  if (globalCount >= CAT_AI_MAX_CONCURRENT) return { allowed: false, reason: 'global_busy' };
   return { allowed: true };
 }
 
@@ -3909,7 +3905,7 @@ async function processCatReplyJob(job) {
       content: replyContent,
       parent_comment_id: job.source_comment_id,
       generated_by_ai: true,
-      actor_key: 'cat_ai_reply_' + job.id.slice(0, 8)
+      actor_key: 'cat_ai_reply_' + job.id
     }]).select('id').single();
 
     if (aiComment.error) {
@@ -5412,9 +5408,9 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
     return res.status(401).json({ error: '账号或密码错误' });
   }
   // 使用 timingSafeEqual 防止时序侧信道攻击
-  const pwBuf = Buffer.from(password);
-  const adminBuf = Buffer.from(ADMIN_PASSWORD);
-  const pwMatch = pwBuf.length === adminBuf.length && crypto.timingSafeEqual(pwBuf, adminBuf);
+  const pwBuf = crypto.createHash('sha256').update(password).digest();
+  const adminBuf = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
+  const pwMatch = crypto.timingSafeEqual(pwBuf, adminBuf);
   if (!pwMatch) {
     return res.status(401).json({ error: '账号或密码错误' });
   }
@@ -5773,6 +5769,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
 
 // ===================== 公告管理 ======================
 app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
   const { title, content } = req.body;
   if (!title && !content) {
     return res.status(400).json({ error: '请至少填写标题或内容' });
@@ -5794,7 +5791,10 @@ app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, r
   
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true, data });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
   try {
@@ -5936,6 +5936,7 @@ app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res)
 
 // ===================== 评论管理 ======================
 app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
+  try {
   const { id } = req.params;
   const { data, error } = await supabase.rpc('delete_comment_v2', {
     p_comment_id: id,
@@ -5943,7 +5944,10 @@ app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true, data });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // ===================== 举报通知辅助函数 ======================
 async function addReportNotification(reportId, action, message) {
@@ -7568,6 +7572,7 @@ app.get('/admin/blacklist', verifyToken, async (req, res) => {
 });
 
 app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  try {
   const { user_name, reason, duration_hours } = req.body;
   const durationCheck = validateDurationHours(duration_hours);
   if (durationCheck.error) return res.status(400).json({ error: durationCheck.error });
@@ -7611,7 +7616,10 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
   }
   
   return res.json({ ok: true });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   try {
@@ -7828,6 +7836,7 @@ function formatAdminReportReason(category, reason) {
 
 // ===================== 举报管理 ======================
 app.get('/admin/reports', verifyToken, async (req, res) => {
+  try {
   const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
 
@@ -7878,7 +7887,10 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
   });
 
   return res.json({ data: reports });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 app.put('/admin/report/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
@@ -8064,6 +8076,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
 
 // 用户提交举报
 app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) => {
+  try {
   const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = req.body;
   const reporterVal = req.userName;
   if (!reporterVal || !target_type || !target_id || !report_category) {
@@ -8090,7 +8103,10 @@ app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) 
   }]);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // 用户查看自己的举报
 app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, res) => {
@@ -10382,8 +10398,12 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
 }
 
 app.get('/api/agent/profile', authenticateUser, async (req, res) => {
+  try {
   return res.status(410).json({ error: '已废弃，AI 配置由管理员统一管理' });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
 app.get('/api/agent/config', authenticateUser, async (req, res) => {
@@ -10429,8 +10449,12 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
 });
 
 app.post('/api/agent/profile', authenticateUser, async (req, res) => {
+  try {
   return res.status(403).json({ error: '该接口已关闭，AI 配置由管理员统一管理' });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 
 async function maybeUpdateConversationSummary(userName, convId, messages) {
@@ -12431,8 +12455,12 @@ app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
 });
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
+  try {
   return res.json({ ok: true, conversation_id: genConvId() });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // Returns authors from posts visible to the current session. The browser must
 // not derive this list from internal authentication marker rows.
