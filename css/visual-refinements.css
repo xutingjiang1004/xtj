@@ -167,7 +167,8 @@
 /* 帖子标题 — 更清晰的层级 */
 .post-content {
   font-size: var(--xtj-font-body);
-  line-height: 1.6;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
 }
 
 /* 导航标题 */
@@ -195,7 +196,7 @@
 /* 用户名 */
 .post-author {
   font-size: var(--xtj-font-body);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* 帖子时间戳 */
@@ -205,10 +206,10 @@
 
 /* ========== 6. 阴影系统优化 ========== */
 .glass {
-  box-shadow: var(--xtj-shadow-md) !important;
+  box-shadow: var(--xtj-shadow-md), inset 0 1px 0 rgba(255,255,255,0.12) !important;
 }
 .glass:hover {
-  box-shadow: var(--xtj-shadow-lg) !important;
+  box-shadow: var(--xtj-shadow-lg), inset 0 1px 0 rgba(255,255,255,0.2) !important;
 }
 
 /* 主按钮 — 更柔和的阴影 */
@@ -238,4 +239,173 @@
   --xtj-shadow-md: 0 4px 10px -2px rgba(80, 140, 150, 0.08), 0 2px 4px -2px rgba(80, 140, 150, 0.04);
   --xtj-shadow-lg: 0 8px 26px -8px rgba(80, 140, 150, 0.10), 0 4px 8px -4px rgba(80, 140, 150, 0.05);
   --xtj-shadow-xl: 0 16px 44px -12px rgba(80, 140, 150, 0.12), 0 8px 16px -8px rgba(80, 140, 150, 0.06);
+}
+
+/* ========== 8. 微交互动画 (Micro-Interactions) ========== */
+@keyframes likeHeartBeat {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.3); }
+  50% { transform: scale(0.95); }
+  75% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+.like-heart-anim {
+  animation: likeHeartBeat 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+  color: #ff4757 !important;
+}
+
+/* ========== 9. 滚动条美化 (Scrollbar Styling) ========== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.4);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ========== 10. 沉浸式顶部 (Sticky & Frosted Header) ========== */
+.posts-nav.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.7);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+[data-theme="dark"] .posts-nav.sticky-header {
+  background: var(--xtj-dark-surface-soft);
+  border-bottom: 1px solid var(--xtj-dark-border);
+}
+.posts-nav.sticky-header.hidden-header {
+  transform: translateY(-100%);
+}
+
+/* ========== 11. 长文本丝滑展开 (Smooth Read-More) ========== */
+.read-more-wrap {
+  display: inline;
+}
+.read-more-hidden {
+  display: none;
+}
+.read-more-btn {
+  color: var(--primary, #16a085);
+  cursor: pointer;
+  font-weight: 600;
+  margin-left: 4px;
+  font-size: var(--xtj-font-small);
+  transition: opacity 0.2s;
+}
+.read-more-btn:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* ========== 12. 图片查看器过渡 (Image Viewer Transition) ========== */
+.img-viewer.img-transition {
+    transition: opacity 0.3s ease;
+    opacity: 0;
+}
+.img-viewer.img-transition.show {
+    opacity: 1;
+}
+.img-viewer.img-transition img {
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform: scale(0.8);
+}
+.img-viewer.img-transition.show img {
+    transform: scale(1);
+}
+
+/* ========== 13. 骨架屏优化 (Skeleton Loading) ========== */
+.xtj-loading-skeleton {
+  padding: 16px;
+  border-radius: var(--xtj-radius-card);
+  background: var(--xtj-dark-surface-soft);
+  margin-bottom: 16px;
+}
+.xtj-skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.xtj-skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.xtj-skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, rgba(200,200,200,0.1) 25%, rgba(200,200,200,0.2) 50%, rgba(200,200,200,0.1) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s infinite linear;
+}
+.xtj-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.xtj-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(200,200,200,0.1) 25%, rgba(200,200,200,0.2) 50%, rgba(200,200,200,0.1) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s infinite linear;
+}
+.xtj-skeleton-line.medium {
+  width: 40%;
+}
+.xtj-skeleton-line.short {
+  width: 20%;
+}
+.xtj-skeleton-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.xtj-skeleton-body .xtj-skeleton-line.short {
+  width: 60%;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+:root:not([data-theme="dark"]) .xtj-skeleton-avatar,
+:root:not([data-theme="dark"]) .xtj-skeleton-line {
+  background: linear-gradient(90deg, rgba(0,0,0,0.05) 25%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.05) 75%);
+  background-size: 200% 100%;
+}
+
+/* ========== 14. AI 交互反馈 (AI Typing Effect) ========== */
+.ai-typing-indicator {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background-color: var(--primary, #16a085);
+  border-radius: 50%;
+  animation: aiBlink 1s infinite alternate;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+@keyframes aiBlink {
+  0% { opacity: 0.2; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1.2); }
 }
