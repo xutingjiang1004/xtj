@@ -4960,17 +4960,27 @@ function renderProfileActivityList(kind) {
             // 缂撳瓨头像URL
 
             async function loadAvatarsForUsers(usernames) {
-                if (!usernames || usernames.length === 0) return;
+                var normalizedUsers = Array.from(new Set(
+                    (usernames || [])
+                        .map(function(value) {
+                            return String(value || '').trim();
+                        })
+                        .filter(Boolean)
+                ));
+
+                if (normalizedUsers.length === 0) return;
                 try {
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                    usernames.forEach(function(username) {
+                    normalizedUsers.forEach(function(username) {
                         if (username && cachedAvatars[username] && !avatarCache[username]) {
                             avatarCache[username] = cachedAvatars[username];
                         }
                     });
                 } catch (e) {}
-                // ?????????????????
-                var uncached = usernames.filter(function(u) { return !avatarCache[u]; });
+
+                var uncached = normalizedUsers.filter(function(username) {
+                    return !avatarCache[username];
+                });
                 if (uncached.length === 0) return;
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/batch', {
@@ -5002,25 +5012,38 @@ function renderProfileActivityList(kind) {
             }
 
             function getAvatarHtml(username, post) {
-                var safeUser = username || '';
-                var avatarUrl = avatarCache[safeUser];
+                var safeUser = String(username || '').trim();
+                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
+                var avatarUrl = avatarCache[safeUser] || '';
+
                 if (!avatarUrl && safeUser) {
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                        avatarUrl = cachedAvatars[safeUser];
+                        avatarUrl = cachedAvatars[safeUser] || '';
                         if (avatarUrl) avatarCache[safeUser] = avatarUrl;
-                    } catch(e) {}
+                    } catch (e) {}
                 }
+
                 var safeName = escapeHtml(safeUser);
-                var safeNameJs = safeName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                // ?????onclick ???? div ???? .avatar ??????
-                if (avatarUrl) {
-                    var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    var innerHtml = '<div class="avatar clickable"><img loading="lazy" decoding="async" src="' + safeImgUrl + '" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + (username[0] || '?').toUpperCase() + '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
-                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
-                } else {
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
+                var safeNameJs = safeJsStr(safeUser);
+                var sanitizedAvatarUrl = avatarUrl ? sanitizeUrl(avatarUrl) : '';
+
+                if (sanitizedAvatarUrl) {
+                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' +
+                        safeNameJs +
+                        '\')"><div class="avatar clickable"><img loading="lazy" decoding="async" src="' +
+                        escapeHtml(sanitizedAvatarUrl) +
+                        '" alt="' + safeName +
+                        '" onerror="this.remove();this.parentElement.textContent=\'' +
+                        safeJsStr(fallbackInitial) +
+                        '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div></div>';
                 }
+
+                return '<div class="avatar clickable" onclick="openUserProfile(\'' +
+                    safeNameJs +
+                    '\')">' +
+                    escapeHtml(fallbackInitial) +
+                    '</div>';
             }
 
             // DEPRECATED_DO_NOT_EDIT ====== [??????]
@@ -5205,7 +5228,11 @@ function renderProfileActivityList(kind) {
                         }
                         htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + buildPostContentHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
                     } catch (e) {
-                        console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
+                        console.error('[feed-render] failed post:', {
+                            postId: post && post.id,
+                            userName: post && post.user_name,
+                            error: e
+                        });
                     }
                 });
 
