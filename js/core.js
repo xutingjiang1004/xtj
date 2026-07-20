@@ -6684,22 +6684,26 @@ function renderProfileActivityList(kind) {
                         await loadFeed(true);
                     } else if (postEl) {
                         // 优雅的过渡动画：原贴发光并缩小淡出
+                        // 优雅的过渡动画：原贴发光并缩小淡出
                         postEl.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
                         postEl.style.transform = 'scale(0.95)';
                         postEl.style.opacity = '0';
                         if (nextPinned) {
                             postEl.style.boxShadow = '0 0 30px rgba(16, 185, 129, 0.3)';
+                            // 先触发平滑滚动，增加视觉流畅度
+                            var st = feedContainer || document.getElementById('panelPosts') || window;
+                            if (st.scrollTo) st.scrollTo({ top: 0, behavior: 'smooth' });
+                            if (st !== window) window.scrollTo({ top: 0, behavior: 'smooth' });
                         }
                         
-                        if (feedContainer && nextPinned) {
-                             feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
-                             // 如果是 window 滚动
-                             if (feedContainer === document.body || feedContainer === document.documentElement) {
-                                 window.scrollTo({ top: 0, behavior: 'smooth' });
-                             }
-                        }
+                        await new Promise(resolve => setTimeout(resolve, 500));
                         
-                        await new Promise(resolve => setTimeout(resolve, 400));
+                        if (nextPinned) {
+                            // 瞬间回顶兜底，确保DOM重建时位置绝对正确，解决“屏幕显示位置不对齐”问题
+                            var st = feedContainer || document.getElementById('panelPosts') || window;
+                            if (st.scrollTo) st.scrollTo({ top: 0, behavior: 'auto' });
+                            if (st !== window) window.scrollTo({ top: 0, behavior: 'auto' });
+                        }
                         
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
@@ -6708,12 +6712,14 @@ function renderProfileActivityList(kind) {
                         if (nextPinned) {
                             var newEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
                             if (newEl) {
-                                newEl.style.transition = 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.8s';
-                                newEl.style.transform = 'translateY(-20px)';
+                                newEl.style.transition = 'transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.6s ease, background-color 0.8s';
+                                newEl.style.transform = 'translateY(-30px)';
+                                newEl.style.opacity = '0';
                                 newEl.style.backgroundColor = 'var(--bg-secondary)';
                                 requestAnimationFrame(() => {
                                     requestAnimationFrame(() => {
                                         newEl.style.transform = 'translateY(0)';
+                                        newEl.style.opacity = '1';
                                         setTimeout(() => newEl.style.backgroundColor = '', 800);
                                     });
                                 });
