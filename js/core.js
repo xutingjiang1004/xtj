@@ -5004,18 +5004,32 @@ function renderProfileActivityList(kind) {
                             var k = keys[ki];
                             if (avatars[k]) avatarCache[k] = avatars[k];
                         }
-                        if (currentUser) {
-                            try {
-                                var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
-                                if (cachedAvatars[currentUser]) {
-                                    avatarCache[currentUser] = cachedAvatars[currentUser];
-                                }
-                            } catch(e) {}
-                        }
+                        // 写入本地缓存，避免下次访问重新请求
+                        try {
+                            var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                            for (var ki2 = 0; ki2 < keys.length; ki2++) {
+                                var k2 = keys[ki2];
+                                if (avatars[k2]) cachedAvatars[k2] = avatars[k2];
+                            }
+                            window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                        } catch(e) {}
                     }
                 } catch(e) {
                     console.error('??????:', e);
                 }
+            }
+
+            function renderAvatarContent(username, avatarUrl) {
+                var safeUser = String(username || '').trim();
+                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
+                    return '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
+                        '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
+                        '" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=\'' + safeJsStr(fallbackInitial) +
+                        '\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);" ' +
+                        'style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                }
+                return '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
             }
 
             function getAvatarHtml(username, post) {
@@ -5033,22 +5047,20 @@ function renderProfileActivityList(kind) {
 
                 var safeName = escapeHtml(safeUser);
                 var safeNameJs = safeJsStr(safeUser);
-                var sanitizedAvatarUrl = avatarUrl ? sanitizeUrl(avatarUrl) : '';
 
-                if (sanitizedAvatarUrl) {
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
                     return '<div class="avatar-wrap" onclick="openUserProfile(\'' +
                         safeNameJs +
-                        '\')"><div class="avatar clickable"><img loading="lazy" decoding="async" src="' +
-                        escapeHtml(sanitizedAvatarUrl) +
-                        '" alt="' + safeName +
-                        '" onerror="this.remove();this.parentElement.textContent=\'' +
-                        safeJsStr(fallbackInitial) +
-                        '\';" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div></div>';
+                        '\')" data-user-name="' + safeName +
+                        '"><div class="avatar clickable">' +
+                        renderAvatarContent(safeUser, avatarUrl) +
+                        '</div></div>';
                 }
 
                 return '<div class="avatar clickable" onclick="openUserProfile(\'' +
                     safeNameJs +
-                    '\')">' +
+                    '\')" data-user-name="' + safeName +
+                    '">' +
                     escapeHtml(fallbackInitial) +
                     '</div>';
             }
@@ -7108,12 +7120,20 @@ function renderProfileActivityList(kind) {
                     if (!feedEl) return;
                     var avatars = feedEl.querySelectorAll('.avatar.clickable');
                     avatars.forEach(function(avatarEl) {
-                        var username = avatarEl.getAttribute('onclick') || '';
-                        username = username.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
-                        if (!username || avatarEl.querySelector('img')) return;
+                        if (avatarEl.querySelector('img')) return;
+                        var username = avatarEl.getAttribute('data-user-name') ||
+                            avatarEl.parentElement && avatarEl.parentElement.getAttribute('data-user-name') ||
+                            avatarEl.closest && avatarEl.closest('[data-user-name]') && avatarEl.closest('[data-user-name]').getAttribute('data-user-name');
+                        if (!username) {
+                            // 兼容旧版 onclick 解析
+                            var onclick = avatarEl.getAttribute('onclick') || '';
+                            username = onclick.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
+                            if (!username || username === onclick) username = '';
+                        }
+                        if (!username) return;
                         var avatarUrl = avatarCache[username];
                         if (avatarUrl) {
-                            avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
                         }
                     });
                 });
@@ -8805,6 +8825,15 @@ function renderProfileActivityList(kind) {
                                     changed = true;
                                 }
                             }
+                            // 写入本地缓存
+                            try {
+                                var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                                for (var ki2 = 0; ki2 < keys.length; ki2++) {
+                                    var k2 = keys[ki2];
+                                    if (result.avatars[k2]) cachedAvatars[k2] = result.avatars[k2];
+                                }
+                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                            } catch(e) {}
                         }
                         if (typeof onReady === 'function') onReady(changed || users.length > 0);
                         return changed || users.length > 0;
