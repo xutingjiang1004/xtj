@@ -7035,7 +7035,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     // 即使系统记录的 marker 被写错，白名单也能兜底过滤
     // 白名单已覆盖正常类型，不再需要单独排除系统标记
     // 注意：不要用 neq/not.in，它们会误杀 media_type IS NULL 的行
-    query = query.or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
+    // Legacy text posts stored an empty string instead of NULL. Keep them in
+    // the normal feed so a refresh cannot make cached posts disappear.
+    query = query.or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
 
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
