@@ -6868,7 +6868,10 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
     }
     var deleted = await supabase.from('comments').delete().eq('id', commentId).eq('user_name', existing.data.user_name);
     if (deleted.error) return res.status(500).json({ error: sanitizeError(deleted.error), code: 'comment_delete_failed' });
-    return res.json({ ok: true });
+    var remaining = await supabase.from('comments').select('id').eq('id', commentId).maybeSingle();
+    if (remaining.error) return res.status(500).json({ error: sanitizeError(remaining.error), code: 'comment_delete_verify_failed' });
+    if (remaining.data) return res.status(500).json({ error: 'Comment still exists after delete', code: 'comment_delete_not_confirmed' });
+    return res.json({ ok: true, deleted_comment_id: commentId });
   } catch (e) {
     console.error('[API] comment delete:', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Failed to delete comment', code: 'comment_delete_failed' });
