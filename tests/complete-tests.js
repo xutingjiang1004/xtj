@@ -415,6 +415,13 @@ test('wide Dock and iPad post layout use explicit visible and single-column over
   assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
 });
 
+test('narrow post layout has a final overflow-safe statistics guard', function(){
+  var source = read('css/ui-shell.css');
+  assert.ok(/@media \(max-width: 767\.98px\)[\s\S]*?#panelPosts \.stats,[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\) !important/.test(source), 'narrow post stats are not constrained');
+  assert.ok(source.indexOf('overflow-wrap: anywhere;') >= 0, 'narrow statistic labels can overflow');
+  assert.ok(source.indexOf('width: 100% !important;') >= 0 && source.indexOf('box-sizing: border-box !important;') >= 0, 'narrow post surfaces are not viewport-safe');
+});
+
 console.log('\n=== English Module Regression Guards ===');
 test('server.js public post filter excludes retired English marker', function(){
   var s = read('render-api/server.js');
