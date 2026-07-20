@@ -6691,14 +6691,6 @@ function renderProfileActivityList(kind) {
                             postEl.style.boxShadow = '0 0 30px rgba(16, 185, 129, 0.3)';
                         }
                         
-                        if (feedContainer && nextPinned) {
-                             feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
-                             // 如果是 window 滚动
-                             if (feedContainer === document.body || feedContainer === document.documentElement) {
-                                 window.scrollTo({ top: 0, behavior: 'smooth' });
-                             }
-                        }
-                        
                         await new Promise(resolve => setTimeout(resolve, 400));
                         
                         writeFeedCacheSnapshot();
@@ -6708,6 +6700,7 @@ function renderProfileActivityList(kind) {
                         if (nextPinned) {
                             var newEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
                             if (newEl) {
+                                newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 newEl.style.transition = 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.8s';
                                 newEl.style.transform = 'translateY(-20px)';
                                 newEl.style.backgroundColor = 'var(--bg-secondary)';
