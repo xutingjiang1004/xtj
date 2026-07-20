@@ -3953,8 +3953,9 @@ function renderProfileActivityList(kind) {
                 // 如果已经存在，则收起（切换显示状态）
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
-                    existingBox.style.maxHeight = '0px';
+                    existingBox.style.gridTemplateRows = '0fr';
                     existingBox.style.opacity = '0';
+                    existingBox.style.marginTop = '0px';
                     setTimeout(() => existingBox.remove(), 300);
                     return;
                 }
@@ -3963,6 +3964,7 @@ function renderProfileActivityList(kind) {
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
                     el.style.gridTemplateRows = '0fr';
                     el.style.opacity = '0';
+                    el.style.marginTop = '0px';
                     setTimeout(() => el.remove(), 300);
                 });
                 
@@ -6681,41 +6683,23 @@ function renderProfileActivityList(kind) {
                         clearFeedCache();
                         await loadFeed(true);
                     } else if (postEl) {
-                        // 克隆元素实现飞行动画
-                        var rect = postEl.getBoundingClientRect();
-                        var clone = postEl.cloneNode(true);
-                        clone.style.cssText = '';
-                        clone.style.position = 'fixed';
-                        clone.style.top = rect.top + 'px';
-                        clone.style.left = rect.left + 'px';
-                        clone.style.width = rect.width + 'px';
-                        clone.style.height = rect.height + 'px';
-                        clone.style.margin = '0';
-                        clone.style.zIndex = '9999';
-                        clone.style.pointerEvents = 'none';
-                        clone.style.boxShadow = '0 20px 40px rgba(0,0,0,0.15)';
-                        clone.style.transition = 'transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.7s ease';
-                        
-                        document.body.appendChild(clone);
+                        // 优雅的过渡动画：原贴发光并缩小淡出
+                        postEl.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                        postEl.style.transform = 'scale(0.95)';
                         postEl.style.opacity = '0';
+                        if (nextPinned) {
+                            postEl.style.boxShadow = '0 0 30px rgba(16, 185, 129, 0.3)';
+                        }
                         
-                        var destTop = feedContainer ? (feedContainer.getBoundingClientRect().top + 16) : 0;
-                        var deltaY = destTop - rect.top;
+                        if (feedContainer && nextPinned) {
+                             feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                             // 如果是 window 滚动
+                             if (feedContainer === document.body || feedContainer === document.documentElement) {
+                                 window.scrollTo({ top: 0, behavior: 'smooth' });
+                             }
+                        }
                         
-                        requestAnimationFrame(() => {
-                            requestAnimationFrame(() => {
-                                if (nextPinned) {
-                                    clone.style.transform = 'translate(0px, ' + deltaY + 'px) scale(0.95)';
-                                    if (feedContainer) feedContainer.scrollTo({ top: 0, behavior: 'smooth' });
-                                } else {
-                                    clone.style.transform = 'scale(0.8)';
-                                    clone.style.opacity = '0';
-                                }
-                            });
-                        });
-                        
-                        await new Promise(resolve => setTimeout(resolve, 600));
-                        clone.remove();
+                        await new Promise(resolve => setTimeout(resolve, 400));
                         
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
@@ -6724,9 +6708,15 @@ function renderProfileActivityList(kind) {
                         if (nextPinned) {
                             var newEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
                             if (newEl) {
-                                newEl.style.transition = 'background-color 0.8s';
+                                newEl.style.transition = 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.8s';
+                                newEl.style.transform = 'translateY(-20px)';
                                 newEl.style.backgroundColor = 'var(--bg-secondary)';
-                                setTimeout(() => newEl.style.backgroundColor = '', 800);
+                                requestAnimationFrame(() => {
+                                    requestAnimationFrame(() => {
+                                        newEl.style.transform = 'translateY(0)';
+                                        setTimeout(() => newEl.style.backgroundColor = '', 800);
+                                    });
+                                });
                             }
                         }
                     } else {
