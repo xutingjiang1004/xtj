@@ -414,12 +414,14 @@
             await cleanupStorage(path);
             throw fetchError;
           }
-          // 状态不确定（processing / 网络错误等），不删除 Storage，保存为待确认
+          // 状态不确定（processing / 网络错误等），强制清理 Storage 避免泄漏
+          await cleanupStorage(path);
           fetchError.photoUploadStage = 'pending';
           fetchError._pendingRetry = true;
           throw fetchError;
         } catch(statusErr) {
-          // 状态查询失败，不删除 Storage，保存为待确认
+          // 状态查询失败，强制清理 Storage 避免泄漏
+          await cleanupStorage(path);
           fetchError.photoUploadStage = 'pending';
           fetchError._pendingRetry = true;
           throw fetchError;
