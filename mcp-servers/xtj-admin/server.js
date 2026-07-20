@@ -30,6 +30,7 @@ if (!API_BASE) {
 }
 
 let authToken = null;
+let authTokenAt = 0;
 let adminUser = process.env.XTJ_ADMIN_USER || null;
 let adminPass = process.env.XTJ_ADMIN_PASS || null;
 
@@ -61,11 +62,13 @@ async function apiRequest(method, path, body = null) {
 }
 
 async function ensureLoggedIn() {
-  if (!authToken) {
+  const TOKEN_MAX_AGE_MS = 30 * 60 * 1000; // 30分钟，超过则重新登录
+  if (!authToken || (Date.now() - authTokenAt > TOKEN_MAX_AGE_MS)) {
     if (adminUser && adminPass) {
       const data = await apiRequest("POST", "/admin/login", { username: adminUser, password: adminPass });
       if (!data.ok || !data.token) throw new Error("自动登录失败");
       authToken = data.token;
+      authTokenAt = Date.now();
     } else {
       throw new Error("未登录，请先通过 admin_login 工具登录");
     }
@@ -76,6 +79,7 @@ async function login(username, password) {
   const data = await apiRequest("POST", "/admin/login", { username, password });
   if (!data.ok || !data.token) throw new Error("登录失败: " + (data.error || "未知错误"));
   authToken = data.token;
+  authTokenAt = Date.now();
   adminUser = username;
 }
 

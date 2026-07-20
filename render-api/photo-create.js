@@ -84,7 +84,7 @@ async function createPhotoThumbnail(options) {
   return {
     path: thumbnailPath,
     url: publicStorageUrl(options.supabaseUrl, thumbnailPath),
-    fileSize: input.length,
+    fileSize: output.length,
     width: Number.isSafeInteger(meta.width) ? meta.width : null,
     height: Number.isSafeInteger(meta.height) ? meta.height : null,
     exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null
@@ -127,7 +127,7 @@ async function createPhotoRecord(options) {
     return { status: 400, body: { ok: false, error: validated.error, code: validated.code || 'INVALID_INPUT' } };
   }
   const uploadId = validated.uploadId;
-  const actorKey = 'photo_' + (uploadId || (options.createActorKey || crypto.randomUUID)());
+  const actorKey = 'photo_' + (uploadId || (options.createActorKey || (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }))));
   const storagePath = validated.storagePath;
 
   // 若提供了 upload_id, 先查询是否已存在 (幂等)
