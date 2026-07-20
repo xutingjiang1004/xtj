@@ -634,6 +634,73 @@ test('10. 底部四大 Dock HTML 未被修改', function(){
   });
 });
 
+console.log('\n=== Avatar & Photo Wall Regression Guards ===');
+test('renderAvatarContent 统一函数存在', function(){
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('function renderAvatarContent(') >= 0, 'renderAvatarContent function must exist');
+});
+test('getAvatarHtml 使用 data-user-name 属性', function(){
+  var s = read('js/core.js');
+  var fnStart = s.indexOf('function getAvatarHtml(');
+  var fnEnd = s.indexOf('function getPostFilterUserAvatar', fnStart);
+  var fn = s.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 2000);
+  assert.ok(fn.indexOf('data-user-name=') >= 0, 'getAvatarHtml must use data-user-name attribute');
+  // 不再解析 onclick 获取用户名
+  assert.ok(fn.indexOf('renderAvatarContent(') >= 0, 'getAvatarHtml must call renderAvatarContent');
+});
+test('getAvatarHtml img 包含 onerror 兜底', function(){
+  var s = read('js/core.js');
+  var fn = s.slice(s.indexOf('function renderAvatarContent('), s.indexOf('function renderAvatarContent(') + 800);
+  assert.ok(fn.indexOf('onerror=') >= 0, 'renderAvatarContent must have onerror fallback');
+  assert.ok(fn.indexOf('avatar-fallback') >= 0, 'renderAvatarContent must have fallback class');
+});
+test('批量头像请求后写入 localStorage', function(){
+  var s = read('js/core.js');
+  var fnStart = s.indexOf('var resp = await fetch(API_BASE + \'/api/avatar/batch\'');
+  var fnEnd = s.indexOf('function getAvatarHtml', fnStart);
+  var fn = s.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 1500);
+  assert.ok(fn.indexOf('AVATAR_CACHE_KEY') >= 0 && fn.indexOf('safeStorage.set') >= 0, 'batch avatar must write to localStorage');
+});
+test('hydrateDockChatAvatars 也写入 localStorage', function(){
+  var s = read('js/core.js');
+  var fnStart = s.indexOf('function hydrateDockChatAvatars(');
+  var fnEnd = s.indexOf('function getDockChatCacheKey', fnStart);
+  var fn = s.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 2500);
+  assert.ok(fn.indexOf('AVATAR_CACHE_KEY') >= 0 && fn.indexOf('safeStorage.set') >= 0, 'hydrateDockChatAvatars must write to localStorage');
+});
+test('后台头像DOM替换使用 data-user-name 而非 onclick 解析', function(){
+  var s = read('js/core.js');
+  var fnStart = s.indexOf('var username = avatarEl.getAttribute');
+  var fn = s.slice(fnStart, fnStart + 1200);
+  assert.ok(fn.indexOf('data-user-name') >= 0, 'background avatar replacement must use data-user-name');
+  assert.ok(fn.indexOf('renderAvatarContent(') >= 0, 'background avatar replacement must use renderAvatarContent');
+});
+test('照片墙 fetchPhotoPage 超时从15秒改为10秒', function(){
+  var s = read('js/photo-wall/data.js');
+  assert.ok(s.indexOf('10000') >= 0, 'fetchPhotoPage timeout must be 10000ms');
+  assert.ok(s.indexOf('15000') === -1, 'fetchPhotoPage must not use 15000ms timeout');
+});
+test('照片墙 loadPhotoWallData 使用 stale-while-revalidate', function(){
+  var s = read('js/photo-wall/data.js');
+  assert.ok(s.indexOf('stale-while-revalidate') >= 0, 'loadPhotoWallData must have stale-while-revalidate comment');
+  // 立即展示本地缓存
+  assert.ok(s.indexOf('loadLocalPhotoWallData()') >= 0, 'must call loadLocalPhotoWallData');
+  // 缓存存在时立即渲染
+  assert.ok(s.indexOf('renderPhotoWallWithoutReload') >= 0 || s.indexOf('renderPhotoWall') >= 0, 'must render cached data immediately');
+});
+test('照片墙云端请求失败时保留缓存', function(){
+  var s = read('js/photo-wall/data.js');
+  var catchStart = s.indexOf('catch (err) {');
+  var catchBlock = s.slice(catchStart, catchStart + 600);
+  assert.ok(catchBlock.indexOf('保留缓存') >= 0 || catchBlock.indexOf('window.photoWallData = local') >= 0, 'must keep cache on failure');
+  assert.ok(catchBlock.indexOf('window.photoWallData = local') >= 0, 'must fall back to local on failure');
+});
+test('照片墙合并时按 id/cloudId 去重', function(){
+  var s = read('js/photo-wall/data.js');
+  assert.ok(s.indexOf('existingIds') >= 0 && s.indexOf('existingIds.has(key)') >= 0, 'must deduplicate by id/cloudId');
+  assert.ok(s.indexOf('按 id/cloudId 去重') >= 0, 'must have deduplication comment');
+});
+
 console.log('\n=== Results ===');
 console.log('  Passed: ' + passed); console.log('  Failed: ' + failed);
 if (failed) process.exit(1);
