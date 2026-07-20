@@ -127,7 +127,8 @@ async function createPhotoRecord(options) {
     return { status: 400, body: { ok: false, error: validated.error, code: validated.code || 'INVALID_INPUT' } };
   }
   const uploadId = validated.uploadId;
-  const actorKey = 'photo_' + (uploadId || (options.createActorKey || (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }))));
+  const createActorKeyFn = typeof options.createActorKey === 'function' ? options.createActorKey : (crypto.randomUUID ? function() { return crypto.randomUUID(); } : function() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }); });
+  const actorKey = 'photo_' + (uploadId || createActorKeyFn());
   const storagePath = validated.storagePath;
 
   // 若提供了 upload_id, 先查询是否已存在 (幂等)
@@ -145,8 +146,7 @@ async function createPhotoRecord(options) {
       thumbnail = await options.createThumbnail({ supabase: options.supabase, supabaseUrl: options.supabaseUrl, storagePath: storagePath });
       var contentObj = JSON.parse(validated.content);
       contentObj.thumb = thumbnail.url || '';
-      contentObj.fileSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : contentObj.fileSize;
-      contentObj.originalSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : contentObj.originalSize;
+      contentObj.thumbFileSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : null;
       contentObj.width = thumbnail.width || null;
       contentObj.height = thumbnail.height || null;
       if (thumbnail.exif) contentObj.exif = thumbnail.exif;

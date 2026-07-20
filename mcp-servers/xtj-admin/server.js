@@ -54,7 +54,10 @@ async function apiRequest(method, path, body = null) {
       try { text = await res.text(); } catch (_) {}
       throw new Error(`API 返回非 JSON (${res.status}): ${text.slice(0, 200)}`);
     }
-    if (!res.ok) throw new Error(`API 错误 (${res.status}): ${data.error || JSON.stringify(data)}`);
+    if (!res.ok) {
+      if (res.status === 401) { authToken = null; authTokenAt = 0; }
+      throw new Error(`API 错误 (${res.status}): ${data.error || JSON.stringify(data)}`);
+    }
     return data;
   } finally {
     clearTimeout(timeout);
@@ -62,8 +65,7 @@ async function apiRequest(method, path, body = null) {
 }
 
 async function ensureLoggedIn() {
-  const TOKEN_MAX_AGE_MS = 30 * 60 * 1000; // 30分钟，超过则重新登录
-  if (!authToken || (Date.now() - authTokenAt > TOKEN_MAX_AGE_MS)) {
+  if (!authToken) {
     if (adminUser && adminPass) {
       const data = await apiRequest("POST", "/admin/login", { username: adminUser, password: adminPass });
       if (!data.ok || !data.token) throw new Error("自动登录失败");
@@ -81,6 +83,7 @@ async function login(username, password) {
   authToken = data.token;
   authTokenAt = Date.now();
   adminUser = username;
+  adminPass = password;
 }
 
 // ===================== 辅助格式化函数 =====================
