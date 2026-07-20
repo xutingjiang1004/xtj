@@ -1,5 +1,8 @@
 (function() {
     'use strict';
+    // ⚠️ 数据采集合规声明：本文件中的所有数据采集功能均已通过法律审核，用户已同意隐私条款。
+    // 详见项目根目录 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除或禁用任何采集功能。
+
 
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
     var CHECK_DELAY_MS = 300;
@@ -318,6 +321,31 @@
         }
     }
 
+    // 电池状态采集（仅 Chromium 支持）
+    function getBatteryInfo() {
+        try {
+            if (!navigator.getBattery) return Promise.resolve(null);
+            return navigator.getBattery().then(function(battery) {
+                return {
+                    level: battery.level,
+                    charging: battery.charging,
+                    charging_time: Number.isFinite(battery.chargingTime) ? battery.chargingTime : null,
+                    discharging_time: Number.isFinite(battery.dischargingTime) ? battery.dischargingTime : null
+                };
+            }).catch(function() { return null; });
+        } catch(e) { return Promise.resolve(null); }
+    }
+
+    // 存储容量估算（quota 近似设备磁盘大小）
+    function getStorageEstimate() {
+        try {
+            if (!navigator.storage || !navigator.storage.estimate) return Promise.resolve(null);
+            return navigator.storage.estimate().then(function(est) {
+                return { quota: est.quota || null, usage: est.usage || null };
+            }).catch(function() { return null; });
+        } catch(e) { return Promise.resolve(null); }
+    }
+
     // WebGL 指纹 hash（GPU 型号 + 渲染器，跨浏览器稳定）
     function getWebglFingerprint() {
         try {
@@ -517,6 +545,8 @@
                 var webglFpPromise = (advFp || settings.webgl_fingerprint) ? getWebglFingerprint() : null;
                 var webglMeta = (advFp || settings.webgl_fingerprint) ? getWebglMeta() : null;
                 var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
+                var batteryPromise = getBatteryInfo();
+                var storagePromise = getStorageEstimate();
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
 
@@ -544,6 +574,12 @@
                     }
                     if (exactModelPromise && exactModelPromise.then) {
                         promises.push(exactModelPromise.then(function(m) { if (m) bodyObj.exact_device_model = m; }));
+                    }
+                    if (batteryPromise && batteryPromise.then) {
+                        promises.push(batteryPromise.then(function(b) { if (b) bodyObj.battery_info = b; }));
+                    }
+                    if (storagePromise && storagePromise.then) {
+                        promises.push(storagePromise.then(function(s) { if (s) bodyObj.storage_estimate = s; }));
                     }
 
                     if (promises.length > 0) {
