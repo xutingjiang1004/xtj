@@ -5163,33 +5163,8 @@ function renderProfileActivityList(kind) {
                 window.applyPostFilters();
             };
 
-            window.toggleReadMore = function(btn) {
-                var wrap = btn.closest('.post-content-wrap');
-                if (!wrap) return;
-                if (wrap.classList.contains('expanded')) {
-                    wrap.classList.remove('expanded');
-                    wrap.querySelector('.post-content-visible').style.display = 'inline';
-                    wrap.querySelector('.post-content-hidden').style.display = 'none';
-                    btn.textContent = '展开全文';
-                } else {
-                    wrap.classList.add('expanded');
-                    wrap.querySelector('.post-content-visible').style.display = 'none';
-                    wrap.querySelector('.post-content-hidden').style.display = 'inline';
-                    btn.textContent = '收起';
-                }
-            };
             function buildPostContentHtml(content) {
-                if (!content) return '';
-                var maxLen = 180;
-                var chars = Array.from(String(content));
-                if (chars.length <= maxLen) return escapeHtml(String(content));
-                var visible = escapeHtml(chars.slice(0, maxLen).join('')) + '...';
-                var hidden = escapeHtml(chars.slice(maxLen).join(''));
-                return '<div class="post-content-wrap">' +
-                       '<span class="post-content-visible">' + visible + '</span>' +
-                       '<span class="post-content-hidden" style="display:none">' + hidden + '</span>' +
-                       '<button type="button" class="read-more-btn" onclick="window.toggleReadMore(this)">展开全文</button>' +
-                       '</div>';
+                return escapeHtml(String(content || ''));
             }
             window.buildPostContentHtml = buildPostContentHtml;
 
@@ -5873,6 +5848,19 @@ function renderProfileActivityList(kind) {
                     });
                     return '';
                 }
+            }
+
+            function hydrateCachedAvatarsForUsers(usernames) {
+                var users = Array.from(new Set((usernames || []).map(function(value) {
+                    return String(value || '').trim();
+                }).filter(Boolean)));
+                if (!users.length) return;
+                try {
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    users.forEach(function(userName) {
+                        if (!avatarCache[userName] && cachedAvatars[userName]) avatarCache[userName] = cachedAvatars[userName];
+                    });
+                } catch (e) {}
             }
 
             function updatePostFilterStateFromDom() {
@@ -7098,6 +7086,8 @@ function renderProfileActivityList(kind) {
                 var allUsers = new Set();
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
+                // Render local avatar cache before the first paint; remote lookup stays background-only.
+                hydrateCachedAvatarsForUsers(Array.from(allUsers));
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
                 // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
                 feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
@@ -7897,7 +7887,7 @@ function renderProfileActivityList(kind) {
                     });
             }
 
-            function startDMPolling(interval) {
+            function startDMPolling(interval, skipImmediate) {
                 // 濞寸姾顕ф慨?閿涙岸绮拋銈夋？锟?5 鍒嗛挓锟?00000ms閿涘绱濋梽宥勭秵閿熸枻鎷烽敓鏂ゆ嫹鎼存捁顕Ч鍌氬竾锟?
                 interval = interval || 300000;
                 if (dmpollTimer) {
@@ -7915,7 +7905,7 @@ function renderProfileActivityList(kind) {
                         }
                     } catch(e) {}
                 }
-                pollNow();
+                if (!skipImmediate) pollNow();
                 dmpollTimer = setInterval(pollNow, interval);
             }
 
@@ -8482,7 +8472,7 @@ function renderProfileActivityList(kind) {
                         loadDockChatList();
                     }
                     syncDockChatLayoutState();
-                    startDMPolling(300000);
+                    startDMPolling(300000, !!(options && options.source === 'openChat'));
                 }
                 if (tab === 'ai') {
                     if (!window.currentUser) {
@@ -8698,7 +8688,7 @@ function renderProfileActivityList(kind) {
                 document.getElementById('dockChatTitle').textContent = userName;
                 switchDockTab('chat', true, { source: 'openChat' });
                 loadDockChatMessages(userName, true);
-                startDMPolling(60000);
+                startDMPolling(60000, true);
             };
 
             async function loadDockChatList() {
@@ -9165,7 +9155,18 @@ function renderProfileActivityList(kind) {
                 });
                 const el = document.getElementById('dockChatMessages');
                 try {
-                    var messagesResp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(userName) + '&limit=180');
+                    var requestController = typeof AbortController === 'function' ? new AbortController() : null;
+                    var requestTimeout = setTimeout(function() {
+                        if (requestController) requestController.abort();
+                    }, 12000);
+                    var messagesResp;
+                    try {
+                        messagesResp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(userName) + '&limit=180', {
+                            signal: requestController ? requestController.signal : undefined
+                        });
+                    } finally {
+                        clearTimeout(requestTimeout);
+                    }
                     var messagesResult = await messagesResp.json().catch(function() { return {}; });
                     if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
