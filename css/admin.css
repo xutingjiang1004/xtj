@@ -1901,3 +1901,14 @@
         background: rgba(239, 68, 68, 0.12);
         color: #ef4444;
     }
+
+/* 优化指纹和 IP 等代码信息展示 */
+.ip-text, .code-hash {
+    font-family: Consolas, "Courier New", monospace !important;
+    font-size: 13px !important;
+    background: rgba(148, 163, 184, 0.1) !important;
+    padding: 3px 6px !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
+    word-break: break-all;
+}

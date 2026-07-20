@@ -2814,7 +2814,6 @@ async function initAdminClient() {
         panel.innerHTML = '<div class="admin-tab-loading" role="status" aria-live="polite">' +
             '<div class="admin-tab-loading-card skeleton-pulse"></div>' +
             '<div class="admin-tab-loading-card skeleton-pulse"></div>' +
-            '<span class="admin-tab-loading-label">正在加载' + escapeHtml(tab || '页面') + '数据…</span>' +
             '</div>';
     }
 
@@ -5435,7 +5434,7 @@ async function initAdminClient() {
                     h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(u.ip || '未记录') + '</td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.location || '未解析') + '</td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + formatTime(u.last_active) + '</td>';
-                    h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\');switchTab(\'profile\')">画像</button></td></tr>';
+                    h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px; white-space:nowrap" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\')">画像</button></td></tr>';
                 });
                 h += '</tbody></table></div></div>';
             } else {
@@ -5450,18 +5449,31 @@ async function initAdminClient() {
 
     // ===================== 用户画像聚合页 =====================
     var profileCurrentUser = '';
-    window.loadUserProfile = async function(userName) {
+    window.loadUserProfile = function(userName, skipOuterRender) {
         if (!userName) return;
         profileCurrentUser = userName;
-        var panel = document.getElementById('tabProfile');
-        if (!panel) return;
-        panel.innerHTML = '<div class="card"><div class="skeleton-block" style="height:400px"></div></div>';
-        try {
-            var profile = await apiCall('GET', '/admin/user-profile?user_name=' + encodeURIComponent(userName));
-            renderUserProfile(panel, profile);
-        } catch(e) {
-            panel.innerHTML = '<div class="card"><div class="empty">加载失败: ' + escapeHtml(e.message || '') + '</div></div>';
+        
+        if (!skipOuterRender) {
+            if (currentTab !== 'profile') {
+                switchTab('profile');
+            } else {
+                var panel = document.getElementById('tabProfile');
+                if (panel) renderProfileTab(panel);
+            }
+            return;
         }
+
+        var dir = document.getElementById('profileDirectory');
+        if (!dir) return;
+
+        apiCall('GET', '/admin/user-profile?user_name=' + encodeURIComponent(userName))
+            .then(function(profile) {
+                renderUserProfile(dir, profile);
+                dir.style.animation = 'fadeIn 0.3s ease';
+            })
+            .catch(function(e) {
+                dir.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message || '') + '</div>';
+            });
     };
     function renderUserProfile(el, p) {
         var cardStyle = 'margin:0;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;gap:12px;font-size:14px;color:var(--text-secondary)';
@@ -5497,7 +5509,7 @@ async function initAdminClient() {
         // 网络卡片
         h += '<div class="card" style="' + cardStyle + '">';
         h += '<div style="' + titleStyle + '"><span style="color:#10b981;display:flex">' + adminIcons.network + '</span>网络信息</div>';
-        h += '<div style="' + rowStyle + '"><span>IP</span><span style="' + valStyle + ';font-family:var(--font-mono, monospace)">' + escapeHtml(p.latest_ip || '') + '</span></div>';
+        h += '<div style="' + rowStyle + '"><span>IP</span><span class="ip-text">' + escapeHtml(p.latest_ip || '') + '</span></div>';
         if (p.latest_location) h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_location.text || '') + '</span></div>';
         if (p.latest_asn) {
             h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px;border-top:1px dashed var(--border);padding-top:8px"><span>ISP</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_asn.isp || '') + '</span></div>';
@@ -5539,7 +5551,7 @@ async function initAdminClient() {
             h += '<h4 style="margin:0 0 12px 0;font-size:16px;display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;display:flex">' + adminIcons.mapPin + '</span> IP 历史 <span style="font-size:12px;background:var(--bg-secondary);padding:2px 8px;border-radius:10px;color:var(--text-secondary)">' + p.unique_ips.length + '</span></h4>';
             h += '<div class="card" style="' + tableWrapStyle + '"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead><tr><th style="'+thStyle+'">IP</th><th style="'+thStyle+'">位置</th><th style="'+thStyle+'">次数</th><th style="'+thStyle+'">首次</th><th style="'+thStyle+'">最后</th></tr></thead><tbody>';
             p.unique_ips.forEach(function(ip) {
-                h += '<tr style="border-bottom:1px solid var(--border)"><td style="' + tdStyle + ';font-family:var(--font-mono, monospace);font-size:13px">' + escapeHtml(ip.ip) + '</td>';
+                h += '<tr style="border-bottom:1px solid var(--border)"><td style="' + tdStyle + '"><span class="ip-text">' + escapeHtml(ip.ip) + '</span></td>';
                 h += '<td style="' + tdStyle + '">' + escapeHtml(ip.location && ip.location.text || '') + '</td>';
                 h += '<td style="' + tdStyle + ';font-family:system-ui;font-weight:500;color:var(--text)">' + ip.count + '</td>';
                 h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(ip.first_seen) + '</td>';
@@ -5568,7 +5580,7 @@ async function initAdminClient() {
                 var label = key.replace(/_hash$/, '').replace(/_/g, ' ').toUpperCase();
                 h += '<div><p style="margin:0 0 8px 0;font-size:12px;color:var(--text-secondary);font-weight:600;letter-spacing:0.5px">' + escapeHtml(label) + '</p>';
                 p.fingerprints[key].forEach(function(fp) {
-                    h += '<code style="font-size:12px;font-family:var(--font-mono, monospace);word-break:break-all;display:block;margin:4px 0;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text)">' + escapeHtml(fp) + '</code>';
+                    h += '<div class="code-hash" style="display:block;margin:4px 0;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text)">' + escapeHtml(fp) + '</div>';
                 });
                 h += '</div>';
             });
@@ -5581,7 +5593,7 @@ async function initAdminClient() {
             p.location_history.forEach(function(loc) {
                 h += '<tr style="border-bottom:1px solid var(--border)">';
                 h += '<td style="' + tdStyle + ';font-weight:500;color:var(--text)">' + escapeHtml(loc.location || '') + '</td>';
-                h += '<td style="' + tdStyle + ';font-family:var(--font-mono, monospace);font-size:13px">' + escapeHtml(loc.ip || '') + '</td>';
+                h += '<td style="' + tdStyle + '"><span class="ip-text">' + escapeHtml(loc.ip || '') + '</span></td>';
                 h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(loc.time) + '</td></tr>';
             });
             h += '</tbody></table></div></div>';
@@ -5597,12 +5609,20 @@ async function initAdminClient() {
         h += 'onkeydown="if(event.key===\'Enter\')loadUserProfile(this.value)" />';
         h += '<button class="btn-sm" onclick="loadUserProfile(document.getElementById(\'profileSearchInp\').value)" style="margin-left:8px">查询</button>';
         h += '</div>';
-        if (!profileCurrentUser) h += '<div class="empty">输入用户名并点击查询，查看完整的用户画像聚合数据</div>';
-        h += '<p style="margin:0 0 14px;color:var(--text-secondary);font-size:13px">选择用户即可查看完整画像，支持按用户名筛选。</p>';
-        h += '<div id="profileDirectory"><div class="skeleton-block" style="height:180px"></div></div>';
-        h += '</div>';
-        el.innerHTML = h;
-        loadProfileDirectory();
+
+        if (profileCurrentUser) {
+            h += '<div id="profileDirectory"><div class="skeleton-block" style="height:400px"></div></div>';
+            h += '</div>';
+            el.innerHTML = h;
+            loadUserProfile(profileCurrentUser, true);
+        } else {
+            h += '<div class="empty">输入用户名并点击查询，查看完整的用户画像聚合数据</div>';
+            h += '<p style="margin:0 0 14px;color:var(--text-secondary);font-size:13px">选择用户即可查看完整画像，支持按用户名筛选。</p>';
+            h += '<div id="profileDirectory"><div class="skeleton-block" style="height:180px"></div></div>';
+            h += '</div>';
+            el.innerHTML = h;
+            loadProfileDirectory();
+        }
     }
 
     window.showProfileDirectory = function() {
@@ -5624,7 +5644,7 @@ async function initAdminClient() {
                 try { info = JSON.parse(user.content || '{}'); } catch (_) {}
                 var location = (info.last_ip_location && info.last_ip_location.text) || (info.last_location && (info.last_location.address || info.last_location.text)) || '未记录';
                 var userName = String(user.user_name || '');
-                h += '<tr data-profile-user="' + escapeHtml(userName.toLowerCase()) + '"><td><b>' + escapeHtml(userName) + '</b></td><td>' + escapeHtml(formatTime(info.last_visit || info.last_login || user.created_at)) + '</td><td>' + escapeHtml(location) + '</td><td><button class="btn-sm" onclick="loadUserProfile(\'' + safeJsStr(userName) + '\')">查看画像</button></td></tr>';
+                h += '<tr data-profile-user="' + escapeHtml(userName.toLowerCase()) + '"><td><b>' + escapeHtml(userName) + '</b></td><td>' + escapeHtml(formatTime(info.last_visit || info.last_login || user.created_at)) + '</td><td>' + escapeHtml(location) + '</td><td><button class="btn-sm" style="white-space:nowrap" onclick="loadUserProfile(\'' + safeJsStr(userName) + '\')">查看画像</button></td></tr>';
             });
             h += '</tbody></table></div>';
             if (!users.length) h += '<div class="empty">暂时没有可查询的用户</div>';
