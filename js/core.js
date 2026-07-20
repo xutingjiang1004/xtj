@@ -3944,27 +3944,35 @@ function renderProfileActivityList(kind) {
                 // 如果已经存在，则收起（切换显示状态）
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
-                    existingBox.remove();
+                    existingBox.style.maxHeight = '0px';
+                    existingBox.style.opacity = '0';
+                    setTimeout(() => existingBox.remove(), 300);
                     return;
                 }
                 
                 // 移除其他帖子下可能打开的内联输入框，保持界面整洁
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
-                    el.remove();
+                    el.style.maxHeight = '0px';
+                    el.style.opacity = '0';
+                    setTimeout(() => el.remove(), 300);
                 });
                 
-                // 创建内联评论框
+                // 创建内联评论框容器 (带动画)
                 var box = document.createElement('div');
                 box.className = 'inline-comment-box';
-                box.style.padding = '12px 16px';
-                box.style.borderTop = '1px solid var(--border)';
-                box.style.display = 'flex';
-                box.style.gap = '8px';
-                box.style.alignItems = 'center';
-                box.style.background = 'var(--bg)';
+                box.style.maxHeight = '0px';
+                box.style.opacity = '0';
+                box.style.overflow = 'hidden';
+                box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                box.style.background = 'transparent'; // 修复底色不统一的问题
                 box.style.borderBottomLeftRadius = '16px';
                 box.style.borderBottomRightRadius = '16px';
-                box.style.marginTop = '-8px';
+                
+                var innerWrap = document.createElement('div');
+                innerWrap.style.padding = '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
+                innerWrap.style.display = 'flex';
+                innerWrap.style.gap = '8px';
+                innerWrap.style.alignItems = 'center';
                 
                 var inp = document.createElement('input');
                 inp.type = 'text';
@@ -4008,7 +4016,9 @@ function renderProfileActivityList(kind) {
                         
                         touchUserSession(false);
                         showToast("评论成功");
-                        box.remove();
+                        box.style.maxHeight = '0px';
+                        box.style.opacity = '0';
+                        setTimeout(() => box.remove(), 300);
                         
                         var scrollEl = document.getElementById('panelPosts');
                         var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
@@ -4047,8 +4057,9 @@ function renderProfileActivityList(kind) {
                     if (e.key === 'Enter') btn.click();
                 };
                 
-                box.appendChild(inp);
-                box.appendChild(btn);
+                innerWrap.appendChild(inp);
+                innerWrap.appendChild(btn);
+                box.appendChild(innerWrap);
                 
                 var actionsEl = postEl.querySelector('.actions');
                 if (actionsEl) {
@@ -4056,7 +4067,16 @@ function renderProfileActivityList(kind) {
                 } else {
                     postEl.appendChild(box);
                 }
-                inp.focus();
+                
+                // 触发展开动画
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        box.style.maxHeight = '80px';
+                        box.style.opacity = '1';
+                    });
+                });
+                
+                setTimeout(() => inp.focus(), 300); // 动画结束后再 focus
             };
 
             // ===================== 删除帖子 =====================
