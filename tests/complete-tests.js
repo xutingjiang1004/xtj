@@ -415,6 +415,11 @@ test('wide Dock and iPad post layout use explicit visible and single-column over
   assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
 });
 
+test('narrow active posts retain the original horizontal statistics row', function(){
+  var source = read('css/ui-shell.css');
+  assert.ok(/@media \(max-width: 767\.98px\)[\s\S]*?#panelPosts\.active \.stats \{[\s\S]*?display: grid !important;[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\) !important/.test(source), 'active mobile post statistics do not stay horizontal');
+});
+
 console.log('\n=== English Module Regression Guards ===');
 test('server.js public post filter excludes retired English marker', function(){
   var s = read('render-api/server.js');
