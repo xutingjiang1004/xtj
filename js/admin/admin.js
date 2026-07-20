@@ -5384,6 +5384,20 @@ async function initAdminClient() {
         }
     }
 
+    const adminIcons = {
+        user: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
+        device: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>',
+        network: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
+        chart: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>',
+        mapPin: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+        warning: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+        fingerprint: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M9 10v1a3 3 0 0 0 6 0v-1"></path><path d="M9 14v1a3 3 0 0 0 6 0v-1"></path></svg>',
+        history: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
+        battery: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><rect x="2" y="7" width="16" height="10" rx="2" ry="2"></rect><line x1="22" y1="11" x2="22" y2="13"></line></svg>',
+        disk: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>',
+        wifi: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>'
+    };
+
     // ===================== 实时在线仪表盘 =====================
     var onlineRefreshTimer = null;
     function renderOnlineTab(el) {
@@ -5399,29 +5413,33 @@ async function initAdminClient() {
             // The standalone admin page owns its authenticated request path.
             // Do not depend on the frontend-only xtjProtectedFetch helper here.
             var data = await apiCall('GET', '/admin/stats/online');
-            var h = '<div class="card">';
-            h += '<h3>\ud83d\udfe2 实时在线用户</h3>';
-            h += '<p style="color:var(--text-secondary);margin-bottom:16px">最近5分钟有活动的用户 \u00b7 每30秒自动刷新</p>';
-            h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">';
-            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:32px;font-weight:700;color:var(--primary)">' + (data.online_count || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">在线人数</div></div>';
+            var h = '<div class="card" style="border:none;box-shadow:none;background:transparent;padding:0">';
+            h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 8px rgba(16,185,129,0.8)"></div><h3 style="margin:0;font-size:20px;font-weight:600">实时在线</h3></div>';
+            h += '<p style="color:var(--text-secondary);font-size:14px;margin-bottom:24px">最近 5 分钟有活动的用户 · 每 30 秒自动刷新</p>';
+            
+            h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">';
+            h += '<div class="card" style="margin:0;display:flex;align-items:center;gap:16px;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px"><div style="padding:12px;border-radius:12px;background:rgba(16,185,129,0.1);color:#10b981;display:flex">' + adminIcons.user + '</div><div><div style="font-size:28px;font-weight:700;line-height:1;font-family:system-ui">' + (data.online_count || 0) + '</div><div style="font-size:13px;color:var(--text-secondary);margin-top:6px;font-weight:500">在线人数</div></div></div>';
             var ds = data.device_stats || {};
-            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udcf1 ' + (ds.mobile || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">手机</div></div>';
-            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udcbb ' + (ds.desktop || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">电脑</div></div>';
-            h += '<div class="card" style="margin:0;text-align:center;padding:16px"><div style="font-size:24px">\ud83d\udccb ' + (ds.tablet || 0) + '</div><div style="font-size:13px;color:var(--text-secondary)">平板</div></div>';
+            h += '<div class="card" style="margin:0;display:flex;align-items:center;gap:16px;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px"><div style="padding:12px;border-radius:12px;background:rgba(59,130,246,0.1);color:#3b82f6;display:flex">' + adminIcons.device + '</div><div style="display:flex;gap:24px">';
+            h += '<div><div style="font-size:20px;font-weight:700;line-height:1;font-family:system-ui">' + (ds.mobile || 0) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">手机</div></div>';
+            h += '<div><div style="font-size:20px;font-weight:700;line-height:1;font-family:system-ui">' + (ds.desktop || 0) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">电脑</div></div>';
+            h += '</div></div>';
             h += '</div>';
+            
             if (data.users && data.users.length > 0) {
-                h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>设备</th><th>IP</th><th>位置</th><th>最后活动</th><th>操作</th></tr></thead><tbody>';
+                h += '<div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead style="background:var(--bg-secondary)"><tr><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">用户</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">设备</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">IP</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">位置</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">最后活动</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">操作</th></tr></thead><tbody>';
                 data.users.forEach(function(u) {
-                    h += '<tr><td><b>' + escapeHtml(u.user_name) + '</b></td>';
-                    h += '<td>' + escapeHtml((u.device_type || '') + ' ' + (u.os || '')) + '</td>';
-                    h += '<td style="font-family:monospace;font-size:12px">' + escapeHtml(u.ip || '') + '</td>';
-                    h += '<td>' + escapeHtml(u.location || '') + '</td>';
-                    h += '<td>' + formatTime(u.last_active) + '</td>';
-                    h += '<td><button class="btn-sm" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\');switchTab(\'profile\')">画像</button></td></tr>';
+                    h += '<tr style="border-bottom:1px solid var(--border)">';
+                    h += '<td style="padding:12px 16px"><b>' + escapeHtml(u.user_name) + '</b></td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml((u.device_type || '') + ' ' + (u.os || '')) + '</td>';
+                    h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(u.ip || '') + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.location || '') + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + formatTime(u.last_active) + '</td>';
+                    h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\');switchTab(\'profile\')">画像</button></td></tr>';
                 });
-                h += '</tbody></table></div>';
+                h += '</tbody></table></div></div>';
             } else {
-                h += '<div class="empty">当前没有在线用户</div>';
+                h += '<div class="card" style="text-align:center;padding:40px;color:var(--text-secondary);background:var(--bg-secondary);border:1px dashed var(--border);border-radius:12px">当前没有在线用户</div>';
             }
             h += '</div>';
             el.innerHTML = h;
@@ -5446,52 +5464,58 @@ async function initAdminClient() {
         }
     };
     function renderUserProfile(el, p) {
-        var h = '<div class="card" style="margin-bottom:16px">';
-        h += '<h3>\ud83d\udc64 ' + escapeHtml(p.user_name) + ' \u2014 用户画像</h3>';
-        h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:16px 0">';
+        var cardStyle = 'margin:0;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;gap:12px;font-size:14px;color:var(--text-secondary)';
+        var rowStyle = 'display:flex;justify-content:space-between;align-items:center;border-bottom:1px dashed var(--border);padding-bottom:8px';
+        var valStyle = 'color:var(--text);font-weight:500;font-family:system-ui';
+        var titleStyle = 'display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px';
+
+        var h = '<div class="card" style="border:none;box-shadow:none;background:transparent;padding:0">';
+        h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:24px"><div style="padding:10px;border-radius:12px;background:rgba(99,102,241,0.1);color:#6366f1;display:flex">' + adminIcons.user + '</div><h3 style="margin:0;font-size:22px;font-weight:600">' + escapeHtml(p.user_name) + ' 的画像</h3></div>';
+        h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-bottom:32px">';
+        
         // 设备卡片
-        h += '<div class="card" style="margin:0"><h4>\ud83d\udcf1 最新设备</h4>';
+        h += '<div class="card" style="' + cardStyle + '">';
+        h += '<div style="' + titleStyle + '"><span style="color:#3b82f6;display:flex">' + adminIcons.device + '</span>最新设备</div>';
         var dev = p.latest_device || {};
-        h += '<p><b>类型:</b> ' + escapeHtml(dev.type || 'unknown') + '</p>';
-        h += '<p><b>OS:</b> ' + escapeHtml(dev.os || '') + '</p>';
-        h += '<p><b>浏览器:</b> ' + escapeHtml(dev.browser || '') + '</p>';
-        h += '<p><b>型号:</b> ' + escapeHtml(dev.model || '未知') + '</p>';
+        h += '<div style="' + rowStyle + '"><span>类型</span><span style="' + valStyle + '">' + escapeHtml(dev.type || 'unknown') + '</span></div>';
+        h += '<div style="' + rowStyle + '"><span>OS</span><span style="' + valStyle + '">' + escapeHtml(dev.os || '') + '</span></div>';
+        h += '<div style="' + rowStyle + '"><span>浏览器</span><span style="' + valStyle + '">' + escapeHtml(dev.browser || '') + '</span></div>';
+        h += '<div style="' + rowStyle + '"><span>型号</span><span style="' + valStyle + '">' + escapeHtml(dev.model || '未知') + '</span></div>';
         if (dev.device_meta) {
             var dm = dev.device_meta;
-            if (dm.screen) h += '<p><b>屏幕:</b> ' + escapeHtml(dm.screen) + '</p>';
-            if (dm.hardware_concurrency) h += '<p><b>CPU:</b> ' + dm.hardware_concurrency + '核</p>';
-            if (dm.device_memory_gb) h += '<p><b>内存:</b> ' + dm.device_memory_gb + 'GB</p>';
+            if (dm.screen) h += '<div style="' + rowStyle + '"><span>屏幕</span><span style="' + valStyle + '">' + escapeHtml(dm.screen) + '</span></div>';
+            if (dm.hardware_concurrency) h += '<div style="' + rowStyle + '"><span>CPU/内存</span><span style="' + valStyle + '">' + dm.hardware_concurrency + '核 / ' + (dm.device_memory_gb || '?') + 'GB</span></div>';
             if (dm.battery_info) {
                 var bat = dm.battery_info;
-                h += '<p><b>\ud83d\udd0b:</b> ' + Math.round((bat.level || 0) * 100) + '% ' + (bat.charging ? '\u26a1充电中' : '') + '</p>';
+                h += '<div style="' + rowStyle + '"><span>电量 ' + adminIcons.battery + '</span><span style="' + valStyle + '">' + Math.round((bat.level || 0) * 100) + '% ' + (bat.charging ? '充电中' : '') + '</span></div>';
             }
-            if (dm.storage_estimate) {
-                h += '<p><b>\ud83d\udcbe:</b> ' + ((dm.storage_estimate.quota || 0) / 1073741824).toFixed(1) + 'GB</p>';
-            }
-            if (dm.network) {
-                h += '<p><b>\ud83d\udce1:</b> ' + escapeHtml(dm.network.effective_type || '') + ' / ' + (dm.network.downlink_mbps || '?') + 'Mbps</p>';
-            }
+            if (dm.storage_estimate) h += '<div style="' + rowStyle + '"><span>存储 ' + adminIcons.disk + '</span><span style="' + valStyle + '">' + ((dm.storage_estimate.quota || 0) / 1073741824).toFixed(1) + 'GB</span></div>';
+            if (dm.network) h += '<div style="' + rowStyle + '"><span>网络 ' + adminIcons.wifi + '</span><span style="' + valStyle + '">' + escapeHtml(dm.network.effective_type || '') + ' / ' + (dm.network.downlink_mbps || '?') + 'Mbps</span></div>';
         }
         h += '</div>';
+
         // 网络卡片
-        h += '<div class="card" style="margin:0"><h4>\ud83c\udf10 网络信息</h4>';
-        h += '<p><b>IP:</b> ' + escapeHtml(p.latest_ip || '') + '</p>';
-        if (p.latest_location) h += '<p><b>位置:</b> ' + escapeHtml(p.latest_location.text || '') + '</p>';
+        h += '<div class="card" style="' + cardStyle + '">';
+        h += '<div style="' + titleStyle + '"><span style="color:#10b981;display:flex">' + adminIcons.network + '</span>网络信息</div>';
+        h += '<div style="' + rowStyle + '"><span>IP</span><span style="' + valStyle + ';font-family:var(--font-mono, monospace)">' + escapeHtml(p.latest_ip || '') + '</span></div>';
+        if (p.latest_location) h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_location.text || '') + '</span></div>';
         if (p.latest_asn) {
-            h += '<p><b>ISP:</b> ' + escapeHtml(p.latest_asn.isp || '') + '</p>';
-            h += '<p><b>ASN:</b> ' + escapeHtml(p.latest_asn.asn || '') + '</p>';
-            if (p.latest_asn.is_proxy) h += '<p style="color:var(--danger)"><b>\u26a0\ufe0f 代理/VPN:</b> 是</p>';
-            if (p.latest_asn.is_hosting) h += '<p style="color:var(--warning)"><b>数据中心IP:</b> 是</p>';
+            h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px;border-top:1px dashed var(--border);padding-top:8px"><span>ISP</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_asn.isp || '') + '</span></div>';
+            h += '<div style="' + rowStyle + '"><span>ASN</span><span style="' + valStyle + '">' + escapeHtml(p.latest_asn.asn || '') + '</span></div>';
+            if (p.latest_asn.is_proxy) h += '<div style="' + rowStyle + '"><span>代理/VPN</span><span style="color:var(--danger);font-weight:600;display:flex;align-items:center;gap:4px">' + adminIcons.warning + ' 是</span></div>';
+            if (p.latest_asn.is_hosting) h += '<div style="' + rowStyle + '"><span>数据中心</span><span style="color:var(--warning);font-weight:600">是</span></div>';
         }
         h += '</div>';
+
         // 统计卡片
-        h += '<div class="card" style="margin:0"><h4>\ud83d\udcca 活动概览</h4>';
-        h += '<p><b>总访问:</b> ' + (p.total_visits || 0) + ' 次</p>';
-        h += '<p><b>总登录:</b> ' + (p.total_logins || 0) + ' 次</p>';
-        h += '<p><b>首次登录:</b> ' + formatTime(p.first_login) + '</p>';
-        h += '<p><b>最后登录:</b> ' + formatTime(p.last_login) + '</p>';
-        h += '<p><b>通讯录:</b> ' + (p.contacts_count || 0) + ' 人</p>';
-        h += '<p><b>剪贴板:</b> ' + (p.clipboard_count || 0) + ' 条</p>';
+        h += '<div class="card" style="' + cardStyle + '">';
+        h += '<div style="' + titleStyle + '"><span style="color:#f59e0b;display:flex">' + adminIcons.chart + '</span>活动概览</div>';
+        h += '<div style="' + rowStyle + '"><span>总访问</span><span style="' + valStyle + '">' + (p.total_visits || 0) + ' 次</span></div>';
+        h += '<div style="' + rowStyle + '"><span>总登录</span><span style="' + valStyle + '">' + (p.total_logins || 0) + ' 次</span></div>';
+        h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>首次登录</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.first_login) + '</span></div>';
+        h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px;border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>最后活动</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.last_login) + '</span></div>';
+        h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px"><span>通讯录</span><span style="' + valStyle + '">' + (p.contacts_count || 0) + ' 人</span></div>';
+        h += '<div style="' + rowStyle + ';border-bottom:none"><span>剪贴板</span><span style="' + valStyle + '">' + (p.clipboard_count || 0) + ' 条</span></div>';
         h += '</div></div>';
         // 代理警报
         if (p.proxy_alerts && p.proxy_alerts.length > 0) {
