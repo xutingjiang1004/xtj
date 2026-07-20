@@ -1176,8 +1176,7 @@
   #panelPosts.active .wrap,
   #panelPosts #publishBox,
   #panelPosts #postFilterBar,
-  #panelPosts #feed,
-  #panelPosts .stats {
+  #panelPosts #feed {
     width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -1188,30 +1187,6 @@
   #panelPosts.active .wrap {
     gap: 16px !important;
     padding-inline: 0 !important;
-  }
-
-  #panelPosts .stats,
-  #panelPosts.active .stats {
-    display: grid !important;
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    gap: 8px !important;
-  }
-
-  #panelPosts .stats .stat-card,
-  #panelPosts.active .stats .stat-card {
-    min-width: 0 !important;
-    min-block-size: 76px !important;
-    padding: 12px 6px !important;
-  }
-
-  #panelPosts .stats .stat-card b {
-    font-size: clamp(16px, 5vw, 20px) !important;
-  }
-
-  #panelPosts .stats .stat-card span {
-    display: block;
-    overflow-wrap: anywhere;
-    line-height: 1.25;
   }
 
   #panelPosts .publish-box {
