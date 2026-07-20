@@ -6866,11 +6866,11 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
     if (existing.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: 'Not allowed to delete this comment', code: 'forbidden' });
     }
-    var deleted = await supabase.from('comments').delete().eq('id', commentId).eq('user_name', existing.data.user_name);
+    var deleted = await supabase.from('comments').delete().eq('id', commentId).eq('user_name', existing.data.user_name).select('id');
     if (deleted.error) return res.status(500).json({ error: sanitizeError(deleted.error), code: 'comment_delete_failed' });
-    var remaining = await supabase.from('comments').select('id').eq('id', commentId).maybeSingle();
-    if (remaining.error) return res.status(500).json({ error: sanitizeError(remaining.error), code: 'comment_delete_verify_failed' });
-    if (remaining.data) return res.status(500).json({ error: 'Comment still exists after delete', code: 'comment_delete_not_confirmed' });
+    if (!(deleted.data || []).some(function(row) { return String(row && row.id) === String(commentId); })) {
+      return res.status(500).json({ error: 'Comment delete was not confirmed', code: 'comment_delete_not_confirmed' });
+    }
     return res.json({ ok: true, deleted_comment_id: commentId });
   } catch (e) {
     console.error('[API] comment delete:', e && e.message ? e.message : e);
