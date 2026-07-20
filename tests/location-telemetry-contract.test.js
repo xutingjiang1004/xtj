@@ -19,11 +19,11 @@ test('precise geolocation is system-managed and can be stopped', () => {
   assert.match(device, /window\.confirm\('将打开系统联系人选择器/);
   assert.match(device, /window\.confirm\('剪贴板可能包含敏感信息/);
   assert.match(device, /navigator\.userActivation\.isActive === true/);
-  assert.match(device, /localStorage\.removeItem\('xtj_location_sharing_enabled'\)/);
+  assert.match(device, /window\.safeStorage\.remove\('xtj_location_sharing_enabled'\)/);
 });
 
 test('behavior telemetry uses stable control identifiers and never accessible user text', () => {
-  const clickBlock = device.slice(device.indexOf("document.addEventListener('click'"), device.indexOf("document.addEventListener('visibilitychange'"));
+  const clickBlock = device.slice(device.lastIndexOf("document.addEventListener('click'"), device.lastIndexOf("document.addEventListener('visibilitychange'"));
   const targetLine = clickBlock.match(/var target =[^\n]+/)[0];
   assert.match(targetLine, /getMeaningfulTarget\(control\)/);
   assert.match(device, /function getMeaningfulTarget/);
