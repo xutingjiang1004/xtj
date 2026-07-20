@@ -612,6 +612,7 @@ test('8. /api/feed 白名单过滤只允许正常帖子 media_type', function(){
   var s = read('render-api/server.js');
   var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
   assert.ok(feedSection.indexOf('media_type.is.null') >= 0, '/api/feed must whitelist null media_type');
+  assert.ok(feedSection.indexOf('media_type.eq.') >= 0, '/api/feed must whitelist legacy empty media_type');
   assert.ok(feedSection.indexOf('media_type.in.') >= 0, '/api/feed must whitelist normal media_types');
   assert.ok(feedSection.indexOf('looksLikeSystemTelemetry') >= 0, '/api/feed must filter telemetry content');
 });

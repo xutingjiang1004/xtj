@@ -24,7 +24,7 @@ test('feed remains usable when an avatar request and one post render fail', asyn
         posts: [
           validPost,
           { id: 'feed-missing-user', user_name: null, content: 'Incomplete legacy row', created_at: '2026-07-20T08:01:00.000Z' },
-          { id: 'feed-long-unicode', user_name: 'Bob', content: `${'x'.repeat(180)}😀Z`, created_at: '2026-07-20T08:02:00.000Z', visibility: 'public' }
+          { id: 'feed-long-content', user_name: 'Bob', content: `${'x'.repeat(240)} full post content`, created_at: '2026-07-20T08:02:00.000Z', visibility: 'public' }
         ],
         comments: [],
         likes: [],
@@ -41,10 +41,8 @@ test('feed remains usable when an avatar request and one post render fail', asyn
   await expect(page.locator('#feed')).not.toContainText('加载失败');
   await expect(page.locator('#feed .post[data-post-id="feed-healthy-post"] .avatar.clickable')).toHaveText('A');
 
-  const readMore = page.locator('.read-more-btn');
-  await expect(readMore).toHaveCount(1);
-  await readMore.click();
-  await expect(page.locator('.post-content-hidden')).toContainText('😀Z');
+  await expect(page.locator('.read-more-btn')).toHaveCount(0);
+  await expect(page.locator('#feed .post[data-post-id="feed-long-content"] .content')).toContainText('full post content');
 
   await page.evaluate(() => window.loadFeed(true));
   await expect.poll(() => feedRequests).toBeGreaterThan(1);
