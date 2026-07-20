@@ -378,7 +378,15 @@
   window.addEventListener('pagehide', unsubscribePhotoWallRealtime);
 
   function subscribePhotoWallRealtime(){
-    if (!window.sb || realtimeChannel) return;
+    if (!window.sb) return;
+    if (realtimeChannel) {
+      var state = realtimeChannel.state;
+      if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
+        unsubscribePhotoWallRealtime();
+      } else {
+        return;
+      }
+    }
     try {
       realtimeChannel = window.sb.channel('photo-wall-realtime')
         .on('postgres_changes', { event:'*', schema:'public', table:'posts', filter:'media_type=eq.' + (window.PHOTO_WALL_MARKER || MARKER) }, function(payload){
@@ -429,6 +437,7 @@
     var now = Date.now();
     if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
     _lastVisibilitySync = now;
+    subscribePhotoWallRealtime();
     return loadPhotoWallData(true).then(function(){
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
     });
