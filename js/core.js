@@ -29,6 +29,14 @@ window.throttleRAF = function(fn) {
     };
 };
 
+window.safeParseDate = function(val) {
+    if (!val) return new Date();
+    var s = String(val);
+    if (s.indexOf('T') === -1) s = s.replace(' ', 'T');
+    var d = new Date(s);
+    return isNaN(d.getTime()) ? new Date(s.replace(/-/g, '/')) : d;
+};
+
 // console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
@@ -2349,7 +2357,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         try {
                             var info = JSON.parse(userInfoRes.data[0].content);
                             if (info.last_login) {
-                                document.getElementById('upcLogin').textContent = '最近登录：' + new Date(info.last_login).toLocaleString();
+                                document.getElementById('upcLogin').textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
                             } else {
                                 document.getElementById('upcLogin').textContent = '最近登录：-';
                             }
@@ -2395,7 +2403,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         try {
                             const userInfo = JSON.parse(userInfoRes.data[0].content);
                             if (userInfo.reg_time) {
-                                document.getElementById('profileDetailRegTime').textContent = new Date(userInfo.reg_time).toLocaleString();
+                                document.getElementById('profileDetailRegTime').textContent = window.safeParseDate(userInfo.reg_time).toLocaleString();
                             } else {
                                 document.getElementById('profileDetailRegTime').textContent = '-';
                             }
@@ -2900,7 +2908,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     var titleText = escapeHtml((typeof currentUser === 'object' && currentUser ? (currentUser.user_metadata?.full_name || currentUser.email) : (typeof currentUser === 'string' ? currentUser : '')) || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子');
                     var metaHtml = [
                         '<div class="profile-activity-record__meta">',
-                        '<span class="profile-activity-record__time">' + new Date(item.created_at).toLocaleString() + '</span>',
+                        '<span class="profile-activity-record__time">' + window.safeParseDate(item.created_at).toLocaleString() + '</span>',
                         canOpenPost ? '<span class="profile-activity-record__hint">点击查看详情</span>' : '<span class="profile-activity-record__hint is-muted">当前不可查看详情</span>',
                         '</div>'
                     ].join('');
@@ -3623,7 +3631,7 @@ function renderProfileActivityList(kind) {
             function setLikeButtonState(btn, liked) {
                 if (!btn) return;
                 btn.classList.toggle('liked', !!liked);
-                btn.textContent = liked ? '已赞' : '点赞';
+                btn.textContent = liked ? '❤️' : '🤍';
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
@@ -5094,7 +5102,28 @@ function renderProfileActivityList(kind) {
                         const pComms = commentMap[p.id] || [];
                         const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                         const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
+                        var commentsHtml = '';
+                        if (pComms.length) {
+                            var parentComments = pComms.filter(function(c) { return !c.parent_comment_id; });
+                            var aiCommentMap = {};
+                            pComms.forEach(function(c) {
+                                if (c.parent_comment_id && c.user_name === 'cat_ai' && c.generated_by_ai) {
+                                    if (!aiCommentMap[c.parent_comment_id]) aiCommentMap[c.parent_comment_id] = [];
+                                    aiCommentMap[c.parent_comment_id].push(c);
+                                }
+                            });
+                            commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
+                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    ';
+                                var aiReplies = aiCommentMap[c.id] || [];
+                                aiReplies.forEach(function(reply) {
+                                    if (typeof renderCatAiComment === 'function') {
+                                        html += renderCatAiComment(reply);
+                                    }
+                                });
+                                return html;
+                            }).join('') + '\n                  </div>\n                  ';
+                        }
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
                     } catch (e) {
                         console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
                     }
@@ -5439,7 +5468,7 @@ function renderProfileActivityList(kind) {
 
             function formatPostTime(post) {
                 var normalized = normalizePost(post);
-                var time = normalized.created_at ? new Date(normalized.created_at).toLocaleString() : "";
+                var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
                 return time;
@@ -7027,7 +7056,7 @@ function renderProfileActivityList(kind) {
 
             function formatStatTime(value) {
                 try {
-                    return new Date(value).toLocaleString();
+                    return window.safeParseDate(value).toLocaleString();
                 } catch (e) {
                     return '';
                 }
@@ -7199,7 +7228,7 @@ function renderProfileActivityList(kind) {
                     <div class="post-detail-header">
                         <div class="pdh-left">
                             <div class="pdh-name">${escapeHtml(post.user_name)}</div>
-                            <div class="pdh-time">${new Date(post.created_at).toLocaleString()}</div>
+                            <div class="pdh-time">${window.safeParseDate(post.created_at).toLocaleString()}</div>
                         </div>
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
@@ -7213,7 +7242,7 @@ function renderProfileActivityList(kind) {
                                     <div class="sli-info">
                                         <div class="sli-user">${escapeHtml(l.user_name)}</div>
                                     </div>
-                                    <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
+                                    <span class="sli-time">${window.safeParseDate(l.created_at).toLocaleString()}</span>
                                 </div>
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
@@ -7225,7 +7254,7 @@ function renderProfileActivityList(kind) {
                                         <div class="sci-user">${escapeHtml(c.user_name)}</div>
                                         <div class="sci-target">${escapeHtml(c.content)}</div>
                                     </div>
-                                    <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
+                                    <span class="sci-time">${window.safeParseDate(c.created_at).toLocaleString()}</span>
                                 </div>
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
                         </div>
@@ -7257,7 +7286,7 @@ function renderProfileActivityList(kind) {
                             ${fmt.tag}
                         </span>
                         ${fmt.thumbUrl ? `<img class="spi-thumb" loading="lazy" decoding="async" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
-                        <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
+                        <span class="spi-time">${window.safeParseDate(p.created_at).toLocaleString()}</span>
                     </div>
                 `;
             }
@@ -7335,7 +7364,7 @@ function renderProfileActivityList(kind) {
                             <div class="svi-user">${escapeHtml(v.user_name)}</div>
                             <div class="svi-target">浏览了 <b>${escapeHtml(v.post_author)}</b> 的帖子：${escapeHtml(v.post_content)}</div>
                         </div>
-                        <span class="svi-time">${new Date(v.viewed_at).toLocaleString()}</span>
+                        <span class="svi-time">${window.safeParseDate(v.viewed_at).toLocaleString()}</span>
                     </div>
                 `).join('');
             }
@@ -7359,7 +7388,7 @@ function renderProfileActivityList(kind) {
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
                                 <div class="sli-target">点赞了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'} 的内容：${postContent}</div>
                             </div>
-                            <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
+                            <span class="sli-time">${window.safeParseDate(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
@@ -7381,7 +7410,7 @@ function renderProfileActivityList(kind) {
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
                                 <div class="sci-target">评论了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'}：${escapeHtml(c.content)}</div>
                             </div>
-                            <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
+                            <span class="sci-time">${window.safeParseDate(c.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
@@ -9819,7 +9848,7 @@ function renderProfileActivityList(kind) {
 
                 var annData = parseAnnData(ann);
                 document.getElementById('announcementDetailTitle').textContent = annData.title;
-                document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
+                document.getElementById('announcementDetailTime').textContent = window.safeParseDate(ann.created_at).toLocaleString('zh-CN');
                 document.getElementById('announcementDetailContent').textContent = annData.content;
                 
                 // 设置发布閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
@@ -9918,7 +9947,7 @@ function renderProfileActivityList(kind) {
                                 ${!isRead ? '<span class="unread-dot"></span>' : ''}
                                 ${escapeHtml(displayTitle)}
                             </div>
-                            <div class="announcement-item-time">${new Date(ann.created_at).toLocaleString('zh-CN')}</div>
+                            <div class="announcement-item-time">${window.safeParseDate(ann.created_at).toLocaleString('zh-CN')}</div>
                         </div>
                         ${previewContent ? `<div class="announcement-item-preview">${escapeHtml(previewContent)}</div>` : ''}
                     `;
@@ -11259,7 +11288,7 @@ function renderProfileActivityList(kind) {
         function formatReportTime(value) {
             if (!value) return '';
             try {
-                return new Date(value).toLocaleString();
+                return window.safeParseDate(value).toLocaleString();
             } catch(_) {
                 return '';
             }
@@ -11268,7 +11297,7 @@ function renderProfileActivityList(kind) {
         function formatReportDate(value) {
             if (!value) return '';
             try {
-                return new Date(value).toLocaleDateString();
+                return window.safeParseDate(value).toLocaleDateString();
             } catch(_) {
                 return '';
             }
@@ -11784,7 +11813,7 @@ function renderProfileActivityList(kind) {
                     '        <div class="post-detail-avatar">' + escapeHtml(String(normalizedPost.user_name || '?').slice(0, 1).toUpperCase()) + '</div>',
                     '        <div class="post-detail-owner-copy">',
                     '          <div class="pdh-name">' + escapeHtml(normalizedPost.user_name || '未知用户') + '</div>',
-                    '          <div class="pdh-time">' + new Date(normalizedPost.created_at).toLocaleString() + '</div>',
+                    '          <div class="pdh-time">' + window.safeParseDate(normalizedPost.created_at).toLocaleString() + '</div>',
                     '        </div>',
                     '      </div>',
                     '      <span class="post-detail-visibility">' + visibilityLabel + '</span>',
@@ -11797,13 +11826,13 @@ function renderProfileActivityList(kind) {
                     '  <section class="post-detail-panel post-detail-panel--stack">',
                     '    <div class="post-detail-panel-title">点赞用户 <span>' + likes.length + '</span></div>',
                     likes.length ? likes.map(function(l) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + new Date(l.created_at).toLocaleString() + '</span></article>';
+                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack">',
                     '    <div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>',
                     comments.length ? comments.map(function(c) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + new Date(c.created_at).toLocaleString() + '</span></article>';
+                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + window.safeParseDate(c.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无评论</div>',
                     '  </section>',
                     '</article>'
@@ -11818,7 +11847,7 @@ function renderProfileActivityList(kind) {
 
             function formatStatTime(value) {
                 try {
-                    return new Date(value).toLocaleString();
+                    return window.safeParseDate(value).toLocaleString();
                 } catch (e) {
                     return '';
                 }
@@ -11979,7 +12008,7 @@ function renderProfileActivityList(kind) {
                     statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-main">',
                     '<div class="stat-row-title">' + (display ? escapeHtml(display) : escapeHtml(statPostSummary(normalized, 'plain'))) + '</div>',
-                    '<div class="stat-row-meta"><span>' + new Date(normalized.created_at).toLocaleString() + '</span>' + tag + '</div>',
+                    '<div class="stat-row-meta"><span>' + window.safeParseDate(normalized.created_at).toLocaleString() + '</span>' + tag + '</div>',
                     '</div>',
                     '<button type="button" class="spi-open-btn stat-row-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>',
                     '</article>'
@@ -12010,7 +12039,7 @@ function renderProfileActivityList(kind) {
                 body.innerHTML = entries.map(function(entry, index) {
                     var name = entry[0];
                     var posts = sortPosts(entry[1] || []);
-                    var latest = posts[0] ? new Date(posts[0].created_at).toLocaleString() : '--';
+                    var latest = posts[0] ? window.safeParseDate(posts[0].created_at).toLocaleString() : '--';
                     var nameJs = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     var previewMedia = posts.filter(function(post) {
                         return !!(post && post.media_url);
@@ -12053,7 +12082,7 @@ function renderProfileActivityList(kind) {
                 var mediaOnclick = post ? "event.stopPropagation();openStatPostMedia('" + safePostId + "')" : '';
                 var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                 var actorName = escapeHtml(item.user_name || '匿名用户');
-                var timeText = new Date(item.created_at).toLocaleString();
+                var timeText = window.safeParseDate(item.created_at).toLocaleString();
                 var summary = post ? statPostSummary(post, 'bracket') : '（帖子已删除）';
                 var cardAttrs = post
                     ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"'
@@ -12114,7 +12143,7 @@ function renderProfileActivityList(kind) {
                         '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
                         '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(v.post_content || postText) + '</div></div>',
                         statMediaColumnMarkup(mediaHtml),
-                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(v.viewed_at).toLocaleString() + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
+                        '<div class="stat-row-side"><span class="stat-row-time">' + window.safeParseDate(v.viewed_at).toLocaleString() + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
                         '</div>',
                         '</article>'
                     ].join('');
@@ -12270,7 +12299,7 @@ function renderProfileActivityList(kind) {
             }
 
             function formatStatDateTime(value) {
-                var date = value ? new Date(value) : new Date();
+                var date = value ? window.safeParseDate(value) : new Date();
                 if (Number.isNaN(date.getTime())) date = new Date();
                 return date.toLocaleString();
             }
