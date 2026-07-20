@@ -145,7 +145,7 @@ window.throttleRAF = function(fn) {
   function fmtTime(iso) {
     if (!iso) return '';
     try {
-      var d = new Date(iso);
+      var d = window.safeParseDate(iso);
       if (isNaN(d.getTime())) return '';
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     } catch (e) {
@@ -546,13 +546,13 @@ window.throttleRAF = function(fn) {
 
   function normalizeDateKey(dateValue) {
     if (!dateValue) return '';
-    var d = new Date(dateValue);
+    var d = window.safeParseDate(dateValue);
     if (isNaN(d.getTime())) return '';
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
   function getConversationGroupLabel(dateValue) {
-    var d = new Date(dateValue || 0);
+    var d = window.safeParseDate(dateValue || 0);
     if (isNaN(d.getTime())) return '更早';
     var now = new Date();
     var todayKey = normalizeDateKey(now);
@@ -3988,7 +3988,7 @@ window.throttleRAF = function(fn) {
     var meta = [];
     if (item && item.source) meta.push(String(item.source));
     if (item && item.created_at) {
-      var created = new Date(item.created_at);
+      var created = window.safeParseDate(item.created_at);
       if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
     }
     if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
