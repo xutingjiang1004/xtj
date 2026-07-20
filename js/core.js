@@ -3964,6 +3964,7 @@ function renderProfileActivityList(kind) {
                 box.className = 'inline-comment-box';
                 box.style.maxHeight = '0px';
                 box.style.opacity = '0';
+                box.style.marginTop = '8px';
                 box.style.overflow = 'hidden';
                 box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
                 box.style.background = 'transparent'; // 修复底色不统一的问题
@@ -4007,12 +4008,17 @@ function renderProfileActivityList(kind) {
                     
                     btn.disabled = true;
                     btn.textContent = "发送中..";
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
                     try {
                         const response = await window.xtjProtectedFetch('/api/post/comment', {
+                            signal: controller.signal,
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ post_id: targetPostId, content: content })
                         });
+                        clearTimeout(timeoutId);
                         const result = await response.json().catch(function() { return {}; });
                         if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
                         
