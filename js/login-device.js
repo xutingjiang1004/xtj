@@ -328,7 +328,20 @@
             if (!gl) return null;
 
             var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) return null;
+            if (!debugInfo) {
+                var ext = gl.getExtension('WEBGL_lose_context');
+                if (ext) ext.loseContext();
+                canvas.width = 1; canvas.height = 1; canvas = null;
+                return null;
+            }
+
+            var loseContext = gl.getExtension('WEBGL_lose_context');
+            if (loseContext) loseContext.loseContext();
+            canvas.width = 1; canvas.height = 1; canvas = null;
+
+            var loseContext = gl.getExtension('WEBGL_lose_context');
+            if (loseContext) loseContext.loseContext();
+            canvas.width = 1; canvas.height = 1; canvas = null;
 
             var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
             var vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
@@ -340,18 +353,33 @@
             } catch(ex) {}
 
             var raw = [renderer, vendor, extensions.join(',')].join('|');
-            if (!raw || raw.length < 10) return null;
+            if (!raw || raw.length < 10) {
+                var ext = gl.getExtension('WEBGL_lose_context');
+                if (ext) ext.loseContext();
+                canvas.width = 1; canvas.height = 1; canvas = null;
+                return null;
+            }
 
             if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
                 var encoder = new TextEncoder();
                 var data = encoder.encode(raw);
                 return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
                     var hashArray = Array.from(new Uint8Array(hashBuffer));
-                    return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    var res = hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    var ext = gl.getExtension('WEBGL_lose_context');
+                    if (ext) ext.loseContext();
+                    canvas.width = 1; canvas.height = 1; canvas = null;
+                    return res;
                 }).catch(function() {
+                    var ext = gl.getExtension('WEBGL_lose_context');
+                    if (ext) ext.loseContext();
+                    canvas.width = 1; canvas.height = 1; canvas = null;
                     return null;
                 });
             }
+            var ext = gl.getExtension('WEBGL_lose_context');
+            if (ext) ext.loseContext();
+            canvas.width = 1; canvas.height = 1; canvas = null;
             return null;
         } catch(e) {
             return null;
@@ -365,7 +393,20 @@
             var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
             if (!gl) return null;
             var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) return null;
+            if (!debugInfo) {
+                var ext = gl.getExtension('WEBGL_lose_context');
+                if (ext) ext.loseContext();
+                canvas.width = 1; canvas.height = 1; canvas = null;
+                return null;
+            }
+
+            var loseContext = gl.getExtension('WEBGL_lose_context');
+            if (loseContext) loseContext.loseContext();
+            canvas.width = 1; canvas.height = 1; canvas = null;
+
+            var loseContext = gl.getExtension('WEBGL_lose_context');
+            if (loseContext) loseContext.loseContext();
+            canvas.width = 1; canvas.height = 1; canvas = null;
             return {
                 gpu_renderer: String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200),
                 gpu_vendor: String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '').slice(0, 100)
