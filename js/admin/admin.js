@@ -5396,7 +5396,7 @@ async function initAdminClient() {
     }
     async function loadOnlineData(el) {
         try {
-            var resp = await adminFetch('/admin/stats/online');
+            var resp = await window.xtjProtectedFetch('/admin/stats/online');
             var data = await resp.json();
             if (!resp.ok) { el.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(data.error || '加载失败') + '</div></div>'; return; }
             var h = '<div class="card">';
@@ -5439,7 +5439,7 @@ async function initAdminClient() {
         if (!panel) return;
         panel.innerHTML = '<div class="card"><div class="skeleton-block" style="height:400px"></div></div>';
         try {
-            var resp = await adminFetch('/admin/user-profile?user_name=' + encodeURIComponent(userName));
+            var resp = await window.xtjProtectedFetch('/admin/user-profile?user_name=' + encodeURIComponent(userName));
             var profile = await resp.json();
             if (!resp.ok) { panel.innerHTML = '<div class="card"><div class="empty">' + escapeHtml(profile.error || '加载失败') + '</div></div>'; return; }
             renderUserProfile(panel, profile);
