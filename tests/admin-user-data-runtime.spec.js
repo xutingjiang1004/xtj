@@ -10,6 +10,11 @@ test('admin shows clipboard tab and user detail at device-dialog width', async (
     if (path === '/admin/login') return json(route, { ok: true, token: 'test-admin-token' });
     if (path === '/admin/data') return json(route, { posts: [], likes: [], comments: [], announcements: [], bans: [] });
     if (path === '/admin/users') return json(route, { data: [{ user_name: '测试用户', content: JSON.stringify({ reg_time: '2026-07-16T01:00:00Z' }) }] });
+    if (path === '/admin/stats/online') return json(route, {
+      online_count: 1,
+      device_stats: { mobile: 1, desktop: 0, tablet: 0, unknown: 0 },
+      users: [{ user_name: 'test-user', device_label: 'iPhone · iOS · Safari', ip: '203.0.113.10', location: 'Test region' }]
+    });
     if (path === '/admin/login-events') return json(route, { data: [], behavior: [] });
     if (path === '/admin/security-alerts' || path === '/admin/mutes' || path === '/admin/reports') return json(route, { data: [] });
     if (path === '/admin/users/register-alerts') return json(route, { ok: true, unread_count: 0, users: [] });
@@ -29,6 +34,13 @@ test('admin shows clipboard tab and user detail at device-dialog width', async (
   await page.locator('#loginPw').fill('test-password');
   await page.evaluate(() => window.doAdminLogin());
   await expect(page.locator('#dashboard')).toBeVisible();
+
+  await page.locator('#tabOnlineBtn').click();
+  await expect(page.locator('#tabOnline')).toContainText('203.0.113.10');
+  await expect(page.locator('#tabOnline')).toContainText('Test region');
+
+  await page.locator('#tabProfileBtn').click();
+  await expect(page.locator('#profileDirectoryRows')).toBeVisible();
 
   await page.locator('#tabClipboardBtn').click();
   await expect(page.locator('#tabClipboard')).toHaveClass(/active/);
