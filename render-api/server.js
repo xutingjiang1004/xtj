@@ -2491,6 +2491,40 @@ function detectBrowserFromUA(ua) {
   return 'Unknown';
 }
 
+function normalizeDeviceSnapshot(eventInfo) {
+  eventInfo = eventInfo && typeof eventInfo === 'object' ? eventInfo : {};
+  var meta = eventInfo.device_meta && typeof eventInfo.device_meta === 'object' ? eventInfo.device_meta : {};
+  var ua = String(eventInfo.user_agent || meta.user_agent || '');
+  var touchPoints = Number(meta.max_touch_points || eventInfo.max_touch_points || 0);
+  var isTablet = /iPad/i.test(ua) || (/Macintosh/i.test(ua) && touchPoints > 1);
+  var type = isTablet ? 'iPad' : detectDeviceTypeFromUA(ua);
+  var os = isTablet ? 'iPadOS' : detectOSFromUA(ua);
+  var browser = detectBrowserFromUA(ua);
+
+  return {
+    type: type === 'Unknown' ? String(eventInfo.device_type || 'Unknown') : type,
+    os: os === 'Unknown' ? String(eventInfo.os || 'Unknown') : os,
+    browser: browser === 'Unknown' ? String(eventInfo.browser || 'Unknown') : browser,
+    model: String(eventInfo.exact_device_model || eventInfo.possible_device_model || meta.possible_device_model || ''),
+    user_agent: ua,
+    device_meta: meta
+  };
+}
+
+function onlineDeviceCategory(device) {
+  var type = String(device && device.type || '').toLowerCase();
+  var os = String(device && device.os || '').toLowerCase();
+  if (type.indexOf('ipad') >= 0 || type.indexOf('tablet') >= 0 || os.indexOf('ipados') >= 0) return 'tablet';
+  if (type.indexOf('iphone') >= 0 || type.indexOf('android') >= 0 || type.indexOf('mobile') >= 0 || type.indexOf('phone') >= 0) return 'mobile';
+  if (type.indexOf('desktop') >= 0 || type.indexOf('pc') >= 0 || /windows|macos|linux/.test(os)) return 'desktop';
+  return 'unknown';
+}
+
+function onlineLocationText(location) {
+  if (!location || typeof location !== 'object') return '';
+  return String(location.text || [location.country, location.region, location.city].filter(Boolean).join(' ') || '');
+}
+
 
 // 根据屏幕参数推测 iPhone 疑似型号（iOS/Safari 不稳定暴露具体型号，非精确识别）
 function getPossibleDeviceModel(info) {
@@ -9051,9 +9085,10 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
         uniqueIps[evt.ip].last_seen = evt.recorded_at;
       }
       if (evt.device_id) {
+        var normalizedDevice = normalizeDeviceSnapshot(evt);
         if (!uniqueDevices[evt.device_id]) uniqueDevices[evt.device_id] = {
-          device_id: evt.device_id, device_type: evt.device_type, os: evt.os, browser: evt.browser,
-          model: evt.possible_device_model || evt.exact_device_model || '', count: 0,
+          device_id: evt.device_id, device_type: normalizedDevice.type, os: normalizedDevice.os, browser: normalizedDevice.browser,
+          model: normalizedDevice.model, count: 0,
           first_seen: evt.recorded_at, last_seen: evt.recorded_at
         };
         uniqueDevices[evt.device_id].count++;
@@ -9081,12 +9116,13 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     });
     var visitCount = (results[3].data || []).length;
     var latestLogin = loginEvents[0] || {};
+    var latestDevice = normalizeDeviceSnapshot(latestLogin);
     var profile = {
       user_name: userName,
       latest_device: {
-        type: latestLogin.device_type || 'unknown', os: latestLogin.os || 'unknown',
-        browser: latestLogin.browser || 'unknown', model: latestLogin.possible_device_model || latestLogin.exact_device_model || '',
-        device_meta: latestLogin.device_meta || null
+        type: latestDevice.type, os: latestDevice.os,
+        browser: latestDevice.browser, model: latestDevice.model,
+        device_meta: latestDevice.device_meta || null
       },
       latest_ip: latestLogin.ip || 'unknown',
       latest_location: latestLogin.ip_location || null,
@@ -9117,33 +9153,60 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
   try {
     var fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     var { data, error } = await supabase.from('posts')
-      .select('user_name, content, created_at')
+      .select('user_name, content, created_at, media_type')
       .in('media_type', [LOGIN_EVENT_MARKER, USER_VISIT_MARKER, USER_BEHAVIOR_MARKER])
       .gte('created_at', fiveMinAgo)
       .order('created_at', { ascending: false })
       .limit(500);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
-    var onlineUsers = {};
+    var activeByUser = {};
     (data || []).forEach(function(row) {
       var name = row.user_name;
-      if (!name || onlineUsers[name]) return;
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch(_) {}
-      onlineUsers[name] = {
-        user_name: name, last_active: row.created_at,
-        device_type: info.device_type || 'unknown', os: info.os || '',
-        browser: info.browser || '', ip: info.ip || '',
-        location: info.ip_location ? (info.ip_location.text || '') : ''
+      if (!name || activeByUser[name]) return;
+      activeByUser[name] = row;
+    });
+    var activeNames = Object.keys(activeByUser);
+    var latestLoginByUser = {};
+    var latestInfoByUser = {};
+    if (activeNames.length) {
+      var related = await Promise.all([
+        supabase.from('posts').select('user_name, content, created_at').eq('media_type', LOGIN_EVENT_MARKER)
+          .in('user_name', activeNames).order('created_at', { ascending: false }).limit(1000),
+        supabase.from('posts').select('user_name, content, created_at').eq('media_type', USER_INFO_MARKER)
+          .in('user_name', activeNames).order('created_at', { ascending: false }).limit(1000)
+      ]);
+      if (related[0].error || related[1].error) return res.status(400).json({ error: sanitizeError(related[0].error || related[1].error) });
+      (related[0].data || []).forEach(function(row) {
+        if (!latestLoginByUser[row.user_name]) latestLoginByUser[row.user_name] = safeJsonParse(row.content);
+      });
+      (related[1].data || []).forEach(function(row) {
+        if (!latestInfoByUser[row.user_name]) latestInfoByUser[row.user_name] = safeJsonParse(row.content);
+      });
+    }
+    var users = activeNames.map(function(name) {
+      var activeInfo = safeJsonParse(activeByUser[name].content);
+      var loginInfo = latestLoginByUser[name] || {};
+      var userInfo = latestInfoByUser[name] || {};
+      var sourceInfo = Object.keys(loginInfo).length ? loginInfo : activeInfo;
+      var device = normalizeDeviceSnapshot(sourceInfo);
+      var ip = String(loginInfo.ip || activeInfo.ip || userInfo.last_ip || '');
+      var location = loginInfo.ip_location || activeInfo.ip_location || userInfo.last_ip_location || userInfo.last_precise_location || userInfo.last_location || null;
+      return {
+        user_name: name,
+        last_active: activeByUser[name].created_at,
+        device_type: device.type,
+        os: device.os,
+        browser: device.browser,
+        model: device.model,
+        device_label: [device.type, device.os, device.browser, device.model].filter(Boolean).join(' · '),
+        ip: ip === 'unknown' ? '' : ip,
+        location: onlineLocationText(location),
+        location_source: location ? (location === userInfo.last_precise_location ? 'precise' : 'ip') : 'unavailable'
       };
     });
-    var users = Object.values(onlineUsers);
     var deviceStats = { mobile: 0, desktop: 0, tablet: 0, unknown: 0 };
     users.forEach(function(u) {
-      var t = String(u.device_type || '').toLowerCase();
-      if (t.indexOf('mobile') >= 0 || t.indexOf('phone') >= 0) deviceStats.mobile++;
-      else if (t.indexOf('desktop') >= 0 || t.indexOf('pc') >= 0) deviceStats.desktop++;
-      else if (t.indexOf('tablet') >= 0 || t.indexOf('ipad') >= 0) deviceStats.tablet++;
-      else deviceStats.unknown++;
+      deviceStats[onlineDeviceCategory({ type: u.device_type, os: u.os })]++;
     });
     return res.json({ online_count: users.length, users: users, device_stats: deviceStats });
   } catch(error) {
@@ -9355,11 +9418,23 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     } catch(e) {}
 
     var finalDeviceMeta = securitySettings.record_device ? (device_meta || null) : null;
+    var requestUserAgent = String(req.get('user-agent') || '').slice(0, 500);
+    var reportedUserAgent = String(user_agent || '').slice(0, 500);
+    var trustedUserAgent = requestUserAgent || reportedUserAgent;
     var possibleDeviceModel = '';
     if (finalDeviceMeta && typeof finalDeviceMeta === 'object') {
-      possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: user_agent || '' }));
+      possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: trustedUserAgent }));
       if (possibleDeviceModel) finalDeviceMeta.possible_device_model = possibleDeviceModel;
     }
+    var normalizedDevice = normalizeDeviceSnapshot({
+      user_agent: trustedUserAgent,
+      device_type: device_type,
+      os: os,
+      browser: browser,
+      exact_device_model: exact_device_model,
+      possible_device_model: possibleDeviceModel,
+      device_meta: finalDeviceMeta
+    });
     var finalBrowserFp = securitySettings.browser_fingerprint ? (browser_fingerprint_hash || null) : null;
     var finalCanvasFp = securitySettings.canvas_fingerprint ? (canvas_fingerprint_hash || null) : null;
     var finalWebglFp = securitySettings.webgl_fingerprint ? (webgl_fingerprint_hash || null) : null;
@@ -9437,10 +9512,10 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
       media_url: deviceIdVal,
       content: JSON.stringify({
         device_id: deviceIdVal,
-        device_type: device_type || 'unknown',
-        os: os || 'Unknown',
-        browser: browser || 'Unknown',
-        user_agent: user_agent || '',
+        device_type: normalizedDevice.type,
+        os: normalizedDevice.os,
+        browser: normalizedDevice.browser,
+        user_agent: normalizedDevice.user_agent,
         possible_device_model: possibleDeviceModel,
         ip: ip,
         ip_version: ip.indexOf(':') >= 0 ? 6 : (ip === 'unknown' ? null : 4),
@@ -9471,7 +9546,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
       const now = new Date().toISOString();
       var infoPatch = {
         last_visit: now,
-        last_device: (device_type || 'unknown') + ' · ' + (os || 'Unknown') + ' · ' + (browser || 'Unknown'),
+        last_device: normalizedDevice.type + ' · ' + normalizedDevice.os + ' · ' + normalizedDevice.browser,
         last_device_id: deviceIdVal,
         last_ip: ip
       };
