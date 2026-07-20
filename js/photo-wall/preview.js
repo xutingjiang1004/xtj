@@ -806,16 +806,24 @@
                             render: !1
                         })), r && r.ok ? (n = e.filter(function(e) {
                             return e && String(e.id) !== String(t.id);
-                        }), V(), window.renderPhotoWallWithoutReload ? window.renderPhotoWallWithoutReload() : window.renderPhotoWall && window.renderPhotoWall(),
+                        }), window.photoWallData && (window.photoWallData = window.photoWallData.filter(function(p) {
+                            return p && String(p.id) !== String(t.id);
+                        })), V(), window.renderPhotoWallWithoutReload ? window.renderPhotoWallWithoutReload() : window.renderPhotoWall && window.renderPhotoWall(),
                         window.showToast("照片已从照片墙删除")) : (o && (o.disabled = !1), a && (a.disabled = !1));
                     }
                 }
             });
         }
     }, window.ppRotatePhoto = function() {
-        b = (b + 90) % 360, document.querySelectorAll(".pp-slide-img").forEach(function(e) {
-            e && e.style && (e.style.transform = "rotate(" + b + "deg)");
-        }), window.showToast && window.showToast("已旋转 " + b + "°");
+        b = (b + 90) % 360;
+        var slide = document.querySelector(".pp-slide-img.pp-active");
+        if (slide) {
+          var currentTransform = slide.style.transform || '';
+          var scaleMatch = currentTransform.match(/scale\(([^)]+)\)/);
+          var scalePart = scaleMatch ? ' scale(' + scaleMatch[1] + ')' : '';
+          slide.style.transform = 'rotate(' + b + 'deg)' + scalePart;
+        }
+        window.showToast && window.showToast("已旋转 " + b + "°");
     }, window.ppCancelDownload = function() {
         try {
             te();
