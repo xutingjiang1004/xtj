@@ -5431,9 +5431,9 @@ async function initAdminClient() {
                 data.users.forEach(function(u) {
                     h += '<tr style="border-bottom:1px solid var(--border)">';
                     h += '<td style="padding:12px 16px"><b>' + escapeHtml(u.user_name) + '</b></td>';
-                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml((u.device_type || '') + ' ' + (u.os || '')) + '</td>';
-                    h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(u.ip || '') + '</td>';
-                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.location || '') + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.device_label || [u.device_type, u.os, u.browser, u.model].filter(Boolean).join(' · ') || '浏览器未提供设备信息') + '</td>';
+                    h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(u.ip || '未记录') + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.location || '未解析') + '</td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + formatTime(u.last_active) + '</td>';
                     h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\');switchTab(\'profile\')">画像</button></td></tr>';
                 });
@@ -5591,8 +5591,47 @@ async function initAdminClient() {
         h += '<button class="btn-sm" onclick="loadUserProfile(document.getElementById(\'profileSearchInp\').value)" style="margin-left:8px">查询</button>';
         h += '</div>';
         if (!profileCurrentUser) h += '<div class="empty">输入用户名并点击查询，查看完整的用户画像聚合数据</div>';
+        h += '<p style="margin:0 0 14px;color:var(--text-secondary);font-size:13px">选择用户即可查看完整画像，支持按用户名筛选。</p>';
+        h += '<div id="profileDirectory"><div class="skeleton-block" style="height:180px"></div></div>';
         h += '</div>';
         el.innerHTML = h;
+        loadProfileDirectory();
     }
+
+    window.showProfileDirectory = function() {
+        profileCurrentUser = '';
+        var panel = document.getElementById('tabProfile');
+        if (panel) renderProfileTab(panel);
+    };
+
+    async function loadProfileDirectory() {
+        var target = document.getElementById('profileDirectory');
+        if (!target) return;
+        try {
+            var response = await apiCall('GET', '/admin/users');
+            var users = Array.isArray(response && response.data) ? response.data : [];
+            var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px"><b>全部用户（' + users.length + '）</b><input id="profileDirectoryFilter" type="search" placeholder="筛选用户名" style="max-width:220px" oninput="filterProfileDirectory(this.value)" /></div>';
+            h += '<div class="table-wrap" style="max-height:420px;overflow:auto"><table><thead><tr><th>用户</th><th>最近活动</th><th>位置</th><th></th></tr></thead><tbody id="profileDirectoryRows">';
+            users.forEach(function(user) {
+                var info = {};
+                try { info = JSON.parse(user.content || '{}'); } catch (_) {}
+                var location = (info.last_ip_location && info.last_ip_location.text) || (info.last_location && (info.last_location.address || info.last_location.text)) || '未记录';
+                var userName = String(user.user_name || '');
+                h += '<tr data-profile-user="' + escapeHtml(userName.toLowerCase()) + '"><td><b>' + escapeHtml(userName) + '</b></td><td>' + escapeHtml(formatTime(info.last_visit || info.last_login || user.created_at)) + '</td><td>' + escapeHtml(location) + '</td><td><button class="btn-sm" onclick="loadUserProfile(\'' + safeJsStr(userName) + '\')">查看画像</button></td></tr>';
+            });
+            h += '</tbody></table></div>';
+            if (!users.length) h += '<div class="empty">暂时没有可查询的用户</div>';
+            if (document.getElementById('profileDirectory') === target) target.innerHTML = h;
+        } catch (error) {
+            if (document.getElementById('profileDirectory') === target) target.innerHTML = '<div class="empty">用户列表加载失败: ' + escapeHtml(error.message || '') + '</div>';
+        }
+    }
+
+    window.filterProfileDirectory = function(value) {
+        var query = String(value || '').trim().toLowerCase();
+        Array.prototype.forEach.call(document.querySelectorAll('#profileDirectoryRows tr'), function(row) {
+            row.style.display = !query || String(row.getAttribute('data-profile-user') || '').indexOf(query) >= 0 ? '' : 'none';
+        });
+    };
 
 })();
