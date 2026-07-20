@@ -1180,11 +1180,30 @@ async function initAdminClient() {
         return true;
     }
 
+    var _userActivityCache = null;
+    var _lastDataLengths = '';
     function getUserActivityStats(userName) {
+        var currentLengths = allPosts.length + ',' + allLikes.length + ',' + allComments.length;
+        if (!_userActivityCache || _lastDataLengths !== currentLengths) {
+            _userActivityCache = { posts: {}, likes: {}, comments: {} };
+            _lastDataLengths = currentLengths;
+            for (var i = 0; i < allPosts.length; i++) {
+                var u = allPosts[i].user_name;
+                _userActivityCache.posts[u] = (_userActivityCache.posts[u] || 0) + 1;
+            }
+            for (var i = 0; i < allLikes.length; i++) {
+                var u = allLikes[i].user_name;
+                _userActivityCache.likes[u] = (_userActivityCache.likes[u] || 0) + 1;
+            }
+            for (var i = 0; i < allComments.length; i++) {
+                var u = allComments[i].user_name;
+                _userActivityCache.comments[u] = (_userActivityCache.comments[u] || 0) + 1;
+            }
+        }
         return {
-            posts: allPosts.filter(function(p) { return p.user_name === userName; }).length,
-            likes: allLikes.filter(function(l) { return l.user_name === userName; }).length,
-            comments: allComments.filter(function(c) { return c.user_name === userName; }).length
+            posts: _userActivityCache.posts[userName] || 0,
+            likes: _userActivityCache.likes[userName] || 0,
+            comments: _userActivityCache.comments[userName] || 0
         };
     }
 
