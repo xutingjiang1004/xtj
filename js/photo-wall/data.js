@@ -163,7 +163,7 @@
     var page = pageIndex;
     var limit = PAGE_SIZE;
     var controller = new AbortController();
-    var timer = setTimeout(function() { controller.abort(); }, 15000);
+    var timer = setTimeout(function() { controller.abort(); }, 10000);
     try {
       var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
       var result = await resp.json();
@@ -181,31 +181,69 @@
     page = 0;
     more = true;
     setPhotoWallSyncStatus('syncing', '同步照片中');
+
+    // stale-while-revalidate: 立即展示本地缓存
+    var local = loadLocalPhotoWallData();
+    if (local.length > 0 && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
+      window.photoWallData = local;
+      lastLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastLoadedAt;
+      if (typeof window.renderPhotoWallWithoutReload === 'function') {
+        window.renderPhotoWallWithoutReload();
+      } else if (typeof window.renderPhotoWall === 'function') {
+        window.renderPhotoWall();
+      }
+    }
+
     try {
-      var local = loadLocalPhotoWallData();
       var rows = await fetchPhotoPage(0);
       more = rows.length >= PAGE_SIZE;
       if (!more && local.length) {
-        var cloudIds = new Set(rows.map(function(row){ return row && row.id != null ? String(row.id) : ''; }).filter(Boolean));
-        local = local.filter(function(item){
-          if (!item) return false;
-          var key = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
-          return !key || cloudIds.has(key);
-        });
+        // 云端数据为空时，本地缓存可能过期，保留本地
+        if (rows.length === 0) {
+          window.photoWallData = local;
+          saveLocalPhotoWallData();
+        } else {
+          var cloudIds = new Set(rows.map(function(row){ return row && row.id != null ? String(row.id) : ''; }).filter(Boolean));
+          local = local.filter(function(item){
+            if (!item) return false;
+            var key = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
+            return !key || cloudIds.has(key);
+          });
+        }
       }
       var deletedRows = rows.filter(function(row){ return row && row.media_url === '__deleted__'; });
       deletedRows.forEach(function(row){ addDeletedPhotoId(row.id); });
       var cloud = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
-      window.photoWallData = mergePhotoLists(cloud, []);
+      // 合并云端和本地，按 id/cloudId 去重
+      var existingIds = new Set();
+      var merged = [];
+      (cloud.concat(Array.isArray(window.photoWallData) ? window.photoWallData : [])).forEach(function(item) {
+        if (!item || !item.imageUrl) return;
+        var key = (item.id != null ? String(item.id) : '') || (item.cloudId != null ? String(item.cloudId) : '');
+        if (key && existingIds.has(key)) return;
+        if (key) existingIds.add(key);
+        merged.push(item);
+      });
+      window.photoWallData = merged;
       saveLocalPhotoWallData();
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
       setPhotoWallSyncStatus('synced', '已同步');
       subscribePhotoWallRealtime();
+      // 无闪烁刷新：云端数据加载完成后更新UI
+      if (typeof window.renderPhotoWallWithoutReload === 'function') {
+        window.renderPhotoWallWithoutReload();
+      } else if (typeof window.renderPhotoWall === 'function') {
+        window.renderPhotoWall();
+      }
       return window.photoWallData;
     } catch (err) {
       console.error('[PhotoWall] load failed', err);
-      window.photoWallData = mergePhotoLists([], loadLocalPhotoWallData());
+      // 保留缓存，不清空
+      if (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0) {
+        window.photoWallData = local;
+      }
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
       setPhotoWallSyncStatus('error', '同步失败');
