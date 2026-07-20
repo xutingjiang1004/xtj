@@ -157,13 +157,14 @@
     return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
   }
 
-  async function fetchPhotoPage(pageIndex){
+  async function fetchPhotoPage(pageIndex, timeoutMs){
     var from = pageIndex * PAGE_SIZE;
     var to = from + PAGE_SIZE - 1;
     var page = pageIndex;
     var limit = PAGE_SIZE;
     var controller = new AbortController();
-    var timer = setTimeout(function() { controller.abort(); }, 10000);
+    var timeout = timeoutMs || 10000;
+    var timer = setTimeout(function() { controller.abort(); }, timeout);
     try {
       var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
       var result = await resp.json();
@@ -184,7 +185,8 @@
 
     // stale-while-revalidate: 立即展示本地缓存
     var local = loadLocalPhotoWallData();
-    if (local.length > 0 && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
+    var hasCache = local.length > 0;
+    if (hasCache && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
       window.photoWallData = local;
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
@@ -196,7 +198,8 @@
     }
 
     try {
-      var rows = await fetchPhotoPage(0);
+      // 首次请求 25s，已有缓存时后台刷新 10s
+      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000);
       more = rows.length >= PAGE_SIZE;
       if (!more && local.length) {
         // 云端数据为空时，本地缓存可能过期，保留本地
@@ -215,6 +218,13 @@
       var deletedRows = rows.filter(function(row){ return row && row.media_url === '__deleted__'; });
       deletedRows.forEach(function(row){ addDeletedPhotoId(row.id); });
       var cloud = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
+      // 过滤本地已删除的ID：云端快照可能滞后于本地删除操作
+      var tombstoneIds = getDeletedIds();
+      cloud = cloud.filter(function(item){
+        if (!item) return false;
+        var identity = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
+        return tombstoneIds.indexOf(identity) < 0 && tombstoneIds.indexOf(String(item.id || '')) < 0;
+      });
       // 合并云端和本地，按 id/cloudId 去重
       var existingIds = new Set();
       var merged = [];

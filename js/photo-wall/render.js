@@ -385,7 +385,7 @@
       renderSorted(sortPhotoWallData(window.photoWallData || [], key));
     } catch (err) {
       console.error('[PhotoWall] render failed', err);
-      grid.innerHTML = '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div></div>';
+      grid.innerHTML = '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>';
     }
     rendering = false;
     if (pendingRender) {
