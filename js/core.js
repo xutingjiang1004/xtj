@@ -6472,6 +6472,10 @@ function renderProfileActivityList(kind) {
                     if (postRes.error) throw postRes.error;
                     posts = normalizePosts(postRes.data || []);
                     endReached = posts.length < FEED_PAGE_SIZE;
+                    try {
+                        var countRes = await applyVisiblePostQueryFilters(sb.from('posts').select('id', { count: 'exact', head: true }));
+                        if (countRes.count !== null) window._xtjTotalPostCount = countRes.count;
+                    } catch(e) {}
                 }
 
                 if (requestId && requestId !== feedLoadRequestId) return null;

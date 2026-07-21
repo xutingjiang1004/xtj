@@ -1586,7 +1586,7 @@ async function initAdminClient() {
     }
 
     async function renderLikesTab(el) {
-        if (API_BASE) {
+        if (API_BASE && (!allLikes || !allLikes.length || !allPosts || !allPosts.length)) {
             try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
         }
         var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
@@ -2008,13 +2008,18 @@ async function initAdminClient() {
         var duration = parseInt(document.getElementById('banDuration').value);
         var reason = document.getElementById('banReason').value.trim();
         if (!validateAdminTargetUser(userName, 'banUserName')) return;
+        var btn = document.querySelector('.report-detail-modal button.primary');
+        if (btn) btn.disabled = true;
         try {
             await apiCall('POST', '/admin/ban', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
             await loadBansData();
             renderTab('bans');
             showToast('已拉黑封禁 ' + userName, 'success');
-        } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
+        } catch(e) {
+            showToast('拉黑封禁失败: ' + e.message, 'error');
+            if (btn) btn.disabled = false;
+        }
     };
 
     window.liftBan = function(id) {
