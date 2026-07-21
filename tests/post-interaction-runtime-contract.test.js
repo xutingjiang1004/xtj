@@ -35,3 +35,14 @@ test('delete timeout aborts the request and confirms authoritative server state'
   assert.match(deletion, /result\.deleted === true && result\.exists === false/);
   assert.doesNotMatch(deletion, /Promise\.race\(\[deletePromise, requestTimeout\]\)/);
 });
+
+test('pin transition scrolls the actual posts panel before rebuilding and animates the replacement card', () => {
+  const pin = between('function pinMotionReduced', 'window.togglePostVisibility = async function');
+  assert.match(pin, /document\.getElementById\('panelPosts'\)/);
+  assert.match(pin, /surface\.scrollTo\(\{ top: targetTop, behavior: 'smooth' \}\)/);
+  assert.match(pin, /waitForPinScroll\(surface, 620\)/);
+  assert.match(pin, /post-pin-departing/);
+  assert.match(pin, /post-pin-arriving/);
+  assert.match(pin, /await rebuildFeedFromCurrentState\(\)[\s\S]*?await refreshPostDetailIfActive\(normalizedPostId\)[\s\S]*?completePinnedPostTransition\(normalizedPostId\)/);
+  assert.doesNotMatch(pin, /window\.scrollTo\(/);
+});
