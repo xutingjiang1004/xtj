@@ -5769,13 +5769,16 @@ function renderProfileActivityList(kind) {
             window.requestPostTranslation = function(postId) {
                 var anchor = getPostToolAnchor(postId);
                 if (!anchor) return;
-                var host = anchor.closest('.post-card, .feed-post, article') || anchor.parentNode;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
                 var existing = host.querySelector('.post-tool-translation');
                 if (existing) { existing.hidden = !existing.hidden; return; }
                 var panel = document.createElement('section');
                 panel.className = 'post-tool-translation';
                 panel.textContent = '正在翻译...';
-                anchor.closest('.actions').insertAdjacentElement('afterend', panel);
+                actions.insertAdjacentElement('afterend', panel);
                 postToolFetch({ post_id: postId, action: 'translate' }).then(function(data) {
                     panel.textContent = data.translation || '暂时无法翻译该帖子。';
                     panel.classList.toggle('is-original-chinese', !!data.already_chinese);
@@ -5792,8 +5795,15 @@ function renderProfileActivityList(kind) {
                     return resp.body.getReader();
                 }).then(function(reader) {
                     var decoder = new TextDecoder(), buffer = '';
+                    var receivedContent = false;
                     function read() { return reader.read().then(function(chunk) {
-                        if (chunk.done) return;
+                        if (chunk.done) {
+                            if (!receivedContent) {
+                                session.output.textContent = 'AI 暂时不可用。';
+                                session.output.classList.add('is-error');
+                            }
+                            return;
+                        }
                         buffer += decoder.decode(chunk.value, { stream: true });
                         var events = buffer.split('\n\n'); buffer = events.pop();
                         events.forEach(function(event) {
@@ -5801,6 +5811,7 @@ function renderProfileActivityList(kind) {
                             if (!dataLine || session.isClosed || requestId !== session.requestId) return;
                             var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
                             if (data.content) {
+                                receivedContent = true;
                                 session.conversationId = data.conversation_id || session.conversationId;
                                 session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
                             }
@@ -5819,14 +5830,17 @@ function renderProfileActivityList(kind) {
             window.openPostAiChat = function(postId) {
                 var anchor = getPostToolAnchor(postId);
                 if (!anchor) return;
-                var host = anchor.closest('.post-card, .feed-post, article') || anchor.parentNode;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
                 var existing = host.querySelector('.post-tool-critique');
                 if (existing) { existing.hidden = !existing.hidden; return; }
                 
                 var panel = document.createElement('section');
                 panel.className = 'post-tool-critique';
                 panel.textContent = 'AI 正在锐评...';
-                anchor.closest('.actions').insertAdjacentElement('afterend', panel);
+                actions.insertAdjacentElement('afterend', panel);
                 
                 var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
                 runPostAiRequest(session, { post_id: String(postId), initial: true });
