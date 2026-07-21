@@ -429,20 +429,36 @@
         return new Promise(function(resolve) {
             var ips = [];
             var done = false;
-            var timer = setTimeout(function() { if (!done) { done = true; resolve(ips.length ? ips : null); } }, 2000);
+            var pc = null;
+            
+            function finish(result) {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                if (pc) {
+                    try { pc.onicecandidate = null; } catch (_) {}
+                    try { pc.onicegatheringstatechange = null; } catch (_) {}
+                    try { pc.close(); } catch (_) {}
+                    pc = null;
+                }
+                resolve(result);
+            }
+            
+            var timer = setTimeout(function() { finish(ips.length ? ips : null); }, 2000);
 
             try {
                 var RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-                if (!RTCPeerConnection) { clearTimeout(timer); resolve(null); return; }
+                if (!RTCPeerConnection) { finish(null); return; }
 
-                var pc = new RTCPeerConnection({ iceServers: [] });
+                pc = new RTCPeerConnection({ iceServers: [] });
                 pc.createDataChannel('');
-                pc.createOffer().then(function(offer) { pc.setLocalDescription(offer); }).catch(function() {
-                    if (!done) { done = true; clearTimeout(timer); resolve(null); }
-                });
+                pc.createOffer()
+                  .then(function(offer) { return pc.setLocalDescription(offer); })
+                  .catch(function() { finish(null); });
+                  
                 pc.onicecandidate = function(e) {
                     if (!e || !e.candidate || !e.candidate.candidate) {
-                        if (!done) { done = true; clearTimeout(timer); resolve(ips.length ? ips : null); }
+                        finish(ips.length ? ips : null);
                         return;
                     }
                     var candidate = e.candidate.candidate;
@@ -455,12 +471,12 @@
                     }
                 };
                 pc.onicegatheringstatechange = function() {
-                    if (pc.iceGatheringState === 'complete' && !done) {
-                        done = true; clearTimeout(timer); resolve(ips.length ? ips : null);
+                    if (pc.iceGatheringState === 'complete') {
+                        finish(ips.length ? ips : null);
                     }
                 };
             } catch(e) {
-                if (!done) { done = true; clearTimeout(timer); resolve(null); }
+                finish(null);
             }
         });
     }
