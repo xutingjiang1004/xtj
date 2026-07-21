@@ -7,13 +7,15 @@ const BANNED_ERRORS = [
   'module_script_timeout'
 ];
 
-async function gotoApp(page) {
+async function gotoApp(page, preserveStorage) {
   const pageErrors = [];
   page.on('pageerror', err => pageErrors.push(err.message));
-  await page.addInitScript(() => {
-    try { localStorage.clear(); } catch (_) {}
-    try { sessionStorage.clear(); } catch (_) {}
-  });
+  if (!preserveStorage) {
+    await page.addInitScript(() => {
+      try { localStorage.clear(); } catch (_) {}
+      try { sessionStorage.clear(); } catch (_) {}
+    });
+  }
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.switchDockTab === 'function');
   await page.waitForTimeout(350);
@@ -57,6 +59,7 @@ test('photo wall opens and renders content within 500ms', async ({ page }) => {
 });
 
 test('photo wall with cache shows immediately when API is slow', async ({ page }) => {
+  page.on('console', msg => console.log(msg.text()));
   // 模拟慢速 API
   await page.route('**/api/photos/public**', async route => {
     await new Promise(resolve => setTimeout(resolve, 15000));
@@ -73,19 +76,29 @@ test('photo wall with cache shows immediately when API is slow', async ({ page }
       window.__xtjPhotoWallCache = JSON.stringify([
         { id: 'cache-1', cloudId: 'cache-1', imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', timestamp: Date.now() }
       ]);
-      localStorage.setItem('__xtj_photo_wall_cache', window.__xtjPhotoWallCache);
+      localStorage.setItem('xtj_photos', window.__xtjPhotoWallCache);
+      localStorage.setItem('xtj_token', 'fake-token');
+      localStorage.setItem('xtj_user', 'u');
+      window.currentUser = 'u';
     } catch (_) {}
   });
 
-  const pageErrors = await gotoApp(page);
+  const pageErrors = await gotoApp(page, true);
 
   await switchToPhotoWall(page);
 
   // 缓存应该在 2 秒内显示
   await page.waitForFunction(() => {
     const grid = document.getElementById('photoGrid');
-    if (!grid) return false;
-    return grid.querySelector('.photo-wall-item') || grid.querySelector('.pw-skeleton');
+    if (!grid) {
+      console.log('grid not found');
+      return false;
+    }
+    const hasItem = grid.querySelector('.photo-wall-item') || grid.querySelector('.pw-skeleton');
+    if (!hasItem) {
+      console.log('grid innerHTML: ', grid.innerHTML);
+    }
+    return hasItem;
   }, { timeout: 3000 });
 
   const hasItems = await page.locator('#photoGrid .photo-wall-item').count();
@@ -143,11 +156,11 @@ test('photo wall rapid toggle 20 times never shows blank', async ({ page }) => {
 
   // 快速来回切换 20 次
   for (let i = 0; i < 20; i++) {
-    await page.evaluate(() => {
+    await page.evaluate((index) => {
       if (typeof window.switchDockTab === 'function') {
-        window.switchDockTab(i % 2 === 0 ? 'ai' : 'posts', true);
+        window.switchDockTab(index % 2 === 0 ? 'ai' : 'posts', true);
       }
-    });
+    }, i);
     await page.waitForTimeout(80);
   }
 
