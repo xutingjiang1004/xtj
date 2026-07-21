@@ -12798,12 +12798,12 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
     var post = await loadPostToolPost(postId, req.userName);
     var content = postToolContent(post).trim();
     var prompt = initial
-      ? '请分析并毒舌锐评下面这条帖子。先说明字面意思、语气情绪、潜台词或可能意图、矛盾或水分之处，再给简短尖锐但不虚构背景的锐评。'
+      ? '请对下面这条帖子给出高冷、犀利、毒舌的简短锐评。直接输出一段话的锐评内容，绝对不要出现“锐评：”之类的开头，也不要使用任何 Markdown 加粗符号（**）。'
       : followup;
     var conversationId = aiSiteText(req.body && req.body.conversation_id, 80) || genConvId();
     var streamed = false;
     var reply = await callDeepSeekAI({
-      system: CAT_AI_BASE_PERSONA + '\n\n当前场景：帖子 AI 询问（问小猫）。\n回复风格：针对当前帖子进行毒舌分析，指出逻辑漏洞和不合理之处，但不虚构背景。\n不要声明"作为AI"，不要写括号动作。',
+      system: CAT_AI_BASE_PERSONA + '\n\n当前场景：帖子 AI 锐评（问小猫）。\n回复风格：高冷犀利毒舌，一针见血地指出逻辑漏洞和不合理之处，但不虚构背景。\n输出要求：直接输出锐评段落。严禁声明"作为AI"，严禁写括号动作，严禁使用 markdown 格式（如 **），严禁包含诸如“字面意思”、“潜台词”、“锐评：”等标题或前缀。',
       messages: [{ role: 'system', content: '帖子作者：' + String(post.user_name || '') + '\n帖子正文：\n' + content }, { role: 'user', content: prompt }],
       max_tokens: 1800,
       thinking_mode: 'low',
