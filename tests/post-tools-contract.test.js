@@ -30,3 +30,19 @@ test('Dock source is not part of this change surface', () => {
   const diff = require('child_process').execFileSync('git', ['diff', '--name-only'], { cwd: root, encoding: 'utf8' });
   assert.doesNotMatch(diff, /dock/i);
 });
+
+test('post tools guard against duplicate UI elements', () => {
+  assert.match(core, /var host = anchor\.closest\('\.post'\)/);
+  assert.match(core, /actions\.insertAdjacentElement\('afterend', panel\)/);
+  assert.match(core, /var existing = host\.querySelector\('\.post-tool-critique'\)/);
+});
+
+test('post chat SSE correctly detects empty streams to avoid infinite loading', () => {
+  assert.match(core, /var receivedContent = false;/);
+  assert.match(core, /if \(!receivedContent\)/);
+  assert.match(core, /receivedContent = true;/);
+});
+
+test('server post chat stream avoids premature abort on req.close', () => {
+  assert.match(server, /res\.on\('close', function\(\) \{ if \(!res\.writableEnded\)/);
+});

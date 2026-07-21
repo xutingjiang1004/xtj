@@ -4978,7 +4978,7 @@ function renderProfileActivityList(kind) {
                 return found || postInfoCache[postId] || null;
             };
 
-            let feedPage = 0;
+            let feedPage = 1;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
             let feedAllPosts = [];
@@ -5750,6 +5750,12 @@ function renderProfileActivityList(kind) {
             }
             window.closePostToolsMenu = closePostToolsMenu;
             window.addEventListener('pagehide', closePostToolsMenu);
+            window.addEventListener('scroll', closePostToolsMenu, { passive: true });
+            document.addEventListener('scroll', function(e) {
+                if (e.target.classList && e.target.classList.contains('photo-wall-container')) {
+                    closePostToolsMenu();
+                }
+            }, true);
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
@@ -5763,13 +5769,16 @@ function renderProfileActivityList(kind) {
             window.requestPostTranslation = function(postId) {
                 var anchor = getPostToolAnchor(postId);
                 if (!anchor) return;
-                var host = anchor.closest('.post-card, .feed-post, article') || anchor.parentNode;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
                 var existing = host.querySelector('.post-tool-translation');
                 if (existing) { existing.hidden = !existing.hidden; return; }
                 var panel = document.createElement('section');
                 panel.className = 'post-tool-translation';
                 panel.textContent = '正在翻译...';
-                anchor.closest('.actions').insertAdjacentElement('afterend', panel);
+                actions.insertAdjacentElement('afterend', panel);
                 postToolFetch({ post_id: postId, action: 'translate' }).then(function(data) {
                     panel.textContent = data.translation || '暂时无法翻译该帖子。';
                     panel.classList.toggle('is-original-chinese', !!data.already_chinese);
@@ -5786,8 +5795,15 @@ function renderProfileActivityList(kind) {
                     return resp.body.getReader();
                 }).then(function(reader) {
                     var decoder = new TextDecoder(), buffer = '';
+                    var receivedContent = false;
                     function read() { return reader.read().then(function(chunk) {
-                        if (chunk.done) return;
+                        if (chunk.done) {
+                            if (!receivedContent) {
+                                session.output.textContent = 'AI 暂时不可用。';
+                                session.output.classList.add('is-error');
+                            }
+                            return;
+                        }
                         buffer += decoder.decode(chunk.value, { stream: true });
                         var events = buffer.split('\n\n'); buffer = events.pop();
                         events.forEach(function(event) {
@@ -5795,6 +5811,7 @@ function renderProfileActivityList(kind) {
                             if (!dataLine || session.isClosed || requestId !== session.requestId) return;
                             var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
                             if (data.content) {
+                                receivedContent = true;
                                 session.conversationId = data.conversation_id || session.conversationId;
                                 session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
                             }
@@ -5813,14 +5830,17 @@ function renderProfileActivityList(kind) {
             window.openPostAiChat = function(postId) {
                 var anchor = getPostToolAnchor(postId);
                 if (!anchor) return;
-                var host = anchor.closest('.post-card, .feed-post, article') || anchor.parentNode;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
                 var existing = host.querySelector('.post-tool-critique');
                 if (existing) { existing.hidden = !existing.hidden; return; }
                 
                 var panel = document.createElement('section');
                 panel.className = 'post-tool-critique';
                 panel.textContent = 'AI 正在锐评...';
-                anchor.closest('.actions').insertAdjacentElement('afterend', panel);
+                actions.insertAdjacentElement('afterend', panel);
                 
                 var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
                 runPostAiRequest(session, { post_id: String(postId), initial: true });
@@ -6019,7 +6039,7 @@ function renderProfileActivityList(kind) {
 
             window.applyPostFilters = function() {
                 updatePostFilterStateFromDom();
-                feedPage = 0;
+                feedPage = 1;
                 feedEndReached = false;
                 var feed = document.getElementById("feed");
                 if (feed) {
@@ -6046,7 +6066,7 @@ function renderProfileActivityList(kind) {
                     visibility: "all",
                     onlyMine: false
                 };
-                feedPage = 0;
+                feedPage = 1;
                 feedEndReached = false;
                 var panel = document.getElementById("postFilterPanel");
                 if (panel) panel.style.display = "none";
@@ -6560,7 +6580,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function rebuildFeedFromCurrentState() {
-                feedPage = 0;
+                feedPage = 1;
                 var noMore = document.getElementById('feedNoMore');
                 if (noMore) noMore.remove();
                 await renderFeedFromMemoryState();
@@ -7158,7 +7178,7 @@ function renderProfileActivityList(kind) {
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
                 if (forceRefresh) {
-                    feedPage = 0;
+                    feedPage = 1;
                     feedEndReached = false;
                     feedNextOffset = 0;
                     feedLoadedPages = [];
@@ -7375,11 +7395,12 @@ function renderProfileActivityList(kind) {
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 // Render local avatar cache before the first paint; remote lookup stays background-only.
                 hydrateCachedAvatarsForUsers(Array.from(allUsers));
-                var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
+                var visibleCount = feedPage * FEED_PAGE_SIZE;
+                var currentPages = filteredPosts.slice(0, Math.max(FEED_PAGE_SIZE, visibleCount));
                 // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
-                feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
-                renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
-                refreshPendingFeedIpPosts(firstPage);
+                feedEndReached = !!feedEndReached && currentPages.length >= filteredPosts.length;
+                renderFeedWithAvatars(currentPages, visibleComments, scopedLikes);
+                refreshPendingFeedIpPosts(currentPages);
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
 
@@ -11865,7 +11886,8 @@ function renderProfileActivityList(kind) {
             }
             _reportType = 'post';
             _reportView = 'form';
-            _reportSelectedId = null;
+            _reportSelectedId = window.__xtjReportTargetPostId || null;
+            window.__xtjReportTargetPostId = null;
             _reportSelectedReason = null;
             _reportTargetUser = null;
             _reportContentData = [];
@@ -12013,7 +12035,8 @@ function renderProfileActivityList(kind) {
             }
             var h = '';
             _reportContentData.forEach(function(item) {
-                var selected = _reportSelectedId === item.id ? ' selected' : '';
+                var selected = _reportSelectedId === String(item.id) ? ' selected' : '';
+                if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
                     ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';var parent=this.closest(\'.rc-thumb\');if(parent){parent.className=\'rc-thumb rc-thumb--text\';parent.innerHTML=\'<span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span>\'}">'
@@ -13091,7 +13114,8 @@ function renderProfileActivityList(kind) {
                 if (!overlay) return;
                 _reportType = 'post';
                 _reportView = 'form';
-                _reportSelectedId = null;
+                _reportSelectedId = window.__xtjReportTargetPostId || null;
+                window.__xtjReportTargetPostId = null;
                 _reportSelectedReason = null;
                 _reportTargetUser = null;
                 _reportContentData = [];
@@ -13419,7 +13443,8 @@ function renderProfileActivityList(kind) {
                 if (!overlay) return;
                 _reportType = 'post';
                 _reportView = 'form';
-                _reportSelectedId = null;
+                _reportSelectedId = window.__xtjReportTargetPostId || null;
+                window.__xtjReportTargetPostId = null;
                 _reportSelectedReason = null;
                 _reportTargetUser = null;
                 _reportContentData = [];
