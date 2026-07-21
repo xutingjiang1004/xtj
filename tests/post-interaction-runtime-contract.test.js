@@ -51,7 +51,7 @@ test('pin transition handles edge cases like concurrent requests and animation c
   const pin = between('function pinMotionReduced', 'window.togglePostVisibility = async function');
   
   // Check for in-flight lock
-  assert.match(pin, /inFlightPins\[normalizedPostId\]/);
+  assert.match(pin, /window\.isPinningPost/);
   // Check for finally block cleanup
   assert.match(pin, /finally\s*\{[\s\S]*?postEl\.classList\.remove\('post-pin-departing'\)/);
   // Check for scroll completion logic
