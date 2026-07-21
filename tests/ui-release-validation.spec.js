@@ -26,6 +26,11 @@ async function gotoApp(page, options = {}) {
     try { localStorage.clear(); } catch (_) {}
     try { sessionStorage.clear(); } catch (_) {}
   });
+  if (options.userName) {
+    await page.addInitScript((userName) => {
+      try { localStorage.setItem('xtj_user', userName); } catch (_) {}
+    }, options.userName);
+  }
   await page.emulateMedia({
     colorScheme: options.colorScheme || 'light',
     reducedMotion: options.reducedMotion || 'no-preference'
@@ -379,6 +384,67 @@ test.describe('release validation', () => {
     await expect(page.locator('#loginNickInp')).toBeFocused();
     expect(pageErrors).toEqual([]);
     expect(await page.evaluate(() => window.__unhandledRejections)).toEqual([]);
+  });
+
+  test('pinning follows the posts panel and animates the rebuilt pinned card into place', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const page = await context.newPage();
+    await page.route('**/api/feed**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: [], comments: [], likes: [], next_offset: null })
+    }));
+    await gotoApp(page, { userName: 'pin-tester' });
+    await page.waitForTimeout(500);
+    const sourceId = await page.evaluate(async () => {
+      const now = Date.now();
+      const posts = Array.from({ length: 7 }, (_, index) => ({
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        user_name: 'pin-tester',
+        content: `置顶动画测试 ${index} ` + '内容 '.repeat(180),
+        created_at: new Date(now - index * 1000).toISOString(),
+        visibility: 'public',
+        is_pinned: false,
+        pinned_at: null,
+        views: index
+      }));
+      window.ensureProtectedOperationAuth = async () => ({ ok: true });
+      window.xtjProtectedFetch = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        const source = posts.find((post) => post.id === body.post_id);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, data: { ...source, is_pinned: true, pinned_at: new Date().toISOString() } })
+        };
+      };
+      for (const post of posts) await window.xtjPrependPostToFeed(post);
+      const source = posts[posts.length - 1];
+      const panel = document.getElementById('panelPosts');
+      panel.scrollTop = panel.scrollHeight;
+      const button = document.querySelector(`.post[data-post-id="${source.id}"] .action-btn.pin`);
+      window.__pinTransitionPromise = window.togglePostPin(source.id, button);
+      return source.id;
+    });
+    await page.evaluate(() => window.__pinTransitionPromise);
+    const arrivalState = await page.evaluate((postId) => {
+      const panel = document.getElementById('panelPosts');
+      const post = document.querySelector(`.post[data-post-id="${postId}"]`);
+      const nav = panel.querySelector('.posts-nav');
+      const panelRect = panel.getBoundingClientRect();
+      const postRect = post.getBoundingClientRect();
+      const navRect = nav.getBoundingClientRect();
+      return {
+        firstPost: document.querySelector('#feed .post') && document.querySelector('#feed .post').getAttribute('data-post-id'),
+        animationCleaned: !post.classList.contains('post-pin-arriving'),
+        postTop: postRect.top,
+        safeTop: Math.max(panelRect.top, navRect.bottom)
+      };
+    }, sourceId);
+    expect(arrivalState.firstPost).toBe(sourceId);
+    expect(arrivalState.animationCleaned).toBeTruthy();
+    expect(arrivalState.postTop).toBeGreaterThanOrEqual(arrivalState.safeTop - 2);
+    await context.close();
   });
 
   test('thirty real Dock clicks do not leak page errors, unhandled rejections, or horizontal overflow', async ({ page }) => {
