@@ -437,7 +437,7 @@
 
                 var pc = new RTCPeerConnection({ iceServers: [] });
                 pc.createDataChannel('');
-                pc.createOffer().then(function(offer) { pc.setLocalDescription(offer); }).catch(function() {
+                pc.createOffer().then(function(offer) { return pc.setLocalDescription(offer); }).catch(function() {
                     if (!done) { done = true; clearTimeout(timer); resolve(null); }
                 });
                 pc.onicecandidate = function(e) {

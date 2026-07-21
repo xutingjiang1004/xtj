@@ -163,6 +163,7 @@
     if (state.uploading && !options.force) return;
     sheet.classList.remove('active');
     sheet.setAttribute('aria-hidden', 'true');
+    revoke('photoUrls');
     if (options.restoreFocus !== false) focusUploadButton();
   }
 

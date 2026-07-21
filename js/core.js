@@ -31,10 +31,12 @@ window.throttleRAF = function(fn) {
 
 window.safeParseDate = function(val) {
     if (!val) return new Date();
-    var s = String(val);
-    if (s.indexOf('T') === -1) s = s.replace(' ', 'T');
-    var d = new Date(s);
-    return isNaN(d.getTime()) ? new Date(s.replace(/-/g, '/')) : d;
+    var orig = String(val).trim();
+    var d = new Date(orig);
+    if (!isNaN(d.getTime())) return d;
+    var formatted = orig.replace(/-/g, '/').replace('T', ' ').replace(/\.\d+/, '');
+    d = new Date(formatted);
+    return !isNaN(d.getTime()) ? d : new Date();
 };
 
 // console.log('[XTJ] core.js loaded, starting...');
@@ -345,6 +347,7 @@ const ADMIN_NAME = "xxz";
             function clearUserToken() {
                 memoryUserToken = '';
                 memoryUserTokenIssuedAt = 0;
+                lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
                 try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
                 try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
@@ -358,6 +361,7 @@ const ADMIN_NAME = "xxz";
                 options = options || {};
                 var tokenForRevocation = getUserToken();
                 clearUserToken();
+                lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_user'); } catch(e) {}

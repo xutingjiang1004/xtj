@@ -589,6 +589,31 @@ window.throttleRAF = function(fn) {
     } catch (e) {}
   }
 
+  function getAiHistoryCacheUserKey() {
+    if (!window.currentUser || typeof window.currentUser !== 'string' || window.currentUser.indexOf('[object Object]') !== -1) return null;
+    return encodeURIComponent(window.currentUser);
+  }
+
+  function getAiHistoryCacheKey(cid) {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return null;
+    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(cid || 'default');
+  }
+
+  function clearAiHistoryCacheForUser() {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return;
+    var prefix = 'xtj_ai_history:' + uk + ':';
+    try {
+      var keysToRemove = [];
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var key = sessionStorage.key(i);
+        if (key && key.indexOf(prefix) === 0) keysToRemove.push(key);
+      }
+      keysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
+    } catch (e) {}
+  }
+
   function readUserName() {
     if (window.currentUser) {
       if (typeof window.currentUser === 'string') return window.currentUser;
@@ -691,6 +716,7 @@ window.throttleRAF = function(fn) {
   };
 
   function clearAiUserToken() {
+    clearAiHistoryCacheForUser();
     try { if (typeof window.clearUserToken === 'function') window.clearUserToken(); } catch (e) {}
     try { localStorage.removeItem('xtj_user_token'); } catch (e2) {}
     try { sessionStorage.removeItem('xtj_user_token'); } catch (e3) {}
@@ -776,9 +802,11 @@ window.throttleRAF = function(fn) {
         rawText: rawText ? String(rawText).slice(0, 300) : ''
       };
     } catch (e) {
-      var errMsg = e && e.name === 'AbortError' ? '请求超时' : ((e && e.message) || '网络异常');
+      var isAbort = e && e.name === 'AbortError';
+      var errCode = isAbort ? 'timeout' : 'network_error';
+      var errMsg = isAbort ? '请求超时' : ((e && e.message) || '网络异常');
       try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg }); } catch (e5) {}
-      return { ok: false, status: 0, data: null, error: errMsg, url: url, rawText: '' };
+      return { ok: false, status: 0, data: null, error: errMsg, error_code: errCode, url: url, rawText: '' };
     }
   }
 
@@ -814,7 +842,11 @@ window.throttleRAF = function(fn) {
     if (r.status === 429) return '小猫调用次数已达上限，请稍后再试';
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
     if (r.status === 500) return '服务端错误，请稍后再试';
-    if (r.status === 0 || (r.error && r.error.name === 'AbortError')) return '请求超时或网络异常，可点击重试或继续发送消息';
+    if (r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error') {
+      if (r.error_code === 'aborted') return '请求已取消';
+      if (r.error_code === 'timeout') return '聊天记录加载超时，可继续发送消息或点击重试';
+      return '聊天记录更新失败，请检查网络后重试';
+    }
     if (r.error) return r.error;
     return fallback || '请求失败';
   }
@@ -1258,10 +1290,18 @@ window.throttleRAF = function(fn) {
     return empty;
   }
 
-  function renderHistoryUnavailable(messagesEl, status, err) {
+  function renderHistoryUnavailable(messagesEl, r, options) {
     if (!messagesEl) return;
+    var opts = options || {};
+    var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
+    
+    if (opts.preserveExistingMessages) {
+      if (isTimeout) notify('聊天记录更新失败，当前显示上次缓存，可继续发送消息或重试');
+      else notify('聊天记录暂时无法加载，当前显示上次缓存');
+      return;
+    }
+    
     messagesEl.innerHTML = '';
-    var isTimeout = status === 0 || (err && err.name === 'AbortError');
     var state = buildEmptyState(isTimeout
       ? '聊天记录加载超时，可继续发送消息或点击重试'
       : '聊天记录暂时无法加载，你仍可发送新消息');
@@ -5088,17 +5128,21 @@ window.throttleRAF = function(fn) {
     var requestId = ++S.historyRequestId;
     var requestedConversationId = S.conversationId;
 
+    var hasCache = false;
     if (!before && messagesEl) {
       messagesEl.setAttribute('aria-busy', 'true');
-      var cacheKey = 'xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default');
+      var cacheKey = getAiHistoryCacheKey(S.conversationId);
       var cachedStr = null;
-      try { cachedStr = sessionStorage.getItem(cacheKey); } catch (e) {}
+      if (cacheKey) {
+        try { cachedStr = sessionStorage.getItem(cacheKey); } catch (e) {}
+      }
       var cachedMsgs = null;
       if (cachedStr) {
         try { cachedMsgs = JSON.parse(cachedStr); } catch (e) {}
       }
       
       if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+        hasCache = true;
         S.messages = cachedMsgs;
         messagesEl.innerHTML = '';
         var frag = document.createDocumentFragment();
@@ -5126,7 +5170,7 @@ window.throttleRAF = function(fn) {
       if (!r.ok || !r.data) {
         if (!before) {
           try { console.warn('[AI] loadHistory failed:', r.status, r.error); } catch (e) {}
-          renderHistoryUnavailable(messagesEl, r.status, r.error);
+          renderHistoryUnavailable(messagesEl, r, { preserveExistingMessages: hasCache });
         }
         return;
       }
@@ -5143,7 +5187,8 @@ window.throttleRAF = function(fn) {
         S.messages = [];
         messagesEl.innerHTML = '';
         appendEmptyState(messagesEl);
-        try { sessionStorage.removeItem('xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default')); } catch (e) {}
+        var remKey = getAiHistoryCacheKey(S.conversationId);
+        if (remKey) { try { sessionStorage.removeItem(remKey); } catch (e) {} }
         return;
       }
 
@@ -5156,8 +5201,8 @@ window.throttleRAF = function(fn) {
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
         try {
-          var cacheKey = 'xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default');
-          sessionStorage.setItem(cacheKey, JSON.stringify(msgs.slice(-12)));
+          var updateKey = getAiHistoryCacheKey(S.conversationId);
+          if (updateKey) sessionStorage.setItem(updateKey, JSON.stringify(msgs.slice(-12)));
         } catch (e) {}
       } else {
         var oldScroll = messagesEl.scrollHeight;
@@ -5725,8 +5770,6 @@ function showChatMessages() {
       try { S.viewportCleanup(); } catch (e3) {}
     }
     S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
-
-    S.conversationId = readConvId();
 
     Promise.allSettled([
       ensureConfig().then(function(cfg) {
