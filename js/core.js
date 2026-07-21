@@ -30,11 +30,34 @@ window.throttleRAF = function(fn) {
 };
 
 window.safeParseDate = function(val) {
-    if (!val) return new Date();
-    var s = String(val);
-    if (s.indexOf('T') === -1) s = s.replace(' ', 'T');
-    var d = new Date(s);
-    return isNaN(d.getTime()) ? new Date(s.replace(/-/g, '/')) : d;
+    if (!val) return new Date('Invalid Date');
+    if (val instanceof Date) return new Date(val.getTime());
+    
+    if (typeof val === 'number') {
+        return new Date(val > 9999999999 ? val : val * 1000);
+    }
+    if (typeof val === 'string' && /^\d+$/.test(val.trim())) {
+        var num = parseInt(val.trim(), 10);
+        return new Date(num > 9999999999 ? num : num * 1000);
+    }
+    
+    var orig = String(val).trim();
+    var d = new Date(orig);
+    if (!isNaN(d.getTime())) return d;
+    
+    // 如果带 Z 或者是标准时区（如 +08:00），原样解析失败说明不是标准格式，交给下面处理
+    // 把 YYYY-MM-DD 替换成 YYYY/MM/DD（Safari 兼容本地时间格式）
+    // 如果存在 'T'，而且没有 'Z' 也没有 '+'，把它换成空格（Safari 兼容）
+    var isISOWithTimezone = /Z|[+-]\d{2}:\d{2}$/i.test(orig);
+    if (isISOWithTimezone) {
+      // 已经带了时区却解析失败，直接原样替换-为/看看
+      d = new Date(orig.replace(/-/g, '/'));
+      return d;
+    }
+    
+    var formatted = orig.replace(/-/g, '/').replace('T', ' ').replace(/\.\d+/, '');
+    d = new Date(formatted);
+    return d; // 如果依然是 Invalid Date，也如实返回
 };
 
 // console.log('[XTJ] core.js loaded, starting...');
@@ -345,6 +368,7 @@ const ADMIN_NAME = "xxz";
             function clearUserToken() {
                 memoryUserToken = '';
                 memoryUserTokenIssuedAt = 0;
+                lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
                 try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
                 try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
@@ -358,6 +382,7 @@ const ADMIN_NAME = "xxz";
                 options = options || {};
                 var tokenForRevocation = getUserToken();
                 clearUserToken();
+                lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_user'); } catch(e) {}

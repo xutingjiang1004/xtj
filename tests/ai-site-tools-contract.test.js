@@ -197,3 +197,37 @@ test('site search results remain navigable to posts, photos, chat and AI history
   assert.match(client, /openConversation/);
   assert.match(client, /openUserProfile/);
 });
+
+test('history query no longer performs client-side fallback to avoid wiping new conversations', () => {
+  const loadHistoryStr = client.slice(client.indexOf('async function loadHistory'), client.indexOf('async function fetchConversations'));
+  assert.doesNotMatch(loadHistoryStr, /\/chat\/conversations.*mode=normal/);
+  // Ensure we just return if no messages and no fallback
+  assert.match(loadHistoryStr, /S\.messages = \[\];\s*messagesEl\.innerHTML = '';\s*appendEmptyState/);
+});
+
+test('openAiChat initiates with no conversationId to allow backend to find the latest', () => {
+  const openChatStr = client.slice(client.indexOf('async function openAiChat()'), client.indexOf('Promise.allSettled'));
+  assert.doesNotMatch(openChatStr, /S\.conversationId = readConvId\(\)/);
+});
+
+test('server pagination buffers 200 rows to ensure deep_think and deleted messages do not shrink the page', () => {
+  const historyRoute = server.slice(server.indexOf("app.get('/api/agent/chat/history'"), server.indexOf('// =====================', server.indexOf("app.get('/api/agent/chat/history'")));
+  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ 199, 200\)\)/);
+  assert.match(historyRoute, /filteredRows\.push\(r2\);\s*if \(filteredRows\.length > limit\) break;/);
+});
+
+test('cache writes and reads are fully isolated by encoding currentUser', () => {
+  const cacheFn = client.slice(client.indexOf('function getAiHistoryCacheUserKey'), client.indexOf('function clearAiHistoryCacheForUser'));
+  assert.match(cacheFn, /encodeURIComponent\(window\.currentUser\)/);
+  
+  const clearFn = client.slice(client.indexOf('function clearAiHistoryCacheForUser'), client.indexOf('function readUserName'));
+  assert.match(clearFn, /sessionStorage\.removeItem\(k\)/);
+  assert.match(clearFn, /key\.indexOf\(prefix\) === 0/);
+});
+
+test('renderHistoryUnavailable receives error_code and preserves cache', () => {
+  assert.match(client, /renderHistoryUnavailable\(messagesEl, r, \{ preserveExistingMessages: hasCache \}\)/);
+  const renderFn = client.slice(client.indexOf('function renderHistoryUnavailable'), client.indexOf('function appendMessage'));
+  assert.match(renderFn, /opts\.preserveExistingMessages/);
+  assert.match(renderFn, /isTimeout.*notify/);
+});
