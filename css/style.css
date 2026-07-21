@@ -14157,7 +14157,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   min-height: 42px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.95);
   color: #1a4233;
   font: inherit;

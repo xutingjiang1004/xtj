@@ -12786,7 +12786,7 @@ app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async 
 app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), async (req, res) => {
   var closed = false;
   var requestAbort = new AbortController();
-  req.on('close', function() { closed = true; requestAbort.abort(); });
+  res.on('close', function() { if (!res.writableEnded) { closed = true; requestAbort.abort(); } });
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
