@@ -6742,7 +6742,7 @@ function renderProfileActivityList(kind) {
 
 
             // Final pin action: server-side RPC enforces one pinned post per author.
-            var inFlightPins = {};
+            window.isPinningPost = false;
             window.togglePostPin = async function(postId, btn) {
                 if (!postId) return;
                 var normalizedPostId = String(postId || '').trim().toLowerCase();
@@ -6751,13 +6751,14 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 
-                if (inFlightPins[normalizedPostId]) return;
-                inFlightPins[normalizedPostId] = true;
+                if (window.isPinningPost) return;
+                window.isPinningPost = true;
                 
                 var originalText = btn ? btn.textContent : '';
                 var nextPinned = false;
                 var didSucceed = false;
                 var serverSucceeded = false;
+                var authoritativePinnedState = null;
                 try {
                     if (btn) { btn.disabled = true; btn.textContent = '...'; }
                     var auth = typeof window.ensureProtectedOperationAuth === 'function'
@@ -6780,7 +6781,7 @@ function renderProfileActivityList(kind) {
                         showToast('无权置顶此帖子');
                         return;
                     }
-                    var isCurrentlyPinned = currentPost ? !!currentPost.is_pinned : (btn && btn.textContent.indexOf('取消') !== -1);
+                    var isCurrentlyPinned = currentPost ? !!currentPost.is_pinned : (btn && (btn.getAttribute('data-pinned') === 'true' || originalText.indexOf('取消') !== -1));
                     nextPinned = !isCurrentlyPinned;
                     
                     var response = await window.xtjProtectedFetch('/api/post/pin', {
@@ -6796,6 +6797,7 @@ function renderProfileActivityList(kind) {
                     }
                     if (!response.ok || !result.ok || !result.data) throw new Error(result.error || '置顶操作失败');
                     serverSucceeded = true;
+                    authoritativePinnedState = result.data.is_pinned;
 
                     (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
                         syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
@@ -6819,7 +6821,10 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     if (serverSucceeded) {
                         console.error('[pin] render failed after server success', e);
-                        showToast('置顶已更新，但界面刷新失败');
+                        showToast('置顶已更新，正在尝试恢复界面同步');
+                        clearFeedCache();
+                        loadFeed(true).catch(function(err){ console.error('loadFeed failed in catch', err); });
+                        refreshPostDetailIfActive(normalizedPostId).catch(function(err){ console.error('refreshPostDetailIfActive failed in catch', err); });
                     } else {
                         console.error('[pin] atomic update failed', e);
                         showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
@@ -6829,9 +6834,14 @@ function renderProfileActivityList(kind) {
                     if (postEl) postEl.classList.remove('post-pin-departing');
                     if (btn) {
                         btn.disabled = false;
-                        btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
+                        if (authoritativePinnedState !== null) {
+                            btn.textContent = authoritativePinnedState ? '取消置顶' : '置顶';
+                            btn.setAttribute('data-pinned', authoritativePinnedState ? 'true' : 'false');
+                        } else {
+                            btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
+                        }
                     }
-                    delete inFlightPins[normalizedPostId];
+                    window.isPinningPost = false;
                 }
             };
 
