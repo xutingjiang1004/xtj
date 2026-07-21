@@ -5331,7 +5331,27 @@ function renderProfileActivityList(kind) {
                     }
                 });
 
+                // Before replacing feed innerHTML:
+                var detachedPanels = [];
+                feed.querySelectorAll('.post-tool-critique, .post-tool-translation').forEach(function(panel) {
+                    var post = panel.closest('.post');
+                    var postId = post ? post.getAttribute('data-post-id') : null;
+                    if (postId) {
+                        panel.parentNode.removeChild(panel);
+                        detachedPanels.push({ id: postId, panel: panel });
+                    }
+                });
+
                 feed.innerHTML = htmlChunks.length ? htmlChunks.join('') : '<div class="loading">快来发布第一条动态吧~</div>';
+
+                // Reattach:
+                detachedPanels.forEach(function(item) {
+                    var post = feed.querySelector('.post[data-post-id="' + escapeHtml(item.id) + '"]');
+                    if (post) {
+                        var actions = post.querySelector('.actions');
+                        if (actions) actions.insertAdjacentElement('afterend', item.panel);
+                    }
+                });
 
                 initPostScrollAnimation();
             }
@@ -5737,8 +5757,12 @@ function renderProfileActivityList(kind) {
                 var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
-                menu.innerHTML = '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' +
-                                 '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' +
+                var post = feedAllPosts.find(function(p) { return p.id == postId; });
+                if (!post && window.currentPost && window.currentPost.id == postId) post = window.currentPost;
+                var hasText = post && String(post.content || '').trim().length > 0;
+                var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
+                var btnAi = hasText ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
+                menu.innerHTML = btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
                 var rect = trigger.getBoundingClientRect();
@@ -5835,7 +5859,17 @@ function renderProfileActivityList(kind) {
                 var actions = anchor.closest('.actions');
                 if (!actions) return;
                 var existing = host.querySelector('.post-tool-critique');
-                if (existing) { existing.hidden = !existing.hidden; return; }
+                if (existing) {
+                    if (existing.classList.contains('is-error')) {
+                        existing.classList.remove('is-error');
+                        existing.textContent = 'AI 正在锐评...';
+                        var existingSession = existing.__aiSession;
+                        if (existingSession) runPostAiRequest(existingSession, { post_id: String(postId), initial: true });
+                    } else {
+                        existing.hidden = !existing.hidden;
+                    }
+                    return;
+                }
                 
                 var panel = document.createElement('section');
                 panel.className = 'post-tool-critique';
@@ -5843,6 +5877,7 @@ function renderProfileActivityList(kind) {
                 actions.insertAdjacentElement('afterend', panel);
                 
                 var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
+                panel.__aiSession = session;
                 runPostAiRequest(session, { post_id: String(postId), initial: true });
             };
             window.openPostReport = function(postId) {
@@ -6911,6 +6946,7 @@ function renderProfileActivityList(kind) {
                 var postToolAction = e.target.closest('[data-post-tool]');
                 if (postToolAction) {
                     e.preventDefault();
+                    if (!window.currentUser) { showToast('请先登录'); return; }
                     var postTool = postToolAction.getAttribute('data-post-tool');
                     var postToolPostId = postToolAction.getAttribute('data-post-id');
                     closePostToolsMenu();
@@ -7297,12 +7333,14 @@ function renderProfileActivityList(kind) {
                 var startIdx = feedPage * FEED_PAGE_SIZE;
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                var fetchFailed = false;
                 if (filteredPosts.length < endIdx && !feedEndReached) {
                     try {
                         feedPageFetchPending = true;
                         await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
                         writeFeedCacheSnapshot();
                     } catch (e) {
+                        fetchFailed = true;
                         console.error('[feed] loadMore ensure coverage failed:', e);
                     } finally {
                         feedPageFetchPending = false;
@@ -7310,7 +7348,7 @@ function renderProfileActivityList(kind) {
                     filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 }
                 pageLoading.remove();
-                if (startIdx >= filteredPosts.length) {
+                if (startIdx >= filteredPosts.length && !fetchFailed) {
                     feedEndReached = true;
                     var noMore = document.getElementById("feedNoMore");
                     if (!noMore) {
@@ -11972,7 +12010,9 @@ function renderProfileActivityList(kind) {
             };
         }
 
+        var _reportLoadId = 0;
         function loadReportContentList() {
+            var reqId = ++_reportLoadId;
             var container = document.getElementById('reportContentList');
             if (!container) return;
             container.innerHTML = '<div class="report-loading">加载中...</div>';
@@ -11985,6 +12025,7 @@ function renderProfileActivityList(kind) {
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
+                            if (reqId !== _reportLoadId) return;
                             _reportContentData = (res.data || []).map(function(p) {
                                 var txt = p.content || '';
                                 try {
@@ -12017,6 +12058,7 @@ function renderProfileActivityList(kind) {
                     fetch(API_BASE + '/api/photos/public?limit=200')
                         .then(function(resp) { return resp.json(); })
                         .then(function(result) {
+                            if (reqId !== _reportLoadId) return;
                             _reportContentData = (result.data || []).map(resolveReportPhotoWallItem).filter(Boolean);
                             renderReportContentList(container);
                         }).catch(function() {
@@ -13108,98 +13150,7 @@ function renderProfileActivityList(kind) {
                 showToast('举报功能暂不可用，请稍后重试');
             };
 
-            window.openReportModal = function() {
-                if (!currentUser) { showToast('请先登录'); return; }
-                var overlay = document.getElementById('reportModal');
-                if (!overlay) return;
-                _reportType = 'post';
-                _reportView = 'form';
-                _reportSelectedId = window.__xtjReportTargetPostId || null;
-                window.__xtjReportTargetPostId = null;
-                _reportSelectedReason = null;
-                _reportTargetUser = null;
-                _reportContentData = [];
-                overlay.classList.add('active');
-                var formBody = document.getElementById('reportModalFormBody');
-                var recordsPanel = document.getElementById('reportRecordsPanel');
-                if (formBody) formBody.style.display = 'block';
-                if (recordsPanel) recordsPanel.style.display = 'none';
-                document.querySelectorAll('.report-type-tab').forEach(function(node) {
-                    node.classList.toggle('active', node.dataset.type === 'post');
-                });
-                document.querySelectorAll('.report-reason-btn').forEach(function(node) {
-                    node.classList.remove('selected');
-                });
-                var reportError = document.getElementById('reportError');
-                if (reportError) {
-                    reportError.style.display = 'none';
-                    reportError.textContent = '';
-                }
-                var list = document.getElementById('reportContentList');
-                if (list) {
-                    list.innerHTML = '<div class="report-loading">加载中...</div>';
-                }
-                try {
-                    if (typeof loadReportContentList === 'function') {
-                        Promise.resolve(loadReportContentList()).catch(function() {
-                            if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                        });
-                    } else if (list) {
-                        list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                    }
-                } catch (_) {
-                    if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                }
-                setBodyLockFromVisibleModals();
-            };
 
-            window.closeReportModal = function() {
-                var overlay = document.getElementById('reportModal');
-                if (!overlay) return;
-                overlay.classList.remove('active');
-                setBodyLockFromVisibleModals();
-            };
-
-            window.bindHeaderActionButtons = function() {
-                var annBtn = document.getElementById('announcementBtn');
-                var reportBtn = document.getElementById('reportBtn');
-                if (!annBtn && !reportBtn) return;
-                if (window.__xtjHeaderActionsBound) return;
-                window.__xtjHeaderActionsBound = true;
-                if (annBtn) {
-                    annBtn.type = 'button';
-                    annBtn.onclick = null;
-                    annBtn.addEventListener('click', function(event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        window.openAnnouncementModal();
-                    });
-                }
-                if (reportBtn) {
-                    reportBtn.type = 'button';
-                    reportBtn.onclick = null;
-                    reportBtn.addEventListener('click', function(event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        window.openReportModal();
-                    });
-                }
-            };
-
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
-            });
-            if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
-
-            var originalCloseModal = window.closeModal;
-            window.closeModal = function(id) {
-                if (typeof originalCloseModal === 'function') {
-                    originalCloseModal(id);
-                }
-                if (id === 'statModal') {
-                    setBodyLockFromVisibleModals();
-                }
-            };
         })();
 
         (function installFinalUiAndDataOverrides() {
@@ -13434,118 +13385,6 @@ function renderProfileActivityList(kind) {
                 syncHeaderModalBodyLock();
             };
 
-            window.openReportModal = function() {
-                if (!currentUser) {
-                    showToast('请先登录');
-                    return;
-                }
-                var overlay = document.getElementById('reportModal');
-                if (!overlay) return;
-                _reportType = 'post';
-                _reportView = 'form';
-                _reportSelectedId = window.__xtjReportTargetPostId || null;
-                window.__xtjReportTargetPostId = null;
-                _reportSelectedReason = null;
-                _reportTargetUser = null;
-                _reportContentData = [];
-                overlay.classList.add('active');
-                var formBody = document.getElementById('reportModalFormBody');
-                var recordsPanel = document.getElementById('reportRecordsPanel');
-                var list = document.getElementById('reportContentList');
-                var errorBox = document.getElementById('reportError');
-                document.querySelectorAll('.report-type-tab').forEach(function(node) {
-                    node.classList.toggle('active', node.dataset.type === 'post');
-                });
-                document.querySelectorAll('.report-reason-btn').forEach(function(node) {
-                    node.classList.remove('selected');
-                });
-                if (formBody) {
-                    formBody.classList.add('active');
-                    formBody.style.display = 'block';
-                    formBody.setAttribute('aria-hidden', 'false');
-                }
-                if (recordsPanel) recordsPanel.style.display = 'none';
-                if (typeof window.closeReportHistoryModal === 'function') {
-                    try { window.closeReportHistoryModal(); } catch (_) {}
-                }
-                if (errorBox) {
-                    errorBox.style.display = 'none';
-                    errorBox.textContent = '';
-                }
-                var customReason = document.getElementById('reportCustomReason');
-                if (customReason) customReason.value = '';
-                var submitBtn = document.getElementById('reportSubmitBtn');
-                if (submitBtn) submitBtn.disabled = true;
-                if (typeof updateReportSelectedPreview === 'function') {
-                    try { updateReportSelectedPreview(); } catch (_) {}
-                }
-                if (list) {
-                    list.innerHTML = '<div class="report-loading">加载中...</div>';
-                }
-                if (typeof syncReportModalBodyLock === 'function') {
-                    syncReportModalBodyLock();
-                } else {
-                    syncHeaderModalBodyLock();
-                }
-                try {
-                    if (typeof loadReportContentList === 'function') {
-                        Promise.resolve(loadReportContentList()).catch(function() {
-                            if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                        });
-                    } else if (list) {
-                        list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                    }
-                } catch (_) {
-                    if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
-                }
-            };
-
-            window.closeReportModal = function() {
-                var overlay = document.getElementById('reportModal');
-                if (!overlay) return;
-                overlay.classList.remove('active');
-                if (typeof window.closeReportHistoryModal === 'function') {
-                    try { window.closeReportHistoryModal(); } catch (_) {}
-                }
-                if (typeof syncReportModalBodyLock === 'function') {
-                    syncReportModalBodyLock();
-                } else {
-                    syncHeaderModalBodyLock();
-                }
-            };
-
-            window.bindHeaderActionButtons = function() {
-                var annBtn = document.getElementById('announcementBtn');
-                var reportBtn = document.getElementById('reportBtn');
-                if (!annBtn && !reportBtn) return;
-                if (window.__xtjHeaderActionsBound) return;
-                window.__xtjHeaderActionsBound = true;
-                if (annBtn) {
-                    annBtn.type = 'button';
-                    annBtn.onclick = null;
-                    annBtn.addEventListener('click', function(event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        window.openAnnouncementModal();
-                    });
-                }
-                if (reportBtn) {
-                    reportBtn.type = 'button';
-                    reportBtn.onclick = null;
-                    reportBtn.addEventListener('click', function(event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        window.openReportModal();
-                    });
-                }
-            };
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', function() {
-                    if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
-                });
-            } else if (typeof window.bindHeaderActionButtons === 'function') {
-                window.bindHeaderActionButtons();
-            }
 
             renderChatLoadingState = function(el, options) {
                 if (!el) return;
