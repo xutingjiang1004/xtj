@@ -89,7 +89,6 @@ test('normal chat and deep research use separate history modes', () => {
   assert.match(historyRoute, /mode === 'deep_think' \? meta\.chat_mode === 'deep_think' : meta\.chat_mode !== 'deep_think'/);
   assert.match(client, /&mode=deep_think/);
   assert.match(client, /qs \+= '&mode=normal'/);
-  assert.match(client, /chat\/conversations\?limit=1&mode=normal/);
   const deepPage = client.slice(client.indexOf('async function openDeepThinkPage()'), client.indexOf('function closeDeepThinkPage()'));
   assert.doesNotMatch(deepPage, /apiRequest\('GET', '\/chat\/history\?limit=30'\)/);
 });

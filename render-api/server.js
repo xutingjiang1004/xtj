@@ -13055,9 +13055,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      // Older records can predate chat_mode. Read a small bounded buffer before
-      // filtering so a mixed legacy conversation cannot leak into the other UI.
-      .limit(Math.min(limit + 101, 200));
+      .limit(limit + 20);
     if (before) {
       query = query.lt('created_at', before);
     }
