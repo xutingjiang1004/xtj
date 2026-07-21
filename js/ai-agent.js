@@ -23,7 +23,8 @@ window.throttleRAF = function(fn) {
   var AI_DEBUG = (function() { try { return localStorage.getItem('xtj_ai_debug') === '1'; } catch (e) { return false; } })();
   if (AI_DEBUG) { try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {} }
 
-  var HISTORY_PAGE_SIZE = 30;
+  var AI_DISPLAY_NAME = '小猫';
+  var HISTORY_PAGE_SIZE = 12;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // 鈽?U3: 涓?TTL 涓€鑷? 閬垮厤姣忓垎閽熷仛鏃犵敤鍔?
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
@@ -813,7 +814,7 @@ window.throttleRAF = function(fn) {
     if (r.status === 429) return '小猫调用次数已达上限，请稍后再试';
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
     if (r.status === 500) return '服务端错误，请稍后再试';
-    if (r.status === 0) return '网络异常，请检查连接';
+    if (r.status === 0 || (r.error && r.error.name === 'AbortError')) return '请求超时或网络异常，可点击重试或继续发送消息';
     if (r.error) return r.error;
     return fallback || '请求失败';
   }
@@ -1252,16 +1253,17 @@ window.throttleRAF = function(fn) {
     renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     visual.appendChild(emojiSlot);
     empty.appendChild(visual);
-    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '小猫') + ' 聊聊天' }));
+    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + AI_DISPLAY_NAME + ' 聊聊天' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '嗨，来聊天吧。') }));
     return empty;
   }
 
-  function renderHistoryUnavailable(messagesEl, status) {
+  function renderHistoryUnavailable(messagesEl, status, err) {
     if (!messagesEl) return;
     messagesEl.innerHTML = '';
-    var state = buildEmptyState(status === 0
-      ? '聊天记录加载超时，你仍可发送新消息'
+    var isTimeout = status === 0 || (err && err.name === 'AbortError');
+    var state = buildEmptyState(isTimeout
+      ? '聊天记录加载超时，可继续发送消息或点击重试'
       : '聊天记录暂时无法加载，你仍可发送新消息');
     state.classList.add('ai-history-unavailable');
     var retry = el('button', {
@@ -5088,7 +5090,23 @@ window.throttleRAF = function(fn) {
 
     if (!before && messagesEl) {
       messagesEl.setAttribute('aria-busy', 'true');
-      if (!messagesEl.children.length || messagesEl.querySelector('.ai-history-unavailable')) {
+      var cacheKey = 'xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default');
+      var cachedStr = null;
+      try { cachedStr = sessionStorage.getItem(cacheKey); } catch (e) {}
+      var cachedMsgs = null;
+      if (cachedStr) {
+        try { cachedMsgs = JSON.parse(cachedStr); } catch (e) {}
+      }
+      
+      if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+        S.messages = cachedMsgs;
+        messagesEl.innerHTML = '';
+        var frag = document.createDocumentFragment();
+        cachedMsgs.forEach(function(m) { frag.appendChild(buildMessageNode(m, messagesEl)); });
+        messagesEl.appendChild(frag);
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+      } else if (!messagesEl.children.length || messagesEl.querySelector('.ai-history-unavailable')) {
         messagesEl.innerHTML = '';
         var loadingState = buildEmptyState('正在加载聊天记录…');
         loadingState.classList.add('ai-history-loading');
@@ -5101,14 +5119,14 @@ window.throttleRAF = function(fn) {
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
-      var r = await apiRequest('GET', '/chat/history' + qs);
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 20000 });
 
       if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
 
       if (!r.ok || !r.data) {
         if (!before) {
           try { console.warn('[AI] loadHistory failed:', r.status, r.error); } catch (e) {}
-          renderHistoryUnavailable(messagesEl, r.status);
+          renderHistoryUnavailable(messagesEl, r.status, r.error);
         }
         return;
       }
@@ -5125,15 +5143,22 @@ window.throttleRAF = function(fn) {
         S.messages = [];
         messagesEl.innerHTML = '';
         appendEmptyState(messagesEl);
+        try { sessionStorage.removeItem('xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default')); } catch (e) {}
         return;
       }
 
       if (!before) {
         S.messages = msgs;
         messagesEl.innerHTML = '';
-        msgs.forEach(function(m) { appendMessage(messagesEl, m); });
+        var frag = document.createDocumentFragment();
+        msgs.forEach(function(m) { frag.appendChild(buildMessageNode(m, messagesEl)); });
+        messagesEl.appendChild(frag);
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
+        try {
+          var cacheKey = 'xtj_ai_history:' + window.currentUser + ':' + (S.conversationId || 'default');
+          sessionStorage.setItem(cacheKey, JSON.stringify(msgs.slice(-12)));
+        } catch (e) {}
       } else {
         var oldScroll = messagesEl.scrollHeight;
         var frag = document.createDocumentFragment();
@@ -5703,34 +5728,18 @@ function showChatMessages() {
 
     S.conversationId = readConvId();
 
-    try {
-      var cfg = await ensureConfig();
-      if (lifecycleId !== S.lifecycleId || !S.active) return;
-      applyConfigToUI(cfg);
-    } catch (e4) {}
-
-    await loadHistory(r.messagesEl, null);
-    if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
-
-    // fallback: localStorage 鐨?convId 鏃犳晥锛堟病鏈夊巻鍙叉秷鎭級锛屽皾璇曞姞杞芥渶杩戜細璇?
-    if (!S.messages.length && S.conversationId) {
-      try {
-        var convR = await apiRequest('GET', '/chat/conversations?limit=1&mode=normal');
-        if (convR && convR.ok && convR.data && convR.data.conversations && convR.data.conversations.length) {
-          var recent = convR.data.conversations[0];
-          if (recent && recent.conversation_id && recent.conversation_id !== S.conversationId) {
-            S.conversationId = recent.conversation_id;
-            writeConvId(recent.conversation_id);
-            await loadHistory(r.messagesEl, null);
-          }
-        }
-      } catch (e5) {}
-    }
-
-    setTimeout(function() {
-      try { r.input.focus(); } catch (e) {}
-      updateInputMetrics();
-    }, 80);
+    Promise.allSettled([
+      ensureConfig().then(function(cfg) {
+        if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
+      }),
+      loadHistory(r.messagesEl, null)
+    ]).then(function() {
+      if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
+      setTimeout(function() {
+        try { r.input.focus(); } catch (e) {}
+        updateInputMetrics();
+      }, 80);
+    });
   }
 
   function applyConfigToUI(cfg) {
@@ -5738,18 +5747,18 @@ function showChatMessages() {
     var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
     if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
-    if (nameEl) nameEl.textContent = cfg.name || 'AI';
+    if (nameEl) nameEl.textContent = AI_DISPLAY_NAME;
     updateAiStatus();
 
     var inp = document.getElementById('aiChatMsgInput');
-    if (inp) inp.placeholder = '和 ' + (cfg.name || '小猫') + ' 说点什么吧…';
+    if (inp) inp.placeholder = '和 ' + AI_DISPLAY_NAME + ' 说点什么吧…';
 
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
       if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
       var e2 = empty.querySelector('.ai-chat-empty-title');
-      if (e2) e2.textContent = '和 ' + (cfg.name || 'AI') + ' 聊聊天';
+      if (e2) e2.textContent = '和 ' + AI_DISPLAY_NAME + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
@@ -5885,8 +5894,8 @@ function showChatMessages() {
     if (!list) return;
     removeAllAiEntries();
 
-    var cfg = S.config || { name: '小猫', avatar: '🐈', description: '小猫 智能体' };
-    var name = cfg.name || '小猫';
+    var cfg = S.config || { avatar: '🐈', description: '小猫 智能体' };
+    var name = AI_DISPLAY_NAME;
     var avatar = cfg.avatar || '🐈';
     var desc = cfg.description || 'AI 智能体';
 
