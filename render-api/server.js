@@ -3447,7 +3447,7 @@ function securityRateLimit(windowMs, maxRequests) {
     // 先执行本地限流
     var localPassed = false;
     var _nextCalled = false;
-    var _next = function() { _nextCalled = true; next(); };
+    var _next = function() { _nextCalled = true; };
     localLimit(req, res, _next);
     if (!_nextCalled) return; // 本地已拒绝
 
@@ -3460,7 +3460,7 @@ function securityRateLimit(windowMs, maxRequests) {
       return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: result.retryAfter });
     }
     // 本地限流已通过，持久化限流也通过了
-    // 注意：本地限流已经调用了 next()，这里不需要再调用
+    next();
   };
 }
 
@@ -5691,11 +5691,13 @@ app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
     await storeRefreshToken(payload.user_name, newRefreshToken);
     // 撤销旧的 refresh token
     try {
-      await supabase.from('posts').delete()
+      var { error: delErr } = await supabase.from('posts').delete()
         .eq('media_type', REFRESH_TOKEN_MARKER)
         .eq('media_url', payload.jti);
+      if (delErr) throw delErr;
     } catch(e) {
       console.error('[auth] refresh token revoke failed:', e && e.message);
+      return res.status(500).json({ error: 'Failed to revoke old refresh token' });
     }
 
     res.cookie('xtj_user_refresh', newRefreshToken, {
@@ -7724,7 +7726,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
             var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
             if (pathMatch) {
               var p = decodeURIComponent(pathMatch[1]);
-              if (p.indexOf('..') === -1 && p.indexOf('/') === -1) storagePaths.push(p);
+              if (p.indexOf('..') === -1) storagePaths.push(p);
             }
           }
         });
@@ -12711,7 +12713,7 @@ app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res
   try {
     var isAdmin = req.userName === ADMIN_USERNAME;
     var query = supabase.from('posts').select('user_name,created_at')
-      .or('media_type.is.null,media_type.in.(text,image,video,audio,photo,album)');
+      .or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
     if (!isAdmin) {
       query = req.userName
         ? query.or('visibility.eq.public,user_name.eq.' + req.userName)

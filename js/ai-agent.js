@@ -2812,6 +2812,7 @@ window.throttleRAF = function(fn) {
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
           if (doneReceivedRef) doneReceivedRef.value = true;
           if (evtHandledRef) evtHandledRef.value = true;
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
           return;
         }
       }
