@@ -18,6 +18,8 @@
   var bc = null;
   var lastLoadedAt = 0;
   var LOAD_CACHE_TTL_MS = 20000;
+  var photoLoadGeneration = 0;
+  var activePhotoLoadController = null;
 
   function byId(id){ return document.getElementById(id); }
 
@@ -157,7 +159,7 @@
     return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
   }
 
-  async function fetchPhotoPage(pageIndex, timeoutMs){
+  async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal){
     var from = pageIndex * PAGE_SIZE;
     var to = from + PAGE_SIZE - 1;
     var page = pageIndex;
@@ -165,6 +167,11 @@
     var controller = new AbortController();
     var timeout = timeoutMs || 10000;
     var timer = setTimeout(function() { controller.abort(); }, timeout);
+    var onAbort = function() { controller.abort(); };
+    if (externalSignal) {
+      if (externalSignal.aborted) throw new DOMException('Aborted', 'AbortError');
+      externalSignal.addEventListener('abort', onAbort);
+    }
     try {
       var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
       var result = await resp.json();
@@ -172,12 +179,23 @@
       return result.data || [];
     } finally {
       clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
     }
   }
 
   async function loadPhotoWallData(force){
     if (loading && !force) return window.photoWallData;
     if (!force && Array.isArray(window.photoWallData) && window.photoWallData.length && lastLoadedAt && Date.now() - lastLoadedAt < LOAD_CACHE_TTL_MS) return window.photoWallData;
+    
+    photoLoadGeneration++;
+    var currentGen = photoLoadGeneration;
+    
+    if (activePhotoLoadController) {
+      try { activePhotoLoadController.abort(); } catch (e) {}
+    }
+    activePhotoLoadController = new AbortController();
+    var signal = activePhotoLoadController.signal;
+    
     loading = true;
     page = 0;
     more = true;
@@ -199,7 +217,9 @@
 
     try {
       // 首次请求 25s，已有缓存时后台刷新 10s
-      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000);
+      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal);
+      if (currentGen !== photoLoadGeneration) return window.photoWallData; // Aborted by newer request
+      
       more = rows.length >= PAGE_SIZE;
       if (!more && local.length) {
         // 云端数据为空时，本地缓存可能过期，保留本地
@@ -249,17 +269,28 @@
       }
       return window.photoWallData;
     } catch (err) {
-      console.error('[PhotoWall] load failed', err);
+      if (currentGen !== photoLoadGeneration) return window.photoWallData;
+      var isAbort = err && err.name === 'AbortError';
+      if (!isAbort) {
+        console.error('[PhotoWall] load failed', err);
+      }
       // 保留缓存，不清空
       if (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0) {
         window.photoWallData = local;
       }
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
-      setPhotoWallSyncStatus('error', '同步失败');
+      if (!isAbort) {
+        setPhotoWallSyncStatus('error', '同步失败');
+      }
       return window.photoWallData;
     } finally {
-      loading = false;
+      if (currentGen === photoLoadGeneration) {
+        loading = false;
+        if (activePhotoLoadController === activePhotoLoadController) {
+            // just to be safe
+        }
+      }
     }
   }
 
@@ -303,7 +334,21 @@
     saveLocalPhotoWallData();
     lastLoadedAt = Date.now();
     window.photoWallDataLoadedAt = lastLoadedAt;
-    if (shouldRender !== false && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
+    
+    var removedDom = false;
+    if (typeof document !== 'undefined' && document.querySelectorAll) {
+      var els = document.querySelectorAll('.photo-wall-item[data-photo-id]');
+      for (var i = 0; i < els.length; i++) {
+        if (els[i].getAttribute('data-photo-id') === key) {
+          if (els[i].parentNode) {
+            els[i].parentNode.removeChild(els[i]);
+            removedDom = true;
+          }
+        }
+      }
+    }
+    
+    if (shouldRender !== false && !removedDom && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
       window.renderPhotoWallWithoutReload();
     }
     return before !== window.photoWallData.length;

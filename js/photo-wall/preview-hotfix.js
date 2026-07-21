@@ -54,7 +54,9 @@
     previewReturnFocus: null,
     infoReturnFocus: null,
     moveRaf: 0,
-    pendingMove: null
+    pendingMove: null,
+    viewportWidthCache: 0,
+    viewportHeightCache: 0
   };
 
   var photoSizeCache = Object.create(null);
@@ -147,11 +149,13 @@
   }
 
   function viewportWidth() {
+    if (state.viewportWidthCache) return state.viewportWidthCache;
     var wrap = wrapper();
     return wrap && wrap.clientWidth ? wrap.clientWidth : window.innerWidth;
   }
 
   function viewportHeight() {
+    if (state.viewportHeightCache) return state.viewportHeightCache;
     var wrap = wrapper();
     return wrap && wrap.clientHeight ? wrap.clientHeight : window.innerHeight;
   }
@@ -619,6 +623,20 @@
     }
   }
 
+  function clearInteractionState() {
+    state.pointers.clear();
+    state.activePointerId = null;
+    state.mode = 'idle';
+    state.moved = false;
+    state.dragAxis = '';
+    state.pointerType = '';
+    state.mouseDown = false;
+    state.viewportWidthCache = 0;
+    state.viewportHeightCache = 0;
+    clearDismissVisual(true);
+    cancelPendingMoveFrame();
+  }
+
   function releasePointerCapture(surface, pointerId) {
     if (!surface || pointerId == null) return;
     try {
@@ -998,6 +1016,13 @@
       state.activePointerId = event.pointerId;
       state.moved = false;
       state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (state.pointers.size === 1) {
+        state.viewportWidthCache = 0;
+        state.viewportHeightCache = 0;
+        state.viewportWidthCache = viewportWidth();
+        state.viewportHeightCache = viewportHeight();
+      }
 
       if (isTouchLike) {
         if (state.pointers.size >= 2) {

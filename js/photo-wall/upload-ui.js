@@ -157,13 +157,29 @@
   }
 
   function closeSheet(options){
+    if (options && typeof options.preventDefault === 'function') options = {};
     options = options || {};
     var sheet = byId('pwUploadSheet');
     if (!sheet) return;
     if (state.uploading && !options.force) return;
     sheet.classList.remove('active');
     sheet.setAttribute('aria-hidden', 'true');
-    revoke('photoUrls');
+    
+    if (!options.force) {
+      revoke('photoUrls');
+      state.photoFiles = [];
+      state.skippedFiles = [];
+      var grid = byId('pwUploadGrid');
+      if (grid) grid.innerHTML = '';
+      var input = byId('pwUploadInput');
+      if (input) input.value = '';
+      var title = byId('pwUploadTitle');
+      if (title) title.textContent = '选择照片';
+      var subtitle = byId('pwUploadSubtitle');
+      if (subtitle) subtitle.textContent = '最多 9 张图片，单张不超过 50MB';
+      setUploadResult('', false);
+    }
+    
     if (options.restoreFocus !== false) focusUploadButton();
   }
 

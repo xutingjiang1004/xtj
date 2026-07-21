@@ -5332,7 +5332,14 @@ async function loadRevokedTokenHashes() {
       } catch(e) {}
     }
     if (expiredIds.length > 0) {
-      await supabase.from('posts').delete().in('id', expiredIds).catch(function(e){ console.warn('[Revoke] 清理过期吊销记录失败:', e && e.message); });
+      try {
+        var { error: delErr } = await supabase.from('posts').delete().in('id', expiredIds);
+        if (delErr) {
+          console.error('[Revoke] 清理过期吊销记录失败 (不影响启动):', delErr.message || delErr);
+        }
+      } catch(e) {
+        console.error('[Revoke] 清理过期吊销记录抛出异常 (不影响启动):', e && e.message);
+      }
     }
   } catch(e) {
     console.warn('[Revoke] 加载吊销列表失败:', e.message);
