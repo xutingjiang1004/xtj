@@ -5125,9 +5125,7 @@ function renderProfileActivityList(kind) {
                 if (avatarUrl && sanitizeUrl(avatarUrl)) {
                     return '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
-                        '" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=\'' + safeJsStr(fallbackInitial) +
-                        '\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);" ' +
-                        'style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        '" onerror="this.parentNode.innerHTML=\'<span class=\\\'avatar-fallback\\\' data-user-name=\\\'' + escapeHtml(safeUser) + '\\\'>' + safeJsStr(fallbackInitial) + '</span>\';">';
                 }
                 return '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
             }
