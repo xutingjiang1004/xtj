@@ -12792,7 +12792,7 @@ function sanitizePostCritique(text) {
     .trim();
 }
 
-const postTranslationCache = new Map();
+
 setInterval(function() {
   var now = Date.now();
   var expired = [];
