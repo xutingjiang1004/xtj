@@ -4978,7 +4978,7 @@ function renderProfileActivityList(kind) {
                 return found || postInfoCache[postId] || null;
             };
 
-            let feedPage = 0;
+            let feedPage = 1;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
             let feedAllPosts = [];
@@ -6025,7 +6025,7 @@ function renderProfileActivityList(kind) {
 
             window.applyPostFilters = function() {
                 updatePostFilterStateFromDom();
-                feedPage = 0;
+                feedPage = 1;
                 feedEndReached = false;
                 var feed = document.getElementById("feed");
                 if (feed) {
@@ -6052,7 +6052,7 @@ function renderProfileActivityList(kind) {
                     visibility: "all",
                     onlyMine: false
                 };
-                feedPage = 0;
+                feedPage = 1;
                 feedEndReached = false;
                 var panel = document.getElementById("postFilterPanel");
                 if (panel) panel.style.display = "none";
@@ -6566,7 +6566,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function rebuildFeedFromCurrentState() {
-                feedPage = 0;
+                feedPage = 1;
                 var noMore = document.getElementById('feedNoMore');
                 if (noMore) noMore.remove();
                 await renderFeedFromMemoryState();
@@ -7164,7 +7164,7 @@ function renderProfileActivityList(kind) {
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
                 if (forceRefresh) {
-                    feedPage = 0;
+                    feedPage = 1;
                     feedEndReached = false;
                     feedNextOffset = 0;
                     feedLoadedPages = [];
@@ -7381,11 +7381,12 @@ function renderProfileActivityList(kind) {
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 // Render local avatar cache before the first paint; remote lookup stays background-only.
                 hydrateCachedAvatarsForUsers(Array.from(allUsers));
-                var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
+                var visibleCount = feedPage * FEED_PAGE_SIZE;
+                var currentPages = filteredPosts.slice(0, Math.max(FEED_PAGE_SIZE, visibleCount));
                 // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
-                feedEndReached = !!feedEndReached && firstPage.length >= filteredPosts.length;
-                renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
-                refreshPendingFeedIpPosts(firstPage);
+                feedEndReached = !!feedEndReached && currentPages.length >= filteredPosts.length;
+                renderFeedWithAvatars(currentPages, visibleComments, scopedLikes);
+                refreshPendingFeedIpPosts(currentPages);
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
 
