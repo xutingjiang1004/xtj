@@ -5750,6 +5750,12 @@ function renderProfileActivityList(kind) {
             }
             window.closePostToolsMenu = closePostToolsMenu;
             window.addEventListener('pagehide', closePostToolsMenu);
+            window.addEventListener('scroll', closePostToolsMenu, { passive: true });
+            document.addEventListener('scroll', function(e) {
+                if (e.target.classList && e.target.classList.contains('photo-wall-container')) {
+                    closePostToolsMenu();
+                }
+            }, true);
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
@@ -11865,7 +11871,8 @@ function renderProfileActivityList(kind) {
             }
             _reportType = 'post';
             _reportView = 'form';
-            _reportSelectedId = null;
+            _reportSelectedId = window.__xtjReportTargetPostId || null;
+            window.__xtjReportTargetPostId = null;
             _reportSelectedReason = null;
             _reportTargetUser = null;
             _reportContentData = [];
@@ -12013,7 +12020,8 @@ function renderProfileActivityList(kind) {
             }
             var h = '';
             _reportContentData.forEach(function(item) {
-                var selected = _reportSelectedId === item.id ? ' selected' : '';
+                var selected = _reportSelectedId === String(item.id) ? ' selected' : '';
+                if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
                     ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';var parent=this.closest(\'.rc-thumb\');if(parent){parent.className=\'rc-thumb rc-thumb--text\';parent.innerHTML=\'<span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span>\'}">'
@@ -13091,7 +13099,8 @@ function renderProfileActivityList(kind) {
                 if (!overlay) return;
                 _reportType = 'post';
                 _reportView = 'form';
-                _reportSelectedId = null;
+                _reportSelectedId = window.__xtjReportTargetPostId || null;
+                window.__xtjReportTargetPostId = null;
                 _reportSelectedReason = null;
                 _reportTargetUser = null;
                 _reportContentData = [];
@@ -13419,7 +13428,8 @@ function renderProfileActivityList(kind) {
                 if (!overlay) return;
                 _reportType = 'post';
                 _reportView = 'form';
-                _reportSelectedId = null;
+                _reportSelectedId = window.__xtjReportTargetPostId || null;
+                window.__xtjReportTargetPostId = null;
                 _reportSelectedReason = null;
                 _reportTargetUser = null;
                 _reportContentData = [];
