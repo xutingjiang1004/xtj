@@ -5734,7 +5734,12 @@ function renderProfileActivityList(kind) {
                 var menu = document.createElement('div');
                 menu.className = 'post-tools-menu';
                 menu.setAttribute('role', 'menu');
-                menu.innerHTML = '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">翻译帖子</button><button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">询问 AI</button><button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">举报帖子</button>';
+                var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
+                var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
+                var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
+                menu.innerHTML = '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' +
+                                 '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' +
+                                 '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
                 var rect = trigger.getBoundingClientRect();
                 var width = menu.offsetWidth || 148;
@@ -5770,15 +5775,10 @@ function renderProfileActivityList(kind) {
                     panel.classList.toggle('is-original-chinese', !!data.already_chinese);
                 }).catch(function() { panel.textContent = '翻译暂时不可用。'; panel.classList.add('is-error'); });
             };
-            function closePostAiSession() {
-                if (!activePostAiSession) return;
-                activePostAiSession.controller.abort();
-                activePostAiSession.root.remove();
-                activePostAiSession = null;
-            }
             function runPostAiRequest(session, payload) {
                 var requestId = ++session.requestId;
-                session.output.textContent = 'AI 正在分析...';
+                session.output.textContent = 'AI 正在锐评...';
+                session.output.classList.remove('is-error');
                 session.controller.abort();
                 session.controller = new AbortController();
                 window.xtjProtectedFetch('/api/agent/post-chat/stream', { method: 'POST', body: JSON.stringify(payload), signal: session.controller.signal }).then(function(resp) {
@@ -5792,37 +5792,38 @@ function renderProfileActivityList(kind) {
                         var events = buffer.split('\n\n'); buffer = events.pop();
                         events.forEach(function(event) {
                             var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
-                            if (!dataLine || !activePostAiSession || activePostAiSession !== session || requestId !== session.requestId) return;
+                            if (!dataLine || session.isClosed || requestId !== session.requestId) return;
                             var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
                             if (data.content) {
                                 session.conversationId = data.conversation_id || session.conversationId;
-                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在分析...' ? '' : session.output.textContent) + data.content : data.content;
+                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
                             }
-                            if (data.error) session.output.textContent = 'AI 暂时不可用。';
+                            if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
                         });
                         return read();
                     }); }
                     return read();
                 }).catch(function(error) {
-                    if (error.name !== 'AbortError' && activePostAiSession === session && requestId === session.requestId) session.output.textContent = 'AI 暂时不可用。';
+                    if (error.name !== 'AbortError' && !session.isClosed && requestId === session.requestId) {
+                        session.output.textContent = 'AI 暂时不可用。';
+                        session.output.classList.add('is-error');
+                    }
                 });
             }
             window.openPostAiChat = function(postId) {
-                closePostAiSession();
-                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); }) || {};
-                var root = document.createElement('div');
-                root.className = 'post-ai-overlay';
-                root.innerHTML = '<section class="post-ai-dialog" role="dialog" aria-modal="true"><button type="button" class="post-ai-close" aria-label="关闭">×</button><h3>询问 AI</h3><div class="post-ai-context"><b>' + escapeHtml(post.user_name || '') + '</b><p>' + escapeHtml(String(post.content || '').slice(0, 180)) + '</p></div><div class="post-ai-output" aria-live="polite">AI 正在分析...</div><form class="post-ai-followup"><input maxlength="1200" placeholder="继续追问..." /><button type="submit">发送</button></form></section>';
-                document.body.appendChild(root);
-                var session = { root: root, postId: String(postId), output: root.querySelector('.post-ai-output'), controller: new AbortController(), requestId: 0, conversationId: '' };
-                activePostAiSession = session;
-                root.querySelector('.post-ai-close').addEventListener('click', closePostAiSession);
-                root.addEventListener('click', function(event) { if (event.target === root) closePostAiSession(); });
-                root.querySelector('.post-ai-followup').addEventListener('submit', function(event) {
-                    event.preventDefault(); var input = this.querySelector('input'); var message = input.value.trim(); if (!message) return; input.value = '';
-                    runPostAiRequest(session, { post_id: session.postId, conversation_id: session.conversationId, message: message });
-                });
-                runPostAiRequest(session, { post_id: session.postId, initial: true });
+                var anchor = getPostToolAnchor(postId);
+                if (!anchor) return;
+                var host = anchor.closest('.post-card, .feed-post, article') || anchor.parentNode;
+                var existing = host.querySelector('.post-tool-critique');
+                if (existing) { existing.hidden = !existing.hidden; return; }
+                
+                var panel = document.createElement('section');
+                panel.className = 'post-tool-critique';
+                panel.textContent = 'AI 正在锐评...';
+                anchor.closest('.actions').insertAdjacentElement('afterend', panel);
+                
+                var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
+                runPostAiRequest(session, { post_id: String(postId), initial: true });
             };
             window.openPostReport = function(postId) {
                 window.__xtjReportTargetPostId = String(postId);
