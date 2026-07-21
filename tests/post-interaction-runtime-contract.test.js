@@ -39,10 +39,24 @@ test('delete timeout aborts the request and confirms authoritative server state'
 test('pin transition scrolls the actual posts panel before rebuilding and animates the replacement card', () => {
   const pin = between('function pinMotionReduced', 'window.togglePostVisibility = async function');
   assert.match(pin, /document\.getElementById\('panelPosts'\)/);
-  assert.match(pin, /surface\.scrollTo\(\{ top: targetTop, behavior: 'smooth' \}\)/);
-  assert.match(pin, /waitForPinScroll\(surface, 620\)/);
+  assert.match(pin, /actualSurface\.scrollTo\(\{ top: targetTop, behavior: 'smooth' \}\)/);
+  assert.match(pin, /waitForPinScroll\(surface, targetTop, 620\)/);
   assert.match(pin, /post-pin-departing/);
   assert.match(pin, /post-pin-arriving/);
   assert.match(pin, /await rebuildFeedFromCurrentState\(\)[\s\S]*?await refreshPostDetailIfActive\(normalizedPostId\)[\s\S]*?completePinnedPostTransition\(normalizedPostId\)/);
   assert.doesNotMatch(pin, /window\.scrollTo\(/);
+});
+
+test('pin transition handles edge cases like concurrent requests and animation cleanup', () => {
+  const pin = between('function pinMotionReduced', 'window.togglePostVisibility = async function');
+  
+  // Check for in-flight lock
+  assert.match(pin, /inFlightPins\[normalizedPostId\]/);
+  // Check for finally block cleanup
+  assert.match(pin, /finally\s*\{[\s\S]*?postEl\.classList\.remove\('post-pin-departing'\)/);
+  // Check for scroll completion logic
+  assert.match(pin, /Math\.abs\(getScroll\(\) - targetTop\) <= 2/);
+  assert.match(pin, /addEventListener\('scrollend'/);
+  // Check for frontend failure differentiation
+  assert.match(pin, /serverSucceeded/);
 });
