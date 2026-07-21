@@ -751,7 +751,7 @@ async function initAdminClient() {
         // 清理定时器和事件监听
         if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
         if (_adminReportPollTimer) { clearInterval(_adminReportPollTimer); _adminReportPollTimer = null; }
-        if (typeof onlineRefreshTimer !== 'undefined' && onlineRefreshTimer) { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
+        if (onlineRefreshTimer) { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
             document.removeEventListener(evt, resetActivityTimer);
         });
