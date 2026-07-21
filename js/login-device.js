@@ -347,29 +347,30 @@
     }
 
     // WebGL 指纹 hash（GPU 型号 + 渲染器，跨浏览器稳定）
-    function getWebglFingerprint() {
+    function cleanupWebgl(canvas, gl) {
         try {
-            var canvas = document.createElement('canvas');
+            var ext = gl && gl.getExtension('WEBGL_lose_context');
+            if (ext) ext.loseContext();
+        } catch (_) {}
+        if (canvas) {
+            canvas.width = 1;
+            canvas.height = 1;
+        }
+    }
+
+    function getWebglFingerprint() {
+        var canvas = null;
+        var gl = null;
+        var raw = null;
+        try {
+            canvas = document.createElement('canvas');
             canvas.width = 256;
             canvas.height = 256;
-            var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
             if (!gl) return null;
 
             var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) {
-                var ext = gl.getExtension('WEBGL_lose_context');
-                if (ext) ext.loseContext();
-                canvas.width = 1; canvas.height = 1; canvas = null;
-                return null;
-            }
-
-            var loseContext = gl.getExtension('WEBGL_lose_context');
-            if (loseContext) loseContext.loseContext();
-            canvas.width = 1; canvas.height = 1; canvas = null;
-
-            var loseContext = gl.getExtension('WEBGL_lose_context');
-            if (loseContext) loseContext.loseContext();
-            canvas.width = 1; canvas.height = 1; canvas = null;
+            if (!debugInfo) return null;
 
             var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
             var vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
@@ -380,67 +381,46 @@
                 extensions = exts.sort();
             } catch(ex) {}
 
-            var raw = [renderer, vendor, extensions.join(',')].join('|');
-            if (!raw || raw.length < 10) {
-                var ext = gl.getExtension('WEBGL_lose_context');
-                if (ext) ext.loseContext();
-                canvas.width = 1; canvas.height = 1; canvas = null;
-                return null;
-            }
-
-            if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
-                var encoder = new TextEncoder();
-                var data = encoder.encode(raw);
-                return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
-                    var hashArray = Array.from(new Uint8Array(hashBuffer));
-                    var res = hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                    var ext = gl.getExtension('WEBGL_lose_context');
-                    if (ext) ext.loseContext();
-                    canvas.width = 1; canvas.height = 1; canvas = null;
-                    return res;
-                }).catch(function() {
-                    var ext = gl.getExtension('WEBGL_lose_context');
-                    if (ext) ext.loseContext();
-                    canvas.width = 1; canvas.height = 1; canvas = null;
-                    return null;
-                });
-            }
-            var ext = gl.getExtension('WEBGL_lose_context');
-            if (ext) ext.loseContext();
-            canvas.width = 1; canvas.height = 1; canvas = null;
-            return null;
+            raw = [renderer, vendor, extensions.join(',')].join('|');
+            if (!raw || raw.length < 10) return null;
         } catch(e) {
             return null;
+        } finally {
+            cleanupWebgl(canvas, gl);
         }
+
+        if (raw && typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+            var encoder = new TextEncoder();
+            var data = encoder.encode(raw);
+            return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
+                var hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            }).catch(function() {
+                return null;
+            });
+        }
+        return null;
     }
 
     // WebGL 元数据（原始 GPU 信息，仅管理员可见）
     function getWebglMeta() {
+        var canvas = null;
+        var gl = null;
         try {
-            var canvas = document.createElement('canvas');
-            var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            canvas = document.createElement('canvas');
+            gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
             if (!gl) return null;
             var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) {
-                var ext = gl.getExtension('WEBGL_lose_context');
-                if (ext) ext.loseContext();
-                canvas.width = 1; canvas.height = 1; canvas = null;
-                return null;
-            }
+            if (!debugInfo) return null;
 
-            var loseContext = gl.getExtension('WEBGL_lose_context');
-            if (loseContext) loseContext.loseContext();
-            canvas.width = 1; canvas.height = 1; canvas = null;
-
-            var loseContext = gl.getExtension('WEBGL_lose_context');
-            if (loseContext) loseContext.loseContext();
-            canvas.width = 1; canvas.height = 1; canvas = null;
             return {
                 gpu_renderer: String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200),
                 gpu_vendor: String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '').slice(0, 100)
             };
         } catch(e) {
             return null;
+        } finally {
+            cleanupWebgl(canvas, gl);
         }
     }
 
