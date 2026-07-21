@@ -1588,7 +1588,9 @@ window.throttleRAF = function(fn) {
       }
     }
 
-    var onViewportChange = function() { applyViewport(); };
+    var disposed = false;
+    var onViewportChange = function() { if (!disposed) applyViewport(); };
+    var viewportHandler = window.throttleRAF(onViewportChange);
     var onBlur = function() {
       if (S.keyboardResetTimer) {
         try { clearTimeout(S.keyboardResetTimer); } catch (e) {}
@@ -1604,24 +1606,25 @@ window.throttleRAF = function(fn) {
 
     var vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener('resize', window.throttleRAF(onViewportChange));
-      vv.addEventListener('scroll', window.throttleRAF(onViewportChange));
+      vv.addEventListener('resize', viewportHandler);
+      vv.addEventListener('scroll', viewportHandler);
     }
-    window.addEventListener('resize', window.throttleRAF(onViewportChange));
+    window.addEventListener('resize', viewportHandler);
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
     applyViewport();
 
     return function() {
+      disposed = true;
       if (S.keyboardResetTimer) {
         try { clearTimeout(S.keyboardResetTimer); } catch (e2) {}
         S.keyboardResetTimer = null;
       }
       if (vv) {
-        vv.removeEventListener('resize', onViewportChange);
-        vv.removeEventListener('scroll', onViewportChange);
+        vv.removeEventListener('resize', viewportHandler);
+        vv.removeEventListener('scroll', viewportHandler);
       }
-      window.removeEventListener('resize', onViewportChange);
+      window.removeEventListener('resize', viewportHandler);
       input.removeEventListener('blur', onBlur);
       input.removeEventListener('focus', onFocus);
       inputBar.style.position = '';
@@ -2063,10 +2066,16 @@ window.throttleRAF = function(fn) {
       }
     }
 
+    var disposed = false;
+    var throttledResize = window.throttleRAF(function() {
+      if (!disposed) resize();
+    });
+
     function stop() {
+      disposed = true;
       state.running = false;
       pause();
-      try { window.removeEventListener('resize', resize); } catch (e) {}
+      try { window.removeEventListener('resize', throttledResize); } catch (e) {}
       try { document.removeEventListener('visibilitychange', handleVisibility); } catch (e2) {}
       try { if (state.observer) state.observer.disconnect(); } catch (e3) {}
       ctx.clearRect(0, 0, state.width, state.height);
@@ -2084,7 +2093,7 @@ window.throttleRAF = function(fn) {
     }
 
     resize();
-    window.addEventListener('resize', window.throttleRAF(resize));
+    window.addEventListener('resize', throttledResize);
     document.addEventListener('visibilitychange', handleVisibility);
     if (window.IntersectionObserver) {
       state.observer = new IntersectionObserver(handleIntersection, { threshold: 0.08 });
