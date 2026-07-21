@@ -6628,14 +6628,26 @@ function renderProfileActivityList(kind) {
                 return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
             }
 
+            function getActualScrollSurface(surface) {
+                if (surface && surface.scrollHeight > surface.clientHeight) {
+                    var overflowY = window.getComputedStyle(surface).overflowY;
+                    if (overflowY === 'auto' || overflowY === 'scroll') return surface;
+                }
+                var dp = document.getElementById('dockPanels');
+                if (dp && dp.scrollHeight > dp.clientHeight && window.getComputedStyle(dp).overflowY !== 'visible') return dp;
+                return window;
+            }
+
             function waitForPinScroll(surface, timeoutMs) {
                 return new Promise(function(resolve) {
-                    if (!surface || pinMotionReduced()) return resolve();
+                    var actualSurface = getActualScrollSurface(surface);
+                    if (!actualSurface || pinMotionReduced()) return resolve();
                     var startedAt = performance.now();
-                    var lastTop = surface.scrollTop;
+                    var getScroll = function() { return actualSurface === window ? window.scrollY : actualSurface.scrollTop; };
+                    var lastTop = getScroll();
                     var stableFrames = 0;
                     function inspect() {
-                        var currentTop = surface.scrollTop;
+                        var currentTop = getScroll();
                         stableFrames = Math.abs(currentTop - lastTop) < 1 ? stableFrames + 1 : 0;
                         lastTop = currentTop;
                         if (stableFrames >= 3 || performance.now() - startedAt >= timeoutMs) return resolve();
@@ -6647,13 +6659,20 @@ function renderProfileActivityList(kind) {
 
             function getPinnedPostScrollTarget(surface) {
                 var feed = document.getElementById('feed');
-                if (!surface || !feed) return 0;
-                var surfaceRect = surface.getBoundingClientRect();
+                if (!feed) return 0;
+                var actualSurface = getActualScrollSurface(surface);
                 var feedRect = feed.getBoundingClientRect();
-                var nav = surface.querySelector('.posts-nav');
+                var nav = document.querySelector('.posts-nav.sticky-header') || (surface ? surface.querySelector('.posts-nav') : null);
                 var navRect = nav ? nav.getBoundingClientRect() : null;
-                var navHeight = navRect && navRect.bottom > surfaceRect.top ? Math.max(0, navRect.height) : 0;
-                return Math.max(0, Math.round(surface.scrollTop + feedRect.top - surfaceRect.top - navHeight - 12));
+                
+                if (actualSurface === window) {
+                    var navHeight = navRect && navRect.bottom > 0 ? Math.max(0, navRect.height) : 0;
+                    return Math.max(0, Math.round(window.scrollY + feedRect.top - navHeight - 12));
+                } else {
+                    var surfaceRect = actualSurface.getBoundingClientRect();
+                    var navHeight = navRect && navRect.bottom > surfaceRect.top ? Math.max(0, navRect.height) : 0;
+                    return Math.max(0, Math.round(actualSurface.scrollTop + feedRect.top - surfaceRect.top - navHeight - 12));
+                }
             }
 
             async function beginPinnedPostTransition(postEl) {
@@ -6661,13 +6680,13 @@ function renderProfileActivityList(kind) {
                 if (postEl && postEl.isConnected && !pinMotionReduced()) {
                     postEl.classList.add('post-pin-departing');
                 }
-                if (!surface) return;
+                var actualSurface = getActualScrollSurface(surface);
                 var targetTop = getPinnedPostScrollTarget(surface);
                 if (pinMotionReduced()) {
-                    surface.scrollTop = targetTop;
+                    actualSurface.scrollTo(0, targetTop);
                     return;
                 }
-                surface.scrollTo({ top: targetTop, behavior: 'smooth' });
+                actualSurface.scrollTo({ top: targetTop, behavior: 'smooth' });
                 await Promise.all([
                     new Promise(function(resolve) { setTimeout(resolve, 320); }),
                     waitForPinScroll(surface, 620)
@@ -6679,7 +6698,8 @@ function renderProfileActivityList(kind) {
                 var postEl = document.querySelector(selector);
                 var surface = document.getElementById('panelPosts');
                 if (!postEl) return Promise.resolve(false);
-                if (surface) surface.scrollTop = getPinnedPostScrollTarget(surface);
+                var actualSurface = getActualScrollSurface(surface);
+                actualSurface.scrollTo(0, getPinnedPostScrollTarget(surface));
                 if (pinMotionReduced()) return Promise.resolve(true);
                 return new Promise(function(resolve) {
                     var completed = false;
