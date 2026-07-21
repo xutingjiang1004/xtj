@@ -6624,6 +6624,83 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            function pinMotionReduced() {
+                return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+            }
+
+            function waitForPinScroll(surface, timeoutMs) {
+                return new Promise(function(resolve) {
+                    if (!surface || pinMotionReduced()) return resolve();
+                    var startedAt = performance.now();
+                    var lastTop = surface.scrollTop;
+                    var stableFrames = 0;
+                    function inspect() {
+                        var currentTop = surface.scrollTop;
+                        stableFrames = Math.abs(currentTop - lastTop) < 1 ? stableFrames + 1 : 0;
+                        lastTop = currentTop;
+                        if (stableFrames >= 3 || performance.now() - startedAt >= timeoutMs) return resolve();
+                        requestAnimationFrame(inspect);
+                    }
+                    requestAnimationFrame(inspect);
+                });
+            }
+
+            function getPinnedPostScrollTarget(surface) {
+                var feed = document.getElementById('feed');
+                if (!surface || !feed) return 0;
+                var surfaceRect = surface.getBoundingClientRect();
+                var feedRect = feed.getBoundingClientRect();
+                var nav = surface.querySelector('.posts-nav');
+                var navRect = nav ? nav.getBoundingClientRect() : null;
+                var navHeight = navRect && navRect.bottom > surfaceRect.top ? Math.max(0, navRect.height) : 0;
+                return Math.max(0, Math.round(surface.scrollTop + feedRect.top - surfaceRect.top - navHeight - 12));
+            }
+
+            async function beginPinnedPostTransition(postEl) {
+                var surface = document.getElementById('panelPosts');
+                if (postEl && postEl.isConnected && !pinMotionReduced()) {
+                    postEl.classList.add('post-pin-departing');
+                }
+                if (!surface) return;
+                var targetTop = getPinnedPostScrollTarget(surface);
+                if (pinMotionReduced()) {
+                    surface.scrollTop = targetTop;
+                    return;
+                }
+                surface.scrollTo({ top: targetTop, behavior: 'smooth' });
+                await Promise.all([
+                    new Promise(function(resolve) { setTimeout(resolve, 320); }),
+                    waitForPinScroll(surface, 620)
+                ]);
+            }
+
+            function completePinnedPostTransition(postId) {
+                var selector = '.post[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]';
+                var postEl = document.querySelector(selector);
+                var surface = document.getElementById('panelPosts');
+                if (!postEl) return Promise.resolve(false);
+                if (surface) surface.scrollTop = getPinnedPostScrollTarget(surface);
+                if (pinMotionReduced()) return Promise.resolve(true);
+                return new Promise(function(resolve) {
+                    var completed = false;
+                    var finish = function() {
+                        if (completed) return;
+                        completed = true;
+                        postEl.classList.remove('post-pin-arriving');
+                        postEl.removeEventListener('animationend', onAnimationEnd);
+                        resolve(true);
+                    };
+                    var onAnimationEnd = function(event) {
+                        if (event.target === postEl && event.animationName === 'xtj-pin-arrive') finish();
+                    };
+                    postEl.classList.remove('post-pin-arriving');
+                    void postEl.offsetWidth;
+                    postEl.addEventListener('animationend', onAnimationEnd);
+                    postEl.classList.add('post-pin-arriving');
+                    setTimeout(finish, 760);
+                });
+            }
+
 
             // Final pin action: server-side RPC enforces one pinned post per author.
             window.togglePostPin = async function(postId, btn) {
@@ -6677,59 +6754,18 @@ function renderProfileActivityList(kind) {
                     });
                     
                     var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
-                    var feedContainer = document.getElementById('panelPosts');
-                    
+                    var willAnimatePin = nextPinned;
+                    if (willAnimatePin) await beginPinnedPostTransition(postEl);
+
                     if (!syncPinnedPostIntoFeedState(result.data)) {
                         clearFeedCache();
                         await loadFeed(true);
-                    } else if (postEl) {
-                        // 优雅的过渡动画：原贴发光并缩小淡出
-                        // 优雅的过渡动画：原贴发光并缩小淡出
-                        postEl.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-                        postEl.style.transform = 'scale(0.95)';
-                        postEl.style.opacity = '0';
-                        if (nextPinned) {
-                            postEl.style.boxShadow = '0 0 30px rgba(16, 185, 129, 0.3)';
-                            // 先触发平滑滚动，增加视觉流畅度
-                            var st = feedContainer || document.getElementById('panelPosts') || window;
-                            if (st.scrollTo) st.scrollTo({ top: 0, behavior: 'smooth' });
-                            if (st !== window) window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }
-                        
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        
-                        if (nextPinned) {
-                            // 瞬间回顶兜底，确保DOM重建时位置绝对正确，解决“屏幕显示位置不对齐”问题
-                            var st = feedContainer || document.getElementById('panelPosts') || window;
-                            if (st.scrollTo) st.scrollTo({ top: 0, behavior: 'auto' });
-                            if (st !== window) window.scrollTo({ top: 0, behavior: 'auto' });
-                        }
-                        
-                        writeFeedCacheSnapshot();
-                        await rebuildFeedFromCurrentState();
-                        await refreshPostDetailIfActive(normalizedPostId);
-                        
-                        if (nextPinned) {
-                            var newEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
-                            if (newEl) {
-                                newEl.style.transition = 'transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.6s ease, background-color 0.8s';
-                                newEl.style.transform = 'translateY(-30px)';
-                                newEl.style.opacity = '0';
-                                newEl.style.backgroundColor = 'var(--bg-secondary)';
-                                requestAnimationFrame(() => {
-                                    requestAnimationFrame(() => {
-                                        newEl.style.transform = 'translateY(0)';
-                                        newEl.style.opacity = '1';
-                                        setTimeout(() => newEl.style.backgroundColor = '', 800);
-                                    });
-                                });
-                            }
-                        }
                     } else {
                         writeFeedCacheSnapshot();
                         await rebuildFeedFromCurrentState();
-                        await refreshPostDetailIfActive(normalizedPostId);
                     }
+                    await refreshPostDetailIfActive(normalizedPostId);
+                    if (willAnimatePin) await completePinnedPostTransition(normalizedPostId);
                     didSucceed = true;
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                 } catch (e) {
