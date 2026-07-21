@@ -225,9 +225,13 @@
     }
     activeLoads += 1;
     var settled = false;
+    var fallbackTimer = setTimeout(function(){
+      settleImage(true);
+    }, 10000);
     function settleImage(failed){
       if (settled) return;
       settled = true;
+      clearTimeout(fallbackTimer);
       activeLoads = Math.max(0, activeLoads - 1);
       img.onload = null;
       img.onerror = null;
@@ -243,8 +247,8 @@
       settleImage(true);
     };
     img.src = url;
-    if (img.complete && img.naturalWidth > 0) {
-      settleImage(false);
+    if (img.complete) {
+      settleImage(img.naturalWidth === 0);
     }
   }
 
