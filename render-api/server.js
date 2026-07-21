@@ -5332,7 +5332,7 @@ async function loadRevokedTokenHashes() {
       } catch(e) {}
     }
     if (expiredIds.length > 0) {
-      supabase.from('posts').delete().in('id', expiredIds).then(function(){}).catch(function(e){ console.warn('[Revoke] 清理过期吊销记录失败:', e && e.message); });
+      await supabase.from('posts').delete().in('id', expiredIds).catch(function(e){ console.warn('[Revoke] 清理过期吊销记录失败:', e && e.message); });
     }
   } catch(e) {
     console.warn('[Revoke] 加载吊销列表失败:', e.message);
@@ -13055,7 +13055,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(limit + 20);
+      .limit(Math.min(limit + 199, 200));
     if (before) {
       query = query.lt('created_at', before);
     }
@@ -13066,11 +13066,16 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
-    // 过滤用户已删除的消息
-    var filteredRows = (rows || []).filter(function(r2) {
+    // 过滤用户已删除的消息和无关模式消息
+    var filteredRows = [];
+    for (var i = 0; i < (rows || []).length; i++) {
+      var r2 = rows[i];
       var meta = parseMsgMeta(r2);
-      return !(meta && meta.deleted) && matchesMode(r2);
-    });
+      if (!(meta && meta.deleted) && matchesMode(r2)) {
+        filteredRows.push(r2);
+        if (filteredRows.length > limit) break;
+      }
+    }
 
     // 判断是否还有更多（filteredRows 超过 limit 表示有下一页）
     var hasMore = filteredRows.length > limit;
