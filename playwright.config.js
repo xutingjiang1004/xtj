@@ -5,10 +5,13 @@ module.exports = defineConfig({
   testMatch: /.*\.spec\.js/,
   timeout: 30000,
   outputDir: 'output/playwright/test-results',
+  reporter: [['html', { open: 'never' }]],
   use: {
     baseURL: 'http://127.0.0.1:4173',
     browserName: 'chromium',
-    channel: process.env.PW_CHANNEL || (process.env.CI ? undefined : 'msedge')
+    channel: process.env.PW_CHANNEL || (process.env.CI ? undefined : 'msedge'),
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure'
   },
   webServer: {
     command: 'node scripts/serve-static.js',
