@@ -6628,32 +6628,51 @@ function renderProfileActivityList(kind) {
                 return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
             }
 
-            function getActualScrollSurface(surface) {
-                if (surface && surface.scrollHeight > surface.clientHeight) {
-                    var overflowY = window.getComputedStyle(surface).overflowY;
-                    if (overflowY === 'auto' || overflowY === 'scroll') return surface;
+            function getActualScrollSurface(startNode) {
+                var current = startNode || document.getElementById('feed');
+                while (current && current !== document.body && current !== document.documentElement) {
+                    if (current.scrollHeight > current.clientHeight) {
+                        var style = window.getComputedStyle(current);
+                        if (style.overflowY === 'auto' || style.overflowY === 'scroll') return current;
+                    }
+                    current = current.parentElement;
                 }
-                var dp = document.getElementById('dockPanels');
-                if (dp && dp.scrollHeight > dp.clientHeight && window.getComputedStyle(dp).overflowY !== 'visible') return dp;
+                
+                var se = document.scrollingElement || document.documentElement;
+                if (se && se.scrollHeight > se.clientHeight) {
+                    var seStyle = window.getComputedStyle(se);
+                    if (seStyle.overflowY !== 'hidden' && seStyle.overflowY !== 'clip') {
+                        return window;
+                    }
+                }
                 return window;
             }
 
-            function waitForPinScroll(surface, timeoutMs) {
+            function waitForPinScroll(surface, targetTop, timeoutMs) {
                 return new Promise(function(resolve) {
                     var actualSurface = getActualScrollSurface(surface);
                     if (!actualSurface || pinMotionReduced()) return resolve();
-                    var startedAt = performance.now();
+                    
                     var getScroll = function() { return actualSurface === window ? window.scrollY : actualSurface.scrollTop; };
-                    var lastTop = getScroll();
-                    var stableFrames = 0;
-                    function inspect() {
-                        var currentTop = getScroll();
-                        stableFrames = Math.abs(currentTop - lastTop) < 1 ? stableFrames + 1 : 0;
-                        lastTop = currentTop;
-                        if (stableFrames >= 3 || performance.now() - startedAt >= timeoutMs) return resolve();
-                        requestAnimationFrame(inspect);
+                    if (Math.abs(getScroll() - targetTop) <= 2) return resolve();
+                    
+                    var isResolved = false;
+                    var timeoutId;
+                    
+                    function finish() {
+                        if (isResolved) return;
+                        isResolved = true;
+                        clearTimeout(timeoutId);
+                        actualSurface.removeEventListener('scrollend', onScrollEnd);
+                        resolve();
                     }
-                    requestAnimationFrame(inspect);
+                    
+                    function onScrollEnd() {
+                        if (Math.abs(getScroll() - targetTop) <= 2) finish();
+                    }
+                    
+                    actualSurface.addEventListener('scrollend', onScrollEnd);
+                    timeoutId = setTimeout(finish, timeoutMs);
                 });
             }
 
@@ -6689,7 +6708,7 @@ function renderProfileActivityList(kind) {
                 actualSurface.scrollTo({ top: targetTop, behavior: 'smooth' });
                 await Promise.all([
                     new Promise(function(resolve) { setTimeout(resolve, 320); }),
-                    waitForPinScroll(surface, 620)
+                    waitForPinScroll(surface, targetTop, 620)
                 ]);
             }
 
@@ -6723,6 +6742,7 @@ function renderProfileActivityList(kind) {
 
 
             // Final pin action: server-side RPC enforces one pinned post per author.
+            var inFlightPins = {};
             window.togglePostPin = async function(postId, btn) {
                 if (!postId) return;
                 var normalizedPostId = String(postId || '').trim().toLowerCase();
@@ -6730,9 +6750,14 @@ function renderProfileActivityList(kind) {
                     showToast('置顶失败：帖子参数无效');
                     return;
                 }
+                
+                if (inFlightPins[normalizedPostId]) return;
+                inFlightPins[normalizedPostId] = true;
+                
                 var originalText = btn ? btn.textContent : '';
                 var nextPinned = false;
                 var didSucceed = false;
+                var serverSucceeded = false;
                 try {
                     if (btn) { btn.disabled = true; btn.textContent = '...'; }
                     var auth = typeof window.ensureProtectedOperationAuth === 'function'
@@ -6755,7 +6780,9 @@ function renderProfileActivityList(kind) {
                         showToast('无权置顶此帖子');
                         return;
                     }
-                    nextPinned = currentPost ? !currentPost.is_pinned : true; // default to true if unknown
+                    var isCurrentlyPinned = currentPost ? !!currentPost.is_pinned : (btn && btn.textContent.indexOf('取消') !== -1);
+                    nextPinned = !isCurrentlyPinned;
+                    
                     var response = await window.xtjProtectedFetch('/api/post/pin', {
                         method: 'POST',
                         body: JSON.stringify({ post_id: normalizedPostId, is_pinned: Boolean(nextPinned) })
@@ -6768,6 +6795,7 @@ function renderProfileActivityList(kind) {
                         throw new Error('置顶服务尚未完成数据库升级，请部署迁移 008_atomic_post_pin.sql');
                     }
                     if (!response.ok || !result.ok || !result.data) throw new Error(result.error || '置顶操作失败');
+                    serverSucceeded = true;
 
                     (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
                         syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
@@ -6789,13 +6817,21 @@ function renderProfileActivityList(kind) {
                     didSucceed = true;
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                 } catch (e) {
-                    console.error('[pin] atomic update failed', e);
-                    showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
+                    if (serverSucceeded) {
+                        console.error('[pin] render failed after server success', e);
+                        showToast('置顶已更新，但界面刷新失败');
+                    } else {
+                        console.error('[pin] atomic update failed', e);
+                        showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
+                    }
                 } finally {
+                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    if (postEl) postEl.classList.remove('post-pin-departing');
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
                     }
+                    delete inFlightPins[normalizedPostId];
                 }
             };
 
