@@ -209,6 +209,7 @@
     img._pwQueued = false;
     img.classList.remove('pw-blur-in');
     img.classList.add('pw-blur-done');
+    img.classList.remove('pw-load-timeout');
     if (imgObserver) imgObserver.unobserve(img);
     applyPhotoWallAspect(img);
   }
@@ -226,7 +227,7 @@
     activeLoads += 1;
     var settled = false;
     var fallbackTimer = setTimeout(function(){
-      settleImage(true);
+      if (!settled && img) img.classList.add('pw-load-timeout');
     }, 10000);
     function settleImage(failed){
       if (settled) return;
