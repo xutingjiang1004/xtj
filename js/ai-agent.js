@@ -3426,14 +3426,19 @@ window.throttleRAF = function(fn) {
       notify('请先登录后再使用深度思考');
       return;
     }
-    var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
-
     var panel = document.getElementById('panelDeepThink');
     if (!panel) return;
 
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
+
+    // Enter the research surface immediately; auth and history can complete in the background.
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+    updateSecondaryPageState(true);
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) return;
 
     // 先从 localStorage 恢复会话 ID锛堝埛鏂伴〉闈㈠悗涔熻兘鎭㈠锛?
     if (!S.dtConversationId) {
@@ -3448,7 +3453,7 @@ window.throttleRAF = function(fn) {
       var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
       msgs.appendChild(loadHint);
       try {
-        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think');
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
           S.dtConversationId = null;
@@ -3490,10 +3495,6 @@ window.throttleRAF = function(fn) {
         }
       } catch (e) {}
     }
-
-    panel.classList.remove('hidden');
-    panel.classList.add('active');
-    updateSecondaryPageState(true);
 
     // 绛夊緟涓ゅ抚 + 涓€涓皬寤舵椂锛岀‘淇濇墍鏈夊瓙鍏冪礌甯冨眬瀹屾垚锛坢arkdown 娓叉煋銆佸浘鐗囩瓑锛?
     // 鐒跺悗鐢?scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
@@ -5286,7 +5287,7 @@ window.throttleRAF = function(fn) {
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
-      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 20000, abortController: loadController });
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 8000, abortController: loadController });
 
       if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
 
@@ -5825,14 +5826,6 @@ function showChatMessages() {
     S.active = true;
     var lifecycleId = ++S.lifecycleId;
     window.__xtjAiChatActive = true;
-    var authOk = await ensureUserAuthOrNotify();
-    if (lifecycleId !== S.lifecycleId || !S.active) return;
-    if (!authOk) {
-      S.active = false;
-      window.__xtjAiChatActive = false;
-      return;
-    }
-
     S.autoScrollPinned = true;
 
     try { closeSiteSearch(); } catch (e) {}
@@ -5872,12 +5865,22 @@ function showChatMessages() {
     }
     S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
 
-    Promise.allSettled([
-      ensureConfig().then(function(cfg) {
-        if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
-      }),
-      loadHistory(r.messagesEl, null)
-    ]).then(function() {
+    // Do not make opening the chat wait for an auth refresh. The shell is useful immediately.
+    ensureUserAuthOrNotify().then(function(authOk) {
+      if (lifecycleId !== S.lifecycleId || !S.active) return null;
+      if (!authOk) {
+        S.active = false;
+        window.__xtjAiChatActive = false;
+        renderHistoryUnavailable(r.messagesEl, { status: 401, error_code: 'auth' });
+        return null;
+      }
+      return Promise.allSettled([
+        ensureConfig().then(function(cfg) {
+          if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
+        }),
+        loadHistory(r.messagesEl, null)
+      ]);
+    }).then(function() {
       if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
       setTimeout(function() {
         try { r.input.focus(); } catch (e) {}

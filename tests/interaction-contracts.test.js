@@ -11,6 +11,7 @@ const style = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
 const uiShell = fs.readFileSync(path.join(root, 'css', 'ui-shell.css'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
+const aiAgent = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
 
 function between(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -25,6 +26,29 @@ test('protected requests attach Bearer auth and retry only once after 401', () =
   assert.match(block, /headers\.Authorization\s*=\s*'Bearer '\s*\+\s*token/);
   assert.match(block, /if \(response\.status === 401\)[\s\S]*refreshUserToken\(true\)/);
   assert.match(block, /credentials:\s*'include'/);
+});
+
+test('feed refresh preserves visible posts while reconciliation is pending', () => {
+  const loadFeed = between(core, 'loadFeed = async function(forceRefresh)', 'window.loadFeed = loadFeed');
+  const refreshSetup = between(loadFeed, 'if (forceRefresh)', 'bindPostFilterEvents');
+  assert.match(loadFeed, /var hadLiveFeed = Array\.isArray\(feedAllPosts\) && feedAllPosts\.length > 0/);
+  assert.doesNotMatch(refreshSetup, /feedAllPosts\s*=\s*\[\]/);
+  assert.match(loadFeed, /if \(!chunk\.posts\.length && hadLiveFeed\)/);
+  assert.match(loadFeed, /if \(!hadLiveFeed && feed\) feed\.innerHTML/);
+});
+
+test('AI tools prewarm, render immediately, and bound history requests', () => {
+  const launcher = between(core, 'function bindTopAiToolsLauncher()', 'bindTopAiToolsLauncher();');
+  const openChat = between(aiAgent, 'async function openAiChat()', 'function applyConfigToUI');
+  const openResearch = between(aiAgent, 'async function openDeepThinkPage()', 'function closeDeepThinkPage');
+  const history = between(aiAgent, 'async function loadHistory(messagesEl, before)', 'async function fetchConversations');
+  assert.match(launcher, /if \(open\) ensureAiAgentLoaded\(\)\.catch/);
+  assert.match(launcher, /nav\.addEventListener\('pointerenter'/);
+  assert.match(uiShell, /ai-tools-menu button:hover,[\s\S]*?filter: none !important;[\s\S]*?transform: none !important;/);
+  assert.ok(openChat.indexOf("aiPanel.classList.add('active')") < openChat.indexOf('ensureUserAuthOrNotify()'));
+  assert.ok(openResearch.indexOf("panel.classList.add('active')") < openResearch.indexOf('ensureUserAuthOrNotify()'));
+  assert.match(history, /timeoutMs:\s*8000/);
+  assert.match(openResearch, /mode=deep_think', null, \{ timeoutMs: 8000 \}/);
 });
 
 test('DM APIs are authenticated and select both sides of a conversation', () => {

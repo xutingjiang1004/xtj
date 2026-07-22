@@ -659,6 +659,17 @@
 
 #panelPosts.active .ai-tools-menu button:hover,
 #panelPosts.active .ai-tools-menu button:focus-visible { background: rgba(54, 141, 112, .1); outline: none; }
+#panelPosts.active .ai-tools-menu button,
+#panelPosts.active .ai-tools-menu button:hover,
+#panelPosts.active .ai-tools-menu button:focus-visible,
+#panelPosts.active .ai-tools-menu button b,
+#panelPosts.active .ai-tools-menu button small {
+  filter: none !important;
+  -webkit-filter: none !important;
+  text-shadow: none !important;
+  transform: none !important;
+  -webkit-font-smoothing: antialiased;
+}
 #panelPosts.active .ai-tools-menu button + button { border-top: 1px solid rgba(117, 173, 158, .16); }
 #panelPosts.active .ai-tools-menu b,
 #panelPosts.active .ai-tools-menu small { display: block; }
