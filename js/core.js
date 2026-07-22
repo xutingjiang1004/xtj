@@ -1114,7 +1114,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 nav.classList.toggle('is-open', !!open);
                 menu.hidden = !open;
                 trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                // Start loading as soon as the menu is useful, not after a tool is clicked.
+                if (open) ensureAiAgentLoaded().catch(function() {});
             }
+            nav.addEventListener('pointerenter', function() {
+                ensureAiAgentLoaded().catch(function() {});
+            }, { passive: true });
+            nav.addEventListener('focusin', function() {
+                ensureAiAgentLoaded().catch(function() {});
+            });
             trigger.addEventListener('click', function(event) {
                 event.stopPropagation();
                 setOpen(menu.hidden);
@@ -7292,17 +7300,11 @@ function renderProfileActivityList(kind) {
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
+                var hadLiveFeed = Array.isArray(feedAllPosts) && feedAllPosts.length > 0;
                 if (forceRefresh) {
-                    feedPage = 1;
-                    feedEndReached = false;
-                    feedNextOffset = 0;
-                    feedLoadedPages = [];
+                    // Keep the rendered feed intact until a replacement page succeeds.
+                    // A transient empty response must not turn a populated page into an empty one.
                     feedPageFetchPending = false;
-                    feedAllPosts = [];
-                    feedAllComments = [];
-                    feedAllLikes = [];
-                    feedVisiblePostsCache = null;
-                    feedMapsCache = null;
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
@@ -7337,6 +7339,10 @@ function renderProfileActivityList(kind) {
                     // A publish may finish while this request is in flight.
                     // Preserve current state and merge this page when that happens.
                     if (stateVersionAtRequest === feedStateVersion) {
+                        if (!chunk.posts.length && hadLiveFeed) {
+                            console.warn('[feed] ignored empty refresh response while posts are visible');
+                            return;
+                        }
                         feedAllPosts = [];
                         feedAllComments = [];
                         feedAllLikes = [];
@@ -7379,8 +7385,8 @@ function renderProfileActivityList(kind) {
                         console.warn('[feed] background hydration failed:', error);
                     });
                 } catch (e) {
-                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
+                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     try {
                         var fallbackRaw = window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
