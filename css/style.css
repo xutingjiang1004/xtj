@@ -1144,7 +1144,7 @@
             height: 76px;
             margin: -38px 0 0 -38px;
             pointer-events: none;
-            z-index: 0;
+            z-index: 2;
             opacity: 0;
             transform-origin: center;
             will-change: transform, opacity;
