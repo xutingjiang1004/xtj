@@ -812,11 +812,33 @@
   opacity: 0.72;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .ai-history-retry:hover {
-    background: rgba(238, 251, 246, 0.92);
-    border-color: rgba(55, 158, 126, 0.42);
-  }
+.ai-history-cache-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 6px 10px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 10px;
+  color: #b45309;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.ai-history-cache-retry {
+  padding: 4px 10px;
+  border: 1px solid rgba(180, 83, 9, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-history-cache-retry:hover {
+  background: #ffffff;
 }
 
 .ai-chat-input-bar {
