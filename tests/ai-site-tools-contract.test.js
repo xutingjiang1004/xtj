@@ -210,9 +210,9 @@ test('openAiChat initiates with no conversationId to allow backend to find the l
   assert.doesNotMatch(openChatStr, /S\.conversationId = readConvId\(\)/);
 });
 
-test('server pagination buffers 200 rows to ensure deep_think and deleted messages do not shrink the page', () => {
+test('server history uses a bounded filter buffer instead of transferring 200 full messages', () => {
   const historyRoute = server.slice(server.indexOf("app.get('/api/agent/chat/history'"), server.indexOf('// =====================', server.indexOf("app.get('/api/agent/chat/history'")));
-  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ 199, 200\)\)/);
+  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ AI_CHAT_HISTORY_FETCH_BUFFER, 100\)\)/);
   assert.match(historyRoute, /filteredRows\.push\(r2\);\s*if \(filteredRows\.length > limit\) break;/);
 });
 
