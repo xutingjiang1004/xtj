@@ -10614,6 +10614,15 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
+// A conversation belongs to one surface. Never filter its user and assistant rows separately.
+function getConversationStorageMode(rows) {
+  for (var i = 0; i < (rows || []).length; i++) {
+    var meta = parseMsgMeta(rows[i]);
+    if (meta && meta.chat_mode === 'deep_think') return 'deep_think';
+  }
+  return 'normal';
+}
+
 function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingElapsedMs, extra) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
@@ -11119,10 +11128,12 @@ async function handleDeepThinkChat(req, res) {
       var cachedContent = cachedHit.content;
       var cachedUsage = cachedHit.usage || null;
       var cachedAgentCount = cachedHit.agent_count || 1;
+      var cacheChatMode = (req.body && req.body.chat_mode) || 'normal';
       // ★ 缓存命中也要把消息保存到 DB (否则用户重进看不到), 用原始 thinking_log
       try {
         var cacheExtra = {
           deep_think: true,
+          chat_mode: cacheChatMode,
           agent_count: cachedAgentCount,
           planner: cachedHit.planner || null,
           worker_results: cachedHit.worker_results || [],
@@ -11134,7 +11145,7 @@ async function handleDeepThinkChat(req, res) {
             user_name: userName,
             content: message,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1),
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: cacheChatMode }),
             actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
           },
           {
@@ -11303,7 +11314,7 @@ async function handleDeepThinkChat(req, res) {
             user_name: userName,
             content: message,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1),
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: chatMode }),
             actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
           },
           {
@@ -11558,14 +11569,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', convId, null, null, 1),
+          media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal' }),
           actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
         },
         {
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal' }),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -12563,6 +12574,14 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     if (!Array.isArray(rows)) {
       return res.json({ ok: true, conversations: [] });
     }
+
+    var conversationModes = {};
+    rows.forEach(function(row) {
+      var rowConvId = resolveConvId(row);
+      if (!rowConvId) return;
+      if (!conversationModes[rowConvId]) conversationModes[rowConvId] = 'normal';
+      if (parseMsgMeta(row).chat_mode === 'deep_think') conversationModes[rowConvId] = 'deep_think';
+    });
     
     // 按 convId 分组，统计所有消息
     // 用两个 pass：第一遍按时间倒序拿最新一条；第二遍计数 & 找第一条 user 消息
@@ -12574,10 +12593,8 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       var convId = resolveConvId(r);
       if (!convId) continue;
       
-      // mode 过滤：chat_mode = 'deep_think' 的只出现在深度研究列表
-      // 旧消息无 chat_mode 字段，视为 normal
-      if (mode === 'normal' && meta.chat_mode === 'deep_think') continue;
-      if (mode === 'deep_think' && meta.chat_mode !== 'deep_think') continue;
+      // Filter complete conversations so user/assistant pairs cannot be split across pages.
+      if (mode && conversationModes[convId] !== mode) continue;
       
       if (!convData[convId]) {
         convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
@@ -13026,16 +13043,10 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     var before = String(req.query.before || '').trim();
 
-    function matchesMode(row) {
-      if (!mode) return true;
-      var meta = parseMsgMeta(row);
-      return mode === 'deep_think' ? meta.chat_mode === 'deep_think' : meta.chat_mode !== 'deep_think';
-    }
-
     // 不带 convId → 先查最近一条 AI 消息的 convId
     if (!convId) {
       var { data: latestRows, error: latestError } = await supabase.from('posts')
-        .select('media_url')
+        .select('actor_key, media_url, created_at')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false })
@@ -13044,10 +13055,24 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
         console.error('[AGENT-CHAT] latest history query error:', latestError.message);
         return res.status(500).json({ error: '查询失败' });
       }
-      var latest = (latestRows || []).find(matchesMode);
-      if (latest) {
-        var meta = parseMsgMeta(latest);
-        if (meta && meta.convId) convId = meta.convId;
+      var recentConversations = {};
+      (latestRows || []).forEach(function(row) {
+        var rowConvId = resolveConvId(row);
+        if (!rowConvId) return;
+        if (!recentConversations[rowConvId]) recentConversations[rowConvId] = [];
+        recentConversations[rowConvId].push(row);
+      });
+      var recentConvIds = Object.keys(recentConversations).sort(function(a, b) {
+        var aTime = recentConversations[a][0] && recentConversations[a][0].created_at || '';
+        var bTime = recentConversations[b][0] && recentConversations[b][0].created_at || '';
+        return aTime < bTime ? 1 : (aTime > bTime ? -1 : 0);
+      });
+      for (var ci = 0; ci < recentConvIds.length; ci++) {
+        var candidateId = recentConvIds[ci];
+        if (!mode || getConversationStorageMode(recentConversations[candidateId]) === mode) {
+          convId = candidateId;
+          break;
+        }
       }
       if (!convId) {
         // 用户从未聊过天
@@ -13076,12 +13101,17 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
-    // 过滤用户已删除的消息和无关模式消息
+    var conversationMode = getConversationStorageMode(rows || []);
+    if (mode && conversationMode !== mode) {
+      return res.json({ ok: true, conversation_id: null, messages: [] });
+    }
+
+    // Filter only deleted rows. Mode is resolved once for the complete conversation above.
     var filteredRows = [];
     for (var i = 0; i < (rows || []).length; i++) {
       var r2 = rows[i];
       var meta = parseMsgMeta(r2);
-      if (!(meta && meta.deleted) && matchesMode(r2)) {
+      if (!(meta && meta.deleted)) {
         filteredRows.push(r2);
         if (filteredRows.length > limit) break;
       }

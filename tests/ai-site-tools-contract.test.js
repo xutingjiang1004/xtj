@@ -82,11 +82,14 @@ test('AI tools keep chat and site search as independent pages instead of changin
   assert.match(openAiChat, /aiPanel\.appendChild\(r\.root\)/);
 });
 
-test('normal chat and deep research use separate history modes', () => {
+test('normal chat and deep research keep complete conversations in separate history modes', () => {
   const historyRoute = server.slice(server.indexOf("app.get('/api/agent/chat/history'"), server.indexOf('// =====================', server.indexOf("app.get('/api/agent/chat/history'")));
   assert.match(historyRoute, /var mode = String\(req\.query\.mode \|\| ''\)\.trim\(\)/);
   assert.match(historyRoute, /mode !== 'normal' && mode !== 'deep_think'/);
-  assert.match(historyRoute, /mode === 'deep_think' \? meta\.chat_mode === 'deep_think' : meta\.chat_mode !== 'deep_think'/);
+  assert.match(server, /function getConversationStorageMode\(rows\)/);
+  assert.match(historyRoute, /getConversationStorageMode\(recentConversations\[candidateId\]\)/);
+  assert.match(historyRoute, /var conversationMode = getConversationStorageMode\(rows \|\| \[\]\)/);
+  assert.doesNotMatch(historyRoute, /matchesMode\(r2\)/);
   assert.match(client, /&mode=deep_think/);
   assert.match(client, /qs \+= '&mode=normal'/);
   const deepPage = client.slice(client.indexOf('async function openDeepThinkPage()'), client.indexOf('function closeDeepThinkPage()'));
