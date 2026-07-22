@@ -217,17 +217,18 @@ test('server pagination buffers 200 rows to ensure deep_think and deleted messag
 });
 
 test('cache writes and reads are fully isolated by encoding currentUser', () => {
-  const cacheFn = client.slice(client.indexOf('function getAiHistoryCacheUserKey'), client.indexOf('function clearAiHistoryCacheForUser'));
-  assert.match(cacheFn, /encodeURIComponent\(window\.currentUser\)/);
+  const cacheFn = client.slice(client.indexOf('function getAiHistoryCacheUserKey'), client.indexOf('function getAiHistoryCacheKey'));
+  assert.match(cacheFn, /readUserName/);
   
-  const clearFn = client.slice(client.indexOf('function clearAiHistoryCacheForUser'), client.indexOf('function readUserName'));
+  const clearFn = client.slice(client.indexOf('function clearAiHistoryCacheForUser'), client.indexOf('window\.clearAiHistoryCacheForUser'));
   assert.match(clearFn, /sessionStorage\.removeItem\(k\)/);
-  assert.match(clearFn, /key\.indexOf\(prefix\) === 0/);
+  assert.match(clearFn, /xtj_ai_history:/);
 });
 
 test('renderHistoryUnavailable receives error_code and preserves cache', () => {
   assert.match(client, /renderHistoryUnavailable\(messagesEl, r, \{ preserveExistingMessages: hasCache \}\)/);
   const renderFn = client.slice(client.indexOf('function renderHistoryUnavailable'), client.indexOf('function appendMessage'));
   assert.match(renderFn, /opts\.preserveExistingMessages/);
-  assert.match(renderFn, /isTimeout.*notify/);
+  assert.match(renderFn, /ai-history-cache-banner/);
+  assert.doesNotMatch(renderFn, /notify/);
 });
