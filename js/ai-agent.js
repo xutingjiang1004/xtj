@@ -589,34 +589,9 @@ window.throttleRAF = function(fn) {
     } catch (e) {}
   }
 
-  function getAiHistoryCacheUserKey() {
-    if (!window.currentUser || typeof window.currentUser !== 'string' || window.currentUser.indexOf('[object Object]') !== -1) return null;
-    return encodeURIComponent(window.currentUser);
-  }
-
-  function getAiHistoryCacheKey(cid) {
-    var uk = getAiHistoryCacheUserKey();
-    if (!uk) return null;
-    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(cid || 'default');
-  }
-
-  function clearAiHistoryCacheForUser() {
-    var uk = getAiHistoryCacheUserKey();
-    if (!uk) return;
-    var prefix = 'xtj_ai_history:' + uk + ':';
-    try {
-      var keysToRemove = [];
-      for (var i = 0; i < sessionStorage.length; i++) {
-        var key = sessionStorage.key(i);
-        if (key && key.indexOf(prefix) === 0) keysToRemove.push(key);
-      }
-      keysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
-    } catch (e) {}
-  }
-
   function readUserName() {
     if (window.currentUser) {
-      if (typeof window.currentUser === 'string') return window.currentUser;
+      if (typeof window.currentUser === 'string' && window.currentUser.indexOf('[object Object]') === -1) return window.currentUser;
       if (window.currentUser.user_name) return window.currentUser.user_name;
       if (window.currentUser.name) return window.currentUser.name;
     }
@@ -633,17 +608,120 @@ window.throttleRAF = function(fn) {
     return '';
   }
 
-  
+  function getAiHistoryCacheUserKey() {
+    var un = readUserName();
+    if (!un || un.indexOf('[object Object]') !== -1) return null;
+    return encodeURIComponent(un);
+  }
+
+  function getAiHistoryCacheKey(cid) {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return null;
+    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(cid || 'default');
+  }
+
+  function extractCompleteTurns(msgs, maxTurns) {
+    if (!Array.isArray(msgs) || !msgs.length) return [];
+    maxTurns = maxTurns || 6;
+    var turns = [];
+    var currentTurn = [];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (!m) continue;
+      if (m.role === 'user') {
+        if (currentTurn.length > 0) {
+          if (currentTurn.some(function(tm) { return tm && tm.role === 'assistant'; })) {
+            turns.push(currentTurn);
+          }
+        }
+        currentTurn = [m];
+      } else {
+        if (currentTurn.length > 0) {
+          currentTurn.push(m);
+        }
+      }
+    }
+    if (currentTurn.length > 0 && currentTurn.some(function(tm) { return tm && tm.role === 'assistant'; })) {
+      turns.push(currentTurn);
+    }
+    var recentTurns = turns.slice(-maxTurns);
+    var resultMsgs = [];
+    recentTurns.forEach(function(t) {
+      resultMsgs = resultMsgs.concat(t);
+    });
+    return resultMsgs;
+  }
+
+  function setAiHistoryCache(cid, msgs) {
+    var key = getAiHistoryCacheKey(cid);
+    if (!key) return;
+    try {
+      var completeMsgs = extractCompleteTurns(msgs, 6);
+      if (!completeMsgs.length) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      var cacheObj = {
+        conversation_id: cid || 'default',
+        messages: completeMsgs,
+        partial: true,
+        cached_at: Date.now()
+      };
+      sessionStorage.setItem(key, JSON.stringify(cacheObj));
+    } catch (e) {}
+  }
+
+  function getAiHistoryCache(cid) {
+    var key = getAiHistoryCacheKey(cid);
+    if (!key) return null;
+    try {
+      var str = sessionStorage.getItem(key);
+      if (!str) return null;
+      var obj = JSON.parse(str);
+      if (!obj) return null;
+      var rawMsgs = Array.isArray(obj) ? obj : (obj.messages && Array.isArray(obj.messages) ? obj.messages : null);
+      if (!rawMsgs || !rawMsgs.length) return null;
+      if (obj.conversation_id && cid && obj.conversation_id !== cid && obj.conversation_id !== 'default') return null;
+      var validMsgs = extractCompleteTurns(rawMsgs, 6);
+      if (!validMsgs.length) validMsgs = rawMsgs;
+      return { conversation_id: (obj && obj.conversation_id) || cid || 'default', messages: validMsgs, partial: true, cached_at: (obj && obj.cached_at) || 0 };
+    } catch (e) {}
+    return null;
+  }
+
+  function clearAiHistoryCacheForUser() {
+    var uk = getAiHistoryCacheUserKey();
+    try {
+      var keysToRemove = [];
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var key = sessionStorage.key(i);
+        if (!key) continue;
+        if (uk && key.indexOf('xtj_ai_history:' + uk + ':') === 0) {
+          keysToRemove.push(key);
+        } else if (key.indexOf('xtj_ai_history:') === 0) {
+          // If no specific user, or clearing general AI history cache
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
+    } catch (e) {}
+  }
+  window.clearAiHistoryCacheForUser = clearAiHistoryCacheForUser;
+
   function abortCurrentRequest() {
     clearStreamCleanup();
-    // 鈽?U3 淇: 涓嶅啀瑁?sendBeacon /chat/cancel (鏃?auth 导致 401)
-    // 直接前端 AbortController abort 即可, 后端 req.on('close') 会自感知
     if (S.abortController) {
-      try { S.abortController.abort(); } catch (e) {}
+      try {
+        S.abortController._abortReason = 'aborted';
+        if (typeof S.abortController.abort === 'function') S.abortController.abort('aborted');
+      } catch (e) {}
       S.abortController = null;
     }
     if (S.deepThinkJob) {
-      try { S.deepThinkJob.abort(); } catch (e) {}
+      try {
+        S.deepThinkJob._abortReason = 'aborted';
+        if (typeof S.deepThinkJob.abort === 'function') S.deepThinkJob.abort('aborted');
+      } catch (e) {}
       S.deepThinkJob = null;
     }
     if (S.deepThinkProgressCard) {
@@ -654,6 +732,8 @@ window.throttleRAF = function(fn) {
     }
     S.sending = false;
     S.paused = false;
+    S.loading = false;
+    S.loadingMore = false;
     S.activeRenderers = [];
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
@@ -754,7 +834,10 @@ window.throttleRAF = function(fn) {
       if (requestController) {
         opts.signal = requestController.signal;
         requestTimer = setTimeout(function() {
-          try { requestController.abort(); } catch (eAbort) {}
+          try {
+            requestController._abortReason = 'timeout';
+            if (typeof requestController.abort === 'function') requestController.abort('timeout');
+          } catch (eAbort) {}
         }, Math.max(3000, Number(options.timeoutMs) || 12000));
       }
 
@@ -803,9 +886,19 @@ window.throttleRAF = function(fn) {
       };
     } catch (e) {
       var isAbort = e && e.name === 'AbortError';
-      var errCode = isAbort ? 'timeout' : 'network_error';
-      var errMsg = isAbort ? '请求超时' : ((e && e.message) || '网络异常');
-      try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg }); } catch (e5) {}
+      var reason = (requestController && requestController._abortReason) || (opts && opts.signal && opts.signal.reason);
+      var errCode = 'network_error';
+      var errMsg = (e && e.message) || '网络异常';
+      if (isAbort) {
+        if (reason === 'aborted' || options.userAborted) {
+          errCode = 'aborted';
+          errMsg = '请求已取消';
+        } else {
+          errCode = 'timeout';
+          errMsg = '请求超时';
+        }
+      }
+      try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg, error_code: errCode }); } catch (e5) {}
       return { ok: false, status: 0, data: null, error: errMsg, error_code: errCode, url: url, rawText: '' };
     }
   }
@@ -814,7 +907,7 @@ window.throttleRAF = function(fn) {
     if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
     var first = await sendOnce(method, path, body, Object.assign({ forceNoToken: false }, opts || {}));
     if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
-    if (first && first.status === 401) {
+    if (first && first.status === 401 && first.error_code !== 'aborted') {
       if (typeof window.refreshUserToken === 'function') {
         try {
           var refreshed = await window.refreshUserToken(true);
@@ -1290,21 +1383,56 @@ window.throttleRAF = function(fn) {
     return empty;
   }
 
+  function removeHistoryUnavailableBanner(messagesEl) {
+    if (!messagesEl) return;
+    var banner = messagesEl.querySelector('.ai-history-cache-banner');
+    if (banner) {
+      try { banner.remove(); } catch (e) {}
+    }
+  }
+
   function renderHistoryUnavailable(messagesEl, r, options) {
     if (!messagesEl) return;
     var opts = options || {};
-    var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
-    
-    if (opts.preserveExistingMessages) {
-      if (isTimeout) notify('聊天记录更新失败，当前显示上次缓存，可继续发送消息或重试');
-      else notify('聊天记录暂时无法加载，当前显示上次缓存');
+    if (r && r.error_code === 'aborted') {
+      removeHistoryUnavailableBanner(messagesEl);
       return;
     }
     
+    if (opts.preserveExistingMessages) {
+      var existingBanner = messagesEl.querySelector('.ai-history-cache-banner');
+      if (!existingBanner) {
+        existingBanner = el('div', { class: 'ai-history-cache-banner' });
+        var textSpan = el('span', { class: 'ai-history-cache-banner-text', text: '当前显示缓存记录，刷新失败' });
+        var retryBtn = el('button', {
+          type: 'button',
+          class: 'ai-history-cache-retry',
+          text: '重试',
+          'aria-label': '重试刷新聊天记录'
+        });
+        retryBtn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          loadHistory(messagesEl, null);
+        });
+        existingBanner.appendChild(textSpan);
+        existingBanner.appendChild(retryBtn);
+        if (messagesEl.firstChild) {
+          messagesEl.insertBefore(existingBanner, messagesEl.firstChild);
+        } else {
+          messagesEl.appendChild(existingBanner);
+        }
+      }
+      return;
+    }
+    
+    removeHistoryUnavailableBanner(messagesEl);
     messagesEl.innerHTML = '';
-    var state = buildEmptyState(isTimeout
+    var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
+    var isNetwork = r && r.error_code === 'network_error';
+    var tip = isTimeout
       ? '聊天记录加载超时，可继续发送消息或点击重试'
-      : '聊天记录暂时无法加载，你仍可发送新消息');
+      : (isNetwork ? '网络连接异常，聊天记录更新失败' : '聊天记录暂时无法加载，你仍可发送新消息');
+    var state = buildEmptyState(tip);
     state.classList.add('ai-history-unavailable');
     var retry = el('button', {
       type: 'button',
@@ -5127,19 +5255,14 @@ window.throttleRAF = function(fn) {
     else S.loading = true;
     var requestId = ++S.historyRequestId;
     var requestedConversationId = S.conversationId;
+    var loadController = typeof AbortController === 'function' ? new AbortController() : null;
+    S.abortController = loadController;
 
     var hasCache = false;
     if (!before && messagesEl) {
       messagesEl.setAttribute('aria-busy', 'true');
-      var cacheKey = getAiHistoryCacheKey(S.conversationId);
-      var cachedStr = null;
-      if (cacheKey) {
-        try { cachedStr = sessionStorage.getItem(cacheKey); } catch (e) {}
-      }
-      var cachedMsgs = null;
-      if (cachedStr) {
-        try { cachedMsgs = JSON.parse(cachedStr); } catch (e) {}
-      }
+      var cachedData = getAiHistoryCache(S.conversationId);
+      var cachedMsgs = cachedData && cachedData.messages;
       
       if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
         hasCache = true;
@@ -5163,7 +5286,7 @@ window.throttleRAF = function(fn) {
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
-      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 20000 });
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 20000, abortController: loadController });
 
       if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
 
@@ -5174,6 +5297,8 @@ window.throttleRAF = function(fn) {
         }
         return;
       }
+
+      removeHistoryUnavailableBanner(messagesEl);
 
       if (r.data.conversation_id) {
         S.conversationId = r.data.conversation_id;
@@ -5201,8 +5326,7 @@ window.throttleRAF = function(fn) {
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
         try {
-          var updateKey = getAiHistoryCacheKey(S.conversationId);
-          if (updateKey) sessionStorage.setItem(updateKey, JSON.stringify(msgs.slice(-12)));
+          setAiHistoryCache(S.conversationId, msgs);
         } catch (e) {}
       } else {
         var oldScroll = messagesEl.scrollHeight;
@@ -5219,11 +5343,9 @@ window.throttleRAF = function(fn) {
         } catch (e2) {}
       }
     } finally {
-      if (requestId === S.historyRequestId) {
-        S.loading = false;
-        S.loadingMore = false;
-        if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
-      }
+      S.loading = false;
+      S.loadingMore = false;
+      if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
     }
   }
 
@@ -5319,13 +5441,12 @@ window.throttleRAF = function(fn) {
   }
 
   async function switchConversation(cid) {
-    if (!cid || cid === S.conversationId) return;
-    if (S.sending) {
-      abortCurrentRequest();
-      await new Promise(function(resolve) { setTimeout(resolve, 100); });
-    }
+    console.log('[DEBUG] switchConversation called:', cid, 'current S.convId:', S.conversationId);
+    if (!cid) return;
+    if (cid === S.conversationId && S.messages.length > 0) return;
+    abortCurrentRequest();
+    removeHistoryUnavailableBanner(S.messagesEl);
     
-    var requestId = ++S.conversationRequestId;
     S.historyRequestId += 1;
     S.loading = false;
     S.loadingMore = false;
@@ -5334,37 +5455,17 @@ window.throttleRAF = function(fn) {
     S.messages = [];
     S.oldestCursor = null;
     S.hasMore = false;
-    if (S.messagesEl) S.messagesEl.innerHTML = '';
-    setAiRootState('ai-loading');
-    
-    try {
-      var r = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=' + HISTORY_PAGE_SIZE + '&mode=normal');
-      if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
-      if (r && r.ok && r.data && r.data.messages) {
-        S.messages = r.data.messages;
-        S.hasMore = r.data.has_more;
-        S.oldestCursor = r.data.oldest || null;
-      }
-    } catch (e) {
-      if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
-      try { console.warn('[AI-CONV] switchConversation error:', e && e.message); } catch(ee) {}
-      notify('加载对话历史失败');
-    }
-    
-    if (requestId !== S.conversationRequestId || cid !== S.conversationId || !S.active) return;
     if (S.messagesEl) {
       S.messagesEl.innerHTML = '';
-      if (S.messages.length) {
-        S.messages.forEach(function(msg) {
-          appendMessage(S.messagesEl, msg);
-        });
-      } else {
-        appendEmptyState(S.messagesEl);
-      }
-      scrollToBottom(S.messagesEl, true);
+      removeHistoryUnavailableBanner(S.messagesEl);
     }
-    setAiRootState('ai-idle');
     showChatMessages();
+    if (S.messagesEl) {
+      S.loading = false;
+      S.loadingMore = false;
+      console.log('[DEBUG] calling loadHistory from switchConversation for:', cid);
+      await loadHistory(S.messagesEl, null);
+    }
   }
   
 function showChatMessages() {
