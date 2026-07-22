@@ -1138,22 +1138,26 @@
             box-shadow: 0 4px 16px rgba(255, 59, 96, 0.2);
         }
 
-        .like-particle {
-            position: fixed;
-            width: 6px;
-            height: 6px;
-            margin: -3px 0 0 -3px;
-            border-radius: 50%;
-            background: #ff5d7f;
+        .actions .like-blossom {
+            position: absolute;
+            width: 76px;
+            height: 76px;
+            margin: -38px 0 0 -38px;
             pointer-events: none;
-            animation: likeParticleFly 460ms cubic-bezier(.16, 1, .3, 1) var(--like-particle-delay, 0ms) forwards;
-            z-index: 9999;
-            box-shadow: 0 0 0 3px rgba(255, 93, 127, 0.14);
+            z-index: 0;
+            opacity: 0;
+            transform-origin: center;
+            will-change: transform, opacity;
+            filter: drop-shadow(0 5px 10px rgba(242, 139, 173, 0.18));
+            animation: xtj-like-blossom 780ms cubic-bezier(.18, .78, .2, 1) forwards;
         }
-        @keyframes likeParticleFly {
-            0% { transform: translate3d(0, 0, 0); opacity: 0; }
-            20% { opacity: .9; }
-            100% { transform: translate3d(var(--like-particle-x), var(--like-particle-y), 0); opacity: 0; }
+        .actions .like-blossom svg { display: block; width: 100%; height: 100%; }
+        .actions .like-bloom-origin { z-index: 1; }
+        @keyframes xtj-like-blossom {
+            0% { opacity: 0; transform: scale(.12) rotate(-15deg); }
+            28% { opacity: .95; }
+            62% { opacity: .92; transform: scale(1.03) rotate(3deg); }
+            100% { opacity: 0; transform: scale(1.22) rotate(8deg); }
         }
         
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: 0; }
@@ -7466,26 +7470,6 @@
   .pp-zoom-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
 }
 
-/* Interaction feedback: like, publish and incremental feed updates. */
-.action-btn.like-feedback-add {
-  animation: xtj-like-add 180ms ease-out !important;
-}
-
-.action-btn.like-feedback-remove {
-  animation: xtj-like-remove 180ms ease-out !important;
-}
-
-@keyframes xtj-like-add {
-  0% { box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12); }
-  45% { box-shadow: 0 6px 16px rgba(255, 59, 96, 0.2); }
-  100% { box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12); }
-}
-
-@keyframes xtj-like-remove {
-  0% { border-color: rgba(255, 59, 96, 0.4); }
-  100% { border-color: rgba(255, 255, 255, 0.7); }
-}
-
 #pubBtn.is-loading,
 #postSubmit.is-loading,
 .btn-primary.is-loading,
@@ -7551,9 +7535,7 @@ button.post-publish.is-loading::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .action-btn.like-feedback-add,
-  .action-btn.like-feedback-remove,
-  .like-particle,
+  .like-blossom,
   .post.is-newly-published {
     animation: none !important;
   }
@@ -7803,8 +7785,7 @@ button.post-publish.is-loading::after {
 .perf-balanced .chat-bubble,
 .perf-balanced .chat-list-item,
 .perf-balanced .profile-setting-item,
-.perf-balanced .photo-card,
-.perf-balanced .like-particle {
+.perf-balanced .photo-card {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08) !important;
 }
 
@@ -7846,12 +7827,13 @@ button.post-publish.is-loading::after {
   filter: none !important;
 }
 
-.perf-lite .like-particle {
+.perf-lite .like-blossom {
   display: none !important;
 }
 
-.perf-balanced .like-particle {
-  animation-duration: 0.55s !important;
+.perf-balanced .like-blossom {
+  animation-duration: 0.58s !important;
+  filter: none !important;
 }
 
 .perf-hz-120 .post,
