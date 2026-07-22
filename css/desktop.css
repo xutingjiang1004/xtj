@@ -1245,7 +1245,7 @@
 
   #panelChat .dock-chat-container {
     display: grid;
-    grid-template-columns: minmax(248px, 300px) minmax(0, 1fr) minmax(220px, 280px);
+    grid-template-columns: minmax(248px, 300px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     width: min(1600px, 100%);
     height: calc(100dvh - 56px);
@@ -1452,5 +1452,13 @@
 
   [data-theme="dark"] #panelChat .chat-list-item:hover {
     background: rgba(43, 93, 65, 0.30);
+  }
+}
+
+/* Fine-pointer desktop uses the persistent left sidebar, so the mobile Dock
+   and the optional conversation inspector are not part of this layout. */
+@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+  .dock-bar {
+    display: none !important;
   }
 }
