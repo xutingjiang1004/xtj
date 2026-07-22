@@ -10561,6 +10561,8 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
 const AI_CHAT_HISTORY_LIMIT = 20;
 const AI_CHAT_HISTORY_MSG_MAX_CHARS = 4000;
 const AI_CHAT_HOURLY_IP_LIMIT = 200;
+const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
+const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 
 // 生成简短的 conversation_id
 function genConvId() {
@@ -13037,7 +13039,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT);
       if (latestError) {
         console.error('[AGENT-CHAT] latest history query error:', latestError.message);
         return res.status(500).json({ error: '查询失败' });
@@ -13062,7 +13064,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(Math.min(limit + 199, 200));
+      // Fetch a small buffer for soft-deleted legacy rows instead of transferring 200 full messages.
+      .limit(Math.min(limit + AI_CHAT_HISTORY_FETCH_BUFFER, 100));
     if (before) {
       query = query.lt('created_at', before);
     }
