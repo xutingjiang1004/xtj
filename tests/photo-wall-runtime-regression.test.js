@@ -86,6 +86,31 @@ test('failed authenticated delete restores photo and removes local tombstone', a
   assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos_deleted') || '[]'), []);
 });
 
+test('a delayed delete blocks stale force-refresh snapshots until the server confirms', async () => {
+  let resolveDelete;
+  const staleRow = { id: 'p-pending', user_name: 'owner', media_url: 'https://example.test/pending.jpg', created_at: '2026-01-01T00:00:00Z' };
+  const runtime = createPhotoDataRuntime((url) => {
+    if (url === '/api/photo/delete') {
+      return new Promise(resolve => { resolveDelete = () => resolve({ ok: true, json: async () => ({ ok: true, deleted: true }) }); });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ ok: true, data: [staleRow] }) });
+  });
+  const photo = { id: 'p-pending', cloudId: 'p-pending', username: 'owner', imageUrl: staleRow.media_url, timestamp: 1 };
+  runtime.window.currentUser = 'owner';
+  runtime.window.photoWallData = [photo];
+  runtime.window.renderPhotoWallWithoutReload = () => {};
+
+  const deletion = runtime.window.deletePhotoWallPhoto(photo);
+  await Promise.resolve();
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal(runtime.window.photoWallData.length, 0, 'stale cloud data must not reinsert a pending deletion');
+
+  resolveDelete();
+  await deletion;
+  assert.equal(runtime.window.pendingDeletedPhotoIds.size, 0, 'pending deletion must clear after success');
+  assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos_deleted') || '[]'), ['p-pending']);
+});
+
 test('delete tombstone rejects stale cloud snapshots during resume reconciliation', async () => {
   const staleRow = { id: 'p3', user_name: 'owner', media_url: 'https://example.test/p3.jpg', created_at: '2026-01-01T00:00:00Z' };
   const runtime = createPhotoDataRuntime(async url => {

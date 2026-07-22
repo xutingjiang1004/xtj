@@ -563,6 +563,30 @@ const ADMIN_NAME = "xxz";
                 return response;
             };
 
+            // Public feed endpoints may use identity when available, but must never force login.
+            window.xtjOptionalAuthFetch = async function(path, options) {
+                options = options || {};
+                var knownUser = String(currentUser || window.safeStorage.get('xtj_user') || '').trim();
+
+                async function send(token) {
+                    var headers = Object.assign({}, options.headers || {});
+                    if (token) headers.Authorization = 'Bearer ' + token;
+                    return fetch((window.API_BASE || '') + path, Object.assign({}, options, {
+                        credentials: 'include',
+                        headers: headers
+                    }));
+                }
+
+                var token = getUserToken();
+                if (!token && knownUser) token = await ensureUserToken();
+                var response = await send(token);
+                if (token && response.status === 401) {
+                    var renewed = await window.refreshUserToken(true);
+                    response = await send(renewed || '');
+                }
+                return response;
+            };
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -5272,7 +5296,7 @@ function renderProfileActivityList(kind) {
                     renderPostFilterUsers();
                 }, 2400);
                 try {
-                    var authRes = await fetch(API_BASE + '/api/feed/authors', { credentials: 'include' });
+                    var authRes = await window.xtjOptionalAuthFetch('/api/feed/authors');
                     if (!authRes.ok) throw new Error('authors_query_failed');
                     var authorPayload = await authRes.json();
                     if (!authorPayload || !authorPayload.ok) throw new Error('authors_query_failed');
@@ -6491,9 +6515,7 @@ function renderProfileActivityList(kind) {
 
                 // 优先使用后端 API（支持私密帖子可见性过滤）
                 try {
-                    var apiResp = await fetch(API_BASE + '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE, {
-                        credentials: 'include'
-                    });
+                    var apiResp = await window.xtjOptionalAuthFetch('/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE);
                     if (apiResp.ok) {
                         var apiData = await apiResp.json();
                         if (apiData && apiData.ok) {

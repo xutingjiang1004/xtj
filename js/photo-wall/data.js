@@ -20,6 +20,7 @@
   var LOAD_CACHE_TTL_MS = 20000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
+  var pendingDeletedPhotoIds = new Set();
 
   function byId(id){ return document.getElementById(id); }
 
@@ -60,6 +61,25 @@
     if (id == null) return;
     var key = String(id);
     writeJson(DELETED_KEY, getDeletedIds().filter(function(item){ return item !== key; }));
+  }
+
+  function addPendingDeletedPhotoId(id){
+    if (id != null) pendingDeletedPhotoIds.add(String(id));
+  }
+
+  function removePendingDeletedPhotoId(id){
+    if (id != null) pendingDeletedPhotoIds.delete(String(id));
+  }
+
+  function isDeletedOrPendingPhoto(item){
+    if (item == null) return false;
+    var id = typeof item === 'object' ? item.id : item;
+    var cloudId = typeof item === 'object' ? item.cloudId : null;
+    var deleted = getDeletedIds();
+    return deleted.indexOf(String(id)) >= 0 ||
+      (cloudId != null && deleted.indexOf(String(cloudId)) >= 0) ||
+      pendingDeletedPhotoIds.has(String(id)) ||
+      (cloudId != null && pendingDeletedPhotoIds.has(String(cloudId)));
   }
 
   function setPhotoWallSyncStatus(state, label){
@@ -151,7 +171,7 @@
       // snapshot has converged. Tombstones must therefore reject stale cloud
       // rows as well as cached rows; UUIDs are never reused for uploads.
       var identity = item.cloudId != null ? String(item.cloudId) : String(item.id);
-      if (deleted.indexOf(identity) >= 0 || deleted.indexOf(String(item.id)) >= 0) return;
+      if (deleted.indexOf(identity) >= 0 || deleted.indexOf(String(item.id)) >= 0 || isDeletedOrPendingPhoto(item)) return;
       if (!map.has(String(item.id))) map.set(String(item.id), item);
     }
     (Array.isArray(primary) ? primary : []).forEach(add);
@@ -205,7 +225,7 @@
     var local = loadLocalPhotoWallData();
     var hasCache = local.length > 0;
     if (hasCache && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
-      window.photoWallData = local;
+      window.photoWallData = mergePhotoLists(local, []);
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
       if (typeof window.renderPhotoWallWithoutReload === 'function') {
@@ -243,19 +263,10 @@
       cloud = cloud.filter(function(item){
         if (!item) return false;
         var identity = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
-        return tombstoneIds.indexOf(identity) < 0 && tombstoneIds.indexOf(String(item.id || '')) < 0;
+        return tombstoneIds.indexOf(identity) < 0 && tombstoneIds.indexOf(String(item.id || '')) < 0 && !isDeletedOrPendingPhoto(item);
       });
       // 合并云端和本地，按 id/cloudId 去重
-      var existingIds = new Set();
-      var merged = [];
-      (cloud.concat(Array.isArray(window.photoWallData) ? window.photoWallData : [])).forEach(function(item) {
-        if (!item || !item.imageUrl) return;
-        var key = (item.id != null ? String(item.id) : '') || (item.cloudId != null ? String(item.cloudId) : '');
-        if (key && existingIds.has(key)) return;
-        if (key) existingIds.add(key);
-        merged.push(item);
-      });
-      window.photoWallData = merged;
+      window.photoWallData = mergePhotoLists(cloud, window.photoWallData);
       saveLocalPhotoWallData();
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
@@ -276,7 +287,7 @@
       }
       // 保留缓存，不清空
       if (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0) {
-        window.photoWallData = local;
+        window.photoWallData = mergePhotoLists(local, []);
       }
       lastLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastLoadedAt;
@@ -381,11 +392,15 @@
       return { ok:false, error:'unauthorized' };
     }
     var id = item.id || item.cloudId;
+    addPendingDeletedPhotoId(item.id);
+    addPendingDeletedPhotoId(item.cloudId);
     // 立即从本地 UI 移除 + 缓存清除（不等云端返回）
     removePhotoLocal(id, opts.render !== false);
     var deleteResult = null;
     try { deleteResult = await deleteCloudPhoto(item); } catch (err) { console.warn('[PhotoWall] cloud delete failed', err); }
     if (!deleteResult) {
+      removePendingDeletedPhotoId(item.id);
+      removePendingDeletedPhotoId(item.cloudId);
       removePhotoLocal(id, opts.render !== false); // 撤销本地移除
       // 注意：addDeletedPhotoId 只在云端删除成功后才调用，防止浏览器崩溃后永久丢失照片
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
@@ -399,6 +414,8 @@
       return { ok:false, error:'cloud_delete_failed' };
     }
     // 云端删除成功后才标记为已删除，防止浏览器崩溃后永久丢失照片
+    removePendingDeletedPhotoId(item.id);
+    removePendingDeletedPhotoId(item.cloudId);
     addDeletedPhotoId(id);
     broadcastSync('photo_deleted', { photoId: id });
     try { await loadPhotoWallData(true); } catch (_) {}
@@ -543,6 +560,7 @@
 
   window.setPhotoWallSyncStatus = setPhotoWallSyncStatus;
   window.addDeletedPhotoId = addDeletedPhotoId;
+  window.pendingDeletedPhotoIds = pendingDeletedPhotoIds;
   window.cleanDeletedIds = function(){ try { window.safeStorage.remove(DELETED_KEY); } catch (_) {} };
   window.saveLocalPhotoWallData = saveLocalPhotoWallData;
   window.normalizePhotoWallRow = normalizePhotoWallRow;
