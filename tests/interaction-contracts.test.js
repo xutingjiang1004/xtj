@@ -63,6 +63,13 @@ test('AI history prioritizes a small first payload, cache paint, and indexed que
   assert.match(aiHistoryIndexes, /actor_key text_pattern_ops/);
 });
 
+test('AI history keeps each conversation pair in one mode', () => {
+  const historyRoute = between(server, "app.get('/api/agent/chat/history'", '// =====================');
+  assert.match(server, /function getConversationStorageMode\(rows\)/);
+  assert.match(historyRoute, /Filter only deleted rows\. Mode is resolved once/);
+  assert.match(server, /buildMsgMeta\('user', convId, null, null, 1, null, 0, \{ chat_mode: chatMode \}\)/);
+});
+
 test('DM APIs are authenticated and select both sides of a conversation', () => {
   const list = between(server, "app.get('/api/dm/list'", "app.get('/api/dm/messages'");
   const messages = between(server, "app.get('/api/dm/messages'", '// =====================');
