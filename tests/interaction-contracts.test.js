@@ -12,6 +12,7 @@ const uiShell = fs.readFileSync(path.join(root, 'css', 'ui-shell.css'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 const aiAgent = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
+const aiHistoryIndexes = fs.readFileSync(path.join(root, 'supabase', 'migrations', '023_ai_history_query_indexes.sql'), 'utf8');
 
 function between(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -49,6 +50,17 @@ test('AI tools prewarm, render immediately, and bound history requests', () => {
   assert.ok(openResearch.indexOf("panel.classList.add('active')") < openResearch.indexOf('ensureUserAuthOrNotify()'));
   assert.match(history, /timeoutMs:\s*8000/);
   assert.match(openResearch, /mode=deep_think', null, \{ timeoutMs: 8000 \}/);
+});
+
+test('AI history prioritizes a small first payload, cache paint, and indexed queries', () => {
+  const historyRoute = between(server, "app.get('/api/agent/chat/history'", '// =====================');
+  assert.match(aiAgent, /var HISTORY_PAGE_SIZE = 10/);
+  assert.match(aiAgent, /var latestKey = getAiHistoryCacheKey\(null\)/);
+  assert.match(historyRoute, /\.limit\(AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT\)/);
+  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ AI_CHAT_HISTORY_FETCH_BUFFER, 100\)\)/);
+  assert.match(aiHistoryIndexes, /posts_ai_agent_history_user_created_idx/);
+  assert.match(aiHistoryIndexes, /posts_ai_agent_history_user_actor_prefix_idx/);
+  assert.match(aiHistoryIndexes, /actor_key text_pattern_ops/);
 });
 
 test('DM APIs are authenticated and select both sides of a conversation', () => {
