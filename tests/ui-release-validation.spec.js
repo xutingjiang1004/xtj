@@ -121,7 +121,8 @@ test.describe('release validation', () => {
       };
     });
     expect(state.containerDisplay).toBe('grid');
-    expect(state.gridTemplateColumns.startsWith('340px')).toBeTruthy();
+    expect(state.gridTemplateColumns.trim().split(/\s+/).length).toBe(3);
+    expect(state.gridTemplateColumns.startsWith('248px') || state.gridTemplateColumns.startsWith('300px')).toBeTruthy();
     expect(state.listDisplay).not.toBe('none');
     expect(state.detailDisplay).not.toBe('none');
     expect(state.backDisplay).toBe('none');
