@@ -399,7 +399,12 @@ test('storage cleanup failure preserves original upload error and logs', functio
 });
 test('refresh failure does not re-upload files', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  assert.ok(s.indexOf("state.photoFiles = []") > s.indexOf("} finally {"), 'photoFiles cleared in finally before refresh');
+  var start = s.indexOf('async function uploadPhotoWallFiles()');
+  var end = s.indexOf('async function retryFailedUploads()', start);
+  var upload = s.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'upload function boundaries missing');
+  assert.ok(upload.indexOf('await performUpload(jobs);') >= 0, 'upload must await result refresh before cleanup');
+  assert.ok(upload.indexOf('state.photoFiles = [];') > upload.indexOf('await performUpload(jobs);'), 'photoFiles must clear after result refresh');
 });
 
 test('showToast wrapper forwards all arguments after text repair', function(){
