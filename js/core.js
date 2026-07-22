@@ -3764,6 +3764,18 @@ function renderProfileActivityList(kind) {
                 statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
             }
 
+            function updatePostLikeCount(postId, likeCount) {
+                var count = Number(likeCount);
+                if (!Number.isFinite(count) || count < 0) return;
+                var pid = String(postId || '');
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var statsEl = postEl.querySelector('.post-stats-text');
+                    if (!statsEl) return;
+                    statsEl.textContent = (statsEl.textContent || '').replace(/(点赞|❤)\s*\d+/, '$1 ' + count);
+                });
+            }
+
             function getPostLikeButtons(postId) {
                 var pid = String(postId || '');
                 var buttons = [];
@@ -3827,13 +3839,9 @@ function renderProfileActivityList(kind) {
                 var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
                 getPostLikeButtons(postId).forEach(function(likeBtn) {
                     if (likeBtn._likeFeedbackTimer) clearTimeout(likeBtn._likeFeedbackTimer);
-                    if (likeBtn._likeHeartTimer) clearTimeout(likeBtn._likeHeartTimer);
-                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove', 'like-heart-anim');
-                    // Force a fresh animation frame when the user toggles faster than the CSS duration.
-                    void likeBtn.offsetWidth;
-                    likeBtn.classList.add(className, 'like-heart-anim');
-                    likeBtn._likeFeedbackTimer = setTimeout(function() { likeBtn.classList.remove(className); }, 260);
-                    likeBtn._likeHeartTimer = setTimeout(function() { likeBtn.classList.remove('like-heart-anim'); }, 400);
+                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
+                    likeBtn.classList.add(className);
+                    likeBtn._likeFeedbackTimer = setTimeout(function() { likeBtn.classList.remove(className); }, 180);
                 });
             }
 
@@ -3841,7 +3849,7 @@ function renderProfileActivityList(kind) {
                 updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
                 updateFeedStats();
                 animatePostLikeFeedback(postId, liked);
-                if (liked && sourceButton) createHeartParticles(sourceButton);
+                if (liked && sourceButton) createLikeParticles(sourceButton);
             }
 
             function flushPostLikeOperation(postId, operation) {
@@ -3859,6 +3867,7 @@ function renderProfileActivityList(kind) {
                             throw new Error(likeResult.error || 'like_state_sync_failed');
                         }
                         operation.confirmed = requestedLiked;
+                        updatePostLikeCount(postId, likeResult.like_count);
                         touchUserSession(false);
                         scheduleLikeStatRefresh();
                         if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') loadProfileActivity(true);
@@ -3905,31 +3914,28 @@ function renderProfileActivityList(kind) {
                 return operation.promise;
             };
 
-            function createHeartParticles(btn) {
+            function createLikeParticles(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤","♥","❤","♡","♥","❤"];
-                const burstCount = perfProfile === 'balanced' ? 4 : 6;
+                const burstCount = perfProfile === 'balanced' ? 2 : 3;
                 for (let i=0; i<burstCount; i++) {
-                    const heart = document.createElement('div');
-                    heart.className = 'heart-particle';
-                    heart.setAttribute('aria-hidden', 'true');
-                    heart.textContent = emojis[i % emojis.length];
-                    const angle = (-Math.PI * 0.9) + (Math.PI * 0.8 * i / Math.max(1, burstCount - 1)) + (Math.random()-0.5)*0.18;
-                    const distance = 26 + Math.random()*24;
-                    heart.style.left = cx+'px';
-                    heart.style.top = cy+'px';
-                    heart.style.setProperty('--heart-x', Math.cos(angle)*distance+'px');
-                    heart.style.setProperty('--heart-y', Math.sin(angle)*distance+'px');
-                    heart.style.setProperty('--heart-rotate', ((Math.random()-0.5)*32)+'deg');
-                    heart.style.setProperty('--heart-delay', (i*18)+'ms');
-                    document.body.appendChild(heart);
-                    heart.addEventListener('animationend', function() { heart.remove(); }, { once: true });
-                    setTimeout(function() { heart.remove(); }, 900);
+                    const particle = document.createElement('i');
+                    particle.className = 'like-particle';
+                    particle.setAttribute('aria-hidden', 'true');
+                    const angle = (-Math.PI * 0.82) + (Math.PI * 0.64 * i / Math.max(1, burstCount - 1));
+                    const distance = 18 + i * 7;
+                    particle.style.left = cx + 'px';
+                    particle.style.top = cy + 'px';
+                    particle.style.setProperty('--like-particle-x', Math.cos(angle) * distance + 'px');
+                    particle.style.setProperty('--like-particle-y', Math.sin(angle) * distance + 'px');
+                    particle.style.setProperty('--like-particle-delay', (i * 20) + 'ms');
+                    document.body.appendChild(particle);
+                    particle.addEventListener('animationend', function() { particle.remove(); }, { once: true });
+                    setTimeout(function() { particle.remove(); }, 520);
                 }
             }
 
