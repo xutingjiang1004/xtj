@@ -75,7 +75,7 @@ test('like feedback uses a single removable cherry blossom without forced reflow
   assert.match(blossom, /animationend/);
   assert.match(blossom, /btn\._likeBlossom/);
   assert.doesNotMatch(blossom, /offsetWidth|like-heart-anim/);
-  assert.match(style, /\.actions \.like-blossom\s*\{[\s\S]*?will-change:\s*transform, opacity;[\s\S]*?animation:\s*xtj-like-blossom/);
+  assert.match(style, /\.actions \.like-blossom\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?will-change:\s*transform, opacity;[\s\S]*?animation:\s*xtj-like-blossom/);
   assert.match(style, /@keyframes xtj-like-blossom[\s\S]*?transform:/);
   assert.doesNotMatch(style, /\.action-btn\.liked\s*\{[^}]*animation:/s);
   assert.doesNotMatch(core, /heart-particle|like-heart-anim|like-particle|createLikeParticles|animatePostLikeFeedback/);
