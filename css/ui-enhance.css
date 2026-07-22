@@ -351,3 +351,109 @@
     animation: none !important;
   }
 }
+
+/* ===== Desktop auth and modal accessibility pass ===== */
+@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+  .modal-overlay,
+  .announcement-modal-overlay,
+  .report-modal-overlay {
+    padding: 32px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .modal-overlay .modal-box,
+  .announcement-modal,
+  .report-modal {
+    width: min(100%, 720px);
+    max-width: 720px;
+    max-height: min(90dvh, 820px);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #loginModal .modal-box,
+  #registerModal .modal-box {
+    width: min(100%, 520px);
+    max-width: 520px;
+    padding: 40px !important;
+  }
+
+  .auth-form {
+    width: min(100%, 440px);
+    margin-inline: auto;
+  }
+
+  .auth-form .af-title,
+  .auth-form p,
+  .auth-form .af-link {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+
+  .auth-form .af-input,
+  .auth-form .af-btn {
+    min-height: 48px;
+  }
+
+  .stat-detail-modal,
+  .profile-detail-modal,
+  .user-profile-card-modal,
+  .announcement-modal,
+  .report-modal {
+    min-height: 0;
+  }
+
+  .stat-detail-body,
+  .profile-detail-body,
+  .announcement-content,
+  .report-modal-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .announcement-detail-content,
+  .report-loading,
+  .report-error,
+  .report-records-empty,
+  .report-selected-preview,
+  .modal-overlay .modal-box,
+  .announcement-modal,
+  .report-modal {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+
+  .report-loading,
+  .report-error,
+  .report-records-empty {
+    min-height: 72px;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    text-align: center;
+  }
+
+  :where(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid rgba(45, 160, 103, 0.9) !important;
+    outline-offset: 3px !important;
+  }
+
+  :where(input, textarea, select):focus-visible {
+    border-color: var(--accent, #2da067) !important;
+    box-shadow: 0 0 0 3px rgba(45, 160, 103, 0.18) !important;
+  }
+}
