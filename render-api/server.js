@@ -11131,12 +11131,17 @@ async function handleDeepThinkChat(req, res) {
   function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
   function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
 
-  req.on('close', function() {
+  function markDeepThinkDisconnected() {
+    if (aborted) return;
     aborted = true;
     cancelToken.cancelled = true;
     try { console.log('[DEEP-THINK] client disconnected, reqId:', clientReqId || '?', 'convId:', convId); } catch (e) {}
     try { clearInterval(_heartbeatTimer); } catch (e) {}
     activeDeepThinkJobs.delete(convId);
+  }
+  req.on('aborted', markDeepThinkDisconnected);
+  res.on('close', function() {
+    if (!res.writableEnded) markDeepThinkDisconnected();
   });
 
   try {
@@ -11505,7 +11510,8 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 // POST /api/agent/chat
 app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
-  req.on('close', function() { aborted = true; });
+  req.on('aborted', function() { aborted = true; });
+  res.on('close', function() { if (!res.writableEnded) aborted = true; });
 
   // ★ M: 深度思考模式分支 — 走 SSE 长连接 + 多 agent 流程
   if (req.body && req.body.deep_think === true) {
@@ -11712,13 +11718,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var _controller, _reader, _timer, _fcTimer;
   function safeEnd() { if (!res.writableEnded) res.end(); }
   
-  req.on('close', function() {
+  function markStreamDisconnected() {
+    if (aborted) return;
     aborted = true;
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
     try { _controller && _controller.abort(); } catch (e) {}
     try { _reader && _reader.cancel(); } catch (e) {}
     try { clearTimeout(_timer); } catch (e) {}
     try { clearTimeout(_fcTimer); } catch (e) {}
+  }
+  req.on('aborted', markStreamDisconnected);
+  res.on('close', function() {
+    if (!res.writableEnded) markStreamDisconnected();
   });
   
   try {
