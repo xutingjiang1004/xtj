@@ -5393,7 +5393,7 @@ async function verifyToken(req, res, next) {
   }
 
   var payload = verifySignedToken(token);
-  if (payload) {
+  if (payload && payload.user === ADMIN_USERNAME && !payload.type) {
     req.adminToken = token;
     req.adminName = payload.user || payload.user_name || 'admin';
     return next();
