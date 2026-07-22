@@ -8,6 +8,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const core = fs.readFileSync(path.join(root, 'js', 'core.js'), 'utf8');
 const style = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
+const uiShell = fs.readFileSync(path.join(root, 'css', 'ui-shell.css'), 'utf8');
+const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 
 function between(source, start, end) {
@@ -85,6 +87,16 @@ test('like feedback uses a single removable cherry blossom without forced reflow
 test('header avatar keeps a fixed circular 24px footprint', () => {
   assert.match(style, /#authUI \.user-pill #myAvatar\s*\{[\s\S]*?inline-size:\s*24px !important;[\s\S]*?block-size:\s*24px !important;[\s\S]*?flex:\s*0 0 24px !important;[\s\S]*?aspect-ratio:\s*1 \/ 1;/);
   assert.match(style, /#authUI \.user-pill #myAvatar > img\s*\{[\s\S]*?object-fit:\s*cover !important;/);
+});
+
+test('iOS visual viewport reserves status-bar and Dock space without changing Dock structure', () => {
+  assert.match(index, /viewport-fit=cover/);
+  assert.match(core, /root\.classList\.add\('xtj-ios-viewport'\)/);
+  assert.match(core, /--xtj-visual-bottom/);
+  assert.match(core, /--xtj-dock-reserve/);
+  assert.match(uiShell, /html\.xtj-ios-viewport \.dock-bar\s*\{[\s\S]*?bottom:\s*max\(var\(--xtj-visual-bottom\), env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(uiShell, /html\.xtj-ios-viewport \.dock-panel\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--xtj-dock-reserve\) \+ env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(uiShell, /#panelPosts \.posts-nav\.sticky-header\s*\{[\s\S]*?env\(safe-area-inset-top, 0px\)/);
 });
 
 test('pin request serializes a UUID string and a boolean', () => {

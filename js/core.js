@@ -9898,6 +9898,7 @@ function renderProfileActivityList(kind) {
                     const dockBar = document.getElementById('dockBar');
                     const inputs = ['dockChatInput', 'postInp', 'announcementAdminInput', 'announcementAdminTitle', 'authUserInput', 'authPassInput'];
                     const root = document.documentElement;
+                    root.classList.add('xtj-ios-viewport');
                     let keyboardOpen = false;
 
                     function hasActiveInput() {
@@ -9909,7 +9910,13 @@ function renderProfileActivityList(kind) {
                         var vv = window.visualViewport;
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        var keyboardGap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        var viewportBottom = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        root.style.setProperty('--xtj-visual-bottom', viewportBottom + 'px');
+                        if (dockBar) {
+                            // Reserve the real Dock footprint so the last post never scrolls behind it.
+                            root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');
+                        }
+                        var keyboardGap = viewportBottom;
                         root.style.setProperty('--xtj-ios-keyboard-gap', keyboardGap + 'px');
                         var chatFocused = document.activeElement && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
                         var shouldCollapseDock = !!(chatFocused && keyboardGap > 0);
