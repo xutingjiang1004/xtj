@@ -3835,21 +3835,10 @@ function renderProfileActivityList(kind) {
 
             var likeOperations = Object.create(null);
 
-            function animatePostLikeFeedback(postId, liked) {
-                var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
-                getPostLikeButtons(postId).forEach(function(likeBtn) {
-                    if (likeBtn._likeFeedbackTimer) clearTimeout(likeBtn._likeFeedbackTimer);
-                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
-                    likeBtn.classList.add(className);
-                    likeBtn._likeFeedbackTimer = setTimeout(function() { likeBtn.classList.remove(className); }, 180);
-                });
-            }
-
             function applyPostLikeIntent(postId, liked, sourceButton) {
                 updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
                 updateFeedStats();
-                animatePostLikeFeedback(postId, liked);
-                if (liked && sourceButton) createLikeParticles(sourceButton);
+                if (liked && sourceButton) createLikeBlossom(sourceButton);
             }
 
             function flushPostLikeOperation(postId, operation) {
@@ -3914,29 +3903,42 @@ function renderProfileActivityList(kind) {
                 return operation.promise;
             };
 
-            function createLikeParticles(btn) {
+            var likeBlossomSequence = 0;
+
+            function createLikeBlossom(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
                 if (perfProfile === 'lite') return;
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-                const rect = btn.getBoundingClientRect();
-                const cx = rect.left + rect.width/2;
-                const cy = rect.top + rect.height/2;
-                const burstCount = perfProfile === 'balanced' ? 2 : 3;
-                for (let i=0; i<burstCount; i++) {
-                    const particle = document.createElement('i');
-                    particle.className = 'like-particle';
-                    particle.setAttribute('aria-hidden', 'true');
-                    const angle = (-Math.PI * 0.82) + (Math.PI * 0.64 * i / Math.max(1, burstCount - 1));
-                    const distance = 18 + i * 7;
-                    particle.style.left = cx + 'px';
-                    particle.style.top = cy + 'px';
-                    particle.style.setProperty('--like-particle-x', Math.cos(angle) * distance + 'px');
-                    particle.style.setProperty('--like-particle-y', Math.sin(angle) * distance + 'px');
-                    particle.style.setProperty('--like-particle-delay', (i * 20) + 'ms');
-                    document.body.appendChild(particle);
-                    particle.addEventListener('animationend', function() { particle.remove(); }, { once: true });
-                    setTimeout(function() { particle.remove(); }, 520);
+                var layer = btn.closest ? btn.closest('.actions') : btn.parentElement;
+                if (!layer) return;
+
+                var existing = btn._likeBlossom;
+                if (existing) {
+                    if (existing.timer) clearTimeout(existing.timer);
+                    if (existing.node && existing.node.parentNode) existing.node.remove();
                 }
+
+                var buttonRect = btn.getBoundingClientRect();
+                var layerRect = layer.getBoundingClientRect();
+                var blossom = document.createElement('span');
+                var gradientId = 'xtj-like-blossom-gradient-' + (++likeBlossomSequence);
+                blossom.className = 'like-blossom';
+                blossom.setAttribute('aria-hidden', 'true');
+                blossom.style.left = (buttonRect.left - layerRect.left + buttonRect.width / 2) + 'px';
+                blossom.style.top = (buttonRect.top - layerRect.top + buttonRect.height / 2) + 'px';
+                blossom.innerHTML = '<svg viewBox="0 0 100 100" focusable="false"><defs><linearGradient id="' + gradientId + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe8f0"/><stop offset=".62" stop-color="#ffb4c8"/><stop offset="1" stop-color="#ff91ad"/></linearGradient></defs><g transform="translate(50 50)"><g transform="rotate(0)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(72)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(144)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(216)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(288)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><circle cx="0" cy="0" r="7.5" fill="#ffd96b"/><circle cx="-2" cy="-1" r="2.2" fill="#fff2ad"/></g></svg>';
+                btn.classList.add('like-bloom-origin');
+                layer.appendChild(blossom);
+
+                var cleanup = function() {
+                    if (btn._likeBlossom && btn._likeBlossom.node === blossom) btn._likeBlossom = null;
+                    if (blossom.parentNode) blossom.remove();
+                };
+                blossom.addEventListener('animationend', cleanup, { once: true });
+                btn._likeBlossom = {
+                    node: blossom,
+                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 620 : 820)
+                };
             }
 
             // ===================== 鐠囧嫯顔?=====================
