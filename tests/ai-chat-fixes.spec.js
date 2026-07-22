@@ -5,12 +5,21 @@ test.describe('AI Agent Chat Fixes Validation', () => {
   test.beforeEach(async ({ page }) => {
     // 设置模拟登录态
     await page.addInitScript(() => {
-      window.currentUser = 'test_user_' + Date.now();
+      window.currentUser = 'test_user_demo';
+      window.localStorage.setItem('xtj_user', 'test_user_demo');
       window.localStorage.setItem('xtj_user_token', 'fake_token');
+      window.ensureProtectedOperationAuth = async () => ({ ok: true });
+      window.ensureUserToken = async () => 'fake_token';
     });
-    // 假设测试页面为根目录
-    await page.goto('/');
-    
+
+    await page.route('**/api/user/**', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, token: 'fake_token', user: { user_name: 'test_user_demo' } })
+      });
+    });
+
     // 初始化配置模拟
     await page.route('**/api/agent/config', route => {
       route.fulfill({
@@ -22,6 +31,18 @@ test.describe('AI Agent Chat Fixes Validation', () => {
         })
       });
     });
+
+    // 默认历史聊记录接口模拟
+    await page.route('**/api/agent/chat/history*', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, conversation_id: 'default', messages: [] })
+      });
+    });
+
+    // 假设测试页面为根目录
+    await page.goto('/');
   });
 
   test('静态名称不会被 config 覆盖', async ({ page }) => {
@@ -48,7 +69,8 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     });
 
     await page.evaluate(() => {
-      window.localStorage.setItem('xtj_ai_last_conversation_id', 'stale-id');
+      if (window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+      window.localStorage.removeItem('xtj_ai_last_conversation_id');
       if (window.__xtjOpenAiChat) window.__xtjOpenAiChat();
     });
 
@@ -61,19 +83,26 @@ test.describe('AI Agent Chat Fixes Validation', () => {
   });
 
   test('主动选择历史会话必须请求指定ID', async ({ page }) => {
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
     let historyRequests = [];
     await page.route('**/api/agent/chat/history*', route => {
-      historyRequests.push(route.request().url());
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, conversation_id: 'spec-id', messages: [] }) });
+      const requestUrl = route.request().url();
+      historyRequests.push(requestUrl);
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, conversation_id: requestUrl.includes('conversation_id=spec-id') ? 'spec-id' : 'init-id', messages: [] }) });
     });
 
-    await page.evaluate(() => {
-      if (window.__xtjAiAgent && window.__xtjAiAgent.openConversation) {
-        window.__xtjAiAgent.openConversation('spec-id');
-      }
+    await page.waitForFunction(() => !!(window.__xtjAiAgent && window.__xtjAiAgent.openConversation));
+    const responsePromise = page.waitForResponse(resp => resp.url().includes('conversation_id=spec-id'), { timeout: 4000 });
+    await page.evaluate(async () => {
+      window.sessionStorage.clear();
+      window.localStorage.setItem('xtj_user', 'test_user_demo');
+      window.localStorage.setItem('xtj_user_token', 'fake_token');
+      window.localStorage.removeItem('xtj_ai_last_conversation_id');
+      if (window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+      await window.__xtjAiAgent.openConversation('spec-id');
     });
 
-    await page.waitForTimeout(500);
+    await responsePromise;
     const url = historyRequests.find(u => u.includes('conversation_id=spec-id'));
     expect(url).toBeTruthy();
   });
@@ -109,8 +138,12 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     });
 
     await page.evaluate(() => {
+      window.currentUser = 'test_user_demo';
       var uk = encodeURIComponent(window.currentUser);
-      window.sessionStorage.setItem('xtj_ai_history:' + uk + ':default', JSON.stringify([{ role: 'user', content: 'CACHE_MSG_123' }]));
+      window.sessionStorage.setItem('xtj_ai_history:' + uk + ':default', JSON.stringify({
+        conversation_id: 'default',
+        messages: [{ role: 'user', content: 'CACHE_MSG_123' }, { role: 'assistant', content: 'REPLY_123' }]
+      }));
       if (window.__xtjOpenAiChat) window.__xtjOpenAiChat();
     });
 
