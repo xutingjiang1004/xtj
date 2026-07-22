@@ -46,7 +46,7 @@ test('all post mutations preserve production UUID identifiers', () => {
     assert.match(route, /normalizePostId\(/, `${endpoint} must validate a UUID without numeric coercion`);
     assert.doesNotMatch(route, /parseInt\([^\n]*post_id|Number\([^\n]*post_id/);
   }
-  assert.match(core, /post_id: normalizedPostId, liked: nextLiked/);
+  assert.match(core, /post_id: normalizedPostId, liked: requestedLiked/);
   assert.match(core, /post_id: normalizedPostId, is_pinned: Boolean\(nextPinned\)/);
 });
 

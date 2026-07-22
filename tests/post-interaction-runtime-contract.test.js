@@ -60,3 +60,11 @@ test('pin transition handles edge cases like concurrent requests and animation c
   // Check for frontend failure differentiation
   assert.match(pin, /serverSucceeded/);
 });
+
+test('post tools menu closes when any scroll container, viewport, or page visibility changes', () => {
+  const tools = between('var activePostToolsMenu = null;', 'var activePostAiSession = null;');
+  assert.match(tools, /document\.addEventListener\('scroll',\s*closePostToolsMenu,\s*\{ capture: true, passive: true \}\)/);
+  assert.match(tools, /window\.addEventListener\('resize',\s*closePostToolsMenu/);
+  assert.match(tools, /visualViewport\.addEventListener\('scroll',\s*closePostToolsMenu/);
+  assert.match(tools, /document\.hidden\) closePostToolsMenu\(\)/);
+});
