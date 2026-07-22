@@ -2317,15 +2317,18 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       if (p.visibility === 'private' && !isAdmin && p.user_name !== userName) return false;
       return true;
     });
-    // client-side filter: check extracted text content (not just raw JSON)
-    if (keywords.length > 0) {
-      candidates = candidates.filter(function(p) {
-        var text = aiSiteText(p.content, 10000);
-        var userMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        var contentMatch = keywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        return contentMatch || (keywords.length === 1 && userMatch);
-      });
-    }
+        // client-side filter: check extracted text content (not just raw JSON)
+    candidates = candidates.filter(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var userKeywordMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      var authorMatch = searchPlan && searchPlan.author && (p.user_name || '').toLowerCase().indexOf(searchPlan.author.toLowerCase()) >= 0;
+      var contentMatch = true;
+      if (keywords.length > 0) {
+        contentMatch = keywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      }
+      if (authorMatch) return contentMatch;
+      return contentMatch || (keywords.length === 1 && userKeywordMatch);
+    });
     rows = candidates.map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -2348,52 +2351,37 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     });
   } else if (source === 'photos') {
     var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__');
-    var photoOrParts = keywords.map(function(k) { return 'content.ilike.%' + k.replace(/[%_]/g, '\\} else if (source === 'photos') {
-    var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
-      var text = aiSiteText(p.content, 10000);
-      var score = aiSiteMatchScore(text, q);
-      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
-    });
-  } else if (source === 'dm') {') + '%'; });
+    var photoOrParts = keywords.map(function(k) { return 'content.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%'; });
     keywords.forEach(function(k) {
-      photoOrParts.push('user_name.ilike.%' + k.replace(/[%_]/g, '\\} else if (source === 'photos') {
-    var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
-      var text = aiSiteText(p.content, 10000);
-      var score = aiSiteMatchScore(text, q);
-      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
-    });
-  } else if (source === 'dm') {') + '%');
+      photoOrParts.push('user_name.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%');
     });
     if (photoOrParts.length > 0) {
       photoQuery = photoQuery.or(photoOrParts.join(','));
     }
     if (searchPlan && searchPlan.author) {
-      photoQuery = photoQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\} else if (source === 'photos') {
-    var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
-      var text = aiSiteText(p.content, 10000);
-      var score = aiSiteMatchScore(text, q);
-      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
-    });
-  } else if (source === 'dm') {') + '%');
+      photoQuery = photoQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\$&') + '%');
     }
+    // date range
+    if (searchPlan && searchPlan.date_from) photoQuery = photoQuery.gte('created_at', searchPlan.date_from);
+    if (searchPlan && searchPlan.date_to) photoQuery = photoQuery.lte('created_at', searchPlan.date_to);
+    
     var photoRes = await photoQuery.order('created_at', { ascending: false }).limit(take * 3);
     if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
     
     var candidates = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; });
-    if (keywords.length > 0) {
-      candidates = candidates.filter(function(p) {
-        var text = aiSiteText(p.content, 10000);
-        var userMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        var contentMatch = keywords.some(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        return contentMatch || userMatch;
-      });
-    }
+    candidates = candidates.filter(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var photoIgnoreKeywords = ['照片', '图片', '图', 'photo'];
+      var effectiveKeywords = keywords.filter(function(k) { return photoIgnoreKeywords.indexOf(k.toLowerCase()) < 0; });
+      var userKeywordMatch = effectiveKeywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      var authorMatch = searchPlan && searchPlan.author && (p.user_name || '').toLowerCase().indexOf(searchPlan.author.toLowerCase()) >= 0;
+      var contentMatch = true;
+      if (effectiveKeywords.length > 0) {
+        contentMatch = effectiveKeywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      }
+      if (authorMatch) return contentMatch;
+      return contentMatch || (effectiveKeywords.length === 1 && userKeywordMatch);
+    });
     rows = candidates.slice(0, take).map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
