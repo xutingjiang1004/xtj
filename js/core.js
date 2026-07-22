@@ -388,6 +388,7 @@ const ADMIN_NAME = "xxz";
                 try { window.safeStorage.remove('xtj_user'); } catch(e) {}
                 try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
+                try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
                 // Explicit logout revokes the refresh cookie. An expired session
                 // must not make another request just to report that it expired.
