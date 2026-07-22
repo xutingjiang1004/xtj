@@ -448,6 +448,21 @@
             border-radius: 99px; font-size: 13px; font-weight: 600;
         }
 
+        /* The compact header avatar must not inherit the feed avatar's 40px flex basis. */
+        #authUI .user-pill #myAvatar {
+            inline-size: 24px !important;
+            block-size: 24px !important;
+            flex: 0 0 24px !important;
+            aspect-ratio: 1 / 1;
+            border-radius: 50%;
+        }
+        #authUI .user-pill #myAvatar > img {
+            inline-size: 100% !important;
+            block-size: 100% !important;
+            object-fit: cover !important;
+            border-radius: inherit;
+        }
+
         .wrap {
             position: relative; z-index: 2; max-width: 640px; margin: 24px auto 80px; padding: 0 16px;
             display: flex; flex-direction: column; gap: 24px;
@@ -1123,54 +1138,24 @@
             box-shadow: 0 4px 16px rgba(255, 59, 96, 0.2);
         }
 
-        .heart-particle {
+        .like-particle {
             position: fixed;
-            width: 20px;
-            height: 20px;
-            margin: -10px 0 0 -10px;
-            display: grid;
-            place-items: center;
-            color: #ff496f;
-            font-size: 18px;
-            line-height: 1;
-            pointer-events: none;
-            animation: heartFly 800ms cubic-bezier(.18,.89,.32,1.2) var(--heart-delay, 0ms) forwards;
-            z-index: 9999;
-            text-shadow: 0 2px 8px rgba(255, 59, 96, 0.4);
-            filter: drop-shadow(0 0 4px rgba(255,59,96,0.3));
-        }
-        @keyframes heartFly {
-            0%   { transform: translate3d(0, 0, 0) scale(.3) rotate(0); opacity: 0; }
-            15%  { opacity: 1; transform: translate3d(calc(var(--heart-x) * 0.2), calc(var(--heart-y) * 0.2), 0) scale(1.2) }
-            50%  { opacity: .9; transform: translate3d(calc(var(--heart-x) * 0.6), calc(var(--heart-y) * 0.6), 0) scale(1) }
-            100% { transform: translate3d(var(--heart-x), var(--heart-y), 0) scale(.8); opacity: 0; }
-        }
-        
-        .pulse-ring {
-            position: fixed;
-            width: 40px;
-            height: 40px;
-            margin: -20px 0 0 -20px;
+            width: 6px;
+            height: 6px;
+            margin: -3px 0 0 -3px;
             border-radius: 50%;
-            border: 2px solid #ff496f;
+            background: #ff5d7f;
             pointer-events: none;
-            animation: pulseRingAnim 600ms cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
-            z-index: 9998;
+            animation: likeParticleFly 460ms cubic-bezier(.16, 1, .3, 1) var(--like-particle-delay, 0ms) forwards;
+            z-index: 9999;
+            box-shadow: 0 0 0 3px rgba(255, 93, 127, 0.14);
         }
-        @keyframes pulseRingAnim {
-            0% { transform: scale(0.5); opacity: 0.8; border-width: 4px; }
-            100% { transform: scale(2.5); opacity: 0; border-width: 0px; }
+        @keyframes likeParticleFly {
+            0% { transform: translate3d(0, 0, 0); opacity: 0; }
+            20% { opacity: .9; }
+            100% { transform: translate3d(var(--like-particle-x), var(--like-particle-y), 0); opacity: 0; }
         }
         
-        .like-feedback-add {
-            animation: likePop 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        @keyframes likePop {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.15); }
-            100% { transform: scale(1); }
-        }
-
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: 0; }
         .action-btn.del:hover { background: rgba(255,59,96,0.06); }
         .action-btn.pin {
@@ -7483,23 +7468,22 @@
 
 /* Interaction feedback: like, publish and incremental feed updates. */
 .action-btn.like-feedback-add {
-  animation: xtj-like-add 220ms ease-out !important;
+  animation: xtj-like-add 180ms ease-out !important;
 }
 
 .action-btn.like-feedback-remove {
-  animation: xtj-like-remove 220ms ease-out !important;
+  animation: xtj-like-remove 180ms ease-out !important;
 }
 
 @keyframes xtj-like-add {
-  0% { filter: brightness(1); }
-  45% { filter: brightness(1.08); }
-  100% { filter: brightness(1); }
+  0% { box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12); }
+  45% { box-shadow: 0 6px 16px rgba(255, 59, 96, 0.2); }
+  100% { box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12); }
 }
 
 @keyframes xtj-like-remove {
-  0% { opacity: 1; }
-  48% { opacity: .7; }
-  100% { opacity: 1; }
+  0% { border-color: rgba(255, 59, 96, 0.4); }
+  100% { border-color: rgba(255, 255, 255, 0.7); }
 }
 
 #pubBtn.is-loading,
@@ -7569,7 +7553,7 @@ button.post-publish.is-loading::after {
 @media (prefers-reduced-motion: reduce) {
   .action-btn.like-feedback-add,
   .action-btn.like-feedback-remove,
-  .heart-particle,
+  .like-particle,
   .post.is-newly-published {
     animation: none !important;
   }
@@ -7820,7 +7804,7 @@ button.post-publish.is-loading::after {
 .perf-balanced .chat-list-item,
 .perf-balanced .profile-setting-item,
 .perf-balanced .photo-card,
-.perf-balanced .heart-particle {
+.perf-balanced .like-particle {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08) !important;
 }
 
@@ -7862,11 +7846,11 @@ button.post-publish.is-loading::after {
   filter: none !important;
 }
 
-.perf-lite .heart-particle {
+.perf-lite .like-particle {
   display: none !important;
 }
 
-.perf-balanced .heart-particle {
+.perf-balanced .like-particle {
   animation-duration: 0.55s !important;
 }
 
