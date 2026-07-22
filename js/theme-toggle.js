@@ -11,6 +11,8 @@
   var clearSwitchingTimer = 0;
   var themeBtn = null;
   var profileThemeToggle = null;
+  var desktopThemeMode = null;
+  var systemThemeQuery = null;
 
   function getSystemTheme() {
     try {
@@ -25,7 +27,7 @@
   function readStoredTheme() {
     try {
       var stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === 'dark' || stored === 'light') return stored;
+      if (stored === 'dark' || stored === 'light' || stored === 'system') return stored;
       var legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (legacy === 'dark' || legacy === 'light') {
         localStorage.setItem(STORAGE_KEY, legacy);
@@ -35,18 +37,25 @@
     return '';
   }
 
-  function resolveTheme() {
-    return readStoredTheme() || htmlEl.getAttribute('data-theme') || getSystemTheme();
+  function resolveThemeMode() {
+    var stored = readStoredTheme();
+    if (stored) return stored;
+    var currentMode = htmlEl.getAttribute('data-theme-mode');
+    return currentMode === 'dark' || currentMode === 'light' || currentMode === 'system' ? currentMode : 'system';
   }
 
-  function persistTheme(theme) {
+  function resolveTheme(mode) {
+    return mode === 'system' ? getSystemTheme() : (mode === 'dark' ? 'dark' : 'light');
+  }
+
+  function persistTheme(mode) {
     try {
-      localStorage.setItem(STORAGE_KEY, theme);
+      localStorage.setItem(STORAGE_KEY, mode);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch (_) {}
   }
 
-  function syncControls(theme) {
+  function syncControls(theme, mode) {
     if (!themeBtn) themeBtn = document.getElementById('themeToggle');
     var isDark = theme === 'dark';
     if (themeBtn) {
@@ -60,11 +69,16 @@
       profileThemeToggle.checked = isDark;
       profileThemeToggle.setAttribute('aria-checked', isDark ? 'true' : 'false');
     }
+    if (!desktopThemeMode) desktopThemeMode = document.getElementById('desktopThemeMode');
+    if (desktopThemeMode) desktopThemeMode.value = mode;
   }
 
-  function applyTheme(theme) {
-    htmlEl.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
-    syncControls(theme);
+  function applyThemeMode(mode) {
+    var normalizedMode = mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
+    var theme = resolveTheme(normalizedMode);
+    htmlEl.setAttribute('data-theme-mode', normalizedMode);
+    htmlEl.setAttribute('data-theme', theme);
+    syncControls(theme, normalizedMode);
   }
 
   function clearThemeSwitching() {
@@ -90,10 +104,10 @@
     }
   }
 
-  function setTheme(theme) {
-    var nextTheme = theme === 'dark' ? 'dark' : 'light';
-    applyTheme(nextTheme);
-    persistTheme(nextTheme);
+  function setThemeMode(mode) {
+    var nextMode = mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
+    applyThemeMode(nextMode);
+    persistTheme(nextMode);
     startThemeSwitching();
   }
 
@@ -102,13 +116,14 @@
       window.clearTimeout(switchTimer);
       switchTimer = 0;
     }
-    var currentTheme = resolveTheme();
+    var currentMode = resolveThemeMode();
+    var currentTheme = resolveTheme(currentMode);
     var nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
 
     if (supportsTransitionAnimation()) {
       try {
         document.startViewTransition(function () {
-          applyTheme(nextTheme);
+          applyThemeMode(nextTheme);
           persistTheme(nextTheme);
         });
         startThemeSwitching();
@@ -119,7 +134,7 @@
       } catch (_) {}
     }
 
-    setTheme(nextTheme);
+    setThemeMode(nextTheme);
     switchTimer = window.setTimeout(function () {
       switchTimer = 0;
     }, 300);
@@ -142,15 +157,33 @@
       var that = this;
       var next = that.checked ? 'dark' : 'light';
       if (profileThemeToggle._debounceTimer) clearTimeout(profileThemeToggle._debounceTimer);
-      profileThemeToggle._debounceTimer = setTimeout(function() { setTheme(next); }, 100);
+      profileThemeToggle._debounceTimer = setTimeout(function() { setThemeMode(next); }, 100);
+    });
+    desktopThemeMode = document.getElementById('desktopThemeMode');
+    bindElementOnce(desktopThemeMode, 'change', function () {
+      setThemeMode(this.value);
     });
   }
 
   function initThemeController() {
-    var theme = resolveTheme();
-    applyTheme(theme);
+    var mode = resolveThemeMode();
+    applyThemeMode(mode);
     bindThemeToggle();
+    try {
+      systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      var handleSystemThemeChange = function () {
+        if (resolveThemeMode() === 'system') applyThemeMode('system');
+      };
+      if (systemThemeQuery.addEventListener) systemThemeQuery.addEventListener('change', handleSystemThemeChange);
+      else if (systemThemeQuery.addListener) systemThemeQuery.addListener(handleSystemThemeChange);
+    } catch (_) {}
   }
+
+  window.XTJThemeController = {
+    setMode: setThemeMode,
+    getMode: resolveThemeMode,
+    getResolvedTheme: function () { return resolveTheme(resolveThemeMode()); }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initThemeController, { once: true });
