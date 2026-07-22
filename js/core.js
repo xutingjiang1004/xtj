@@ -9599,6 +9599,10 @@ function renderProfileActivityList(kind) {
             }
 
             function buildDockChatBodyMarkup(message) {
+                var payload = getDMMessagePayload(message);
+                if (payload && payload.withdrawn) {
+                    return '<span class="msg-text withdrawn" style="color: #999; font-style: italic;">[此消息已被撤回]</span>';
+                }
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
@@ -9616,16 +9620,28 @@ function renderProfileActivityList(kind) {
                 return '<span class="msg-text">' + escapeHtml(messageText || '') + '</span>';
             }
 
-            function buildDockChatRowMarkup(message, avatars, disableAnim) {
+                        function buildDockChatRowMarkup(message, avatars, disableAnim) {
                 var sent = message.user_name === currentUser;
                 var avatarHtml = sent ? avatars.mine : avatars.other;
                 var readStatus = sent ? (isMsgReadByMe(message) ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                
+                var payload = getDMMessagePayload(message);
+                var isWithdrawn = payload && payload.withdrawn;
+                
+                var elapsed = Date.now() - new Date(message.created_at).getTime();
+                var timeLimit = (currentUser === window.ADMIN_USERNAME) ? (10 * 60 * 1000) : (3 * 60 * 1000);
+                var canWithdraw = sent && !message.__optimistic && !isWithdrawn && (elapsed <= timeLimit);
+                
+                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" onclick="window.withdrawDMMessage(\'' + message.id + '\', this)" style="cursor:pointer; font-size: 11px; margin-left: 6px; color: #999;">撤回</span>' : '';
+                
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
                 if (message.__optimistic) bubbleClass += ' pending';
+                if (isWithdrawn) bubbleClass += ' is-withdrawn';
+                
                 var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
-                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span></div>';
+                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + withdrawBtn + '</span></div>';
                 if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
                 return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
             }
@@ -9743,6 +9759,32 @@ function renderProfileActivityList(kind) {
                 patchDockChatMessageAvatars(userName);
                 if (shouldAutoScroll) el.scrollTop = el.scrollHeight;
             }
+
+            window.withdrawDMMessage = async function(id, btnEl) {
+                if (!id) return;
+                var oldText = btnEl.textContent;
+                btnEl.textContent = '撤回中...';
+                btnEl.style.pointerEvents = 'none';
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/withdraw', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: id })
+                    });
+                    var result = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || !result.ok) {
+                        throw new Error(result.error || '撤回失败');
+                    }
+                    if (result.message && dockChatActiveUser) {
+                        upsertDockChatCacheMessage(dockChatActiveUser, result.message);
+                        loadDockChatMessages(dockChatActiveUser, false);
+                    }
+                } catch (e) {
+                    window.showToast(e.message || '撤回请求失败');
+                    btnEl.textContent = oldText;
+                    btnEl.style.pointerEvents = 'auto';
+                }
+            };
 
             function scrollDockChatBottom() {
                 const el = document.getElementById('dockChatMessages');
