@@ -48,22 +48,27 @@ test('atomic like endpoint validates exact types and returns canonical state', (
   assert.match(endpoint, /\.eq\('post_id',\s*postId\)\.eq\('user_name',\s*req\.userName\)/);
 });
 
-test('like UI is optimistic, rolls back, animates both states, and has no success toast', () => {
-  const toggle = between(core, 'window.toggleLike = async function', 'function createHeartParticles');
-  assert.match(toggle, /updatePostLikeUi\(pid,\s*nextLiked/);
-  assert.match(toggle, /xtjProtectedFetch\('\/api\/post\/like'/);
-  assert.match(toggle, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*liked:\s*nextLiked \}\)/);
-  assert.match(toggle, /updatePostLikeUi\(pid,\s*wasLiked/);
-  assert.match(toggle, /animatePostLikeFeedback\(pid,\s*nextLiked\)/);
+test('like UI is optimistic, coalesces rapid toggles, and keeps the control interactive', () => {
+  const toggle = between(core, 'window.toggleLike = function', 'function createHeartParticles');
+  const flush = between(core, 'function flushPostLikeOperation', 'window.toggleLike = function');
+  assert.match(toggle, /operation\.desired\s*=\s*nextLiked/);
+  assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
+  assert.match(toggle, /if \(!operation\.running\) operation\.promise = flushPostLikeOperation/);
+  assert.match(flush, /xtjProtectedFetch\('\/api\/post\/like'/);
+  assert.match(flush, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*liked:\s*requestedLiked \}\)/);
+  assert.match(flush, /operation\.desired !== operation\.confirmed/);
+  assert.match(core, /likeBtn\.disabled\s*=\s*false/);
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
-  assert.doesNotMatch(toggle, /showToast\(['"](?:已点赞|已取消点赞)/);
 });
 
-test('like feedback scatters hearts without scaling the action button', () => {
-  const toggle = between(core, 'window.toggleLike = async function', 'function createHeartParticles');
+test('like feedback restarts cleanly and scatters hearts without scaling the action button', () => {
+  const toggle = between(core, 'window.toggleLike = function', 'function createHeartParticles');
+  const feedback = between(core, 'function animatePostLikeFeedback', 'function applyPostLikeIntent');
   const particles = between(core, 'function createHeartParticles', '// =====================');
   const feedbackCss = between(style, '/* Interaction feedback: like, publish', '#pubBtn.is-loading');
-  assert.match(toggle, /if \(nextLiked\) createHeartParticles\(btn\)/);
+  assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
+  assert.match(feedback, /void likeBtn\.offsetWidth/);
+  assert.match(feedback, /like-heart-anim/);
   assert.doesNotMatch(toggle, /xtjAnimateLikeToggle/);
   assert.match(particles, /prefers-reduced-motion:\s*reduce/);
   assert.match(particles, /--heart-x/);

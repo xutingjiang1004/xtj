@@ -447,6 +447,77 @@ test.describe('release validation', () => {
     await context.close();
   });
 
+  test('rapid post likes stay responsive and synchronize only the latest intent', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const page = await context.newPage();
+    await page.route('**/api/feed**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: [], comments: [], likes: [], next_offset: null })
+    }));
+    await gotoApp(page, { userName: 'like-tester' });
+    const initialState = await page.evaluate(async () => {
+      const id = '00000000-0000-4000-8000-000000000099';
+      const calls = [];
+      window.xtjProtectedFetch = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        calls.push(body.liked);
+        await new Promise(resolve => setTimeout(resolve, 80));
+        return { ok: true, status: 200, json: async () => ({ ok: true, liked: body.liked }) };
+      };
+      await window.xtjPrependPostToFeed({
+        id,
+        user_name: 'like-tester',
+        content: 'rapid like regression',
+        created_at: new Date().toISOString(),
+        visibility: 'public',
+        views: 0
+      });
+      const button = document.querySelector(`.post[data-post-id="${id}"] .actions .action-btn`);
+      const first = window.toggleLike(button, id);
+      const second = window.toggleLike(button, id);
+      const during = { liked: button.classList.contains('liked'), disabled: button.disabled, busy: button.getAttribute('aria-busy') };
+      await Promise.all([first, second]);
+      return { calls, during, finalLiked: button.classList.contains('liked'), finalBusy: button.getAttribute('aria-busy') };
+    });
+    expect(initialState.during).toEqual({ liked: false, disabled: false, busy: 'true' });
+    expect(initialState.calls).toEqual([true, false]);
+    expect(initialState.finalLiked).toBeFalsy();
+    expect(initialState.finalBusy).toBeNull();
+    await context.close();
+  });
+
+  test('post tools menu closes when the posts panel scrolls', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const page = await context.newPage();
+    await page.route('**/api/feed**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: [], comments: [], likes: [], next_offset: null })
+    }));
+    await gotoApp(page, { userName: 'menu-tester' });
+    await page.evaluate(async () => {
+      const id = '00000000-0000-4000-8000-000000000100';
+      await window.xtjPrependPostToFeed({
+        id,
+        user_name: 'menu-tester',
+        content: 'tool menu regression',
+        created_at: new Date().toISOString(),
+        visibility: 'public',
+        views: 0
+      });
+      document.querySelector(`.post-tools-trigger[data-post-id="${id}"]`).click();
+    });
+    await expect(page.locator('.post-tools-menu')).toBeVisible();
+    await page.evaluate(() => {
+      const panel = document.getElementById('panelPosts');
+      panel.scrollTop += 1;
+      panel.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await expect(page.locator('.post-tools-menu')).toHaveCount(0);
+    await context.close();
+  });
+
   test('thirty real Dock clicks do not leak page errors, unhandled rejections, or horizontal overflow', async ({ page }) => {
     const pageErrors = [];
     await page.addInitScript(() => {
