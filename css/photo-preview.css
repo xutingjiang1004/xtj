@@ -294,3 +294,82 @@ html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-info-mo
     transition: none;
   }
 }
+
+/* Desktop fine-pointer deep adaptation: preserve the touch preview geometry. */
+@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+  html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-close {
+    top: 28px;
+    right: 32px;
+    width: 48px;
+    height: 48px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
+    width: 48px;
+    height: 48px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-prev {
+    left: 32px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-next {
+    right: 32px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img {
+    max-width: min(84vw, 1320px);
+    max-height: calc(100vh - 184px);
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar {
+    bottom: 28px;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn {
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    min-height: 46px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info {
+    bottom: 102px;
+    max-width: min(70vw, 860px);
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
+    width: min(560px, calc(100vw - 160px));
+    max-width: 560px;
+    max-height: min(76vh, 720px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 20px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-header {
+    padding: 18px 22px;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-close:focus-visible,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow:focus-visible,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar button:focus-visible,
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-close:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.92);
+    outline-offset: 4px;
+    box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.16);
+  }
+}
