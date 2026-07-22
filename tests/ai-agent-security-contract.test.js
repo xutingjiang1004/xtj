@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 
 test('AI module does not read legacy password-equivalent hashes', () => {
   assert.doesNotMatch(source, /PW_HASH_KEYS|readPwHash|hasLocalPasswordHash/);
@@ -27,4 +28,13 @@ test('AI close clears recurring status and configuration timers', () => {
   const closeBody = source.slice(closeStart, source.indexOf('function ', closeStart + 30));
   assert.match(closeBody, /clearInterval\(S\.statusTimer\)/);
   assert.match(closeBody, /clearInterval\(S\._configRefreshTimer\)/);
+});
+
+test('AI routes do not treat a normally completed request body as a disconnect', () => {
+  const aiRouteStart = serverSource.indexOf("app.post('/api/agent/chat'");
+  const aiRouteEnd = serverSource.indexOf("app.post('/api/agent/chat/stream'", aiRouteStart);
+  const aiRoutes = serverSource.slice(aiRouteStart, aiRouteEnd + 1800);
+  assert.doesNotMatch(aiRoutes, /req\.on\(['"]close['"]/);
+  assert.match(aiRoutes, /req\.on\(['"]aborted['"]/);
+  assert.match(aiRoutes, /res\.on\(['"]close['"]/);
 });

@@ -30,7 +30,6 @@
         else button.removeAttribute('aria-current');
       }
     });
-    syncChatInspector();
   }
 
   function syncUser() {
@@ -60,54 +59,6 @@
     target.hidden = !target.textContent.trim() || source.style.display === 'none';
   }
 
-  function getChatInspector(container) {
-    var inspector = document.getElementById('desktopChatInspector');
-    if (inspector || !container) return inspector;
-    inspector = document.createElement('aside');
-    inspector.id = 'desktopChatInspector';
-    inspector.className = 'desktop-chat-inspector';
-    inspector.setAttribute('aria-label', '会话资料');
-    inspector.hidden = true;
-    var kicker = document.createElement('small');
-    kicker.className = 'desktop-chat-inspector__kicker';
-    kicker.textContent = '会话资料';
-    var avatar = document.createElement('span');
-    avatar.className = 'desktop-chat-inspector__avatar';
-    var name = document.createElement('b');
-    name.className = 'desktop-chat-inspector__name';
-    var status = document.createElement('span');
-    status.className = 'desktop-chat-inspector__status';
-    inspector.appendChild(kicker);
-    inspector.appendChild(avatar);
-    inspector.appendChild(name);
-    inspector.appendChild(status);
-    container.appendChild(inspector);
-    return inspector;
-  }
-
-  function syncChatInspector() {
-    var container = document.getElementById('dockChatContainer');
-    var inspector = getChatInspector(container);
-    if (!inspector) return;
-    var isDesktop = false;
-    try { isDesktop = window.matchMedia('(min-width: 1280px) and (hover: hover) and (pointer: fine)').matches; } catch (_) {}
-    inspector.hidden = !isDesktop;
-    if (!isDesktop) return;
-    var name = inspector.querySelector('.desktop-chat-inspector__name');
-    var status = inspector.querySelector('.desktop-chat-inspector__status');
-    var avatar = inspector.querySelector('.desktop-chat-inspector__avatar');
-    var activeUser = window.dockChatActiveUser ? String(window.dockChatActiveUser) : '';
-    if (!activeUser) {
-      name.textContent = '选择一个会话';
-      status.textContent = '当前未打开私聊';
-      avatar.textContent = '?';
-      return;
-    }
-    name.textContent = activeUser;
-    status.textContent = '当前私聊对象';
-    avatar.textContent = activeUser.slice(0, 1).toUpperCase();
-  }
-
   function syncContacts() {
     var target = document.getElementById('desktopContactsPreview');
     if (!target) return;
@@ -116,7 +67,7 @@
     if (!window.currentUser) {
       var authEmpty = document.createElement('span');
       authEmpty.className = 'desktop-contacts-empty';
-      authEmpty.textContent = '鐧诲綍鍚庢樉绀烘渶杩戣仈绯讳汉';
+      authEmpty.textContent = '登录后显示最近联系人';
       target.appendChild(authEmpty);
       return;
     }
@@ -125,7 +76,7 @@
     if (!rows.length) {
       var empty = document.createElement('span');
       empty.className = 'desktop-contacts-empty';
-      empty.textContent = '鏆傛棤鏈€杩戣仈绯讳汉';
+      empty.textContent = '暂无最近联系人';
       target.appendChild(empty);
       return;
     }
@@ -232,14 +183,6 @@
     if (badge && window.MutationObserver) {
       new MutationObserver(syncChatBadge).observe(badge, { attributes: true, childList: true, characterData: true });
     }
-    var chatTitle = document.getElementById('dockChatTitle');
-    if (chatTitle && window.MutationObserver) {
-      new MutationObserver(syncChatInspector).observe(chatTitle, { childList: true, characterData: true, subtree: true });
-    }
-    var chatDetail = document.getElementById('dockChatDetailView');
-    if (chatDetail && window.MutationObserver) {
-      new MutationObserver(syncChatInspector).observe(chatDetail, { attributes: true, attributeFilter: ['class', 'style'] });
-    }
     var chatList = document.getElementById('dockChatList');
     if (chatList && window.MutationObserver) {
       new MutationObserver(scheduleContactsSync).observe(chatList, {
@@ -254,7 +197,6 @@
     syncUser();
     syncChatBadge();
     syncContacts();
-    syncChatInspector();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
