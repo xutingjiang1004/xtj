@@ -1912,3 +1912,149 @@
     color: var(--text) !important;
     word-break: break-all;
 }
+
+/* ===== Desktop administrator accessibility and layout pass ===== */
+@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+    .login-wrap {
+        padding: 40px;
+    }
+
+    .login-card {
+        width: min(100%, 480px);
+        max-width: 480px;
+        padding: 44px 40px;
+    }
+
+    .login-card h1,
+    .login-card p,
+    .login-err {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .login-card h1 {
+        line-height: 1.25;
+    }
+
+    .login-card p,
+    .login-err {
+        line-height: 1.5;
+    }
+
+    .login-card input,
+    .login-card button {
+        min-height: 48px;
+    }
+
+    .dash-header {
+        padding-inline: max(32px, calc((100vw - 1440px) / 2 + 32px));
+    }
+
+    .dash-header .dh-right {
+        width: auto;
+        min-width: 0;
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        overflow-x: auto;
+        overflow-y: visible;
+        padding: 2px 2px 6px;
+    }
+
+    .dash-content {
+        max-width: 1440px;
+        padding: 28px 32px;
+    }
+
+    .ai-admin-settings {
+        max-width: 960px;
+    }
+
+    .modal-overlay {
+        padding: 32px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .modal-dialog,
+    .modal-box {
+        max-height: min(90dvh, 820px);
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .modal-dialog.admin-detail-dialog {
+        width: min(calc(100vw - 64px), 1024px);
+        max-width: 1024px;
+        max-height: min(92dvh, 900px);
+        overflow: hidden;
+    }
+
+    .admin-detail-body {
+        scrollbar-width: thin;
+    }
+
+    .admin-detail-head h3,
+    .admin-card-title-row,
+    .admin-card-title-row p,
+    .admin-clipboard-item,
+    .admin-stack-item,
+    .admin-action-note,
+    .email-section,
+    .card,
+    .loading,
+    .empty,
+    .empty-state,
+    .admin-tab-loading-label,
+    [role="status"],
+    [role="alert"] {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.55;
+    }
+
+    .admin-tab-loading {
+        min-height: 260px;
+    }
+
+    .loading,
+    .empty,
+    .empty-state {
+        min-height: 96px;
+        display: grid;
+        place-items: center;
+        text-align: center;
+    }
+
+    .toast-wrap {
+        width: max-content;
+        max-width: min(720px, calc(100vw - 64px));
+    }
+
+    .toast-item {
+        max-width: min(720px, calc(100vw - 96px));
+        line-height: 1.5;
+        text-align: start;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    :where(
+        button,
+        a,
+        input,
+        textarea,
+        select,
+        [tabindex]:not([tabindex="-1"])
+    ):focus-visible {
+        outline: 3px solid rgba(5, 150, 105, 0.9) !important;
+        outline-offset: 3px !important;
+    }
+
+    :where(input, textarea, select):focus-visible {
+        border-color: var(--primary) !important;
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18) !important;
+    }
+}
