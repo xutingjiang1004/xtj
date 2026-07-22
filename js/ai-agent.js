@@ -24,7 +24,8 @@ window.throttleRAF = function(fn) {
   if (AI_DEBUG) { try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {} }
 
   var AI_DISPLAY_NAME = '小猫';
-  var HISTORY_PAGE_SIZE = 12;
+  // Keep the first network payload small; older messages remain available by scrolling.
+  var HISTORY_PAGE_SIZE = 10;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // 鈽?U3: 涓?TTL 涓€鑷? 閬垮厤姣忓垎閽熷仛鏃犵敤鍔?
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
@@ -668,6 +669,12 @@ window.throttleRAF = function(fn) {
         cached_at: Date.now()
       };
       sessionStorage.setItem(key, JSON.stringify(cacheObj));
+      // The first open after a reload has not resolved a conversation id yet.
+      // Keep a per-user latest alias so it can paint immediately while the server refreshes it.
+      if (cid) {
+        var latestKey = getAiHistoryCacheKey(null);
+        if (latestKey && latestKey !== key) sessionStorage.setItem(latestKey, JSON.stringify(cacheObj));
+      }
     } catch (e) {}
   }
 
