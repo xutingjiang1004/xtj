@@ -2317,15 +2317,18 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       if (p.visibility === 'private' && !isAdmin && p.user_name !== userName) return false;
       return true;
     });
-    // client-side filter: check extracted text content (not just raw JSON)
-    if (keywords.length > 0) {
-      candidates = candidates.filter(function(p) {
-        var text = aiSiteText(p.content, 10000);
-        var userMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        var contentMatch = keywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
-        return contentMatch || (keywords.length === 1 && userMatch);
-      });
-    }
+        // client-side filter: check extracted text content (not just raw JSON)
+    candidates = candidates.filter(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var userKeywordMatch = keywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      var authorMatch = searchPlan && searchPlan.author && (p.user_name || '').toLowerCase().indexOf(searchPlan.author.toLowerCase()) >= 0;
+      var contentMatch = true;
+      if (keywords.length > 0) {
+        contentMatch = keywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      }
+      if (authorMatch) return contentMatch;
+      return contentMatch || (keywords.length === 1 && userKeywordMatch);
+    });
     rows = candidates.map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -2347,9 +2350,39 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('comments', c.id, c.user_name + ' 的评论', aiSiteSnippet(c.content, q), c.created_at, { type: 'comment', post_id: c.post_id, comment_id: c.id }, q, score);
     });
   } else if (source === 'photos') {
-    var photoRes = await supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__');
+    var photoOrParts = keywords.map(function(k) { return 'content.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%'; });
+    keywords.forEach(function(k) {
+      photoOrParts.push('user_name.ilike.%' + k.replace(/[%_]/g, '\\$&') + '%');
+    });
+    if (photoOrParts.length > 0) {
+      photoQuery = photoQuery.or(photoOrParts.join(','));
+    }
+    if (searchPlan && searchPlan.author) {
+      photoQuery = photoQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\$&') + '%');
+    }
+    // date range
+    if (searchPlan && searchPlan.date_from) photoQuery = photoQuery.gte('created_at', searchPlan.date_from);
+    if (searchPlan && searchPlan.date_to) photoQuery = photoQuery.lte('created_at', searchPlan.date_to);
+    
+    var photoRes = await photoQuery.order('created_at', { ascending: false }).limit(take * 3);
     if (photoRes.error) { console.error('[aiSiteSearch] photos query error:', photoRes.error); return { results: [], error: { code: 'photos_query_failed', message: '照片搜索暂时不可用' } }; }
-    rows = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; }).map(function(p) {
+    
+    var candidates = (photoRes.data || []).filter(function(p) { return p.visibility !== 'private' || p.user_name === userName; });
+    candidates = candidates.filter(function(p) {
+      var text = aiSiteText(p.content, 10000);
+      var photoIgnoreKeywords = ['照片', '图片', '图', 'photo'];
+      var effectiveKeywords = keywords.filter(function(k) { return photoIgnoreKeywords.indexOf(k.toLowerCase()) < 0; });
+      var userKeywordMatch = effectiveKeywords.some(function(k) { return (p.user_name || '').toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      var authorMatch = searchPlan && searchPlan.author && (p.user_name || '').toLowerCase().indexOf(searchPlan.author.toLowerCase()) >= 0;
+      var contentMatch = true;
+      if (effectiveKeywords.length > 0) {
+        contentMatch = effectiveKeywords.every(function(k) { return text.toLowerCase().indexOf(k.toLowerCase()) >= 0; });
+      }
+      if (authorMatch) return contentMatch;
+      return contentMatch || (effectiveKeywords.length === 1 && userKeywordMatch);
+    });
+    rows = candidates.slice(0, take).map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
       return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
@@ -2446,8 +2479,9 @@ async function executeAiSiteTool(name, args, context) {
   if (definition.adminOnly && !aiSiteIsAdmin(context)) return { tool_name: name, error: '此操作仅管理员可用' };
   if (!definition.write) {
     var sources = name === 'search_everything' ? ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'] : [name.replace('search_', '').replace('_messages', '').replace('_history', '')];
-    var lookup = { posts: 'posts', comments: 'comments', photos: 'photos', dm: 'dm', ai: 'ai_history', users: 'users' };
-    var settled = await Promise.allSettled(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, args.query, userName, args.limit); }));
+        var lookup = { posts: 'posts', comments: 'comments', photos: 'photos', dm: 'dm', ai: 'ai_history', users: 'users' };
+    var searchPlan = parseSearchQuery(args.query);
+    var settled = await Promise.allSettled(sources.map(function(source) { return aiSiteSearch(lookup[source] || source, searchPlan.semantic_query || args.query, userName, args.limit, false, searchPlan); }));
     var found = [];
     var errors = [];
     settled.forEach(function(s) {
@@ -7434,7 +7468,61 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
   }
 });
 
+// POST /api/dm/withdraw - 撤回私信（发送者3分钟内，管理员10分钟内）
+app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var reqUser = req.userName;
+    var messageId = String(req.body && req.body.id || '').trim();
+
+    if (!messageId) {
+      return res.status(400).json({ error: '消息ID无效', code: 'invalid_id' });
+    }
+
+    var { data: msg } = await supabase.from('posts')
+      .select('id, user_name, created_at, content, media_type')
+      .eq('id', messageId)
+      .eq('media_type', DM_MARKER)
+      .maybeSingle();
+
+    if (!msg) {
+      return res.status(404).json({ error: '消息不存在', code: 'not_found' });
+    }
+
+    // 仅支持撤回自己发送的消息
+    if (msg.user_name !== reqUser) {
+      return res.status(403).json({ error: '无权撤回他人的消息', code: 'forbidden' });
+    }
+
+    var elapsed = Date.now() - new Date(msg.created_at).getTime();
+    var timeLimit = (reqUser === ADMIN_USERNAME) ? (10 * 60 * 1000) : (3 * 60 * 1000);
+
+    if (elapsed > timeLimit) {
+      return res.status(403).json({ error: '消息发送时间已超过可撤回期限', code: 'timeout' });
+    }
+
+    // 更新内容为撤回状态
+    var contentPayload = JSON.stringify({ text: '[消息已撤回]', withdrawn: true, read_at: null });
+    var { data: updated, error: updateErr } = await supabase
+      .from('posts')
+      .update({ content: contentPayload })
+      .eq('id', messageId)
+      .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
+      .single();
+
+    if (updateErr) {
+      console.error('[API] dm withdraw update error:', updateErr);
+      return res.status(500).json({ error: sanitizeError(updateErr), code: 'dm_withdraw_failed' });
+    }
+
+    return res.json({ ok: true, message: updated });
+  } catch (e) {
+    console.error('[API] dm withdraw:', e && e.message);
+    return res.status(500).json({ error: '撤回失败', code: 'dm_withdraw_error' });
+  }
+});
+
 // ===================== 封禁管理 ======================
+
 app.get('/admin/bans', verifyToken, async (req, res) => {
   try {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
@@ -10614,6 +10702,15 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
+// A conversation belongs to one surface. Never filter its user and assistant rows separately.
+function getConversationStorageMode(rows) {
+  for (var i = 0; i < (rows || []).length; i++) {
+    var meta = parseMsgMeta(rows[i]);
+    if (meta && meta.chat_mode === 'deep_think') return 'deep_think';
+  }
+  return 'normal';
+}
+
 function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingElapsedMs, extra) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
@@ -10858,10 +10955,10 @@ const AI_DEFAULT_CONFIG = {
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
-  // ★ M: default_thinking_mode 从 low 改成 max
-  //   用户要求: 普通聊天也用 max 思考程度
+    // ★ M: default_thinking_mode 从 max 改成 low
+  //   用户要求: 普通聊天改成默认low思考
   //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
-  model: { reasoner_model: DEEPSEEK_MODEL_REASONER, default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
+  model: { reasoner_model: DEEPSEEK_MODEL_REASONER, default_thinking_mode: 'low', allow_user_thinking_switch: false, multi_agent: true },
   // ★ P 新增: 深度思考模式子配置 (与普通聊天分开, 管理员独立切换)
   deep_think: {
     enabled: true,                    // 是否启用深度思考模式 (前端 toggle 可用)
@@ -11119,10 +11216,12 @@ async function handleDeepThinkChat(req, res) {
       var cachedContent = cachedHit.content;
       var cachedUsage = cachedHit.usage || null;
       var cachedAgentCount = cachedHit.agent_count || 1;
+      var cacheChatMode = (req.body && req.body.chat_mode) || 'normal';
       // ★ 缓存命中也要把消息保存到 DB (否则用户重进看不到), 用原始 thinking_log
       try {
         var cacheExtra = {
           deep_think: true,
+          chat_mode: cacheChatMode,
           agent_count: cachedAgentCount,
           planner: cachedHit.planner || null,
           worker_results: cachedHit.worker_results || [],
@@ -11134,7 +11233,7 @@ async function handleDeepThinkChat(req, res) {
             user_name: userName,
             content: message,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1),
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: cacheChatMode }),
             actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
           },
           {
@@ -11303,7 +11402,7 @@ async function handleDeepThinkChat(req, res) {
             user_name: userName,
             content: message,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1),
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: chatMode }),
             actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
           },
           {
@@ -11470,9 +11569,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //       AI 可以自己决定是否调用搜索
     var reply = '';
     var usage = null;
-    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
-    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
+        // ★ M: fallback 从 max 改成 low
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var reasoning = '';
     var toolCallsInfo = [];
     var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
@@ -11558,14 +11657,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', convId, null, null, 1),
+          media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal' }),
           actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
         },
         {
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal' }),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -11705,9 +11804,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 思考模式
-    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
-    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
+        // ★ M: fallback 从 max 改成 low
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     // DeepSeek cannot safely combine reasoning mode with tools. Station actions
     // are routed through function calling, so select the non-thinking path.
     if (/搜索|查找|找一下|私信|发送消息|草稿|公告|维修任务/i.test(message)) thinkingMode = 'off';
@@ -12563,6 +12662,14 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     if (!Array.isArray(rows)) {
       return res.json({ ok: true, conversations: [] });
     }
+
+    var conversationModes = {};
+    rows.forEach(function(row) {
+      var rowConvId = resolveConvId(row);
+      if (!rowConvId) return;
+      if (!conversationModes[rowConvId]) conversationModes[rowConvId] = 'normal';
+      if (parseMsgMeta(row).chat_mode === 'deep_think') conversationModes[rowConvId] = 'deep_think';
+    });
     
     // 按 convId 分组，统计所有消息
     // 用两个 pass：第一遍按时间倒序拿最新一条；第二遍计数 & 找第一条 user 消息
@@ -12574,10 +12681,8 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       var convId = resolveConvId(r);
       if (!convId) continue;
       
-      // mode 过滤：chat_mode = 'deep_think' 的只出现在深度研究列表
-      // 旧消息无 chat_mode 字段，视为 normal
-      if (mode === 'normal' && meta.chat_mode === 'deep_think') continue;
-      if (mode === 'deep_think' && meta.chat_mode !== 'deep_think') continue;
+      // Filter complete conversations so user/assistant pairs cannot be split across pages.
+      if (mode && conversationModes[convId] !== mode) continue;
       
       if (!convData[convId]) {
         convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
@@ -13026,16 +13131,10 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     var before = String(req.query.before || '').trim();
 
-    function matchesMode(row) {
-      if (!mode) return true;
-      var meta = parseMsgMeta(row);
-      return mode === 'deep_think' ? meta.chat_mode === 'deep_think' : meta.chat_mode !== 'deep_think';
-    }
-
     // 不带 convId → 先查最近一条 AI 消息的 convId
     if (!convId) {
       var { data: latestRows, error: latestError } = await supabase.from('posts')
-        .select('media_url')
+        .select('actor_key, media_url, created_at')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false })
@@ -13044,10 +13143,24 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
         console.error('[AGENT-CHAT] latest history query error:', latestError.message);
         return res.status(500).json({ error: '查询失败' });
       }
-      var latest = (latestRows || []).find(matchesMode);
-      if (latest) {
-        var meta = parseMsgMeta(latest);
-        if (meta && meta.convId) convId = meta.convId;
+      var recentConversations = {};
+      (latestRows || []).forEach(function(row) {
+        var rowConvId = resolveConvId(row);
+        if (!rowConvId) return;
+        if (!recentConversations[rowConvId]) recentConversations[rowConvId] = [];
+        recentConversations[rowConvId].push(row);
+      });
+      var recentConvIds = Object.keys(recentConversations).sort(function(a, b) {
+        var aTime = recentConversations[a][0] && recentConversations[a][0].created_at || '';
+        var bTime = recentConversations[b][0] && recentConversations[b][0].created_at || '';
+        return aTime < bTime ? 1 : (aTime > bTime ? -1 : 0);
+      });
+      for (var ci = 0; ci < recentConvIds.length; ci++) {
+        var candidateId = recentConvIds[ci];
+        if (!mode || getConversationStorageMode(recentConversations[candidateId]) === mode) {
+          convId = candidateId;
+          break;
+        }
       }
       if (!convId) {
         // 用户从未聊过天
@@ -13076,12 +13189,17 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
-    // 过滤用户已删除的消息和无关模式消息
+    var conversationMode = getConversationStorageMode(rows || []);
+    if (mode && conversationMode !== mode) {
+      return res.json({ ok: true, conversation_id: null, messages: [] });
+    }
+
+    // Filter only deleted rows. Mode is resolved once for the complete conversation above.
     var filteredRows = [];
     for (var i = 0; i < (rows || []).length; i++) {
       var r2 = rows[i];
       var meta = parseMsgMeta(r2);
-      if (!(meta && meta.deleted) && matchesMode(r2)) {
+      if (!(meta && meta.deleted)) {
         filteredRows.push(r2);
         if (filteredRows.length > limit) break;
       }
