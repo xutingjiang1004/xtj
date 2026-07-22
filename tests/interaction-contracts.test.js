@@ -49,7 +49,7 @@ test('atomic like endpoint validates exact types and returns canonical state', (
 });
 
 test('like UI is optimistic, coalesces rapid toggles, and keeps the control interactive', () => {
-  const toggle = between(core, 'window.toggleLike = function', 'function createLikeParticles');
+  const toggle = between(core, 'window.toggleLike = function', 'function createLikeBlossom');
   const flush = between(core, 'function flushPostLikeOperation', 'window.toggleLike = function');
   assert.match(toggle, /operation\.desired\s*=\s*nextLiked/);
   assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
@@ -62,22 +62,24 @@ test('like UI is optimistic, coalesces rapid toggles, and keeps the control inte
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
 });
 
-test('like feedback uses lightweight particles without heart shaking', () => {
-  const toggle = between(core, 'window.toggleLike = function', 'function createLikeParticles');
-  const feedback = between(core, 'function animatePostLikeFeedback', 'function applyPostLikeIntent');
-  const particles = between(core, 'function createLikeParticles', '// =====================');
-  const feedbackCss = between(style, '/* Interaction feedback: like, publish', '#pubBtn.is-loading');
+test('like feedback uses a single removable cherry blossom without forced reflow', () => {
+  const toggle = between(core, 'window.toggleLike = function', 'function createLikeBlossom');
+  const applyIntent = between(core, 'function applyPostLikeIntent', 'function flushPostLikeOperation');
+  const blossom = between(core, 'function createLikeBlossom', '// =====================');
   assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
-  assert.doesNotMatch(feedback, /offsetWidth|like-heart-anim/);
+  assert.match(applyIntent, /if \(liked && sourceButton\) createLikeBlossom\(sourceButton\);/);
   assert.doesNotMatch(toggle, /xtjAnimateLikeToggle/);
-  assert.match(particles, /prefers-reduced-motion:\s*reduce/);
-  assert.match(particles, /like-particle/);
-  assert.match(particles, /--like-particle-x/);
-  assert.match(particles, /--like-particle-y/);
-  assert.match(particles, /animationend/);
-  assert.doesNotMatch(feedbackCss, /transform:\s*scale/);
+  assert.match(blossom, /prefers-reduced-motion:\s*reduce/);
+  assert.match(blossom, /like-blossom/);
+  assert.match(blossom, /xtj-like-blossom-gradient-/);
+  assert.match(blossom, /animationend/);
+  assert.match(blossom, /btn\._likeBlossom/);
+  assert.doesNotMatch(blossom, /offsetWidth|like-heart-anim/);
+  assert.match(style, /\.actions \.like-blossom\s*\{[\s\S]*?will-change:\s*transform, opacity;[\s\S]*?animation:\s*xtj-like-blossom/);
+  assert.match(style, /@keyframes xtj-like-blossom[\s\S]*?transform:/);
   assert.doesNotMatch(style, /\.action-btn\.liked\s*\{[^}]*animation:/s);
-  assert.doesNotMatch(core, /heart-particle|like-heart-anim/);
+  assert.doesNotMatch(core, /heart-particle|like-heart-anim|like-particle|createLikeParticles|animatePostLikeFeedback/);
+  assert.doesNotMatch(style, /like-particle|likeParticleFly|like-feedback-add|like-feedback-remove|xtj-like-add|xtj-like-remove/);
 });
 
 test('header avatar keeps a fixed circular 24px footprint', () => {
