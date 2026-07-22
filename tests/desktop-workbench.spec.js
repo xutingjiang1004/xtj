@@ -73,6 +73,8 @@ test.describe('desktop workbench contract', () => {
       await page.locator('.desktop-nav-item[data-desktop-tab="chat"]').click();
       await expect(page.locator('#dockChatListView')).toBeVisible();
       await expect(page.locator('#dockChatDetailView')).toBeVisible();
+      await expect(page.locator('#dockBar')).toBeHidden();
+      await expect(page.locator('#desktopChatInspector')).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
       await context.close();
     }
@@ -100,15 +102,11 @@ test.describe('desktop workbench contract', () => {
     await expect.poll(() => page.evaluate(() => window.__openedContact)).toBe('real-contact');
   });
 
-  test('desktop chat inspector reflects the active real conversation', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
+  test('mobile keeps the existing Dock navigation', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const page = await context.newPage();
     await openApp(page);
-    await page.evaluate(() => {
-      window.dockChatActiveUser = 'active-contact';
-      document.getElementById('dockChatTitle').textContent = 'active-contact';
-    });
-    await expect(page.locator('#desktopChatInspector')).toBeVisible();
-    await expect(page.locator('.desktop-chat-inspector__name')).toHaveText('active-contact');
-    await expect(page.locator('.desktop-chat-inspector__status')).toHaveText('当前私聊对象');
+    await expect(page.locator('#dockBar')).toBeVisible();
+    await context.close();
   });
 });
