@@ -49,7 +49,7 @@ window.throttleRAF = function(fn) {
     //   鐢ㄦ埛瑕佹眰: 鏅€氳亰澶╅粯璁ゅ氨鐢?max 深度思考?
     //   绠＄悊鍛樺彲鍦ㄥ悗鍙?/admin/ai-agent/config 鍒囨崲涓?low/medium/high/max
     //   鏅€氱敤鎴蜂笉鑳藉湪 UI 切换 (allow_user_thinking_switch: false)
-    thinkingMode: 'max',
+    thinkingMode: 'low',
     // 鈽?P 鏂板: 深度思考冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
     deepThinkEffort: 'max',
     deepThinkEnabled: true,    // 后端 config.deep_think.enabled
@@ -4562,14 +4562,17 @@ window.throttleRAF = function(fn) {
       });
       
       if (!resp.ok) {
+        var responseMessage = 'AI 服务暂时不可用，请稍后重试';
         try {
           var errJson = await resp.json().catch(function(){ return {}; });
-          if (errJson && errJson.error) {
-            if (S._currentReqId !== reqId) return;
-            try { typingNode.remove(); } catch (e) {}
-            notify(String(errJson.error));
-          }
+          if (errJson && errJson.error) responseMessage = String(errJson.error);
         } catch(e) {}
+        if (S._currentReqId !== reqId) return;
+        try { typingNode.remove(); } catch (e) {}
+        S.messages.pop();
+        removeLastUserMessage(messagesEl);
+        restoreInputText();
+        notify(responseMessage);
         resetSendingIfCurrent();
         return;
       }
@@ -5237,7 +5240,7 @@ window.throttleRAF = function(fn) {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
           restoreInputText();
-          notify('缃戠粶寮傚父锛岃妫€鏌ヨ繛鎺ュ悗閲嶈瘯');
+          notify('网络连接异常，请检查网络后重试');
         }
       } else {
         // AbortError: 用户主动停止
