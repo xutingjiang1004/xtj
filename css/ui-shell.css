@@ -1418,3 +1418,28 @@
     transform: none !important;
   }
 }
+
+/* iOS Safari: keep system chrome outside the app and reserve the measured Dock. */
+html.xtj-ios-viewport {
+  --xtj-dock-reserve: 154px;
+  --xtj-visual-bottom: 0px;
+}
+
+html.xtj-ios-viewport .dock-bar {
+  bottom: max(var(--xtj-visual-bottom), env(safe-area-inset-bottom, 0px)) !important;
+}
+
+html.xtj-ios-viewport .dock-panel {
+  padding-bottom: calc(var(--xtj-dock-reserve) + env(safe-area-inset-bottom, 0px)) !important;
+  scroll-padding-bottom: calc(var(--xtj-dock-reserve) + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767.98px) and (orientation: portrait) {
+  html.xtj-ios-viewport .dock-panel {
+    padding-top: max(52px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
+  }
+
+  html.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
+    top: max(12px, env(safe-area-inset-top, 0px)) !important;
+  }
+}
