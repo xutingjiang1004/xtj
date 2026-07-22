@@ -3753,7 +3753,10 @@ function renderProfileActivityList(kind) {
 
             function setPostLikePending(postId, pending) {
                 getPostLikeButtons(postId).forEach(function(likeBtn) {
-                    likeBtn.disabled = !!pending;
+                    // Keep the control available so rapid toggles feel immediate while the latest intent syncs.
+                    likeBtn.disabled = false;
+                    if (pending) likeBtn.setAttribute('aria-busy', 'true');
+                    else likeBtn.removeAttribute('aria-busy');
                     if (pending) likeBtn.dataset.likePending = '1';
                     else delete likeBtn.dataset.likePending;
                 });
@@ -3795,74 +3798,87 @@ function renderProfileActivityList(kind) {
             }
 
             var likeOperations = Object.create(null);
-            var likeOperationVersions = Object.create(null);
 
             function animatePostLikeFeedback(postId, liked) {
                 var className = liked ? 'like-feedback-add' : 'like-feedback-remove';
                 getPostLikeButtons(postId).forEach(function(likeBtn) {
-                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove');
-                    likeBtn.classList.add(className);
-                    setTimeout(function() { likeBtn.classList.remove(className); }, 260);
+                    if (likeBtn._likeFeedbackTimer) clearTimeout(likeBtn._likeFeedbackTimer);
+                    if (likeBtn._likeHeartTimer) clearTimeout(likeBtn._likeHeartTimer);
+                    likeBtn.classList.remove('like-feedback-add', 'like-feedback-remove', 'like-heart-anim');
+                    // Force a fresh animation frame when the user toggles faster than the CSS duration.
+                    void likeBtn.offsetWidth;
+                    likeBtn.classList.add(className, 'like-heart-anim');
+                    likeBtn._likeFeedbackTimer = setTimeout(function() { likeBtn.classList.remove(className); }, 260);
+                    likeBtn._likeHeartTimer = setTimeout(function() { likeBtn.classList.remove('like-heart-anim'); }, 400);
                 });
             }
 
-            window.toggleLike = async function (btn, postId) {
-                if (!currentUser) { showToast("请先登录"); return; }
-                if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
-                var pid = String(postId || '');
-                if (!btn || !pid || likeOperations[pid]) return;
-                btn.classList.add('like-heart-anim');
-                setTimeout(function() { btn.classList.remove('like-heart-anim'); }, 400);
-                var wasLiked = btn.classList.contains("liked");
-                var version = (likeOperationVersions[pid] || 0) + 1;
-                likeOperationVersions[pid] = version;
-                likeOperations[pid] = { version: version };
-                setPostLikePending(pid, true);
-                var previousOwnedLikes = (feedAllLikes || []).filter(function(item) {
-                    return isLikeOwnedByCurrentUser(item, pid);
-                });
+            function applyPostLikeIntent(postId, liked, sourceButton) {
+                updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
+                updateFeedStats();
+                animatePostLikeFeedback(postId, liked);
+                if (liked && sourceButton) createHeartParticles(sourceButton);
+            }
 
-                try {
-                    var nextLiked = !wasLiked;
-                    var optimisticLikeRecord = { post_id: pid, user_name: currentUser, actor_key: deviceId };
-                    updatePostLikeUi(pid, nextLiked, optimisticLikeRecord);
-                    updateFeedStats();
-                    animatePostLikeFeedback(pid, nextLiked);
-                    if (nextLiked) createHeartParticles(btn);
-                    var normalizedPostId = pid.trim().toLowerCase();
-                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) throw new Error('帖子参数无效');
-                    var likeResponse = await window.xtjProtectedFetch('/api/post/like', {
-                        method: 'POST',
-                        body: JSON.stringify({ post_id: normalizedPostId, liked: nextLiked })
+            function flushPostLikeOperation(postId, operation) {
+                if (likeOperations[postId] !== operation) return Promise.resolve();
+                var requestedLiked = operation.desired;
+                operation.running = true;
+                operation.requested = requestedLiked;
+                var normalizedPostId = postId.trim().toLowerCase();
+                return window.xtjProtectedFetch('/api/post/like', {
+                    method: 'POST',
+                    body: JSON.stringify({ post_id: normalizedPostId, liked: requestedLiked })
+                }).then(function(likeResponse) {
+                    return likeResponse.json().catch(function() { return {}; }).then(function(likeResult) {
+                        if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== requestedLiked) {
+                            throw new Error(likeResult.error || 'like_state_sync_failed');
+                        }
+                        operation.confirmed = requestedLiked;
+                        touchUserSession(false);
+                        scheduleLikeStatRefresh();
+                        if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') loadProfileActivity(true);
+                        try { if (typeof window.queueBehavior === 'function') window.queueBehavior(requestedLiked ? 'post_like' : 'post_unlike', 'post ' + postId.slice(0, 8)); } catch(e) {}
+                        if (operation.desired !== operation.confirmed) return flushPostLikeOperation(postId, operation);
                     });
-                    var likeResult = await likeResponse.json().catch(function() { return {}; });
-                    if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== nextLiked) {
-                        throw new Error(likeResult.error || '点赞状态同步失败');
+                }).catch(function(error) {
+                    console.error(error);
+                    if (likeOperations[postId] !== operation) return;
+                    if (operation.desired !== operation.confirmed) {
+                        applyPostLikeIntent(postId, operation.confirmed);
+                        showToast('like_operation_failed');
                     }
-                    touchUserSession(false);
-                    scheduleLikeStatRefresh();
-                    if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
-                        loadProfileActivity(true);
+                }).finally(function() {
+                    if (likeOperations[postId] === operation && operation.desired === operation.confirmed) {
+                        delete likeOperations[postId];
+                        setPostLikePending(postId, false);
                     }
-                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior(nextLiked ? 'post_like' : 'post_unlike', '赞了帖子 ' + pid.slice(0, 8)); } catch(e) {}
-                } catch (e) {
-                    console.error(e);
-                    if (likeOperations[pid] && likeOperations[pid].version === version) {
-                        feedAllLikes = (feedAllLikes || []).filter(function(item) {
-                            return !isLikeOwnedByCurrentUser(item, pid);
-                        }).concat(previousOwnedLikes);
-                        persistFeedLikesCache();
-                        updatePostLikeUi(pid, wasLiked, previousOwnedLikes[0]);
-                    }
-                    updateFeedStats();
-                    scheduleLikeStatRefresh();
-                    showToast('点赞操作失败');
-                } finally {
-                    if (likeOperations[pid] && likeOperations[pid].version === version) {
-                        delete likeOperations[pid];
-                        setPostLikePending(pid, false);
-                    }
+                });
+            }
+
+            window.toggleLike = function (btn, postId) {
+                if (!currentUser) { showToast("login_required"); return; }
+                if (isUserMuted()) { showToast("interaction_unavailable"); return; }
+                var pid = String(postId || '');
+                if (!btn || !pid) return;
+                var normalizedPostId = pid.trim().toLowerCase();
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
+                    showToast('post_parameter_invalid');
+                    return;
                 }
+                var operation = likeOperations[pid];
+                var visibleButton = getPostLikeButtons(pid)[0] || btn;
+                var currentLiked = operation ? operation.desired : visibleButton.classList.contains('liked');
+                var nextLiked = !currentLiked;
+                if (!operation) {
+                    operation = { confirmed: currentLiked, desired: currentLiked, running: false, promise: null };
+                    likeOperations[pid] = operation;
+                }
+                operation.desired = nextLiked;
+                setPostLikePending(pid, true);
+                applyPostLikeIntent(pid, nextLiked, btn);
+                if (!operation.running) operation.promise = flushPostLikeOperation(pid, operation);
+                return operation.promise;
             };
 
             function createHeartParticles(btn) {
@@ -5799,11 +5815,16 @@ function renderProfileActivityList(kind) {
             window.closePostToolsMenu = closePostToolsMenu;
             window.addEventListener('pagehide', closePostToolsMenu);
             window.addEventListener('scroll', closePostToolsMenu, { passive: true });
-            document.addEventListener('scroll', function(e) {
-                if (e.target.classList && e.target.classList.contains('photo-wall-container')) {
-                    closePostToolsMenu();
-                }
-            }, true);
+            window.addEventListener('resize', closePostToolsMenu, { passive: true });
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', closePostToolsMenu, { passive: true });
+                window.visualViewport.addEventListener('scroll', closePostToolsMenu, { passive: true });
+            }
+            // Capture scroll from dock panels as well as the document; the menu is appended to body.
+            document.addEventListener('scroll', closePostToolsMenu, { capture: true, passive: true });
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) closePostToolsMenu();
+            });
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
