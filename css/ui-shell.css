@@ -659,6 +659,17 @@
 
 #panelPosts.active .ai-tools-menu button:hover,
 #panelPosts.active .ai-tools-menu button:focus-visible { background: rgba(54, 141, 112, .1); outline: none; }
+#panelPosts.active .ai-tools-menu button,
+#panelPosts.active .ai-tools-menu button:hover,
+#panelPosts.active .ai-tools-menu button:focus-visible,
+#panelPosts.active .ai-tools-menu button b,
+#panelPosts.active .ai-tools-menu button small {
+  filter: none !important;
+  -webkit-filter: none !important;
+  text-shadow: none !important;
+  transform: none !important;
+  -webkit-font-smoothing: antialiased;
+}
 #panelPosts.active .ai-tools-menu button + button { border-top: 1px solid rgba(117, 173, 158, .16); }
 #panelPosts.active .ai-tools-menu b,
 #panelPosts.active .ai-tools-menu small { display: block; }
@@ -1416,5 +1427,30 @@
   .dock-panel.is-leaving {
     transition: none !important;
     transform: none !important;
+  }
+}
+
+/* iOS Safari: keep system chrome outside the app and reserve the measured Dock. */
+html.xtj-ios-viewport {
+  --xtj-dock-reserve: 154px;
+  --xtj-visual-bottom: 0px;
+}
+
+html.xtj-ios-viewport .dock-bar {
+  bottom: max(var(--xtj-visual-bottom), env(safe-area-inset-bottom, 0px)) !important;
+}
+
+html.xtj-ios-viewport .dock-panel {
+  padding-bottom: calc(var(--xtj-dock-reserve) + env(safe-area-inset-bottom, 0px)) !important;
+  scroll-padding-bottom: calc(var(--xtj-dock-reserve) + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767.98px) and (orientation: portrait) {
+  html.xtj-ios-viewport .dock-panel {
+    padding-top: max(52px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
+  }
+
+  html.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
+    top: max(12px, env(safe-area-inset-top, 0px)) !important;
   }
 }
