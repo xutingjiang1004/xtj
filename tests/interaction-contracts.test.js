@@ -49,7 +49,7 @@ test('atomic like endpoint validates exact types and returns canonical state', (
 });
 
 test('like UI is optimistic, coalesces rapid toggles, and keeps the control interactive', () => {
-  const toggle = between(core, 'window.toggleLike = function', 'function createHeartParticles');
+  const toggle = between(core, 'window.toggleLike = function', 'function createLikeParticles');
   const flush = between(core, 'function flushPostLikeOperation', 'window.toggleLike = function');
   assert.match(toggle, /operation\.desired\s*=\s*nextLiked/);
   assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
@@ -57,25 +57,32 @@ test('like UI is optimistic, coalesces rapid toggles, and keeps the control inte
   assert.match(flush, /xtjProtectedFetch\('\/api\/post\/like'/);
   assert.match(flush, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*liked:\s*requestedLiked \}\)/);
   assert.match(flush, /operation\.desired !== operation\.confirmed/);
+  assert.match(flush, /updatePostLikeCount\(postId, likeResult\.like_count\)/);
   assert.match(core, /likeBtn\.disabled\s*=\s*false/);
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
 });
 
-test('like feedback restarts cleanly and scatters hearts without scaling the action button', () => {
-  const toggle = between(core, 'window.toggleLike = function', 'function createHeartParticles');
+test('like feedback uses lightweight particles without heart shaking', () => {
+  const toggle = between(core, 'window.toggleLike = function', 'function createLikeParticles');
   const feedback = between(core, 'function animatePostLikeFeedback', 'function applyPostLikeIntent');
-  const particles = between(core, 'function createHeartParticles', '// =====================');
+  const particles = between(core, 'function createLikeParticles', '// =====================');
   const feedbackCss = between(style, '/* Interaction feedback: like, publish', '#pubBtn.is-loading');
   assert.match(toggle, /applyPostLikeIntent\(pid,\s*nextLiked,\s*btn\)/);
-  assert.match(feedback, /void likeBtn\.offsetWidth/);
-  assert.match(feedback, /like-heart-anim/);
+  assert.doesNotMatch(feedback, /offsetWidth|like-heart-anim/);
   assert.doesNotMatch(toggle, /xtjAnimateLikeToggle/);
   assert.match(particles, /prefers-reduced-motion:\s*reduce/);
-  assert.match(particles, /--heart-x/);
-  assert.match(particles, /--heart-y/);
+  assert.match(particles, /like-particle/);
+  assert.match(particles, /--like-particle-x/);
+  assert.match(particles, /--like-particle-y/);
   assert.match(particles, /animationend/);
   assert.doesNotMatch(feedbackCss, /transform:\s*scale/);
   assert.doesNotMatch(style, /\.action-btn\.liked\s*\{[^}]*animation:/s);
+  assert.doesNotMatch(core, /heart-particle|like-heart-anim/);
+});
+
+test('header avatar keeps a fixed circular 24px footprint', () => {
+  assert.match(style, /#authUI \.user-pill #myAvatar\s*\{[\s\S]*?inline-size:\s*24px !important;[\s\S]*?block-size:\s*24px !important;[\s\S]*?flex:\s*0 0 24px !important;[\s\S]*?aspect-ratio:\s*1 \/ 1;/);
+  assert.match(style, /#authUI \.user-pill #myAvatar > img\s*\{[\s\S]*?object-fit:\s*cover !important;/);
 });
 
 test('pin request serializes a UUID string and a boolean', () => {
