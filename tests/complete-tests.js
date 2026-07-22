@@ -697,12 +697,12 @@ test('照片墙云端请求失败时保留缓存', function(){
   var s = read('js/photo-wall/data.js');
   var catchStart = s.indexOf('catch (err) {');
   var catchBlock = s.slice(catchStart, catchStart + 600);
-  assert.ok(catchBlock.indexOf('保留缓存') >= 0 || catchBlock.indexOf('window.photoWallData = local') >= 0, 'must keep cache on failure');
-  assert.ok(catchBlock.indexOf('window.photoWallData = local') >= 0, 'must fall back to local on failure');
+  assert.ok(catchBlock.indexOf('window.photoWallData = mergePhotoLists(local, [])') >= 0, 'must keep cache on failure');
+  assert.ok(catchBlock.indexOf('window.photoWallData = mergePhotoLists(local, [])') >= 0, 'must fall back to local on failure');
 });
 test('照片墙合并时按 id/cloudId 去重', function(){
   var s = read('js/photo-wall/data.js');
-  assert.ok(s.indexOf('existingIds') >= 0 && s.indexOf('existingIds.has(key)') >= 0, 'must deduplicate by id/cloudId');
+  assert.ok(s.indexOf('function mergePhotoLists') >= 0 && s.indexOf('map.has(String(item.id))') >= 0 && s.indexOf('cloudId') >= 0, 'must deduplicate by id/cloudId');
   assert.ok(s.indexOf('按 id/cloudId 去重') >= 0, 'must have deduplication comment');
 });
 
@@ -739,7 +739,7 @@ test('Dock 打开照片墙有自动兜底检查', function(){
 });
 test('fetchPhotoPage 支持 timeoutMs 参数', function(){
   var s = read('js/photo-wall/data.js');
-  assert.ok(s.indexOf('function fetchPhotoPage(pageIndex, timeoutMs)') >= 0, 'fetchPhotoPage must accept timeoutMs');
+  assert.ok(s.indexOf('function fetchPhotoPage(pageIndex, timeoutMs') >= 0, 'fetchPhotoPage must accept timeoutMs');
   assert.ok(s.indexOf('hasCache ? 10000 : 25000') >= 0, 'must use 25s first load, 10s cached');
 });
 test('Dock 调用链 sequence: ensurePhotoWallLoaded → initPhotoWall', function(){

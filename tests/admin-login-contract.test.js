@@ -28,15 +28,22 @@ test('admin login form prevents default submit', () => {
 });
 
 test('admin login saves token before initAdminClient', () => {
-  assert.match(adminJs, /var loginToken = data\.token \|\| data\.user_token/);
+  assert.match(adminJs, /var loginToken = data\.user_token/);
   assert.match(adminJs, /ADMIN = name;\s+setToken\(loginToken\)/);
   assert.match(adminJs, /setToken\(loginToken\);\s+try\s*\{/);
 });
 
 test('admin login validates data.ok before proceeding', () => {
   assert.match(adminJs, /data\.ok !== true/);
-  assert.match(adminJs, /var loginToken = data\.token \|\| data\.user_token/);
+  assert.match(adminJs, /var loginToken = data\.user_token/);
   assert.match(adminJs, /!loginToken \|\| typeof loginToken !== 'string' \|\| !loginToken\.trim\(\)/);
+});
+
+test('admin login and admin API requests retain the HttpOnly admin cookie', () => {
+  assert.match(adminJs, /fetch\(API_BASE \+ '\/admin\/login', \{[\s\S]{0,140}credentials: 'include'/);
+  const api = adminJs.slice(adminJs.indexOf('async function apiCall'), adminJs.indexOf('function showToast'));
+  assert.match(api, /credentials: 'include'/);
+  assert.doesNotMatch(api, /var token = getToken\(\);/);
 });
 
 test('admin login validates token is non-empty string', () => {

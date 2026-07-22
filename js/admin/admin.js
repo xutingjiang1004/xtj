@@ -11,7 +11,7 @@
     var AUDIT_LOG_MARKER = '__admin_audit__';
     var CLIENT_ERROR_MARKER = '__client_error__';
     var SESSION_KEY = "xtj_admin_session";
-    var TOKEN_KEY = "xtj_admin_token";
+    var USER_ACCESS_TOKEN_KEY = "xtj_admin_user_access_token";
     var TAB_KEY = "xtj_admin_tab";
     var ADMIN = '';
 
@@ -432,15 +432,29 @@
 
     // ===================== API 辅助函数 =====================
     function getToken() {
-        try { return _deobfuscateToken(localStorage.getItem(TOKEN_KEY) || ''); } catch(e) { return ''; }
+        try { return _deobfuscateToken(sessionStorage.getItem(USER_ACCESS_TOKEN_KEY) || ''); } catch(e) { return ''; }
     }
 
     function setToken(t) {
-        try { localStorage.setItem(TOKEN_KEY, _obfuscateToken(t)); } catch(e) {}
+        try { sessionStorage.setItem(USER_ACCESS_TOKEN_KEY, _obfuscateToken(t)); } catch(e) {}
     }
 
     function clearToken() {
-        try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
+        try { sessionStorage.removeItem(USER_ACCESS_TOKEN_KEY); } catch(e) {}
+    }
+
+    async function refreshUserAccessToken() {
+        try {
+            var response = await fetch(API_BASE + '/api/user/refresh', {
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }
+            });
+            var data = await response.json().catch(function() { return {}; });
+            if (!response.ok || !data || !data.token) return '';
+            setToken(data.token);
+            return data.token;
+        } catch (e) {
+            return '';
+        }
     }
 
     function isFetchAbortError(e) {
@@ -453,11 +467,15 @@
         if (!API_BASE) {
             throw new Error('API_BASE 未配置');
         }
+        var useUserAccessToken = options.authMode === 'user_access';
         var opts = {
             method: method,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
         };
-        var token = getToken();
+        var token = useUserAccessToken ? getToken() : '';
+        if (useUserAccessToken && !token) token = await refreshUserAccessToken();
+        if (useUserAccessToken && !token) throw new Error('用户访问凭证不可用');
         if (token) opts.headers['Authorization'] = 'Bearer ' + token;
         if (body) opts.body = JSON.stringify(body);
         var timeoutMs = Number(options.timeoutMs) || 30000;
@@ -467,6 +485,16 @@
         var res;
         try {
             res = await fetch(API_BASE + path, opts);
+            if (useUserAccessToken && res.status === 401 && !options._retriedUserAccess) {
+                clearTimeout(at);
+                var renewed = await refreshUserAccessToken();
+                if (renewed) {
+                    return apiCall(method, path, body, Object.assign({}, options, {
+                        authMode: 'user_access',
+                        _retriedUserAccess: true
+                    }));
+                }
+            }
         } catch (fetchErr) {
             clearTimeout(at);
             if (fetchErr && fetchErr.name === 'AbortError') {
@@ -481,7 +509,7 @@
         } catch (jsonErr) {
             throw new Error('后端返回格式异常（HTTP ' + res.status + '），请检查API地址');
         }
-        if (res.status === 401) {
+        if (res.status === 401 && !useUserAccessToken) {
             clearSession();
             try {
                 document.getElementById('dashboard').style.display = 'none';
@@ -688,6 +716,7 @@ async function initAdminClient() {
         try {
             var res = await fetch(API_BASE + '/admin/login', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: name, password: pw })
             });
@@ -698,7 +727,7 @@ async function initAdminClient() {
                 btn.textContent = '登录';
                 return;
             }
-            var loginToken = data.token || data.user_token;
+            var loginToken = data.user_token;
             if (!loginToken || typeof loginToken !== 'string' || !loginToken.trim()) {
                 err.textContent = '服务端未返回有效 Token，请重试';
                 btn.disabled = false;
@@ -4990,7 +5019,6 @@ async function initAdminClient() {
                     }
                     if (statusEl) statusEl.textContent = '上传中...';
                     try {
-                        var adminToken = getToken();
                         var reader = new FileReader();
                         var ext = (file.name.split('.').pop() || 'png').toLowerCase();
                         var base64Data = await new Promise(function(resolve, reject) {
@@ -4998,15 +5026,7 @@ async function initAdminClient() {
                             reader.onerror = reject;
                             reader.readAsDataURL(file);
                         });
-                        var resp = await fetch(API_BASE + '/admin/ai-agent/avatar', {
-                            method: 'POST',
-                            headers: adminToken ? {
-                                'Authorization': 'Bearer ' + adminToken,
-                                'Content-Type': 'application/json'
-                            } : { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ image: base64Data, ext: ext })
-                        });
-                        var result = await resp.json().catch(function() { return {}; });
+                        var result = await apiCall('POST', '/admin/ai-agent/avatar', { image: base64Data, ext: ext });
                         if (result && result.ok && result.avatar_url) {
                             if (previewEl) previewEl.innerHTML = '<img src="' + escapeHtml(result.avatar_url) + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
                             if (statusEl) statusEl.textContent = '上传成功，记得保存配置';
@@ -5120,15 +5140,15 @@ async function initAdminClient() {
 
             // 检查搜索健康状态
             var _searchHealthChecking = false;
-            function checkSearchHealth() {
+            async function checkSearchHealth() {
                 if (_searchHealthChecking) return;
                 _searchHealthChecking = true;
                 var resultEl = document.getElementById('searchHealthResult');
                 if (!resultEl) { _searchHealthChecking = false; return; }
                 resultEl.textContent = '检查中...';
-                fetch((window.API_BASE || '') + '/api/agent/search-health?q=测试搜索健康')
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
+                try {
+                    var query = encodeURIComponent('测试搜索健康');
+                    var data = await apiCall('GET', '/api/agent/search-health?q=' + query, null, { authMode: 'user_access' });
                         if (!data || data.ok === false) {
                             resultEl.textContent = '搜索异常: ' + (data && data.error || '无有效结果');
                             return;
@@ -5157,11 +5177,11 @@ async function initAdminClient() {
                             parts.push('当前使用: ' + data.used_provider);
                         }
                         resultEl.textContent = parts.join(' | ');
-                    })
-                    .catch(function(e) {
-                        resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
-                    })
-                    .finally(function() { _searchHealthChecking = false; });
+                } catch (e) {
+                    resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
+                } finally {
+                    _searchHealthChecking = false;
+                }
             }
             // 暴露到全局
             window.checkSearchHealth = checkSearchHealth;
