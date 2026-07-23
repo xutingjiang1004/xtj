@@ -1392,7 +1392,7 @@ async function initAdminClient() {
                 var preview = (displayContent || '').slice(0, 60);
                 if (displayContent && displayContent.length > 60) preview += '...';
                 h += '<tr><td>' + titlePreview + '</td><td>' + escapeHtml(preview || '-') + '</td><td>' + escapeHtml(a.user_name) + '</td><td>' + formatTime(a.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + a.id + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + String(a.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -1626,7 +1626,7 @@ async function initAdminClient() {
                 h += '<td>' + (imgHtml || '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + p.id + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + String(p.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -1683,7 +1683,7 @@ async function initAdminClient() {
                     h += '<td>-</td>';
                 } else {
                     h += '<td><span class="badge badge-green">正常</span></td>';
-                    h += '<td><button class="btn-sm del" onclick="deleteAdminComment(\'' + c.id + '\', \'' + (c.actor_key || '') + '\')">删除</button></td>';
+                    h += '<td><button class="btn-sm del" onclick="deleteAdminComment(\'' + String(c.id).replace(/'/g, "\\'") + '\', \'' + (c.actor_key || '') + '\')">删除</button></td>';
                 }
                 h += '</tr>';
             });
@@ -1876,10 +1876,10 @@ async function initAdminClient() {
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td style="white-space:nowrap;">';
                 if (r.status === 'pending') {
-                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
-                    h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">驳回</button>';
                 } else {
-                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">详情</button>';
                 }
                 h += '</td></tr>';
             });
@@ -1925,9 +1925,9 @@ async function initAdminClient() {
         
         html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
         if (r.status === 'pending') {
-            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + r.id + '\')">删除内容</button>';
-            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + r.id + '\')">封禁用户</button>';
-            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + r.id + '\')">标记已处理</button>';
+            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + String(r.id).replace(/'/g, "\\'") + '\')">删除内容</button>';
+            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + String(r.id).replace(/'/g, "\\'") + '\')">封禁用户</button>';
+            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + String(r.id).replace(/'/g, "\\'") + '\')">标记已处理</button>';
         }
         html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
         html += '</div>';
@@ -1936,7 +1936,7 @@ async function initAdminClient() {
             html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
             html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
             html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
-            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + r.id + '\')">回复并处理</button>';
+            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">回复并处理</button>';
             html += '</div>';
         }
         
@@ -2242,7 +2242,7 @@ async function initAdminClient() {
                 var fullUrl = p.media_url || extra.thumb || '';
                 var previewUrl = fullUrl || thumbUrl;
                 var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + safeJsStr(previewUrl) + '\', \'' + safeJsStr(thumbUrl) + '\', \'' + safeJsStr(p.user_name || '') + '\', \'' + safeJsStr(p.created_at || '') + '\')" title="\u70b9\u51fb\u9884\u89c8\u5927\u56fe">' : '-';
-                var actions = '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\')">\u5220\u9664</button>';
+                var actions = '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + String(p.id).replace(/'/g, "\\'") + '\')">\u5220\u9664</button>';
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
                 h += '<td>' + (extra.fileSize ? (extra.fileSize / (1024 * 1024)).toFixed(2) + 'MB' : '-') + '</td>';
@@ -2593,13 +2593,13 @@ async function initAdminClient() {
                 if ((a.related_users || []).length > 3) relatedHtml += ' ...';
                 var actionsHtml = '';
                 if (!a.is_read) {
-                    actionsHtml += '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + a.id + '\')">已读</button>';
+                    actionsHtml += '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + String(a.id).replace(/'/g, "\\'") + '\')">已读</button>';
                 }
                 var ignored = a.ignored || false;
                 var fpVal = a.false_positive || false;
                 if (!fpVal) {
-                    actionsHtml += '<button class="btn-sm" onclick="setSecurityAlertStatus(\'' + a.id + '\',\'ignored\')">忽略</button>';
-                    actionsHtml += '<button class="btn-sm del" onclick="setSecurityAlertStatus(\'' + a.id + '\',\'false_positive\')">误报</button>';
+                    actionsHtml += '<button class="btn-sm" onclick="setSecurityAlertStatus(\'' + String(a.id).replace(/'/g, "\\'") + '\',\'ignored\')">忽略</button>';
+                    actionsHtml += '<button class="btn-sm del" onclick="setSecurityAlertStatus(\'' + String(a.id).replace(/'/g, "\\'") + '\',\'false_positive\')">误报</button>';
                 }
                 if (ignored || fpVal) {
                     actionsHtml += '<span style="font-size:10px;color:var(--text-muted);">' + (fpVal ? '已标记误报' : '已忽略') + '</span>';
@@ -2656,7 +2656,7 @@ async function initAdminClient() {
             blacklistData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">黑名单中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftTime = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(b.reason || '-') + '</td><td>' + escapeHtml(b.added_by || '-') + '</td><td>' + formatTime(b.created_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBlacklist(\'' + b.id + '\')">解除</button>' : liftTime) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(b.reason || '-') + '</td><td>' + escapeHtml(b.added_by || '-') + '</td><td>' + formatTime(b.created_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBlacklist(\'' + String(b.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftTime) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2832,7 +2832,7 @@ async function initAdminClient() {
             bansData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftInfo = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td><td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td><td>' + escapeHtml(b.banned_by || '-') + '</td><td>' + formatTime(b.banned_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm del" onclick="liftBan(\'' + b.id + '\')">解除</button>' : liftInfo) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td><td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td><td>' + escapeHtml(b.banned_by || '-') + '</td><td>' + formatTime(b.banned_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm del" onclick="liftBan(\'' + String(b.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftInfo) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2854,7 +2854,7 @@ async function initAdminClient() {
             mutesData.forEach(function(m) {
                 var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftInfo = !m.is_active && m.lifted_at ? formatTime(m.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td><td>' + ((m.duration_hours || 0) > 0 ? formatDuration(m.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td><td>' + escapeHtml(m.muted_by || '-') + '</td><td>' + formatTime(m.created_at) + '</td><td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">解除</button>' : liftInfo) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td><td>' + ((m.duration_hours || 0) > 0 ? formatDuration(m.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td><td>' + escapeHtml(m.muted_by || '-') + '</td><td>' + formatTime(m.created_at) + '</td><td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + String(m.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftInfo) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2989,7 +2989,7 @@ async function initAdminClient() {
                 h += '<td>' + buildAdminMediaThumb(p) + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + p.id + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + String(p.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -3058,10 +3058,10 @@ async function initAdminClient() {
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td style="white-space:nowrap;">';
                 if (r.status === 'pending') {
-                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
-                    h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">驳回</button>';
                 } else {
-                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">详情</button>';
                 }
                 h += '</td></tr>';
             });
@@ -3202,10 +3202,10 @@ async function initAdminClient() {
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td style="white-space:nowrap;">';
                 if (r.status === 'pending') {
-                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
-                    h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">驳回</button>';
                 } else {
-                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">详情</button>';
                 }
                 h += '</td></tr>';
             });
@@ -3248,9 +3248,9 @@ async function initAdminClient() {
         }
         html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
         if (r.status === 'pending') {
-            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + r.id + '\')">删除内容</button>';
-            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + r.id + '\')">封禁用户</button>';
-            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + r.id + '\')">标记已处理</button>';
+            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + String(r.id).replace(/'/g, "\\'") + '\')">删除内容</button>';
+            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + String(r.id).replace(/'/g, "\\'") + '\')">封禁用户</button>';
+            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + String(r.id).replace(/'/g, "\\'") + '\')">标记已处理</button>';
         }
         html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
         html += '</div>';
@@ -3258,7 +3258,7 @@ async function initAdminClient() {
             html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
             html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
             html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
-            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + r.id + '\')">回复并处理</button>';
+            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">回复并处理</button>';
             html += '</div>';
         }
         box.innerHTML = html;
