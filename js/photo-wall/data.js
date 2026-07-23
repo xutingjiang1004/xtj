@@ -390,26 +390,31 @@
       return result;
     } catch (err) {
       clearTimeout(timeoutId);
-      // ★ 超时后查询服务端权威删除状态（重新调用 delete 接口，它是幂等的）
+      // ★ 超时后查询服务端权威删除状态（使用只读状态接口，不重复执行删除）
       if (err.name === 'AbortError') {
         try {
-          var statusResponse = await fetch((window.API_BASE || '') + '/api/photo/delete', {
-            method: 'POST',
-            headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
-            body: JSON.stringify({ photoId: id })
+          var statusController = new AbortController();
+          var statusTimeoutId = setTimeout(function() { statusController.abort(); }, 12000);
+          var statusResponse = await fetch((window.API_BASE || '') + '/api/photo/delete-status?photo_id=' + encodeURIComponent(id), {
+            method: 'GET',
+            headers: Object.assign({}, authHeaders || {}),
+            signal: statusController.signal
           });
+          clearTimeout(statusTimeoutId);
           var statusResult = await statusResponse.json().catch(function(){ return {}; });
-          if (statusResponse.ok && statusResult.already_deleted) {
+          if (statusResult.status === 'deleted') {
             return { ok: true, already_deleted: true };
           }
-          if (statusResponse.ok && statusResult.ok) {
-            return statusResult;
+          if (statusResult.status === 'exists') {
+            // 照片还存在，删除未成功
+            throw new Error('delete_status_uncertain');
           }
-          // 确认失败则恢复照片
+          // not_found 或 unknown 也视为不确定
           throw new Error('delete_status_uncertain');
         } catch (statusErr) {
+          if (statusErr.message === 'delete_status_uncertain') throw statusErr;
           console.warn('[PhotoWall] delete status check failed', statusErr);
-          throw err; // 保留原始错误
+          throw err; // 保留原始 AbortError
         }
       }
       throw err;
