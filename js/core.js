@@ -305,7 +305,9 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
 }
 
 const ADMIN_NAME = "xxz";
-            const AVATAR_CACHE_KEY = "xtj_avatars";
+            const AVATAR_CACHE_KEY = "xtj_avatars_v2";
+            const AVATAR_CACHE_VERSION = 2;
+            const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小时
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -638,6 +640,74 @@ const ADMIN_NAME = "xxz";
 
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
+
+            // ★ 头像缓存版本化读写（含 TTL 和 fetched_at）
+            function readAvatarCacheFromStorage() {
+                try {
+                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
+                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
+                        var now = Date.now();
+                        var result = {};
+                        var keys = Object.keys(raw.data);
+                        for (var i = 0; i < keys.length; i++) {
+                            var entry = raw.data[keys[i]];
+                            if (entry && entry.url && (now - (entry.fetched_at || 0)) < AVATAR_CACHE_TTL_MS) {
+                                result[keys[i]] = entry.url;
+                            }
+                        }
+                        return result;
+                    }
+                    // 迁移旧格式 { username: url }
+                    var old = window.safeLocalStorageGetJSON("xtj_avatars", null);
+                    if (old && typeof old === 'object' && !old.version) {
+                        var migrated = { version: AVATAR_CACHE_VERSION, data: {} };
+                        var oldKeys = Object.keys(old);
+                        for (var j = 0; j < oldKeys.length; j++) {
+                            if (typeof old[oldKeys[j]] === 'string') {
+                                migrated.data[oldKeys[j]] = { url: old[oldKeys[j]], fetched_at: Date.now() };
+                            }
+                        }
+                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(migrated));
+                        // 迁移后删除旧缓存
+                        try { window.safeStorage.remove("xtj_avatars"); } catch(e) {}
+                        var mResult = {};
+                        var mKeys = Object.keys(migrated.data);
+                        for (var k = 0; k < mKeys.length; k++) {
+                            mResult[mKeys[k]] = migrated.data[mKeys[k]].url;
+                        }
+                        return mResult;
+                    }
+                } catch(e) {}
+                return {};
+            }
+            function writeAvatarCacheToStorage(data) {
+                try {
+                    var now = Date.now();
+                    var wrapped = { version: AVATAR_CACHE_VERSION, data: {} };
+                    var keys = Object.keys(data);
+                    for (var i = 0; i < keys.length; i++) {
+                        if (data[keys[i]]) {
+                            wrapped.data[keys[i]] = { url: data[keys[i]], fetched_at: now };
+                        }
+                    }
+                    window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(wrapped));
+                } catch(e) {}
+            }
+            function invalidateAvatarCacheEntry(username) {
+                if (!username) return;
+                delete avatarCache[username];
+                try {
+                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
+                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
+                        delete raw.data[username];
+                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(raw));
+                    }
+                } catch(e) {}
+            }
+            // ★ 暴露为全局函数，供 inline onerror 调用
+            window.__xtjInvalidateAvatarCache = function(username) {
+                invalidateAvatarCacheEntry(username);
+            };
 
             // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
             async function fetchAvatarUrl(userName) {
@@ -2565,7 +2635,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 var showAvatar = avatarCache[userName];
                 if (!showAvatar && userName === currentUser) {
                     try {
-                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                        var cachedAvatars = readAvatarCacheFromStorage();
                         if (cachedAvatars[currentUser]) {
                             showAvatar = cachedAvatars[currentUser];
                             avatarCache[currentUser] = cachedAvatars[currentUser];
@@ -2600,7 +2670,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     // 当前用户优先使用localStorage缓存
                     if (userName === currentUser) {
                         try {
-                            var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                            var cv = readAvatarCacheFromStorage();
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
@@ -2624,7 +2694,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             avatarEl.innerHTML = imgHtml;
                             // 写入本地缓存
                             if (userName === currentUser) {
-                                try { var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {}); cv[currentUser] = url; window.safeLocalStorageSetJSON(AVATAR_CACHE_KEY, cv); } catch(_) {}
+                                try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = url; writeAvatarCacheToStorage(cv); } catch(_) {}
                             }
                         }
                     }
@@ -2712,7 +2782,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 
                 // localStorage鏉冿拷鈻夐敓鏂ゆ嫹閿熸枻鎷烽敍姘帥濡澁鎷烽弻銉︽拱閸︽壆绱﹂敓?
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" alt="头像">';
@@ -2734,9 +2804,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         avatarCache[currentUser] = avatarUrl;
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
-                            var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                            var cv = readAvatarCacheFromStorage();
                             cv[currentUser] = avatarUrl;
-                            window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                            writeAvatarCacheToStorage(cv);
                         } catch(e) {}
                     } else if (!avatarCache[currentUser]) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
@@ -2862,9 +2932,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     avatarCache[currentUser] = avatarUrl;
                     // 保存到localStorage持久化存储
                     try {
-                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                        var cachedAvatars = readAvatarCacheFromStorage();
                         cachedAvatars[currentUser] = avatarUrl;
-                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                        writeAvatarCacheToStorage(cachedAvatars);
                     } catch(e) {}
                     updateAllAvatarElements(avatarUrl);
                     
@@ -2884,7 +2954,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             function updateAllAvatarElements(avatarUrl) {
                 var safeUrl = escapeHtml(sanitizeUrl(avatarUrl));
                 if (!safeUrl) return;
-                var imgHtml = '<img loading="lazy" decoding="async" src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                var avatarContent = renderAvatarContent(currentUser, avatarUrl);
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
@@ -2893,7 +2963,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 ];
                 els.forEach(function(el) {
                     if (el) {
-                        el.innerHTML = imgHtml;
+                        el.innerHTML = avatarContent;
                     }
                 });
                 document.querySelectorAll('#feed .post .avatar').forEach(function(el) {
@@ -2901,13 +2971,13 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     if (header) {
                         var nameEl = header.querySelector('.user-name');
                         if (nameEl && nameEl.textContent === currentUser) {
-                            el.innerHTML = imgHtml;
+                            el.innerHTML = avatarContent;
                         }
                     }
                 });
                 document.querySelectorAll('#dockChatMessages .chat-msg-avatar').forEach(function(el) {
                     if (el.closest('.chat-msg-row.sent')) {
-                        el.innerHTML = imgHtml;
+                        el.innerHTML = avatarContent;
                     }
                 });
                 document.querySelectorAll('#dockChatList .chat-list-item').forEach(function(el) {
@@ -2915,7 +2985,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     if (nameEl && nameEl.textContent === currentUser) {
                         var avEl = el.querySelector('.cli-avatar');
                         if (avEl) {
-                            avEl.innerHTML = imgHtml;
+                            avEl.innerHTML = avatarContent;
                         }
                     }
                 });
@@ -2924,12 +2994,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             async function updateAllAvatars() {
                 // 闁哄洤鐡ㄩ弻濠囧箣閹寸姵鐣卞銈囨暬濞间即鏌ｉ妸銉ヮ仼闁靛洦妫冨畷鎾圭疀閵壯咁槱localStorage闂佸搫顦崯顐﹀煝婢跺鍠橀柛蹇撶墳缁?
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         const profileAvatar = document.getElementById('profileAvatar');
                         if (profileAvatar) {
-                            profileAvatar.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            profileAvatar.innerHTML = renderAvatarContent(currentUser, cachedAvatars[currentUser]);
                         }
                         return;
                     }
@@ -2947,13 +3017,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     const profileAvatar = document.getElementById('profileAvatar');
                     if (profileAvatar) {
                         if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                            var safeProfileAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
-                            profileAvatar.innerHTML = '<img loading="lazy" decoding="async" src="' + safeProfileAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            profileAvatar.innerHTML = renderAvatarContent(currentUser, avatarRes.data[0].media_url);
                             avatarCache[currentUser] = avatarRes.data[0].media_url;
                             try {
-                                var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                                var cv = readAvatarCacheFromStorage();
                                 cv[currentUser] = avatarRes.data[0].media_url;
-                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                                writeAvatarCacheToStorage(cv);
                             } catch(e) {}
                         } else {
                             profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
@@ -3004,6 +3073,8 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 window.dockChatListCacheTime = 0;
                 document.body.style.overflow = '';
                 Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
+                // ★ 清除 localStorage 头像缓存
+                try { window.safeStorage.remove(AVATAR_CACHE_KEY); } catch(e) {}
                 var profileMainView = document.getElementById('profileMainView');
                 if (profileMainView) {
                     profileMainView.hidden = false;
@@ -3736,84 +3807,114 @@ function renderProfileActivityList(kind) {
                 var baseInterval = 2000; // 基础间隔2秒
                 var retryCount = 0;
                 var maxRetries = 5;
-                // ★ 使用实际运行时间而非 Date.now() 绝对时间，页面隐藏时暂停计时
+                // ★ 使用实际运行时间，页面隐藏时不消耗超时
                 var accumulatedRunTime = 0;
                 var maxRunTime = 90000; // 最多实际运行90秒
                 var lastPollStart = 0;
                 var pausedAt = 0;
+                var notTriggeredCount = 0; // not_triggered 连续计数
+                var commentIdStr = String(commentId);
 
                 // 显示临时状态
-                showCatAiStatus(commentId, '小猫正在组织毒液……');
+                showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
 
                 function poll() {
-                    // 页面隐藏时记录暂停时间，不删除任务
+                    // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
                     if (document.hidden) {
                         if (!pausedAt) pausedAt = Date.now();
-                        window.__catAiPollTimers[commentId] = setTimeout(poll, 3000);
+                        window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
                         return;
                     }
-                    // 恢复可见时，补回暂停时间
+                    // ★ 恢复可见时，清空暂停标记，不把隐藏时间加入运行时间
                     if (pausedAt) {
-                        accumulatedRunTime += Date.now() - pausedAt;
                         pausedAt = 0;
                     }
                     if (accumulatedRunTime > maxRunTime) {
-                        showCatAiStatus(commentId, '小猫暂时无法回复，点击重试', true);
-                        retryBtnSetup(commentId, postId);
-                        delete window.__catAiPollTimers[commentId];
-                        delete window.__catAiPollControllers[commentId];
+                        showCatAiStatus(commentIdStr, '小猫暂时无法回复，点击重试', true);
+                        retryBtnSetup(commentIdStr, postId);
+                        delete window.__catAiPollTimers[commentIdStr];
+                        delete window.__catAiPollControllers[commentIdStr];
                         return;
                     }
                     lastPollStart = Date.now();
 
                     var controller = new AbortController();
                     var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
-                    window.__catAiPollControllers[commentId] = controller;
+                    window.__catAiPollControllers[commentIdStr] = controller;
 
-                    window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentId), { signal: controller.signal })
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) {
-                            clearTimeout(timeoutId);
-                            // 计入实际运行时间
+                    window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentIdStr), { signal: controller.signal })
+                        .then(function(r) {
+                            // ★ 计入实际运行时间（仅请求耗时）
                             accumulatedRunTime += Date.now() - lastPollStart;
+                            // ★ 先检查 HTTP 状态码，400 不是网络错误
+                            if (!r.ok) {
+                                return r.json().catch(function() { return {}; }).then(function(payload) {
+                                    if (r.status === 400 && (payload.code === 'invalid_comment_id')) {
+                                        console.error('[CatAI] invalid comment_id:', commentIdStr);
+                                        showCatAiStatus(commentIdStr, '评论ID格式错误，请刷新页面重试', true);
+                                        delete window.__catAiPollTimers[commentIdStr];
+                                        delete window.__catAiPollControllers[commentIdStr];
+                                        return;
+                                    }
+                                    throw new Error('http_error_' + r.status);
+                                });
+                            }
+                            return r.json();
+                        })
+                        .then(function(data) {
+                            if (!data) return;
+                            clearTimeout(timeoutId);
                             retryCount = 0; // 成功请求后重置重试计数
                             if (data.status === 'completed') {
-                                // ★ 严格验证：必须包含完整字段
+                                // ★ 严格验证：必须包含完整字段，使用 String() 比较
                                 var aiComment = data.data;
-                                if (aiComment && aiComment.id && typeof aiComment.content === 'string' && aiComment.content.trim() && aiComment.user_name === 'cat_ai' && aiComment.generated_by_ai && aiComment.parent_comment_id === commentId) {
-                                    removeCatAiStatus(commentId);
-                                    delete window.__catAiPollTimers[commentId];
-                                    delete window.__catAiPollControllers[commentId];
+                                if (aiComment && aiComment.id && typeof aiComment.content === 'string' && aiComment.content.trim() && aiComment.user_name === 'cat_ai' && aiComment.generated_by_ai && String(aiComment.parent_comment_id) === commentIdStr) {
+                                    removeCatAiStatus(commentIdStr);
+                                    delete window.__catAiPollTimers[commentIdStr];
+                                    delete window.__catAiPollControllers[commentIdStr];
                                     // 通过统一 upsert 函数插入
-                                    upsertAiComment(aiComment, commentId, postId);
+                                    upsertAiComment(aiComment, commentIdStr, postId);
                                 } else {
                                     // 数据不完整，回退到全量刷新
                                     if (typeof loadFeed === 'function') loadFeed(true).catch(function() {});
-                                    window.__catAiPollTimers[commentId] = setTimeout(poll, baseInterval);
+                                    window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
+                                }
+                            } else if (data.status === 'not_triggered') {
+                                // ★ 前10秒内 not_triggered 视为任务尚未同步，继续轮询
+                                notTriggeredCount++;
+                                var commentAge = 0;
+                                try { commentAge = Date.now() - new Date(data.comment_created_at).getTime(); } catch(e) {}
+                                if (notTriggeredCount <= 5 && commentAge < 10000) {
+                                    showCatAiStatus(commentIdStr, '小猫正在准备回复……');
+                                    window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 1500);
+                                } else {
+                                    showCatAiStatus(commentIdStr, '未能创建回复任务，点击重试', true);
+                                    retryBtnSetup(commentIdStr, postId);
+                                    delete window.__catAiPollTimers[commentIdStr];
+                                    delete window.__catAiPollControllers[commentIdStr];
                                 }
                             } else if (data.status === 'rate_limited') {
-                                showCatAiStatus(commentId, data.message || '小猫今天被叫得有点烦，稍后再试', true);
-                                delete window.__catAiPollTimers[commentId];
-                                delete window.__catAiPollControllers[commentId];
+                                showCatAiStatus(commentIdStr, data.message || '小猫今天被叫得有点烦，稍后再试', true);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'failed') {
-                                showCatAiStatus(commentId, '小猫暂时不想说话', true);
-                                retryBtnSetup(commentId, postId);
-                                delete window.__catAiPollTimers[commentId];
-                                delete window.__catAiPollControllers[commentId];
+                                showCatAiStatus(commentIdStr, '小猫暂时不想说话', true);
+                                retryBtnSetup(commentIdStr, postId);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'blocked') {
-                                removeCatAiStatus(commentId);
-                                delete window.__catAiPollTimers[commentId];
-                                delete window.__catAiPollControllers[commentId];
+                                removeCatAiStatus(commentIdStr);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'processing' || data.status === 'pending') {
-                                // 更新状态文本
                                 if (data.message && data.message.includes('同步')) {
-                                    showCatAiStatus(commentId, '回复已生成，正在同步……');
+                                    showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
                                 }
-                                window.__catAiPollTimers[commentId] = setTimeout(poll, baseInterval);
+                                window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {
-                                removeCatAiStatus(commentId);
-                                delete window.__catAiPollTimers[commentId];
-                                delete window.__catAiPollControllers[commentId];
+                                removeCatAiStatus(commentIdStr);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
                             }
                         })
                         .catch(function(err) {
@@ -3823,16 +3924,16 @@ function renderProfileActivityList(kind) {
                             if (retryCount < maxRetries) {
                                 retryCount++;
                                 var backoff = Math.min(baseInterval * Math.pow(2, retryCount), 30000);
-                                window.__catAiPollTimers[commentId] = setTimeout(poll, backoff);
+                                window.__catAiPollTimers[commentIdStr] = setTimeout(poll, backoff);
                             } else {
-                                showCatAiStatus(commentId, '小猫暂时无法回复，点击重试', true);
-                                retryBtnSetup(commentId, postId);
-                                delete window.__catAiPollTimers[commentId];
-                                delete window.__catAiPollControllers[commentId];
+                                showCatAiStatus(commentIdStr, '小猫暂时无法回复，点击重试', true);
+                                retryBtnSetup(commentIdStr, postId);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
                             }
                         });
                 }
-                window.__catAiPollTimers[commentId] = setTimeout(poll, baseInterval);
+                window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
             }
 
             // ★ 显示重试按钮
@@ -3850,20 +3951,51 @@ function renderProfileActivityList(kind) {
             // ★ 统一 AI 评论插入函数（polling 和 Realtime 共用）
             function upsertAiComment(aiComment, sourceCommentId, postId) {
                 if (!aiComment || !aiComment.id || !aiComment.content || !aiComment.content.trim()) return;
+                var aiIdStr = String(aiComment.id);
+                var srcIdStr = String(sourceCommentId);
                 // 去重：检查 feedAllComments 和 DOM
                 var existingInFeed = (feedAllComments || []).some(function(item) {
-                    return item && item.id != null && String(item.id) === String(aiComment.id);
+                    return item && item.id != null && String(item.id) === aiIdStr;
                 });
-                var existingInDom = document.querySelector('.comment-item[data-comment-id="' + aiComment.id + '"]');
+                var existingInDom = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
                 if (existingInFeed && existingInDom) return; // 已存在，跳过
                 // 加入 feedAllComments
                 feedAllComments = (feedAllComments || []).filter(function(item) {
-                    return !(item && item.id != null && String(item.id) === String(aiComment.id));
+                    return !(item && item.id != null && String(item.id) === aiIdStr);
                 });
                 feedAllComments.push(aiComment);
                 writeFeedCacheSnapshot();
-                // 插入 DOM
-                insertCatAiCommentIntoDOM(aiComment, sourceCommentId, postId);
+                // 插入 DOM，返回结果
+                var result = insertCatAiCommentIntoDOM(aiComment, srcIdStr, postId);
+                if (!result.inserted) {
+                    // ★ 插入失败：定向重渲染对应帖子
+                    if (result.reason === 'source_comment_missing') {
+                        try {
+                            // 尝试对对应 postId 执行一次定向帖子重渲染
+                            var postEl = document.querySelector('.post[data-post-id="' + String(postId) + '"]');
+                            if (postEl && typeof renderPostCardSafely === 'function') {
+                                // 查找该帖子的评论数据
+                                var postComms = (feedAllComments || []).filter(function(c) {
+                                    return String(c.post_id) === String(postId);
+                                });
+                                var maps = buildPostMaps([], postComms);
+                                var template = document.createElement('template');
+                                template.innerHTML = renderPostCardSafely({ id: postId }, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                                var newPost = template.content.firstElementChild;
+                                if (newPost && postEl.parentNode) {
+                                    postEl.parentNode.replaceChild(newPost, postEl);
+                                }
+                            }
+                            // 重渲染后再次确认
+                            var confirmExisting = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
+                            if (!confirmExisting) {
+                                console.warn('[CatAI] upsert retry failed for comment:', aiIdStr);
+                            }
+                        } catch (e) {
+                            console.warn('[CatAI] upsert re-render failed:', e);
+                        }
+                    }
+                }
                 // 同步评论数量
                 if (typeof syncPostCommentCount === 'function') syncPostCommentCount(postId);
                 // 更新个人活动
@@ -3872,14 +4004,16 @@ function renderProfileActivityList(kind) {
 
             // ★ 直接将 AI 回复插入 DOM（正确层级：源评论的 .comment-replies 容器内）
             function insertCatAiCommentIntoDOM(aiComment, sourceCommentId, postId) {
-                if (!aiComment || !aiComment.id) return;
-                var sourceEl = document.querySelector('.comment-item[data-comment-id="' + sourceCommentId + '"]');
-                if (!sourceEl) return;
+                if (!aiComment || !aiComment.id) return { inserted: false, reason: 'invalid_data' };
+                var aiIdStr = String(aiComment.id);
+                var srcIdStr = String(sourceCommentId);
+                var sourceEl = document.querySelector('.comment-item[data-comment-id="' + srcIdStr + '"]');
+                if (!sourceEl) return { inserted: false, reason: 'source_comment_missing' };
                 // 移除旧状态
-                removeCatAiStatus(sourceCommentId);
+                removeCatAiStatus(srcIdStr);
                 // 检查是否已存在
-                var existing = document.querySelector('.comment-item[data-comment-id="' + aiComment.id + '"]');
-                if (existing) return;
+                var existing = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
+                if (existing) return { inserted: false, reason: 'already_exists' };
                 // ★ 查找或创建 .comment-replies 容器
                 var repliesContainer = sourceEl.querySelector('.comment-replies');
                 if (!repliesContainer) {
@@ -3890,10 +4024,10 @@ function renderProfileActivityList(kind) {
                 // 创建 AI 评论 DOM（与 renderCatAiComment 渲染结构一致）
                 var aiEl = document.createElement('div');
                 aiEl.className = 'comment-item cat-ai-comment';
-                aiEl.setAttribute('data-comment-id', aiComment.id);
-                aiEl.setAttribute('data-parent-comment-id', sourceCommentId);
+                aiEl.setAttribute('data-comment-id', aiIdStr);
+                aiEl.setAttribute('data-parent-comment-id', srcIdStr);
                 var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(aiComment.created_at) : (aiComment.created_at || '刚刚'));
-                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(aiComment.id) + '\', this)">删除</button>' : '';
+                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(aiIdStr) + '\', this)">删除</button>' : '';
                 aiEl.innerHTML = '<div class="comment-item-inner">' +
                     '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>' +
                     '<div class="comment-item-body">' +
@@ -3902,6 +4036,7 @@ function renderProfileActivityList(kind) {
                     '</div></div>';
                 // ★ 追加到 .comment-replies 容器内，而非源评论的兄弟节点
                 repliesContainer.appendChild(aiEl);
+                return { inserted: true, reason: 'ok' };
             }
 
             function showCatAiStatus(commentId, message, fadeOut) {
@@ -4023,7 +4158,7 @@ function renderProfileActivityList(kind) {
 
             async function loadUserAvatar() {
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         updateAllAvatarElements(cachedAvatars[currentUser]);
@@ -4034,7 +4169,7 @@ function renderProfileActivityList(kind) {
                             avatarCache[currentUser] = avatarUrl;
                             try {
                                 cachedAvatars[currentUser] = avatarUrl;
-                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                                writeAvatarCacheToStorage(cachedAvatars);
                             } catch(e) {}
                             updateAllAvatarElements(avatarUrl);
                         } else {
@@ -5649,7 +5784,7 @@ function renderProfileActivityList(kind) {
 
                 if (normalizedUsers.length === 0) return;
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     normalizedUsers.forEach(function(username) {
                         if (username && cachedAvatars[username] && !avatarCache[username]) {
                             avatarCache[username] = cachedAvatars[username];
@@ -5678,12 +5813,12 @@ function renderProfileActivityList(kind) {
                         }
                         // 写入本地缓存，避免下次访问重新请求
                         try {
-                            var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                            var cachedAvatars = readAvatarCacheFromStorage();
                             for (var ki2 = 0; ki2 < keys.length; ki2++) {
                                 var k2 = keys[ki2];
                                 if (avatars[k2]) cachedAvatars[k2] = avatars[k2];
                             }
-                            window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                            writeAvatarCacheToStorage(cachedAvatars);
                         } catch(e) {}
                     }
                 } catch(e) {
@@ -5694,12 +5829,16 @@ function renderProfileActivityList(kind) {
             function renderAvatarContent(username, avatarUrl) {
                 var safeUser = String(username || '').trim();
                 var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
+                var fallbackSpan = '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
                 if (avatarUrl && sanitizeUrl(avatarUrl)) {
-                    return '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
+                    return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
-                        '" onerror="this.parentNode.innerHTML=\'<span class=\\\'avatar-fallback\\\' data-user-name=\\\'' + escapeHtml(safeUser) + '\\\'>' + safeJsStr(fallbackInitial) + '</span>\';">';
+                        '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
+                        ' onload="var p=this.closest(\'.avatar\');if(p){p.classList.add(\'has-image\');this.style.opacity=\'1\'}"' +
+                        ' onerror="var p=this.closest(\'.avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        fallbackSpan;
                 }
-                return '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
+                return fallbackSpan;
             }
 
             function getAvatarHtml(username, post) {
@@ -5709,7 +5848,7 @@ function renderProfileActivityList(kind) {
 
                 if (!avatarUrl && safeUser) {
                     try {
-                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                        var cachedAvatars = readAvatarCacheFromStorage();
                         avatarUrl = cachedAvatars[safeUser] || '';
                         if (avatarUrl) avatarCache[safeUser] = avatarUrl;
                     } catch (e) {}
@@ -5743,7 +5882,7 @@ function renderProfileActivityList(kind) {
                     return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
                 }
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[username]) {
                         avatarCache[username] = cachedAvatars[username];
                         return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username]) + '" alt="' + safeName + '"></span>';
@@ -5875,19 +6014,25 @@ function renderProfileActivityList(kind) {
                             var aiCommentMap = {};
                             pComms.forEach(function(c) {
                                 if (c.parent_comment_id && c.user_name === 'cat_ai' && c.generated_by_ai) {
-                                    if (!aiCommentMap[c.parent_comment_id]) aiCommentMap[c.parent_comment_id] = [];
-                                    aiCommentMap[c.parent_comment_id].push(c);
+                                    var key = String(c.parent_comment_id);
+                                    if (!aiCommentMap[key]) aiCommentMap[key] = [];
+                                    aiCommentMap[key].push(c);
                                 }
                             });
                             commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
                                 var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(c.id) + '\', this)">删除</button>' : '';
-                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    </div>\n                    ';
-                                var aiReplies = aiCommentMap[c.id] || [];
-                                aiReplies.forEach(function(reply) {
-                                    if (typeof renderCatAiComment === 'function') {
-                                        html += renderCatAiComment(reply);
-                                    }
-                                });
+                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    ';
+                                var aiReplies = aiCommentMap[String(c.id)] || [];
+                                if (aiReplies.length > 0) {
+                                    html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">';
+                                    aiReplies.forEach(function(reply) {
+                                        if (typeof renderCatAiComment === 'function') {
+                                            html += renderCatAiComment(reply);
+                                        }
+                                    });
+                                    html += '</div>';
+                                }
+                                html += '\n                    </div>\n                    ';
                                 return html;
                             }).join('') + '\n                  </div>\n                  ';
                         }
@@ -6597,7 +6742,7 @@ function renderProfileActivityList(kind) {
                       var html = '';
                       roots.forEach(function(r) {
                         html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
-                        var replies = children.filter(function(c) { return c.parent_comment_id === r.id; });
+                        var replies = children.filter(function(c) { return String(c.parent_comment_id) === String(r.id); });
                         if (replies.length > 0) {
                           html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
                             if (c.user_name === 'cat_ai' && c.generated_by_ai) {
@@ -6633,7 +6778,7 @@ function renderProfileActivityList(kind) {
                 }).filter(Boolean)));
                 if (!users.length) return;
                 try {
-                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                    var cachedAvatars = readAvatarCacheFromStorage();
                     users.forEach(function(userName) {
                         if (!avatarCache[userName] && cachedAvatars[userName]) avatarCache[userName] = cachedAvatars[userName];
                     });
@@ -8863,8 +9008,8 @@ function renderProfileActivityList(kind) {
                                 feedAllComments.push(row);
                                 // ★ 如果是 AI 评论，使用统一 upsert 函数
                                 if (row.generated_by_ai && row.parent_comment_id) {
-                                    removeCatAiStatus(row.parent_comment_id);
-                                    upsertAiComment(row, row.parent_comment_id, row.post_id);
+                                    removeCatAiStatus(String(row.parent_comment_id));
+                                    upsertAiComment(row, String(row.parent_comment_id), row.post_id);
                                 } else {
                                     // 普通评论，全量刷新
                                     if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
@@ -9866,12 +10011,12 @@ function renderProfileActivityList(kind) {
                             }
                             // 写入本地缓存
                             try {
-                                var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                                var cachedAvatars = readAvatarCacheFromStorage();
                                 for (var ki2 = 0; ki2 < keys.length; ki2++) {
                                     var k2 = keys[ki2];
                                     if (result.avatars[k2]) cachedAvatars[k2] = result.avatars[k2];
                                 }
-                                window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                                writeAvatarCacheToStorage(cachedAvatars);
                             } catch(e) {}
                         }
                         if (typeof onReady === 'function') onReady(changed || users.length > 0);
@@ -10222,7 +10367,7 @@ function renderProfileActivityList(kind) {
                 // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
                 if (currentUser) {
                     try {
-                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
+                        var cachedAvatars = readAvatarCacheFromStorage();
                         if (cachedAvatars[currentUser]) {
                             avatarCache[currentUser] = cachedAvatars[currentUser];
                         }

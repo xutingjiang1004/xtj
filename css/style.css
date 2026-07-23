@@ -921,35 +921,46 @@
         }
 
         .avatar {
+            position: relative;
             width: 40px;
             height: 40px;
             flex: 0 0 40px;
-            position: relative;
             overflow: hidden;
-            display: grid;
-            place-items: center;
             border-radius: 50%;
-            background: linear-gradient(135deg, #059669, #34d399); color: white; font-weight: bold; font-size: 16px;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white; font-weight: bold; font-size: 16px;
             transition: var(--trans-spring);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .avatar > img {
+        .avatar-image {
+            position: absolute !important;
+            inset: 0 !important;
             display: block !important;
             width: 100% !important;
             height: 100% !important;
-            min-width: 100%;
-            min-height: 100%;
+            max-width: none !important;
+            max-height: none !important;
             object-fit: cover !important;
-            object-position: center;
+            object-position: center !important;
             border-radius: inherit;
+            z-index: 2;
         }
 
         .avatar-fallback {
-            width: 100%;
-            height: 100%;
+            position: absolute;
+            inset: 0;
             display: grid;
             place-items: center;
+            z-index: 1;
+            color: #fff;
+            font-weight: 700;
+            font-size: 16px;
         }
+        .avatar.has-image { background: transparent; }
+        .avatar.has-image .avatar-fallback { visibility: hidden; }
         .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
         @media (hover: hover) and (pointer: fine) {
             .avatar:hover { transform: scale(1.05); }
