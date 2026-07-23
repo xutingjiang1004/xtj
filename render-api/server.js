@@ -4063,10 +4063,12 @@ setInterval(function() {
 // 小猫 AI 回复状态查询接口
 app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
   try {
-    var commentId = req.query.comment_id;
-    if (!commentId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(commentId)) {
-      return res.status(400).json({ error: 'invalid comment_id' });
+    var commentIdRaw = String(req.query.comment_id || '').trim();
+    // ★ comments.id 是 bigint，不是 UUID。必须按正整数校验
+    if (!/^\d+$/.test(commentIdRaw)) {
+      return res.status(400).json({ error: 'invalid comment_id', code: 'invalid_comment_id' });
     }
+    var commentId = commentIdRaw;
     // 验证当前用户有权查看该评论
     var commentRes = await supabase.from('comments').select('id, post_id, user_name').eq('id', commentId).maybeSingle();
     if (!commentRes.data) return res.status(404).json({ error: 'comment not found' });
@@ -4087,11 +4089,11 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
         .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
       if (replyRes.data) {
         var r = replyRes.data;
-        if (r.id && typeof r.content === 'string' && r.content.trim() && r.user_name === 'cat_ai' && r.generated_by_ai === true && r.parent_comment_id === commentId) {
+        if (r.id && typeof r.content === 'string' && r.content.trim() && r.user_name === 'cat_ai' && r.generated_by_ai === true && String(r.parent_comment_id) === String(commentId)) {
           return res.json({ status: 'completed', reply_comment_id: r.id, message: '', data: r });
         }
       }
-      return res.json({ status: 'not_triggered', reply_comment_id: null, message: '' });
+      return res.json({ status: 'not_triggered', reply_comment_id: null, message: '', comment_created_at: commentRes.data.created_at });
     }
     var job = jobRes.data;
     var status = job.status;
@@ -4107,7 +4109,7 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
       if (replyRes.data) {
         var rr = replyRes.data;
         // ★ 严格验证：必须包含完整字段，否则返回 processing 状态而非空对象
-        if (rr.id && typeof rr.content === 'string' && rr.content.trim() && rr.user_name === 'cat_ai' && rr.generated_by_ai === true && rr.parent_comment_id === commentId) {
+        if (rr.id && typeof rr.content === 'string' && rr.content.trim() && rr.user_name === 'cat_ai' && rr.generated_by_ai === true && String(rr.parent_comment_id) === String(commentId)) {
           return res.json({ status: 'completed', reply_comment_id: rr.id, message: '', data: rr });
         }
       }
@@ -6990,6 +6992,11 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
         if (job) await recordCatRateLimit(req.userName, postId);
+        return res.status(201).json({
+          ok: true,
+          data: inserted.data,
+          cat_ai: { triggered: true, job_created: !!job, source_comment_id: String(inserted.data.id) }
+        });
       } else {
         // 限流时记录 failed 任务以便前端 poll 能收到 rate_limited 状态
         await supabase.from('ai_comment_reply_jobs').insert({
@@ -7001,6 +7008,11 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
           error_message: rateLimit.reason,
           model: DEEPSEEK_MODEL_REASONER || 'deepseek-chat',
           attempts: 1
+        });
+        return res.status(201).json({
+          ok: true,
+          data: inserted.data,
+          cat_ai: { triggered: true, job_created: false, rate_limited: true, reason: rateLimit.reason, source_comment_id: String(inserted.data.id) }
         });
       }
       // 限流时评论仍正常发布，不报错
