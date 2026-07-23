@@ -5943,7 +5943,9 @@ function showChatMessages() {
   }
 
   function closeAiChat() {
-    if (!S.active) return;
+    var activePanel = document.getElementById('panelAiChat');
+    var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
+    if (!S.active && !panelIsVisible) return;
     S.active = false;
     S.lifecycleId += 1;
     S.historyRequestId += 1;

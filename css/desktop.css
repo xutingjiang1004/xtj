@@ -11,7 +11,7 @@
    - 涓嶆敼鍙?Supabase / 鍙戝竷 / 鑱婂ぉ / 绛涢€?/ 寮圭獥 / 鐧诲綍
    ============================================================ */
 
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   .app-container {
     max-width: 100% !important;
     margin: 0 !important;
@@ -1206,8 +1206,8 @@
   }
 }
 
-/* Touch tablets keep the existing single-pane chat interaction. */
-@media (min-width: 1024px) and (max-width: 1279.98px) and (hover: none) and (pointer: coarse) {
+/* Phones keep the existing single-pane chat interaction. */
+@media (max-width: 767.98px) {
   #panelChat .dock-chat-container {
     display: block;
     grid-template-columns: none;
@@ -1235,9 +1235,9 @@
 
 /* ============================================================
    Private chat desktop surface
-   The split is intentionally limited to fine-pointer desktop input.
+   Every non-phone viewport uses the split desktop workbench.
    ============================================================ */
-@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+@media (min-width: 768px) {
   #panelChat {
     padding: 24px clamp(24px, 3vw, 56px) 32px;
     overflow: hidden;
@@ -1457,8 +1457,53 @@
 
 /* Fine-pointer desktop uses the persistent left sidebar, so the mobile Dock
    and the optional conversation inspector are not part of this layout. */
-@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+@media (min-width: 768px) {
   .dock-bar {
     display: none !important;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  #panelChat {
+    padding: 12px 12px 18px;
+  }
+
+  #panelChat .dock-chat-container {
+    grid-template-columns: minmax(210px, 220px) minmax(0, 1fr);
+    height: calc(100dvh - 24px);
+    min-height: 480px;
+    border-radius: 16px;
+  }
+
+  #panelChat .chat-header {
+    min-height: 58px;
+    padding: 10px 16px;
+  }
+
+  #panelChat #dockChatList {
+    padding: 8px;
+  }
+
+  #panelChat .chat-list-item {
+    padding: 10px 8px !important;
+  }
+
+  #panelChat #dockChatMessages {
+    padding: 18px 16px;
+  }
+
+  #panelChat .chat-input-area {
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279.98px) {
+  #panelChat {
+    padding: 16px 18px 22px;
+  }
+
+  #panelChat .dock-chat-container {
+    grid-template-columns: minmax(240px, 260px) minmax(0, 1fr);
+    height: calc(100dvh - 38px);
   }
 }
