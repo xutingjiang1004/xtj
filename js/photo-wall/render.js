@@ -203,6 +203,8 @@
   var pendingImgs = [];
   var activeLoads = 0;
   var MAX_LOADS = 4;
+  // ★ 每次 render 的 generation ID，用于防止旧加载任务修改新页面
+  var _pwRenderGeneration = 0;
 
   function finishImg(img){
     if (!img) return;
@@ -219,26 +221,44 @@
     var item = pendingImgs.shift();
     if (!item || !item.target) return pumpImages();
     var img = item.target;
+    // ★ 检查 img 是否还在 DOM 中，且属于当前 generation
+    if (!img.isConnected || img._pwGeneration !== _pwRenderGeneration) {
+      // 释放计数
+      if (img._pwActiveLoad && img._pwActiveLoad === _pwRenderGeneration) {
+        activeLoads = Math.max(0, activeLoads - 1);
+        img._pwActiveLoad = 0;
+      }
+      img._pwQueued = false;
+      return pumpImages();
+    }
     var url = img.getAttribute('data-src');
     if (!url) {
       finishImg(img);
       return pumpImages();
     }
     activeLoads += 1;
+    img._pwActiveLoad = _pwRenderGeneration;
     var settled = false;
     var fallbackTimer = setTimeout(function(){
-      if (!settled && img) img.classList.add('pw-load-timeout');
+      if (!settled && img && img.isConnected) img.classList.add('pw-load-timeout');
     }, 10000);
     function settleImage(failed){
       if (settled) return;
       settled = true;
       clearTimeout(fallbackTimer);
-      activeLoads = Math.max(0, activeLoads - 1);
+      // ★ 只有当前 generation 的加载才更新状态
+      if (img._pwActiveLoad === _pwRenderGeneration) {
+        activeLoads = Math.max(0, activeLoads - 1);
+        img._pwActiveLoad = 0;
+      }
       img.onload = null;
       img.onerror = null;
       if (failed) img.src = FALLBACK_IMG;
       img.removeAttribute('data-src');
-      finishImg(img);
+      // ★ 只有 img 还在 DOM 中且属于当前 generation 才完成
+      if (img.isConnected && img._pwGeneration === _pwRenderGeneration) {
+        finishImg(img);
+      }
       pumpImages();
     }
     img.onload = function(){
@@ -256,6 +276,7 @@
   function queueImage(img){
     if (!img || img._pwQueued || !img.getAttribute('data-src')) return;
     img._pwQueued = true;
+    img._pwGeneration = _pwRenderGeneration;
     pendingImgs.push({ target:img });
   }
 
@@ -275,7 +296,22 @@
   }
 
   function observeImages(container){
+    // ★ 清理旧加载任务
     pendingImgs = [];
+    // 清空旧 generation 的 activeLoads 计数
+    activeLoads = 0;
+    // 清空旧图片的加载状态
+    try {
+      var allImgs = container.querySelectorAll('img');
+      for (var i = 0; i < allImgs.length; i++) {
+        var img = allImgs[i];
+        img._pwQueued = false;
+        img._pwActiveLoad = 0;
+        img._pwGeneration = _pwRenderGeneration;
+        if (img.onload) img.onload = null;
+        if (img.onerror) img.onerror = null;
+      }
+    } catch(e) {}
     if (imgObserver) imgObserver.disconnect();
     if (window.IntersectionObserver) {
       imgObserver = new IntersectionObserver(function(entries){
@@ -376,6 +412,8 @@
       return;
     }
     rendering = true;
+    // ★ 递增 generation ID，废弃旧加载任务
+    _pwRenderGeneration += 1;
     var grid = document.getElementById('photoGrid');
     if (!grid) {
       rendering = false;
