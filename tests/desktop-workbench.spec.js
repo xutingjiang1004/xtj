@@ -194,4 +194,30 @@ test.describe('desktop workbench contract', () => {
       await context.close();
     }
   });
+
+  test('desktop account avatar follows asynchronous source avatar updates', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openApp(page);
+    await page.evaluate(() => {
+      window.currentUser = 'xxz';
+      document.getElementById('myName').textContent = 'xxz';
+      document.getElementById('myAvatar').innerHTML = '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="头像">';
+    });
+    await expect(page.locator('#desktopWorkbenchAvatar img')).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => ({
+      source: document.querySelector('#myAvatar img')?.getAttribute('src'),
+      target: document.querySelector('#desktopWorkbenchAvatar img')?.getAttribute('src'),
+      name: document.getElementById('desktopWorkbenchName').textContent
+    }))).toEqual({
+      source: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+      target: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+      name: 'xxz'
+    });
+
+    await page.evaluate(() => {
+      document.getElementById('myAvatar').textContent = 'X';
+    });
+    await expect(page.locator('#desktopWorkbenchAvatar')).toHaveText('X');
+    await expect(page.locator('#desktopWorkbenchAvatar img')).toHaveCount(0);
+  });
 });
