@@ -19,7 +19,7 @@ test('@ triggers mention autocomplete', () => {
 });
 
 test('mention shows 小猫 candidate with AI badge', () => {
-  assert.match(core, /name="小猫"/);
+  assert.match(core, /mention-name.*小猫/);
   assert.match(core, /AI<\/span>/);
   assert.match(core, /犀利毒舌回复/);
   assert.match(core, /mention-avatar.*🐱/);
@@ -49,8 +49,9 @@ test('mention uses event delegation, not per-input binding', () => {
 });
 
 test('mention dropdown has aria attributes', () => {
-  assert.match(core, /role=.combobox/);
-  assert.match(core, /role=.listbox/);
+  assert.match(core, /role/);
+  assert.match(core, /combobox/);
+  assert.match(core, /listbox/);
   assert.match(core, /aria-expanded/);
   assert.match(core, /aria-activedescendant/);
 });

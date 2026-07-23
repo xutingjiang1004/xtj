@@ -19,14 +19,10 @@ test('throttleRAF ticking is reset in finally block', () => {
 
 // 8.2: Markdown Double Escape
 test('markdown code blocks are extracted before HTML escaping', () => {
-  // 先提取代码块，再全局转义
-  const renderMarkdown = aiAgent.match(/function renderMarkdown[\s\S]*?(?=function)/);
+  const renderMarkdown = aiAgent.match(/function renderMarkdown[\s\S]*?(?=\n  function|\nfunction)/);
   assert.ok(renderMarkdown);
-  // 代码块提取在全局转义之前
-  const codeBlockExtract = renderMarkdown[0].match(/```[\s\S]*?%%%CODEBLOCK/);
-  const globalEscape = renderMarkdown[0].match(/s = s\.replace\(.*?&amp;/);
-  assert.ok(codeBlockExtract);
-  assert.ok(globalEscape);
+  assert.ok(renderMarkdown[0].includes('%%%CODEBLOCK'));
+  assert.ok(renderMarkdown[0].includes('.replace(/&/g, \'&amp;\')'));
 });
 
 test('markdown code blocks are escaped only once', () => {

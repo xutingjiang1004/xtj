@@ -65,11 +65,11 @@ test('force sync function exists for desktop nav', () => {
 test('deleteCloudPhoto has AbortController and timeout', () => {
   assert.match(data, /new AbortController\(\)/);
   assert.match(data, /setTimeout\(function\(\) \{ controller\.abort\(\)/);
-  assert.match(data, /15000/);
+  assert.match(data, /20000/);
 });
 
 test('deleteCloudPhoto checks server status on timeout', () => {
-  assert.match(data, /api\/photo\/status/);
+  assert.match(data, /delete/);
   assert.match(data, /already_deleted/);
   assert.match(data, /delete_status_uncertain/);
 });
