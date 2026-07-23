@@ -368,10 +368,10 @@
     if (!window.pwAlbumView) {
       window.pwCurrentSortedPhotos = photos.slice();
       if (!photos.length) {
-        var syncWrap = document.getElementById('photoSyncStatus');
+        var syncWrap = document.getElementById('pwSyncStatus') || document.getElementById('photoSyncStatus');
         var isError = syncWrap && syncWrap.classList.contains('is-error');
         grid.innerHTML = isError
-          ? '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div></div>'
+          ? '<div class="photo-wall-empty"><div>照片墙加载失败，请重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>'
           : emptyHtml();
         return;
       }
