@@ -536,9 +536,12 @@ const ADMIN_NAME = "xxz";
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
             window.ensureProtectedOperationAuth = async function() {
-                // ★ 启动验证未完成，阻止所有受保护操作
+                // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
                 if (window._xtjAuthState === 'auth_pending') {
-                    return { ok: false, reason: 'auth_pending', token: '', user_name: '' };
+                    var waitStart = Date.now();
+                    while (window._xtjAuthState === 'auth_pending' && (Date.now() - waitStart) < 5000) {
+                        await new Promise(function(r) { setTimeout(r, 150); });
+                    }
                 }
                 try {
                     var userName = '';
