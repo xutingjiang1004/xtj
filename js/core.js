@@ -3946,9 +3946,40 @@ function renderProfileActivityList(kind) {
                     statusEl.innerHTML = '小猫暂时无法回复 <button type="button" class="cat-ai-retry-btn" onclick="window.__xtjRetryCatAi(\'' + safeJsStr(commentId) + '\', \'' + safeJsStr(postId) + '\')">重试</button>';
                 }
             }
-            window.__xtjRetryCatAi = function(commentId, postId) {
-                removeCatAiStatus(commentId);
-                pollCatAiReply(commentId, postId);
+            window.__xtjRetryCatAi = async function(commentId, postId) {
+                var commentIdStr = String(commentId);
+                var statusEl = document.getElementById('cat-ai-status-' + commentIdStr);
+                if (statusEl) statusEl.innerHTML = '小猫正在恢复……';
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/comments/ai-reply-retry', {
+                        method: 'POST',
+                        body: JSON.stringify({ comment_id: commentIdStr })
+                    });
+                    var payload = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok) {
+                        var errMsg = payload.message || payload.error || '重试失败';
+                        showCatAiStatus(commentIdStr, errMsg, true);
+                        return;
+                    }
+                    if (payload.status === 'completed') {
+                        var aiComment = payload.data || payload;
+                        if (aiComment && aiComment.id) {
+                            upsertAiComment(aiComment, commentIdStr, postId);
+                            removeCatAiStatus(commentIdStr);
+                            return;
+                        }
+                    }
+                    if (payload.status === 'rate_limited') {
+                        showCatAiStatus(commentIdStr, payload.message || '调用过于频繁，请稍后再试', true);
+                        return;
+                    }
+                    // pending/processing - 开始轮询
+                    removeCatAiStatus(commentIdStr);
+                    pollCatAiReply(commentIdStr, postId);
+                } catch (e) {
+                    console.error('[CatAI] retry failed:', e);
+                    showCatAiStatus(commentIdStr, '重试失败，请检查网络后重试', true);
+                }
             };
 
             // ★ 统一 AI 评论插入函数（polling 和 Realtime 共用）
