@@ -4130,100 +4130,118 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
 });
 
 // ★ 小猫 AI 评论回复重试 — 将 failed/blocked Job 重置为 pending
-app.post('/api/comments/ai-reply-retry', authenticateUser, async (req, res) => {
+app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    var commentIdRaw = parseInt(String(req.body && req.body.comment_id || ''), 10);
-    if (!Number.isFinite(commentIdRaw) || commentIdRaw < 1) {
+    var commentIdRaw = String(req.body && req.body.comment_id || '').trim();
+    // ★ comments.id 是 bigint，不能使用 parseInt 或 Number 转换，必须按正整数正则校验
+    if (!/^\d+$/.test(commentIdRaw)) {
       return res.status(400).json({ error: '无效的评论ID', code: 'invalid_comment_id' });
     }
     var commentId = commentIdRaw;
     var userName = req.userName;
 
     // 1. 验证源评论存在
-    var { data: sourceComment } = await supabase.from('comments')
+    var { data: sourceComment, error: sourceErr } = await supabase.from('comments')
       .select('id, post_id, user_name, content')
       .eq('id', commentId)
       .maybeSingle();
-    if (!sourceComment) return res.status(404).json({ error: '评论不存在' });
+    if (sourceErr) return res.status(500).json({ error: sanitizeError(sourceErr), code: 'db_error' });
+    if (!sourceComment) return res.status(404).json({ error: '评论不存在', code: 'comment_not_found' });
 
     // 2. 验证帖子存在
-    var { data: post } = await supabase.from('posts')
+    var { data: post, error: postErr } = await supabase.from('posts')
       .select('id, user_name, visibility')
       .eq('id', sourceComment.post_id)
       .maybeSingle();
-    if (!post) return res.status(404).json({ error: '帖子不存在' });
+    if (postErr) return res.status(500).json({ error: sanitizeError(postErr), code: 'db_error' });
+    if (!post) return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
 
-    // 3. 权限检查：仅帖子作者或评论作者可重试
-    var isOwner = post.user_name === userName;
+    // 3. 权限检查：仅帖子作者或评论作者可重试（管理员也可）
+    var isOwner = post.user_name === userName || userName === ADMIN_USERNAME;
     var isCommenter = sourceComment.user_name === userName;
     if (!isOwner && !isCommenter) {
       return res.status(403).json({ error: '无权操作', code: 'forbidden' });
     }
 
-    // 4. 查找现有 AI 回复 Job
-    var { data: existingJobs } = await supabase.from('ai_reply_jobs')
-      .select('id, status, error_message')
-      .eq('comment_id', commentId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    var existingJob = (existingJobs && existingJobs.length > 0) ? existingJobs[0] : null;
+    // 4. 查找现有 AI 回复 Job (ai_comment_reply_jobs 规范表)
+    var { data: existingJob, error: jobErr } = await supabase.from('ai_comment_reply_jobs')
+      .select('*')
+      .eq('source_comment_id', commentId)
+      .maybeSingle();
+    if (jobErr) return res.status(500).json({ error: sanitizeError(jobErr), code: 'db_error' });
 
-    // 5. 已完成的直接返回
+    // 5. 查找现有 AI 评论
+    var { data: aiReplyComment, error: replyErr } = await supabase.from('comments')
+      .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+      .eq('parent_comment_id', commentId)
+      .eq('generated_by_ai', true)
+      .eq('user_name', 'cat_ai')
+      .maybeSingle();
+    if (replyErr) return res.status(500).json({ error: sanitizeError(replyErr), code: 'db_error' });
+
+    // 6. 已完成的直接返回完整格式（与 GET /api/comments/ai-reply-status 一致）
+    if (aiReplyComment && aiReplyComment.id && typeof aiReplyComment.content === 'string' && aiReplyComment.content.trim() && aiReplyComment.user_name === 'cat_ai' && aiReplyComment.generated_by_ai === true && String(aiReplyComment.parent_comment_id) === String(commentId)) {
+      return res.json({ status: 'completed', reply_comment_id: aiReplyComment.id, message: '', data: aiReplyComment, source_comment_id: commentId });
+    }
     if (existingJob && existingJob.status === 'completed') {
-      var { data: aiComments } = await supabase.from('comments')
-        .select('id, user_name, content, created_at')
-        .eq('parent_id', commentId)
-        .eq('user_name', '小猫')
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (aiComments && aiComments.length > 0) {
-        return res.json({ ok: true, status: 'completed', data: aiComments[0], source_comment_id: commentId });
-      }
-      return res.json({ ok: true, status: 'completed', source_comment_id: commentId });
+      return res.json({ status: 'completed', reply_comment_id: null, message: '', data: null, source_comment_id: commentId });
     }
 
-    // 6. pending/processing 不重复创建，返回当前状态
+    // 7. pending/processing 不重复创建，直接返回当前状态
     if (existingJob && (existingJob.status === 'pending' || existingJob.status === 'processing')) {
-      return res.json({ ok: true, status: existingJob.status, source_comment_id: commentId });
+      return res.json({ ok: true, status: existingJob.status, reply_comment_id: null, message: '小猫正在组织毒液……', source_comment_id: commentId });
     }
 
-    // 7. failed/blocked → 原子重置为 pending
-    if (existingJob && (existingJob.status === 'failed' || existingJob.status === 'blocked')) {
-      var { error: updateErr } = await supabase.from('ai_reply_jobs')
-        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
+    // 8. 判定是否为不可重试的 blocked / 安全校验拦截 / 关联数据删除状态
+    var nonRetryableMsgs = ['source comment deleted', 'post deleted', 'blocked by safety check', 'privacy', 'harassment', 'sexual', 'illegal', 'self_harm', 'prompt_injection', 'spam'];
+    function isNonRetryable(job) {
+      if (!job) return false;
+      if (job.status === 'blocked') return true;
+      var errMsg = String(job.error_message || '').toLowerCase();
+      var riskType = String(job.risk_type || '').toLowerCase();
+      if (riskType && riskType !== 'null' && riskType !== 'undefined') return true;
+      for (var i = 0; i < nonRetryableMsgs.length; i++) {
+        if (errMsg.includes(nonRetryableMsgs[i])) return true;
+      }
+      return false;
+    }
+
+    if (existingJob && isNonRetryable(existingJob)) {
+      return res.status(400).json({ ok: false, code: 'non_retryable', error: '该任务已被安全规则拦截或关联数据已被删除，不可重试', status: 'blocked', source_comment_id: commentId });
+    }
+
+    // 9. failed 状态重置为 pending（仅临时可重试错误）
+    if (existingJob && existingJob.status === 'failed') {
+      var { error: updateErr } = await supabase.from('ai_comment_reply_jobs')
+        .update({
+          status: 'pending',
+          error_message: null,
+          risk_type: null,
+          started_at: null,
+          completed_at: null,
+          attempts: 0,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', existingJob.id)
-        .eq('status', existingJob.status); // 原子条件更新
+        .eq('status', 'failed');
       if (updateErr) {
         console.error('[ai-reply-retry] update failed:', updateErr.message);
-        return res.status(500).json({ error: '重试失败，请稍后再试' });
+        return res.status(500).json({ error: sanitizeError(updateErr), code: 'db_error' });
       }
-      return res.json({ ok: true, status: 'pending', source_comment_id: commentId });
+      return res.json({ ok: true, status: 'pending', job_id: existingJob.id, source_comment_id: commentId });
     }
 
-    // 8. 无 Job — 创建新任务
-    // 限流检查：60秒内同一评论最多重试3次
-    var sixtySecAgo = new Date(Date.now() - 60000).toISOString();
-    var { count: recentCount } = await supabase.from('ai_reply_jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('comment_id', commentId)
-      .gte('created_at', sixtySecAgo);
-    if (recentCount >= 3) {
-      return res.status(429).json({ error: '重试过于频繁，请稍后再试', code: 'rate_limited', status: 'rate_limited' });
-    }
-
-    var { data: newJob, error: insertErr } = await supabase.from('ai_reply_jobs')
-      .insert([{
-        comment_id: commentId,
-        post_id: sourceComment.post_id,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }])
-      .select('id')
-      .single();
-    if (insertErr) {
-      console.error('[ai-reply-retry] insert failed:', insertErr.message);
-      return res.status(500).json({ error: '创建重试任务失败' });
+    // 10. 无 Job — 复用 createCatReplyJob 创建新任务
+    var newJob = await createCatReplyJob(commentId, sourceComment.post_id, userName);
+    if (!newJob) {
+      var { data: doubleCheck } = await supabase.from('ai_comment_reply_jobs')
+        .select('id, status')
+        .eq('source_comment_id', commentId)
+        .maybeSingle();
+      if (doubleCheck) {
+        return res.json({ ok: true, status: doubleCheck.status, job_id: doubleCheck.id, source_comment_id: commentId });
+      }
+      return res.status(500).json({ error: '创建重试任务失败或触发频率限制', code: 'create_job_failed' });
     }
 
     return res.json({ ok: true, status: 'pending', job_id: newJob.id, source_comment_id: commentId });
