@@ -439,6 +439,8 @@ const ADMIN_NAME = "xxz";
                 clearAllAuthState({ revokeRemote: false });
                 try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
                 try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                // ★ 30秒后重置，允许用户关闭弹窗后再次触发
+                setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
             }
             window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
@@ -536,9 +538,12 @@ const ADMIN_NAME = "xxz";
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
             window.ensureProtectedOperationAuth = async function() {
-                // ★ 启动验证未完成，阻止所有受保护操作
+                // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
                 if (window._xtjAuthState === 'auth_pending') {
-                    return { ok: false, reason: 'auth_pending', token: '', user_name: '' };
+                    var waitStart = Date.now();
+                    while (window._xtjAuthState === 'auth_pending' && (Date.now() - waitStart) < 5000) {
+                        await new Promise(function(r) { setTimeout(r, 150); });
+                    }
                 }
                 try {
                     var userName = '';
@@ -3943,9 +3948,40 @@ function renderProfileActivityList(kind) {
                     statusEl.innerHTML = '小猫暂时无法回复 <button type="button" class="cat-ai-retry-btn" onclick="window.__xtjRetryCatAi(\'' + safeJsStr(commentId) + '\', \'' + safeJsStr(postId) + '\')">重试</button>';
                 }
             }
-            window.__xtjRetryCatAi = function(commentId, postId) {
-                removeCatAiStatus(commentId);
-                pollCatAiReply(commentId, postId);
+            window.__xtjRetryCatAi = async function(commentId, postId) {
+                var commentIdStr = String(commentId);
+                var statusEl = document.getElementById('cat-ai-status-' + commentIdStr);
+                if (statusEl) statusEl.innerHTML = '小猫正在恢复……';
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/comments/ai-reply-retry', {
+                        method: 'POST',
+                        body: JSON.stringify({ comment_id: commentIdStr })
+                    });
+                    var payload = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok) {
+                        var errMsg = payload.message || payload.error || '重试失败';
+                        showCatAiStatus(commentIdStr, errMsg, true);
+                        return;
+                    }
+                    if (payload.status === 'completed') {
+                        var aiComment = payload.data || payload;
+                        if (aiComment && aiComment.id) {
+                            upsertAiComment(aiComment, commentIdStr, postId);
+                            removeCatAiStatus(commentIdStr);
+                            return;
+                        }
+                    }
+                    if (payload.status === 'rate_limited') {
+                        showCatAiStatus(commentIdStr, payload.message || '调用过于频繁，请稍后再试', true);
+                        return;
+                    }
+                    // pending/processing - 开始轮询
+                    removeCatAiStatus(commentIdStr);
+                    pollCatAiReply(commentIdStr, postId);
+                } catch (e) {
+                    console.error('[CatAI] retry failed:', e);
+                    showCatAiStatus(commentIdStr, '重试失败，请检查网络后重试', true);
+                }
             };
 
             // ★ 统一 AI 评论插入函数（polling 和 Realtime 共用）
