@@ -660,7 +660,7 @@ test('getAvatarHtml 使用 data-user-name 属性', function(){
 });
 test('getAvatarHtml img 包含 onerror 兜底', function(){
   var s = read('js/core.js');
-  var fn = s.slice(s.indexOf('function renderAvatarContent('), s.indexOf('function renderAvatarContent(') + 800);
+  var fn = s.slice(s.indexOf('function renderAvatarContent('), s.indexOf('function renderAvatarContent(') + 1200);
   assert.ok(fn.indexOf('onerror=') >= 0, 'renderAvatarContent must have onerror fallback');
   assert.ok(fn.indexOf('avatar-fallback') >= 0, 'renderAvatarContent must have fallback class');
 });
@@ -669,14 +669,14 @@ test('批量头像请求后写入 localStorage', function(){
   var fnStart = s.indexOf('var resp = await fetch(API_BASE + \'/api/avatar/batch\'');
   var fnEnd = s.indexOf('function getAvatarHtml', fnStart);
   var fn = s.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 1500);
-  assert.ok(fn.indexOf('AVATAR_CACHE_KEY') >= 0 && fn.indexOf('safeStorage.set') >= 0, 'batch avatar must write to localStorage');
+  assert.ok(fn.indexOf('writeAvatarCacheToStorage') >= 0, 'batch avatar must write to localStorage');
 });
 test('hydrateDockChatAvatars 也写入 localStorage', function(){
   var s = read('js/core.js');
   var fnStart = s.indexOf('function hydrateDockChatAvatars(');
   var fnEnd = s.indexOf('function getDockChatCacheKey', fnStart);
   var fn = s.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 2500);
-  assert.ok(fn.indexOf('AVATAR_CACHE_KEY') >= 0 && fn.indexOf('safeStorage.set') >= 0, 'hydrateDockChatAvatars must write to localStorage');
+  assert.ok(fn.indexOf('writeAvatarCacheToStorage') >= 0, 'hydrateDockChatAvatars must write to localStorage');
 });
 test('后台头像DOM替换使用 data-user-name 而非 onclick 解析', function(){
   var s = read('js/core.js');
