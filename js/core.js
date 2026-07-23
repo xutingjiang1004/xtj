@@ -12899,7 +12899,17 @@ function renderProfileActivityList(kind) {
                 try {
                     var apiUrl = (window.API_BASE || '') + '/api/post/detail/' + encodeURIComponent(postId);
                     var apiRes = await fetch(apiUrl, { credentials: 'include' });
-                    var apiData = await apiRes.json();
+                    if (!apiRes.ok && (!apiRes.headers.get('content-type') || !apiRes.headers.get('content-type').includes('application/json'))) {
+                        if (body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
+                        return;
+                    }
+                    var apiData;
+                    try {
+                        apiData = await apiRes.json();
+                    } catch(e) {
+                        if (body) body.innerHTML = '<div class="stat-empty">解析帖子详情失败，请稍后重试。</div>';
+                        return;
+                    }
                     if (!apiRes.ok || !apiData || !apiData.ok) {
                         var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
                         if (body) body.innerHTML = '<div class="stat-empty">' + errMsg + '</div>';

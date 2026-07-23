@@ -1156,8 +1156,8 @@
       if (isControl(event.target)) return;
       if (Date.now() < state.suppressTapUntil || isModalOpen()) {
         event.preventDefault();
+        event.stopImmediatePropagation();
       }
-      event.stopImmediatePropagation();
     }, true);
 
     surface.addEventListener('dblclick', function (event) {

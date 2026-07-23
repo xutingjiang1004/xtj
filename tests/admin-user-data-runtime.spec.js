@@ -8,7 +8,7 @@ test('admin shows clipboard tab and user detail at device-dialog width', async (
     const url = new URL(route.request().url());
     const key = url.pathname.replace(/^\/api/, '');
     if (!key.startsWith('/admin/')) return route.continue();
-    if (key === '/admin/login') return json(route, { ok: true, token: 'test-admin-token', user_token: 'test-admin-token' });
+    if (key === '/admin/login') return json(route, { ok: true, user_token: 'test-admin-token', user_user_token: 'test-admin-token' });
     if (key === '/admin/data') return json(route, { posts: [], likes: [], comments: [], announcements: [], bans: [] });
     if (key === '/admin/users') return json(route, { data: [{ user_name: '测试用户', content: JSON.stringify({ reg_time: '2026-07-16T01:00:00Z' }) }] });
     if (key === '/admin/stats/online') return json(route, {

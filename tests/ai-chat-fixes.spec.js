@@ -78,7 +78,7 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     expect(historyRequests.length).toBe(1);
     const url = historyRequests[0];
     expect(url).toContain('mode=normal');
-    expect(url).toContain('limit=12');
+    expect(url).toContain('limit=10');
     expect(url).not.toContain('conversation_id='); // 首次打开必须不带 ID
   });
 
