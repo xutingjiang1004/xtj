@@ -24,6 +24,7 @@ The reference and implementation were normalized onto equal 1280 x 720 canvases 
 5. Signed-out content remains authentic: the composer and recent-contact data are not fabricated for the screenshot.
 6. The incomplete three-petal desktop AI mark was replaced with the project's existing complete six-petal AI asset geometry.
 7. At 768px and above, the AI conversation surface is bounded to the workbench content column; the sidebar remains visible and interactive. Phone AI remains a full-screen secondary surface.
+8. The desktop account card now mirrors asynchronously loaded and newly uploaded avatar image nodes instead of falling back to `?`; broken images fall back to the signed-in user's initial.
 
 ## Verification
 

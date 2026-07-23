@@ -52,9 +52,27 @@
     targetName.textContent = loggedIn ? ((sourceName && sourceName.textContent.trim()) || String(window.currentUser)) : '未登录';
     targetStatus.textContent = loggedIn ? '欢迎回来' : '登录后同步个人信息';
     if (sourceAvatar) {
-      targetAvatar.textContent = sourceAvatar.textContent || '?';
-      targetAvatar.style.backgroundImage = sourceAvatar.style.backgroundImage || '';
       targetAvatar.className = sourceAvatar.className + ' desktop-workbench-avatar';
+      targetAvatar.style.backgroundImage = sourceAvatar.style.backgroundImage || '';
+      targetAvatar.replaceChildren();
+
+      Array.prototype.forEach.call(sourceAvatar.childNodes, function (node) {
+        targetAvatar.appendChild(node.cloneNode(true));
+      });
+
+      var targetImage = targetAvatar.querySelector('img');
+      if (targetImage) {
+        targetImage.removeAttribute('id');
+        targetImage.addEventListener('error', function () {
+          targetAvatar.textContent = loggedIn && String(window.currentUser)
+            ? String(window.currentUser).slice(0, 1).toUpperCase()
+            : '?';
+        }, { once: true });
+      } else if (!targetAvatar.textContent.trim() && !targetAvatar.style.backgroundImage) {
+        targetAvatar.textContent = loggedIn && String(window.currentUser)
+          ? String(window.currentUser).slice(0, 1).toUpperCase()
+          : '?';
+      }
     }
     syncContacts();
   }
