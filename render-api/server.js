@@ -3679,7 +3679,7 @@ setInterval(function() { processNextJob().catch(function() {}); }, 5000);
 const CAT_AI_USERNAME = 'cat_ai';
 const CAT_AI_DISPLAY_NAME = '小猫';
 const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
-const CAT_AI_MENTION_PATTERN = /@小猫(?=\s|$|[^\w\u4e00-\u9fa5])/;
+const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?=\s|$|[^\w\u4e00-\u9fa5])/;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_MAX_CONCURRENT = 3;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
@@ -3726,7 +3726,7 @@ function hasCatMention(content) {
 // 提取用户去掉 @小猫 后真正的问题
 function extractCatQuestion(content) {
   if (!content) return '';
-  return content.replace(/@小猫\s*/g, '').trim();
+  return content.replace(/[@＠]小猫\s*/g, '').trim();
 }
 
 // 判断是否为有效触发（排除误触发）
@@ -4090,7 +4090,8 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     if (status === 'pending' || status === 'processing') message = '小猫正在组织毒液……';
     else if (status === 'completed') {
       var replyRes = await buildSummaryQuery('comments', 'id', null, null, 'created_at').eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
-      return res.json({ status: 'completed', reply_comment_id: replyRes.data ? replyRes.data.id : null, message: '' });
+      // ★ 返回完整的 AI 评论数据，方便前端直接插入
+      return res.json({ status: 'completed', reply_comment_id: replyRes.data ? replyRes.data.id : null, message: '', data: replyRes.data || null });
     } else if (status === 'failed') message = '小猫暂时不想说话';
     else if (status === 'blocked') message = '';
     return res.json({ status: status, reply_comment_id: null, message: message });
@@ -5711,6 +5712,11 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
     console.error('[API] 用户注册失败:', e.message);
     return res.status(500).json({ error: '注册失败' });
   }
+});
+
+// 验证当前用户身份（基于 access token 返回规范 user_name）
+app.get('/api/user/me', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  return res.json({ ok: true, user_name: req.userName });
 });
 
 // 刷新用户 access token（使用 HttpOnly cookie 中的 refresh token）

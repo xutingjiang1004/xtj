@@ -135,6 +135,39 @@ async function createPhotoRecord(options) {
   if (uploadId) {
     const existing = await findExistingPhotoByActorKey(options.supabase, actorKey);
     if (existing.ok && existing.data) {
+      // ★ 检查旧记录引用的文件是否还存在
+      var oldStoragePath = null;
+      try {
+        var content = JSON.parse(existing.data.content || '{}');
+        oldStoragePath = content.storagePath || '';
+      } catch (_) {}
+      if (oldStoragePath) {
+        var fileExists = false;
+        try {
+          var fileCheck = await options.supabase.storage.from('uploads').createSignedUrl(oldStoragePath, 60);
+          fileExists = fileCheck && !fileCheck.error;
+        } catch (_) {}
+        if (!fileExists) {
+          // 旧文件丢失，使用新文件路径更新记录
+          try {
+            var newContent = existing.data.content;
+            try {
+              var contentObj = JSON.parse(newContent);
+              contentObj.storagePath = storagePath;
+              newContent = JSON.stringify(contentObj);
+            } catch (_) {}
+            await options.supabase.from('posts').update({
+              media_url: validated.mediaUrl,
+              content: newContent
+            }).eq('id', existing.data.id);
+            existing.data.media_url = validated.mediaUrl;
+            existing.data.content = newContent;
+            existing.data._repaired = true;
+            return { status: 200, body: { ok: true, data: existing.data, idempotent: true, repaired: true } };
+          } catch (_) {}
+        }
+      }
+      // 旧文件存在或无法确认，删除本次新文件，返回旧记录
       await cleanupStorageFile(options.supabase, storagePath, options.logger);
       return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
     }

@@ -181,7 +181,106 @@
     else window.setTimeout(run, 0);
   }
 
+  // ★ 双击刷新：每个导航项的 in-flight lock
+  var _refreshLocks = {};
+
+  function refreshTab(tab) {
+    if (_refreshLocks[tab]) return; // 防止重复刷新
+    _refreshLocks[tab] = true;
+    try {
+      if (typeof window.showToast === 'function') window.showToast('正在刷新…', 'info');
+    } catch (e) {}
+
+    switch (tab) {
+      case 'posts':
+        // 帖子：强制重新请求首屏帖子，刷新评论和点赞关系
+        try {
+          if (typeof window.loadFeed === 'function') {
+            window.loadFeed(true).catch(function() {}).finally(function() { _refreshLocks[tab] = false; });
+          } else { _refreshLocks[tab] = false; }
+        } catch (e) { _refreshLocks[tab] = false; }
+        break;
+
+      case 'chat':
+        // 聊天：刷新联系人列表、未读数、当前聊天记录
+        try {
+          if (typeof window.updateUnreadBadge === 'function') {
+            window.updateUnreadBadge().catch(function() {});
+          }
+          if (typeof window.startDMPolling === 'function') {
+            window.startDMPolling(300000, false);
+          }
+          // 如果已打开某个联系人，刷新当前聊天记录
+          if (typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
+            if (typeof window.loadDockChatMessages === 'function') {
+              window.loadDockChatMessages(window.dockChatActiveUser, false).catch(function() {});
+            }
+          }
+          syncContacts();
+          syncChatBadge();
+        } catch (e) {} finally { _refreshLocks[tab] = false; }
+        break;
+
+      case 'ai':
+        // 小猫 AI：保持当前会话内容，刷新会话列表、配置和历史
+        try {
+          if (typeof window.__xtjRefreshAiSession === 'function') {
+            window.__xtjRefreshAiSession().catch(function() {});
+          }
+          if (typeof window.__xtjRefreshAiConfig === 'function') {
+            window.__xtjRefreshAiConfig().catch(function() {});
+          }
+        } catch (e) {} finally { _refreshLocks[tab] = false; }
+        break;
+
+      case 'photos':
+        // 照片墙：调用受控的强制同步，刷新照片数据，重新连接 Realtime
+        try {
+          if (typeof window.__xtjPhotoWallForceSync === 'function') {
+            window.__xtjPhotoWallForceSync().catch(function() {}).finally(function() { _refreshLocks[tab] = false; });
+          } else { _refreshLocks[tab] = false; }
+        } catch (e) { _refreshLocks[tab] = false; }
+        break;
+
+      case 'profile':
+        // 我的：刷新用户资料、头像、点赞、评论、帖子和举报统计
+        try {
+          if (typeof window.loadCurrentUserInfoSnapshot === 'function' && window.currentUser) {
+            window.loadCurrentUserInfoSnapshot(window.currentUser).catch(function() {});
+          }
+          if (typeof window.renderProfileActivity === 'function') {
+            window.renderProfileActivity();
+          }
+          syncUser();
+        } catch (e) {} finally { _refreshLocks[tab] = false; }
+        break;
+
+      default:
+        _refreshLocks[tab] = false;
+        break;
+    }
+  }
+
   function init() {
+    // ★ 双击刷新处理
+    document.addEventListener('dblclick', function (event) {
+      var tabButton = event.target.closest('[data-desktop-tab]');
+      if (tabButton) {
+        event.preventDefault();
+        var tab = tabButton.getAttribute('data-desktop-tab');
+        // 只有当前激活的 tab 才响应双击刷新
+        if (tabButton.classList.contains('is-active')) {
+          refreshTab(tab);
+        }
+        return;
+      }
+      var actionButton = event.target.closest('[data-desktop-action="ai-chat"]');
+      if (actionButton && actionButton.classList.contains('is-active')) {
+        event.preventDefault();
+        refreshTab('ai');
+      }
+    });
+
     document.addEventListener('click', function (event) {
       var tabButton = event.target.closest('[data-desktop-tab]');
       if (tabButton) {

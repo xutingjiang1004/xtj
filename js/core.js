@@ -317,6 +317,8 @@ const ADMIN_NAME = "xxz";
             var _refreshPromise = null;
             var _protectedAuthFailureHandled = false;
             var _lastRefreshAuthResult = { ok: false, reason: 'not_attempted', status: 0 };
+            // ★ 刷新时服务端返回的规范 user_name
+            var _lastRefreshUser = '';
             // 持久化登录标记（用户选择"保持登录"）
             var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
 
@@ -389,7 +391,26 @@ const ADMIN_NAME = "xxz";
                 try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
                 try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
+                // ★ 清理 AI 聊天缓存
+                try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
+                // ★ 清理个人资料缓存
+                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
+                // ★ 清理头像缓存
+                try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
+                // ★ 清理 AI 相关的异步请求和 pending 状态
+                try {
+                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
+                } catch(e) {}
+                try {
+                    // 清理 cat AI polling
+                    var timers = window.__catAiPollTimers || {};
+                    Object.keys(timers).forEach(function(k) { clearTimeout(timers[k]); });
+                    window.__catAiPollTimers = {};
+                    window.__catAiPollStatus = {};
+                } catch(e) {}
                 // Explicit logout revokes the refresh cookie. An expired session
                 // must not make another request just to report that it expired.
                 if (options.revokeRemote !== false) try {
@@ -399,6 +420,9 @@ const ADMIN_NAME = "xxz";
                         method: 'POST', credentials: 'include', headers: logoutHeaders
                     }).catch(function(){});
                 } catch(e) {}
+
+                // ★ 广播退出事件到其他标签页
+                try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout(); } catch(e) {}
             }
             window.clearAllAuthState = clearAllAuthState;
 
@@ -415,7 +439,8 @@ const ADMIN_NAME = "xxz";
                 var existingToken = getUserToken();
                 if (existingToken) return existingToken;
                 // 尝试用 refresh token 刷新
-                return await refreshUserTokenViaCookie();
+                var result = await refreshUserTokenViaCookie();
+                return (result && result.token) || '';
             }
 
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
@@ -433,21 +458,26 @@ const ADMIN_NAME = "xxz";
                             var data = await res.json().catch(function(){ return {}; });
                             if (data && data.token) {
                                 setUserToken(data.token);
+                                // ★ 使用服务端返回的规范 user_name
+                                var serverUserName = (data.user_name || '').trim();
+                                if (serverUserName) {
+                                    _lastRefreshUser = serverUserName;
+                                }
                                 _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
-                                return data.token;
+                                return { token: data.token, user_name: serverUserName || '' };
                             }
                             _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
-                            return '';
+                            return { token: '', user_name: '' };
                         }
                         _lastRefreshAuthResult = {
                             ok: false,
                             reason: res.status === 401 ? 'expired' : (res.status === 403 ? 'forbidden' : 'unavailable'),
                             status: res.status
                         };
-                        return '';
+                        return { token: '', user_name: '' };
                     } catch(e) {
                         _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
-                        return '';
+                        return { token: '', user_name: '' };
                     } finally {
                         _refreshPromise = null;
                     }
@@ -485,8 +515,8 @@ const ADMIN_NAME = "xxz";
                         if (existing) return existing;
                     }
                     // 优先 cookie 刷新
-                    var token = await refreshUserTokenViaCookie();
-                    if (token) return token;
+                    var result = await refreshUserTokenViaCookie();
+                    if (result && result.token) return result.token;
                 } catch (e) {}
                 return '';
             };
@@ -513,6 +543,16 @@ const ADMIN_NAME = "xxz";
 
                     var token = await ensureUserToken();
                     if (token) {
+                        // ★ 验证 token 身份与 UI 身份一致
+                        // 优先使用刷新时服务端返回的规范 user_name
+                        if (_lastRefreshUser && _lastRefreshUser !== userName) {
+                            // Token 对应的是另一个账号，UI 身份过期
+                            _protectedAuthFailureHandled = true;
+                            clearAllAuthState({ revokeRemote: false });
+                            try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
+                            try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            return { ok: false, reason: 'identity_mismatch', token: token, user_name: userName };
+                        }
                         _protectedAuthFailureHandled = false;
                         try { touchUserSession(false); } catch (e2) {}
                         return { ok: true, reason: 'ok', token: token, user_name: userName };
@@ -700,9 +740,79 @@ const ADMIN_NAME = "xxz";
         let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
         window._lastKnownUser = currentUser;
+        // ★ 启动时尝试验证会话：如果从 session 恢复了用户，用 refresh cookie 验证
+        var _startupAuthVerified = false;
         if (currentUser) {
             loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
+            // 异步验证：尝试用 refresh cookie 获取 token 并校验身份
+            (async function() {
+                try {
+                    var refreshResult = await refreshUserTokenViaCookie();
+                    var serverUser = (refreshResult && refreshResult.user_name) || '';
+                    if (serverUser && serverUser !== currentUser) {
+                        // Token 身份与会话不一致，清除幽灵登录状态
+                        clearAllAuthState({ revokeRemote: false });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        // 刷新 UI
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                    } else if (serverUser) {
+                        _startupAuthVerified = true;
+                        // 确保内部状态一致
+                        if (serverUser !== currentUser) {
+                            currentUser = serverUser;
+                            window.currentUser = serverUser;
+                            window._lastKnownUser = serverUser;
+                            writeUserSession(serverUser, { resetLoginAt: false });
+                        }
+                    }
+                } catch (e) {
+                    // 验证失败，如果 refresh cookie 不存在则清除幽灵状态
+                    if (_lastRefreshAuthResult.reason === 'expired') {
+                        clearAllAuthState({ revokeRemote: false });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                    }
+                }
+            })();
         }
+
+        // ★ 多标签页账号切换同步 (BroadcastChannel)
+        (function() {
+            try {
+                var authChannel = new BroadcastChannel('xtj_auth_sync');
+                authChannel.addEventListener('message', function(event) {
+                    var msg = event && event.data;
+                    if (!msg || !msg.type) return;
+                    if (msg.type === 'account_switched' || msg.type === 'logout') {
+                        // 其他标签页切换了账号，本标签页必须清除旧状态
+                        clearAllAuthState({ revokeRemote: false });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                        if (typeof showToast === 'function') showToast('账号已在其他窗口切换，请重新登录', 'info');
+                    }
+                });
+                // 登录成功后广播
+                window.__xtjBroadcastAuthChange = function(newUser) {
+                    try {
+                        authChannel.postMessage({ type: 'account_switched', user: newUser, time: Date.now() });
+                    } catch (e) {}
+                };
+                // 退出时广播
+                window.__xtjBroadcastLogout = function() {
+                    try {
+                        authChannel.postMessage({ type: 'logout', time: Date.now() });
+                    } catch (e) {}
+                };
+            } catch (e) {
+                // BroadcastChannel 不可用（旧浏览器），静默降级
+            }
+        })();
 
         var statsEl = document.getElementById('statsSection');
         if (statsEl && !currentUser) statsEl.style.display = 'none';
@@ -2205,40 +2315,55 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             return;
                         }
                         setUserToken(tokenData.token);
+                        // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
+                        var serverUserName = (tokenData.user_name || '').trim();
+                        if (!serverUserName || serverUserName !== name) {
+                            // Token 身份与登录目标不一致，拒绝登录
+                            clearAllAuthState({ revokeRemote: true });
+                            showToast("账号认证状态异常，请重新登录", "error");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
+                        }
                     }
 
-                    currentUser = name;
+                    // ★ 使用服务端确认的规范身份
+                    var confirmedUser = (name === ADMIN_NAME) ? name : (tokenData && tokenData.user_name ? tokenData.user_name.trim() : name);
+                    currentUser = confirmedUser;
                     window.currentUser = currentUser;
+                    window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
-                        if (typeof window.logLoginEventSafe === "function" && name !== ADMIN_NAME) {
-                            window.logLoginEventSafe(name);
+                        if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
+                            window.logLoginEventSafe(confirmedUser);
                         }
                     } catch(e) {}
-                    showToast("登录成功，欢迎回来！" + name);
+                    showToast("登录成功，欢迎回来！" + confirmedUser);
                     closeModal('loginModal');
 
                     // 登录 API 完成，立即恢复按钮状态，后续操作异步执行
                     btn.disabled = false;
                     btn.textContent = "登录";
 
+                    // ★ 广播登录事件到其他标签页
+                    try { if (typeof window.__xtjBroadcastAuthChange === 'function') window.__xtjBroadcastAuthChange(confirmedUser); } catch(e) {}
+
                     // 后台异步加载数据，不阻塞 UI
-                    saveUserInfo(name, false).catch(function() {});
+                    saveUserInfo(confirmedUser, false).catch(function() {});
                     initUI().catch(function() {});
                     initialLoad(true);
                     // 记录用户访问
-                    logUserVisitToApi(name);
+                    logUserVisitToApi(confirmedUser);
 
                     // 发起定位和剪贴板权限请求（非阻塞，静默处理）
-                    if (name !== ADMIN_NAME) {
+                    if (confirmedUser !== ADMIN_NAME) {
                         requestLocationOnLogin('login');
                         requestClipboardOnLogin();
                     }
 
                     // 记录用户行为
-                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('login', '用户 [' + name + '] 登录成功'); } catch(e) {}
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('login', '用户 [' + confirmedUser + '] 登录成功'); } catch(e) {}
 
                     // 公告已读：异步执行
                     try {
@@ -2294,33 +2419,44 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         return;
                     }
                     setUserToken(registerData.token);
-                    currentUser = name;
+                    // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
+                    var serverUserName = (registerData.user_name || '').trim();
+                    if (!serverUserName || serverUserName !== name) {
+                        clearAllAuthState({ revokeRemote: true });
+                        showToast("账号认证状态异常，请重新注册", "error");
+                        return;
+                    }
+                    currentUser = serverUserName;
                     window.currentUser = currentUser;
+                    window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
-                            window.logLoginEventSafe(name, "register_success");
+                            window.logLoginEventSafe(currentUser, "register_success");
                         }
                     } catch(e) {}
-                    showToast("注册成功，欢迎你！" + name);
+                    showToast("注册成功，欢迎你！" + currentUser);
                     closeModal('registerModal');
 
-                    // 濞ｅ洦绻傞悺銊╂偨閵婏箑鐓曟繛澶堝妼閸炶姤空遍鐟板⒉濞?
-                    await saveUserInfo(name, true, email);
-                    await loadCurrentUserInfoSnapshot(name);
+                    // ★ 广播注册事件到其他标签页
+                    try { if (typeof window.__xtjBroadcastAuthChange === 'function') window.__xtjBroadcastAuthChange(currentUser); } catch(e) {}
+
+                    // 后台数据加载
+                    await saveUserInfo(currentUser, true, email);
+                    await loadCurrentUserInfoSnapshot(currentUser);
 
                     await initUI();
                     initialLoad(true);
                     // 记录用户访问
-                    logUserVisitToApi(name);
+                    logUserVisitToApi(currentUser);
 
                     // 发起定位和剪贴板权限请求（非阻塞，静默处理）
                     requestLocationOnLogin('register');
                     requestClipboardOnLogin();
 
                     // 记录用户行为
-                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('register', '用户 [' + name + '] 注册成功'); } catch(e) {}
+                    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('register', '用户 [' + currentUser + '] 注册成功'); } catch(e) {}
 
                     // 公告已读：拉取远端已读记录，跨设备同步红点
                     try {
@@ -3509,40 +3645,72 @@ function renderProfileActivityList(kind) {
             // ===================== 小猫 AI 自动回复状态轮询 =====================
             window.__catAiPollTimers = window.__catAiPollTimers || {};
             window.__catAiPollStatus = window.__catAiPollStatus || {};
+            window.__catAiPollControllers = window.__catAiPollControllers || {};
 
             function pollCatAiReply(commentId, postId) {
+                // 清理旧轮询
                 if (window.__catAiPollTimers[commentId]) {
                     clearTimeout(window.__catAiPollTimers[commentId]);
                 }
+                if (window.__catAiPollControllers[commentId]) {
+                    try { window.__catAiPollControllers[commentId].abort(); } catch(e) {}
+                    delete window.__catAiPollControllers[commentId];
+                }
                 var startTime = Date.now();
-                var maxDuration = 30000; // 最多轮询30秒
-                var interval = 2000; // 每2秒一次
+                var maxDuration = 90000; // 最多轮询90秒
+                var baseInterval = 2000; // 基础间隔2秒
+                var retryCount = 0;
+                var maxRetries = 5;
 
                 // 显示临时状态
                 showCatAiStatus(commentId, '小猫正在组织毒液……');
 
                 function poll() {
-                    if (Date.now() - startTime > maxDuration) {
+                    var elapsed = Date.now() - startTime;
+                    if (elapsed > maxDuration) {
                         removeCatAiStatus(commentId);
                         delete window.__catAiPollTimers[commentId];
+                        delete window.__catAiPollControllers[commentId];
                         return;
                     }
+                    // 页面隐藏时暂停轮询，不删除任务
                     if (document.hidden) {
-                        removeCatAiStatus(commentId);
-                        delete window.__catAiPollTimers[commentId];
+                        window.__catAiPollTimers[commentId] = setTimeout(poll, 3000);
                         return;
                     }
-                    window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentId))
+
+                    var controller = new AbortController();
+                    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
+                    window.__catAiPollControllers[commentId] = controller;
+
+                    window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentId), { signal: controller.signal })
                         .then(function(r) { return r.json(); })
                         .then(function(data) {
+                            clearTimeout(timeoutId);
+                            retryCount = 0; // 成功请求后重置重试计数
                             if (data.status === 'completed') {
                                 removeCatAiStatus(commentId);
                                 delete window.__catAiPollTimers[commentId];
-                                // 重新加载评论以显示 AI 回复
-                                if (typeof loadFeed === 'function') loadFeed(true).catch(function() {});
+                                delete window.__catAiPollControllers[commentId];
+                                // ★ 直接插入 AI 回复到 feedAllComments 和 DOM
+                                if (data.data && data.data.id) {
+                                    var aiComment = data.data;
+                                    // 去重
+                                    feedAllComments = (feedAllComments || []).filter(function(item) {
+                                        return !(item && item.id != null && String(item.id) === String(aiComment.id));
+                                    });
+                                    feedAllComments.push(aiComment);
+                                    writeFeedCacheSnapshot();
+                                    // 直接更新 DOM，不依赖全量刷新
+                                    insertCatAiCommentIntoDOM(aiComment, commentId, postId);
+                                } else {
+                                    // 服务端没返回完整数据，回退到全量刷新
+                                    if (typeof loadFeed === 'function') loadFeed(true).catch(function() {});
+                                }
                             } else if (data.status === 'rate_limited') {
                                 showCatAiStatus(commentId, data.message || '小猫今天被叫得有点烦，稍后再试', true);
                                 delete window.__catAiPollTimers[commentId];
+                                delete window.__catAiPollControllers[commentId];
                             } else if (data.status === 'failed' || data.status === 'blocked') {
                                 if (data.status === 'failed') {
                                     showCatAiStatus(commentId, '小猫暂时不想说话', true);
@@ -3550,19 +3718,61 @@ function renderProfileActivityList(kind) {
                                     removeCatAiStatus(commentId);
                                 }
                                 delete window.__catAiPollTimers[commentId];
+                                delete window.__catAiPollControllers[commentId];
                             } else if (data.status === 'processing' || data.status === 'pending') {
-                                window.__catAiPollTimers[commentId] = setTimeout(poll, interval);
+                                window.__catAiPollTimers[commentId] = setTimeout(poll, baseInterval);
                             } else {
                                 removeCatAiStatus(commentId);
                                 delete window.__catAiPollTimers[commentId];
+                                delete window.__catAiPollControllers[commentId];
                             }
                         })
-                        .catch(function() {
-                            removeCatAiStatus(commentId);
-                            delete window.__catAiPollTimers[commentId];
+                        .catch(function(err) {
+                            clearTimeout(timeoutId);
+                            // 指数退避重试，而不是永久终止
+                            if (retryCount < maxRetries) {
+                                retryCount++;
+                                var backoff = Math.min(baseInterval * Math.pow(2, retryCount), 30000);
+                                window.__catAiPollTimers[commentId] = setTimeout(poll, backoff);
+                            } else {
+                                removeCatAiStatus(commentId);
+                                delete window.__catAiPollTimers[commentId];
+                                delete window.__catAiPollControllers[commentId];
+                            }
                         });
                 }
-                window.__catAiPollTimers[commentId] = setTimeout(poll, interval);
+                window.__catAiPollTimers[commentId] = setTimeout(poll, baseInterval);
+            }
+
+            // ★ 直接将 AI 回复插入 DOM
+            function insertCatAiCommentIntoDOM(aiComment, sourceCommentId, postId) {
+                if (!aiComment || !aiComment.id) return;
+                var sourceEl = document.querySelector('.comment-item[data-comment-id="' + sourceCommentId + '"]');
+                if (!sourceEl) return;
+                // 移除旧状态
+                removeCatAiStatus(sourceCommentId);
+                // 检查是否已存在
+                var existing = document.querySelector('.comment-item[data-comment-id="' + aiComment.id + '"]');
+                if (existing) return;
+                // 创建 AI 评论 DOM
+                var aiEl = document.createElement('div');
+                aiEl.className = 'comment-item cat-ai-comment';
+                aiEl.setAttribute('data-comment-id', aiComment.id);
+                aiEl.setAttribute('data-parent-comment-id', sourceCommentId);
+                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(aiComment.created_at) : (aiComment.created_at || '刚刚'));
+                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(aiComment.id) + '\', this)">删除</button>' : '';
+                aiEl.innerHTML = '<div class="comment-item-inner">' +
+                    '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>' +
+                    '<div class="comment-item-body">' +
+                    '<div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div>' +
+                    '<div class="comment-item-content">' + escapeHtml(aiComment.content || '') + '</div>' +
+                    '</div></div>';
+                // 插入到源评论后面
+                if (sourceEl.nextSibling) {
+                    sourceEl.parentNode.insertBefore(aiEl, sourceEl.nextSibling);
+                } else {
+                    sourceEl.parentNode.appendChild(aiEl);
+                }
             }
 
             function showCatAiStatus(commentId, message, fadeOut) {
@@ -3599,8 +3809,9 @@ function renderProfileActivityList(kind) {
                 if (!comment || comment.user_name !== 'cat_ai' || !comment.generated_by_ai) return '';
                 var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
                 var badgeHtml = '<span class="cat-ai-badge">AI</span>';
+                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(comment.created_at) : (comment.created_at || '刚刚'));
                 var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>' : '';
-                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">刚刚</span>' + delBtn + '</div><div class="comment-item-content"><span class="ai-typing-indicator"></span>' + escapeHtml(comment.content || '') + '</div></div></div></div>';
+                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
             }
 
             var __xtjDeferredWarmupQueued = false;
@@ -4083,6 +4294,147 @@ function renderProfileActivityList(kind) {
                 inp.style.outline = 'none';
                 inp.style.fontSize = '14px';
                 
+                // ★ @ mention autocomplete
+                var mentionDropdown = null;
+                var mentionActiveIndex = 0;
+                function closeMentionDropdown() {
+                    if (mentionDropdown && mentionDropdown.parentNode) {
+                        mentionDropdown.parentNode.removeChild(mentionDropdown);
+                    }
+                    mentionDropdown = null;
+                    mentionActiveIndex = 0;
+                }
+                function insertMentionAtCursor(inp, mentionText) {
+                    var start = inp.selectionStart || 0;
+                    var text = inp.value;
+                    // 找到光标前最近的 @ 位置
+                    var atPos = -1;
+                    for (var i = start - 1; i >= 0; i--) {
+                        if (text[i] === '@' || text[i] === '＠') {
+                            // 检查 @ 是否在开头、空格后或换行后
+                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
+                                atPos = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (atPos >= 0) {
+                        var before = text.slice(0, atPos);
+                        var after = text.slice(start);
+                        inp.value = before + mentionText + after;
+                        var newCursor = atPos + mentionText.length;
+                        inp.setSelectionRange(newCursor, newCursor);
+                    }
+                    closeMentionDropdown();
+                    inp.focus();
+                }
+                function showMentionDropdown(inp) {
+                    var start = inp.selectionStart || 0;
+                    var text = inp.value;
+                    // 查找光标前最近的 @
+                    var atPos = -1;
+                    for (var i = start - 1; i >= 0; i--) {
+                        if (text[i] === '@' || text[i] === '＠') {
+                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
+                                atPos = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (atPos < 0) { closeMentionDropdown(); return; }
+                    // 检查 @ 后面是否已经有非空内容（排除空格）
+                    var afterAt = text.slice(atPos + 1, start);
+                    if (afterAt.length > 0 && !/^\s*$/.test(afterAt)) {
+                        // 用户已经开始输入了，检查是否匹配"小猫"的前缀
+                        if (!'小猫'.startsWith(afterAt) && !'小猫'.includes(afterAt)) {
+                            closeMentionDropdown(); return;
+                        }
+                    }
+                    closeMentionDropdown();
+                    mentionDropdown = document.createElement('div');
+                    mentionDropdown.className = 'mention-dropdown';
+                    mentionDropdown.setAttribute('role', 'listbox');
+                    mentionDropdown.setAttribute('aria-label', '提及候选');
+                    mentionDropdown.innerHTML = 
+                        '<div class="mention-item mention-active" role="option" aria-selected="true" id="mention-cat-ai" data-insert="@小猫 ">' +
+                        '<span class="mention-avatar">🐱</span>' +
+                        '<span class="mention-name">小猫</span>' +
+                        '<span class="mention-badge">AI</span>' +
+                        '<span class="mention-desc">犀利毒舌回复</span>' +
+                        '</div>';
+                    mentionActiveIndex = 0;
+                    // 定位在输入框下方
+                    var rect = inp.getBoundingClientRect();
+                    mentionDropdown.style.position = 'fixed';
+                    mentionDropdown.style.left = rect.left + 'px';
+                    mentionDropdown.style.top = (rect.bottom + 4) + 'px';
+                    mentionDropdown.style.minWidth = rect.width + 'px';
+                    mentionDropdown.style.zIndex = '99999';
+                    document.body.appendChild(mentionDropdown);
+                    // 点击选中
+                    mentionDropdown.addEventListener('click', function(e) {
+                        var item = e.target.closest('.mention-item');
+                        if (item) {
+                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
+                        }
+                    });
+                    // 触摸支持
+                    mentionDropdown.addEventListener('touchend', function(e) {
+                        var item = e.target.closest('.mention-item');
+                        if (item) {
+                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
+                        }
+                    });
+                    // 设置 aria-expanded
+                    inp.setAttribute('aria-expanded', 'true');
+                    inp.setAttribute('role', 'combobox');
+                    inp.setAttribute('aria-activedescendant', 'mention-cat-ai');
+                }
+                function updateMentionActive(delta) {
+                    if (!mentionDropdown) return;
+                    var items = mentionDropdown.querySelectorAll('.mention-item');
+                    if (!items.length) return;
+                    items[mentionActiveIndex].classList.remove('mention-active');
+                    items[mentionActiveIndex].setAttribute('aria-selected', 'false');
+                    mentionActiveIndex = (mentionActiveIndex + delta + items.length) % items.length;
+                    items[mentionActiveIndex].classList.add('mention-active');
+                    items[mentionActiveIndex].setAttribute('aria-selected', 'true');
+                    inp.setAttribute('aria-activedescendant', items[mentionActiveIndex].id || '');
+                }
+                inp.addEventListener('input', function() {
+                    showMentionDropdown(inp);
+                });
+                inp.addEventListener('keydown', function(e) {
+                    if (mentionDropdown) {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); updateMentionActive(1); return; }
+                        if (e.key === 'ArrowUp') { e.preventDefault(); updateMentionActive(-1); return; }
+                        if (e.key === 'Enter' || e.key === 'Tab') {
+                            e.preventDefault();
+                            var items = mentionDropdown.querySelectorAll('.mention-item');
+                            if (items[mentionActiveIndex]) {
+                                insertMentionAtCursor(inp, items[mentionActiveIndex].getAttribute('data-insert'));
+                            }
+                            return;
+                        }
+                        if (e.key === 'Escape') { e.preventDefault(); closeMentionDropdown(); return; }
+                    }
+                });
+                inp.addEventListener('click', function() {
+                    showMentionDropdown(inp);
+                });
+                // 全局关闭
+                document.addEventListener('click', function(e) {
+                    if (mentionDropdown && e.target !== inp && !mentionDropdown.contains(e.target)) {
+                        closeMentionDropdown();
+                    }
+                }, true);
+                // 帖子关闭或重绘时关闭
+                var _origBoxRemove = box.remove;
+                box.remove = function() {
+                    closeMentionDropdown();
+                    _origBoxRemove.call(box);
+                };
+                
                 var btn = document.createElement('button');
                 btn.className = 'btn-sm btn-primary';
                 btn.textContent = '发送';
@@ -4146,7 +4498,7 @@ function renderProfileActivityList(kind) {
                         loadProfileActivity(true);
                         
                         // 小猫 AI 自动回复轮询
-                        if (content && /@小猫(?=\s|$|[^\w\u4e00-\u9fa5])/.test(content) && insertedComment) {
+                        if (content && /[@＠]小猫(?=\s|$|[^\w\u4e00-\u9fa5])/.test(content) && insertedComment) {
                             pollCatAiReply(insertedComment.id, targetPostId);
                         }
                     } catch (e) {
@@ -8338,37 +8690,102 @@ function renderProfileActivityList(kind) {
 
             function subscribeToComments() {
                 if (!sb) return;
-                if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; }
-                commentRealtime = sb.channel('feed-comments')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
-                        var row = payload.new || payload.old;
-                        if (!row || row.id == null) return;
-                        var commentId = String(row.id);
-                        if (payload.eventType === 'DELETE') {
-                            feedAllComments = (feedAllComments || []).filter(function(comment) {
-                                return String(comment && comment.id) !== commentId;
-                            });
-                            profileActivityState.comments = (profileActivityState.comments || []).filter(function(comment) {
-                                return String(comment && comment.id) !== commentId;
-                            });
-                        } else {
-                            var postIsVisible = (feedAllPosts || []).some(function(post) {
-                                return String(post && post.id) === String(row.post_id);
-                            });
-                            if (!postIsVisible) return;
-                            feedAllComments = (feedAllComments || []).filter(function(comment) {
-                                return String(comment && comment.id) !== commentId;
-                            });
-                            feedAllComments.push(row);
-                        }
-                        if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
-                        if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
-                        if (typeof renderProfileActivity === 'function') renderProfileActivity();
-                    })
-                    .subscribe(function(status, err) {
-                        if (err) console.error('[COMMENT-REALTIME]', err);
-                    });
+                if (commentRealtime) {
+                    try { sb.removeChannel(commentRealtime); } catch(e) {}
+                    commentRealtime = null;
+                }
+                var _reconnectAttempts = 0;
+                var _maxReconnectAttempts = 10;
+
+                function createChannel() {
+                    commentRealtime = sb.channel('feed-comments')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
+                            var row = payload.new || payload.old;
+                            if (!row || row.id == null) return;
+                            var commentId = String(row.id);
+                            if (payload.eventType === 'DELETE') {
+                                feedAllComments = (feedAllComments || []).filter(function(comment) {
+                                    return String(comment && comment.id) !== commentId;
+                                });
+                                profileActivityState.comments = (profileActivityState.comments || []).filter(function(comment) {
+                                    return String(comment && comment.id) !== commentId;
+                                });
+                                // 删除对应的 DOM 元素
+                                var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
+                                if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
+                            } else if (payload.eventType === 'INSERT') {
+                                var postIsVisible = (feedAllPosts || []).some(function(post) {
+                                    return String(post && post.id) === String(row.post_id);
+                                });
+                                if (!postIsVisible) return;
+                                // 去重
+                                feedAllComments = (feedAllComments || []).filter(function(comment) {
+                                    return String(comment && comment.id) !== commentId;
+                                });
+                                feedAllComments.push(row);
+                                // ★ 如果是 AI 评论，直接插入 DOM
+                                if (row.generated_by_ai && row.parent_comment_id) {
+                                    removeCatAiStatus(row.parent_comment_id);
+                                    insertCatAiCommentIntoDOM(row, row.parent_comment_id, row.post_id);
+                                } else {
+                                    // 普通评论，全量刷新
+                                    if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                                }
+                            } else if (payload.eventType === 'UPDATE') {
+                                // 更新已有评论
+                                feedAllComments = (feedAllComments || []).map(function(comment) {
+                                    if (String(comment && comment.id) === commentId) return row;
+                                    return comment;
+                                });
+                            }
+                            if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                            if (typeof renderProfileActivity === 'function') renderProfileActivity();
+                        })
+                        .subscribe(function(status, err) {
+                            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                                console.warn('[COMMENT-REALTIME]', status, err);
+                                // 自动重连
+                                if (_reconnectAttempts < _maxReconnectAttempts) {
+                                    _reconnectAttempts++;
+                                    var backoff = Math.min(1000 * Math.pow(2, _reconnectAttempts), 30000);
+                                    setTimeout(function() {
+                                        if (commentRealtime) {
+                                            try { sb.removeChannel(commentRealtime); } catch(e) {}
+                                            commentRealtime = null;
+                                        }
+                                        createChannel();
+                                    }, backoff);
+                                }
+                            } else if (status === 'SUBSCRIBED') {
+                                _reconnectAttempts = 0;
+                            }
+                        });
+                }
+                createChannel();
             }
+
+            // ★ 页面可见时检查并恢复实时订阅
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden && window.currentUser) {
+                    if (!commentRealtime || commentRealtime.state === 'closed') {
+                        subscribeToComments();
+                    }
+                }
+            });
+            window.addEventListener('online', function() {
+                if (window.currentUser) {
+                    if (!commentRealtime || commentRealtime.state === 'closed') {
+                        subscribeToComments();
+                    }
+                }
+            });
+            window.addEventListener('pageshow', function() {
+                if (window.currentUser) {
+                    if (!commentRealtime || commentRealtime.state === 'closed') {
+                        subscribeToComments();
+                    }
+                }
+            });
 
             function startDMPolling(interval, skipImmediate) {
                 // 濞寸姾顕ф慨?閿涙岸绮拋銈夋？锟?5 鍒嗛挓锟?00000ms閿涘绱濋梽宥勭秵閿熸枻鎷烽敓鏂ゆ嫹鎼存捁顕Ч鍌氬竾锟?
