@@ -75,11 +75,14 @@
     if (item == null) return false;
     var id = typeof item === 'object' ? item.id : item;
     var cloudId = typeof item === 'object' ? item.cloudId : null;
+    if (id == null && cloudId == null) return false;
     var deleted = getDeletedIds();
-    return deleted.indexOf(String(id)) >= 0 ||
-      (cloudId != null && deleted.indexOf(String(cloudId)) >= 0) ||
-      pendingDeletedPhotoIds.has(String(id)) ||
-      (cloudId != null && pendingDeletedPhotoIds.has(String(cloudId)));
+    var idStr = id != null ? String(id) : null;
+    var cloudIdStr = cloudId != null ? String(cloudId) : null;
+    return (idStr != null && deleted.indexOf(idStr) >= 0) ||
+      (cloudIdStr != null && deleted.indexOf(cloudIdStr) >= 0) ||
+      (idStr != null && pendingDeletedPhotoIds.has(idStr)) ||
+      (cloudIdStr != null && pendingDeletedPhotoIds.has(cloudIdStr));
   }
 
   function setPhotoWallSyncStatus(state, label){
