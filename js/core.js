@@ -9058,12 +9058,7 @@ function renderProfileActivityList(kind) {
                     window.innerWidth || 0,
                     document.documentElement ? (document.documentElement.clientWidth || 0) : 0
                 );
-                if (width < 1280) return false;
-                try {
-                    return !!window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-                } catch (_) {
-                    return true;
-                }
+                return width >= 768;
             }
 
             function renderDockChatDesktopEmptyState() {

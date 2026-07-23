@@ -5,6 +5,11 @@
   window.__xtjDesktopShellBound = true;
 
   function openTab(tab) {
+    var aiPanel = document.getElementById('panelAiChat');
+    var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
+    if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
+      window.__xtjCloseAiChat();
+    }
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
     }
@@ -12,18 +17,21 @@
 
   function openAiChat() {
     if (typeof window.__xtjOpenAiChat === 'function') {
-      window.__xtjOpenAiChat();
-      return;
+      return window.__xtjOpenAiChat();
     }
     var fallback = document.querySelector('[data-ai-tool="chat"]');
     if (fallback) fallback.click();
   }
 
   function syncActiveTab() {
+    var aiPanel = document.getElementById('panelAiChat');
+    var aiActive = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     var activePanel = document.querySelector('.dock-panel.active');
     var tab = activePanel && activePanel.id ? activePanel.id.replace(/^panel/, '').toLowerCase() : 'posts';
-    document.querySelectorAll('[data-desktop-tab]').forEach(function (button) {
-      var active = button.getAttribute('data-desktop-tab') === tab;
+    document.querySelectorAll('.desktop-nav-item').forEach(function (button) {
+      var active = aiActive
+        ? button.getAttribute('data-desktop-action') === 'ai-chat'
+        : button.getAttribute('data-desktop-tab') === tab;
       button.classList.toggle('is-active', active);
       if (button.classList.contains('desktop-nav-item')) {
         if (active) button.setAttribute('aria-current', 'page');
@@ -168,12 +176,17 @@
       if (actionButton) {
         event.preventDefault();
         openAiChat();
+        window.requestAnimationFrame(syncActiveTab);
       }
     });
 
     var panels = document.getElementById('dockPanels');
     if (panels && window.MutationObserver) {
       new MutationObserver(syncActiveTab).observe(panels, { attributes: true, subtree: true, attributeFilter: ['class'] });
+    }
+    var aiPanel = document.getElementById('panelAiChat');
+    if (aiPanel && window.MutationObserver) {
+      new MutationObserver(syncActiveTab).observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
     }
     var auth = document.querySelector('.nav-auth');
     if (auth && window.MutationObserver) {
