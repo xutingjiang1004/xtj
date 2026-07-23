@@ -181,83 +181,84 @@
     else window.setTimeout(run, 0);
   }
 
-  // ★ 双击刷新：每个导航项的 in-flight lock
+  // ★ 双击刷新：每个导航项的 Promise 锁防抖
   var _refreshLocks = {};
 
   function refreshTab(tab) {
-    if (_refreshLocks[tab]) return; // 防止重复刷新
-    _refreshLocks[tab] = true;
+    if (_refreshLocks[tab]) return _refreshLocks[tab];
+    _refreshLocks[tab] = performRefresh(tab);
+    return _refreshLocks[tab];
+  }
+
+  async function performRefresh(tab) {
     try {
-      if (typeof window.showToast === 'function') window.showToast('正在刷新…', 'info');
-    } catch (e) {}
+      try {
+        if (typeof window.showToast === 'function') window.showToast('正在刷新…', 'info');
+      } catch (e) {}
 
-    switch (tab) {
-      case 'posts':
-        // 帖子：强制重新请求首屏帖子，刷新评论和点赞关系
-        try {
-          if (typeof window.loadFeed === 'function') {
-            window.loadFeed(true).catch(function() {}).finally(function() { _refreshLocks[tab] = false; });
-          } else { _refreshLocks[tab] = false; }
-        } catch (e) { _refreshLocks[tab] = false; }
-        break;
+      switch (tab) {
+        case 'posts':
+          if (typeof window.loadFeed === 'function') await window.loadFeed(true);
+          break;
 
-      case 'chat':
-        // 聊天：刷新联系人列表、未读数、当前聊天记录
-        try {
+        case 'chat':
+          var chatPromises = [];
           if (typeof window.updateUnreadBadge === 'function') {
-            window.updateUnreadBadge().catch(function() {});
+            chatPromises.push(window.updateUnreadBadge().catch(function() {}));
           }
           if (typeof window.startDMPolling === 'function') {
-            window.startDMPolling(300000, false);
+            chatPromises.push(window.startDMPolling(300000, false));
           }
-          // 如果已打开某个联系人，刷新当前聊天记录
+          if (typeof window.syncContacts === 'function') {
+            chatPromises.push(window.syncContacts().catch(function() {}));
+          }
+          if (typeof window.syncChatBadge === 'function') {
+            chatPromises.push(window.syncChatBadge().catch(function() {}));
+          }
           if (typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
             if (typeof window.loadDockChatMessages === 'function') {
-              window.loadDockChatMessages(window.dockChatActiveUser, false).catch(function() {});
+              chatPromises.push(window.loadDockChatMessages(window.dockChatActiveUser, false).catch(function() {}));
             }
           }
-          syncContacts();
-          syncChatBadge();
-        } catch (e) {} finally { _refreshLocks[tab] = false; }
-        break;
+          if (chatPromises.length) await Promise.allSettled(chatPromises);
+          break;
 
-      case 'ai':
-        // 小猫 AI：保持当前会话内容，刷新会话列表、配置和历史
-        try {
+        case 'ai':
+          var aiPromises = [];
           if (typeof window.__xtjRefreshAiSession === 'function') {
-            window.__xtjRefreshAiSession().catch(function() {});
+            aiPromises.push(window.__xtjRefreshAiSession().catch(function() {}));
           }
           if (typeof window.__xtjRefreshAiConfig === 'function') {
-            window.__xtjRefreshAiConfig().catch(function() {});
+            aiPromises.push(window.__xtjRefreshAiConfig().catch(function() {}));
           }
-        } catch (e) {} finally { _refreshLocks[tab] = false; }
-        break;
+          if (aiPromises.length) await Promise.allSettled(aiPromises);
+          break;
 
-      case 'photos':
-        // 照片墙：调用受控的强制同步，刷新照片数据，重新连接 Realtime
-        try {
+        case 'photos':
           if (typeof window.__xtjPhotoWallForceSync === 'function') {
-            window.__xtjPhotoWallForceSync().catch(function() {}).finally(function() { _refreshLocks[tab] = false; });
-          } else { _refreshLocks[tab] = false; }
-        } catch (e) { _refreshLocks[tab] = false; }
-        break;
+            await window.__xtjPhotoWallForceSync();
+          }
+          break;
 
-      case 'profile':
-        // 我的：刷新用户资料、头像、点赞、评论、帖子和举报统计
-        try {
+        case 'profile':
+          var profilePromises = [];
           if (typeof window.loadCurrentUserInfoSnapshot === 'function' && window.currentUser) {
-            window.loadCurrentUserInfoSnapshot(window.currentUser).catch(function() {});
+            profilePromises.push(window.loadCurrentUserInfoSnapshot(window.currentUser).catch(function() {}));
           }
           if (typeof window.renderProfileActivity === 'function') {
-            window.renderProfileActivity();
+            try { window.renderProfileActivity(); } catch (e) {}
           }
-          syncUser();
-        } catch (e) {} finally { _refreshLocks[tab] = false; }
-        break;
+          if (typeof window.syncUser === 'function') {
+            profilePromises.push(window.syncUser().catch(function() {}));
+          }
+          if (profilePromises.length) await Promise.allSettled(profilePromises);
+          break;
 
-      default:
-        _refreshLocks[tab] = false;
-        break;
+        default:
+          break;
+      }
+    } finally {
+      delete _refreshLocks[tab];
     }
   }
 
@@ -268,7 +269,6 @@
       if (tabButton) {
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
-        // 只有当前激活的 tab 才响应双击刷新
         if (tabButton.classList.contains('is-active')) {
           refreshTab(tab);
         }

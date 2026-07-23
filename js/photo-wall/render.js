@@ -405,36 +405,54 @@
 
   var rendering = false;
   var pendingRender = false;
+  var _renderPromise = null;
 
   async function renderPhotoWall(){
     if (rendering) {
       pendingRender = true;
-      return;
+      // ★ 返回当前渲染的 Promise，让调用者可以等待
+      return _renderPromise;
     }
     rendering = true;
     // ★ 递增 generation ID，废弃旧加载任务
     _pwRenderGeneration += 1;
-    var grid = document.getElementById('photoGrid');
-    if (!grid) {
+    var currentGen = _pwRenderGeneration;
+
+    _renderPromise = (async function() {
+      var grid = document.getElementById('photoGrid');
+      if (!grid) {
+        rendering = false;
+        _renderPromise = null;
+        return;
+      }
+      var skeleton = '';
+      for (var i = 0; i < 9; i++) skeleton += '<div class="pw-skeleton"></div>';
+      grid.innerHTML = skeleton;
+      try {
+        if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData();
+        // ★ 检查 generation，旧数据不覆盖
+        if (currentGen !== _pwRenderGeneration) {
+          rendering = false;
+          _renderPromise = null;
+          return;
+        }
+        var key = window.pwSortKey || 'date_desc';
+        renderSorted(sortPhotoWallData(window.photoWallData || [], key));
+      } catch (err) {
+        console.error('[PhotoWall] render failed', err);
+        if (currentGen === _pwRenderGeneration) {
+          grid.innerHTML = '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>';
+        }
+      }
       rendering = false;
-      return;
-    }
-    var skeleton = '';
-    for (var i = 0; i < 9; i++) skeleton += '<div class="pw-skeleton"></div>';
-    grid.innerHTML = skeleton;
-    try {
-      if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData();
-      var key = window.pwSortKey || 'date_desc';
-      renderSorted(sortPhotoWallData(window.photoWallData || [], key));
-    } catch (err) {
-      console.error('[PhotoWall] render failed', err);
-      grid.innerHTML = '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>';
-    }
-    rendering = false;
-    if (pendingRender) {
-      pendingRender = false;
-      renderPhotoWall();
-    }
+      _renderPromise = null;
+      if (pendingRender) {
+        pendingRender = false;
+        renderPhotoWall();
+      }
+    })();
+
+    return _renderPromise;
   }
 
   function renderPhotoWallWithoutReload(){
