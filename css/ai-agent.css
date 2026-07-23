@@ -4115,7 +4115,17 @@
  * remains data-driven by ai-agent.js; the contextual rail only styles status
  * nodes that the runtime actually inserts.
  */
-@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+@media (min-width: 768px) {
+  #panelAiChat.ai-secondary-panel {
+    --ai-workbench-sidebar: 236px;
+    inset-block: 0;
+    inset-inline-start: calc(max(16px, (100vw - 1536px) / 2) + var(--ai-workbench-sidebar));
+    inset-inline-end: max(16px, calc((100vw - 1536px) / 2));
+    width: auto;
+    height: 100dvh;
+    z-index: 40;
+  }
+
   .ai-secondary-panel,
   #panelDeepThink {
     background:
@@ -4458,5 +4468,45 @@
   [data-theme="dark"] #panelDeepThink .dt-page {
     background: rgba(14, 31, 27, .84);
     box-shadow: 0 0 0 1px rgba(137, 207, 194, .1), 0 20px 54px rgba(0, 0, 0, .22);
+  }
+}
+
+/* Tablet workbench: keep desktop navigation while collapsing the optional
+ * context rail so the conversation remains readable on iPad-sized screens. */
+@media (min-width: 768px) and (max-width: 1179.98px) {
+  #panelAiChat.ai-secondary-panel {
+    --ai-workbench-sidebar: clamp(184px, 23vw, 220px);
+  }
+
+  .ai-secondary-panel #aiChatRoot {
+    --ai-desktop-history: clamp(190px, 25vw, 236px);
+    --ai-desktop-context: 0px;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-header {
+    display: flex;
+    min-height: 64px;
+    padding: 10px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-header .ai-chat-header-info {
+    flex: 1 1 180px;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+    padding: 20px clamp(16px, 3vw, 28px) 28px;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages::before {
+    display: none;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-search-status,
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-tool-status {
+    grid-column: 1;
   }
 }

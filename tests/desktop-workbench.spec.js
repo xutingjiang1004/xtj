@@ -12,7 +12,7 @@ async function openApp(page, options = {}) {
 }
 
 test.describe('desktop workbench contract', () => {
-  test('only fine-pointer desktop exposes the three-column shell', async ({ browser }) => {
+  test('every viewport from 768px exposes the desktop workbench', async ({ browser }) => {
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const desktopPage = await desktop.newPage();
     await openApp(desktopPage);
@@ -28,16 +28,27 @@ test.describe('desktop workbench contract', () => {
     expect(desktopState.mode).toBe('system');
     await desktop.close();
 
-    const tablet = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true });
-    const tabletPage = await tablet.newPage();
-    await openApp(tabletPage);
-    const tabletState = await tabletPage.evaluate(() => ({
-      sidebar: getComputedStyle(document.getElementById('desktopWorkbenchSidebar')).display,
-      matches: matchMedia('(min-width: 1280px) and (hover: hover) and (pointer: fine)').matches
-    }));
-    expect(tabletState.sidebar).toBe('none');
-    expect(tabletState.matches).toBeFalsy();
-    await tablet.close();
+    for (const viewport of [
+      { width: 768, height: 1024 },
+      { width: 834, height: 1194 },
+      { width: 1024, height: 768 },
+      { width: 1194, height: 834 }
+    ]) {
+      const tablet = await browser.newContext({ viewport, hasTouch: true });
+      const tabletPage = await tablet.newPage();
+      await openApp(tabletPage);
+      const tabletState = await tabletPage.evaluate(() => ({
+        sidebar: getComputedStyle(document.getElementById('desktopWorkbenchSidebar')).display,
+        dock: getComputedStyle(document.getElementById('dockBar')).display,
+        matches: matchMedia('(min-width: 768px)').matches,
+        scrollWidth: document.documentElement.scrollWidth
+      }));
+      expect(tabletState.sidebar).toBe('flex');
+      expect(tabletState.dock).toBe('none');
+      expect(tabletState.matches).toBeTruthy();
+      expect(tabletState.scrollWidth).toBeLessThanOrEqual(viewport.width);
+      await tablet.close();
+    }
   });
 
   test('desktop theme selector persists and keeps the header toggle synchronized', async ({ page }) => {
@@ -65,9 +76,80 @@ test.describe('desktop workbench contract', () => {
     }
   });
 
+  test('desktop AI stays inside the workbench content beside the sidebar', async ({ browser }) => {
+    for (const viewport of [
+      { width: 768, height: 1024 },
+      { width: 1024, height: 768 },
+      { width: 1440, height: 900 }
+    ]) {
+      const context = await browser.newContext({ viewport, hasTouch: viewport.width < 1280 });
+      const page = await context.newPage();
+      await openApp(page);
+      await page.waitForFunction(() => typeof window.__xtjOpenAiChat === 'function');
+      await page.evaluate(() => {
+        window.__xtjOpenAiChat = () => {
+          const panel = document.getElementById('panelAiChat');
+          panel.classList.remove('hidden');
+          panel.classList.add('active');
+          panel.setAttribute('aria-hidden', 'false');
+          panel.innerHTML = '<div id="aiChatRoot"></div>';
+          window.__xtjAiChatActive = true;
+        };
+        window.__xtjCloseAiChat = () => {
+          const panel = document.getElementById('panelAiChat');
+          panel.classList.add('hidden');
+          panel.classList.remove('active');
+          panel.setAttribute('aria-hidden', 'true');
+          window.__xtjAiChatActive = false;
+        };
+      });
+      const urlBefore = page.url();
+      await page.evaluate(() => window.__xtjOpenAiChat());
+      await expect(page.locator('#panelAiChat #aiChatRoot')).toBeVisible();
+      const state = await page.evaluate(() => {
+        const sidebar = document.getElementById('desktopWorkbenchSidebar');
+        const panel = document.getElementById('panelAiChat');
+        const button = document.querySelector('.desktop-nav-item[data-desktop-action="ai-chat"]');
+        const sidebarRect = sidebar.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        return {
+          sidebarDisplay: getComputedStyle(sidebar).display,
+          panelLeft: panelRect.left,
+          panelRight: panelRect.right,
+          sidebarRight: sidebarRect.right,
+          active: button.classList.contains('is-active'),
+          current: button.getAttribute('aria-current'),
+          overflow: document.documentElement.scrollWidth > innerWidth
+        };
+      });
+      expect(state.sidebarDisplay).toBe('flex');
+      expect(state.panelLeft).toBeGreaterThanOrEqual(state.sidebarRight - 1);
+      expect(state.panelRight).toBeLessThanOrEqual(viewport.width + 1);
+      expect(state.active).toBeTruthy();
+      expect(state.current).toBe('page');
+      expect(state.overflow).toBeFalsy();
+      expect(page.url()).toBe(urlBefore);
+      expect(context.pages()).toHaveLength(1);
+
+      await page.locator('.desktop-nav-item[data-desktop-tab="posts"]').click();
+      await expect(page.locator('#panelAiChat')).toBeHidden();
+      await expect(page.locator('.desktop-nav-item[data-desktop-tab="posts"]')).toHaveClass(/is-active/);
+      await context.close();
+    }
+  });
+
+  test('desktop AI icon uses the complete six-petal asset', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openApp(page);
+    const icon = page.locator('.desktop-nav-icon--ai');
+    await expect(icon.locator('ellipse')).toHaveCount(6);
+    await expect(icon.locator('circle')).toHaveCount(1);
+    expect(await icon.locator('svg').getAttribute('viewBox')).toBe('-2 -2 28 28');
+  });
+
   test('desktop chat keeps the conversation surface usable at required widths', async ({ browser }) => {
-    for (const viewport of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
-      const context = await browser.newContext({ viewport });
+    for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1194, height: 834 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
+      const context = await browser.newContext({ viewport, hasTouch: viewport.width < 1280 });
       const page = await context.newPage();
       await openApp(page);
       await page.locator('.desktop-nav-item[data-desktop-tab="chat"]').click();
@@ -103,10 +185,13 @@ test.describe('desktop workbench contract', () => {
   });
 
   test('mobile keeps the existing Dock navigation', async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
-    const page = await context.newPage();
-    await openApp(page);
-    await expect(page.locator('#dockBar')).toBeVisible();
-    await context.close();
+    for (const viewport of [{ width: 390, height: 844 }, { width: 767, height: 1024 }]) {
+      const context = await browser.newContext({ viewport, hasTouch: true });
+      const page = await context.newPage();
+      await openApp(page);
+      await expect(page.locator('#dockBar')).toBeVisible();
+      await expect(page.locator('#desktopWorkbenchSidebar')).toBeHidden();
+      await context.close();
+    }
   });
 });
