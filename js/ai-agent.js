@@ -1,4 +1,5 @@
 
+// ★ 使用安全的 throttleRAF（复用 core.js 版本或添加 try/finally）
 window.throttleRAF = function(fn) {
     var ticking = false, args, ctx;
     return function() {
@@ -7,8 +8,11 @@ window.throttleRAF = function(fn) {
         if (!ticking) {
             ticking = true;
             requestAnimationFrame(function() {
-                fn.apply(ctx, args);
-                ticking = false;
+                try {
+                    fn.apply(ctx, args);
+                } finally {
+                    ticking = false;
+                }
             });
         }
     };
@@ -195,21 +199,24 @@ window.throttleRAF = function(fn) {
   function renderMarkdown(txt) {
     if (!txt) return '';
     var s = String(txt);
-    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // ★ 先提取代码块，避免重复转义
     var codeBlocks = [];
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
       var idx = codeBlocks.length;
+      // 代码块只转义一次
       codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>');
       return '%%%CODEBLOCK' + idx + '%%%';
     });
+    // ★ 普通正文：HTML 转义
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // 鍥剧墖: 鍙厑璁?data:image/ 协议
+    // 图片: 只允许 data:image/ 协议
     s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
       return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
     });
-    // 链接: 使用 DOM API 闃?XSS, 鐧藉悕鍗曞崗璁? http:, https:, mailto:
+    // 链接: 使用 DOM API 防 XSS, 白名单协议: http:, https:, mailto:
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
       var cleanHref = String(href).trim();
       var lowerHref = cleanHref.toLowerCase();
@@ -244,6 +251,7 @@ window.throttleRAF = function(fn) {
       return '<ol>' + m.replace(/ class="ol-item"/g, '') + '</ol>';
     });
     s = s.replace(/\n/g, '<br>');
+    // ★ 恢复代码块
     s = s.replace(/%%%CODEBLOCK(\d+)%%%/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
     return s;
   }

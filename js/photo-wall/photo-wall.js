@@ -4,6 +4,8 @@
   var initialized = false;
   var initializingPromise = null;
   var warmTimer = null;
+  // ★ 初始化 generation，用于防止并发竞态
+  var _initGeneration = 0;
 
   function warmVisibleImages(){
     if (warmTimer) clearTimeout(warmTimer);
@@ -29,7 +31,14 @@
 
     if (initializingPromise && !force) return initializingPromise;
 
+    // ★ 强制刷新时，增加 generation 废弃旧任务
+    _initGeneration++;
+    var currentGen = _initGeneration;
+
     initializingPromise = Promise.resolve().then(async function() {
+      // ★ 检查 generation，旧任务直接返回
+      if (currentGen !== _initGeneration) return true;
+
       var grid = document.getElementById('photoGrid');
       if (!grid) throw new Error('photo_grid_missing');
 
@@ -38,6 +47,9 @@
       }
 
       await window.renderPhotoWall();
+
+      // ★ 再次检查 generation
+      if (currentGen !== _initGeneration) return true;
 
       initialized = true;
 
@@ -52,6 +64,9 @@
       warmVisibleImages();
       return true;
     }).catch(function(error) {
+      // ★ 旧 generation 的错误不处理
+      if (currentGen !== _initGeneration) return false;
+
       initialized = false;
 
       var grid = document.getElementById('photoGrid');
@@ -66,10 +81,26 @@
       console.error('[PhotoWall] initialization failed:', error && error.message ? error.message : error);
       throw error;
     }).finally(function() {
-      initializingPromise = null;
+      // ★ 只有最新 generation 的任务才清除 promise
+      if (currentGen === _initGeneration) {
+        initializingPromise = null;
+      }
     });
 
     return initializingPromise;
+  };
+
+  // ★ 照片墙强制同步函数（供桌面导航双击刷新调用）
+  window.__xtjPhotoWallForceSync = async function() {
+    try {
+      // 取消旧初始化任务
+      _initGeneration++;
+      initializingPromise = null;
+      initialized = false;
+      await window.initPhotoWall(true);
+    } catch (e) {
+      console.error('[PhotoWall] force sync failed', e);
+    }
   };
 
   function wrapRender(name){

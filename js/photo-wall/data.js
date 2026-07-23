@@ -248,11 +248,14 @@
           saveLocalPhotoWallData();
         } else {
           var cloudIds = new Set(rows.map(function(row){ return row && row.id != null ? String(row.id) : ''; }).filter(Boolean));
+          // ★ 过滤本地缓存：只保留云端存在的 ID
           local = local.filter(function(item){
             if (!item) return false;
             var key = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
             return !key || cloudIds.has(key);
           });
+          // ★ 使用过滤后的本地缓存参与合并，防止已删除照片被复活
+          window.photoWallData = local;
         }
       }
       var deletedRows = rows.filter(function(row){ return row && row.media_url === '__deleted__'; });
@@ -371,14 +374,46 @@
     var authHeaders = typeof window.getUserAuthHeaders === 'function'
       ? await window.getUserAuthHeaders()
       : {};
-    var response = await fetch((window.API_BASE || '') + '/api/photo/delete', {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
-      body: JSON.stringify({ photoId:id })
-    });
-    var result = await response.json().catch(function(){ return {}; });
-    if (!response.ok || !result.ok) throw new Error(result.error || 'cloud_delete_failed');
-    return result;
+    // ★ 添加 AbortController 和超时控制
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 20000);
+    try {
+      var response = await fetch((window.API_BASE || '') + '/api/photo/delete', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
+        body: JSON.stringify({ photoId:id }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      var result = await response.json().catch(function(){ return {}; });
+      if (!response.ok || !result.ok) throw new Error(result.error || 'cloud_delete_failed');
+      return result;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      // ★ 超时后查询服务端权威删除状态（重新调用 delete 接口，它是幂等的）
+      if (err.name === 'AbortError') {
+        try {
+          var statusResponse = await fetch((window.API_BASE || '') + '/api/photo/delete', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
+            body: JSON.stringify({ photoId: id })
+          });
+          var statusResult = await statusResponse.json().catch(function(){ return {}; });
+          if (statusResponse.ok && statusResult.already_deleted) {
+            return { ok: true, already_deleted: true };
+          }
+          if (statusResponse.ok && statusResult.ok) {
+            return statusResult;
+          }
+          // 确认失败则恢复照片
+          throw new Error('delete_status_uncertain');
+        } catch (statusErr) {
+          console.warn('[PhotoWall] delete status check failed', statusErr);
+          throw err; // 保留原始错误
+        }
+      }
+      throw err;
+    }
   }
 
   async function deletePhotoWallPhoto(item, opts){
