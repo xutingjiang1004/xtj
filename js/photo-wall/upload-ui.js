@@ -589,8 +589,8 @@
       throw fetchError;
     }
     clearTimeout(timeoutTimer);
-    if (state.cancelRequested) throw createPhotoUploadError('cancelled');
     if (!createRes.ok) {
+      if (state.cancelRequested) throw createPhotoUploadError('cancelled');
       var errBody = {};
       try { errBody = await createRes.json(); } catch (_) { errBody = {}; }
       var recordError = new Error((errBody && errBody.error) || '创建照片记录失败');
