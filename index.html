@@ -50,12 +50,12 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=713beaf154" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=77f8c42249" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=713beaf154" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=77f8c42249" /><link rel="stylesheet" href="css/ai-agent.min.css?v=1bd10c629c" /></noscript>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=03544ecc78" />
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=713beaf154" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=77f8c42249" /><link rel="stylesheet" href="css/ai-agent.min.css?v=4b9c6183bc" /></noscript>
+    <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=628dce9d97" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=428fb84be1">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=0b4bf3692f">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=1bd10c629c">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=30dfb8a696">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=8a502eb945">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4b9c6183bc">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=4b0bc2ef8a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=aa75c2e48d">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=ce3255caca">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=fca0bba21c">
@@ -120,7 +120,7 @@
         <nav class="desktop-workbench-nav" aria-label="主要页面">
             <button type="button" class="desktop-nav-item is-active" data-desktop-tab="posts" aria-current="page"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></span><span>帖子</span></button>
             <button type="button" class="desktop-nav-item" data-desktop-tab="chat"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span><span>聊天</span><span class="desktop-nav-badge" id="desktopChatBadge"></span></button>
-            <button type="button" class="desktop-nav-item" data-desktop-action="ai-chat"><span class="desktop-nav-icon desktop-nav-icon--ai" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"></circle><ellipse cx="12" cy="7" rx="3" ry="6"></ellipse><ellipse cx="12" cy="7" rx="3" ry="6" transform="rotate(60 12 12)"></ellipse><ellipse cx="12" cy="7" rx="3" ry="6" transform="rotate(120 12 12)"></ellipse></svg></span><span>小猫AI</span></button>
+            <button type="button" class="desktop-nav-item" data-desktop-action="ai-chat"><span class="desktop-nav-icon desktop-nav-icon--ai" aria-hidden="true"><svg viewBox="-2 -2 28 28" fill="none"><g transform="translate(12,12)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(0)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(60)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(120)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(180)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(240)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(300)"></ellipse><circle cx="0" cy="0" r="2.5"></circle></g></svg></span><span>小猫AI</span></button>
             <button type="button" class="desktop-nav-item" data-desktop-tab="ai"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8.5" cy="10" r="1.5"></circle><path d="m5 17 4.5-4 3.2 3 2.3-2.1 4 3.1"></path></svg></span><span>照片墙</span></button>
             <button type="button" class="desktop-nav-item" data-desktop-tab="profile"><span class="desktop-nav-icon" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 21c.8-4.2 3.1-6.3 7-6.3s6.2 2.1 7 6.3"></path></svg></span><span>我的</span></button>
         </nav>
@@ -1054,10 +1054,10 @@
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=98dccd199b"></script>
     <script defer src="js/performance.min.js?v=02b80c5e7f"></script>
-    <script defer src="js/core.min.js?v=e059eb7807"></script>
+    <script defer src="js/core.min.js?v=daa764607e"></script>
     <script defer src="js/login-device.min.js?v=db4fc5abe7"></script>
     <script defer src="js/theme-toggle.min.js?v=7dfb0a50cb"></script>
-    <script defer src="js/desktop-shell.min.js?v=38ff595db9"></script>
+    <script defer src="js/desktop-shell.min.js?v=7dc74e05a4"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

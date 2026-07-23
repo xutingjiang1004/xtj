@@ -99,11 +99,11 @@ test('ui-shell and desktop CSS parse cleanly with no dangling fragments', functi
   assert.ok(!/,\s*@media\b/.test(uiShell), 'selector list falls through into @media');
   assert.ok(!/@media[^{]+\{\s*\}/.test(uiShell), 'empty media query remains');
 });
-test('chat responsive split keeps touch layouts single-pane and wide fine-pointer layouts stable', function(){
+test('chat responsive split keeps phones single-pane and all 768px+ layouts split', function(){
   var uiShell = read('css/ui-shell.css');
   var desktop = read('css/desktop.css');
-  assert.ok(/@media \(max-width: 1023\.98px\)[\s\S]*?#panelChat \.chat-view\.hidden[\s\S]*?display: none !important;/.test(uiShell), 'small-screen chat exclusivity missing');
-  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1179\.98px\),[\s\S]*?#panelChat \.dock-chat-container[\s\S]*?display: block !important;[\s\S]*?#panelChat \.chat-view\.hidden[\s\S]*?display: none !important;/.test(uiShell), 'tablet or coarse-pointer chat override missing');
+  assert.ok(/@media \(max-width: 767\.98px\)[\s\S]*?#panelChat \.chat-view\.hidden[\s\S]*?display: none !important;/.test(uiShell), 'phone chat exclusivity missing');
+  assert.ok(/@media \(min-width: 768px\)[\s\S]*?#panelChat \.dock-chat-container[\s\S]*?display: grid(?: !important)?;/.test(desktop), 'tablet and desktop chat split missing');
   assert.ok(/#panelChat \.dock-chat-container \{[\s\S]*?grid-template-columns:\s*340px minmax\(0,\s*1fr\)/.test(desktop), 'desktop chat split source missing');
 });
 test('profile shell cancels legacy named-grid tracks on wide layouts', function(){
@@ -111,10 +111,10 @@ test('profile shell cancels legacy named-grid tracks on wide layouts', function(
   assert.ok(/#panelProfile \.profile-main-view \{[\s\S]*?display: block;/.test(uiShell), 'profile wide layout does not reset to block flow');
   assert.ok(/#panelProfile \.profile-header,[\s\S]*?#panelProfile \.profile-settings \{[\s\S]*?grid-area: auto;[\s\S]*?grid-column: auto;/.test(uiShell), 'profile children still rely on legacy grid placement');
 });
-test('desktop chat layout helper keeps wide fine-pointer split explicit', function(){
+test('desktop chat layout helper switches at the phone boundary', function(){
   var source = read('js/core.js');
   assert.ok(source.indexOf('function shouldUseDesktopChatSplitLayout()') >= 0, 'missing desktop chat layout helper');
-  assert.ok(source.indexOf("window.matchMedia('(hover: hover) and (pointer: fine)')") >= 0, 'desktop chat split is not tied to fine pointer');
+  assert.ok(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?return width >= 768;/.test(source), 'desktop chat split is not tied to the 768px boundary');
   assert.ok(source.indexOf('function syncDockChatLayoutState()') >= 0, 'missing chat layout state sync');
   assert.ok(source.indexOf('选择一条会话开始聊天') >= 0, 'desktop chat empty state missing');
 });
