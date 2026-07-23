@@ -732,10 +732,15 @@
     if (!photo) return Promise.resolve(null);
     if (photo.fileSize) return Promise.resolve(photo.fileSize);
     if (!photo.imageUrl) return Promise.resolve(null);
-    return fetch(photo.imageUrl, { method: 'HEAD', mode: 'cors' })
+    return fetch(photo.imageUrl, { method: 'HEAD', mode: 'cors', credentials: 'omit' })
       .then(function(res) {
         var cl = res.headers.get('content-length');
-        return cl ? parseInt(cl, 10) : null;
+        if (cl) return parseInt(cl, 10);
+        return fetch(photo.imageUrl, { method: 'GET', mode: 'cors', credentials: 'omit' })
+          .then(function(gRes) {
+            var gCl = gRes.headers.get('content-length');
+            return gCl ? parseInt(gCl, 10) : null;
+          });
       })
       .catch(function() { return null; });
   }
