@@ -5768,6 +5768,16 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            function formatRelativeTime(dateStr) {
+                var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
+                var diff = Math.floor((Date.now() - d.getTime()) / 1000);
+                if (diff < 60) return "刚刚";
+                if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
+                if (diff < 86400) return Math.floor(diff / 3600) + "小时前";
+                if (diff < 86400 * 30) return Math.floor(diff / 86400) + "天前";
+                return d.toLocaleDateString();
+            }
+
             function formatPostTime(post) {
                 var normalized = normalizePost(post);
                 var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
@@ -9624,7 +9634,7 @@ function renderProfileActivityList(kind) {
                 var isWithdrawn = payload && payload.withdrawn;
                 
                 var elapsed = Date.now() - new Date(message.created_at).getTime();
-                var timeLimit = (currentUser === window.ADMIN_USERNAME) ? (10 * 60 * 1000) : (3 * 60 * 1000);
+                var timeLimit = 3 * 60 * 1000;
                 var canWithdraw = sent && !message.__optimistic && !isWithdrawn && (elapsed <= timeLimit);
                 
                 var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" onclick="window.withdrawDMMessage(\'' + message.id + '\', this)" style="cursor:pointer; font-size: 11px; margin-left: 6px; color: #999;">撤回</span>' : '';
