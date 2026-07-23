@@ -1210,6 +1210,25 @@ async function initAdminClient() {
         return true;
     }
 
+    var _userFlagsCache = null;
+    var _lastFlagLengths = null;
+    function getUserStateFlags(userName) {
+        var flagLengths = (bansData || []).length + ',' + (mutesData || []).length + ',' + (blacklistData || []).length;
+        if (!_userFlagsCache || _lastFlagLengths !== flagLengths) {
+            _userFlagsCache = { bans: {}, mutes: {}, blacklist: {} };
+            _lastFlagLengths = flagLengths;
+            (bansData || []).forEach(function(b) { if (b && b.is_active && b.user_name) _userFlagsCache.bans[b.user_name] = true; });
+            (mutesData || []).forEach(function(m) { if (m && m.is_active && m.user_name) _userFlagsCache.mutes[m.user_name] = true; });
+            (blacklistData || []).forEach(function(bl) { if (bl && bl.is_active && bl.user_name) _userFlagsCache.blacklist[bl.user_name] = true; });
+        }
+        return {
+            isAdmin: userName === ADMIN,
+            isBanned: !!_userFlagsCache.bans[userName],
+            isMuted: !!_userFlagsCache.mutes[userName],
+            isBlacklisted: !!_userFlagsCache.blacklist[userName]
+        };
+    }
+
     var _userActivityCache = null;
     var _lastDataLengths = '';
     function getUserActivityStats(userName) {
