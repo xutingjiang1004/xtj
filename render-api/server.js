@@ -1684,6 +1684,7 @@ function getUtcDateKey(value) {
 async function fetchAllPostsByMediaType(mediaType, selectFields) {
   let from = 0;
   let results = [];
+  const MAX_FETCH_ALL_ROWS = 50000;
   while (true) {
     const { data, error } = await supabase.from('posts')
       .select(selectFields)
@@ -1694,7 +1695,7 @@ async function fetchAllPostsByMediaType(mediaType, selectFields) {
     if (error) throw error;
     const chunk = data || [];
     results = results.concat(chunk);
-    if (chunk.length < ADMIN_STATS_PAGE_SIZE) break;
+    if (chunk.length < ADMIN_STATS_PAGE_SIZE || results.length >= MAX_FETCH_ALL_ROWS) break;
     from += ADMIN_STATS_PAGE_SIZE;
   }
   return results;
@@ -5993,27 +5994,32 @@ app.post('/api/announcements/read', authenticateUser, async (req, res) => {
 
 // ===================== 帖子管理 ======================
 app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res) => {
-  var auditUser = 'unknown';
   try {
-    var token = (req.headers.authorization || '').replace('Bearer ', '');
-    var parts = token.split('.');
-    if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
-      auditUser = payload.user || 'unknown';
-    }
-  } catch(e) {}
-  const { id } = req.params;
-  // 先获取帖子的 actor_key
-  const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
-  const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-  
-  const { error } = await supabase.rpc('delete_post_with_actor', {
-    p_post_id: id,
-    p_actor_key: actorKey
-  });
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  await logAdminAudit('delete_post', auditUser, 'post_id:' + id);
-  return res.json({ ok: true });
+    var auditUser = 'unknown';
+    try {
+      var token = (req.headers.authorization || '').replace('Bearer ', '');
+      var parts = token.split('.');
+      if (parts.length >= 2) {
+        var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+        auditUser = payload.user || 'unknown';
+      }
+    } catch(e) {}
+    const { id } = req.params;
+    // 先获取帖子的 actor_key
+    const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
+    const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
+    
+    const { error } = await supabase.rpc('delete_post_with_actor', {
+      p_post_id: id,
+      p_actor_key: actorKey
+    });
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    await logAdminAudit('delete_post', auditUser, 'post_id:' + id);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin] delete_post exception:', e && e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }
 });
 
 // ===================== 评论管理 ======================
@@ -6115,38 +6121,43 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
 });
 
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
-  var auditUser = 'unknown';
   try {
-    var token = (req.headers.authorization || '').replace('Bearer ', '');
-    var parts = token.split('.');
-    if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
-      auditUser = payload.user || 'unknown';
+    var auditUser = 'unknown';
+    try {
+      var token = (req.headers.authorization || '').replace('Bearer ', '');
+      var parts = token.split('.');
+      if (parts.length >= 2) {
+        var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+        auditUser = payload.user || 'unknown';
+      }
+    } catch(e) {}
+    const id = normalizePostId(req.params.id);
+    if (!id) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
+    const lookup = await supabase.from('posts')
+      .select('id, user_name, media_url, media_type, actor_key, content')
+      .eq('id', id).eq('media_type', '__photo_wall__').maybeSingle();
+    if (lookup.error) return res.status(400).json({ error: sanitizeError(lookup.error) });
+    if (!lookup.data) return res.json({ ok: true, deleted: false, already_deleted: true, photo_id: id });
+    const photo = lookup.data;
+    const result = await hardDeleteContent({
+      postId: id,
+      actorUser: ADMIN_USERNAME,
+      isAdmin: true,
+      expectPhoto: true,
+      actorKey: photo.actor_key || ('admin_photo_' + id),
+      storagePaths: collectPhotoStoragePaths(photo)
+    });
+    if (result.error) return res.status(500).json({ error: sanitizeError(result.error), code: 'delete_failed' });
+    if (!result.result || !result.result.ok) {
+      return res.status(500).json({ error: result.result && result.result.error || '删除未生效', code: result.result && result.result.code || 'delete_not_applied' });
     }
-  } catch(e) {}
-  const id = normalizePostId(req.params.id);
-  if (!id) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
-  const lookup = await supabase.from('posts')
-    .select('id, user_name, media_url, media_type, actor_key, content')
-    .eq('id', id).eq('media_type', '__photo_wall__').maybeSingle();
-  if (lookup.error) return res.status(400).json({ error: sanitizeError(lookup.error) });
-  if (!lookup.data) return res.json({ ok: true, deleted: false, already_deleted: true, photo_id: id });
-  const photo = lookup.data;
-  const result = await hardDeleteContent({
-    postId: id,
-    actorUser: ADMIN_USERNAME,
-    isAdmin: true,
-    expectPhoto: true,
-    actorKey: photo.actor_key || ('admin_photo_' + id),
-    storagePaths: collectPhotoStoragePaths(photo)
-  });
-  if (result.error) return res.status(500).json({ error: sanitizeError(result.error), code: 'delete_failed' });
-  if (!result.result || !result.result.ok) {
-    return res.status(500).json({ error: result.result && result.result.error || '删除未生效', code: result.result && result.result.code || 'delete_not_applied' });
+    await processStorageCleanupJobs();
+    await logAdminAudit('delete_photo', auditUser, 'photo_id:' + id);
+    return res.json({ ok: true, deleted: result.result.deleted === true, already_deleted: result.result.already_deleted === true, photo_id: id });
+  } catch (e) {
+    console.error('[admin] delete_photo exception:', e && e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
   }
-  await processStorageCleanupJobs();
-  await logAdminAudit('delete_photo', auditUser, 'photo_id:' + id);
-  return res.json({ ok: true, deleted: result.result.deleted === true, already_deleted: result.result.already_deleted === true, photo_id: id });
 });
 
 // ===================== 用户照片上传 API（使用 service_role 绕过 RLS） ======================
@@ -7478,11 +7489,16 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
       return res.status(400).json({ error: '消息ID无效', code: 'invalid_id' });
     }
 
-    var { data: msg } = await supabase.from('posts')
+    var { data: msg, error: findErr } = await supabase.from('posts')
       .select('id, user_name, created_at, content, media_type')
       .eq('id', messageId)
       .eq('media_type', DM_MARKER)
       .maybeSingle();
+
+    if (findErr) {
+      console.error('[API] dm withdraw lookup error:', findErr);
+      return res.status(500).json({ error: '暂时无法读取消息', code: 'dm_lookup_failed' });
+    }
 
     if (!msg) {
       return res.status(404).json({ error: '消息不存在', code: 'not_found' });
@@ -7494,7 +7510,7 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     }
 
     var elapsed = Date.now() - new Date(msg.created_at).getTime();
-    var timeLimit = (reqUser === ADMIN_USERNAME) ? (10 * 60 * 1000) : (3 * 60 * 1000);
+    var timeLimit = 3 * 60 * 1000;
 
     if (elapsed > timeLimit) {
       return res.status(403).json({ error: '消息发送时间已超过可撤回期限', code: 'timeout' });
