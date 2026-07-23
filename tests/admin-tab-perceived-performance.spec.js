@@ -11,11 +11,11 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
   await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
   await page.route('**/admin/**', async route => {
     const url = new URL(route.request().url());
-    const key = url.pathname;
+    const key = url.pathname.replace(/^\/api/, '');
     if (!key.startsWith('/admin/')) return route.continue();
     counts[key] = (counts[key] || 0) + 1;
 
-    if (key === '/admin/login') return json(route, { ok: true, token: 'test-admin-token' });
+    if (key === '/admin/login') return json(route, { ok: true, user_token: 'test-admin-token' });
     if (key === '/admin/data') return json(route, {
       posts: [], likes: [], comments: [], announcements: [], bans: []
     });
