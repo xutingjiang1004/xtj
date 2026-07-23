@@ -3874,12 +3874,12 @@ function validateCatReply(parsed, rawText) {
 async function processCatReplyJob(job) {
   var startedAt = new Date().toISOString();
   try {
-    // 原子状态切换：pending -> processing
+    // 原子状态切换：pending -> processing（只有成功 CAS 的 worker 才继续）
     var { data: updated, error: updateErr } = await supabase.from('ai_comment_reply_jobs')
-      .update({ status: 'processing', started_at: startedAt, attempts: job.attempts + 1, updated_at: startedAt })
+      .update({ status: 'processing', started_at: startedAt, attempts: (job.attempts || 0) + 1, updated_at: startedAt })
       .eq('id', job.id).eq('status', 'pending').select('*').single();
     if (updateErr || !updated) {
-      console.error('[CAT_AI] atomic update failed:', updateErr);
+      // 另一个 worker 已领取此任务，静默返回
       return;
     }
 
@@ -3965,6 +3965,13 @@ async function processCatReplyJob(job) {
         status: 'blocked', risk_type: validated.risk_type, error_message: 'blocked by safety check',
         completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
       }).eq('id', job.id);
+      return;
+    }
+
+    // ★ 创建 AI 子评论前，确认 job 仍处于 processing 状态（未被 recoverStaleCatJobs 重置）
+    var jobCheck = await supabase.from('ai_comment_reply_jobs').select('status').eq('id', job.id).maybeSingle();
+    if (!jobCheck.data || jobCheck.data.status !== 'processing') {
+      console.log('[CAT_AI] job', job.id, 'status changed to', jobCheck.data && jobCheck.data.status, '- aborting comment insert');
       return;
     }
 
@@ -4074,10 +4081,15 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
       .select('status, generated_reply, error_message, completed_at')
       .eq('source_comment_id', commentId).maybeSingle();
     if (!jobRes.data) {
-      // 检查是否已有 AI 回复
-      var replyRes = await buildSummaryQuery('comments', 'id', null, null, 'created_at').eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      // 检查是否已有 AI 回复 - 必须返回完整字段
+      var replyRes = await supabase.from('comments')
+        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
       if (replyRes.data) {
-        return res.json({ status: 'completed', reply_comment_id: replyRes.data.id, message: '' });
+        var r = replyRes.data;
+        if (r.id && typeof r.content === 'string' && r.content.trim() && r.user_name === 'cat_ai' && r.generated_by_ai === true && r.parent_comment_id === commentId) {
+          return res.json({ status: 'completed', reply_comment_id: r.id, message: '', data: r });
+        }
       }
       return res.json({ status: 'not_triggered', reply_comment_id: null, message: '' });
     }
@@ -4089,9 +4101,18 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     }
     if (status === 'pending' || status === 'processing') message = '小猫正在组织毒液……';
     else if (status === 'completed') {
-      var replyRes = await buildSummaryQuery('comments', 'id', null, null, 'created_at').eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
-      // ★ 返回完整的 AI 评论数据，方便前端直接插入
-      return res.json({ status: 'completed', reply_comment_id: replyRes.data ? replyRes.data.id : null, message: '', data: replyRes.data || null });
+      var replyRes = await supabase.from('comments')
+        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      if (replyRes.data) {
+        var rr = replyRes.data;
+        // ★ 严格验证：必须包含完整字段，否则返回 processing 状态而非空对象
+        if (rr.id && typeof rr.content === 'string' && rr.content.trim() && rr.user_name === 'cat_ai' && rr.generated_by_ai === true && rr.parent_comment_id === commentId) {
+          return res.json({ status: 'completed', reply_comment_id: rr.id, message: '', data: rr });
+        }
+      }
+      // completed 但没有有效回复 -> 回复记录正在同步
+      return res.json({ status: 'processing', reply_comment_id: null, message: '回复记录正在同步' });
     } else if (status === 'failed') message = '小猫暂时不想说话';
     else if (status === 'blocked') message = '';
     return res.json({ status: status, reply_comment_id: null, message: message });
@@ -6420,6 +6441,44 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
   } catch(e) {
     console.error('[API] 照片删除失败:', e.message);
     return res.status(500).json({ error: '删除失败' });
+  }
+});
+
+// ★ 只读照片删除状态查询接口（不执行删除操作）
+app.get('/api/photo/delete-status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    const photoId = normalizePostId(req.query && (req.query.photo_id || req.query.photoId));
+    if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
+
+    // 只读查询：检查照片是否存在
+    const { data: photo } = await supabase.from('posts')
+      .select('id, user_name, media_url, media_type, actor_key')
+      .eq('id', photoId)
+      .maybeSingle();
+
+    if (!photo) {
+      return res.json({ status: 'deleted', photo_id: photoId });
+    }
+
+    if (photo.media_type !== '__photo_wall__') {
+      return res.json({ status: 'not_found', photo_id: photoId, reason: 'not_a_photo' });
+    }
+
+    // 权限验证
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    if (!isAdmin && photo.user_name !== req.userName) {
+      return res.status(403).json({ error: '无权查看此照片状态' });
+    }
+
+    return res.json({
+      status: 'exists',
+      photo_id: photoId,
+      user_name: photo.user_name,
+      media_url: photo.media_url
+    });
+  } catch(e) {
+    console.error('[API] delete-status error:', e.message);
+    return res.status(500).json({ error: '查询失败' });
   }
 });
 
