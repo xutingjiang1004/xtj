@@ -4919,10 +4919,13 @@ async function runMultiAgentFlow(opts) {
       onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: chunk }); },
       onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
     });
+    var synthTimeoutId;
     var synthTimeout = new Promise(function(_, reject) {
-      setTimeout(function() { reject(new Error('Synthesizer 超时')); }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
+      synthTimeoutId = setTimeout(function() { reject(new Error('Synthesizer 超时')); }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
     });
+    synthTimeout.catch(function(){}); // Prevent UnhandledRejection
     var synthResult = await Promise.race([synthPromise, synthTimeout]);
+    clearTimeout(synthTimeoutId);
     synthContent = synthResult.content || '';
     synthUsage = synthResult.usage;
     synthModel = normalizeDeepSeekUsageModel(synthResult.model || DEEPSEEK_MODEL_REASONER, synthResult.model || DEEPSEEK_MODEL_REASONER);
@@ -6044,7 +6047,7 @@ app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, r
     return res.status(500).json({ error: '服务器内部错误' });
   }});
 
-app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
+app.delete('/admin/announcement/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   const { id } = req.params;
   const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
@@ -6188,7 +6191,7 @@ app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res)
 });
 
 // ===================== 评论管理 ======================
-app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
+app.delete('/admin/comment/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   const { id } = req.params;
   const { data, error } = await supabase.rpc('delete_comment_v2', {
@@ -6285,7 +6288,7 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
   } catch (e) { console.error('[admin] photos:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
-app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
+app.delete('/admin/photo/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     var auditUser = 'unknown';
     try {
@@ -7594,22 +7597,24 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
     var now = new Date().toISOString();
     var updated = [];
     var failedIds = [];
-    for (var i = 0; i < (lookup.data || []).length; i++) {
-      var row = lookup.data[i];
+    var promises = (lookup.data || []).map(async (row) => {
       var payload = {};
       try { payload = JSON.parse(row.content || '{}'); } catch (_) { payload = { text: String(row.content || '') }; }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = { text: String(row.content || '') };
       if (!payload.read_at) payload.read_at = now;
       var nextViews = Math.max(Number(row.views) || 0, 1);
-      var result = await supabase.from('posts')
+      return supabase.from('posts')
         .update({ content: JSON.stringify(payload), views: nextViews })
         .eq('id', row.id)
         .eq('media_type', DM_MARKER)
         .eq('media_url', req.userName)
         .select('id, user_name, media_url, media_type, content, views, created_at')
-        .single();
-      if (result.error) failedIds.push(String(row.id));
-      else if (result.data) updated.push(result.data);
+        .single().then(r => ({ rowId: String(row.id), result: r }));
+    });
+    var results = await Promise.all(promises);
+    for (var j = 0; j < results.length; j++) {
+      if (results[j].result.error) failedIds.push(results[j].rowId);
+      else if (results[j].result.data) updated.push(results[j].result.data);
     }
     return res.json({ ok: true, marked: updated.length, partial: failedIds.length > 0, failed_ids: failedIds, data: updated });
   } catch (e) {
@@ -7833,7 +7838,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
+app.put('/admin/ban/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   var auditUser = 'unknown';
   try {
@@ -7907,7 +7912,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
+app.put('/admin/mute/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   var auditUser = 'unknown';
   try {
@@ -7989,7 +7994,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     return res.status(500).json({ error: '服务器内部错误' });
   }});
 
-app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
+app.put('/admin/blacklist/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   const { id } = req.params;
   const { data: target } = await supabase.from('blacklist').select('user_name').eq('id', id).maybeSingle();
@@ -8260,7 +8265,7 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
     return res.status(500).json({ error: '服务器内部错误' });
   }});
 
-app.put('/admin/report/:id', verifyToken, async (req, res) => {
+app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   const allowedStatuses = ['pending', 'reviewed', 'actioned', 'dismissed'];
@@ -8284,7 +8289,7 @@ app.put('/admin/report/:id', verifyToken, async (req, res) => {
 });
 
 // 管理员回复举报
-app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
+app.put('/admin/report/:id/respond', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   const { id } = req.params;
   const { response } = req.body;
   if (!response || !String(response).trim()) {
@@ -8312,7 +8317,7 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
 });
 
 // 管理员处理举报 + 删除帖子
-app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
+app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     const { id } = req.params;
     // 从 posts 表获取举报数据（存储在 content JSON 中）
@@ -8363,7 +8368,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
 });
 
 // 管理员处理举报 + 封禁用户
-app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
+app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     const { id } = req.params;
     const { duration_hours } = req.body;

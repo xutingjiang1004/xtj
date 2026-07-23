@@ -2910,7 +2910,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     }]);
                     
                     if (error) {
-                        supabase.storage.from('photo-wall').remove([newAvatarPath]);
+                        sb.storage.from('uploads').remove([path]);
                         showToast('上传失败: ' + error.message);
                         return;
                     }
@@ -3049,6 +3049,11 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 window.currentUser = currentUser;
                 window.currentUserInfoSnapshot = null;
                 clearUserSessionStorage();
+                try {
+                    await apiCall('POST', '/api/user/logout');
+                } catch (e) {
+                    console.error('API logout failed', e);
+                }
                 // ★ 修复 M5：停止限制轮询（避免内存泄漏）
                 stopRestrictionPolling();
                 // ★ 修复 M1：清理所有用户相关的 localStorage 缓存
