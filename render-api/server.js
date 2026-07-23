@@ -13,6 +13,11 @@ const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
 
+var STARTED_AT = new Date().toISOString();
+var COMMIT_SHA = (function() {
+  try { return String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim() || null; } catch(e) { return null; }
+})();
+
 const app = express();
 
 // 简单 cookie 解析中间件
@@ -4070,7 +4075,7 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     }
     var commentId = commentIdRaw;
     // 验证当前用户有权查看该评论
-    var commentRes = await supabase.from('comments').select('id, post_id, user_name').eq('id', commentId).maybeSingle();
+    var commentRes = await supabase.from('comments').select('id, post_id, user_name, created_at').eq('id', commentId).maybeSingle();
     if (!commentRes.data) return res.status(404).json({ error: 'comment not found' });
     // 验证帖子访问权限
     var postRes = await supabase.from('posts').select('id, visibility, user_name').eq('id', commentRes.data.post_id).maybeSingle();
@@ -4121,6 +4126,110 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
   } catch (e) {
     console.error('[CAT_AI] status error:', e && e.message);
     return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ★ 小猫 AI 评论回复重试 — 将 failed/blocked Job 重置为 pending
+app.post('/api/comments/ai-reply-retry', authenticateUser, async (req, res) => {
+  try {
+    var commentIdRaw = parseInt(String(req.body && req.body.comment_id || ''), 10);
+    if (!Number.isFinite(commentIdRaw) || commentIdRaw < 1) {
+      return res.status(400).json({ error: '无效的评论ID', code: 'invalid_comment_id' });
+    }
+    var commentId = commentIdRaw;
+    var userName = req.userName;
+
+    // 1. 验证源评论存在
+    var { data: sourceComment } = await supabase.from('comments')
+      .select('id, post_id, user_name, content')
+      .eq('id', commentId)
+      .maybeSingle();
+    if (!sourceComment) return res.status(404).json({ error: '评论不存在' });
+
+    // 2. 验证帖子存在
+    var { data: post } = await supabase.from('posts')
+      .select('id, user_name, visibility')
+      .eq('id', sourceComment.post_id)
+      .maybeSingle();
+    if (!post) return res.status(404).json({ error: '帖子不存在' });
+
+    // 3. 权限检查：仅帖子作者或评论作者可重试
+    var isOwner = post.user_name === userName;
+    var isCommenter = sourceComment.user_name === userName;
+    if (!isOwner && !isCommenter) {
+      return res.status(403).json({ error: '无权操作', code: 'forbidden' });
+    }
+
+    // 4. 查找现有 AI 回复 Job
+    var { data: existingJobs } = await supabase.from('ai_reply_jobs')
+      .select('id, status, error_message')
+      .eq('comment_id', commentId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    var existingJob = (existingJobs && existingJobs.length > 0) ? existingJobs[0] : null;
+
+    // 5. 已完成的直接返回
+    if (existingJob && existingJob.status === 'completed') {
+      var { data: aiComments } = await supabase.from('comments')
+        .select('id, user_name, content, created_at')
+        .eq('parent_id', commentId)
+        .eq('user_name', '小猫')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (aiComments && aiComments.length > 0) {
+        return res.json({ ok: true, status: 'completed', data: aiComments[0], source_comment_id: commentId });
+      }
+      return res.json({ ok: true, status: 'completed', source_comment_id: commentId });
+    }
+
+    // 6. pending/processing 不重复创建，返回当前状态
+    if (existingJob && (existingJob.status === 'pending' || existingJob.status === 'processing')) {
+      return res.json({ ok: true, status: existingJob.status, source_comment_id: commentId });
+    }
+
+    // 7. failed/blocked → 原子重置为 pending
+    if (existingJob && (existingJob.status === 'failed' || existingJob.status === 'blocked')) {
+      var { error: updateErr } = await supabase.from('ai_reply_jobs')
+        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
+        .eq('id', existingJob.id)
+        .eq('status', existingJob.status); // 原子条件更新
+      if (updateErr) {
+        console.error('[ai-reply-retry] update failed:', updateErr.message);
+        return res.status(500).json({ error: '重试失败，请稍后再试' });
+      }
+      return res.json({ ok: true, status: 'pending', source_comment_id: commentId });
+    }
+
+    // 8. 无 Job — 创建新任务
+    // 限流检查：60秒内同一评论最多重试3次
+    var sixtySecAgo = new Date(Date.now() - 60000).toISOString();
+    var { count: recentCount } = await supabase.from('ai_reply_jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('comment_id', commentId)
+      .gte('created_at', sixtySecAgo);
+    if (recentCount >= 3) {
+      return res.status(429).json({ error: '重试过于频繁，请稍后再试', code: 'rate_limited', status: 'rate_limited' });
+    }
+
+    var { data: newJob, error: insertErr } = await supabase.from('ai_reply_jobs')
+      .insert([{
+        comment_id: commentId,
+        post_id: sourceComment.post_id,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('id')
+      .single();
+    if (insertErr) {
+      console.error('[ai-reply-retry] insert failed:', insertErr.message);
+      return res.status(500).json({ error: '创建重试任务失败' });
+    }
+
+    return res.json({ ok: true, status: 'pending', job_id: newJob.id, source_comment_id: commentId });
+  } catch (e) {
+    console.error('[ai-reply-retry] error:', e && e.message);
+    return res.status(500).json({ error: '服务器错误' });
   }
 });
 
@@ -5474,7 +5583,13 @@ async function verifyToken(req, res, next) {
 
 // ===================== 健康检查 ======================
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    commit: COMMIT_SHA || 'unknown',
+    started_at: STARTED_AT,
+    deepseek_configured: !!DEEPSEEK_API_KEY,
+    supabase_configured: !!(SUPABASE_URL && SUPABASE_SERVICE_KEY)
+  });
 });
 
 // 邮件配置健康检查（需管理员鉴权）
