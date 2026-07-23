@@ -99,6 +99,35 @@
     });
   }
 
+  // ★ 保存 pending 上传状态（状态不确定时不删除 Storage，等待后续查询）
+  function savePendingPhotoUpload(info) {
+    try {
+      var pending = readJson('xtj_photo_upload_pending', []);
+      pending.push({
+        uploadId: info.uploadId,
+        path: info.path,
+        publicUrl: info.publicUrl,
+        fileName: info.fileName,
+        fileSize: info.fileSize,
+        mimeType: info.mimeType,
+        createdAt: Date.now()
+      });
+      // 保留最近 50 条
+      writeJson('xtj_photo_upload_pending', pending.slice(-50));
+    } catch(e) {}
+  }
+
+  function readJson(key, fallback) {
+    try {
+      var raw = window.safeStorage.get(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (_) { return fallback; }
+  }
+
+  function writeJson(key, value) {
+    try { window.safeStorage.set(key, JSON.stringify(value)); } catch (_) {}
+  }
+
   function uploadBatchPercent(processed, total){
     return total > 0 ? Math.round((processed / total) * 100) : 100;
   }
@@ -431,14 +460,24 @@
             await cleanupStorage(path);
             throw fetchError;
           }
-          // 状态不确定（processing / 网络错误等），强制清理 Storage 避免泄漏
-          await cleanupStorage(path);
+          if (statusData && statusData.status === 'failed') {
+            // 服务端明确失败，清理 Storage
+            await cleanupStorage(path);
+            throw fetchError;
+          }
+          // ★ 状态不确定（processing / 其他），不得删除 Storage
+          // 保存 pending 状态，继续查询权威结果
+          savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
           fetchError.photoUploadStage = 'pending';
           fetchError._pendingRetry = true;
           throw fetchError;
         } catch(statusErr) {
-          // 状态查询失败，强制清理 Storage 避免泄漏
-          await cleanupStorage(path);
+          // ★ 状态查询失败，不得删除 Storage
+          // 保存 pending 状态，稍后重试
+          if (statusErr !== fetchError) {
+            fetchError._statusQueryError = statusErr;
+          }
+          savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
           fetchError.photoUploadStage = 'pending';
           fetchError._pendingRetry = true;
           throw fetchError;
