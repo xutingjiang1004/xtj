@@ -103,19 +103,118 @@
   function savePendingPhotoUpload(info) {
     try {
       var pending = readJson('xtj_photo_upload_pending', []);
-      pending.push({
-        uploadId: info.uploadId,
-        path: info.path,
-        publicUrl: info.publicUrl,
-        fileName: info.fileName,
-        fileSize: info.fileSize,
-        mimeType: info.mimeType,
-        createdAt: Date.now()
-      });
+      // ★ 按 uploadId 去重，不重复 push
+      var exists = pending.some(function(p) { return p.uploadId === info.uploadId; });
+      if (!exists) {
+        pending.push({
+          uploadId: info.uploadId,
+          path: info.path,
+          publicUrl: info.publicUrl,
+          fileName: info.fileName,
+          fileSize: info.fileSize,
+          mimeType: info.mimeType,
+          createdAt: Date.now()
+        });
+      }
       // 保留最近 50 条
       writeJson('xtj_photo_upload_pending', pending.slice(-50));
     } catch(e) {}
   }
+
+  // ★ 恢复 pending 上传状态
+  var _reconcileLocks = {};
+  window.reconcilePendingPhotoUploads = async function() {
+    try {
+      var pending = readJson('xtj_photo_upload_pending', []);
+      if (!pending.length) return;
+      var now = Date.now();
+      var maxAge = 7 * 24 * 60 * 60 * 1000; // 7 天过期
+      var remaining = [];
+      var reconciled = 0;
+
+      for (var i = 0; i < pending.length; i++) {
+        var entry = pending[i];
+        if (!entry.uploadId) continue;
+        // 过期但先查询服务端确认
+        if ((now - entry.createdAt) > maxAge) {
+          // 先查询再决定是否丢弃
+        }
+        // 每个 uploadId 同时只能有一个 reconcile 请求
+        if (_reconcileLocks[entry.uploadId]) continue;
+        _reconcileLocks[entry.uploadId] = true;
+
+        try {
+          var controller = new AbortController();
+          var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
+          var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+          var resp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
+            body: JSON.stringify({ upload_id: entry.uploadId }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          var data = await resp.json().catch(function(){ return {}; });
+
+          if (resp.ok && data.committed) {
+            // 已提交，加入照片墙
+            reconciled++;
+            // 删除 pending 记录（不删除 Storage，因为文件已提交）
+            continue; // 不加入 remaining
+          } else if (resp.ok && (data.status === 'failed' || data.status === 'not_found')) {
+            // 失败或不存在，清理 Storage 和 pending
+            try {
+              // 清理 Storage（通过服务端）
+              if (entry.path) {
+                fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+                  method: 'POST',
+                  headers: Object.assign({ 'Content-Type': 'application/json' }, typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {}),
+                  body: JSON.stringify({ path: entry.path })
+                }).catch(function() {});
+              }
+            } catch (e) {}
+            continue; // 不加入 remaining
+          } else if (resp.ok && data.status === 'processing') {
+            // 仍在处理，保留记录
+            remaining.push(entry);
+          } else {
+            // 网络错误或未知状态，保留记录
+            remaining.push(entry);
+          }
+        } catch (err) {
+          // 网络错误，保留记录，不删除 Storage
+          remaining.push(entry);
+        } finally {
+          delete _reconcileLocks[entry.uploadId];
+        }
+      }
+
+      writeJson('xtj_photo_upload_pending', remaining);
+      if (reconciled > 0 && typeof window.initPhotoWall === 'function') {
+        window.initPhotoWall(true).catch(function() {});
+      }
+    } catch (e) {
+      console.warn('[PhotoWall] reconcile pending uploads failed', e);
+    }
+  };
+
+  // ★ 绑定 reconcile 触发时机
+  (function() {
+    // 页面启动
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() { window.reconcilePendingPhotoUploads(); }, 2000);
+      }, { once: true });
+    } else {
+      setTimeout(function() { window.reconcilePendingPhotoUploads(); }, 2000);
+    }
+    // online / pageshow / visibilitychange
+    window.addEventListener('online', function() { window.reconcilePendingPhotoUploads(); });
+    window.addEventListener('pageshow', function() { window.reconcilePendingPhotoUploads(); });
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) window.reconcilePendingPhotoUploads();
+    });
+  })();
 
   function readJson(key, fallback) {
     try {

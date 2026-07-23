@@ -92,11 +92,11 @@
 
   // ★ 照片墙强制同步函数（供桌面导航双击刷新调用）
   window.__xtjPhotoWallForceSync = async function() {
+    // ★ 增加 generation 废弃旧任务，但不手动清空 initializingPromise
+    _initGeneration++;
+    var currentGen = _initGeneration;
+    initialized = false;
     try {
-      // 取消旧初始化任务
-      _initGeneration++;
-      initializingPromise = null;
-      initialized = false;
       await window.initPhotoWall(true);
     } catch (e) {
       console.error('[PhotoWall] force sync failed', e);
