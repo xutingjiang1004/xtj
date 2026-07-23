@@ -2596,10 +2596,22 @@ window.throttleRAF = function(fn) {
         notify('请先登录后再和小猫聊天');
         return false;
       }
+      // 其他认证失败原因也给出明确提示
+      if (reason === 'expired') {
+        notify('登录已失效，请重新登录');
+        return false;
+      }
+      if (reason === 'auth_pending') {
+        notify('正在验证身份，请稍后再试');
+        return false;
+      }
+      notify('认证服务暂时不可用，请稍后重试');
+      return false;
     } catch (e) {
       try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
     }
     try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e2) {}
+    notify('认证失败，请重新登录');
     return false;
   }
 

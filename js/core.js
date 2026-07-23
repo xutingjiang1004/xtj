@@ -439,6 +439,8 @@ const ADMIN_NAME = "xxz";
                 clearAllAuthState({ revokeRemote: false });
                 try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
                 try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                // ★ 30秒后重置，允许用户关闭弹窗后再次触发
+                setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
             }
             window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
