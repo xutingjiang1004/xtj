@@ -420,7 +420,7 @@
 /* On small touch layouts the chat views remain mutually exclusive.  Wide
    layouts are owned by desktop.css, where list and detail are intentionally
    displayed side-by-side. */
-@media (max-width: 1023.98px) {
+@media (max-width: 767.98px) {
   #panelChat .chat-view.hidden {
     display: none !important;
   }
@@ -459,9 +459,7 @@
 /* A 1024px tablet does not have enough reliable input space for the desktop
    conversation split.  Keep the existing single-pane selection model until a
    fine-pointer desktop has real room for both columns. */
-@media (min-width: 1024px) and (max-width: 1179.98px),
-       (min-width: 1180px) and (hover: none),
-       (min-width: 1180px) and (pointer: coarse) {
+@media (max-width: 767.98px) {
   #panelChat .dock-chat-container {
     display: block !important;
     height: auto !important;
@@ -1467,7 +1465,7 @@ html.xtj-ios-viewport .dock-panel {
 .desktop-right-rail > .desktop-ai-card,
 .desktop-overview-card > .desktop-rail-heading { display: none; }
 
-@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+@media (min-width: 768px) {
   .app-container {
     --wb-sidebar-width: 236px;
     --wb-inspector-width: 300px;
@@ -1883,8 +1881,61 @@ html.xtj-ios-viewport .dock-panel {
   }
 }
 
-/* Desktop fine-pointer deep adaptation: keep touch/tablet layouts unchanged. */
-@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+/* Compact workbench: tablets use the same desktop information architecture,
+   with the optional right rail collapsed to preserve the primary workspace. */
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .app-container {
+    --wb-sidebar-width: clamp(184px, 23vw, 220px);
+  }
+
+  .desktop-workbench-sidebar {
+    padding: 20px 12px 18px;
+  }
+
+  .desktop-workbench-brand {
+    padding-inline: 8px;
+    padding-bottom: 16px;
+  }
+
+  .desktop-workbench-nav {
+    margin-top: 18px;
+    gap: 5px;
+  }
+
+  .desktop-nav-item {
+    min-height: 46px;
+    padding-inline: 11px;
+  }
+
+  #panelPosts.active .posts-nav {
+    padding-inline: 18px !important;
+  }
+
+  #panelPosts.active .wrap {
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    max-width: 920px !important;
+    padding: 18px 18px 48px !important;
+  }
+
+  #panelPosts.active #publishBox,
+  #panelPosts.active #postFilterBar,
+  #panelPosts.active #feed {
+    grid-column: 1 !important;
+  }
+
+  #panelPosts.active .desktop-right-rail {
+    display: none !important;
+  }
+
+  html.xtj-ios-viewport .dock-panel {
+    padding-bottom: 0 !important;
+    scroll-padding-bottom: 0 !important;
+  }
+}
+
+/* Desktop and tablet deep adaptation. */
+@media (min-width: 768px) {
   #panelAi,
   #panelProfile {
     min-height: 0 !important;

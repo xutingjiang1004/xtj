@@ -130,7 +130,7 @@ test.describe('release validation', () => {
     await context.close();
   });
 
-  test('touch tablets keep chat in a single-pane layout', async ({ browser }) => {
+  test('touch tablets use the desktop split chat layout', async ({ browser }) => {
     const cases = [
       { width: 1024, height: 768 },
       { width: 1180, height: 820 },
@@ -151,9 +151,9 @@ test.describe('release validation', () => {
           detailDisplay: getComputedStyle(detailView).display
         };
       });
-      expect(state.display).toBe('block');
+      expect(state.display).toBe('grid');
       expect(state.listDisplay).not.toBe('none');
-      expect(state.detailDisplay).toBe('none');
+      expect(state.detailDisplay).not.toBe('none');
       await context.close();
     }
   });
