@@ -151,20 +151,36 @@ async function createPhotoRecord(options) {
           // 旧文件丢失，使用新文件路径更新记录
           try {
             var newContent = existing.data.content;
+            var contentObj = {};
             try {
-              var contentObj = JSON.parse(newContent);
+              contentObj = JSON.parse(newContent);
               contentObj.storagePath = storagePath;
               newContent = JSON.stringify(contentObj);
-            } catch (_) {}
-            await options.supabase.from('posts').update({
+            } catch (_) {
+              newContent = existing.data.content;
+            }
+            // ★ 必须检查 update 的 error 和返回的 data
+            var updateResult = await options.supabase.from('posts').update({
               media_url: validated.mediaUrl,
               content: newContent
-            }).eq('id', existing.data.id);
-            existing.data.media_url = validated.mediaUrl;
-            existing.data.content = newContent;
-            existing.data._repaired = true;
-            return { status: 200, body: { ok: true, data: existing.data, idempotent: true, repaired: true } };
-          } catch (_) {}
+            }).eq('id', existing.data.id).select('id, media_url, content').maybeSingle();
+            if (updateResult.error) {
+              if (options.logger) options.logger.error('[PHOTO_REPAIR_UPDATE_FAILED]', updateResult.error);
+              // 更新失败，不能返回 repaired:true
+            } else if (updateResult.data) {
+              // ★ 验证更新后的数据
+              var updatedContent = {};
+              try { updatedContent = JSON.parse(updateResult.data.content || '{}'); } catch (_) {}
+              if (updateResult.data.media_url === validated.mediaUrl && updatedContent.storagePath === storagePath) {
+                existing.data.media_url = validated.mediaUrl;
+                existing.data.content = newContent;
+                existing.data._repaired = true;
+                return { status: 200, body: { ok: true, data: existing.data, idempotent: true, repaired: true } };
+              }
+            }
+          } catch (_) {
+            // 异常时静默降级，继续使用旧记录
+          }
         }
       }
       // 旧文件存在或无法确认，删除本次新文件，返回旧记录
