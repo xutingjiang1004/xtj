@@ -5,6 +5,13 @@
   window.__xtjDesktopShellBound = true;
 
   function openTab(tab) {
+    // When leaving Code panel, call cleanup
+    var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
+    var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
+    if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
+      window.__xtjCodeWorkspaceAPI.cleanup();
+    }
+
     var aiPanel = document.getElementById('panelAiChat');
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
