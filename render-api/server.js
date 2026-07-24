@@ -5802,22 +5802,23 @@ app.get('/health/mail', verifyToken, (req, res) => {
 
 // ===================== 管理员登录 ======================
 app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: '请输入账号和密码' });
-  }
-  
-  // 输入长度校验
-  if (username.length > MAX_USERNAME_LEN) {
-    return res.status(400).json({ error: '账号格式不正确' });
-  }
-  if (password.length > 128) {
-    return res.status(400).json({ error: '密码格式不正确' });
-  }
-  
-  // 防止用户名枚举：无论用户名是否存在，都进行密码比对，返回统一错误
-  if (username !== ADMIN_USERNAME || !ADMIN_PASSWORD) {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: '请输入账号和密码' });
+    }
+    
+    // 输入长度校验
+    if (username.length > MAX_USERNAME_LEN) {
+      return res.status(400).json({ error: '账号格式不正确' });
+    }
+    if (password.length > 128) {
+      return res.status(400).json({ error: '密码格式不正确' });
+    }
+    
+    // 防止用户名枚举：无论用户名是否存在，都进行密码比对，返回统一错误
+    if (username !== ADMIN_USERNAME || !ADMIN_PASSWORD) {
     // 用户名不存在或密码未配置 → 执行虚拟比对防时序
     const dummyPw = Buffer.from('dummy');
     const dummyAdmin = Buffer.from('dummy');
@@ -5852,6 +5853,10 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
 
   var adminUserSession = await issueUserSession(res, ADMIN_USERNAME);
   return res.json({ ok: true, username: ADMIN_USERNAME, user_token: adminUserSession.token });
+  } catch (e) {
+    console.error('[API] admin login error:', e && e.message);
+    return res.status(500).json({ error: '登录失败，请稍后重试' });
+  }
 });
 
 // ===================== 用户 Token 认证（JWT access_token + refresh_token） =====================
@@ -6048,7 +6053,11 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
 
 // 验证当前用户身份（基于 access token 返回规范 user_name）
 app.get('/api/user/me', authenticateUser, rateLimit(60000, 30), async (req, res) => {
-  return res.json({ ok: true, user_name: req.userName });
+  try {
+    return res.json({ ok: true, user_name: req.userName });
+  } catch (e) {
+    return res.status(500).json({ error: '查询失败' });
+  }
 });
 
 // 刷新用户 access token（使用 HttpOnly cookie 中的 refresh token）
