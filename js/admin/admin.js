@@ -1767,14 +1767,15 @@ async function initAdminClient() {
     };
 
     window.deleteAdminComment = function(id) {
-        var comment = allComments.find(function(c) { return c.id === id; });
+        var idStr = String(id);
+        var comment = allComments.find(function(c) { return String(c.id) === idStr; });
         var preview = comment ? (comment.content || '').slice(0, 50) : '';
         if (preview && comment.content && comment.content.length > 50) preview += '...';
         
         showConfirm('删除评论', '您确定要删除此评论吗？\n\n' + (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '评论将标记为删除，但记录会保留在数据库中。', '确认删除', async function() {
             try {
                 if (API_BASE) {
-                    await apiCall('DELETE', '/admin/comment/' + id);
+                    await apiCall('DELETE', '/admin/comment/' + encodeURIComponent(idStr));
                 } else {
                     var { data, error } = await sb.rpc('delete_comment_v2', { p_comment_id: id, p_deleted_by: ADMIN });
                     if (error) { showToast('删除失败: ' + error.message, 'error'); return; }
