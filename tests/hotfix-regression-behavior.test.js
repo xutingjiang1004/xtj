@@ -73,7 +73,7 @@ describe('cat-ai frontend reply behavior', function() {
   });
 
   it('Realtime INSERT 必须调用 upsertAiComment', function() {
-    assert.ok(core.includes('upsertAiComment(row, row.parent_comment_id'), 'Realtime 必须调用 upsertAiComment');
+    assert.ok(core.includes('upsertAiComment(row, String(row.parent_comment_id)'), 'Realtime 必须调用 upsertAiComment');
   });
 
   it('polling 收到完整回复后必须调用 upsertAiComment', function() {
@@ -91,7 +91,7 @@ describe('cat-ai frontend reply behavior', function() {
   it('polling 页面隐藏时使用 accumulatedRunTime 而非 Date.now() 绝对时间', function() {
     assert.ok(core.includes('accumulatedRunTime'), '必须使用 accumulatedRunTime');
     assert.ok(core.includes('pausedAt'), '必须使用 pausedAt 记录暂停时间');
-    assert.ok(core.includes('accumulatedRunTime += Date.now() - pausedAt'), '恢复时必须补回暂停时间');
+    assert.ok(core.includes('accumulatedRunTime += Date.now() - lastPollStart'), '恢复时必须补回暂停时间');
   });
 
   it('页面隐藏时保留 polling 任务', function() {
@@ -177,7 +177,7 @@ describe('ghost login prevention behavior', function() {
 
   it('ensureProtectedOperationAuth 必须拦截 auth_pending', function() {
     assert.ok(core.includes("_xtjAuthState === 'auth_pending'"), '必须拦截 auth_pending');
-    assert.ok(core.includes("reason: 'auth_pending'"), 'auth_pending 必须返回明确原因');
+    assert.ok(core.includes("while (window._xtjAuthState === 'auth_pending'"), 'auth_pending 必须等待验证完成');
   });
 
   it('必须有 isAuthenticated 函数', function() {
