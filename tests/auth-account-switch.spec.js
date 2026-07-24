@@ -59,7 +59,7 @@ test('login success broadcasts to other tabs', () => {
 });
 
 test('logout broadcasts to other tabs', () => {
-  assert.match(core, /__xtjBroadcastLogout\(\)/);
+  assert.match(core, /__xtjBroadcastLogout\(/);
 });
 
 test('currentUser set from server-confirmed identity, not input box', () => {

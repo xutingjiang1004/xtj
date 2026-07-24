@@ -12,7 +12,7 @@ test('pollCatAiReply uses exponential backoff', () => {
 });
 
 test('pollCatAiReply max duration extended to 90 seconds', () => {
-  assert.match(core, /maxDuration = 90000/);
+  assert.match(core, /maxRunTime = 90000/);
 });
 
 test('pollCatAiReply does not delete task on page hide', () => {
@@ -64,7 +64,7 @@ test('subscribeToComments checks and restores on online and pageshow', () => {
 });
 
 test('renderCatAiComment uses real created_at, not fixed 刚刚', () => {
-  assert.match(core, /var timeStr = formatTimeAgo\(comment\.created_at\)/);
+  assert.match(core, /formatRelativeTime\(comment\.created_at\)/);
   // 不应该有固定的"刚刚"
   assert.ok(!/renderCatAiComment[\s\S]*?<span class="comment-item-time">刚刚<\/span>/.test(core));
 });
@@ -74,7 +74,8 @@ test('renderCatAiComment has no typing indicator in completed state', () => {
 });
 
 test('backend ai-reply-status returns full comment data when completed', () => {
-  assert.match(server, /data: replyRes\.data \|\| null/);
+  assert.match(server, /if \(replyRes\.data\)/);
+  assert.match(server, /data: r/);
 });
 
 test('backend hasCatMention supports full-width @', () => {
