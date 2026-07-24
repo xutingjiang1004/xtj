@@ -94,9 +94,9 @@ test('code-agent validatePath rejects backslashes', () => {
 // ============================================================
 // 8. 操作类型限制
 // ============================================================
-test('code-agent only allows update and create operations', () => {
+test('code-agent only allows update, create and document operations', () => {
   assert.match(codeAgent, /OP_TYPES_ALLOWED/);
-  assert.match(codeAgent, /'update'.*'create'/);
+  assert.match(codeAgent, /'update'.*'create'.*'document'/);
 });
 
 test('code-agent rejects dangerous operation types', () => {
@@ -178,8 +178,8 @@ test('code-agent has system prompt builder', () => {
   assert.match(codeAgent, /expert coding assistant/);
 });
 
-test('system prompt enforces update and create only', () => {
-  assert.match(codeAgent, /Only use "update" and "create"/);
+test('system prompt enforces update, create and document only', () => {
+  assert.match(codeAgent, /Only use "update", "create", and "document"/);
   assert.match(codeAgent, /Do NOT use delete, rename, execute, terminal, or git/);
 });
 
