@@ -67,6 +67,11 @@ jobs:
     timeout-minutes: 15
     needs: [test, syntax]
 
+    env:
+      API_SECRET: test-ci-secret-key-123456
+      SUPABASE_SERVICE_KEY: test-ci-service-key-123456
+      ADMIN_PASSWORD: test-admin-password-ci
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -85,13 +90,3 @@ jobs:
 
       - name: Run UI tests
         run: npm run test:ui
-
-      - name: Upload test artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-artifacts
-          path: |
-            output/playwright/test-results/
-            playwright-report/
-          retention-days: 7

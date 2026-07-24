@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const registerCodeAgentRoutes = require('./code-agent');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -14531,6 +14532,9 @@ function startDmUnreadNotifier() {
   dmUnreadNotifyTimer = setInterval(checkUnreadDmForAdmin, DM_UNREAD_NOTIFY_INTERVAL);
   checkUnreadDmForAdmin(); // 立即执行一次
 }
+
+// ── Code workspace AI agent routes ──
+registerCodeAgentRoutes(app, { supabase, rateLimit, authenticateUser, sanitizeError });
 
 app.listen(port, () => {
   console.log(`[xtj-admin-api] running on port ${port}`);
