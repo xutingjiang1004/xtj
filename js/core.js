@@ -3043,56 +3043,102 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 doLogout();
             };
 
+            var _isLoggingOut = false;
             window.doLogout = async function () {
+                if (_isLoggingOut) return;
+                _isLoggingOut = true;
+
                 try { if (typeof window.xtjStopLocationSharing === 'function') window.xtjStopLocationSharing('位置共享已关闭'); } catch (e) {}
-                currentUser = "";
-                window.currentUser = currentUser;
-                window.currentUserInfoSnapshot = null;
-                clearUserSessionStorage();
+
+                var savedToken = '';
+                var savedUser = '';
+                try { savedToken = getUserToken() || ''; } catch (e) {}
+                try { savedUser = currentUser || window.currentUser || ''; } catch (e) {}
+
+                var logoutCallSucceeded = false;
                 try {
-                    await apiCall('POST', '/api/user/logout');
+                    var logoutHeaders = { 'Content-Type': 'application/json' };
+                    if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
+                    var resp = await fetch(API_BASE + '/api/user/logout', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: logoutHeaders
+                    });
+                    if (resp && resp.ok) logoutCallSucceeded = true;
                 } catch (e) {
-                    console.error('API logout failed', e);
+                    console.error('API logout failed (will still clear local state):', e);
                 }
-                // ★ 修复 M5：停止限制轮询（避免内存泄漏）
-                stopRestrictionPolling();
-                // ★ 修复 M1：清理所有用户相关的 localStorage 缓存
-                // 避免用户A登出后用户B看到A的头像、VIP、已读消息等
+
+                try {
+                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
+                } catch (e) {}
+                try {
+                    var catTimers = window.__catAiPollTimers || {};
+                    Object.keys(catTimers).forEach(function(k) { clearTimeout(catTimers[k]); });
+                    window.__catAiPollTimers = {};
+                    window.__catAiPollStatus = {};
+                } catch (e) {}
+                try { stopRestrictionPolling(); } catch (e) {}
+                try { stopDMPolling(); } catch (e) {}
+                try { if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; } } catch (e) {}
+                try { if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; } } catch (e) {}
+                try { if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; } } catch (e) {}
+
+                clearUserToken();
+                lastUserSessionWriteAt = 0;
+                try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
+                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
+                try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(e) {}
+                try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
+                try { avatarCache = {}; } catch(e) {}
+                try { window.safeStorage.remove(AVATAR_CACHE_KEY); } catch(e) {}
+
+                currentUser = '';
+                window.currentUser = '';
+                window._lastKnownUser = '';
+                window.currentUserInfoSnapshot = null;
+                _chatCache = {};
+                window.dockChatListCacheTime = 0;
+                window._xtjAuthState = 'unauthenticated';
+
                 var xtjKeys = [];
-                for (var i = 0; i < localStorage.length; i++) {
-                    var key = localStorage.key(i);
-                    if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0)) {
-                        xtjKeys.push(key);
+                try {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var key = localStorage.key(i);
+                        if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0)) {
+                            xtjKeys.push(key);
+                        }
                     }
-                }
+                } catch (e) {}
                 xtjKeys.forEach(function(k) {
                     try { window.safeStorage.remove(k); } catch(e) {}
                 });
-                // 也清理 sessionStorage 中的密码 hash
-                try { sessionStorage.removeItem("xtj_pw_hash"); } catch(e) {}
-                clearUserToken();
-                document.getElementById("loginNickInp").value = "";
-                document.getElementById("loginPwInp").value = "";
-                document.getElementById("regNickInp").value = "";
-                document.getElementById("regPwInp").value = "";
-                if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
-                if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; }
-                if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; }
-                stopDMPolling();
-                _chatCache = {};
-                window.dockChatListCacheTime = 0;
+                clearUserSessionStorage();
+                try {
+                    var loginNick = document.getElementById('loginNickInp');
+                    var loginPw = document.getElementById('loginPwInp');
+                    var regNick = document.getElementById('regNickInp');
+                    var regPw = document.getElementById('regPwInp');
+                    if (loginNick) loginNick.value = '';
+                    if (loginPw) loginPw.value = '';
+                    if (regNick) regNick.value = '';
+                    if (regPw) regPw.value = '';
+                } catch (e) {}
                 document.body.style.overflow = '';
-                Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
-                // ★ 清除 localStorage 头像缓存
-                try { window.safeStorage.remove(AVATAR_CACHE_KEY); } catch(e) {}
-                var profileMainView = document.getElementById('profileMainView');
-                if (profileMainView) {
-                    profileMainView.hidden = false;
-                }
+
+                try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout('manual'); } catch(e) {}
                 try { if (typeof window.queueBehavior === 'function') window.queueBehavior('logout', '用户退出登录'); } catch(e) {}
-                showToast("已退出登录");
-                await initUI();
-                initialLoad(true);
+
+                showToast('已退出登录');
+                try { await initUI(); } catch (e) {}
+                try { initialLoad(true); } catch (e) {}
+                _isLoggingOut = false;
             };
 
             // 处理鎴戠殑椤甸潰锟矫伙拷卡片鐐癸拷??
