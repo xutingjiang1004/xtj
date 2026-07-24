@@ -2257,14 +2257,17 @@
         throw new Error('无法读取文件');
       }
 
-      // Convert base64 back to ArrayBuffer
-      var binaryStr = atob(result.content);
-      var bytes = new Uint8Array(binaryStr.length);
-      for (var i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
+      // result.content is an ArrayBuffer for document files.
+      // Convert ArrayBuffer to base64 for sending to the backend API.
+      var buffer = result.content;
+      var bytes = new Uint8Array(buffer);
+      var binaryStr = '';
+      for (var i = 0; i < bytes.length; i++) {
+        binaryStr += String.fromCharCode(bytes[i]);
       }
+      var base64 = btoa(binaryStr);
 
-      // Call backend API to apply document operations
+      // Call backend API to apply document operations, sending the file content
       var ext = op.path.split('.').pop().toLowerCase();
       var mimeType = ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
                      ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
@@ -2275,6 +2278,7 @@
         apiCall = window.xtjProtectedFetch('/api/code/document/apply', {
           method: 'POST',
           body: JSON.stringify({
+            file: base64,
             fileName: op.path.split('/').pop(),
             mimeType: mimeType,
             document_type: op.document_type || ext,
@@ -2287,6 +2291,7 @@
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            file: base64,
             fileName: op.path.split('/').pop(),
             mimeType: mimeType,
             document_type: op.document_type || ext,
