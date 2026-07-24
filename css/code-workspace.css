@@ -57,6 +57,25 @@
   isolation: isolate;
 }
 
+/* ── 1a. Workspace Layout (three-column: sidebar | editor | chat) ── */
+.code-workspace {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ── 1b. Editor Column (center) ── */
+.code-editor-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--cw-bg);
+}
+
 /* ── 2. Sidebar ───────────────────────────────────────────── */
 .code-sidebar {
   width: var(--cw-sidebar-width);

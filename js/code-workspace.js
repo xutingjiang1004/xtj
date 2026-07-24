@@ -23,7 +23,9 @@
     _applyLock: false,
     _monacoLoaded: false,
     _monacoEditor: null,
-    _objectUrls: []
+    _objectUrls: [],
+    _abortController: null,
+    _requestId: 0
   };
 
   // ──────────────────────────────────────────────
@@ -301,6 +303,12 @@
   // cleanup() — called when leaving Code tab
   // ──────────────────────────────────────────────
   function cleanup() {
+    // Cancel any in-flight request
+    if (state._abortController) {
+      try { state._abortController.abort(); } catch (e) { /* ignore */ }
+      state._abortController = null;
+    }
+    state._requestId++;
     revokeAllUrls();
     disposeMonaco();
     state.sending = false;
@@ -390,11 +398,11 @@
     if (!_dom.panelCode) return;
     _dom.panelCode.innerHTML = '';
 
-    // Main workspace container
+    // Main workspace container — true three-column layout
     var workspace = document.createElement('div');
     workspace.className = 'code-workspace';
 
-    // ── Sidebar ──
+    // ── Sidebar (left) ──
     var sidebar = document.createElement('div');
     sidebar.className = 'code-sidebar';
 
@@ -425,29 +433,29 @@
 
     workspace.appendChild(sidebar);
 
-    // ── Main area ──
-    var main = document.createElement('div');
-    main.className = 'code-main';
+    // ── Editor column (center) ──
+    var editorColumn = document.createElement('div');
+    editorColumn.className = 'code-editor-column';
 
     // Tab bar
     var tabBar = document.createElement('div');
     tabBar.className = 'code-tab-bar';
     tabBar.id = 'codeTabBar';
-    main.appendChild(tabBar);
+    editorColumn.appendChild(tabBar);
 
     // Editor area
     var editorArea = document.createElement('div');
     editorArea.className = 'code-editor-area';
     editorArea.id = 'codeEditorArea';
-    main.appendChild(editorArea);
+    editorColumn.appendChild(editorArea);
 
-    // Chat panel
+    workspace.appendChild(editorColumn);
+
+    // ── Chat panel (right) ──
     var chatPanel = document.createElement('div');
     chatPanel.className = 'code-chat-panel';
     chatPanel.id = 'codeChatPanel';
-    main.appendChild(chatPanel);
-
-    workspace.appendChild(main);
+    workspace.appendChild(chatPanel);
 
     _dom.panelCode.appendChild(workspace);
 
@@ -458,7 +466,7 @@
     _dom.editorArea = editorArea;
     _dom.chatPanel = chatPanel;
     _dom.sidebar = sidebar;
-    _dom.main = main;
+    _dom.editorColumn = editorColumn;
 
     // Render sub-components
     renderFileTree();
@@ -791,45 +799,46 @@
     _dom.tabBar.innerHTML = '';
 
     for (var i = 0; i < state.openTabs.length; i++) {
-      var tab = state.openTabs[i];
-      var el = document.createElement('div');
-      el.className = 'code-tab' + (tab.path === state.activePath ? ' active' : '') + (tab.modified ? ' modified' : '');
-      el.setAttribute('data-path', tab.path);
+      (function (tab) {
+        var el = document.createElement('div');
+        el.className = 'code-tab' + (tab.path === state.activePath ? ' active' : '') + (tab.modified ? ' modified' : '');
+        el.setAttribute('data-path', tab.path);
 
-      var inContext = state.contextPaths[tab.path];
-      var contextDot = inContext ? '<span class="code-tab-context"></span>' : '';
+        var inContext = state.contextPaths[tab.path];
+        var contextDot = inContext ? '<span class="code-tab-context"></span>' : '';
 
-      el.innerHTML =
-        contextDot +
-        '<span class="tab-name">' + escapeHTML(tab.name) + '</span>' +
-        '<span class="tab-close" title="关闭">✕</span>';
+        el.innerHTML =
+          contextDot +
+          '<span class="tab-name">' + escapeHTML(tab.name) + '</span>' +
+          '<span class="tab-close" title="关闭">✕</span>';
 
-      // Click tab to switch
-      el.addEventListener('click', function (e) {
-        if (e.target.classList.contains('tab-close')) return;
-        state.activePath = tab.path;
-        renderTabs();
-        renderEditor();
-      });
-
-      // Close button
-      var closeBtn = el.querySelector('.tab-close');
-      if (closeBtn) {
-        closeBtn.addEventListener('click', function (e) {
-          e.stopPropagation();
-          closeTab(tab.path);
+        // Click tab to switch
+        el.addEventListener('click', function (e) {
+          if (e.target.classList.contains('tab-close')) return;
+          state.activePath = tab.path;
+          renderTabs();
+          renderEditor();
         });
-      }
 
-      // Middle-click to close
-      el.addEventListener('auxclick', function (e) {
-        if (e.button === 1) {
-          e.preventDefault();
-          closeTab(tab.path);
+        // Close button
+        var closeBtn = el.querySelector('.tab-close');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            closeTab(tab.path);
+          });
         }
-      });
 
-      _dom.tabBar.appendChild(el);
+        // Middle-click to close
+        el.addEventListener('auxclick', function (e) {
+          if (e.button === 1) {
+            e.preventDefault();
+            closeTab(tab.path);
+          }
+        });
+
+        _dom.tabBar.appendChild(el);
+      })(state.openTabs[i]);
     }
 
     if (state.openTabs.length === 0) {
@@ -1279,9 +1288,17 @@
     var sendBtn = document.getElementById('codeChatSendBtn');
     if (sendBtn) sendBtn.disabled = true;
 
-    // Add user message
+    // Cancel previous request
+    if (state._abortController) {
+      try { state._abortController.abort(); } catch (e) { /* ignore */ }
+    }
+    state._abortController = new AbortController();
+    var requestId = ++state._requestId;
+
     var now = new Date();
     var timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+    // Add user message to state
     state.messages.push({ role: 'user', content: message, time: timeStr });
 
     input.value = '';
@@ -1293,61 +1310,177 @@
     // Show typing indicator
     showTypingIndicator();
 
-    // Build files array from context
-    var files = [];
+    // Read all context files from disk (not just open tabs)
     var contextPaths = Object.keys(state.contextPaths);
+    var fs = window.__xtjCodeFS;
+    var readPromises = [];
+
     for (var i = 0; i < contextPaths.length; i++) {
-      var p = contextPaths[i];
-      var tab = null;
-      for (var j = 0; j < state.openTabs.length; j++) {
-        if (state.openTabs[j].path === p) {
-          tab = state.openTabs[j];
-          break;
-        }
-      }
-      if (tab && tab.type === 'text') {
-        files.push({
-          path: p,
-          language: getFileLanguage(p),
-          content: tab.content || '',
-          sha256: tab.sha256 || ''
-        });
-      }
+      (function (p) {
+        readPromises.push(
+          new Promise(function (resolve) {
+            // Check if file is open and has unsaved changes
+            var openTab = null;
+            for (var j = 0; j < state.openTabs.length; j++) {
+              if (state.openTabs[j].path === p) {
+                openTab = state.openTabs[j];
+                break;
+              }
+            }
+
+            // If file is an image or PDF, skip for context
+            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf')) {
+              resolve(null);
+              return;
+            }
+
+            // If file is a restricted context file, skip
+            if (isRestrictedContextFile(p)) {
+              resolve(null);
+              return;
+            }
+
+            // Read from disk
+            if (!fs || !fs.readFileByPath) {
+              resolve(null);
+              return;
+            }
+
+            fs.readFileByPath(p).then(function (result) {
+              if (!result || result.type !== 'text') {
+                resolve(null);
+                return;
+              }
+
+              // Use _currentContent if file has unsaved modifications
+              var content = result.content;
+              if (openTab && openTab.modified && openTab._currentContent !== undefined) {
+                content = openTab._currentContent;
+              }
+
+              // Compute SHA-256 of the actual content being sent to AI
+              getSHA256(content).then(function (computedSha) {
+                resolve({
+                  path: p,
+                  language: getFileLanguage(p),
+                  content: content,
+                  sha256: computedSha || result.sha256 || ''
+                });
+              }).catch(function () {
+                // Fallback: use disk SHA if computation fails
+                resolve({
+                  path: p,
+                  language: getFileLanguage(p),
+                  content: content,
+                  sha256: result.sha256 || ''
+                });
+              });
+            }).catch(function (err) {
+              console.error('[code-workspace] Failed to read context file:', p, err);
+              resolve({ path: p, error: (err && err.message) ? err.message : String(err) });
+            });
+          })
+        );
+      })(contextPaths[i]);
     }
 
-    // Build request
-    var body = {
-      workspace_name: state.workspaceName || '',
-      message: message,
-      active_path: state.activePath || '',
-      history: state.messages.slice(-20).map(function (m) {
-        return { role: m.role, content: m.content };
-      }),
-      files: files
-    };
+    Promise.all(readPromises).then(function (results) {
+      // Check if request was cancelled
+      if (requestId !== state._requestId) return;
 
-    // Send API request
+      var files = [];
+      var failedFiles = [];
+      var totalBytes = 0;
+
+      for (var k = 0; k < results.length; k++) {
+        var r = results[k];
+        if (!r) continue;
+        if (r.error) {
+          failedFiles.push(r.path + ': ' + r.error);
+          continue;
+        }
+        // Recalculate SHA-256 for files with unsaved changes
+        var contentBytes = new TextEncoder().encode(r.content).length;
+        if (totalBytes + contentBytes > 600 * 1024) {
+          showToast('AI 上下文文件总内容超过 600 KB 限制，请减少上下文文件', 'error');
+          state.sending = false;
+          if (input) input.disabled = false;
+          if (sendBtn) sendBtn.disabled = false;
+          removeTypingIndicator();
+          return;
+        }
+        totalBytes += contentBytes;
+
+        files.push({
+          path: r.path,
+          language: r.language,
+          content: r.content,
+          sha256: r.sha256
+        });
+      }
+
+      if (failedFiles.length > 0) {
+        showToast('部分文件读取失败: ' + failedFiles.join('; '), 'error');
+      }
+
+      // Build history WITHOUT the current message (dedup)
+      // The current message was just pushed to state.messages, so exclude it
+      var historyMsgs = state.messages.slice(0, -1).slice(-20).map(function (m) {
+        return { role: m.role, content: m.content };
+      });
+
+      // Build request
+      var body = {
+        workspace_name: state.workspaceName || '',
+        message: message,
+        active_path: state.activePath || '',
+        history: historyMsgs,
+        files: files
+      };
+
+      return sendApiRequest(body, requestId, timeStr);
+    }).catch(function (err) {
+      if (requestId !== state._requestId) return;
+      removeTypingIndicator();
+      var errMsg = (err && err.message) ? err.message : String(err);
+      state.messages.push({ role: 'assistant', content: '抱歉，请求失败: ' + errMsg, time: timeStr });
+      renderChatPanel();
+      state.sending = false;
+      if (input) input.disabled = false;
+      if (sendBtn) sendBtn.disabled = false;
+    });
+  }
+
+  function sendApiRequest(body, requestId, timeStr) {
+    var sendBtn = document.getElementById('codeChatSendBtn');
+    var input = document.getElementById('codeChatInput');
+
     var apiCall;
     if (window.xtjProtectedFetch) {
       apiCall = window.xtjProtectedFetch('/api/code/chat', {
         method: 'POST',
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: state._abortController ? state._abortController.signal : undefined
       });
     } else {
       apiCall = fetch('/api/code/chat', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: state._abortController ? state._abortController.signal : undefined
       });
     }
 
     apiCall.then(function (resp) {
+      if (requestId !== state._requestId) return;
       if (!resp.ok) {
         throw new Error('API 请求失败: ' + resp.status + ' ' + (resp.statusText || ''));
       }
       return resp.json();
     }).then(function (data) {
+      if (requestId !== state._requestId) return;
+
       // Remove typing indicator
       removeTypingIndicator();
 
@@ -1369,6 +1502,10 @@
         renderDiffView();
       }
     }).catch(function (err) {
+      if (requestId !== state._requestId) return;
+      // AbortError is not a real failure
+      if (err && err.name === 'AbortError') return;
+
       removeTypingIndicator();
 
       var errMsg = (err && err.message) ? err.message : String(err);
@@ -1376,13 +1513,29 @@
 
       renderChatPanel();
     }).then(function () {
+      if (requestId !== state._requestId) return;
       // Re-enable UI
       state.sending = false;
+      state._abortController = null;
       var inp = document.getElementById('codeChatInput');
       if (inp) inp.disabled = false;
       var sb = document.getElementById('codeChatSendBtn');
       if (sb) sb.disabled = false;
     });
+  }
+
+  function isRestrictedContextFile(path) {
+    if (!path) return false;
+    var name = fileNameFromPath(path).toLowerCase();
+    var restricted = [
+      '.env', '.env.local', '.env.development', '.env.production',
+      'credentials.json', 'id_rsa', 'id_rsa.pub'
+    ];
+    for (var i = 0; i < restricted.length; i++) {
+      if (name === restricted[i]) return true;
+    }
+    if (name.endsWith('.pem') || name.endsWith('.key')) return true;
+    return false;
   }
 
   function showTypingIndicator() {
@@ -1465,8 +1618,8 @@
 
       // Get original content from snapshot or tab
       var originalContent = '';
-      if (state.snapshots[op.path]) {
-        originalContent = state.snapshots[op.path];
+      if (state.snapshots[op.path] && state.snapshots[op.path].beforeContent !== undefined) {
+        originalContent = state.snapshots[op.path].beforeContent;
       } else {
         for (var j = 0; j < state.openTabs.length; j++) {
           if (state.openTabs[j].path === op.path) {
@@ -1581,19 +1734,65 @@
     }
 
     var fs = window.__xtjCodeFS;
-    if (!fs || !fs.readFileByPath || !fs.writeFileByPath) {
+    if (!fs || !fs.writeFileByPath) {
       return Promise.reject(new Error('File system not available'));
     }
 
-    // Re-read file and verify SHA-256
+    if (op.type === 'create') {
+      // Create operation: check file doesn't exist, then create
+      return fs.readFileByPath(op.path).then(function (result) {
+        // File exists — reject
+        throw new Error('文件 "' + op.path + '" 已存在，AI 创建操作不能覆盖已有文件');
+      }).catch(function (err) {
+        // If the error is "file exists", re-throw
+        if (err.message && err.message.indexOf('已存在') !== -1) throw err;
+        // File doesn't exist — proceed with create
+        // Save snapshot with existed=false
+        if (!state.snapshots[op.path]) {
+          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
+        }
+        return fs.writeFileByPath(op.path, op.new_content || '');
+      }).then(function (writeResult) {
+        // Optionally open the new file in a tab
+        for (var i = 0; i < state.openTabs.length; i++) {
+          if (state.openTabs[i].path === op.path) {
+            state.openTabs[i].content = op.new_content || '';
+            state.openTabs[i].sha256 = writeResult.sha256 || '';
+            state.openTabs[i].modified = false;
+            state.openTabs[i]._currentContent = undefined;
+            break;
+          }
+        }
+        state.pendingOperations.splice(index, 1);
+        if (state.activePath === op.path) {
+          renderEditor();
+        }
+        showToast('已创建: ' + op.path, 'success');
+        return true;
+      });
+    }
+
+    // Update operation: re-read existing file and verify SHA-256
+    if (!fs.readFileByPath) {
+      return Promise.reject(new Error('File system not available'));
+    }
+
     return fs.readFileByPath(op.path).then(function (result) {
+      if (!result) {
+        throw new Error('无法读取文件: ' + op.path);
+      }
+
       if (op.expected_sha256 && result.sha256 !== op.expected_sha256) {
-        throw new Error('文件已被修改，与 AI 生成回复时的内容不一致。请重新生成。');
+        throw new Error('文件 "' + op.path + '" 已被修改，与 AI 生成回复时的内容不一致。请重新生成。');
       }
 
       // Take snapshot of current content before writing
       if (!state.snapshots[op.path]) {
-        state.snapshots[op.path] = result.type === 'text' ? result.content : '';
+        state.snapshots[op.path] = {
+          existed: true,
+          beforeContent: result.type === 'text' ? result.content : '',
+          beforeSha256: result.sha256 || ''
+        };
       }
 
       // Write new content
@@ -1676,43 +1875,92 @@
     }
 
     var fs = window.__xtjCodeFS;
-    if (!fs || !fs.writeFileByPath) {
+    if (!fs) {
       showToast('文件系统不可用', 'error');
       return;
     }
 
     var promises = [];
+    var successPaths = [];
+    var failedPaths = [];
+
     for (var i = 0; i < snapshotPaths.length; i++) {
-      var p = snapshotPaths[i];
-      var original = state.snapshots[p];
-      promises.push(
-        fs.writeFileByPath(p, original).then(function () {
-          // Update open tab
-          for (var j = 0; j < state.openTabs.length; j++) {
-            if (state.openTabs[j].path === p) {
-              state.openTabs[j].content = original;
-              state.openTabs[j].modified = false;
-              state.openTabs[j]._currentContent = undefined;
-              break;
+      (function (p, snapshot) {
+        promises.push(
+          new Promise(function (resolve) {
+            if (snapshot.existed === false) {
+              // This was a create operation — delete the file
+              if (!fs.deleteFileByPath) {
+                // Fallback: write empty string (not ideal but we can't delete)
+                fs.writeFileByPath(p, '').then(function () {
+                  successPaths.push(p);
+                  resolve(true);
+                }).catch(function (err) {
+                  console.error('[code-workspace] undo delete failed for', p, err);
+                  failedPaths.push(p);
+                  resolve(false);
+                });
+                return;
+              }
+              fs.deleteFileByPath(p).then(function () {
+                successPaths.push(p);
+                resolve(true);
+              }).catch(function (err) {
+                console.error('[code-workspace] undo delete failed for', p, err);
+                failedPaths.push(p);
+                resolve(false);
+              });
+              return;
             }
-          }
-          return true;
-        }).catch(function (err) {
-          console.error('[code-workspace] undo error for', p, err);
-          return false;
-        })
-      );
+
+            // Update operation — restore original content
+            if (!fs.writeFileByPath) {
+              failedPaths.push(p);
+              resolve(false);
+              return;
+            }
+
+            fs.writeFileByPath(p, snapshot.beforeContent || '').then(function () {
+              // Update open tab
+              for (var j = 0; j < state.openTabs.length; j++) {
+                if (state.openTabs[j].path === p) {
+                  state.openTabs[j].content = snapshot.beforeContent || '';
+                  state.openTabs[j].modified = false;
+                  state.openTabs[j]._currentContent = undefined;
+                  state.openTabs[j].sha256 = snapshot.beforeSha256 || '';
+                  break;
+                }
+              }
+              successPaths.push(p);
+              resolve(true);
+            }).catch(function (err) {
+              console.error('[code-workspace] undo error for', p, err);
+              failedPaths.push(p);
+              resolve(false);
+            });
+          })
+        );
+      })(snapshotPaths[i], state.snapshots[snapshotPaths[i]]);
     }
 
     Promise.all(promises).then(function () {
-      state.snapshots = {};
+      // Only remove successful snapshots
+      for (var k = 0; k < successPaths.length; k++) {
+        delete state.snapshots[successPaths[k]];
+      }
+
       state.pendingOperations = [];
       renderDiffView();
       renderTabs();
       if (state.activePath) {
         renderEditor();
       }
-      showToast('已撤销所有更改', 'info');
+
+      if (failedPaths.length > 0) {
+        showToast('部分文件撤销失败: ' + failedPaths.join(', '), 'error');
+      } else {
+        showToast('已撤销所有更改 (' + successPaths.length + ' 个文件)', 'info');
+      }
     });
   }
 
