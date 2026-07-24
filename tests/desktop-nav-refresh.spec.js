@@ -57,11 +57,11 @@ test('refresh provides toast feedback', () => {
 });
 
 test('in-flight lock prevents concurrent refreshes', () => {
-  assert.match(shell, /_refreshLocks\[tab\] = true/);
-  assert.match(shell, /_refreshLocks\[tab\] = false/);
+  assert.match(shell, /_refreshLocks\[tab\] = performRefresh/);
+  assert.match(shell, /delete _refreshLocks\[tab\]/);
 });
 
 test('click handler still works for tab switching', () => {
   assert.match(shell, /addEventListener\('click'/);
-  assert.match(shell, /openTab\(tabButton\.getAttribute\('data-desktop-tab'\)\)/);
+  assert.match(shell, /openTab\(tab\)/);
 });
