@@ -289,6 +289,45 @@
     }
   }
 
+  
+  var _loadedModules = {};
+  function loadModuleScript(id, metaName) {
+    if (_loadedModules[id]) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var meta = document.querySelector('meta[name="' + metaName + '"]');
+      if (!meta || !meta.content) return reject(new Error('Missing meta ' + metaName));
+      var script = document.createElement('script');
+      script.src = meta.content;
+      script.onload = function () {
+        _loadedModules[id] = true;
+        resolve();
+      };
+      script.onerror = function () {
+        reject(new Error('Failed to load ' + meta.content));
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  function loadModuleStyle(id, metaName) {
+    if (_loadedModules[id]) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var meta = document.querySelector('meta[name="' + metaName + '"]');
+      if (!meta || !meta.content) return reject(new Error('Missing meta ' + metaName));
+      var link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = meta.content;
+      link.onload = function () {
+        _loadedModules[id] = true;
+        resolve();
+      };
+      link.onerror = function () {
+        reject(new Error('Failed to load ' + meta.content));
+      };
+      document.head.appendChild(link);
+    });
+  }
+
   function init() {
     // ★ 双击刷新处理
     document.addEventListener('dblclick', function (event) {
