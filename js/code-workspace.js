@@ -473,6 +473,117 @@
     renderEmptyState();
     renderContextPanel();
     renderChatPanel();
+
+    // Restore open tabs after re-entering Code
+    restoreTabs();
+  }
+
+  // ──────────────────────────────────────────────
+  // restoreTabs() — restore open tabs after cleanup
+  // ──────────────────────────────────────────────
+  function restoreTabs() {
+    if (state.openTabs.length === 0) return;
+
+    // Validate activePath
+    var found = false;
+    for (var i = 0; i < state.openTabs.length; i++) {
+      if (state.openTabs[i].path === state.activePath) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      state.activePath = state.openTabs[0].path;
+    }
+
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.readFileByPath) {
+      renderTabs();
+      renderEditor();
+      return;
+    }
+
+    // Re-read all open tabs to refresh content and blob URLs
+    var readPromises = [];
+    for (var i = 0; i < state.openTabs.length; i++) {
+      (function (tab) {
+        readPromises.push(
+          new Promise(function (resolve) {
+            fs.readFileByPath(tab.path).then(function (result) {
+              if (!result) {
+                // File was deleted externally
+                resolve({ tab: tab, deleted: true });
+                return;
+              }
+              // Update content for text files
+              if (result.type === 'text') {
+                tab.content = result.content;
+                tab.sha256 = result.sha256 || '';
+                tab.modified = false;
+                tab._currentContent = undefined;
+              }
+              // Generate new blob URL for image/PDF (old one was revoked)
+              if (result.type === 'image' || result.type === 'pdf') {
+                // Revoke any stale blob URL reference
+                if (tab.blobUrl) {
+                  var oldUrl = tab.blobUrl;
+                  tab.blobUrl = null;
+                  try { URL.revokeObjectURL(oldUrl); } catch (e) { /* ignore */ }
+                }
+                tab.blobUrl = result.content; // readFileByPath returns blob URL as content
+                tab.mimeType = result.mimeType || '';
+                if (tab.blobUrl) {
+                  trackUrl(tab.blobUrl);
+                }
+              }
+              resolve({ tab: tab, deleted: false });
+            }).catch(function () {
+              // Read failed — file may be deleted
+              resolve({ tab: tab, deleted: true });
+            });
+          })
+        );
+      })(state.openTabs[i]);
+    }
+
+    Promise.all(readPromises).then(function (results) {
+      // Remove tabs for deleted files
+      var deletedPaths = [];
+      for (var k = results.length - 1; k >= 0; k--) {
+        if (results[k].deleted) {
+          var t = results[k].tab;
+          deletedPaths.push(t.path);
+          // Remove from openTabs
+          for (var m = state.openTabs.length - 1; m >= 0; m--) {
+            if (state.openTabs[m].path === t.path) {
+              state.openTabs.splice(m, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      // Re-validate activePath after removing deleted tabs
+      if (state.openTabs.length > 0) {
+        var activeFound = false;
+        for (var n = 0; n < state.openTabs.length; n++) {
+          if (state.openTabs[n].path === state.activePath) {
+            activeFound = true;
+            break;
+          }
+        }
+        if (!activeFound) {
+          state.activePath = state.openTabs[0].path;
+        }
+      }
+
+      renderTabs();
+      renderEditor();
+
+      if (deletedPaths.length > 0) {
+        showToast('部分文件已被外部删除，已关闭对应标签', 'warning');
+      }
+    });
   }
 
   // ──────────────────────────────────────────────
@@ -1095,6 +1206,36 @@
         showToast('最多添加 12 个文件到 AI 上下文', 'error');
         return;
       }
+
+      // Check if file is restricted (sensitive files)
+      if (isRestrictedContextFile(path)) {
+        showToast('该文件包含敏感信息，不能作为 AI 文本上下文', 'error');
+        return;
+      }
+
+      // Check if file is image, PDF, or binary — cannot be AI text context
+      var tab = null;
+      for (var j = 0; j < state.openTabs.length; j++) {
+        if (state.openTabs[j].path === path) {
+          tab = state.openTabs[j];
+          break;
+        }
+      }
+      if (tab) {
+        if (tab.type === 'image' || tab.type === 'pdf' || tab.type === 'binary') {
+          showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
+          return;
+        }
+      } else {
+        // File not open — check by extension
+        var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
+        if (ext === '.pdf' || imgExts.indexOf(ext) !== -1) {
+          showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
+          return;
+        }
+      }
+
       state.contextPaths[path] = true;
     }
 
@@ -1103,10 +1244,61 @@
   }
 
   // ──────────────────────────────────────────────
+  // sanitizeContextPaths() — remove invalid paths
+  // ──────────────────────────────────────────────
+  function sanitizeContextPaths() {
+    var removed = [];
+    var paths = Object.keys(state.contextPaths);
+    for (var i = 0; i < paths.length; i++) {
+      var p = paths[i];
+      var shouldRemove = false;
+
+      // Check restricted files
+      if (isRestrictedContextFile(p)) {
+        shouldRemove = true;
+      }
+
+      // Check if open tab is image/PDF/binary
+      if (!shouldRemove) {
+        for (var j = 0; j < state.openTabs.length; j++) {
+          if (state.openTabs[j].path === p) {
+            var t = state.openTabs[j];
+            if (t.type === 'image' || t.type === 'pdf' || t.type === 'binary') {
+              shouldRemove = true;
+            }
+            break;
+          }
+        }
+      }
+
+      // Check extension for unopened files
+      if (!shouldRemove) {
+        var ext = p.slice(p.lastIndexOf('.')).toLowerCase();
+        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
+        if (ext === '.pdf' || imgExts.indexOf(ext) !== -1) {
+          shouldRemove = true;
+        }
+      }
+
+      if (shouldRemove) {
+        delete state.contextPaths[p];
+        removed.push(p);
+      }
+    }
+    return removed;
+  }
+
+  // ──────────────────────────────────────────────
   // renderContextPanel()
   // ──────────────────────────────────────────────
   function renderContextPanel() {
     if (!_dom.contextPanel) return;
+
+    // Clean up invalid paths
+    var removed = sanitizeContextPaths();
+    if (removed.length > 0) {
+      renderTabs();
+    }
 
     var paths = Object.keys(state.contextPaths);
     var totalSize = 0;
@@ -1309,6 +1501,9 @@
 
     // Show typing indicator
     showTypingIndicator();
+
+    // Final defense: clean up invalid context paths before sending
+    sanitizeContextPaths();
 
     // Read all context files from disk (not just open tabs)
     var contextPaths = Object.keys(state.contextPaths);

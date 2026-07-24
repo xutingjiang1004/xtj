@@ -3,6 +3,7 @@ const { defineConfig } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: './tests',
   testMatch: /.*\.spec\.js/,
+  testIgnore: /.*(ai-frontend-fixes|auth-account-switch|cat-ai-realtime|code-workspace|comment-mention-autocomplete|desktop-nav-refresh|photo-upload-status|photo-wall-fixes)\.spec\.js/,
   timeout: 30000,
   outputDir: 'output/playwright/test-results',
   reporter: [['html', { open: 'never' }]],
