@@ -153,7 +153,11 @@
       '.png': 'file-img', '.jpg': 'file-img', '.jpeg': 'file-img',
       '.gif': 'file-img', '.webp': 'file-img', '.svg': 'file-img',
       '.bmp': 'file-img', '.ico': 'file-img',
-      '.pdf': 'file-pdf'
+      '.pdf': 'file-pdf',
+      '.docx': 'file-doc', '.doc': 'file-doc',
+      '.xlsx': 'file-xls', '.xls': 'file-xls',
+      '.pptx': 'file-ppt', '.ppt': 'file-ppt',
+      '.csv': 'file-csv'
     };
     return map[ext] || 'file-icon';
   }
@@ -167,6 +171,12 @@
   function fileIsPdf(fileName) {
     if (!fileName) return false;
     return fileName.slice(fileName.lastIndexOf('.')).toLowerCase() === '.pdf';
+  }
+
+  function fileIsDocument(fileName) {
+    if (!fileName) return false;
+    var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+    return ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt'].indexOf(ext) !== -1;
   }
 
   // ──────────────────────────────────────────────
@@ -284,9 +294,9 @@
       return;
     }
 
-    // Try to restore previous workspace
-    tryRestoreWorkspace().then(function () {
-      if (state.directoryHandle) {
+    // Try to restore previous workspace (auto-load, no permission prompt)
+    tryRestoreWorkspace().then(function (result) {
+      if (result && result.status === 'granted') {
         renderWorkspace();
       } else {
         renderWelcome();
@@ -298,16 +308,16 @@
 
   function tryRestoreWorkspace() {
     if (!window.__xtjCodeFS || !window.__xtjCodeFS.restoreWorkspace) {
-      return Promise.resolve();
+      return Promise.resolve({ status: 'missing' });
     }
-    return window.__xtjCodeFS.restoreWorkspace().then(function (handle) {
-      if (handle) {
-        state.directoryHandle = handle;
-        state.workspaceName = handle.name;
+    return window.__xtjCodeFS.restoreWorkspace({ requestPermission: false }).then(function (result) {
+      if (result.status === 'granted') {
+        state.directoryHandle = result.handle;
+        state.workspaceName = result.handle.name;
       }
+      return result;
     }).catch(function () {
-      // Ignore restore errors
-      state.directoryHandle = null;
+      return { status: 'error' };
     });
   }
 
@@ -345,7 +355,7 @@
       '<p class="welcome-desc">选择一个本地文件夹作为工作区，浏览和编辑文件，或使用 AI 助手进行代码操作。</p>' +
       '<div class="welcome-actions">' +
         '<button class="folder-picker-btn-large" id="codeWelcomeOpenBtn">' +
-          '<span class="folder-icon">📂</span> 打开文件夹' +
+          '<span class="folder-icon">📂</span> 重新选择文件夹' +
         '</button>' +
       '</div>' +
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
@@ -360,29 +370,79 @@
       });
     }
 
-    // Check if there's a stored handle path
+    // Check if there's a stored handle path — show restore section
+    var stored = null;
     try {
-      var stored = localStorage.getItem('xtj_code_workspace_name');
-      if (stored) {
-        var recentEl = document.getElementById('codeWelcomeRecent');
-        if (recentEl) {
-          recentEl.style.display = 'block';
-          recentEl.innerHTML = '上次打开的工作区：<span class="recent-path" id="codeRecentPath">' + escapeHTML(stored) + '</span>';
-          var recentPath = document.getElementById('codeRecentPath');
-          if (recentPath) {
-            recentPath.addEventListener('click', function () {
-              tryRestoreWorkspace().then(function () {
-                if (state.directoryHandle) {
-                  renderWorkspace();
-                } else {
-                  showToast('无法恢复上次的工作区，请重新选择文件夹', 'error');
-                }
-              });
-            });
-          }
-        }
-      }
+      stored = localStorage.getItem('xtj_code_workspace_name');
     } catch (e) { /* ignore */ }
+
+    var recentEl = document.getElementById('codeWelcomeRecent');
+    if (recentEl && stored) {
+      recentEl.style.display = 'block';
+
+      var restoreBtn = document.createElement('button');
+      restoreBtn.className = 'folder-picker-btn-large';
+      restoreBtn.id = 'codeWelcomeRestoreBtn';
+      restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+      restoreBtn.title = '上次打开: ' + stored;
+
+      var statusText = document.createElement('span');
+      statusText.className = 'welcome-status';
+      statusText.id = 'codeWelcomeStatus';
+
+      recentEl.appendChild(restoreBtn);
+      recentEl.appendChild(statusText);
+
+      restoreBtn.addEventListener('click', function () {
+        restoreBtn.disabled = true;
+        restoreBtn.innerHTML = '<span class="folder-icon">⏳</span> 正在恢复...';
+        statusText.textContent = '';
+        statusText.className = 'welcome-status';
+
+        if (!window.__xtjCodeFS || !window.__xtjCodeFS.restoreWorkspace) {
+          statusText.textContent = '文件系统 API 不可用';
+          statusText.className = 'welcome-status error';
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          return;
+        }
+
+        window.__xtjCodeFS.restoreWorkspace({ requestPermission: true }).then(function (result) {
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+
+          if (result.status === 'granted') {
+            state.directoryHandle = result.handle;
+            state.workspaceName = result.handle.name;
+            try {
+              localStorage.setItem('xtj_code_workspace_name', result.handle.name);
+            } catch (e) { /* ignore */ }
+            renderWorkspace();
+          } else if (result.status === 'missing') {
+            statusText.textContent = '工作区记录已失效，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+            if (window.__xtjCodeFS.clearWorkspaceRecord) {
+              window.__xtjCodeFS.clearWorkspaceRecord().catch(function () {});
+            }
+            recentEl.style.display = 'none';
+          } else if (result.status === 'denied') {
+            statusText.textContent = '您拒绝了访问权限，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+          } else if (result.status === 'prompt') {
+            statusText.textContent = '需要授权才能恢复工作区，请点击按钮重试';
+            statusText.className = 'welcome-status warning';
+          } else {
+            statusText.textContent = '恢复失败，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+          }
+        }).catch(function (err) {
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          statusText.textContent = '恢复失败: ' + (err && err.message ? err.message : String(err));
+          statusText.className = 'welcome-status error';
+        });
+      });
+    }
   }
 
   function selectAndOpenWorkspace() {
@@ -1055,6 +1115,8 @@
       renderImagePreview(tab.path, tab.blobUrl);
     } else if (tab.type === 'pdf') {
       renderPdfPreview(tab.path, tab.blobUrl);
+    } else if (tab.type === 'document') {
+      renderDocumentPreview(tab);
     } else {
       // Text editor
       renderTextEditor(tab);
@@ -1278,6 +1340,74 @@
   }
 
   // ──────────────────────────────────────────────
+  // renderDocumentPreview(tab)
+  // ──────────────────────────────────────────────
+  function renderDocumentPreview(tab) {
+    if (!_dom.editorArea) return;
+
+    var preview = document.createElement('div');
+    preview.className = 'code-preview-area code-document-preview';
+    preview.id = 'codePreviewArea';
+
+    // Loading state
+    preview.innerHTML = '<div class="doc-preview-loading"><span class="doc-loading-spinner"></span><p>正在提取文档内容...</p></div>';
+    _dom.editorArea.appendChild(preview);
+
+    // Extract text via backend API
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.readDocumentText) {
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取功能不可用</p></div>';
+      return;
+    }
+
+    // Read the file again to get ArrayBuffer
+    fs.readFileByPath(tab.path).then(function (result) {
+      if (!result || result.type !== 'document') {
+        preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>无法读取文档文件</p></div>';
+        return;
+      }
+
+      return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
+    }).then(function (docData) {
+      if (!docData) return;
+
+      var docIcon = '📄';
+      var docLabel = '文档';
+      var ext = (docData.ext || '').toLowerCase();
+      if (ext === '.docx' || ext === '.doc') { docIcon = '📝'; docLabel = 'Word 文档'; }
+      else if (ext === '.xlsx' || ext === '.xls') { docIcon = '📊'; docLabel = 'Excel 表格'; }
+      else if (ext === '.pptx' || ext === '.ppt') { docIcon = '📽️'; docLabel = 'PPT 演示'; }
+
+      var html = '<div class="doc-preview-header">';
+      html += '<span class="doc-preview-icon">' + docIcon + '</span>';
+      html += '<div class="doc-preview-info">';
+      html += '<span class="doc-preview-label">' + docLabel + '</span>';
+      html += '<span class="doc-preview-name">' + escapeHTML(tab.name) + '</span>';
+      if (docData.metadata) {
+        if (docData.metadata.pages) html += '<span class="doc-preview-meta">' + docData.metadata.pages + ' 页</span>';
+        if (docData.metadata.sheetCount) html += '<span class="doc-preview-meta">' + docData.metadata.sheetCount + ' 个工作表</span>';
+      }
+      html += '</div></div>';
+
+      html += '<div class="doc-preview-content">';
+      if (docData.truncated) {
+        html += '<div class="doc-preview-truncated">⚠ 内容过长，已截断显示前 100KB</div>';
+      }
+      html += '<pre class="doc-preview-text">' + escapeHTML(docData.text) + '</pre>';
+      html += '</div>';
+
+      preview.innerHTML = html;
+
+      // Store extracted text in tab for AI context
+      tab._extractedText = docData.text;
+      tab._extractedTruncated = docData.truncated;
+      tab._extractedMetadata = docData.metadata;
+    }).catch(function (err) {
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML((err && err.message) || '未知错误') + '</p></div>';
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // toggleContext(path)
   // ──────────────────────────────────────────────
   function toggleContext(path) {
@@ -1311,6 +1441,7 @@
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
+        // document type is allowed — will be extracted at send time
       } else {
         // File not open — check by extension
         var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
@@ -1319,6 +1450,7 @@
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
+        // document extensions are allowed — will be extracted at send time
       }
 
       state.contextPaths[path] = true;
@@ -1351,6 +1483,7 @@
             if (t.type === 'image' || t.type === 'pdf' || t.type === 'binary') {
               shouldRemove = true;
             }
+            // document type is allowed — will be extracted at send time
             break;
           }
         }
@@ -1637,7 +1770,7 @@
             }
 
             // If file is an image or PDF, skip for context
-            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf')) {
+            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf' || openTab.type === 'binary')) {
               resolve(null);
               return;
             }
@@ -1655,7 +1788,48 @@
             }
 
             fs.readFileByPath(p).then(function (result) {
-              if (!result || result.type !== 'text') {
+              if (!result) {
+                resolve(null);
+                return;
+              }
+
+              // Handle document type: extract text via backend API
+              if (result.type === 'document') {
+                if (!fs.readDocumentText) {
+                  resolve(null);
+                  return;
+                }
+                fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType).then(function (docData) {
+                  if (!docData || !docData.text) {
+                    resolve(null);
+                    return;
+                  }
+                  var docContent = '【文档: ' + p + '】\n' + docData.text;
+                  if (docData.truncated) {
+                    docContent += '\n\n[注意: 文档内容过长，已截断]';
+                  }
+                  var encoder = new TextEncoder();
+                  var contentBytes = encoder.encode(docContent).length;
+                  if (contentBytes > 500 * 1024) {
+                    // Truncate to 500KB for AI context
+                    var truncated = docContent.slice(0, 500 * 1024);
+                    docContent = truncated + '\n\n[文档内容过长，已截断至 500KB]';
+                  }
+                  resolve({
+                    path: p,
+                    language: 'document',
+                    content: docContent,
+                    sha256: result.sha256 || ''
+                  });
+                }).catch(function (err) {
+                  console.error('[code-workspace] Document extraction failed:', p, err);
+                  resolve({ path: p, error: '文档提取失败: ' + ((err && err.message) || '未知错误') });
+                });
+                return;
+              }
+
+              // For text files
+              if (result.type !== 'text') {
                 resolve(null);
                 return;
               }
