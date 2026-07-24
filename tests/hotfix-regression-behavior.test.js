@@ -417,3 +417,97 @@ describe('cat AI worker behavior', function() {
     assert.ok(commentInsertFail, 'comment 写入失败必须标记为 failed');
   });
 });
+
+// ─── 12. processCatReplyJob buildSummaryQuery 移除验证 ───
+describe('processCatReplyJob no buildSummaryQuery', function() {
+  const server = read('render-api/server.js');
+
+  it('processCatReplyJob 代码块不得调用 buildSummaryQuery', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'processCatReplyJob 不得调用 buildSummaryQuery');
+  });
+
+  it('processCatReplyJob 必须使用 supabase.from(\'comments\') 查询已有 AI 回复', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.match(block, /supabase\.from\('comments'\)/, '必须使用 supabase.from(\'comments\')');
+  });
+
+  it('已有 AI 回复查询必须 select 完整字段', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.match(block, /\.select\(['"]id,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*parent_comment_id,\s*generated_by_ai['"]\)/, '必须 select 完整字段');
+  });
+
+  it('查询已有 AI 回复必须检查 error', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.match(block, /existingReplyRes\.error/, '必须检查 existingReplyRes.error');
+    assert.match(block, /existing AI reply lookup failed/, 'error 分支必须抛出具名错误');
+  });
+
+  it('parent_comment_id 必须使用 String() 转换', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.match(block, /String\(job\.source_comment_id\)/, 'parent_comment_id 必须使用 String() 转换');
+  });
+
+  it('已存在 AI 回复时必须将 job 标为 completed 并返回', function() {
+    const start = server.indexOf('async function processCatReplyJob');
+    const end = server.indexOf('async function recoverStaleCatJobs', start);
+    const block = server.slice(start, end > start ? end : start + 4000);
+    assert.match(block, /status:\s*'completed'/, '必须标记为 completed');
+    assert.match(block, /generated_reply:\s*existingReplyRes\.data\.content/, 'generated_reply 必须使用现有回复内容');
+  });
+});
+
+// ─── 13. 全仓库 buildSummaryQuery 运行时调用检查 ───
+describe('no runtime buildSummaryQuery outside admin stats', function() {
+  const server = read('render-api/server.js');
+
+  it('POST /api/like 不得调用 buildSummaryQuery', function() {
+    // 找到 POST /api/like 路由处理函数
+    const likeStart = server.indexOf("app.post('/api/like'");
+    const likeEnd = server.indexOf("app.get('/api/likes/", likeStart);
+    const block = server.slice(likeStart, likeEnd > likeStart ? likeEnd : likeStart + 5000);
+    assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'POST /api/like 不得调用 buildSummaryQuery');
+  });
+
+  it('DELETE /admin/user/:userName 不得调用 buildSummaryQuery', function() {
+    const delUserStart = server.indexOf("app.delete('/admin/user/:userName'");
+    const delUserEnd = server.indexOf("app.post('/admin/ban'", delUserStart);
+    const block = server.slice(delUserStart, delUserEnd > delUserStart ? delUserEnd : delUserStart + 5000);
+    assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'DELETE /admin/user/:userName 不得调用 buildSummaryQuery');
+  });
+
+  it('buildSummaryQuery 仅存在于 admin stats 路由内', function() {
+    // 统计 buildSummaryQuery 调用（排除注释中的文字引用）
+    var allCallMatches = server.match(/\bbuildSummaryQuery\s*\(/g);
+    var allCallCount = (allCallMatches || []).length;
+    // 定义在 admin stats 内 + 调用在 admin stats 内 = 应该全部在 stats 函数体内
+    var statsStart = server.indexOf("app.get('/admin/stats'");
+    var statsEnd = server.indexOf("app.get('/admin/", statsStart + 10);
+    var statsBlock = server.slice(statsStart, statsEnd > statsStart ? statsEnd : statsStart + 20000);
+    var statsCallMatches = (statsBlock.match(/\bbuildSummaryQuery\s*\(/g) || []).length;
+    assert.equal(allCallCount, statsCallMatches, '所有 buildSummaryQuery 调用必须在 admin stats 路由内');
+  });
+});
+
+// ─── 14. 公告按钮点击事件验证 ───
+describe('announcement button click handler', function() {
+  const html = read('index.html');
+
+  it('公告按钮必须有 onclick 处理器', function() {
+    assert.match(html, /id="announcementBtn"[^>]*onclick="openAnnouncementModal/, 'announcementBtn 必须有 onclick="openAnnouncementModal()"');
+  });
+
+  it('公告模态框必须有关闭处理器', function() {
+    assert.match(html, /id="announcementModal"[^>]*onclick="if\(event\.target===this\)closeAnnouncementModal/, 'announcementModal overlay 必须有 closeAnnouncementModal 处理器');
+  });
+});
