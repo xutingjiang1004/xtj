@@ -51,33 +51,43 @@ function validateHistory(history) {
 }
 
 function validateFiles(files) {
-  if (!Array.isArray(files)) return { ok: true, value: [] };
-  if (files.length > MAX_FILES) return { ok: false, error: '文件数量最多 ' + MAX_FILES + ' 个' };
-  var cleaned = [];
-  var totalContent = 0;
-  for (var i = 0; i < files.length; i++) {
-    var f = files[i];
-    if (!f || typeof f !== 'object') continue;
-    if (typeof f.path !== 'string' || !f.path.trim()) continue;
-    if (!validatePath(f.path.trim())) continue;
-    if (typeof f.content !== 'string') continue;
-    var content = f.content;
-    var contentBytes = Buffer.byteLength(content, 'utf8');
-    if (contentBytes > MAX_SINGLE_FILE_CONTENT) return { ok: false, error: '单个文件内容不能超过 1 MB' };
-    totalContent += contentBytes;
-    if (totalContent > MAX_FILES_TOTAL_CONTENT) return { ok: false, error: '文件总内容不能超过 600 KB' };
-    var item = {
-      path: f.path.trim(),
-      content: content,
-      language: (typeof f.language === 'string' && f.language.trim()) ? f.language.trim().toLowerCase() : 'plaintext'
-    };
-    if (typeof f.sha256 === 'string' && SHA256_HEX_RE.test(f.sha256)) {
-      item.sha256 = f.sha256.toLowerCase();
+    if (!Array.isArray(files)) return { ok: true, value: [] };
+    if (files.length > MAX_FILES) return { ok: false, error: '文件数量最多 ' + MAX_FILES + ' 个' };
+    var cleaned = [];
+    var totalContent = 0;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (!f || typeof f !== 'object') continue;
+      if (typeof f.path !== 'string' || !f.path.trim()) continue;
+      if (!validatePath(f.path.trim())) continue;
+      if (typeof f.content !== 'string') continue;
+      
+      var content = f.content;
+      var contentBytes = Buffer.byteLength(content, 'utf8');
+      
+      // Truncate large files instead of rejecting
+      if (contentBytes > MAX_SINGLE_FILE_CONTENT) {
+        var truncateStr = '\n...[Content truncated due to size limits]...';
+        // Rough truncation based on bytes
+        content = content.substring(0, MAX_SINGLE_FILE_CONTENT - 1000) + truncateStr;
+        contentBytes = Buffer.byteLength(content, 'utf8');
+      }
+      
+      totalContent += contentBytes;
+      if (totalContent > MAX_FILES_TOTAL_CONTENT) {
+        return { ok: false, error: '文件总内容不能超过 600 KB' };
+      }
+      
+      var item = {
+        path: f.path.trim(),
+        language: typeof f.language === 'string' ? f.language.trim() : '',
+        content: content,
+        sha256: typeof f.sha256 === 'string' ? f.sha256.trim() : ''
+      };
+      cleaned.push(item);
     }
-    cleaned.push(item);
+    return { ok: true, value: cleaned };
   }
-  return { ok: true, value: cleaned };
-}
 
 function validatePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
@@ -102,7 +112,7 @@ function isValidSha256(hex) {
   return typeof hex === 'string' && SHA256_HEX_RE.test(hex);
 }
 
-function parseOperations(raw) {
+  function parseOperations(raw) {
   var ops = [];
   if (!Array.isArray(raw)) return ops;
   for (var i = 0; i < raw.length; i++) {

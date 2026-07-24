@@ -25,7 +25,8 @@
     _monacoEditor: null,
     _objectUrls: [],
     _abortController: null,
-    _requestId: 0
+    _requestId: 0,
+    _themeObserver: null
   };
 
   // ──────────────────────────────────────────────
@@ -44,6 +45,10 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function getMonacoTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs';
   }
 
   function getFileLanguage(fileName) {
@@ -199,6 +204,10 @@
   }
 
   function disposeMonaco() {
+    if (state._themeObserver) {
+      state._themeObserver.disconnect();
+      state._themeObserver = null;
+    }
     if (state._monacoEditor) {
       try {
         state._monacoEditor.dispose();
@@ -374,11 +383,46 @@
   }
 
   function selectAndOpenWorkspace() {
-    if (!window.__xtjCodeFS || !window.__xtjCodeFS.selectDirectory) {
-      showToast('文件系统 API 不可用，请使用支持 File System Access API 的浏览器', 'error');
+    var btn = document.getElementById('codeWelcomeOpenBtn');
+    if (!window.showDirectoryPicker) {
+      // Fallback for browsers without File System Access API
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.webkitdirectory = true;
+      input.multiple = true;
+      input.onchange = function(e) {
+        if (!e.target.files || !e.target.files.length) return;
+        var files = Array.from(e.target.files);
+        var dirName = files[0].webkitRelativePath.split('/')[0] || 'Workspace';
+        state.directoryHandle = { _isMock: true, name: dirName, files: files };
+        state.workspaceName = dirName;
+        renderWorkspace();
+      };
+      input.click();
       return;
     }
+    
+    if (!window.isSecureContext) {
+      if (typeof window.showToast === 'function') window.showToast('需要 HTTPS 环境才能使用文件系统 API', 'error');
+      return;
+    }
+
+    if (!window.__xtjCodeFS || !window.__xtjCodeFS.selectDirectory) {
+      if (typeof window.showToast === 'function') window.showToast('文件系统 API 不可用', 'error');
+      return;
+    }
+
+    var originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="folder-icon">⏳</span> 请在弹窗中选择并授权...';
+    }
+
     window.__xtjCodeFS.selectDirectory().then(function (handle) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
       if (!handle) return; // User cancelled
       state.directoryHandle = handle;
       state.workspaceName = handle.name;
@@ -387,7 +431,19 @@
       } catch (e) { /* ignore */ }
       renderWorkspace();
     }).catch(function (err) {
-      showToast('选择文件夹失败: ' + (err && err.message ? err.message : String(err)), 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+      var msg = err && err.message ? err.message : String(err);
+      if (err.name === 'SecurityError') {
+        msg = '安全错误，无法访问文件夹';
+      } else if (err.name === 'NotAllowedError') {
+        msg = '您拒绝了访问权限';
+      } else if (err.name === 'AbortError') {
+        return; // User cancelled
+      }
+      if (typeof window.showToast === 'function') window.showToast('选择文件夹失败：' + msg, 'error');
     });
   }
 
@@ -849,6 +905,7 @@
         trackUrl(tab.blobUrl);
       }
 
+      
       state.openTabs.push(tab);
       state.activePath = path;
 
@@ -859,7 +916,20 @@
 
       renderTabs();
       renderEditor();
+      
+      // Auto-add to context if text and not in context
+      if (tab.type === 'text' && !state.contextPaths[path]) {
+        var count = Object.keys(state.contextPaths).length;
+        if (count < 12 && !isRestrictedContextFile(path)) {
+          state.contextPaths[path] = true;
+          renderContextPanel();
+          if (typeof renderChatContext === 'function') {
+            renderChatContext();
+          }
+        }
+      }
     }).catch(function (err) {
+
       showToast('打开文件失败: ' + (err && err.message ? err.message : String(err)), 'error');
     });
   }
@@ -1021,7 +1091,7 @@
         var model = monaco.editor.createModel(tab.content || '', language);
         var editor = monaco.editor.create(container, {
           model: model,
-          theme: 'vs-dark',
+          theme: getMonacoTheme(),
           fontSize: 13,
           fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', 'Monaco', monospace",
           lineNumbers: 'on',
@@ -1040,6 +1110,15 @@
         });
 
         state._monacoEditor = editor;
+
+        if (!state._themeObserver) {
+          state._themeObserver = new MutationObserver(function () {
+            if (state._monacoEditor && window.monaco) {
+              monaco.editor.setTheme(getMonacoTheme());
+            }
+          });
+          state._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        }
 
         // Track content changes
         editor.getModel().onDidChangeContent(function () {
