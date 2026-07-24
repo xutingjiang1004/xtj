@@ -89,6 +89,29 @@ function validateFiles(files) {
     return { ok: true, value: cleaned };
   }
 
+function validatePath(p) {
+  if (typeof p !== 'string' || !p.trim()) return false;
+  if (p.indexOf('..') >= 0) return false;
+  if (p.indexOf('\\') >= 0) return false;
+  // Reject absolute paths (Unix /foo/bar, Windows C:\foo)
+  if (p.charCodeAt(0) === 47) return false; // '/'
+  if (/^[A-Za-z]:/.test(p)) return false;
+  // Reject empty segments
+  var parts = p.split('/');
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i]) return false;
+  }
+  return true;
+}
+
+function isValidOperationType(type) {
+  return OP_TYPES_ALLOWED.has(type);
+}
+
+function isValidSha256(hex) {
+  return typeof hex === 'string' && SHA256_HEX_RE.test(hex);
+}
+
   function parseOperations(raw) {
   var ops = [];
   if (!Array.isArray(raw)) return ops;
