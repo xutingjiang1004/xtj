@@ -4826,16 +4826,44 @@ async function runMultiAgentFlow(opts) {
 
   if (agentCount === 0) {
     sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在进行深度分析...' });
+    var directAbortController = null;
+    var directTimeoutId = null;
+    var directFinished = false;
+    function _directGuard() { return directFinished || isCancelled() || (directAbortController && directAbortController.signal.aborted); }
     try {
       var corePrompt = buildAiCorePrompt(config);
       var directPrompt = corePrompt + '\n\n用户问题: ' + message + '\n\n作为深度研究模式，请从以下角度进行全面分析：\n1. 问题的核心是什么？\n2. 从哪些维度可以深入探讨？\n3. 给出有深度的分析和结论\n不要因为问题简短就敷衍。';
-      var directResult = await callDeepSeek(
+      directAbortController = new AbortController();
+      var _directOnCancel = function() { try { directAbortController && directAbortController.abort(); } catch (e) {} };
+      if (isCancelled()) directAbortController.abort();
+      cancelToken._onDirectCancel = _directOnCancel;
+      var directPromise = callDeepSeek(
         [{ role: 'system', content: directPrompt + (historyContext || '') }],
-        { thinking_mode: deepThinkThinkingMode, max_tokens: 8192,
-          onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk }); },
-          onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+        {
+          thinking_mode: deepThinkThinkingMode, max_tokens: 8192,
+          signal: directAbortController.signal,
+          onThinkingChunk: function(chunk) { if (_directGuard()) return; sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk }); },
+          onContentChunk: function(chunk) { if (_directGuard()) return; sseSend({ type: 'answer_chunk', chunk: chunk }); }
         }
       );
+      var directTimeout = new Promise(function(_, reject) {
+        directTimeoutId = setTimeout(function() {
+          try { directAbortController && directAbortController.abort(); } catch (e) {}
+          var te = new Error('Direct analysis timeout');
+          te.code = 'DIRECT_TIMEOUT';
+          reject(te);
+        }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
+      });
+      directTimeout.catch(function(){});
+      var directResult;
+      try {
+        directResult = await Promise.race([directPromise, directTimeout]);
+      } catch (raceErr) {
+        throw raceErr;
+      } finally {
+        if (directTimeoutId) { clearTimeout(directTimeoutId); directTimeoutId = null; }
+      }
+      directFinished = true;
       var fakePlanner = { complexity: 'medium', reasoning: '深度模式直接分析', agent_count: 1, agents: [{ role: 'AI 研究员', need_search: false }] };
       return {
         cancelled: false, finalContent: directResult.content || '', planner: fakePlanner, worker_results: [],
@@ -4843,7 +4871,17 @@ async function runMultiAgentFlow(opts) {
         search_count: 0, search_results: [], search_query: '', sources: [], queries: []
       };
     } catch (e) {
+      directFinished = true;
+      var isDirectAborted = (directAbortController && directAbortController.signal.aborted) || (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR'));
+      if (isCancelled() || isDirectAborted) {
+        return { cancelled: true, partial: true, finalContent: '', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
+      }
       return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
+    } finally {
+      if (directTimeoutId) { clearTimeout(directTimeoutId); directTimeoutId = null; }
+      if (cancelToken && cancelToken._onDirectCancel === _directOnCancel) { delete cancelToken._onDirectCancel; }
+      directAbortController = null;
+      directFinished = true;
     }
   }
 
@@ -5106,35 +5144,47 @@ async function runDeepThinkAgent(opts) {
   var usage = null;
   var finalModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
   var toolCallsInfo = [];
+  var agentAbortController = null;
+  var agentTimeoutId = null;
+  var agentFinished = false;
+  function _agentGuard() { return agentFinished || isCancelled() || (agentAbortController && agentAbortController.signal.aborted); }
   // V2: thinking chunk 节流缓冲区 — 首包立即推 + 后续 80ms 合并 (更流畅, 更低延迟)
   var _thinkingChunkBuf = '';
   var _thinkingChunkTimer = null;
+  var _answerChunkBuf = '';
+  var _answerChunkTimer = null;
   var _thinkingFirstFlushed = false;
+  var _answerFirstFlushed = false;
+  function _cleanupAgentBuffers() {
+    if (_thinkingChunkTimer) { clearTimeout(_thinkingChunkTimer); _thinkingChunkTimer = null; }
+    if (_answerChunkTimer) { clearTimeout(_answerChunkTimer); _answerChunkTimer = null; }
+  }
   function _flushThinkingChunk() {
     if (_thinkingChunkTimer) { clearTimeout(_thinkingChunkTimer); _thinkingChunkTimer = null; }
     var flushed = _thinkingChunkBuf;
     _thinkingChunkBuf = '';
-    if (flushed) sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: flushed.slice(0, 4000) });
+    if (flushed && !_agentGuard()) sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: flushed.slice(0, 4000) });
   }
-  // V2: answer chunk 节流缓冲区 — 首包立即推 + 后续 50ms 合并 (答案比思考更敏感, 要快)
-  var _answerChunkBuf = '';
-  var _answerChunkTimer = null;
-  var _answerFirstFlushed = false;
   function _flushAnswerChunk() {
     if (_answerChunkTimer) { clearTimeout(_answerChunkTimer); _answerChunkTimer = null; }
     var flushed = _answerChunkBuf;
     _answerChunkBuf = '';
-    if (flushed) sseSend({ type: 'answer_chunk', chunk: flushed.slice(0, 8000) });
+    if (flushed && !_agentGuard()) sseSend({ type: 'answer_chunk', chunk: flushed.slice(0, 8000) });
   }
 
   try {
+    agentAbortController = new AbortController();
+    var _agentOnCancel = function() { try { agentAbortController && agentAbortController.abort(); } catch (e) {} };
+    if (isCancelled()) agentAbortController.abort();
+    cancelToken._onAgentCancel = _agentOnCancel;
     // ★ R: 1 个 callDeepSeek, 根据思考程度差异化传参
     var deepSeekOpts = {
       thinking_mode: deepThinkThinkingMode,
       max_tool_rounds: maxToolRounds,
       max_tokens: maxTokensLimit,
+      signal: agentAbortController.signal,
       onThinkingChunk: function(chunk) {
-        // V2: 首包立即推送(无延迟), 后续 80ms 合并推送, 显著降低首字延迟
+        if (_agentGuard()) return;
         _thinkingChunkBuf += String(chunk || '');
         if (!_thinkingFirstFlushed) {
           _thinkingFirstFlushed = true;
@@ -5145,7 +5195,7 @@ async function runDeepThinkAgent(opts) {
         _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 80);
       },
       onContentChunk: function(chunk) {
-        // V2: 答案流 — 首包立即推 + 50ms 合并, 极低延迟
+        if (_agentGuard()) return;
         _answerChunkBuf += String(chunk || '');
         if (!_answerFirstFlushed) {
           _answerFirstFlushed = true;
@@ -5163,13 +5213,31 @@ async function runDeepThinkAgent(opts) {
       deepSeekOpts.tool_choice = 'auto';
       deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum);
     }
-    var result = await callDeepSeek(
+    var agentPromise = callDeepSeek(
       [
         { role: 'system', content: DEEP_THINK_AGENT_PROMPT + (historyContext || '') },
         { role: 'user', content: message }
       ],
       deepSeekOpts
     );
+    var agentTimeout = new Promise(function(_, reject) {
+      agentTimeoutId = setTimeout(function() {
+        try { agentAbortController && agentAbortController.abort(); } catch (e) {}
+        var te = new Error('Agent timeout');
+        te.code = 'AGENT_TIMEOUT';
+        reject(te);
+      }, DEEP_THINK_CONFIG.MAX_DURATION_MS);
+    });
+    agentTimeout.catch(function(){});
+    var result;
+    try {
+      result = await Promise.race([agentPromise, agentTimeout]);
+    } catch (raceErr) {
+      throw raceErr;
+    } finally {
+      if (agentTimeoutId) { clearTimeout(agentTimeoutId); agentTimeoutId = null; }
+    }
+    agentFinished = true;
     searchCount = searchCountAccum.count || 0;
 
     finalContent = result.content || '';
@@ -5181,13 +5249,33 @@ async function runDeepThinkAgent(opts) {
     _flushAnswerChunk();
     // thinking_chunk 已通过 onThinkingChunk 流式推送, thinkingLog 已由 sseSend 记录
   } catch (e) {
-    console.error('[DEEP-THINK] agent failed:', e && e.message);
+    agentFinished = true;
+    _cleanupAgentBuffers();
     _flushThinkingChunk();
     _flushAnswerChunk();
-    sseSend({ type: 'deep_think_stage', stage: 'error', message: 'AI 思考失败: ' + (e.message || '未知错误') });
+    var isAgentTimeout = e && e.code === 'AGENT_TIMEOUT';
+    var isAgentAborted = !isAgentTimeout && ((agentAbortController && agentAbortController.signal.aborted) || (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')));
+    if (isCancelled() || isAgentAborted) {
+      return {
+        cancelled: true,
+        partial: true,
+        finalContent: finalContent || '',
+        worker_results: [{
+          role: 'AI 智能体',
+          status: 'cancelled',
+          elapsed_ms: Date.now() - agentStartTime
+        }],
+        thinking_log: thinkingLog,
+        usage: usage,
+        model: finalModel
+      };
+    }
+    console.error('[DEEP-THINK] agent failed:', e && e.message);
+    var errMsg = isAgentTimeout ? 'AI 思考超时, 请重试' : ('AI 思考失败: ' + (e.message || '未知错误'));
+    sseSend({ type: 'deep_think_stage', stage: 'error', message: errMsg });
     return {
-      cancelled: isCancelled(),
-      finalContent: '（AI 思考失败, 请重试: ' + (e.message || '') + '）',
+      cancelled: false,
+      finalContent: '（' + errMsg + '）',
       worker_results: [{
         role: 'AI 智能体',
         status: 'failed',
@@ -5197,6 +5285,12 @@ async function runDeepThinkAgent(opts) {
       usage: null,
       model: finalModel
     };
+  } finally {
+    _cleanupAgentBuffers();
+    if (agentTimeoutId) { clearTimeout(agentTimeoutId); agentTimeoutId = null; }
+    if (cancelToken && cancelToken._onAgentCancel === _agentOnCancel) { delete cancelToken._onAgentCancel; }
+    agentAbortController = null;
+    agentFinished = true;
   }
 
   var agentElapsed = Date.now() - agentStartTime;
@@ -5300,6 +5394,8 @@ async function runDeepThinkWorker(opts) {
     if (onRound) onRound(round);
 
     var r = null;
+    var workerAbortController = null;
+    var workerTimeoutId = null;
     try {
       var callOpts = {
         thinking_mode: thinkingMode,
@@ -5311,32 +5407,47 @@ async function runDeepThinkWorker(opts) {
         callOpts.tool_choice = 'auto';
         callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum);
       }
-      // ★ U3: Promise.race 强制超时（同时中止底层 HTTP 请求）
-      var workerAbortController = new AbortController();
-      var callPromise = callDeepSeek(messages, Object.assign({}, callOpts, { signal: workerAbortController.signal }));
+      workerAbortController = new AbortController();
+      if (cancelToken.cancelled) workerAbortController.abort();
+      callOpts.signal = workerAbortController.signal;
+      var callPromise = callDeepSeek(messages, callOpts);
       var timeoutPromise = new Promise(function(_, reject) {
-        setTimeout(function() { workerAbortController.abort(); reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)')); }, workerTimeoutMs);
+        workerTimeoutId = setTimeout(function() {
+          try { workerAbortController && workerAbortController.abort(); } catch (e) {}
+          reject(new Error('Worker 超时 (' + Math.round(workerTimeoutMs / 1000) + 's)'));
+        }, workerTimeoutMs);
       });
+      timeoutPromise.catch(function(){});
       r = await Promise.race([callPromise, timeoutPromise]);
     } catch (e) {
-      console.error('[DEEP-THINK] worker callDeepSeek failed:', e && e.message);
+      if (workerAbortController) { try { workerAbortController.abort(); } catch (e2) {} }
+      if (cancelToken.cancelled || (workerAbortController && workerAbortController.signal.aborted && e && e.name !== 'AbortError' && !/超时/.test(e.message || ''))) {
+        // cancelled externally - don't log as error
+      } else {
+        console.error('[DEEP-THINK] worker callDeepSeek failed:', agent.role, e && e.message);
+      }
       throw e;
+    } finally {
+      if (workerTimeoutId) { clearTimeout(workerTimeoutId); workerTimeoutId = null; }
     }
 
-    if (r.reasoning && r.reasoning.length > 0) {
-      sseSend({ type: 'thinking_chunk', agent_role: agent.role, chunk: String(r.reasoning).slice(0, 4000), round: round });
+    if (cancelToken.cancelled) break;
+
+    if (r && r.reasoning && r.reasoning.length > 0) {
+      if (!cancelToken.cancelled) {
+        sseSend({ type: 'thinking_chunk', agent_role: agent.role, chunk: String(r.reasoning).slice(0, 4000), round: round });
+      }
     }
 
-    // ★ U3 Bug 1 修复: 使用 r.finalMessages 获取真实的 tool_result 上下文
-    if (r.finalMessages && Array.isArray(r.finalMessages)) {
+    if (r && r.finalMessages && Array.isArray(r.finalMessages)) {
       messages = r.finalMessages;
     }
 
-    if (r.tool_calls_info && r.tool_calls_info.length > 0) {
+    if (r && r.tool_calls_info && r.tool_calls_info.length > 0) {
       continue;
     }
 
-    var finalText = r.content || '';
+    var finalText = (r && r.content) || '';
     return { content: finalText, sources: sources, queries: queries };
   }
 
@@ -7666,12 +7777,26 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
     if (rpcResult) {
       var updatedIds = Array.isArray(rpcResult.updated_ids) ? rpcResult.updated_ids.map(String) : [];
       var failedIds = Array.isArray(rpcResult.failed_ids) ? rpcResult.failed_ids.map(String) : [];
+      var updatedRows = [];
+      if (updatedIds.length > 0) {
+        var { data: fetchedRows, error: fetchErr } = await supabase.from('posts')
+          .select('id, user_name, media_url, media_type, content, views, created_at')
+          .in('id', updatedIds)
+          .eq('media_type', DM_MARKER)
+          .eq('media_url', req.userName);
+        if (fetchErr) {
+          console.warn('[DM read] RPC updated but fetch rows failed:', fetchErr.message);
+        } else {
+          updatedRows = fetchedRows || [];
+        }
+      }
       return res.json({
         ok: true,
         marked: Number(rpcResult.marked) || updatedIds.length,
         partial: failedIds.length > 0,
         failed_ids: failedIds,
-        updated_ids: updatedIds
+        updated_ids: updatedIds,
+        data: updatedRows
       });
     }
 
@@ -11487,6 +11612,8 @@ async function handleDeepThinkChat(req, res) {
     try { clearInterval(_heartbeatTimer); } catch (e) {}
     try { if (typeof cancelToken._onPlannerCancel === 'function') cancelToken._onPlannerCancel(); } catch (e) {}
     try { if (typeof cancelToken._onSynthCancel === 'function') cancelToken._onSynthCancel(); } catch (e) {}
+    try { if (typeof cancelToken._onDirectCancel === 'function') cancelToken._onDirectCancel(); } catch (e) {}
+    try { if (typeof cancelToken._onAgentCancel === 'function') cancelToken._onAgentCancel(); } catch (e) {}
     activeDeepThinkJobs.delete(convId);
   }
   req.on('aborted', markDeepThinkDisconnected);
