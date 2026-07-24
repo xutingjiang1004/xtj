@@ -24,7 +24,8 @@
   var SIZE_LIMITS = {
     text: 1 * 1024 * 1024,      // 1 MB
     image: 15 * 1024 * 1024,    // 15 MB
-    pdf: 30 * 1024 * 1024       // 30 MB
+    pdf: 30 * 1024 * 1024,      // 30 MB
+    binary: 5 * 1024 * 1024     // 5 MB
   };
 
   var TEXT_EXTENSIONS = [
@@ -49,7 +50,7 @@
   ];
 
   var IMAGE_EXTENSIONS = [
-    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico'
   ];
 
   var PDF_EXTENSIONS = ['.pdf'];
@@ -131,6 +132,7 @@
           var req = store.put(dirHandle, HANDLE_KEY);
           req.onsuccess = function () { resolve(); };
           req.onerror = function (e) {
+            db.close();
             reject(wrapError(e.target.error, 'IndexedDB.storeHandle'));
           };
           tx.oncomplete = function () { db.close(); };
@@ -302,8 +304,8 @@
   function selectDirectory() {
     try {
       return window.showDirectoryPicker({ mode: 'readwrite' }).then(function (handle) {
-        _dirHandle = handle;
         return storeHandle(handle).then(function () {
+          _dirHandle = handle;
           return handle;
         });
       }).catch(function (err) {
@@ -710,10 +712,17 @@
       return Promise.reject(new Error('createFileByPath: content must be a string'));
     }
 
+    var fullPath = parts.join('/');
+    if (_fileLocks[fullPath]) {
+      return Promise.reject(new Error('createFileByPath: file "' + fullPath + '" is currently being created'));
+    }
+    _fileLocks[fullPath] = true;
+
     // First check that the file does NOT exist
     return fileExistsByPath(parts).then(function (exists) {
       if (exists) {
-        return Promise.reject(new Error('createFileByPath: file "' + parts.join('/') + '" already exists'));
+        delete _fileLocks[fullPath];
+        return Promise.reject(new Error('createFileByPath: file "' + fullPath + '" already exists'));
       }
 
       // File does not exist — safe to create with { create: true }
@@ -727,7 +736,11 @@
               // Create the file
               current.getFileHandle(parts[index], { create: true }).then(function (fileHandle) {
                 return writeFile(fileHandle, content);
-              }).then(resolve).catch(function (err) {
+              }).then(function(res) {
+                delete _fileLocks[fullPath];
+                resolve(res);
+              }).catch(function (err) {
+                delete _fileLocks[fullPath];
                 reject(wrapError(err, 'createFileByPath'));
               });
               return;
@@ -743,9 +756,13 @@
           }
           traverse();
         } catch (err) {
+          delete _fileLocks[fullPath];
           reject(wrapError(err, 'createFileByPath'));
         }
       });
+    }).catch(function(err) {
+      delete _fileLocks[fullPath];
+      return Promise.reject(err);
     });
   }
 
