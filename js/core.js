@@ -2343,7 +2343,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 };
                 if (body) opts.body = JSON.stringify(body);
                 var res = await fetch(API_BASE + path, opts);
-                var data = await res.json();
+                var contentType = res.headers.get('content-type') || '';
+                var data;
+                if (contentType.indexOf('application/json') !== -1) {
+                    data = await res.json().catch(function() { return {}; });
+                } else {
+                    var text = await res.text().catch(function() { return ''; });
+                    if (!res.ok) throw new Error('请求失败 (' + res.status + '): ' + text.substring(0, 50));
+                    data = {};
+                }
                 if (!res.ok) {
                     var errMsg = (data && data.error) || ('请求失败 (' + res.status + ')');
                     throw new Error(errMsg);
