@@ -814,6 +814,18 @@ async function initAdminClient() {
         }
     });
 
+    // Event delegation for admin action buttons (safe alternative to inline onclick)
+    document.addEventListener('click', function(e) {
+        var btn = e.target && e.target.closest ? e.target.closest('[data-action="delete-comment"]') : null;
+        if (btn) {
+            e.preventDefault();
+            var commentId = btn.getAttribute('data-comment-id') || '';
+            if (commentId && typeof window.deleteAdminComment === 'function') {
+                window.deleteAdminComment(commentId);
+            }
+        }
+    });
+
     async function loadAllData(keepTab) {
         if (adminDataLoading) return;
         adminDataLoading = true;
@@ -1683,7 +1695,7 @@ async function initAdminClient() {
                     h += '<td>-</td>';
                 } else {
                     h += '<td><span class="badge badge-green">正常</span></td>';
-                    h += '<td><button class="btn-sm del" onclick="deleteAdminComment(\'' + String(c.id).replace(/'/g, "\\'") + '\', \'' + (c.actor_key || '') + '\')">删除</button></td>';
+                    h += '<td><button type="button" class="btn-sm del" data-action="delete-comment" data-comment-id="' + escapeHtml(String(c.id)) + '">删除</button></td>';
                 }
                 h += '</tr>';
             });
@@ -1754,7 +1766,7 @@ async function initAdminClient() {
         });
     };
 
-    window.deleteAdminComment = function(id, actorKey) {
+    window.deleteAdminComment = function(id) {
         var comment = allComments.find(function(c) { return c.id === id; });
         var preview = comment ? (comment.content || '').slice(0, 50) : '';
         if (preview && comment.content && comment.content.length > 50) preview += '...';

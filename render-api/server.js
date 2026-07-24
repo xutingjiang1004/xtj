@@ -4734,8 +4734,13 @@ async function runMultiAgentFlow(opts) {
 
   // 2. 调用 Planner (★ U3: +超时机制 + 流式thinking)
   var plannerContent = '';
+  var plannerTimeoutId = null;
+  var plannerAbortController = null;
   try {
-    var plannerAbortController = new AbortController();
+    plannerAbortController = new AbortController();
+    var _plannerOnCancel = function() { try { plannerAbortController && plannerAbortController.abort(); } catch (e) {} };
+    if (isCancelled()) plannerAbortController.abort();
+    cancelToken._onPlannerCancel = _plannerOnCancel;
     var plannerPromise = callDeepSeek(
       [
         { role: 'system', content: sharedPrefix + '\n\n---\n\n' + DEEP_THINK_PLANNER_PROMPT.replace('{maxWorkers}', String(effectiveMaxWorkers)).replace('{minComplex}', String(Math.min(4, effectiveMaxWorkers - 1))) },
@@ -4750,22 +4755,25 @@ async function runMultiAgentFlow(opts) {
         signal: plannerAbortController.signal,
         // ★ 流式推 Planner 的思考过程，用户实时看到规划中的思考，不再空等 15-20 秒
         onThinkingChunk: function(chunk) {
+          if (isCancelled() || (plannerAbortController && plannerAbortController.signal.aborted)) return;
           sseSend({ type: 'thinking_chunk', agent_role: 'Planner', chunk: chunk, round: 0 });
         }
       }
     );
-    var plannerTimeoutId;
     var plannerTimeout = new Promise(function(_, reject) {
       plannerTimeoutId = setTimeout(function() { plannerAbortController.abort(); reject(new Error('Planner 超时')); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
     });
     plannerTimeout.catch(function(){}); // Prevent UnhandledRejection if it rejects after race
     var plannerResult = await Promise.race([plannerPromise, plannerTimeout]);
-    clearTimeout(plannerTimeoutId);
     plannerContent = plannerResult.content || '';
   } catch (e) {
     console.error('[MULTI-AGENT] Planner failed:', e && e.message);
     sseSend({ type: 'deep_think_stage', stage: 'error', message: '规划失败，回退通用多智能体' });
     plannerContent = '{"complexity":"medium","reasoning":"Planner失败，使用通用方向并行分析","agents":[]}';
+  } finally {
+    if (plannerTimeoutId) { clearTimeout(plannerTimeoutId); plannerTimeoutId = null; }
+    if (cancelToken && cancelToken._onPlannerCancel === _plannerOnCancel) { delete cancelToken._onPlannerCancel; }
+    plannerAbortController = null;
   }
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -4912,28 +4920,61 @@ async function runMultiAgentFlow(opts) {
   var synthContent = '';
   var synthUsage = null;
   var synthModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
+  var synthAbortController = null;
+  var synthTimeoutId = null;
+  var synthFinished = false;
+  function _synthGuard() { return synthFinished || isCancelled() || (synthAbortController && synthAbortController.signal.aborted); }
   try {
-    // ★ U3: Synthesizer 超时机制
+    synthAbortController = new AbortController();
+    var _synthOnCancel = function() { try { synthAbortController && synthAbortController.abort(); } catch (e) {} };
+    if (isCancelled()) { synthAbortController.abort(); }
+    cancelToken._onSynthCancel = _synthOnCancel;
+    var _synthAborted = false;
+    var _synthTimedOut = false;
     var synthPromise = callDeepSeek(synthMessages, {
       thinking_mode: deepThinkThinkingMode, max_tokens: 16384,
-      onThinkingChunk: function(chunk) { sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: chunk }); },
-      onContentChunk: function(chunk) { sseSend({ type: 'answer_chunk', chunk: chunk }); }
+      signal: synthAbortController.signal,
+      onThinkingChunk: function(chunk) { if (_synthGuard()) return; sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: chunk }); },
+      onContentChunk: function(chunk) { if (_synthGuard()) return; sseSend({ type: 'answer_chunk', chunk: chunk }); }
     });
-    var synthTimeoutId;
     var synthTimeout = new Promise(function(_, reject) {
-      synthTimeoutId = setTimeout(function() { reject(new Error('Synthesizer 超时')); }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
+      synthTimeoutId = setTimeout(function() {
+        _synthTimedOut = true;
+        try { synthAbortController && synthAbortController.abort(); } catch (e) {}
+        var te = new Error('Synthesizer 超时');
+        te.code = 'SYNTH_TIMEOUT';
+        reject(te);
+      }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
     });
-    synthTimeout.catch(function(){}); // Prevent UnhandledRejection
-    var synthResult = await Promise.race([synthPromise, synthTimeout]);
-    clearTimeout(synthTimeoutId);
+    synthTimeout.catch(function(){});
+    var synthResult;
+    try {
+      synthResult = await Promise.race([synthPromise, synthTimeout]);
+    } catch (raceErr) {
+      _synthAborted = !_synthTimedOut && (raceErr && (raceErr.name === 'AbortError' || raceErr.code === 'ABORT_ERR' || (synthAbortController && synthAbortController.signal.aborted)));
+      throw raceErr;
+    } finally {
+      if (synthTimeoutId) { clearTimeout(synthTimeoutId); synthTimeoutId = null; }
+    }
+    synthFinished = true;
     synthContent = synthResult.content || '';
     synthUsage = synthResult.usage;
     synthModel = normalizeDeepSeekUsageModel(synthResult.model || DEEPSEEK_MODEL_REASONER, synthResult.model || DEEPSEEK_MODEL_REASONER);
   } catch (e) {
-    console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
-    // ★ U3 修复: Synthesizer 失败时 fallback 拼接 worker 结果, 不让用户看到空内容
+    synthFinished = true;
+    var synthErrCode = e && e.code;
+    var isSynthTimeout = synthErrCode === 'SYNTH_TIMEOUT' || (e && e.message && /Synthesizer 超时/.test(e.message));
+    var isSynthAborted = !isSynthTimeout && (synthAbortController && synthAbortController.signal.aborted) || (e && (e.name === 'AbortError' || synthErrCode === 'ABORT_ERR'));
+    if (isSynthTimeout) {
+      console.error('[MULTI-AGENT] Synthesizer timeout after', DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS, 'ms');
+    } else if (isSynthAborted) {
+      console.error('[MULTI-AGENT] Synthesizer aborted (user cancelled)');
+    } else {
+      console.error('[MULTI-AGENT] Synthesizer failed:', e && e.message);
+    }
     if (workerResults && workerResults.length > 0) {
-      var parts2 = ['(Synthesizer 整合失败: ' + (e.message || '') + ', 以下是各方向原始分析)\n'];
+      var failLabel = isSynthTimeout ? 'Synthesizer 超时' : isSynthAborted ? 'Synthesizer 被取消' : 'Synthesizer 整合失败';
+      var parts2 = ['(' + failLabel + ', 以下是各方向原始分析)\n'];
       workerResults.forEach(function(wr, idx) {
         var wrC = String(wr.content || '(无内容)');
         if (wrC.length > 1500) wrC = wrC.slice(0, 1500) + '\n...(截断)';
@@ -4941,8 +4982,13 @@ async function runMultiAgentFlow(opts) {
       });
       synthContent = parts2.join('\n');
     } else {
-      synthContent = '(整合答案失败: ' + (e.message || '') + ')';
+      synthContent = '(整合答案失败: ' + (isSynthTimeout ? '请求超时' : isSynthAborted ? '已取消' : (e.message || '未知错误')) + ')';
     }
+  } finally {
+    if (synthTimeoutId) { clearTimeout(synthTimeoutId); synthTimeoutId = null; }
+    if (cancelToken && cancelToken._onSynthCancel === _synthOnCancel) { delete cancelToken._onSynthCancel; }
+    synthAbortController = null;
+    synthFinished = true;
   }
 
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: synthContent };
@@ -6051,12 +6097,19 @@ app.delete('/admin/announcement/:id', verifyToken, securityRateLimit(60000, 30),
   try {
   const { id } = req.params;
   const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
-  const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-  const { error } = await supabase.rpc('delete_post_with_actor', {
+  if (!post) return res.status(404).json({ error: '公告不存在', code: 'not_found' });
+  const actorKey = post.actor_key;
+  if (!actorKey) return res.status(500).json({ error: '记录缺少 actor_key' });
+  const { data: rpcData, error } = await supabase.rpc('delete_post_with_actor', {
     p_post_id: id,
     p_actor_key: actorKey
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (!rpcData || rpcData.ok !== true) {
+    var code = (rpcData && rpcData.code) || 'delete_failed';
+    var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
+    return res.status(status).json({ error: (rpcData && rpcData.error) || '删除失败', code: code });
+  }
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] delete_announcement:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -6173,15 +6226,21 @@ app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res)
       }
     } catch(e) {}
     const { id } = req.params;
-    // 先获取帖子的 actor_key
     const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
-    const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-    
-    const { error } = await supabase.rpc('delete_post_with_actor', {
+    if (!post) return res.status(404).json({ error: '帖子不存在', code: 'not_found' });
+    const actorKey = post.actor_key;
+    if (!actorKey) return res.status(500).json({ error: '记录缺少 actor_key' });
+
+    const { data: rpcData, error } = await supabase.rpc('delete_post_with_actor', {
       p_post_id: id,
       p_actor_key: actorKey
     });
     if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (!rpcData || rpcData.ok !== true) {
+      var code = (rpcData && rpcData.code) || 'delete_failed';
+      var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
+      return res.status(status).json({ error: (rpcData && rpcData.error) || '删除失败', code: code });
+    }
     await logAdminAudit('delete_post', auditUser, 'post_id:' + id);
     return res.json({ ok: true });
   } catch (e) {
@@ -7588,34 +7647,89 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
     var rawIds = Array.isArray(req.body && req.body.message_ids) ? req.body.message_ids : [];
     var messageIds = Array.from(new Set(rawIds.map(normalizePostId).filter(Boolean))).slice(0, 200);
     if (!messageIds.length) return res.status(400).json({ error: '消息参数无效', code: 'invalid_message_ids' });
-    var lookup = await supabase.from('posts')
-      .select('id, user_name, media_url, media_type, content, views')
+    var receiver = String(req.userName || '');
+    if (!receiver) return res.status(401).json({ error: '未登录', code: 'auth_required' });
+    var now = new Date().toISOString();
+
+    var rpcResult = null;
+    var rpcError = null;
+    try {
+      var { data: rpcData, error: rpcErr } = await supabase.rpc('mark_dm_messages_read', {
+        p_receiver: receiver,
+        p_message_ids: messageIds
+      });
+      if (rpcErr) { rpcError = rpcErr; }
+      else if (rpcData && rpcData.ok === true) { rpcResult = rpcData; }
+      else { rpcError = rpcData; }
+    } catch (e) { rpcError = e; }
+
+    if (rpcResult) {
+      var updatedIds = Array.isArray(rpcResult.updated_ids) ? rpcResult.updated_ids.map(String) : [];
+      var failedIds = Array.isArray(rpcResult.failed_ids) ? rpcResult.failed_ids.map(String) : [];
+      return res.json({
+        ok: true,
+        marked: Number(rpcResult.marked) || updatedIds.length,
+        partial: failedIds.length > 0,
+        failed_ids: failedIds,
+        updated_ids: updatedIds
+      });
+    }
+
+    if (rpcError) {
+      console.warn('[DM read] RPC unavailable, falling back to batched updates:', rpcError && rpcError.message);
+    }
+
+    var { data: foundRows, error: lookupErr } = await supabase.from('posts')
+      .select('id, user_name, media_url, media_type, content, views, created_at')
       .in('id', messageIds)
       .eq('media_type', DM_MARKER)
       .eq('media_url', req.userName);
-    if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'dm_read_lookup_failed' });
-    var now = new Date().toISOString();
+    if (lookupErr) return res.status(500).json({ error: sanitizeError(lookupErr), code: 'dm_read_lookup_failed' });
+
+    var rows = foundRows || [];
     var updated = [];
     var failedIds = [];
-    var promises = (lookup.data || []).map(async (row) => {
+    var BATCH_SIZE = 5;
+
+    async function updateOne(row) {
       var payload = {};
       try { payload = JSON.parse(row.content || '{}'); } catch (_) { payload = { text: String(row.content || '') }; }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = { text: String(row.content || '') };
       if (!payload.read_at) payload.read_at = now;
       var nextViews = Math.max(Number(row.views) || 0, 1);
-      return supabase.from('posts')
-        .update({ content: JSON.stringify(payload), views: nextViews })
-        .eq('id', row.id)
-        .eq('media_type', DM_MARKER)
-        .eq('media_url', req.userName)
-        .select('id, user_name, media_url, media_type, content, views, created_at')
-        .single().then(r => ({ rowId: String(row.id), result: r }));
-    });
-    var results = await Promise.all(promises);
-    for (var j = 0; j < results.length; j++) {
-      if (results[j].result.error) failedIds.push(results[j].rowId);
-      else if (results[j].result.data) updated.push(results[j].result.data);
+      try {
+        var r = await supabase.from('posts')
+          .update({ content: JSON.stringify(payload), views: nextViews })
+          .eq('id', row.id)
+          .eq('media_type', DM_MARKER)
+          .eq('media_url', req.userName)
+          .select('id, user_name, media_url, media_type, content, views, created_at')
+          .single();
+        if (r.error) { failedIds.push(String(row.id)); return null; }
+        return r.data;
+      } catch (e) {
+        failedIds.push(String(row.id));
+        return null;
+      }
     }
+
+    for (var bi = 0; bi < rows.length; bi += BATCH_SIZE) {
+      var batch = rows.slice(bi, bi + BATCH_SIZE);
+      var batchResults = await Promise.all(batch.map(updateOne));
+      for (var k = 0; k < batchResults.length; k++) {
+        if (batchResults[k]) updated.push(batchResults[k]);
+      }
+    }
+
+    var inputIdSet = new Set(messageIds.map(String));
+    var updatedIdSet = new Set(updated.map(function(r) { return String(r.id); }));
+    rows.forEach(function(r) {
+      var rid = String(r.id);
+      if (inputIdSet.has(rid) && !updatedIdSet.has(rid) && failedIds.indexOf(rid) < 0) {
+        failedIds.push(rid);
+      }
+    });
+
     return res.json({ ok: true, marked: updated.length, partial: failedIds.length > 0, failed_ids: failedIds, data: updated });
   } catch (e) {
     console.error('[API] dm read:', e && e.message ? e.message : e);
@@ -11371,6 +11485,8 @@ async function handleDeepThinkChat(req, res) {
     cancelToken.cancelled = true;
     try { console.log('[DEEP-THINK] client disconnected, reqId:', clientReqId || '?', 'convId:', convId); } catch (e) {}
     try { clearInterval(_heartbeatTimer); } catch (e) {}
+    try { if (typeof cancelToken._onPlannerCancel === 'function') cancelToken._onPlannerCancel(); } catch (e) {}
+    try { if (typeof cancelToken._onSynthCancel === 'function') cancelToken._onSynthCancel(); } catch (e) {}
     activeDeepThinkJobs.delete(convId);
   }
   req.on('aborted', markDeepThinkDisconnected);
