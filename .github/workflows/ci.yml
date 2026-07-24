@@ -67,6 +67,11 @@ jobs:
     timeout-minutes: 15
     needs: [test, syntax]
 
+    env:
+      API_SECRET: test-ci-secret-key-123456
+      SUPABASE_SERVICE_KEY: test-ci-service-key-123456
+      ADMIN_PASSWORD: test-admin-password-ci
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
