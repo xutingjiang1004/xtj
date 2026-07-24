@@ -565,7 +565,7 @@
   align-items: stretch;
   justify-content: flex-start;
   padding: 0;
-  background: var(--cw-bg-primary);
+  background: var(--cw-bg);
   overflow: auto;
 }
 
@@ -633,7 +633,7 @@
 .doc-preview-name {
   font-size: 13px;
   font-weight: 500;
-  color: var(--cw-text-primary);
+  color: var(--cw-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -665,10 +665,10 @@
   font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--cw-text-primary);
+  color: var(--cw-text);
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--cw-bg-primary);
+  background: var(--cw-bg);
 }
 
 /* ── 18. Empty State ──────────────────────────────────────── */
