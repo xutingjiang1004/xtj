@@ -817,10 +817,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         if (err.name === 'AbortError') {
           if (aborted) {
             console.error('[code-agent] Request cancelled by client');
+            return;
           } else {
             console.error('[code-agent] DeepSeek API timeout');
+            return res.status(504).json({ ok: false, error: 'AI 服务超时，请稍后重试' });
           }
-          return;
         }
         console.error('[code-agent] DeepSeek API fetch error:', err.message || err);
         return res.status(500).json({ ok: false, error: 'AI 服务请求失败' });
