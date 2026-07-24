@@ -107,7 +107,9 @@ const JS_FILES = [
   'js/photo-wall/upload-ui.js',
   'js/photo-wall/preview.js',
   'js/photo-wall/preview-hotfix.js',
-  'js/admin/admin.js'
+  'js/admin/admin.js',
+  'js/code-file-system.js',
+  'js/code-workspace.js'
 ];
 
 const CSS_FILES = [
@@ -118,7 +120,8 @@ const CSS_FILES = [
   'css/admin.css',
   'css/ai-agent.css',
   'css/ui-shell.css',
-  'css/photo-preview.css'
+  'css/photo-preview.css',
+  'css/code-workspace.css'
 ];
 
 function minifyJS(filePath, optional) {
