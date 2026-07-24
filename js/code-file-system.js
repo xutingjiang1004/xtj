@@ -56,18 +56,13 @@
   var PDF_EXTENSIONS = ['.pdf'];
 
   var DOCUMENT_EXTENSIONS = [
-    '.docx', '.doc',
-    '.xlsx', '.xls',
-    '.pptx', '.ppt'
+    '.docx', '.xlsx', '.xls'
   ];
 
   var DOCUMENT_MIME_MAP = {
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.doc': 'application/msword',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.ppt': 'application/vnd.ms-powerpoint'
+    '.xls': 'application/vnd.ms-excel'
   };
 
   // ──────────────────────────────────────────────

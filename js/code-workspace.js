@@ -156,7 +156,6 @@
       '.pdf': 'file-pdf',
       '.docx': 'file-doc', '.doc': 'file-doc',
       '.xlsx': 'file-xls', '.xls': 'file-xls',
-      '.pptx': 'file-ppt', '.ppt': 'file-ppt',
       '.csv': 'file-csv'
     };
     return map[ext] || 'file-icon';
@@ -176,7 +175,7 @@
   function fileIsDocument(fileName) {
     if (!fileName) return false;
     var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
-    return ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt'].indexOf(ext) !== -1;
+    return ['.docx', '.doc', '.xlsx', '.xls'].indexOf(ext) !== -1;
   }
 
   // ──────────────────────────────────────────────
@@ -2240,14 +2239,12 @@
 
   // ──────────────────────────────────────────────
   // applyDocumentOperation(op, index)
+  // 由 applyOperation 调用，不自行管理 _applyLock
+  // 批量锁由 applyAllOperations 统一管理
   // ──────────────────────────────────────────────
   function applyDocumentOperation(op, index) {
-    if (state._applyLock) return Promise.reject(new Error('已有操作正在进行中'));
-    state._applyLock = true;
-
     var fs = window.__xtjCodeFS;
     if (!fs || !fs.readFileByPath || !fs.writeBinaryFileByPath) {
-      state._applyLock = false;
       return Promise.reject(new Error('File system not available'));
     }
 
@@ -2282,7 +2279,7 @@
             fileName: op.path.split('/').pop(),
             mimeType: mimeType,
             document_type: op.document_type || ext,
-            document_operations: op.document_operations || []
+            operations: op.document_operations || []
           })
         });
       } else {
@@ -2295,7 +2292,7 @@
             fileName: op.path.split('/').pop(),
             mimeType: mimeType,
             document_type: op.document_type || ext,
-            document_operations: op.document_operations || []
+            operations: op.document_operations || []
           })
         });
       }
@@ -2312,6 +2309,29 @@
           throw new Error(data.error || '文档操作返回数据无效');
         }
 
+        // Use backend-returned file info. Default to original ext if not provided.
+        var newFileName = data.fileName || op.path.split('/').pop();
+        var newMimeType = data.newMimeType || '';
+        var newExt = newFileName.split('.').pop().toLowerCase();
+
+        // Validate MIME vs extension before saving
+        if (newExt === 'docx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          throw new Error('DOCX 文件格式无效，暂不支持此操作');
+        }
+        if (newExt === 'xlsx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+          throw new Error('XLSX 文件格式无效');
+        }
+        if (newMimeType === 'text/plain' && newExt !== 'txt') {
+          throw new Error('text/plain 只能保存为 .txt 文件');
+        }
+        if (newMimeType !== newMimeType) {} // noop
+
+        // DOCX is read-only for now
+        var origExt = op.path.split('.').pop().toLowerCase();
+        if (origExt === 'docx') {
+          throw new Error('DOCX 暂仅支持读取，真实 DOCX 写入功能尚未完成');
+        }
+
         // Decode returned base64 content
         var newBinaryStr = atob(data.newFile);
         var newBytes = new Uint8Array(newBinaryStr.length);
@@ -2320,10 +2340,8 @@
         }
 
         // Save as new file (don't overwrite original)
-        var dotIdx = op.path.lastIndexOf('.');
-        var baseName = dotIdx >= 0 ? op.path.substring(0, dotIdx) : op.path;
-        var extName = dotIdx >= 0 ? op.path.substring(dotIdx) : '';
-        var newPath = baseName + '_AI\u4fee\u6539\u7248' + extName;
+        var parentPath = op.path.indexOf('/') >= 0 ? op.path.substring(0, op.path.lastIndexOf('/') + 1) : '';
+        var newPath = parentPath + newFileName.replace(/(\.[^.]+)$/, '_AI\u4fee\u6539\u7248$1');
 
         return fs.createBinaryFileByPath(newPath, newBytes.buffer).then(function () {
           // Remove operation from pending
@@ -2336,12 +2354,10 @@
           openFile(newPath);
 
           showToast('\u5df2\u4fdd\u5b58\u4e3a: ' + newPath.split('/').pop(), 'success');
-          state._applyLock = false;
           return true;
         });
       });
     }).catch(function (err) {
-      state._applyLock = false;
       showToast('\u6587\u6863\u64cd\u4f5c\u5931\u8d25: ' + (err && err.message ? err.message : String(err)), 'error');
       throw err;
     });
