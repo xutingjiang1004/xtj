@@ -503,11 +503,18 @@
             throw new Error('网络连接失败，请检查: ' + (fetchErr.message || '未知错误'));
         }
         clearTimeout(at);
+        var contentType = res.headers.get('content-type') || '';
         var data;
-        try {
-            data = await res.json();
-        } catch (jsonErr) {
-            throw new Error('后端返回格式异常（HTTP ' + res.status + '），请检查API地址');
+        if (contentType.indexOf('application/json') !== -1) {
+            try {
+                data = await res.json();
+            } catch (jsonErr) {
+                throw new Error('后端返回格式异常（HTTP ' + res.status + '），请检查API地址');
+            }
+        } else {
+            var text = await res.text().catch(function() { return ''; });
+            if (!res.ok) throw new Error('请求失败 (' + res.status + '): ' + text.substring(0, 50));
+            data = {};
         }
         if (res.status === 401 && !useUserAccessToken) {
             clearSession();

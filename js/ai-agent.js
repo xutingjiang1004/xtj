@@ -3355,7 +3355,18 @@ window.throttleRAF = function(fn) {
         signal: controller.signal
       });
       if (!resp.ok) {
-        try { var ej = await resp.json().catch(function(){}); if (S._currentReqId !== reqId) return; safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); } catch(e){}
+        try {
+          var rawErrText = await resp.text().catch(function(){ return ''; });
+          var ej = null;
+          if (rawErrText) {
+            try { ej = JSON.parse(rawErrText); } catch (parseErr) {
+              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
+            }
+          }
+          if (S._currentReqId !== reqId) return;
+          safeRemoveProgressCard();
+          notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')')));
+        } catch(e){}
         resetSendingIfCurrent(); return;
       }
       if (!resp.body) {
@@ -3896,7 +3907,13 @@ window.throttleRAF = function(fn) {
       });
       if (!resp.ok) {
         try {
-          var ej = await resp.json().catch(function(){});
+          var rawErrText = await resp.text().catch(function(){ return ''; });
+          var ej = null;
+          if (rawErrText) {
+            try { ej = JSON.parse(rawErrText); } catch (parseErr) {
+              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
+            }
+          }
           if (S._currentReqId !== reqId) return;
           if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', String((ej&&ej.error) || ('AI 失败 (' + resp.status + ')')));
           else { safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); }
@@ -4584,7 +4601,13 @@ window.throttleRAF = function(fn) {
       if (!resp.ok) {
         var responseMessage = 'AI 服务暂时不可用，请稍后重试';
         try {
-          var errJson = await resp.json().catch(function(){ return {}; });
+          var rawErrText = await resp.text().catch(function(){ return ''; });
+          var errJson = null;
+          if (rawErrText) {
+            try { errJson = JSON.parse(rawErrText); } catch (parseErr) {
+              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
+            }
+          }
           if (errJson && errJson.error) responseMessage = String(errJson.error);
         } catch(e) {}
         if (S._currentReqId !== reqId) return;
