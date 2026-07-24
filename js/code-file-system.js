@@ -941,6 +941,109 @@
   }
 
   // ──────────────────────────────────────────────
+  // Binary file writing (for document operations)
+  // ──────────────────────────────────────────────
+  function writeBinaryFile(fileHandle, buffer) {
+    if (!(buffer instanceof ArrayBuffer) && !(buffer instanceof Blob)) {
+      return Promise.reject(new Error('writeBinaryFile: content must be ArrayBuffer or Blob'));
+    }
+
+    return new Promise(function (resolve, reject) {
+      try {
+        var originalSHA256 = null;
+
+        getSHA256(buffer).then(function (sha) {
+          originalSHA256 = sha;
+          return fileHandle.createWritable();
+        }).then(function (writable) {
+          return writable.write(buffer).then(function () {
+            return writable.close();
+          });
+        }).then(function () {
+          return readFile(fileHandle);
+        }).then(function (result) {
+          if (result.sha256 !== originalSHA256) {
+            reject(new Error('writeBinaryFile: verification failed - SHA-256 mismatch'));
+            return;
+          }
+          resolve({
+            name: result.name,
+            size: result.size,
+            sha256: result.sha256,
+            type: result.type
+          });
+        }).catch(function (err) {
+          reject(wrapError(err, 'writeBinaryFile'));
+        });
+      } catch (err) {
+        reject(wrapError(err, 'writeBinaryFile'));
+      }
+    });
+  }
+
+  function writeBinaryFileByPath(pathParts, buffer) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('writeBinaryFileByPath: no workspace selected'));
+    }
+    var parts = Array.isArray(pathParts) ? pathParts : validatePath(pathParts);
+    if (!parts) {
+      return Promise.reject(new Error('writeBinaryFileByPath: invalid path'));
+    }
+
+    return new Promise(function (resolve, reject) {
+      var current = _dirHandle;
+      var index = 0;
+      function traverse() {
+        if (index === parts.length - 1) {
+          current.getFileHandle(parts[index], { create: true }).then(function (fileHandle) {
+            return writeBinaryFile(fileHandle, buffer);
+          }).then(function (result) {
+            resolve(result);
+          }).catch(function (err) {
+            reject(wrapError(err, 'writeBinaryFileByPath'));
+          });
+          return;
+        }
+        current.getDirectoryHandle(parts[index]).then(function (dirHandle) {
+          current = dirHandle;
+          index++;
+          traverse();
+        }).catch(function (err) {
+          reject(wrapError(err, 'writeBinaryFileByPath'));
+        });
+      }
+      traverse();
+    });
+  }
+
+  function createBinaryFileByPath(pathParts, buffer) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('createBinaryFileByPath: no workspace selected'));
+    }
+    var parts = Array.isArray(pathParts) ? pathParts : validatePath(pathParts);
+    if (!parts) {
+      return Promise.reject(new Error('createBinaryFileByPath: invalid path'));
+    }
+    if (!(buffer instanceof ArrayBuffer) && !(buffer instanceof Blob)) {
+      return Promise.reject(new Error('createBinaryFileByPath: content must be ArrayBuffer or Blob'));
+    }
+
+    return new Promise(function (resolve, reject) {
+      fileExistsByPath(parts).then(function (exists) {
+        if (exists) {
+          reject(new Error('File already exists: ' + parts.join('/')));
+          return;
+        }
+        return writeBinaryFileByPath(parts, buffer);
+      }).then(function (result) {
+        if (result) resolve(result);
+      }).catch(function (err) {
+        reject(wrapError(err, 'createBinaryFileByPath'));
+      });
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // Public API
   // ──────────────────────────────────────────────
   window.__xtjCodeFS = {
@@ -979,9 +1082,12 @@
     // File writing
     writeFile: writeFile,
     writeFileByPath: writeFileByPath,
+    writeBinaryFile: writeBinaryFile,
+    writeBinaryFileByPath: writeBinaryFileByPath,
 
     // Safe file creation
     createFileByPath: createFileByPath,
+    createBinaryFileByPath: createBinaryFileByPath,
 
     // File deletion
     deleteFileByPath: deleteFileByPath,

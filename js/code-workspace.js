@@ -2115,17 +2115,49 @@
         }
       }
 
-      var newContent = op.new_content || '';
-      var diffLines = computeDiff(originalContent, newContent);
+      if (op.type === 'document') {
+        // Document operation: show operations list instead of text diff
+        var docInfo = document.createElement('div');
+        docInfo.style.padding = '12px 14px';
+        docInfo.style.cssText = 'padding:12px 14px;color:var(--cw-text);font-size:13px;';
 
-      for (var k = 0; k < diffLines.length; k++) {
-        var line = diffLines[k];
-        var lineEl = document.createElement('div');
-        lineEl.className = 'code-diff-line ' + line.type;
-        lineEl.innerHTML =
-          '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
-          '<span class="line-content">' + escapeHTML(line.text) + '</span>';
-        before.appendChild(lineEl);
+        var ext = (op.path || '').split('.').pop().toLowerCase();
+        var docType = ext === 'docx' ? 'Word' : ext === 'xlsx' ? 'Excel' : '文档';
+        docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
+          escapeHTML(docType + ' 修改') + '</div>' +
+          '<div style="margin-bottom:6px;">' +
+          '  将另存为: <strong>' + escapeHTML(op.path.replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
+          '</div>';
+
+        if (op.document_operations && op.document_operations.length > 0) {
+          var opsList = document.createElement('ul');
+          opsList.style.cssText = 'margin:8px 0;padding-left:20px;list-style:disc;';
+          for (var di = 0; di < op.document_operations.length; di++) {
+            var dop = op.document_operations[di];
+            var li = document.createElement('li');
+            li.style.cssText = 'margin:4px 0;line-height:1.5;';
+            li.textContent = (dop.type || '修改') + ': ' + (dop.description || JSON.stringify(dop));
+            opsList.appendChild(li);
+          }
+          docInfo.appendChild(opsList);
+        } else {
+          docInfo.innerHTML += '<div style="color:var(--cw-text-muted);">无详细操作描述</div>';
+        }
+
+        before.appendChild(docInfo);
+      } else {
+        var newContent = op.new_content || '';
+        var diffLines = computeDiff(originalContent, newContent);
+
+        for (var k = 0; k < diffLines.length; k++) {
+          var line = diffLines[k];
+          var lineEl = document.createElement('div');
+          lineEl.className = 'code-diff-line ' + line.type;
+          lineEl.innerHTML =
+            '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
+            '<span class="line-content">' + escapeHTML(line.text) + '</span>';
+          before.appendChild(lineEl);
+        }
       }
 
       diffBody.appendChild(before);
@@ -2207,6 +2239,110 @@
   }
 
   // ──────────────────────────────────────────────
+  // applyDocumentOperation(op, index)
+  // ──────────────────────────────────────────────
+  function applyDocumentOperation(op, index) {
+    if (state._applyLock) return Promise.reject(new Error('已有操作正在进行中'));
+    state._applyLock = true;
+
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.readFileByPath || !fs.writeBinaryFileByPath) {
+      state._applyLock = false;
+      return Promise.reject(new Error('File system not available'));
+    }
+
+    // Read original file as ArrayBuffer
+    return fs.readFileByPath(op.path).then(function (result) {
+      if (!result || !result.content) {
+        throw new Error('无法读取文件');
+      }
+
+      // Convert base64 back to ArrayBuffer
+      var binaryStr = atob(result.content);
+      var bytes = new Uint8Array(binaryStr.length);
+      for (var i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      // Call backend API to apply document operations
+      var ext = op.path.split('.').pop().toLowerCase();
+      var mimeType = ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+                     ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+                     'application/octet-stream';
+
+      var apiCall;
+      if (window.xtjProtectedFetch) {
+        apiCall = window.xtjProtectedFetch('/api/code/document/apply', {
+          method: 'POST',
+          body: JSON.stringify({
+            fileName: op.path.split('/').pop(),
+            mimeType: mimeType,
+            document_type: op.document_type || ext,
+            document_operations: op.document_operations || []
+          })
+        });
+      } else {
+        apiCall = fetch('/api/code/document/apply', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileName: op.path.split('/').pop(),
+            mimeType: mimeType,
+            document_type: op.document_type || ext,
+            document_operations: op.document_operations || []
+          })
+        });
+      }
+
+      return apiCall.then(function (resp) {
+        if (!resp.ok) {
+          return resp.json().then(function (data) {
+            throw new Error(data.error || '文档操作失败');
+          });
+        }
+        return resp.json();
+      }).then(function (data) {
+        if (!data.ok || !data.newFile) {
+          throw new Error(data.error || '文档操作返回数据无效');
+        }
+
+        // Decode returned base64 content
+        var newBinaryStr = atob(data.newFile);
+        var newBytes = new Uint8Array(newBinaryStr.length);
+        for (var i = 0; i < newBinaryStr.length; i++) {
+          newBytes[i] = newBinaryStr.charCodeAt(i);
+        }
+
+        // Save as new file (don't overwrite original)
+        var dotIdx = op.path.lastIndexOf('.');
+        var baseName = dotIdx >= 0 ? op.path.substring(0, dotIdx) : op.path;
+        var extName = dotIdx >= 0 ? op.path.substring(dotIdx) : '';
+        var newPath = baseName + '_AI\u4fee\u6539\u7248' + extName;
+
+        return fs.createBinaryFileByPath(newPath, newBytes.buffer).then(function () {
+          // Remove operation from pending
+          state.pendingOperations.splice(index, 1);
+
+          // Refresh file tree
+          refreshFileTree();
+
+          // Open the new file
+          openFile(newPath);
+
+          showToast('\u5df2\u4fdd\u5b58\u4e3a: ' + newPath.split('/').pop(), 'success');
+          state._applyLock = false;
+          return true;
+        });
+      });
+    }).catch(function (err) {
+      state._applyLock = false;
+      showToast('\u6587\u6863\u64cd\u4f5c\u5931\u8d25: ' + (err && err.message ? err.message : String(err)), 'error');
+      throw err;
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // applyOperation(index)
   // ──────────────────────────────────────────────
   function applyOperation(index) {
@@ -2222,6 +2358,11 @@
     var fs = window.__xtjCodeFS;
     if (!fs || !fs.writeFileByPath) {
       return Promise.reject(new Error('File system not available'));
+    }
+
+    // Document operation (DOCX/XLSX): delegate to applyDocumentOperation
+    if (op.type === 'document') {
+      return applyDocumentOperation(op, index);
     }
 
     if (op.type === 'create') {
