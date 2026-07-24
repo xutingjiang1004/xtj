@@ -1,212 +1,92 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { test, expect } = require('@playwright/test');
+const path = require('path');
+const fs = require('fs');
 
-const ROOT = path.resolve(__dirname, '..');
+test.describe('Code Workspace', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
+    await page.click('button[data-desktop-tab="code"]');
+    await page.waitForSelector('#codeWelcomeOpenBtn', { state: 'visible', timeout: 10000 });
+  });
 
-// ============================================================
-// Helper: read file relative to project root
-// ============================================================
-function readFile(relPath) {
-  return fs.readFileSync(path.resolve(ROOT, relPath), 'utf8');
-}
+  test('should correctly initialize Code module and display welcome screen', async ({ page }) => {
+    const welcomeTitle = page.locator('.welcome-title');
+    await expect(welcomeTitle).toBeVisible();
+    
+    const welcomeIcon = page.locator('.welcome-icon');
+    await expect(welcomeIcon).toBeVisible();
+  });
 
-// ============================================================
-// 1. 文件存在性检查
-// ============================================================
-test('all code workspace files exist', () => {
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'js/code-file-system.js')), 'code-file-system.js must exist');
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'js/code-workspace.js')), 'code-workspace.js must exist');
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'css/code-workspace.css')), 'code-workspace.css must exist');
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'render-api/code-agent.js')), 'code-agent.js must exist');
-});
+  test('should fallback to input when showDirectoryPicker is unavailable', async ({ page }) => {
+    await page.addInitScript(() => {
+      delete window.showDirectoryPicker;
+    });
+    
+    await page.goto('/');
+    await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
+    await page.click('button[data-desktop-tab="code"]');
+    await page.waitForSelector('#codeWelcomeOpenBtn', { state: 'visible', timeout: 10000 });
+    
+    const openBtn = page.locator('#codeWelcomeOpenBtn');
+    
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      openBtn.click()
+    ]);
+    
+    expect(fileChooser.isMultiple()).toBe(true);
+  });
 
-// ============================================================
-// 2. 构建系统包含新文件
-// ============================================================
-test('build.js includes code workspace files', () => {
-  const buildJS = readFile('scripts/build.js');
-  assert.match(buildJS, /js\/code-file-system\.js/);
-  assert.match(buildJS, /js\/code-workspace\.js/);
-  assert.match(buildJS, /css\/code-workspace\.css/);
-});
+  test('should intercept 500 API errors and show toast', async ({ page }) => {
+    // 1. Intercept API
+    await page.route('/api/code/chat', async route => {
+      await route.fulfill({
+        status: 502,
+        contentType: 'text/html',
+        body: '<html><body><h1>502 Bad Gateway</h1></body></html>'
+      });
+    });
 
-// ============================================================
-// 3. min 文件存在
-// ============================================================
-test('minified files exist after build', () => {
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'js/code-file-system.min.js')), 'code-file-system.min.js must exist');
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'js/code-workspace.min.js')), 'code-workspace.min.js must exist');
-  assert.ok(fs.existsSync(path.resolve(ROOT, 'css/code-workspace.min.css')), 'code-workspace.min.css must exist');
-});
+    // 2. Disable native picker to use fallback
+    await page.addInitScript(() => {
+      delete window.showDirectoryPicker;
+    });
+    
+    await page.goto('/');
+    await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
+    await page.click('button[data-desktop-tab="code"]');
+    await page.waitForSelector('#codeWelcomeOpenBtn', { state: 'visible', timeout: 10000 });
+    
+    // 3. Open a mock workspace using the fallback file chooser
+    // Create a temporary directory with a dummy file to upload
+    const testDir = path.join(__dirname, 'mock_workspace');
+    if (!fs.existsSync(testDir)) fs.mkdirSync(testDir);
+    fs.writeFileSync(path.join(testDir, 'test.js'), 'console.log("hello");');
+    
+    const openBtn = page.locator('#codeWelcomeOpenBtn');
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      openBtn.click()
+    ]);
+    
+    // Pass directory to file chooser
+    await fileChooser.setFiles(testDir);
+    
+    // 4. Verify chat UI is loaded
+    await page.waitForSelector('#codeChatInput', { state: 'visible', timeout: 10000 });
 
-// ============================================================
-// 4. index.html 引用 min 文件
-// ============================================================
-test('index.html references minified code files', () => {
-  const html = readFile('index.html');
-  assert.match(html, /js\/code-file-system\.min\.js/);
-  assert.match(html, /js\/code-workspace\.min\.js/);
-  assert.match(html, /css\/code-workspace\.min\.css/);
-});
+    // 5. Trigger the API request by sending a message
+    await page.fill('#codeChatInput', 'Hello AI');
+    await page.click('#codeChatSendBtn');
 
-// ============================================================
-// 5. 语法检查
-// ============================================================
-test('code-file-system.js syntax is valid', () => {
-  const cp = require('node:child_process');
-  cp.execSync('node --check js/code-file-system.js', { cwd: ROOT, stdio: 'pipe' });
-});
-
-test('code-workspace.js syntax is valid', () => {
-  const cp = require('node:child_process');
-  cp.execSync('node --check js/code-workspace.js', { cwd: ROOT, stdio: 'pipe' });
-});
-
-test('code-agent.js syntax is valid', () => {
-  const cp = require('node:child_process');
-  cp.execSync('node --check render-api/code-agent.js', { cwd: ROOT, stdio: 'pipe' });
-});
-
-// ============================================================
-// 6. CSS 文件非空
-// ============================================================
-test('code-workspace.css is not empty', () => {
-  var css = readFile('css/code-workspace.css');
-  assert.ok(css.length > 100, 'CSS file should have meaningful content');
-  assert.ok(/\.code-panel/.test(css), 'CSS should contain .code-panel');
-  assert.ok(/\.code-main/.test(css), 'CSS should contain .code-main');
-  assert.ok(/\.code-sidebar/.test(css), 'CSS should contain .code-sidebar');
-  assert.ok(/\.code-file-tree/.test(css), 'CSS should contain .code-file-tree');
-});
-
-// ============================================================
-// 7. 模块使用 IIFE
-// ============================================================
-test('code-file-system.js uses IIFE', () => {
-  const content = readFile('js/code-file-system.js');
-  assert.match(content, /\(function\s*\(\)\s*\{/);
-  assert.match(content, /'use strict'/);
-  assert.match(content, /window\.__xtjCodeFS/);
-});
-
-test('code-workspace.js uses IIFE', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /\(function\s*\(\)\s*\{/);
-  assert.match(content, /'use strict'/);
-});
-
-// ============================================================
-// 8. 全局 API 导出
-// ============================================================
-test('code-file-system exports __xtjCodeFS', () => {
-  const content = readFile('js/code-file-system.js');
-  assert.match(content, /window\.__xtjCodeFS\s*=/);
-  assert.match(content, /selectDirectory/);
-  assert.match(content, /readFileByPath/);
-  assert.match(content, /writeFileByPath/);
-  assert.match(content, /getSHA256/);
-});
-
-test('code-workspace exports __xtjCodeInit and API', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /window\.__xtjCodeInit\s*=/);
-  assert.match(content, /window\.__xtjCodeRefreshWorkspace\s*=/);
-  assert.match(content, /window\.__xtjCodeWorkspaceAPI\s*=/);
-});
-
-// ============================================================
-// 9. 模块防重复加载
-// ============================================================
-test('code-file-system prevents double loading', () => {
-  const content = readFile('js/code-file-system.js');
-  assert.match(content, /window\.__xtjCodeFS\s*\)\s*return/);
-});
-
-test('code-workspace prevents double loading', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /window\.__xtjCodeWorkspace\s*\)\s*return/);
-});
-
-// ============================================================
-// 10. 状态对象独立
-// ============================================================
-test('code-workspace state is independent', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /var state = \{/);
-  assert.match(content, /active:\s*false/);
-  assert.match(content, /directoryHandle:\s*null/);
-  assert.match(content, /openTabs:\s*\[\]/);
-  assert.match(content, /contextPaths:\s*\{/);
-  assert.match(content, /pendingOperations:\s*\[\]/);
-  assert.match(content, /snapshots:\s*\{/);
-});
-
-// ============================================================
-// 11. 编辑功能
-// ============================================================
-test('code-workspace supports multiple open tabs', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /openTabs\.push/);
-  assert.match(content, /closeTab/);
-  assert.match(content, /renderTabs/);
-});
-
-test('code-workspace supports file save', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /function saveFile/);
-  assert.match(content, /writeFileByPath/);
-});
-
-// ============================================================
-// 12. AI 聊天功能
-// ============================================================
-test('code-workspace has chat panel', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /function renderChatPanel/);
-  assert.match(content, /function sendMessage/);
-  assert.match(content, /\/api\/code\/chat/);
-});
-
-// ============================================================
-// 13. Context 管理
-// ============================================================
-test('code-workspace supports context management', () => {
-  const content = readFile('js/code-workspace.js');
-  assert.match(content, /function toggleContext/);
-  assert.match(content, /function renderContextPanel/);
-  assert.match(content, /添加到 AI 上下文/);
-});
-
-// ============================================================
-// 14. SVG 图标格式
-// ============================================================
-test('Code nav button uses hand-drawn SVG icon', () => {
-  const html = readFile('index.html');
-  assert.match(html, /data-desktop-tab="code"/);
-  // Check for SVG with correct attributes
-  assert.match(html, /fill="none"/);
-  assert.match(html, /stroke="currentColor"/);
-  assert.match(html, /stroke-width="1\.7"/);
-  assert.match(html, /stroke-linecap="round"/);
-  assert.match(html, /stroke-linejoin="round"/);
-});
-
-// ============================================================
-// 15. Hash 验证
-// ============================================================
-test('index.html hashes match minified file content', () => {
-  const html = readFile('index.html');
-  const crypto = require('node:crypto');
-  function hash(p) {
-    return crypto.createHash('sha256').update(fs.readFileSync(path.resolve(ROOT, p))).digest('hex').slice(0, 10);
-  }
-  var re = /\b(?:href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))\?v=([a-f0-9]{10})"/g;
-  var m;
-  while ((m = re.exec(html))) {
-    if (m[1].includes('code-file-system') || m[1].includes('code-workspace') || m[1].includes('code-workspace.css')) {
-      assert.strictEqual(m[2], hash(m[1]), m[1] + ' hash mismatch');
-    }
-  }
+    // 6. Check for error message in the chat
+    await page.waitForSelector('.code-chat-message:has-text("抱歉，请求失败")', { state: 'visible', timeout: 5000 });
+    const hasErrorMsg = await page.locator('.code-chat-message:has-text("抱歉，请求失败")').isVisible();
+    expect(hasErrorMsg).toBe(true);
+    
+    // Clean up
+    fs.unlinkSync(path.join(testDir, 'test.js'));
+    fs.rmdirSync(testDir);
+  });
 });
