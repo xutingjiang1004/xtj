@@ -55,11 +55,27 @@
 
   var PDF_EXTENSIONS = ['.pdf'];
 
+  var DOCUMENT_EXTENSIONS = [
+    '.docx', '.doc',
+    '.xlsx', '.xls',
+    '.pptx', '.ppt'
+  ];
+
+  var DOCUMENT_MIME_MAP = {
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.ppt': 'application/vnd.ms-powerpoint'
+  };
+
   // ──────────────────────────────────────────────
   // Internal state
   // ──────────────────────────────────────────────
   var _dirHandle = null;
   var _objectUrls = [];
+  var _fileLocks = {};
 
   // ──────────────────────────────────────────────
   // Helpers
@@ -83,6 +99,16 @@
   function isPdfExtension(name) {
     var ext = lowerExt(name);
     return PDF_EXTENSIONS.indexOf(ext) !== -1;
+  }
+
+  function isDocumentExtension(name) {
+    var ext = lowerExt(name);
+    return DOCUMENT_EXTENSIONS.indexOf(ext) !== -1;
+  }
+
+  function getDocumentMimeType(name) {
+    var ext = lowerExt(name);
+    return DOCUMENT_MIME_MAP[ext] || 'application/octet-stream';
   }
 
   function shouldSkip(name) {
@@ -153,23 +179,8 @@
           var req = store.get(HANDLE_KEY);
           req.onsuccess = function () {
             var dirHandle = req.result;
-            if (!dirHandle) {
-              db.close();
-              resolve(null);
-              return;
-            }
-            // Verify readwrite permission
-            dirHandle.queryPermission({ mode: 'readwrite' }).then(function (state) {
-              db.close();
-              if (state === 'granted') {
-                resolve(dirHandle);
-              } else {
-                resolve(null);
-              }
-            }).catch(function () {
-              db.close();
-              resolve(null);
-            });
+            db.close();
+            resolve(dirHandle || null);
           };
           req.onerror = function (e) {
             db.close();
@@ -295,6 +306,7 @@
     if (isTextExtension(fileName)) return 'text';
     if (isImageExtension(fileName)) return 'image';
     if (isPdfExtension(fileName)) return 'pdf';
+    if (isDocumentExtension(fileName)) return 'document';
     return 'binary';
   }
 
@@ -325,10 +337,56 @@
     return _dirHandle.name;
   }
 
-  function restoreWorkspace() {
+  function restoreWorkspace(options) {
     return restoreHandle().then(function (handle) {
-      _dirHandle = handle;
-      return handle;
+      if (!handle) return { status: 'missing', handle: null };
+
+      return handle.queryPermission({ mode: 'readwrite' }).then(function (permission) {
+        if (permission === 'granted') {
+          _dirHandle = handle;
+          return { status: 'granted', handle: handle };
+        }
+
+        if (permission === 'prompt' && options && options.requestPermission) {
+          return handle.requestPermission({ mode: 'readwrite' }).then(function (result) {
+            if (result === 'granted') {
+              _dirHandle = handle;
+              return { status: 'granted', handle: handle };
+            }
+            return { status: 'denied', handle: handle };
+          });
+        }
+
+        return {
+          status: permission === 'denied' ? 'denied' : 'prompt',
+          handle: handle
+        };
+      }).catch(function () {
+        return { status: 'error', handle: handle };
+      });
+    });
+  }
+
+  function clearWorkspaceRecord() {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        try {
+          var tx = db.transaction(STORE_NAME, 'readwrite');
+          var store = tx.objectStore(STORE_NAME);
+          var req = store.delete(HANDLE_KEY);
+          req.onsuccess = function () { resolve(); };
+          req.onerror = function (e) {
+            db.close();
+            reject(wrapError(e.target.error, 'IndexedDB.clearWorkspaceRecord'));
+          };
+          tx.oncomplete = function () { db.close(); };
+        } catch (err) {
+          db.close();
+          reject(wrapError(err, 'IndexedDB.clearWorkspaceRecord'));
+        }
+      });
+    }).then(function () {
+      try { localStorage.removeItem('xtj_code_workspace_name'); } catch (e) { /* ignore */ }
     });
   }
 
@@ -488,6 +546,22 @@
             }).catch(function (err) {
               reject(wrapError(err, 'readFile.arrayBuffer'));
             });
+          } else if (fileType === 'document') {
+            file.arrayBuffer().then(function (buffer) {
+              return getSHA256(buffer).then(function (sha256) {
+                resolve({
+                  content: buffer,
+                  sha256: sha256,
+                  size: file.size,
+                  type: fileType,
+                  name: fileName,
+                  mimeType: file.type || getDocumentMimeType(fileName),
+                  _arrayBuffer: buffer
+                });
+              });
+            }).catch(function (err) {
+              reject(wrapError(err, 'readFile.document'));
+            });
           } else {
             // binary
             file.arrayBuffer().then(function (buffer) {
@@ -640,6 +714,64 @@
       } catch (err) {
         reject(wrapError(err, 'writeFileByPath'));
       }
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // Document text extraction (calls backend API)
+  // ──────────────────────────────────────────────
+  function readDocumentText(arrayBuffer, fileName, mimeType) {
+    if (!arrayBuffer && !(arrayBuffer instanceof ArrayBuffer)) {
+      return Promise.reject(new Error('readDocumentText: arrayBuffer is required'));
+    }
+    if (!mimeType) {
+      mimeType = getDocumentMimeType(fileName || '');
+    }
+
+    var bytes = new Uint8Array(arrayBuffer);
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    var base64 = btoa(binary);
+
+    var apiCall;
+    if (window.xtjProtectedFetch) {
+      apiCall = window.xtjProtectedFetch('/api/code/document/extract', {
+        method: 'POST',
+        body: JSON.stringify({ file: base64, fileName: fileName || '', mimeType: mimeType })
+      });
+    } else {
+      apiCall = fetch('/api/code/document/extract', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: base64, fileName: fileName || '', mimeType: mimeType })
+      });
+    }
+
+    return apiCall.then(function (resp) {
+      if (!resp.ok) {
+        return resp.json().then(function (errData) {
+          throw new Error((errData && errData.error) || '文档提取失败: ' + resp.status);
+        }).catch(function () {
+          throw new Error('文档提取失败: ' + resp.status);
+        });
+      }
+      return resp.json();
+    }).then(function (data) {
+      if (!data.ok) {
+        throw new Error(data.error || '文档提取失败');
+      }
+      return {
+        text: data.text || '',
+        truncated: !!data.truncated,
+        textLength: data.textLength || 0,
+        metadata: data.metadata || {},
+        fileName: data.fileName || fileName,
+        mimeType: data.mimeType || mimeType,
+        ext: data.ext || ''
+      };
     });
   }
 
@@ -818,6 +950,8 @@
     TEXT_EXTENSIONS: TEXT_EXTENSIONS,
     IMAGE_EXTENSIONS: IMAGE_EXTENSIONS,
     PDF_EXTENSIONS: PDF_EXTENSIONS,
+    DOCUMENT_EXTENSIONS: DOCUMENT_EXTENSIONS,
+    DOCUMENT_MIME_MAP: DOCUMENT_MIME_MAP,
 
     // Directory operations
     selectDirectory: selectDirectory,
@@ -833,6 +967,11 @@
     getFileType: getFileType,
     readFile: readFile,
     readFileByPath: readFileByPath,
+
+    // Document extraction
+    readDocumentText: readDocumentText,
+    getDocumentMimeType: getDocumentMimeType,
+    isDocumentExtension: isDocumentExtension,
 
     // File existence check
     fileExistsByPath: fileExistsByPath,
@@ -861,7 +1000,8 @@
 
     // IndexedDB
     _storeHandle: storeHandle,
-    _restoreHandle: restoreHandle
+    _restoreHandle: restoreHandle,
+    clearWorkspaceRecord: clearWorkspaceRecord
   };
 
 })();
