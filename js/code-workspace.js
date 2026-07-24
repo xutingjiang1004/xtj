@@ -1739,20 +1739,12 @@
     }
 
     if (op.type === 'create') {
-      // Create operation: check file doesn't exist, then create
-      return fs.readFileByPath(op.path).then(function (result) {
-        // File exists — reject
-        throw new Error('文件 "' + op.path + '" 已存在，AI 创建操作不能覆盖已有文件');
-      }).catch(function (err) {
-        // If the error is "file exists", re-throw
-        if (err.message && err.message.indexOf('已存在') !== -1) throw err;
-        // File doesn't exist — proceed with create
-        // Save snapshot with existed=false
-        if (!state.snapshots[op.path]) {
-          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
-        }
-        return fs.writeFileByPath(op.path, op.new_content || '');
-      }).then(function (writeResult) {
+      // Create operation: use createFileByPath with proper existence check
+      // Save snapshot with existed=false before creating
+      if (!state.snapshots[op.path]) {
+        state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
+      }
+      return fs.createFileByPath(op.path, op.new_content || '').then(function (writeResult) {
         // Optionally open the new file in a tab
         for (var i = 0; i < state.openTabs.length; i++) {
           if (state.openTabs[i].path === op.path) {

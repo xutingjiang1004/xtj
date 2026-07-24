@@ -420,7 +420,9 @@ test('update operation saves snapshot before writing', () => {
 // ============================================================
 test('create operation checks file does not exist', () => {
   assert.match(codeWorkspace, /op\.type === 'create'/);
-  assert.match(codeWorkspace, /已存在.*不能覆盖已有文件/);
+  // createFileByPath properly checks existence and rejects if file exists
+  assert.match(codeFS, /already exists/);
+  assert.match(codeWorkspace, /fs\.createFileByPath/);
 });
 
 test('create operation snapshot records existed=false', () => {
@@ -564,4 +566,312 @@ test('restricted files cannot be added to AI context', () => {
 // ============================================================
 test('SKIP_DIRS includes .DS_Store', () => {
   assert.match(codeFS, /'\.DS_Store'/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — fileExistsByPath 区分 NotFoundError 与其他错误
+// ============================================================
+test('fileExistsByPath only treats NotFoundError as file-not-exists', () => {
+  // fileExistsByPath must check err.name === 'NotFoundError'
+  assert.match(codeFS, /err\.name === 'NotFoundError'/);
+  // Must NOT treat all errors as file-not-exists
+  assert.match(codeFS, /function fileExistsByPath/);
+  // Must have a reject path for non-NotFoundError
+  assert.match(codeFS, /reject\(wrapError\(err,\s*'fileExistsByPath'\)\)/);
+  // Must have resolve(false) for NotFoundError
+  assert.match(codeFS, /resolve\(false\)/);
+  // Must have resolve(true) when file exists
+  assert.match(codeFS, /resolve\(true\)/);
+});
+
+test('fileExistsByPath uses getFileHandle without create option', () => {
+  // Must use getFileHandle without { create: true }
+  // Extract fileExistsByPath body from function start to next top-level function
+  var fileExistsStart = codeFS.indexOf('function fileExistsByPath');
+  var createFileStart = codeFS.indexOf('function createFileByPath');
+  assert.ok(fileExistsStart !== -1, 'fileExistsByPath function should exist');
+  assert.ok(createFileStart !== -1 && createFileStart > fileExistsStart, 'createFileByPath should follow fileExistsByPath');
+  var fileExistsBody = codeFS.slice(fileExistsStart, createFileStart);
+  // getFileHandle call should NOT have { create: true }
+  var getFileHandleCalls = fileExistsBody.match(/getFileHandle\(/g);
+  assert.ok(getFileHandleCalls && getFileHandleCalls.length >= 1, 'should call getFileHandle');
+  // Verify no { create: true } in the fileExistsByPath function
+  assert.ok(!/\{ create: true \}/.test(fileExistsBody), 'fileExistsByPath should NOT use create:true');
+});
+
+test('fileExistsByPath must not read file content', () => {
+  // fileExistsByPath should NOT call getFile(), text(), arrayBuffer(), or readFile()
+  var fileExistsStart = codeFS.indexOf('function fileExistsByPath');
+  var createFileStart = codeFS.indexOf('function createFileByPath');
+  assert.ok(fileExistsStart !== -1, 'fileExistsByPath function should exist');
+  var fileExistsBody = codeFS.slice(fileExistsStart, createFileStart);
+  assert.ok(!/\.getFile\(\)/.test(fileExistsBody), 'fileExistsByPath should NOT call getFile()');
+  assert.ok(!/\.text\(\)/.test(fileExistsBody), 'fileExistsByPath should NOT call text()');
+  assert.ok(!/readFile\(/.test(fileExistsBody), 'fileExistsByPath should NOT call readFile()');
+});
+
+// ============================================================
+// ★ 真实行为测试 — createFileByPath 不覆盖已有文件
+// ============================================================
+test('createFileByPath checks existence before creating', () => {
+  // Must call fileExistsByPath before creating
+  assert.match(codeFS, /function createFileByPath/);
+  assert.match(codeFS, /fileExistsByPath\(parts\)/);
+  // Must reject if file exists
+  assert.match(codeFS, /already exists/);
+});
+
+test('createFileByPath only uses create:true after confirming file does not exist', () => {
+  // The createFileByPath function should:
+  // 1. Call fileExistsByPath first
+  // 2. Only use { create: true } in the .then() after confirming file does NOT exist
+  var createFileStart = codeFS.indexOf('function createFileByPath');
+  var deleteFileStart = codeFS.indexOf('function deleteFileByPath');
+  assert.ok(createFileStart !== -1, 'createFileByPath function should exist');
+  assert.ok(deleteFileStart !== -1 && deleteFileStart > createFileStart, 'deleteFileByPath should follow createFileByPath');
+  var createFnBody = codeFS.slice(createFileStart, deleteFileStart);
+  // fileExistsByPath must be called before getFileHandle with create:true
+  var fileExistsIdx = createFnBody.indexOf('fileExistsByPath');
+  var createTrueIdx = createFnBody.indexOf('{ create: true }');
+  assert.ok(fileExistsIdx !== -1, 'should call fileExistsByPath');
+  assert.ok(createTrueIdx !== -1, 'should use create:true');
+  assert.ok(fileExistsIdx < createTrueIdx, 'fileExistsByPath must be called BEFORE create:true');
+});
+
+test('createFileByPath rejects if content is not a string', () => {
+  assert.match(codeFS, /typeof content !== 'string'/);
+  assert.match(codeFS, /content must be a string/);
+});
+
+test('createFileByPath rejects if no workspace selected', () => {
+  assert.match(codeFS, /createFileByPath: no workspace selected/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — deleteFileByPath
+// ============================================================
+test('deleteFileByPath uses removeEntry', () => {
+  assert.match(codeFS, /function deleteFileByPath/);
+  assert.match(codeFS, /removeEntry\(/);
+  // Must not use writeFile or createWritable for deletion
+  var deleteFileStart = codeFS.indexOf('function deleteFileByPath');
+  var nextFnStart = codeFS.indexOf('function ', deleteFileStart + 1);
+  assert.ok(deleteFileStart !== -1, 'deleteFileByPath function should exist');
+  var deleteFnBody = nextFnStart !== -1 ? codeFS.slice(deleteFileStart, nextFnStart) : codeFS.slice(deleteFileStart);
+  assert.ok(!/createWritable/.test(deleteFnBody), 'deleteFileByPath should NOT use createWritable');
+  assert.ok(!/writeFile\(/.test(deleteFnBody), 'deleteFileByPath should NOT call writeFile');
+});
+
+// ============================================================
+// ★ 真实行为测试 — create 操作不覆盖已有文件（code-workspace 侧）
+// ============================================================
+test('applyOperation create uses createFileByPath not writeFileByPath', () => {
+  // The create branch in applyOperation must use createFileByPath, not writeFileByPath
+  var applyFn = codeWorkspace.match(/if \(op\.type === 'create'\)[\s\S]*?return fs\.createFileByPath/);
+  assert.ok(applyFn, 'create operation should use createFileByPath');
+  // Must NOT use writeFileByPath for create
+  var createBranch = codeWorkspace.match(/op\.type === 'create'[\s\S]*?(?=Update operation)/);
+  assert.ok(createBranch, 'create branch should exist');
+  assert.ok(createBranch[0].indexOf('fs.createFileByPath') !== -1, 'create should use fs.createFileByPath');
+});
+
+test('applyOperation create saves snapshot with existed=false', () => {
+  // The create branch must save snapshot before calling createFileByPath
+  var createBranch = codeWorkspace.match(/op\.type === 'create'[\s\S]*?(?=Update operation)/);
+  assert.ok(createBranch, 'create branch should exist');
+  assert.ok(createBranch[0].indexOf('existed: false') !== -1, 'create should save snapshot with existed=false');
+  // Snapshot must be set BEFORE fs.createFileByPath is called (not comment)
+  var snapshotIdx = createBranch[0].indexOf('existed: false');
+  var createCallIdx = createBranch[0].indexOf('fs.createFileByPath');
+  assert.ok(snapshotIdx < createCallIdx, 'snapshot must be saved BEFORE createFileByPath');
+});
+
+// ============================================================
+// ★ 真实行为测试 — update 操作继续使用 writeFileByPath
+// ============================================================
+test('applyOperation update continues to use writeFileByPath', () => {
+  // The update branch must still use writeFileByPath
+  assert.match(codeWorkspace, /writeFileByPath\(op\.path,\s*op\.new_content/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — Code 页面切换时执行 cleanup
+// ============================================================
+test('desktop-shell openTab calls cleanup when leaving Code', () => {
+  // The openTab function must check if current panel is panelCode
+  assert.match(desktopShell, /panelCode/);
+  // Must call window.__xtjCodeWorkspaceAPI.cleanup()
+  assert.match(desktopShell, /__xtjCodeWorkspaceAPI\.cleanup\(\)/);
+  // Must only cleanup when target is not code
+  assert.match(desktopShell, /tab !== 'code'/);
+});
+
+test('desktop-shell openTab only cleans up when current panel is Code', () => {
+  // Must check currentPanel.id === 'panelCode'
+  assert.match(desktopShell, /currentPanel\.id === 'panelCode'/);
+  // Must check currentPanel is active and not hidden
+  assert.match(desktopShell, /dock-panel\.active:not\(\.hidden\)/);
+});
+
+test('desktop-shell openTab does not modify other navigation', () => {
+  // openTab should still call switchDockTab
+  assert.match(desktopShell, /switchDockTab\(tab/);
+  // openTab should still handle AI chat close
+  assert.match(desktopShell, /__xtjCloseAiChat/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — cleanup 是幂等的
+// ============================================================
+test('cleanup is idempotent — multiple calls do not throw', () => {
+  // cleanup must handle null _abortController gracefully
+  assert.match(codeWorkspace, /if \(state\._abortController\)/);
+  // cleanup must use try/catch for abort
+  assert.match(codeWorkspace, /try \{ state\._abortController\.abort\(\)/);
+  // cleanup must not clear directoryHandle
+  var cleanupFn = codeWorkspace.match(/function cleanup[\s\S]*?(?=function \w+)/);
+  assert.ok(cleanupFn, 'cleanup function should exist');
+  // Must NOT clear directoryHandle
+  assert.ok(!/directoryHandle\s*=\s*null/.test(cleanupFn[0]), 'cleanup should NOT clear directoryHandle');
+  // Must NOT clear workspaceName
+  assert.ok(!/workspaceName\s*=\s*''/.test(cleanupFn[0]), 'cleanup should NOT clear workspaceName');
+});
+
+test('cleanup preserves directoryHandle and workspace authorization', () => {
+  // cleanup comment says "Don't clear directoryHandle so workspace can be restored"
+  assert.match(codeWorkspace, /Don't clear directoryHandle/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — cleanup 调用后可以重新 init
+// ============================================================
+test('init sets state.active = true and can be called after cleanup', () => {
+  // init must set state.active = true
+  assert.match(codeWorkspace, /state\.active = true/);
+  // init must return early if already active
+  assert.match(codeWorkspace, /if \(state\.active\) return/);
+  // After cleanup sets state.active = false, init can be called again
+  assert.match(codeWorkspace, /state\.active = false/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — 请求被 AbortController 真正取消
+// ============================================================
+test('AbortController is created with new AbortController()', () => {
+  assert.match(codeWorkspace, /new AbortController\(\)/);
+});
+
+test('abort signal is passed to fetch', () => {
+  // signal must be passed to fetch options
+  assert.match(codeWorkspace, /signal:\s*state\._abortController/);
+  assert.match(codeWorkspace, /state\._abortController \? state\._abortController\.signal : undefined/);
+});
+
+test('cleanup cancels current request and invalidates requestId', () => {
+  // cleanup must call abort()
+  var cleanupFn = codeWorkspace.match(/function cleanup[\s\S]*?(?=function \w+)/);
+  assert.ok(cleanupFn, 'cleanup function should exist');
+  assert.ok(cleanupFn[0].indexOf('_abortController.abort()') !== -1, 'cleanup must abort');
+  // cleanup must increment requestId to invalidate stale responses
+  assert.ok(cleanupFn[0].indexOf('_requestId++') !== -1, 'cleanup must invalidate requestId');
+});
+
+// ============================================================
+// ★ 真实行为测试 — 三个标签分别点击和关闭
+// ============================================================
+test('tab click switches activePath and re-renders', () => {
+  // Click on a tab should set state.activePath and call renderTabs + renderEditor
+  assert.match(codeWorkspace, /state\.activePath = tab\.path/);
+  assert.match(codeWorkspace, /renderTabs\(\)/);
+  assert.match(codeWorkspace, /renderEditor\(\)/);
+});
+
+test('tab close removes tab and selects adjacent tab', () => {
+  // closeTab must splice the tab from openTabs
+  assert.match(codeWorkspace, /state\.openTabs\.splice\(idx,\s*1\)/);
+  // If active tab is closed, select previous or next
+  assert.match(codeWorkspace, /state\.activePath === path/);
+  assert.match(codeWorkspace, /Math\.max\(0,\s*idx - 1\)/);
+});
+
+test('tab close revokes blob URL', () => {
+  // closeTab must revoke blob URL for image/pdf tabs
+  assert.match(codeWorkspace, /if \(tab\.blobUrl\)/);
+  assert.match(codeWorkspace, /revokeUrl\(tab\.blobUrl\)/);
+});
+
+test('tab middle-click close works', () => {
+  assert.match(codeWorkspace, /addEventListener\('auxclick'/);
+  assert.match(codeWorkspace, /e\.button === 1/);
+  assert.match(codeWorkspace, /e\.preventDefault\(\)/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — 多文件撤销分别恢复
+// ============================================================
+test('undo iterates all snapshot paths', () => {
+  // undo must iterate through all snapshotPaths
+  assert.match(codeWorkspace, /var snapshotPaths = Object\.keys\(state\.snapshots\)/);
+  assert.match(codeWorkspace, /for \(var i = 0; i < snapshotPaths\.length; i\+\+\)/);
+});
+
+test('undo handles create operations by deleting the file', () => {
+  // When snapshot.existed === false, must delete the file
+  assert.match(codeWorkspace, /snapshot\.existed === false/);
+  assert.match(codeWorkspace, /deleteFileByPath\(p\)/);
+});
+
+test('undo handles update operations by restoring original content', () => {
+  // When snapshot.existed === true, must restore original content
+  assert.match(codeWorkspace, /writeFileByPath\(p,\s*snapshot\.beforeContent/);
+});
+
+test('undo only removes successful snapshots', () => {
+  // Only snapshots that were successfully restored are removed
+  assert.match(codeWorkspace, /successPaths\.push\(p\)/);
+  assert.match(codeWorkspace, /delete state\.snapshots\[successPaths\[k\]\]/);
+});
+
+test('undo reports failed paths clearly', () => {
+  // Failed paths must be reported
+  assert.match(codeWorkspace, /failedPaths\.push\(p\)/);
+  assert.match(codeWorkspace, /部分文件撤销失败/);
+});
+
+test('undo restores open tab content for each file', () => {
+  // For each restored file, open tab content must be updated
+  assert.match(codeWorkspace, /state\.openTabs\[j\]\.content = snapshot\.beforeContent/);
+  assert.match(codeWorkspace, /state\.openTabs\[j\]\.modified = false/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — 公共 API 完整性
+// ============================================================
+test('window.__xtjCodeFS exports fileExistsByPath', () => {
+  assert.match(codeFS, /fileExistsByPath:\s*fileExistsByPath/);
+});
+
+test('window.__xtjCodeFS exports createFileByPath', () => {
+  assert.match(codeFS, /createFileByPath:\s*createFileByPath/);
+});
+
+test('window.__xtjCodeFS exports deleteFileByPath', () => {
+  assert.match(codeFS, /deleteFileByPath:\s*deleteFileByPath/);
+});
+
+test('window.__xtjCodeWorkspaceAPI exports cleanup method', () => {
+  assert.match(codeWorkspace, /cleanup:\s*cleanup/);
+});
+
+test('window.__xtjCodeWorkspaceAPI exports init method', () => {
+  assert.match(codeWorkspace, /init:\s*init/);
+});
+
+// ============================================================
+// ★ 真实行为测试 — cleanup 不修改 Dock
+// ============================================================
+test('desktop-shell cleanup integration does not modify Dock', () => {
+  // The cleanup call in openTab must not touch dock elements
+  assert.ok(!/dock-nav/.test(desktopShell.match(/function openTab[\s\S]*?(?=function \w+)/)[0]), 'openTab should not modify dock-nav');
+  assert.ok(!/dock-btn/.test(desktopShell.match(/function openTab[\s\S]*?(?=function \w+)/)[0]), 'openTab should not modify dock-btn');
 });

@@ -642,6 +642,156 @@
   }
 
   // ──────────────────────────────────────────────
+  // File existence check (no content read)
+  // ──────────────────────────────────────────────
+  function fileExistsByPath(pathParts) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('fileExistsByPath: no workspace selected'));
+    }
+    var parts = Array.isArray(pathParts) ? pathParts : validatePath(pathParts);
+    if (parts.length === 0) {
+      return Promise.reject(new Error('fileExistsByPath: path must contain at least a file name'));
+    }
+
+    return new Promise(function (resolve, reject) {
+      try {
+        var current = _dirHandle;
+        var index = 0;
+
+        function traverse() {
+          if (index >= parts.length - 1) {
+            // Check if file exists using getFileHandle without create
+            current.getFileHandle(parts[index]).then(function () {
+              resolve(true);
+            }).catch(function (err) {
+              // Only NotFoundError means the file does NOT exist
+              if (err && err.name === 'NotFoundError') {
+                resolve(false);
+              } else {
+                // SecurityError, NotAllowedError, TypeMismatchError,
+                // AbortError, UnknownError, etc. must be propagated
+                reject(wrapError(err, 'fileExistsByPath'));
+              }
+            });
+            return;
+          }
+          current.getDirectoryHandle(parts[index]).then(function (dirHandle) {
+            current = dirHandle;
+            index++;
+            traverse();
+          }).catch(function (err) {
+            if (err && err.name === 'NotFoundError') {
+              // Intermediate directory doesn't exist, so file can't exist
+              resolve(false);
+            } else {
+              reject(wrapError(err, 'fileExistsByPath'));
+            }
+          });
+        }
+        traverse();
+      } catch (err) {
+        reject(wrapError(err, 'fileExistsByPath'));
+      }
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // Safe file creation (never overwrites)
+  // ──────────────────────────────────────────────
+  function createFileByPath(pathParts, content) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('createFileByPath: no workspace selected'));
+    }
+    var parts = Array.isArray(pathParts) ? pathParts : validatePath(pathParts);
+    if (parts.length === 0) {
+      return Promise.reject(new Error('createFileByPath: path must contain at least a file name'));
+    }
+    if (typeof content !== 'string') {
+      return Promise.reject(new Error('createFileByPath: content must be a string'));
+    }
+
+    // First check that the file does NOT exist
+    return fileExistsByPath(parts).then(function (exists) {
+      if (exists) {
+        return Promise.reject(new Error('createFileByPath: file "' + parts.join('/') + '" already exists'));
+      }
+
+      // File does not exist — safe to create with { create: true }
+      return new Promise(function (resolve, reject) {
+        try {
+          var current = _dirHandle;
+          var index = 0;
+
+          function traverse() {
+            if (index >= parts.length - 1) {
+              // Create the file
+              current.getFileHandle(parts[index], { create: true }).then(function (fileHandle) {
+                return writeFile(fileHandle, content);
+              }).then(resolve).catch(function (err) {
+                reject(wrapError(err, 'createFileByPath'));
+              });
+              return;
+            }
+            // Ensure intermediate directories exist
+            current.getDirectoryHandle(parts[index], { create: true }).then(function (dirHandle) {
+              current = dirHandle;
+              index++;
+              traverse();
+            }).catch(function (err) {
+              reject(wrapError(err, 'createFileByPath'));
+            });
+          }
+          traverse();
+        } catch (err) {
+          reject(wrapError(err, 'createFileByPath'));
+        }
+      });
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // File deletion
+  // ──────────────────────────────────────────────
+  function deleteFileByPath(pathParts) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('deleteFileByPath: no workspace selected'));
+    }
+    var parts = Array.isArray(pathParts) ? pathParts : validatePath(pathParts);
+    if (parts.length === 0) {
+      return Promise.reject(new Error('deleteFileByPath: path must contain at least a file name'));
+    }
+
+    return new Promise(function (resolve, reject) {
+      try {
+        var current = _dirHandle;
+        var index = 0;
+
+        function traverse() {
+          if (index >= parts.length - 1) {
+            // Remove the file
+            current.removeEntry(parts[index]).then(function () {
+              resolve(true);
+            }).catch(function (err) {
+              reject(wrapError(err, 'deleteFileByPath'));
+            });
+            return;
+          }
+          current.getDirectoryHandle(parts[index]).then(function (dirHandle) {
+            current = dirHandle;
+            index++;
+            traverse();
+          }).catch(function (err) {
+            reject(wrapError(err, 'deleteFileByPath'));
+          });
+        }
+        traverse();
+      } catch (err) {
+        reject(wrapError(err, 'deleteFileByPath'));
+      }
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // Public API
   // ──────────────────────────────────────────────
   window.__xtjCodeFS = {
@@ -667,9 +817,18 @@
     readFile: readFile,
     readFileByPath: readFileByPath,
 
+    // File existence check
+    fileExistsByPath: fileExistsByPath,
+
     // File writing
     writeFile: writeFile,
     writeFileByPath: writeFileByPath,
+
+    // Safe file creation
+    createFileByPath: createFileByPath,
+
+    // File deletion
+    deleteFileByPath: deleteFileByPath,
 
     // Path utilities
     validatePath: validatePath,
