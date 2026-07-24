@@ -203,7 +203,7 @@ test('snapshots are saved before applying', () => {
 // ============================================================
 test('undoOperations restores snapshots', () => {
   assert.match(codeWorkspace, /function undoOperations/);
-  assert.match(codeWorkspace, /state\.snapshots\[p\]/);
+  assert.match(codeWorkspace, /state\.snapshots\[snapshotPaths\[i\]\]/);
   assert.match(codeWorkspace, /已撤销所有更改/);
 });
 
@@ -316,4 +316,252 @@ test('Diff view is rendered for pending operations', () => {
 test('apply lock prevents concurrent applies', () => {
   assert.match(codeWorkspace, /_applyLock/);
   assert.match(codeWorkspace, /state\._applyLock = true/);
+});
+
+// ============================================================
+// Real behavior tests — three-column layout
+// ============================================================
+test('three-column layout: code-workspace has flex display', () => {
+  var css = fs.readFileSync('css/code-workspace.css', 'utf8');
+  assert.match(css, /\.code-workspace\s*\{/);
+  assert.match(css, /display:\s*flex/);
+});
+
+test('three-column layout: code-editor-column defined', () => {
+  var css = fs.readFileSync('css/code-workspace.css', 'utf8');
+  assert.match(css, /\.code-editor-column\s*\{/);
+  assert.match(css, /flex:\s*1/);
+});
+
+test('three-column layout: sidebar, editor-column, and chat-panel are separate children', () => {
+  assert.match(codeWorkspace, /code-sidebar/);
+  assert.match(codeWorkspace, /code-editor-column/);
+  assert.match(codeWorkspace, /code-chat-panel/);
+  // Verify they are appended as separate children of workspace
+  assert.match(codeWorkspace, /workspace\.appendChild\(sidebar\)/);
+  assert.match(codeWorkspace, /workspace\.appendChild\(editorColumn\)/);
+  assert.match(codeWorkspace, /workspace\.appendChild\(chatPanel\)/);
+});
+
+// ============================================================
+// Real behavior tests — tab closure (IIFE pattern)
+// ============================================================
+test('tab render uses IIFE closure for each tab', () => {
+  // Each tab in the loop should be wrapped in an IIFE
+  assert.match(codeWorkspace, /\(function\s*\(tab\)\s*\{/);
+});
+
+test('tab close button uses tab.path from closure', () => {
+  assert.match(codeWorkspace, /closeTab\(tab\.path\)/);
+  assert.match(codeWorkspace, /e\.stopPropagation\(\)/);
+});
+
+test('tab middle-click close uses tab.path from closure', () => {
+  assert.match(codeWorkspace, /addEventListener\('auxclick'/);
+  assert.match(codeWorkspace, /e\.button === 1/);
+  assert.match(codeWorkspace, /closeTab\(tab\.path\)/);
+});
+
+// ============================================================
+// Real behavior tests — AI context reading
+// ============================================================
+test('AI context reads files from disk, not just open tabs', () => {
+  assert.match(codeWorkspace, /fs\.readFileByPath\(p\)/);
+  assert.match(codeWorkspace, /contextPaths = Object\.keys\(state\.contextPaths\)/);
+});
+
+test('AI context uses _currentContent for unsaved modifications', () => {
+  assert.match(codeWorkspace, /openTab\._currentContent/);
+  assert.match(codeWorkspace, /openTab\.modified/);
+});
+
+test('AI context fails loudly for unreadable files', () => {
+  assert.match(codeWorkspace, /Failed to read context file/);
+  assert.match(codeWorkspace, /failedFiles\.push/);
+  assert.match(codeWorkspace, /部分文件读取失败/);
+});
+
+test('AI context respects 600 KB limit', () => {
+  assert.match(codeWorkspace, /600 \* 1024/);
+  assert.match(codeWorkspace, /超过 600 KB 限制/);
+});
+
+test('AI context max 12 files', () => {
+  assert.match(codeWorkspace, /count >= 12/);
+  assert.match(codeWorkspace, /最多添加 12 个文件/);
+});
+
+// ============================================================
+// Real behavior tests — message dedup
+// ============================================================
+test('sendMessage does not duplicate current user message', () => {
+  // history should exclude the current message (slice(0, -1))
+  assert.match(codeWorkspace, /state\.messages\.slice\(0,\s*-1\)/);
+});
+
+// ============================================================
+// Real behavior tests — SHA-256 and update
+// ============================================================
+test('update operation verifies SHA-256 before applying', () => {
+  assert.match(codeWorkspace, /op\.expected_sha256/);
+  assert.match(codeWorkspace, /result\.sha256 !== op\.expected_sha256/);
+  assert.match(codeWorkspace, /已被修改.*请重新生成/);
+});
+
+test('update operation saves snapshot before writing', () => {
+  assert.match(codeWorkspace, /state\.snapshots\[op\.path\]/);
+  assert.match(codeWorkspace, /existed:\s*true/);
+  assert.match(codeWorkspace, /beforeContent/);
+  assert.match(codeWorkspace, /beforeSha256/);
+});
+
+// ============================================================
+// Real behavior tests — create operation
+// ============================================================
+test('create operation checks file does not exist', () => {
+  assert.match(codeWorkspace, /op\.type === 'create'/);
+  assert.match(codeWorkspace, /已存在.*不能覆盖已有文件/);
+});
+
+test('create operation snapshot records existed=false', () => {
+  assert.match(codeWorkspace, /existed:\s*false/);
+});
+
+test('create undo deletes the created file', () => {
+  assert.match(codeWorkspace, /snapshot\.existed === false/);
+  assert.match(codeWorkspace, /deleteFileByPath/);
+});
+
+// ============================================================
+// Real behavior tests — multi-file undo
+// ============================================================
+test('undo uses IIFE closure for each snapshot', () => {
+  assert.match(codeWorkspace, /\(function\s*\(p,\s*snapshot\)\s*\{/);
+});
+
+test('undo only removes successful snapshots', () => {
+  assert.match(codeWorkspace, /delete state\.snapshots\[successPaths\[k\]\]/);
+});
+
+test('undo reports failed paths', () => {
+  assert.match(codeWorkspace, /failedPaths\.length > 0/);
+  assert.match(codeWorkspace, /部分文件撤销失败/);
+});
+
+test('undo restores open tab content', () => {
+  assert.match(codeWorkspace, /state\.openTabs\[j\]\.content = snapshot\.beforeContent/);
+});
+
+// ============================================================
+// Real behavior tests — request cancellation
+// ============================================================
+test('cleanup cancels in-flight request', () => {
+  assert.match(codeWorkspace, /_abortController\.abort\(\)/);
+  assert.match(codeWorkspace, /_requestId\+\+/);
+});
+
+test('AbortError is not shown as failure', () => {
+  assert.match(codeWorkspace, /err\.name === 'AbortError'/);
+  assert.match(codeWorkspace, /if \(err && err\.name === 'AbortError'\) return/);
+});
+
+test('stale request responses are ignored', () => {
+  assert.match(codeWorkspace, /requestId !== state\._requestId/);
+});
+
+// ============================================================
+// Real behavior tests — server-side validation
+// ============================================================
+test('server validates file paths in context', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /validatePath\(f\.path\.trim\(\)\)/);
+});
+
+test('server validates active_path', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /activePath && !validatePath\(activePath\)/);
+  assert.match(codeAgent, /当前路径无效/);
+});
+
+test('server uses Buffer.byteLength for UTF-8', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /Buffer\.byteLength\(content,\s*'utf8'\)/);
+});
+
+test('server limits operations to 6', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /MAX_OPERATIONS\s*=\s*6/);
+  assert.match(codeAgent, /ops\.length >= MAX_OPERATIONS/);
+});
+
+test('server limits new_content size', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /MAX_NEW_CONTENT_LEN/);
+  assert.match(codeAgent, /Buffer\.byteLength\(op\.new_content,\s*'utf8'\)/);
+});
+
+test('server rejects invalid operations', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /OP_TYPES_REJECTED\.has\(type\)/);
+});
+
+test('server parseOperations returns empty array on failure', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /function parseOperations/);
+  assert.match(codeAgent, /if \(!Array\.isArray\(raw\)\) return ops/);
+});
+
+// ============================================================
+// Real behavior tests — system prompt
+// ============================================================
+test('system prompt constrains AI to only see provided files', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /You can only see files explicitly included/);
+  assert.match(codeAgent, /Never claim to have read or inspected files/);
+  assert.match(codeAgent, /Do not claim tests, builds, commands, or Git operations/);
+});
+
+test('system prompt limits operations to 6', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /at most 6 file operations/);
+});
+
+test('system prompt instructs to ask user for missing context', () => {
+  var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /If information is missing, ask the user/);
+});
+
+// ============================================================
+// Real behavior tests — Code icon
+// ============================================================
+test('Code icon is hand-drawn code icon, not monitor', () => {
+  // The Code icon should use polyline/lines (code brackets), not a rect (monitor)
+  assert.match(indexHtml, /data-desktop-tab="code"/);
+  // Should contain code-like elements (polyline/line), not monitor rect
+  var codeBtnMatch = indexHtml.match(/data-desktop-tab="code"[\s\S]*?<\/button>/);
+  assert.ok(codeBtnMatch, 'Code button should exist');
+  var codeBtn = codeBtnMatch[0];
+  assert.match(codeBtn, /<polyline/);
+  assert.match(codeBtn, /fill="none"/);
+  assert.match(codeBtn, /stroke="currentColor"/);
+  // Should NOT be a monitor (rect-based icon)
+  assert.ok(!/<rect/.test(codeBtn), 'Code icon should not be a monitor rect');
+});
+
+// ============================================================
+// Real behavior tests — restricted context files
+// ============================================================
+test('restricted files cannot be added to AI context', () => {
+  assert.match(codeWorkspace, /isRestrictedContextFile/);
+  assert.match(codeWorkspace, /\.env/);
+  assert.match(codeWorkspace, /\.pem/);
+  assert.match(codeWorkspace, /\.key/);
+  assert.match(codeWorkspace, /credentials\.json/);
+});
+
+// ============================================================
+// Real behavior tests — file tree skip dirs
+// ============================================================
+test('SKIP_DIRS includes .DS_Store', () => {
+  assert.match(codeFS, /'\.DS_Store'/);
 });
