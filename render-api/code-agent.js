@@ -12,6 +12,8 @@ const MAX_HISTORY_ITEMS = 20;
 const MAX_FILES = 12;
 const MAX_FILES_TOTAL_CONTENT = 600 * 1024; // 600 KB
 const MAX_SINGLE_FILE_CONTENT = 1 * 1024 * 1024; // 1 MB
+const MAX_OPERATIONS = 6;
+const MAX_NEW_CONTENT_LEN = 1 * 1024 * 1024; // 1 MB per new_content
 const DEEPSEEK_TIMEOUT_MS = 120000; // 120 秒超时
 const OP_TYPES_ALLOWED = new Set(['update', 'create']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
@@ -57,10 +59,12 @@ function validateFiles(files) {
     var f = files[i];
     if (!f || typeof f !== 'object') continue;
     if (typeof f.path !== 'string' || !f.path.trim()) continue;
+    if (!validatePath(f.path.trim())) continue;
     if (typeof f.content !== 'string') continue;
     var content = f.content;
-    if (content.length > MAX_SINGLE_FILE_CONTENT) return { ok: false, error: '单个文件内容不能超过 1 MB' };
-    totalContent += content.length;
+    var contentBytes = Buffer.byteLength(content, 'utf8');
+    if (contentBytes > MAX_SINGLE_FILE_CONTENT) return { ok: false, error: '单个文件内容不能超过 1 MB' };
+    totalContent += contentBytes;
     if (totalContent > MAX_FILES_TOTAL_CONTENT) return { ok: false, error: '文件总内容不能超过 600 KB' };
     var item = {
       path: f.path.trim(),
@@ -102,6 +106,7 @@ function parseOperations(raw) {
   var ops = [];
   if (!Array.isArray(raw)) return ops;
   for (var i = 0; i < raw.length; i++) {
+    if (ops.length >= MAX_OPERATIONS) break;
     var op = raw[i];
     if (!op || typeof op !== 'object') continue;
     var type = (typeof op.type === 'string' ? op.type.trim().toLowerCase() : '');
@@ -111,6 +116,8 @@ function parseOperations(raw) {
     if (!validatePath(op.path)) continue;
     if (type === 'update' && !isValidSha256(op.expected_sha256)) continue;
     if (typeof op.new_content !== 'string') continue;
+    // new_content size limit
+    if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
     if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
     ops.push({
       type: type,
@@ -153,7 +160,10 @@ function extractJsonFromText(text) {
 function buildSystemPrompt() {
   return [
     'You are an expert coding assistant integrated into a code workspace IDE.',
-    'You have access to the user\'s project files and can suggest code modifications.',
+    'You can only see files explicitly included in this request.',
+    'Never claim to have read or inspected files that were not provided.',
+    'Do not claim tests, builds, commands, or Git operations were executed.',
+    'Do not modify unrelated files.',
     '',
     'When asked to modify code, you MUST respond with TWO parts:',
     '1. FIRST: Your reasoning and explanation in plain text. Explain what you\'re doing and why.',
@@ -168,11 +178,14 @@ function buildSystemPrompt() {
     '  - new_content: the complete new file content as a string',
     '',
     'IMPORTANT RULES:',
+    '- Only return update or create operations.',
+    '- Return at most 6 file operations.',
     '- For "update" operations, new_content must contain the ENTIRE file, not just the changed parts.',
     '- For "create" operations, new_content must contain the complete new file.',
     '- Only use "update" and "create" types. Do NOT use delete, rename, execute, terminal, or git.',
     '- Paths must be relative (no absolute paths, no ".." traversal).',
     '- expected_sha256 must be exactly the 64-character hex hash of the file content sent to you.',
+    '- If information is missing, ask the user to add the required file to context.',
     '- If you are not making code changes, do NOT include the JSON block — just provide your explanation.',
     '- Always provide your reasoning and explanation FIRST, before the JSON block.',
     '',
@@ -247,8 +260,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
   app.post('/api/code/chat', rateLimit(60000, 20), authenticateUser, async function(req, res) {
     var aborted = false;
-    req.on('aborted', function() { aborted = true; });
-    res.on('close', function() { if (!res.writableEnded) aborted = true; });
+    var deepSeekController = null;
+    req.on('aborted', function() {
+      aborted = true;
+      if (deepSeekController) { try { deepSeekController.abort(); } catch (_) {} }
+    });
+    res.on('close', function() {
+      if (!res.writableEnded) {
+        aborted = true;
+        if (deepSeekController) { try { deepSeekController.abort(); } catch (_) {} }
+      }
+    });
 
     try {
       var userName = req.userName;
@@ -270,10 +292,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!wsResult.ok) return res.status(400).json({ ok: false, error: wsResult.error });
       var workspaceName = wsResult.value;
 
-      // active_path: optional string
+      // active_path: optional string, must pass path validation
       var apResult = validateString(body.active_path, 500, '当前路径');
       if (!apResult.ok) return res.status(400).json({ ok: false, error: apResult.error });
       var activePath = apResult.value;
+      if (activePath && !validatePath(activePath)) {
+        return res.status(400).json({ ok: false, error: '当前路径无效' });
+      }
 
       // history: optional array, max 20 items
       var histResult = validateHistory(body.history);
@@ -307,8 +332,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var model = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 
-      var controller = new AbortController();
-      var timer = setTimeout(function() { controller.abort(); }, DEEPSEEK_TIMEOUT_MS);
+      deepSeekController = new AbortController();
+      var timer = setTimeout(function() { deepSeekController.abort(); }, DEEPSEEK_TIMEOUT_MS);
 
       var apiResp;
       try {
@@ -327,19 +352,23 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             temperature: 0.3,
             max_tokens: 8192
           }),
-          signal: controller.signal
+          signal: deepSeekController.signal
         });
       } catch (err) {
-        clearTimeout(timer);
-        if (aborted) return;
         if (err.name === 'AbortError') {
-          console.error('[code-agent] DeepSeek API timeout');
-          return res.status(500).json({ ok: false, error: 'AI 服务响应超时' });
+          if (aborted) {
+            // Client disconnected — not a timeout
+            console.error('[code-agent] Request cancelled by client');
+          } else {
+            console.error('[code-agent] DeepSeek API timeout');
+          }
+          return;
         }
         console.error('[code-agent] DeepSeek API fetch error:', err.message || err);
         return res.status(500).json({ ok: false, error: 'AI 服务请求失败' });
+      } finally {
+        clearTimeout(timer);
       }
-      clearTimeout(timer);
 
       if (aborted) return;
 
