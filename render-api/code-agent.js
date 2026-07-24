@@ -381,11 +381,7 @@ async function extractDocumentText(buffer, mimeType, fileName) {
     } else if (mimeType === 'text/csv' || mimeType === 'text/plain') {
       text = buffer.toString('utf-8');
     } else {
-      try {
-        text = buffer.toString('utf-8').slice(0, 50000);
-      } catch (e) {
-        text = '';
-      }
+      return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（仅支持 PDF、DOCX、XLSX、CSV、TXT）' };
     }
   } catch (e) {
     console.error('[code-agent] Document extraction error:', e && e.message ? e.message : e);
