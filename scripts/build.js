@@ -45,7 +45,9 @@ function updateHtmlAssetVersions(htmlFile) {
     return next;
   });
   if (changed) {
-    fs.writeFileSync(htmlPath, html);
+    html = html.replace(/\r\n?/g, '\n');
+    if (!html.endsWith('\n')) html += '\n';
+    fs.writeFileSync(htmlPath, html, 'utf8');
     console.log('[HASH] ' + htmlFile + ' local CSS/JS query strings updated');
   } else {
     console.log('[HASH] ' + htmlFile + ' local CSS/JS query strings already current');
@@ -130,20 +132,35 @@ function minifyJS(filePath, optional) {
     return false;
   }
   const outPath = fullPath.replace(/\.js$/, '.min.js');
+  var normalizedInputPath = null;
   const statsBefore = fs.statSync(fullPath).size;
   console.log(`[MINIFY] ${filePath} (${(statsBefore / 1024).toFixed(0)}KB)`);
   try {
+    var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\r\n?/g, '\n');
+    var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-js-'));
+    normalizedInputPath = path.join(tempDir, path.basename(fullPath));
+    fs.writeFileSync(normalizedInputPath, normalizedSource, 'utf8');
     execSync(
-      cliCommand(TERSER, [fullPath, '--compress', '--mangle', '--output', outPath]),
+      cliCommand(TERSER, [normalizedInputPath, '--compress', '--mangle', '--output', outPath]),
       { stdio: 'pipe', timeout: 30000 }
     );
-    const statsAfter = fs.statSync(outPath).size;
-    const saved = ((statsBefore - statsAfter) / statsBefore * 100).toFixed(0);
-    console.log(`  => ${(statsAfter / 1024).toFixed(0)}KB (压缩 ${saved}%)`);
+    if (fs.existsSync(outPath)) {
+      var outRaw = fs.readFileSync(outPath, 'utf8');
+      var outNormalized = outRaw.replace(/\r\n?/g, '\n');
+      if (!outNormalized.endsWith('\n')) outNormalized += '\n';
+      fs.writeFileSync(outPath, outNormalized, 'utf8');
+      const statsAfter = fs.statSync(outPath).size;
+      const saved = ((statsBefore - statsAfter) / statsBefore * 100).toFixed(0);
+      console.log(`  => ${(statsAfter / 1024).toFixed(0)}KB (压缩 ${saved}%)`);
+    }
     return true;
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
     return false;
+  } finally {
+    if (normalizedInputPath) {
+      try { fs.rmSync(path.dirname(normalizedInputPath), { recursive: true, force: true }); } catch (_) {}
+    }
   }
 }
 
@@ -187,6 +204,10 @@ function minifyCSS(filePath, optional) {
       );
     }
     if (fs.existsSync(outPath)) {
+      var cssRaw = fs.readFileSync(outPath, 'utf8');
+      var cssNormalized = cssRaw.replace(/\r\n?/g, '\n');
+      if (!cssNormalized.endsWith('\n')) cssNormalized += '\n';
+      fs.writeFileSync(outPath, cssNormalized, 'utf8');
       const statsAfter = fs.statSync(outPath).size;
       const saved = ((statsBefore - statsAfter) / statsBefore * 100).toFixed(0);
       console.log(`  => ${(statsAfter / 1024).toFixed(0)}KB (压缩 ${saved}%)`);
