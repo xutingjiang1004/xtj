@@ -3902,10 +3902,25 @@ async function processCatReplyJob(job) {
       return;
     }
 
-    // 检查是否已有 AI 回复
-    var existingReply = await buildSummaryQuery('comments', 'id', null, null, 'created_at').eq('parent_comment_id', job.source_comment_id).eq('generated_by_ai', true).maybeSingle();
-    if (existingReply.data) {
-      await supabase.from('ai_comment_reply_jobs').update({ status: 'completed', generated_reply: 'duplicate', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+    // 检查是否已有 AI 回复（★ 直接使用 Supabase 查询，不再调用不存在的 buildSummaryQuery）
+    var existingReplyRes = await supabase.from('comments')
+      .select('id, post_id, user_name, content, created_at, parent_comment_id, generated_by_ai')
+      .eq('parent_comment_id', String(job.source_comment_id))
+      .eq('generated_by_ai', true)
+      .maybeSingle();
+
+    if (existingReplyRes.error) {
+      throw new Error('existing AI reply lookup failed: ' + String(existingReplyRes.error.message || 'unknown error'));
+    }
+
+    if (existingReplyRes.data) {
+      await supabase.from('ai_comment_reply_jobs').update({
+        status: 'completed',
+        generated_reply: existingReplyRes.data.content || 'duplicate',
+        error_message: null,
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('id', job.id);
       return;
     }
 
@@ -7369,8 +7384,8 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
 
     if (liked) {
-      var existingLike = await buildSummaryQuery('likes', 'id', null, null, 'created_at').eq('post_id', postId)
-        .eq('user_name', req.userName).limit(1).maybeSingle();
+      var existingLike = await supabase.from('likes').select('id')
+        .eq('post_id', postId).eq('user_name', req.userName).limit(1).maybeSingle();
       if (existingLike.error) return res.status(500).json({ error: sanitizeError(existingLike.error), code: 'like_failed' });
       if (!existingLike.data) {
         var { error: likeError } = await supabase.from('likes').insert([{
@@ -8256,8 +8271,8 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     // 检查用户是否在任意表中存在（不仅 AUTH_MARKER）
     var existsChecks = await Promise.all([
       supabase.from('posts').select('id').eq('user_name', userName).limit(1),
-      buildSummaryQuery('likes', 'id', null, null, 'created_at').eq('user_name', userName).limit(1),
-      buildSummaryQuery('comments', 'id', null, null, 'created_at').eq('user_name', userName).limit(1),
+      supabase.from('likes').select('id').eq('user_name', userName).limit(1),
+      supabase.from('comments').select('id').eq('user_name', userName).limit(1),
       supabase.from('bans').select('id').eq('user_name', userName).order('banned_at', { ascending: false }).limit(1),
       supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
       supabase.from('blacklist').select('id').eq('user_name', userName).limit(1)
