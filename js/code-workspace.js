@@ -117,7 +117,7 @@
     if (typeof path !== 'string' || path.trim() === '') {
       throw new Error('Path must be a non-empty string');
     }
-    if (path.indexOf('..') !== -1) {
+    if (path.split('/').some(function(part) { return part === '..'; })) {
       throw new Error('Path traversal is not allowed');
     }
     if (/^[a-zA-Z]:[\\/]/.test(path) || path.charAt(0) === '/') {
@@ -210,6 +210,9 @@
     }
     if (state._monacoEditor) {
       try {
+        if (window.monaco) {
+          monaco.editor.getModels().forEach(function(m) { m.dispose(); });
+        }
         state._monacoEditor.dispose();
       } catch (e) { /* ignore */ }
       state._monacoEditor = null;
@@ -923,9 +926,6 @@
         if (count < 12 && !isRestrictedContextFile(path)) {
           state.contextPaths[path] = true;
           renderContextPanel();
-          if (typeof renderChatContext === 'function') {
-            renderChatContext();
-          }
         }
       }
     }).catch(function (err) {
@@ -1088,7 +1088,8 @@
 
       try {
         var language = getFileLanguage(tab.name);
-        var model = monaco.editor.createModel(tab.content || '', language);
+        var content = tab._currentContent !== undefined ? tab._currentContent : (tab.content || '');
+        var model = monaco.editor.createModel(content, language);
         var editor = monaco.editor.create(container, {
           model: model,
           theme: getMonacoTheme(),
@@ -1156,7 +1157,7 @@
 
     var textarea = document.createElement('textarea');
     textarea.className = 'code-textarea';
-    textarea.value = tab.content || '';
+    textarea.value = tab._currentContent !== undefined ? tab._currentContent : (tab.content || '');
     textarea.spellcheck = false;
     textarea.setAttribute('placeholder', '// 文件内容...');
     container.appendChild(textarea);
@@ -1175,6 +1176,7 @@
     textarea.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
+        e.stopPropagation();
         saveFile(tab.path);
       }
     });
@@ -1243,7 +1245,7 @@
     img.alt = fileNameFromPath(path);
     img.title = fileNameFromPath(path);
     img.onerror = function () {
-      preview.innerHTML = '<div class="pdf-placeholder"><span class="pdf-icon">🖼️</span><p>图片加载失败</p></div>';
+      preview.innerHTML = '<div class="image-placeholder"><span class="image-icon">🖼️</span><p>图片加载失败</p></div>';
     };
 
     preview.appendChild(img);
@@ -1263,9 +1265,13 @@
     var iframe = document.createElement('iframe');
     iframe.src = url;
     iframe.title = fileNameFromPath(path);
-    iframe.onerror = function () {
+    // iframe onerror doesn't trigger for network errors
+    // We can use fetch to verify if it's a valid blob/url
+    fetch(url, { method: 'HEAD' }).then(function(res) {
+      if (!res.ok) throw new Error('Not ok');
+    }).catch(function() {
       preview.innerHTML = '<div class="pdf-placeholder"><span class="pdf-icon">📕</span><p>PDF 预览不可用</p></div>';
-    };
+    });
 
     preview.appendChild(iframe);
     _dom.editorArea.appendChild(preview);
@@ -1514,6 +1520,26 @@
     scrollChatToBottom();
   }
 
+  function parseSimpleMarkdown(text) {
+    if (typeof window.marked !== 'undefined') {
+      try {
+        return window.marked.parse(text);
+      } catch (e) { /* ignore */ }
+    }
+    // Escape HTML first
+    var html = escapeHTML(text);
+    // Code blocks
+    html = html.replace(/```[a-z]*\n([\s\S]*?)```/gi, '<pre><code>$1</code></pre>');
+    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
   function appendChatMessage(msg, container) {
     if (!container) return;
     var el = document.createElement('div');
@@ -1523,7 +1549,7 @@
     var avatar = '<div class="msg-avatar">' + escapeHTML(avatarText) + '</div>';
 
     var body = '<div class="msg-body">';
-    body += '<div class="msg-content">' + escapeHTML(msg.content) + '</div>';
+    body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(msg.content) + '</div>';
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
@@ -1576,10 +1602,18 @@
     input.style.height = 'auto';
 
     // Re-render chat
-    renderChatPanel();
-
-    // Show typing indicator
-    showTypingIndicator();
+    try {
+      renderChatPanel();
+      // Show typing indicator
+      showTypingIndicator();
+    } catch (e) {
+      state.sending = false;
+      var curInput = document.getElementById('codeChatInput');
+      if (curInput) curInput.disabled = false;
+      var curSendBtn = document.getElementById('codeChatSendBtn');
+      if (curSendBtn) curSendBtn.disabled = false;
+      return;
+    }
 
     // Final defense: clean up invalid context paths before sending
     sanitizeContextPaths();
@@ -1678,8 +1712,10 @@
         if (totalBytes + contentBytes > 600 * 1024) {
           showToast('AI 上下文文件总内容超过 600 KB 限制，请减少上下文文件', 'error');
           state.sending = false;
-          if (input) input.disabled = false;
-          if (sendBtn) sendBtn.disabled = false;
+          var curInput = document.getElementById('codeChatInput');
+          if (curInput) curInput.disabled = false;
+          var curSendBtn = document.getElementById('codeChatSendBtn');
+          if (curSendBtn) curSendBtn.disabled = false;
           removeTypingIndicator();
           return;
         }
@@ -1720,8 +1756,10 @@
       state.messages.push({ role: 'assistant', content: '抱歉，请求失败: ' + errMsg, time: timeStr });
       renderChatPanel();
       state.sending = false;
-      if (input) input.disabled = false;
-      if (sendBtn) sendBtn.disabled = false;
+      var curInput = document.getElementById('codeChatInput');
+      if (curInput) curInput.disabled = false;
+      var curSendBtn = document.getElementById('codeChatSendBtn');
+      if (curSendBtn) curSendBtn.disabled = false;
     });
   }
 

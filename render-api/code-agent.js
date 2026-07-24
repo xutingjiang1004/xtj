@@ -19,7 +19,7 @@ const OP_TYPES_ALLOWED = new Set(['update', 'create']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
 const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
 const JSON_BLOCK_RE = /```json\s*([\s\S]*?)\s*```/i;
-const JSON_OBJECT_RE = /\{[\s\S]*"operations"[\s\S]*\}/;
+const JSON_OBJECT_RE = /"operations"\s*:/;
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -69,7 +69,8 @@ function validateFiles(files) {
       if (contentBytes > MAX_SINGLE_FILE_CONTENT) {
         var truncateStr = '\n...[Content truncated due to size limits]...';
         // Rough truncation based on bytes
-        content = content.substring(0, MAX_SINGLE_FILE_CONTENT - 1000) + truncateStr;
+        var buffer = Buffer.from(content, 'utf8');
+        content = buffer.subarray(0, MAX_SINGLE_FILE_CONTENT - 1000).toString('utf8') + truncateStr;
         contentBytes = Buffer.byteLength(content, 'utf8');
       }
       
@@ -125,7 +126,7 @@ function isValidSha256(hex) {
     if (!isValidOperationType(type)) continue;
     if (!validatePath(op.path)) continue;
     if (type === 'update' && !isValidSha256(op.expected_sha256)) continue;
-    if (typeof op.new_content !== 'string') continue;
+    if (typeof op.new_content !== 'string' || op.new_content === '') continue;
     // new_content size limit
     if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
     if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
@@ -150,14 +151,17 @@ function extractJsonFromText(text) {
   var objMatch = text.match(JSON_OBJECT_RE);
   if (objMatch) {
     try {
-      var candidate = objMatch[0];
-      // Try to find balanced braces
-      var depth = 0, start = objMatch.index;
-      for (var i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++;
-        if (text[i] === '}') depth--;
-        if (depth === 0) {
-          try { return JSON.parse(text.slice(start, i + 1)); } catch (_) { break; }
+      // Find the nearest opening brace before "operations"
+      var start = text.lastIndexOf('{', objMatch.index);
+      if (start >= 0) {
+        // Try to find balanced braces
+        var depth = 0;
+        for (var i = start; i < text.length; i++) {
+          if (text[i] === '{') depth++;
+          if (text[i] === '}') depth--;
+          if (depth === 0) {
+            try { return JSON.parse(text.slice(start, i + 1)); } catch (_) { break; }
+          }
         }
       }
     } catch (_) {}
@@ -340,7 +344,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
       }
 
-      var model = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+      var model = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-coder';
 
       deepSeekController = new AbortController();
       var timer = setTimeout(function() { deepSeekController.abort(); }, DEEPSEEK_TIMEOUT_MS);
@@ -387,7 +391,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         try { errText = await apiResp.text(); } catch (_) {}
         console.error('[code-agent] DeepSeek API error ' + apiResp.status + ':', errText.slice(0, 500));
         if (apiResp.status === 429) {
-          return res.status(500).json({ ok: false, error: 'AI 服务繁忙，请稍后重试' });
+          return res.status(429).json({ ok: false, error: 'AI 服务繁忙，请稍后重试' });
         }
         return res.status(500).json({ ok: false, error: 'AI 服务返回错误' });
       }
@@ -449,12 +453,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
 
       // ── Build response ─────────────────────────────────────────────
+      var tokenUsage = apiData.usage || null;
+      if (tokenUsage) {
+        console.log('[code-agent] API token usage:', tokenUsage);
+      }
+
       return res.json({
         ok: true,
-        reply: reply,
-        operations: operations
+        reply: reply.trim(),
+        operations: operations,
+        usage: tokenUsage
       });
-
     } catch (err) {
       console.error('[code-agent] Unhandled error:', err && err.message ? err.message : err);
       return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '操作失败' });
