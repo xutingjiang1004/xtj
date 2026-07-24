@@ -170,8 +170,9 @@ test('validatePath rejects .. traversal', () => {
   assert.match(codeFS, /path traversal is not allowed/);
 });
 
-test('code-workspace also validates paths', () => {
-  assert.match(codeWorkspace, /path\.indexOf\('\.\.'\) !== -1/);
+test('code-workspace also validates paths with per-segment check', () => {
+  assert.match(codeWorkspace, /part === '\.\.'/);
+  assert.match(codeWorkspace, /path\.split\('\/'\)\.some/);
   assert.match(codeWorkspace, /Path traversal is not allowed/);
 });
 
@@ -518,7 +519,7 @@ test('server parseOperations returns empty array on failure', () => {
 // ============================================================
 test('system prompt constrains AI to only see provided files', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /You can only see files explicitly included/);
+  assert.match(codeAgent, /You can see the files that are included/);
   assert.match(codeAgent, /Never claim to have read or inspected files/);
   assert.match(codeAgent, /Do not claim tests, builds, commands, or Git operations/);
 });

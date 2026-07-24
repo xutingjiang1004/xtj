@@ -153,7 +153,10 @@
       '.png': 'file-img', '.jpg': 'file-img', '.jpeg': 'file-img',
       '.gif': 'file-img', '.webp': 'file-img', '.svg': 'file-img',
       '.bmp': 'file-img', '.ico': 'file-img',
-      '.pdf': 'file-pdf'
+      '.pdf': 'file-pdf',
+      '.docx': 'file-doc', '.doc': 'file-doc',
+      '.xlsx': 'file-xls', '.xls': 'file-xls',
+      '.csv': 'file-csv'
     };
     return map[ext] || 'file-icon';
   }
@@ -167,6 +170,12 @@
   function fileIsPdf(fileName) {
     if (!fileName) return false;
     return fileName.slice(fileName.lastIndexOf('.')).toLowerCase() === '.pdf';
+  }
+
+  function fileIsDocument(fileName) {
+    if (!fileName) return false;
+    var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+    return ['.docx', '.doc', '.xlsx', '.xls'].indexOf(ext) !== -1;
   }
 
   // ──────────────────────────────────────────────
@@ -284,9 +293,9 @@
       return;
     }
 
-    // Try to restore previous workspace
-    tryRestoreWorkspace().then(function () {
-      if (state.directoryHandle) {
+    // Try to restore previous workspace (auto-load, no permission prompt)
+    tryRestoreWorkspace().then(function (result) {
+      if (result && result.status === 'granted') {
         renderWorkspace();
       } else {
         renderWelcome();
@@ -298,16 +307,16 @@
 
   function tryRestoreWorkspace() {
     if (!window.__xtjCodeFS || !window.__xtjCodeFS.restoreWorkspace) {
-      return Promise.resolve();
+      return Promise.resolve({ status: 'missing' });
     }
-    return window.__xtjCodeFS.restoreWorkspace().then(function (handle) {
-      if (handle) {
-        state.directoryHandle = handle;
-        state.workspaceName = handle.name;
+    return window.__xtjCodeFS.restoreWorkspace({ requestPermission: false }).then(function (result) {
+      if (result.status === 'granted') {
+        state.directoryHandle = result.handle;
+        state.workspaceName = result.handle.name;
       }
+      return result;
     }).catch(function () {
-      // Ignore restore errors
-      state.directoryHandle = null;
+      return { status: 'error' };
     });
   }
 
@@ -345,7 +354,7 @@
       '<p class="welcome-desc">选择一个本地文件夹作为工作区，浏览和编辑文件，或使用 AI 助手进行代码操作。</p>' +
       '<div class="welcome-actions">' +
         '<button class="folder-picker-btn-large" id="codeWelcomeOpenBtn">' +
-          '<span class="folder-icon">📂</span> 打开文件夹' +
+          '<span class="folder-icon">📂</span> 重新选择文件夹' +
         '</button>' +
       '</div>' +
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
@@ -360,29 +369,79 @@
       });
     }
 
-    // Check if there's a stored handle path
+    // Check if there's a stored handle path — show restore section
+    var stored = null;
     try {
-      var stored = localStorage.getItem('xtj_code_workspace_name');
-      if (stored) {
-        var recentEl = document.getElementById('codeWelcomeRecent');
-        if (recentEl) {
-          recentEl.style.display = 'block';
-          recentEl.innerHTML = '上次打开的工作区：<span class="recent-path" id="codeRecentPath">' + escapeHTML(stored) + '</span>';
-          var recentPath = document.getElementById('codeRecentPath');
-          if (recentPath) {
-            recentPath.addEventListener('click', function () {
-              tryRestoreWorkspace().then(function () {
-                if (state.directoryHandle) {
-                  renderWorkspace();
-                } else {
-                  showToast('无法恢复上次的工作区，请重新选择文件夹', 'error');
-                }
-              });
-            });
-          }
-        }
-      }
+      stored = localStorage.getItem('xtj_code_workspace_name');
     } catch (e) { /* ignore */ }
+
+    var recentEl = document.getElementById('codeWelcomeRecent');
+    if (recentEl && stored) {
+      recentEl.style.display = 'block';
+
+      var restoreBtn = document.createElement('button');
+      restoreBtn.className = 'folder-picker-btn-large';
+      restoreBtn.id = 'codeWelcomeRestoreBtn';
+      restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+      restoreBtn.title = '上次打开: ' + stored;
+
+      var statusText = document.createElement('span');
+      statusText.className = 'welcome-status';
+      statusText.id = 'codeWelcomeStatus';
+
+      recentEl.appendChild(restoreBtn);
+      recentEl.appendChild(statusText);
+
+      restoreBtn.addEventListener('click', function () {
+        restoreBtn.disabled = true;
+        restoreBtn.innerHTML = '<span class="folder-icon">⏳</span> 正在恢复...';
+        statusText.textContent = '';
+        statusText.className = 'welcome-status';
+
+        if (!window.__xtjCodeFS || !window.__xtjCodeFS.restoreWorkspace) {
+          statusText.textContent = '文件系统 API 不可用';
+          statusText.className = 'welcome-status error';
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          return;
+        }
+
+        window.__xtjCodeFS.restoreWorkspace({ requestPermission: true }).then(function (result) {
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+
+          if (result.status === 'granted') {
+            state.directoryHandle = result.handle;
+            state.workspaceName = result.handle.name;
+            try {
+              localStorage.setItem('xtj_code_workspace_name', result.handle.name);
+            } catch (e) { /* ignore */ }
+            renderWorkspace();
+          } else if (result.status === 'missing') {
+            statusText.textContent = '工作区记录已失效，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+            if (window.__xtjCodeFS.clearWorkspaceRecord) {
+              window.__xtjCodeFS.clearWorkspaceRecord().catch(function () {});
+            }
+            recentEl.style.display = 'none';
+          } else if (result.status === 'denied') {
+            statusText.textContent = '您拒绝了访问权限，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+          } else if (result.status === 'prompt') {
+            statusText.textContent = '需要授权才能恢复工作区，请点击按钮重试';
+            statusText.className = 'welcome-status warning';
+          } else {
+            statusText.textContent = '恢复失败，请重新选择文件夹';
+            statusText.className = 'welcome-status error';
+          }
+        }).catch(function (err) {
+          restoreBtn.disabled = false;
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          statusText.textContent = '恢复失败: ' + (err && err.message ? err.message : String(err));
+          statusText.className = 'welcome-status error';
+        });
+      });
+    }
   }
 
   function selectAndOpenWorkspace() {
@@ -1055,6 +1114,8 @@
       renderImagePreview(tab.path, tab.blobUrl);
     } else if (tab.type === 'pdf') {
       renderPdfPreview(tab.path, tab.blobUrl);
+    } else if (tab.type === 'document') {
+      renderDocumentPreview(tab);
     } else {
       // Text editor
       renderTextEditor(tab);
@@ -1278,6 +1339,74 @@
   }
 
   // ──────────────────────────────────────────────
+  // renderDocumentPreview(tab)
+  // ──────────────────────────────────────────────
+  function renderDocumentPreview(tab) {
+    if (!_dom.editorArea) return;
+
+    var preview = document.createElement('div');
+    preview.className = 'code-preview-area code-document-preview';
+    preview.id = 'codePreviewArea';
+
+    // Loading state
+    preview.innerHTML = '<div class="doc-preview-loading"><span class="doc-loading-spinner"></span><p>正在提取文档内容...</p></div>';
+    _dom.editorArea.appendChild(preview);
+
+    // Extract text via backend API
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.readDocumentText) {
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取功能不可用</p></div>';
+      return;
+    }
+
+    // Read the file again to get ArrayBuffer
+    fs.readFileByPath(tab.path).then(function (result) {
+      if (!result || result.type !== 'document') {
+        preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>无法读取文档文件</p></div>';
+        return;
+      }
+
+      return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
+    }).then(function (docData) {
+      if (!docData) return;
+
+      var docIcon = '📄';
+      var docLabel = '文档';
+      var ext = (docData.ext || '').toLowerCase();
+      if (ext === '.docx' || ext === '.doc') { docIcon = '📝'; docLabel = 'Word 文档'; }
+      else if (ext === '.xlsx' || ext === '.xls') { docIcon = '📊'; docLabel = 'Excel 表格'; }
+      else if (ext === '.pptx' || ext === '.ppt') { docIcon = '📽️'; docLabel = 'PPT 演示'; }
+
+      var html = '<div class="doc-preview-header">';
+      html += '<span class="doc-preview-icon">' + docIcon + '</span>';
+      html += '<div class="doc-preview-info">';
+      html += '<span class="doc-preview-label">' + docLabel + '</span>';
+      html += '<span class="doc-preview-name">' + escapeHTML(tab.name) + '</span>';
+      if (docData.metadata) {
+        if (docData.metadata.pages) html += '<span class="doc-preview-meta">' + docData.metadata.pages + ' 页</span>';
+        if (docData.metadata.sheetCount) html += '<span class="doc-preview-meta">' + docData.metadata.sheetCount + ' 个工作表</span>';
+      }
+      html += '</div></div>';
+
+      html += '<div class="doc-preview-content">';
+      if (docData.truncated) {
+        html += '<div class="doc-preview-truncated">⚠ 内容过长，已截断显示前 100KB</div>';
+      }
+      html += '<pre class="doc-preview-text">' + escapeHTML(docData.text) + '</pre>';
+      html += '</div>';
+
+      preview.innerHTML = html;
+
+      // Store extracted text in tab for AI context
+      tab._extractedText = docData.text;
+      tab._extractedTruncated = docData.truncated;
+      tab._extractedMetadata = docData.metadata;
+    }).catch(function (err) {
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML((err && err.message) || '未知错误') + '</p></div>';
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // toggleContext(path)
   // ──────────────────────────────────────────────
   function toggleContext(path) {
@@ -1311,6 +1440,7 @@
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
+        // document type is allowed — will be extracted at send time
       } else {
         // File not open — check by extension
         var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
@@ -1319,6 +1449,7 @@
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
+        // document extensions are allowed — will be extracted at send time
       }
 
       state.contextPaths[path] = true;
@@ -1351,6 +1482,7 @@
             if (t.type === 'image' || t.type === 'pdf' || t.type === 'binary') {
               shouldRemove = true;
             }
+            // document type is allowed — will be extracted at send time
             break;
           }
         }
@@ -1637,7 +1769,7 @@
             }
 
             // If file is an image or PDF, skip for context
-            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf')) {
+            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf' || openTab.type === 'binary')) {
               resolve(null);
               return;
             }
@@ -1655,7 +1787,48 @@
             }
 
             fs.readFileByPath(p).then(function (result) {
-              if (!result || result.type !== 'text') {
+              if (!result) {
+                resolve(null);
+                return;
+              }
+
+              // Handle document type: extract text via backend API
+              if (result.type === 'document') {
+                if (!fs.readDocumentText) {
+                  resolve(null);
+                  return;
+                }
+                fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType).then(function (docData) {
+                  if (!docData || !docData.text) {
+                    resolve(null);
+                    return;
+                  }
+                  var docContent = '【文档: ' + p + '】\n' + docData.text;
+                  if (docData.truncated) {
+                    docContent += '\n\n[注意: 文档内容过长，已截断]';
+                  }
+                  var encoder = new TextEncoder();
+                  var contentBytes = encoder.encode(docContent).length;
+                  if (contentBytes > 500 * 1024) {
+                    // Truncate to 500KB for AI context
+                    var truncated = docContent.slice(0, 500 * 1024);
+                    docContent = truncated + '\n\n[文档内容过长，已截断至 500KB]';
+                  }
+                  resolve({
+                    path: p,
+                    language: 'document',
+                    content: docContent,
+                    sha256: result.sha256 || ''
+                  });
+                }).catch(function (err) {
+                  console.error('[code-workspace] Document extraction failed:', p, err);
+                  resolve({ path: p, error: '文档提取失败: ' + ((err && err.message) || '未知错误') });
+                });
+                return;
+              }
+
+              // For text files
+              if (result.type !== 'text') {
                 resolve(null);
                 return;
               }
@@ -1941,17 +2114,49 @@
         }
       }
 
-      var newContent = op.new_content || '';
-      var diffLines = computeDiff(originalContent, newContent);
+      if (op.type === 'document') {
+        // Document operation: show operations list instead of text diff
+        var docInfo = document.createElement('div');
+        docInfo.style.padding = '12px 14px';
+        docInfo.style.cssText = 'padding:12px 14px;color:var(--cw-text);font-size:13px;';
 
-      for (var k = 0; k < diffLines.length; k++) {
-        var line = diffLines[k];
-        var lineEl = document.createElement('div');
-        lineEl.className = 'code-diff-line ' + line.type;
-        lineEl.innerHTML =
-          '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
-          '<span class="line-content">' + escapeHTML(line.text) + '</span>';
-        before.appendChild(lineEl);
+        var ext = (op.path || '').split('.').pop().toLowerCase();
+        var docType = ext === 'docx' ? 'Word' : ext === 'xlsx' ? 'Excel' : '文档';
+        docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
+          escapeHTML(docType + ' 修改') + '</div>' +
+          '<div style="margin-bottom:6px;">' +
+          '  将另存为: <strong>' + escapeHTML(op.path.replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
+          '</div>';
+
+        if (op.document_operations && op.document_operations.length > 0) {
+          var opsList = document.createElement('ul');
+          opsList.style.cssText = 'margin:8px 0;padding-left:20px;list-style:disc;';
+          for (var di = 0; di < op.document_operations.length; di++) {
+            var dop = op.document_operations[di];
+            var li = document.createElement('li');
+            li.style.cssText = 'margin:4px 0;line-height:1.5;';
+            li.textContent = (dop.type || '修改') + ': ' + (dop.description || JSON.stringify(dop));
+            opsList.appendChild(li);
+          }
+          docInfo.appendChild(opsList);
+        } else {
+          docInfo.innerHTML += '<div style="color:var(--cw-text-muted);">无详细操作描述</div>';
+        }
+
+        before.appendChild(docInfo);
+      } else {
+        var newContent = op.new_content || '';
+        var diffLines = computeDiff(originalContent, newContent);
+
+        for (var k = 0; k < diffLines.length; k++) {
+          var line = diffLines[k];
+          var lineEl = document.createElement('div');
+          lineEl.className = 'code-diff-line ' + line.type;
+          lineEl.innerHTML =
+            '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
+            '<span class="line-content">' + escapeHTML(line.text) + '</span>';
+          before.appendChild(lineEl);
+        }
       }
 
       diffBody.appendChild(before);
@@ -2033,6 +2238,132 @@
   }
 
   // ──────────────────────────────────────────────
+  // applyDocumentOperation(op, index)
+  // 由 applyOperation 调用，不自行管理 _applyLock
+  // 批量锁由 applyAllOperations 统一管理
+  // ──────────────────────────────────────────────
+  function applyDocumentOperation(op, index) {
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.readFileByPath || !fs.writeBinaryFileByPath) {
+      return Promise.reject(new Error('File system not available'));
+    }
+
+    // Read original file as ArrayBuffer
+    return fs.readFileByPath(op.path).then(function (result) {
+      if (!result || !result.content) {
+        throw new Error('无法读取文件');
+      }
+
+      // result.content is an ArrayBuffer for document files.
+      // Convert ArrayBuffer to base64 for sending to the backend API.
+      var buffer = result.content;
+      var bytes = new Uint8Array(buffer);
+      var binaryStr = '';
+      for (var i = 0; i < bytes.length; i++) {
+        binaryStr += String.fromCharCode(bytes[i]);
+      }
+      var base64 = btoa(binaryStr);
+
+      // Call backend API to apply document operations, sending the file content
+      var ext = op.path.split('.').pop().toLowerCase();
+      var mimeType = ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+                     ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+                     'application/octet-stream';
+
+      var apiCall;
+      if (window.xtjProtectedFetch) {
+        apiCall = window.xtjProtectedFetch('/api/code/document/apply', {
+          method: 'POST',
+          body: JSON.stringify({
+            file: base64,
+            fileName: op.path.split('/').pop(),
+            mimeType: mimeType,
+            document_type: op.document_type || ext,
+            operations: op.document_operations || []
+          })
+        });
+      } else {
+        apiCall = fetch('/api/code/document/apply', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file: base64,
+            fileName: op.path.split('/').pop(),
+            mimeType: mimeType,
+            document_type: op.document_type || ext,
+            operations: op.document_operations || []
+          })
+        });
+      }
+
+      return apiCall.then(function (resp) {
+        if (!resp.ok) {
+          return resp.json().then(function (data) {
+            throw new Error(data.error || '文档操作失败');
+          });
+        }
+        return resp.json();
+      }).then(function (data) {
+        if (!data.ok || !data.newFile) {
+          throw new Error(data.error || '文档操作返回数据无效');
+        }
+
+        // Use backend-returned file info. Default to original ext if not provided.
+        var newFileName = data.fileName || op.path.split('/').pop();
+        var newMimeType = data.newMimeType || '';
+        var newExt = newFileName.split('.').pop().toLowerCase();
+
+        // Validate MIME vs extension before saving
+        if (newExt === 'docx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          throw new Error('DOCX 文件格式无效，暂不支持此操作');
+        }
+        if (newExt === 'xlsx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+          throw new Error('XLSX 文件格式无效');
+        }
+        if (newMimeType === 'text/plain' && newExt !== 'txt') {
+          throw new Error('text/plain 只能保存为 .txt 文件');
+        }
+        if (newMimeType !== newMimeType) {} // noop
+
+        // DOCX is read-only for now
+        var origExt = op.path.split('.').pop().toLowerCase();
+        if (origExt === 'docx') {
+          throw new Error('DOCX 暂仅支持读取，真实 DOCX 写入功能尚未完成');
+        }
+
+        // Decode returned base64 content
+        var newBinaryStr = atob(data.newFile);
+        var newBytes = new Uint8Array(newBinaryStr.length);
+        for (var i = 0; i < newBinaryStr.length; i++) {
+          newBytes[i] = newBinaryStr.charCodeAt(i);
+        }
+
+        // Save as new file (don't overwrite original)
+        var parentPath = op.path.indexOf('/') >= 0 ? op.path.substring(0, op.path.lastIndexOf('/') + 1) : '';
+        var newPath = parentPath + newFileName.replace(/(\.[^.]+)$/, '_AI\u4fee\u6539\u7248$1');
+
+        return fs.createBinaryFileByPath(newPath, newBytes.buffer).then(function () {
+          // Remove operation from pending
+          state.pendingOperations.splice(index, 1);
+
+          // Refresh file tree
+          refreshFileTree();
+
+          // Open the new file
+          openFile(newPath);
+
+          showToast('\u5df2\u4fdd\u5b58\u4e3a: ' + newPath.split('/').pop(), 'success');
+          return true;
+        });
+      });
+    }).catch(function (err) {
+      showToast('\u6587\u6863\u64cd\u4f5c\u5931\u8d25: ' + (err && err.message ? err.message : String(err)), 'error');
+      throw err;
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // applyOperation(index)
   // ──────────────────────────────────────────────
   function applyOperation(index) {
@@ -2048,6 +2379,11 @@
     var fs = window.__xtjCodeFS;
     if (!fs || !fs.writeFileByPath) {
       return Promise.reject(new Error('File system not available'));
+    }
+
+    // Document operation (DOCX/XLSX): delegate to applyDocumentOperation
+    if (op.type === 'document') {
+      return applyDocumentOperation(op, index);
     }
 
     if (op.type === 'create') {

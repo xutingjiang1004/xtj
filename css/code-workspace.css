@@ -314,6 +314,10 @@
 .code-tree-icon.file-git { color: #f05032; }
 .code-tree-icon.file-img { color: #a78bfa; }
 .code-tree-icon.file-pdf { color: #ef4444; }
+.code-tree-icon.file-doc { color: #2b7cd3; }
+.code-tree-icon.file-xls { color: #217346; }
+.code-tree-icon.file-ppt { color: #d24726; }
+.code-tree-icon.file-csv { color: #6b7280; }
 
 /* ── 10. Main Content Area ────────────────────────────────── */
 .code-main {
@@ -553,6 +557,118 @@
 .code-preview-area .pdf-placeholder .pdf-icon {
   font-size: 48px;
   opacity: 0.5;
+}
+
+/* ── Document Preview ─────────────────────────────────────── */
+.code-document-preview {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  background: var(--cw-bg);
+  overflow: auto;
+}
+
+.doc-preview-loading,
+.doc-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--cw-text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.doc-preview-loading .doc-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--cw-border);
+  border-top-color: var(--cw-accent);
+  border-radius: 50%;
+  animation: doc-spin 0.8s linear infinite;
+}
+
+@keyframes doc-spin {
+  to { transform: rotate(360deg); }
+}
+
+.doc-preview-error .doc-icon {
+  font-size: 48px;
+  opacity: 0.4;
+}
+
+.doc-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--cw-bg-secondary);
+  border-bottom: 1px solid var(--cw-border);
+  flex-shrink: 0;
+}
+
+.doc-preview-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.doc-preview-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.doc-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cw-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.doc-preview-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cw-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-preview-meta {
+  font-size: 11px;
+  color: var(--cw-text-muted);
+}
+
+.doc-preview-truncated {
+  padding: 8px 16px;
+  background: var(--cw-warning-bg, rgba(255, 193, 7, 0.1));
+  color: var(--cw-warning-text, #b8860b);
+  font-size: 12px;
+  border-bottom: 1px solid var(--cw-border);
+  flex-shrink: 0;
+}
+
+.doc-preview-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.doc-preview-text {
+  margin: 0;
+  padding: 16px 20px;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cw-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--cw-bg);
 }
 
 /* ── 18. Empty State ──────────────────────────────────────── */
@@ -1346,6 +1462,32 @@
 .code-welcome .welcome-recent .recent-path:hover {
   background: var(--cw-bg-hover);
   color: var(--cw-accent);
+}
+
+/* Welcome status messages */
+.code-welcome .welcome-status {
+  display: block;
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: var(--cw-radius-xs);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--cw-text-muted);
+  background: var(--cw-bg-tertiary);
+  border: 1px solid var(--cw-border);
+}
+
+.code-welcome .welcome-status.error {
+  color: var(--cw-danger);
+  background: var(--cw-danger-soft);
+  border-color: rgba(255, 59, 96, 0.2);
+}
+
+.code-welcome .welcome-status.warning {
+  color: var(--cw-warning);
+  background: var(--cw-warning-soft);
+  border-color: rgba(245, 158, 11, 0.2);
 }
 
 /* ── 38. Toolbar ──────────────────────────────────────────── */
