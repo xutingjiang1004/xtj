@@ -1138,6 +1138,7 @@
     getWorkspaceName: getWorkspaceName,
     restoreWorkspace: restoreWorkspace,
     getDirHandle: function () { return _dirHandle; },
+    setDirHandle: function (handle) { _dirHandle = handle; },
 
     // File tree
     buildFileTree: buildFileTree,
