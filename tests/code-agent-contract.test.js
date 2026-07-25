@@ -60,14 +60,24 @@ test('code-agent validates history length', () => {
   assert.match(codeAgent, /50/);
 });
 
-test('code-agent validates files count', () => {
-  assert.match(codeAgent, /MAX_FILES/);
-  assert.match(codeAgent, /50/);
+// Phase 1: MAX_FILES and MAX_FILES_TOTAL_CONTENT are deprecated.
+// Context is now managed via project index + token budget, not static file uploads.
+test('code-agent uses project index for context selection', () => {
+  assert.match(codeAgent, /codeIndex/);
+  assert.match(codeAgent, /selectBestChunks/);
+  assert.match(codeAgent, /getIndexSummary/);
 });
 
-test('code-agent validates files total content size', () => {
-  assert.match(codeAgent, /MAX_FILES_TOTAL_CONTENT/);
-  assert.match(codeAgent, /900 \* 1024/);
+test('code-agent uses token budget management', () => {
+  assert.match(codeAgent, /TokenBudget/);
+  assert.match(codeAgent, /DEFAULT_MAX_TOKENS/);
+  assert.match(codeAgent, /estimateTokens/);
+});
+
+test('code-agent no longer hard-blocks on file count or total content size', () => {
+  // validateFiles should not contain the old hard-block error messages
+  assert.ok(!/文件数量最多/.test(codeAgent), 'should not hard-block on file count');
+  assert.ok(!/文件总内容不能超过/.test(codeAgent), 'should not hard-block on total content size');
 });
 
 test('code-agent validates single file content size', () => {
@@ -186,9 +196,9 @@ test('system prompt enforces update, create and document only', () => {
 // ============================================================
 // 15. 用户消息构建
 // ============================================================
-test('code-agent builds user message with file context', () => {
+test('code-agent builds user message with code context', () => {
   assert.match(codeAgent, /function buildUserMessage/);
-  assert.match(codeAgent, /项目文件/);
+  assert.match(codeAgent, /项目代码/);
   assert.match(codeAgent, /SHA256/);
 });
 

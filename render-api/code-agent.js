@@ -4,18 +4,23 @@
 // Mounted in server.js as a route module.
 // Handles POST /api/code/chat — AI-powered code operations.
 // Also handles POST /api/code/document/extract and /api/code/document/apply
+// Phase 1: Project index + Agent tool calls + Token budget management
 
 const crypto = require('crypto');
+const codeIndex = require('./code-index');
 
 // ── Constants ──────────────────────────────────────────────────────────
 const MAX_MESSAGE_LEN = 12000;
 const MAX_HISTORY_ITEMS = 50;
-const MAX_FILES = 50;
-const MAX_FILES_TOTAL_CONTENT = 900 * 1024; // 900 KB (DeepSeek supports 1M, leave headroom)
-const MAX_SINGLE_FILE_CONTENT = 2 * 1024 * 1024; // 2 MB
+// Phase 1: MAX_FILES and MAX_FILES_TOTAL_CONTENT are deprecated.
+// Context is now managed via project index + token budget, not static file uploads.
+// validateFiles still validates individual file size and path, but no longer
+// hard-blocks on total file count or total content size.
+const MAX_FILES_TOTAL_CONTENT = 900 * 1024; // Kept only for legacy fallback warning, not a hard block
+const MAX_SINGLE_FILE_CONTENT = 2 * 1024 * 1024;
 const MAX_OPERATIONS = 10;
-const MAX_NEW_CONTENT_LEN = 2 * 1024 * 1024; // 2 MB per new_content
-const DEEPSEEK_TIMEOUT_MS = 180000; // 180 秒超时
+const MAX_NEW_CONTENT_LEN = 2 * 1024 * 1024;
+const DEEPSEEK_TIMEOUT_MS = 180000;
 const OP_TYPES_ALLOWED = new Set(['update', 'create', 'document']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
 const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
@@ -53,9 +58,10 @@ function validateHistory(history) {
 
 function validateFiles(files) {
   if (!Array.isArray(files)) return { ok: true, value: [] };
-  if (files.length > MAX_FILES) return { ok: false, error: '文件数量最多 ' + MAX_FILES + ' 个' };
+  // Phase 1: No hard limit on file count. Context is managed by project index + token budget.
   var cleaned = [];
   var totalContent = 0;
+  var truncationWarnings = 0;
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
     if (!f || typeof f !== 'object') continue;
@@ -66,19 +72,15 @@ function validateFiles(files) {
     var content = f.content;
     var contentBytes = Buffer.byteLength(content, 'utf8');
 
-    // Truncate large files instead of rejecting
     if (contentBytes > MAX_SINGLE_FILE_CONTENT) {
       var truncateStr = '\n...[Content truncated due to size limits]...';
-      // Rough truncation based on bytes
       var buffer = Buffer.from(content, 'utf8');
       content = buffer.subarray(0, MAX_SINGLE_FILE_CONTENT - 1000).toString('utf8') + truncateStr;
       contentBytes = Buffer.byteLength(content, 'utf8');
+      truncationWarnings++;
     }
 
     totalContent += contentBytes;
-    if (totalContent > MAX_FILES_TOTAL_CONTENT) {
-      return { ok: false, error: '文件总内容不能超过 ' + Math.round(MAX_FILES_TOTAL_CONTENT / 1024) + ' KB' };
-    }
 
     var item = {
       path: f.path.trim(),
@@ -88,17 +90,21 @@ function validateFiles(files) {
     };
     cleaned.push(item);
   }
-  return { ok: true, value: cleaned };
+
+  // Log a warning if total content is large, but do NOT hard-block
+  if (totalContent > MAX_FILES_TOTAL_CONTENT) {
+    console.warn('[code-agent] Total files content (' + Math.round(totalContent / 1024) + 'KB) exceeds legacy ' + Math.round(MAX_FILES_TOTAL_CONTENT / 1024) + 'KB threshold. Project index and token budget will manage context.');
+  }
+
+  return { ok: true, value: cleaned, warnings: truncationWarnings > 0 ? { truncatedFiles: truncationWarnings } : undefined };
 }
 
 function validatePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
   if (p.indexOf('..') >= 0) return false;
   if (p.indexOf('\\') >= 0) return false;
-  // Reject absolute paths (Unix /foo/bar, Windows C:\foo)
-  if (p.charCodeAt(0) === 47) return false; // '/'
+  if (p.charCodeAt(0) === 47) return false;
   if (/^[A-Za-z]:/.test(p)) return false;
-  // Reject empty segments
   var parts = p.split('/');
   for (var i = 0; i < parts.length; i++) {
     if (!parts[i]) return false;
@@ -122,13 +128,11 @@ function parseOperations(raw) {
     var op = raw[i];
     if (!op || typeof op !== 'object') continue;
     var type = (typeof op.type === 'string' ? op.type.trim().toLowerCase() : '');
-    // Reject dangerous operation types
     if (OP_TYPES_REJECTED.has(type)) continue;
     if (!isValidOperationType(type)) continue;
     if (!validatePath(op.path)) continue;
 
     if (type === 'document') {
-      // Document operations: require document_type and document_operations
       var docType = (typeof op.document_type === 'string' ? op.document_type.trim().toLowerCase() : '');
       if (docType !== 'xlsx') continue;
       var docOps = op.document_operations;
@@ -146,7 +150,6 @@ function parseOperations(raw) {
 
     if (type === 'update' && !isValidSha256(op.expected_sha256)) continue;
     if (typeof op.new_content !== 'string' || op.new_content === '') continue;
-    // new_content size limit
     if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
     if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
     ops.push({
@@ -161,19 +164,15 @@ function parseOperations(raw) {
 }
 
 function extractJsonFromText(text) {
-  // Try fenced JSON block first
   var match = text.match(JSON_BLOCK_RE);
   if (match) {
     try { return JSON.parse(match[1].trim()); } catch (_) {}
   }
-  // Try to find a JSON object with "operations" field
   var objMatch = text.match(JSON_OBJECT_RE);
   if (objMatch) {
     try {
-      // Find the nearest opening brace before "operations"
       var start = text.lastIndexOf('{', objMatch.index);
       if (start >= 0) {
-        // Try to find balanced braces
         var depth = 0;
         for (var i = start; i < text.length; i++) {
           if (text[i] === '{') depth++;
@@ -190,16 +189,33 @@ function extractJsonFromText(text) {
 
 // ── System prompt builder ──────────────────────────────────────────────
 
-function buildSystemPrompt() {
-  return [
+function buildSystemPrompt(indexSummary) {
+  var parts = [
     'You are an expert coding assistant integrated into a code workspace IDE.',
-    'You can see the files that are included in the "项目文件" section below.',
-    'Each file is labeled with its path, language, and SHA-256 hash.',
-    'For document files (XLSX, XLS, PPTX, DOCX, PDF, TXT, CSV, MD), you will see their extracted text content.',
+    'You can see relevant code snippets from the project files in the "项目代码" section below.',
+    'Each code snippet is labeled with its file path, language, and line range.',
     'Never claim to have read or inspected files that were not provided.',
     'Do not claim tests, builds, commands, or Git operations were executed.',
     'Do not modify unrelated files.',
-    '',
+    ''
+  ];
+
+  if (indexSummary) {
+    parts.push('【项目摘要】');
+    parts.push('- 工作区: ' + (indexSummary.workspaceId || ''));
+    parts.push('- 文件总数: ' + indexSummary.totalFiles);
+    parts.push('- 代码块总数: ' + indexSummary.totalChunks);
+    parts.push('- 索引时间: ' + indexSummary.builtAt);
+    parts.push('');
+    parts.push('你可以使用以下工具浏览项目代码（在回复中说明你需要查看哪些文件）：');
+    parts.push('- 搜索代码: 告诉我你想查找什么，系统会自动搜索相关代码');
+    parts.push('- 读取文件: 告诉我文件路径，系统会读取该文件');
+    parts.push('- 读取行范围: 告诉我文件路径和行号范围');
+    parts.push('如果提供的代码片段不足以回答问题，请明确说明需要查看哪些文件。');
+    parts.push('');
+  }
+
+  parts.push(
     'When asked to modify code, you MUST respond with TWO parts:',
     '1. FIRST: Your reasoning and explanation in plain text. Explain what you\'re doing and why.',
     '2. SECOND: A JSON block containing the operations array.',
@@ -254,10 +270,11 @@ function buildSystemPrompt() {
     '  ]',
     '}',
     '```'
-  ].join('\n');
+  );
+  return parts.join('\n');
 }
 
-function buildUserMessage(message, workspaceName, activePath, history, files) {
+function buildUserMessage(message, workspaceName, activePath, history, contextChunks) {
   var parts = [];
 
   if (workspaceName) {
@@ -267,15 +284,15 @@ function buildUserMessage(message, workspaceName, activePath, history, files) {
     parts.push('【当前文件】' + activePath);
   }
 
-  // Include file contents as context
-  if (files && files.length > 0) {
+  // Include context chunks from index
+  if (contextChunks && contextChunks.length > 0) {
     parts.push('');
-    parts.push('【项目文件】');
-    for (var i = 0; i < files.length; i++) {
-      var f = files[i];
-      var shaSuffix = f.sha256 ? ' (SHA256: ' + f.sha256 + ')' : '';
-      parts.push('--- ' + f.path + ' (' + f.language + ')' + shaSuffix + ' ---');
-      parts.push(f.content);
+    parts.push('【项目代码】');
+    for (var i = 0; i < contextChunks.length; i++) {
+      var chunk = contextChunks[i];
+      var shaSuffix = chunk.sha256 ? ' (SHA256: ' + chunk.sha256 + ')' : '';
+      parts.push('--- ' + chunk.path + ' (' + (chunk.language || '') + ') L' + chunk.startLine + '-L' + chunk.endLine + shaSuffix + ' ---');
+      parts.push(chunk.content);
       parts.push('');
     }
   }
@@ -443,25 +460,22 @@ async function extractPptxText(buffer) {
 }
 
 // ── XLSX modification operations ──────────────────────────────────────
-var CELL_REF_RE = /^[A-Z]{1,3}[1-9]\d{0,6}$/; // 列 A-XFD，行 1-1048576
-var MAX_DOC_OPS = 50; // P1: 单次最多 50 个操作
-var MAX_CELL_VALUE_LEN = 32767; // P1: 单元格值最大长度
-var MAX_SHEET_NAME_LEN = 31; // P1: 工作表名称最大长度
-var SHEET_NAME_FORBIDDEN = /[\\\/\?\*\[\]:]/; // P1: 工作表名称禁止字符
+var CELL_REF_RE = /^[A-Z]{1,3}[1-9]\d{0,6}$/;
+var MAX_DOC_OPS = 50;
+var MAX_CELL_VALUE_LEN = 32767;
+var MAX_SHEET_NAME_LEN = 31;
+var SHEET_NAME_FORBIDDEN = /[\\\/\?\*\[\]:]/;
 
 function validateCellRef(cell) {
   if (!cell || typeof cell !== 'string') return false;
   var upper = cell.toUpperCase().trim();
   if (!CELL_REF_RE.test(upper)) return false;
-  // 进一步验证列范围 A-XFD
   var colMatch = upper.match(/^([A-Z]{1,3})/);
   if (!colMatch) return false;
   var col = colMatch[1];
   if (col.length === 3) {
-    // 三字母列: AAA-XFD
     if (col > 'XFD') return false;
   }
-  // 验证行范围 1-1048576
   var rowMatch = upper.match(/(\d+)$/);
   if (!rowMatch) return false;
   var row = parseInt(rowMatch[1], 10);
@@ -474,7 +488,6 @@ function validateSheetName(name) {
   var trimmed = name.trim();
   if (!trimmed.length || trimmed.length > MAX_SHEET_NAME_LEN) return false;
   if (SHEET_NAME_FORBIDDEN.test(trimmed)) return false;
-  // 禁止特殊属性名
   if (trimmed === '__proto__' || trimmed === 'constructor' || trimmed === 'prototype') return false;
   return true;
 }
@@ -499,7 +512,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
   var xlsx = getXlsxParser();
   if (!xlsx) return { ok: false, error: 'XLSX 解析库不可用' };
 
-  // P1: 操作数量限制
   if (operations.length > MAX_DOC_OPS) {
     return { ok: false, error: '单次最多支持 ' + MAX_DOC_OPS + ' 个修改操作' };
   }
@@ -527,19 +539,16 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           var cell = (op.cell || '').toUpperCase().trim();
           var value = op.value !== undefined ? op.value : '';
 
-          // P1: 验证工作表名称
           if (!validateSheetName(sheetName)) {
             changes.push({ type: 'cell_update', sheet: sheetName, cell: cell || '(empty)', error: '无效的工作表名称' });
             continue;
           }
 
-          // Validate cell reference
           if (!validateCellRef(cell)) {
             changes.push({ type: 'cell_update', sheet: sheetName, cell: cell || '(empty)', error: '无效的单元格地址' });
             continue;
           }
 
-          // P1: 单元格值长度限制
           var strValue = String(value);
           if (strValue.length > MAX_CELL_VALUE_LEN) {
             changes.push({ type: 'cell_update', sheet: sheetName, cell: cell, error: '单元格值超过最大长度 ' + MAX_CELL_VALUE_LEN });
@@ -562,7 +571,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           }
 
           if (typeof value === 'string' && value.startsWith('=')) {
-            // Strip leading '=' for formula field (XLSX stores formula without '=')
             workbook.Sheets[sheetName][cell] = { t: 'n', f: value.slice(1) };
           } else if (typeof value === 'number') {
             workbook.Sheets[sheetName][cell] = { t: 'n', v: value };
@@ -570,7 +578,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
             workbook.Sheets[sheetName][cell] = { t: 's', v: String(value) };
           }
 
-          // Update sheet range to include new cell
           updateSheetRef(workbook, sheetName, xlsx);
 
           appliedOps.push({ type: 'cell_update', sheet: sheetName, cell: cell, oldValue: oldValue, newValue: String(value) });
@@ -578,7 +585,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
         } else if (op.type === 'cell_delete') {
           var sName = op.sheet || workbook.SheetNames[0];
           var cellRef = (op.cell || '').toUpperCase().trim();
-          // Validate cell reference
           if (!validateCellRef(cellRef)) {
             changes.push({ type: 'cell_delete', sheet: sName, cell: cellRef || '(empty)', error: '无效的单元格地址' });
             continue;
@@ -591,7 +597,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           }
         } else if (op.type === 'sheet_add') {
           var newSheetName = op.sheet || ('Sheet' + (workbook.SheetNames.length + 1));
-          // P1: 验证工作表名称
           if (!validateSheetName(newSheetName)) {
             changes.push({ type: 'sheet_add', sheet: newSheetName, error: '无效的工作表名称' });
             continue;
@@ -607,7 +612,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
         } else if (op.type === 'sheet_rename') {
           var oldName = op.sheet || '';
           var newName = op.new_name || '';
-          // P1: 验证新工作表名称
           if (!validateSheetName(newName)) {
             changes.push({ type: 'sheet_rename', old: oldName, new: newName, error: '无效的工作表名称' });
             continue;
@@ -643,13 +647,11 @@ async function applyXlsxOperations(buffer, operations, fileName) {
 
     var newBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-    // P1: 验证生成的文件可以重新读取
     try {
       var verifyWorkbook = xlsx.read(newBuffer, { type: 'buffer' });
       if (!verifyWorkbook || !verifyWorkbook.SheetNames) {
         return { ok: false, error: 'XLSX 生成验证失败：无法重新打开文件' };
       }
-      // 验证修改后的单元格真实存在
       for (var v = 0; v < appliedOps.length; v++) {
         var aop = appliedOps[v];
         if (aop.type === 'cell_update') {
@@ -799,6 +801,139 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     }
   });
 
+  // ── Phase 1: Project Index Build ────────────────────────────────────
+  app.post('/api/code/index/build', rateLimit(60000, 10), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body;
+      if (!body || !body.files || !Array.isArray(body.files)) {
+        return res.status(400).json({ ok: false, error: '缺少文件列表' });
+      }
+
+      var workspaceId = body.workspaceId || 'default';
+      var result = codeIndex.buildIndex(workspaceId, body.files);
+
+      if (!result.ok) {
+        return res.status(400).json({ ok: false, error: result.error });
+      }
+
+      console.log('[code-agent] Index built: ' + result.totalFiles + ' files, ' + result.totalChunks + ' chunks');
+
+      return res.json({
+        ok: true,
+        totalFiles: result.totalFiles,
+        totalChunks: result.totalChunks,
+        builtAt: result.builtAt
+      });
+    } catch (err) {
+      console.error('[code-agent] Index build error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '索引构建失败' });
+    }
+  });
+
+  // ── Phase 1: Project Index Status ───────────────────────────────────
+  app.post('/api/code/index/status', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var summary = codeIndex.getIndexSummary();
+      var pinnedFiles = codeIndex.getPinnedFiles();
+      return res.json({
+        ok: true,
+        summary: summary,
+        pinnedFiles: pinnedFiles
+      });
+    } catch (err) {
+      console.error('[code-agent] Index status error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '索引状态查询失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - list_files ────────────────────────────────
+  app.post('/api/code/agent/list_files', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      var result = codeIndex.listFiles(body.directory, body.depth, body.pattern);
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] list_files error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '文件列表获取失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - search_code ───────────────────────────────
+  app.post('/api/code/agent/search_code', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.query) {
+        return res.status(400).json({ ok: false, error: '缺少查询关键词' });
+      }
+      var result = codeIndex.searchCode(body.query, {
+        path: body.path,
+        extensions: body.extensions,
+        maxResults: body.maxResults || 20
+      });
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] search_code error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '代码搜索失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - read_file ─────────────────────────────────
+  app.post('/api/code/agent/read_file', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.path) {
+        return res.status(400).json({ ok: false, error: '缺少文件路径' });
+      }
+      var result = codeIndex.readFileRange(body.path, body.startLine || 1, body.endLine || 999999);
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] read_file error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '文件读取失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - get_symbols ───────────────────────────────
+  app.post('/api/code/agent/get_symbols', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.path) {
+        return res.status(400).json({ ok: false, error: '缺少文件路径' });
+      }
+      var result = codeIndex.getFileSymbols(body.path);
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] get_symbols error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '符号获取失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - pin_file ──────────────────────────────────
+  app.post('/api/code/agent/pin_file', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.path) {
+        return res.status(400).json({ ok: false, error: '缺少文件路径' });
+      }
+      var result = codeIndex.pinFile(body.path, body.pinned !== false);
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] pin_file error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '文件固定失败' });
+    }
+  });
+
+  // ── Phase 1: Agent Tool - clear_index ───────────────────────────────
+  app.post('/api/code/agent/clear_index', rateLimit(60000, 10), authenticateUser, async function(req, res) {
+    try {
+      var result = codeIndex.clearIndex();
+      return res.json(result);
+    } catch (err) {
+      console.error('[code-agent] clear_index error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '索引清除失败' });
+    }
+  });
+
+  // ── Code chat endpoint (refactored for Phase 1) ─────────────────────
   app.post('/api/code/chat', rateLimit(60000, 20), authenticateUser, async function(req, res) {
     var aborted = false;
     var deepSeekController = null;
@@ -814,8 +949,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     });
 
     try {
-      var userName = req.userName;
-
       // ── Validate request body ──────────────────────────────────────
       var body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -846,14 +979,84 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!histResult.ok) return res.status(400).json({ ok: false, error: histResult.error });
       var history = histResult.value;
 
-      // files: optional array, max 12 items, with content size limits
+      // files: optional (legacy), now only used as fallback
       var filesResult = validateFiles(body.files);
       if (!filesResult.ok) return res.status(400).json({ ok: false, error: filesResult.error });
       var files = filesResult.value;
 
+      // pinned_paths: optional array of paths to prioritize
+      var pinnedPaths = Array.isArray(body.pinned_paths) ? body.pinned_paths : [];
+
+      // ── Phase 1: Context selection via index ────────────────────────
+      var indexSummary = codeIndex.getIndexSummary();
+      var contextChunks = [];
+      var contextInfo = {
+        files_read: [],
+        total_chunks: 0,
+        total_tokens: 0,
+        budget_tokens: 0,
+        truncated: false,
+        indexed: false
+      };
+
+      if (indexSummary) {
+        contextInfo.indexed = true;
+
+        // Use token budget manager
+        var budget = new codeIndex.TokenBudget(codeIndex.DEFAULT_MAX_TOKENS);
+        var budgetTokens = budget.available();
+
+        var selection = codeIndex.selectBestChunks(message, budgetTokens, pinnedPaths, activePath);
+
+        if (selection.ok) {
+          contextChunks = selection.selected;
+          contextInfo.total_chunks = selection.selected.length;
+          contextInfo.total_tokens = selection.usedTokens;
+          contextInfo.budget_tokens = selection.budgetTokens;
+          contextInfo.truncated = selection.truncated;
+
+          // Build files_read for response
+          var fileReadMap = {};
+          for (var si = 0; si < selection.selected.length; si++) {
+            var chunk = selection.selected[si];
+            if (!fileReadMap[chunk.path]) {
+              fileReadMap[chunk.path] = [];
+            }
+            fileReadMap[chunk.path].push([chunk.startLine, chunk.endLine]);
+          }
+          var filePaths = Object.keys(fileReadMap);
+          for (var fi = 0; fi < filePaths.length; fi++) {
+            contextInfo.files_read.push({
+              path: filePaths[fi],
+              ranges: fileReadMap[filePaths[fi]]
+            });
+          }
+        }
+      } else if (files && files.length > 0) {
+        // Legacy fallback: index not built, use provided files directly
+        contextInfo.indexed = false;
+        for (var li = 0; li < files.length; li++) {
+          var f = files[li];
+          contextChunks.push({
+            path: f.path,
+            language: f.language,
+            content: f.content,
+            sha256: f.sha256,
+            startLine: 1,
+            endLine: (f.content || '').split('\n').length
+          });
+          contextInfo.files_read.push({
+            path: f.path,
+            ranges: [[1, (f.content || '').split('\n').length]]
+          });
+        }
+        contextInfo.total_chunks = contextChunks.length;
+        contextInfo.total_tokens = codeIndex.estimateTokensForChunks(contextChunks);
+      }
+
       // ── Build prompts ──────────────────────────────────────────────
-      var systemPrompt = buildSystemPrompt();
-      var userMessage = buildUserMessage(message, workspaceName, activePath, history, files);
+      var systemPrompt = buildSystemPrompt(indexSummary);
+      var userMessage = buildUserMessage(message, workspaceName, activePath, history, contextChunks);
 
       // ── Call DeepSeek API ──────────────────────────────────────────
       var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
@@ -863,7 +1066,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
 
       var baseUrl = deps.getDeepSeekApiUrl ? deps.getDeepSeekApiUrl() : 'https://api.deepseek.com/chat/completions';
-      // Ensure we have a valid URL ending
       if (!/\/chat\/completions$/.test(baseUrl)) {
         if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
         if (!/\/chat\/completions$/.test(baseUrl)) {
@@ -958,14 +1160,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (parsed && parsed.operations && Array.isArray(parsed.operations)) {
         operations = parseOperations(parsed.operations);
 
-        // Remove the JSON block from the reply text to avoid duplication
         var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
         if (jsonBlockMatch) {
           reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
         }
       }
 
-      // If operations were not found in a fenced block, try to remove the inline JSON
       if (operations.length === 0 && parsed) {
         var objStart = rawContent.indexOf('{');
         if (objStart >= 0) {
@@ -981,7 +1181,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
       }
 
-      // ── Build response ─────────────────────────────────────────────
+      // ── Build response with context info ───────────────────────────
       var tokenUsage = apiData.usage || null;
       if (tokenUsage) {
         console.log('[code-agent] API token usage:', tokenUsage);
@@ -991,7 +1191,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         ok: true,
         reply: reply.trim(),
         operations: operations,
-        usage: tokenUsage
+        usage: tokenUsage,
+        context_info: contextInfo
       });
     } catch (err) {
       console.error('[code-agent] Unhandled error:', err && err.message ? err.message : err);
