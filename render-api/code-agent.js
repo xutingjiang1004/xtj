@@ -8,14 +8,14 @@
 const crypto = require('crypto');
 
 // ── Constants ──────────────────────────────────────────────────────────
-const MAX_MESSAGE_LEN = 4000;
-const MAX_HISTORY_ITEMS = 20;
-const MAX_FILES = 12;
-const MAX_FILES_TOTAL_CONTENT = 600 * 1024; // 600 KB
-const MAX_SINGLE_FILE_CONTENT = 1 * 1024 * 1024; // 1 MB
-const MAX_OPERATIONS = 6;
-const MAX_NEW_CONTENT_LEN = 1 * 1024 * 1024; // 1 MB per new_content
-const DEEPSEEK_TIMEOUT_MS = 120000; // 120 秒超时
+const MAX_MESSAGE_LEN = 12000;
+const MAX_HISTORY_ITEMS = 50;
+const MAX_FILES = 50;
+const MAX_FILES_TOTAL_CONTENT = 900 * 1024; // 900 KB (DeepSeek supports 1M, leave headroom)
+const MAX_SINGLE_FILE_CONTENT = 2 * 1024 * 1024; // 2 MB
+const MAX_OPERATIONS = 10;
+const MAX_NEW_CONTENT_LEN = 2 * 1024 * 1024; // 2 MB per new_content
+const DEEPSEEK_TIMEOUT_MS = 180000; // 180 秒超时
 const OP_TYPES_ALLOWED = new Set(['update', 'create', 'document']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
 const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
@@ -77,7 +77,7 @@ function validateFiles(files) {
 
     totalContent += contentBytes;
     if (totalContent > MAX_FILES_TOTAL_CONTENT) {
-      return { ok: false, error: '文件总内容不能超过 600 KB' };
+      return { ok: false, error: '文件总内容不能超过 ' + Math.round(MAX_FILES_TOTAL_CONTENT / 1024) + ' KB' };
     }
 
     var item = {
@@ -195,7 +195,7 @@ function buildSystemPrompt() {
     'You are an expert coding assistant integrated into a code workspace IDE.',
     'You can see the files that are included in the "项目文件" section below.',
     'Each file is labeled with its path, language, and SHA-256 hash.',
-    'For document files (DOCX, XLSX), you will see their extracted text content.',
+    'For document files (DOCX, DOC, XLSX, XLS, PPTX, PDF, TXT, CSV, MD), you will see their extracted text content.',
     'Never claim to have read or inspected files that were not provided.',
     'Do not claim tests, builds, commands, or Git operations were executed.',
     'Do not modify unrelated files.',
@@ -227,7 +227,7 @@ function buildSystemPrompt() {
     '',
     'IMPORTANT RULES:',
     '- Only return update, create, or document operations.',
-    '- Return at most 6 file operations.',
+    '- Return at most 10 file operations.',
     '- For "update" operations, new_content must contain the ENTIRE file, not just the changed parts.',
     '- For "create" operations, new_content must contain the complete new file.',
     '- For "document" operations, include document_operations array with the specific changes.',
@@ -237,6 +237,7 @@ function buildSystemPrompt() {
     '- If information is missing, ask the user to add the required file to context.',
     '- If you are not making code changes, do NOT include the JSON block — just provide your explanation.',
     '- Always provide your reasoning and explanation FIRST, before the JSON block.',
+    '- The user may be writing travel guides or other documents. Help them with content creation, editing, and analysis.',
     '',
     'Example document operation format:',
     '',
@@ -329,8 +330,11 @@ function getExtFromMime(mimeType) {
     'application/pdf': '.pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
     'application/vnd.ms-excel': '.xls',
+    'application/vnd.ms-powerpoint': '.ppt',
     'application/msword': '.doc',
+    'application/rtf': '.rtf',
     'text/csv': '.csv',
     'text/plain': '.txt'
   };
@@ -342,10 +346,13 @@ function detectMimeFromFileName(fileName) {
   if (lower.endsWith('.pdf')) return 'application/pdf';
   if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
   if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
+  if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
   if (lower.endsWith('.doc')) return 'application/msword';
+  if (lower.endsWith('.rtf')) return 'application/rtf';
   if (lower.endsWith('.csv')) return 'text/csv';
-  if (lower.endsWith('.txt')) return 'text/plain';
+  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json')) return 'text/plain';
   return 'application/octet-stream';
 }
 
@@ -378,10 +385,16 @@ async function extractDocumentText(buffer, mimeType, fileName) {
         sheets.push('【工作表: ' + sName + '】\n' + csv);
       });
       text = sheets.join('\n\n');
+    } else if (
+      mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ) {
+      var pptxResult = extractPptxText(buffer);
+      text = pptxResult.text;
+      metadata = pptxResult.metadata;
     } else if (mimeType === 'text/csv' || mimeType === 'text/plain') {
       text = buffer.toString('utf-8');
     } else {
-      return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（仅支持 PDF、DOCX、XLSX、CSV、TXT）' };
+      return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（支持 PDF、DOCX、DOC、XLSX、XLS、PPTX、CSV、TXT、MD）' };
     }
   } catch (e) {
     console.error('[code-agent] Document extraction error:', e && e.message ? e.message : e);
@@ -389,6 +402,91 @@ async function extractDocumentText(buffer, mimeType, fileName) {
   }
 
   return { ok: true, text: text, metadata: metadata };
+}
+
+function extractPptxText(buffer) {
+  var zlib = require('zlib');
+  var slides = [];
+  var slideNames = [];
+
+  try {
+    var str = buffer.toString('binary');
+    var fileHeaderSig = 'PK\x03\x04';
+    var pos = 0;
+
+    while (pos < str.length - 4) {
+      var sigIdx = str.indexOf(fileHeaderSig, pos);
+      if (sigIdx === -1) break;
+
+      var offset = sigIdx;
+      if (offset + 30 > buffer.length) break;
+
+      var compressionMethod = buffer.readUInt16LE(offset + 8);
+      var compressedSize = buffer.readUInt32LE(offset + 18);
+      var uncompressedSize = buffer.readUInt32LE(offset + 22);
+      var fileNameLen = buffer.readUInt16LE(offset + 26);
+      var extraLen = buffer.readUInt16LE(offset + 28);
+
+      if (offset + 30 + fileNameLen + extraLen > buffer.length) break;
+
+      var fileName = buffer.toString('utf8', offset + 30, offset + 30 + fileNameLen);
+      var dataStart = offset + 30 + fileNameLen + extraLen;
+
+      if (fileName.match(/^ppt\/slides\/slide\d+\.xml$/i)) {
+        var slideNum = fileName.match(/slide(\d+)\.xml/i);
+        var slideLabel = slideNum ? '第' + slideNum[1] + '页' : fileName;
+
+        var xmlBuffer;
+        if (compressionMethod === 0) {
+          xmlBuffer = buffer.subarray(dataStart, dataStart + (uncompressedSize || compressedSize));
+        } else if (compressionMethod === 8) {
+          try {
+            xmlBuffer = zlib.inflateRawSync(buffer.subarray(dataStart, dataStart + compressedSize));
+          } catch (e) {
+            pos = dataStart + compressedSize;
+            continue;
+          }
+        } else {
+          pos = dataStart + compressedSize;
+          continue;
+        }
+
+        var xml = xmlBuffer.toString('utf8');
+        var textParts = [];
+        var textRegex = /<a:t[^>]*>([^<]*)<\/a:t>/g;
+        var match;
+        while ((match = textRegex.exec(xml)) !== null) {
+          var t = match[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+          if (t.trim()) textParts.push(t);
+        }
+
+        if (textParts.length > 0) {
+          slideNames.push(slideLabel);
+          slides.push('【幻灯片: ' + slideLabel + '】\n' + textParts.join('\n'));
+        }
+      }
+
+      pos = dataStart + compressedSize;
+      if (compressedSize === 0 && compressionMethod === 0) {
+        var dataDescSig = 'PK\x07\x08';
+        var ddPos = str.indexOf(dataDescSig, pos);
+        if (ddPos !== -1 && ddPos < pos + 100) {
+          pos = ddPos + 16;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[code-agent] PPTX extraction error:', e.message);
+  }
+
+  if (slides.length === 0) {
+    return { text: '[无法从PPTX中提取文本内容]', metadata: { slideCount: 0 } };
+  }
+
+  return {
+    text: slides.join('\n\n'),
+    metadata: { slideCount: slides.length, slideNames: slideNames }
+  };
 }
 
 // ── XLSX modification operations ──────────────────────────────────────
@@ -616,8 +714,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var text = extractResult.text;
       var truncated = false;
-      if (text.length > 100 * 1024) {
-        text = text.slice(0, 100 * 1024) + '\n\n[内容过长，已截断]';
+      if (text.length > 800 * 1024) {
+        text = text.slice(0, 800 * 1024) + '\n\n[内容过长，已截断]';
         truncated = true;
       }
 
