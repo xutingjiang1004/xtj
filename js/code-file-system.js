@@ -727,34 +727,34 @@
       mimeType = getDocumentMimeType(fileName || '');
     }
 
-    var bytes = new Uint8Array(arrayBuffer);
-    var binary = '';
-    for (var i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    var base64 = btoa(binary);
+    var formData = new FormData();
+    var blob = new Blob([arrayBuffer], { type: mimeType });
+    formData.append('file', blob, fileName);
+    formData.append('fileName', fileName || '');
+    formData.append('mimeType', mimeType);
 
     var apiCall;
     if (window.xtjProtectedFetch) {
       apiCall = window.xtjProtectedFetch('/api/code/document/extract', {
         method: 'POST',
-        body: JSON.stringify({ file: base64, fileName: fileName || '', mimeType: mimeType })
+        body: formData
       });
     } else {
       apiCall = fetch('/api/code/document/extract', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file: base64, fileName: fileName || '', mimeType: mimeType })
+        
+        body: formData
       });
     }
 
     return apiCall.then(function (resp) {
       if (!resp.ok) {
-        return resp.json().then(function (errData) {
-          throw new Error((errData && errData.error) || '文档提取失败: ' + resp.status);
-        }).catch(function () {
-          throw new Error('文档提取失败: ' + resp.status);
+        return resp.text().then(function (text) {
+          var data = null;
+          try { data = JSON.parse(text); } catch (e) {}
+          var msg = (data && data.error) ? data.error : text || ('文档提取失败: ' + resp.status);
+          throw new Error(msg);
         });
       }
       return resp.json();

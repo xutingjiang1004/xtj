@@ -1594,7 +1594,7 @@
     header.className = 'context-header';
     header.innerHTML =
       '<span>AI 上下文</span>' +
-      '<span class="context-count">' + paths.length + ' / 12</span>';
+      '<span class="context-count">' + paths.length + ' / 50</span>';
     _dom.contextPanel.appendChild(header);
 
     var list = document.createElement('div');
