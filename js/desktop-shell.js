@@ -265,18 +265,22 @@
           if (typeof window.__xtjCodeRefreshWorkspace === 'function') {
             await window.__xtjCodeRefreshWorkspace();
           } else {
+            _codeLoadGeneration++;
+            var gen = _codeLoadGeneration;
             try {
               await Promise.all([
                 loadModuleScript('code-fs', 'xtj-module-code-fs'),
                 loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
                 loadModuleStyle('code-css', 'xtj-module-code-style')
               ]);
+              if (gen !== _codeLoadGeneration) break;
               if (typeof window.__xtjCodeInit === 'function') {
                 window.__xtjCodeInit();
               }
             } catch (e) {
+              if (gen !== _codeLoadGeneration) break;
               console.error('[CODE] workspace load failed:', e);
-              if (typeof window.showToast === 'function') window.showToast('代码工作区加载失败', 'error');
+              if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
             }
           }
           break;
@@ -291,6 +295,7 @@
 
   
   var _loadedModules = {};
+  var _codeLoadGeneration = 0;
   function loadModuleScript(id, metaName) {
     if (_loadedModules[id]) return Promise.resolve();
     return new Promise(function (resolve, reject) {
@@ -353,17 +358,30 @@
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
         if (tab === 'code' && typeof window.__xtjCodeInit !== 'function') {
+          // Show loading state first
+          var panelCode = document.getElementById('panelCode');
+          if (panelCode) {
+            panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+          }
+          // Increment loading generation token
+          _codeLoadGeneration++;
+          var gen = _codeLoadGeneration;
           Promise.all([
             loadModuleScript('code-fs', 'xtj-module-code-fs'),
             loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
             loadModuleStyle('code-css', 'xtj-module-code-style')
           ]).then(function () {
+            if (gen !== _codeLoadGeneration) return; // User navigated away
             if (typeof window.__xtjCodeInit === 'function') {
               window.__xtjCodeInit();
             }
           }).catch(function (e) {
+            if (gen !== _codeLoadGeneration) return;
             console.error('[CODE] workspace load failed:', e);
-            if (typeof window.showToast === 'function') window.showToast('代码工作区加载失败', 'error');
+            if (panelCode) {
+              panelCode.innerHTML = '<div class="code-loading-state"><p>Code 工作区加载失败，请重试</p><button class="code-retry-btn" onclick="this.closest(\'#panelCode\').innerHTML=\'\';var evt=new MouseEvent(\'click\',{bubbles:true});document.querySelector(\'[data-desktop-tab=code]\').dispatchEvent(evt);">重试</button></div>';
+            }
+            if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
           });
         }
         openTab(tab);

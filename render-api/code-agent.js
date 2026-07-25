@@ -537,17 +537,21 @@ async function applyXlsxOperations(buffer, operations, fileName) {
     });
     afterText = afterParts.join('\n\n');
 
+    if (appliedOps.length === 0 && operations.length > 0) {
+      var errMsgs = changes.map(function(c) { return c.error || '未生效'; }).join('; ');
+      return { ok: false, error: 'XLSX 修改失败，无任何操作生效: ' + errMsgs };
+    }
+
     var newBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    var newFile = newBuffer.toString('base64');
 
     return {
       ok: true,
-      newFile: newFile,
+      newBuffer: newBuffer,
+      changes: changes,
       newMimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       fileName: fileName,
       beforeText: beforeText,
       afterText: afterText,
-      changes: changes,
       appliedOps: appliedOps
     };
   } catch (e) {
@@ -655,18 +659,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return res.status(500).json({ ok: false, error: result.error });
       }
 
-      var newBuffer;
-      try {
-        newBuffer = Buffer.from(result.newFile, 'base64');
-      } catch (e) {
+      var newBuffer = result.newBuffer;
+      if (!newBuffer || !Buffer.isBuffer(newBuffer)) {
         return res.status(500).json({ ok: false, error: '生成文件失败' });
       }
 
-      var outFileName = fileName.replace(/\.[^.]+$/, '') + '_AI修改版' + (documentType === 'xlsx' ? '.xlsx' : '.txt');
+      var outFileName = fileName.replace(/\.[^.]+$/, '') + '_AI修改版.xlsx';
 
       res.setHeader('Content-Type', result.newMimeType);
       res.setHeader('Content-Disposition', 'attachment; filename="' + encodeURIComponent(outFileName) + '"');
-      res.setHeader('X-Document-Changes', encodeURIComponent(JSON.stringify({ changes: result.changes, appliedOps: result.appliedOps })));
+      res.setHeader('X-Document-Changes', encodeURIComponent(JSON.stringify({ changes: result.changes || [], appliedOps: result.appliedOps || [] })));
 
       return res.send(newBuffer);
     } catch (err) {

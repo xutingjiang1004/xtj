@@ -161,23 +161,6 @@
     return map[ext] || 'file-icon';
   }
 
-  function fileIsImage(fileName) {
-    if (!fileName) return false;
-    var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
-    return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'].indexOf(ext) !== -1;
-  }
-
-  function fileIsPdf(fileName) {
-    if (!fileName) return false;
-    return fileName.slice(fileName.lastIndexOf('.')).toLowerCase() === '.pdf';
-  }
-
-  function fileIsDocument(fileName) {
-    if (!fileName) return false;
-    var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
-    return ['.docx', '.xlsx', '.xls', '.pptx'].indexOf(ext) !== -1;
-  }
-
   // ──────────────────────────────────────────────
   // Monaco lazy-load
   // ──────────────────────────────────────────────
@@ -284,6 +267,13 @@
   // ──────────────────────────────────────────────
   function init() {
     if (state.active) return;
+
+    var panelCode = document.getElementById('panelCode');
+    if (!panelCode || !panelCode.offsetParent) {
+      // User navigated away while scripts were loading
+      return;
+    }
+
     state.active = true;
 
     _dom.panelCode = document.getElementById('panelCode');
@@ -324,6 +314,15 @@
   // cleanup() — called when leaving Code tab
   // ──────────────────────────────────────────────
   function cleanup() {
+    var hasUnsaved = state.openTabs.some(function(t) { return t.modified && t._currentContent !== undefined; });
+    if (hasUnsaved) {
+      // Unsaved changes, prompt
+      if (!window.confirm('文件存在未保存修改，是否继续？')) {
+        // Unfortunately, cleanup is called after navigation has started in this SPA.
+        // Returning here would leave UI in an inconsistent state since the container is already hidden.
+        // We will just let it proceed but we won't clear the unsaved state, so it restores later!
+      }
+    }
     // Cancel any in-flight request
     if (state._abortController) {
       try { state._abortController.abort(); } catch (e) { /* ignore */ }
@@ -444,6 +443,18 @@
     }
   }
 
+  function resetWorkspaceState() {
+    state.openTabs = [];
+    state.activePath = '';
+    state.contextPaths = {};
+    state.pendingOperations = [];
+    state.snapshots = {};
+    state.fileHandles = {};
+    state.messages = [];
+    revokeAllUrls();
+    disposeMonaco();
+  }
+
   function selectAndOpenWorkspace() {
     var btn = document.getElementById('codeWelcomeOpenBtn');
     if (!window.showDirectoryPicker) {
@@ -519,12 +530,45 @@
                   }
                 }
               };
+            },
+            entries: function() {
+              var children = {};
+              files.forEach(function(f) {
+                if (f.webkitRelativePath.startsWith(pathPrefix)) {
+                  var remainder = f.webkitRelativePath.substring(pathPrefix.length);
+                  var slashIdx = remainder.indexOf('/');
+                  if (slashIdx === -1) {
+                    children[remainder] = {
+                      name: remainder,
+                      kind: 'file',
+                      getFile: function() { return Promise.resolve(f); }
+                    };
+                  } else {
+                    var childDirName = remainder.substring(0, slashIdx);
+                    if (!children[childDirName]) {
+                      children[childDirName] = createMockDirHandle(childDirName, pathPrefix + childDirName + '/');
+                    }
+                  }
+                }
+              });
+              var handles = Object.entries(children);
+              var idx = 0;
+              return {
+                next: function() {
+                  if (idx < handles.length) {
+                    return Promise.resolve({ value: handles[idx], done: false });
+                  } else {
+                    return Promise.resolve({ done: true });
+                  }
+                }
+              };
             }
           };
         }
 
         state.directoryHandle = createMockDirHandle(dirName, dirName + '/');
         state.workspaceName = dirName;
+        state._isReadOnly = true;
         renderWorkspace();
       };
       input.click();
@@ -586,6 +630,15 @@
     // Main workspace container — true three-column layout
     var workspace = document.createElement('div');
     workspace.className = 'code-workspace';
+
+    // Read-only mode banner
+    if (state._isReadOnly) {
+      var banner = document.createElement('div');
+      banner.className = 'code-readonly-banner';
+      banner.style.cssText = 'background:#fff3cd;color:#856404;padding:8px 12px;font-size:12px;text-align:center;border-bottom:1px solid var(--cw-border);';
+      banner.innerHTML = '当前浏览器使用只读文件夹模式。可以查看和分析文件，但不能直接保存修改。建议使用最新版 Chrome 或 Edge 获得完整读写能力。';
+      workspace.appendChild(banner);
+    }
 
     // ── Sidebar (left) ──
     var sidebar = document.createElement('div');
@@ -702,10 +755,14 @@
               }
               // Update content for text files
               if (result.type === 'text') {
-                tab.content = result.content;
-                tab.sha256 = result.sha256 || '';
-                tab.modified = false;
-                tab._currentContent = undefined;
+                if (tab.modified && tab._currentContent !== undefined) {
+                  // Do not overwrite user's unsaved draft
+                } else {
+                  tab.content = result.content;
+                  tab.sha256 = result.sha256 || '';
+                  tab.modified = false;
+                  tab._currentContent = undefined;
+                }
               }
               // Generate new blob URL for image/PDF (old one was revoked)
               if (result.type === 'image' || result.type === 'pdf') {
@@ -896,6 +953,9 @@
         }
       };
 
+      // Expose toggle on wrapper for auto-expand (renderFileTree calls wrapper._toggle)
+      wrapper._toggle = row._toggle;
+
       row.addEventListener('click', function (e) {
         e.stopPropagation();
         row._toggle();
@@ -1076,6 +1136,12 @@
 
     var tab = state.openTabs[idx];
 
+    if (tab.modified && tab._currentContent !== undefined) {
+      if (!window.confirm('文件存在未保存修改，是否继续关闭？')) {
+        return;
+      }
+    }
+
     // Revoke blob URL
     if (tab.blobUrl) {
       revokeUrl(tab.blobUrl);
@@ -1184,10 +1250,44 @@
       renderPdfPreview(tab.path, tab.blobUrl);
     } else if (tab.type === 'document') {
       renderDocumentPreview(tab);
+    } else if (tab.type === 'binary') {
+      renderBinaryPreview(tab);
     } else {
       // Text editor
       renderTextEditor(tab);
     }
+  }
+
+  function renderBinaryPreview(tab) {
+    if (!_dom.editorArea) return;
+    _dom.editorArea.innerHTML = '';
+    var container = document.createElement('div');
+    container.className = 'code-preview-container pdf-preview-container';
+    container.style.flex = '1';
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.alignItems = 'center';
+    container.style.justifyContent = 'center';
+    container.style.padding = '40px';
+    container.style.color = 'var(--text-color)';
+
+    var icon = document.createElement('div');
+    icon.innerHTML = '📦';
+    icon.style.fontSize = '48px';
+    icon.style.marginBottom = '16px';
+
+    var nameEl = document.createElement('h3');
+    nameEl.textContent = tab.name;
+    nameEl.style.marginBottom = '8px';
+
+    var msg = document.createElement('p');
+    msg.textContent = '该文件是二进制文件，当前仅显示文件信息，不能编辑或保存。';
+    msg.style.opacity = '0.7';
+
+    container.appendChild(icon);
+    container.appendChild(nameEl);
+    container.appendChild(msg);
+    _dom.editorArea.appendChild(container);
   }
 
   // ──────────────────────────────────────────────
@@ -1323,6 +1423,10 @@
   // saveFile(path)
   // ──────────────────────────────────────────────
   function saveFile(path) {
+    if (state._isReadOnly) {
+      showToast('当前为只读模式，不支持保存文件', 'error');
+      return;
+    }
     var tab = null;
     for (var i = 0; i < state.openTabs.length; i++) {
       if (state.openTabs[i].path === path) {
@@ -1331,6 +1435,11 @@
       }
     }
     if (!tab) return;
+
+    if (tab.type === 'binary') {
+      showToast('二进制文件不支持保存', 'error');
+      return;
+    }
 
     var content;
     if (state._monacoEditor && state.activePath === path) {
@@ -1505,20 +1614,20 @@
         }
       }
       if (tab) {
-        if (tab.type === 'image' || tab.type === 'pdf' || tab.type === 'binary') {
+        if (tab.type === 'image' || tab.type === 'binary') {
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
-        // document type is allowed — will be extracted at send time
+        // document and pdf types are allowed — will be extracted at send time
       } else {
         // File not open — check by extension
         var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
-        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
+        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
         if (imgExts.indexOf(ext) !== -1) {
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
-        // document extensions are allowed — will be extracted at send time
+        // document and pdf extensions are allowed — will be extracted at send time
       }
 
       state.contextPaths[path] = true;
@@ -1548,10 +1657,10 @@
         for (var j = 0; j < state.openTabs.length; j++) {
           if (state.openTabs[j].path === p) {
             var t = state.openTabs[j];
-            if (t.type === 'image' || t.type === 'pdf' || t.type === 'binary') {
+            if (t.type === 'image' || t.type === 'binary') {
               shouldRemove = true;
             }
-            // document type is allowed — will be extracted at send time
+            // pdf and document types are allowed — will be extracted at send time
             break;
           }
         }
@@ -1560,7 +1669,7 @@
       // Check extension for unopened files
       if (!shouldRemove) {
         var ext = p.slice(p.lastIndexOf('.')).toLowerCase();
-        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
+        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
         if (imgExts.indexOf(ext) !== -1) {
           shouldRemove = true;
         }
@@ -1892,8 +2001,8 @@
               }
             }
 
-            // If file is an image or PDF, skip for context
-            if (openTab && (openTab.type === 'image' || openTab.type === 'pdf' || openTab.type === 'binary')) {
+            // If file is an image or binary, skip for context
+            if (openTab && (openTab.type === 'image' || openTab.type === 'binary')) {
               resolve(null);
               return;
             }
@@ -1917,7 +2026,7 @@
               }
 
               // Handle document type: extract text via backend API
-              if (result.type === 'document') {
+              if (result.type === 'document' || result.type === 'pdf') {
                 if (!fs.readDocumentText) {
                   resolve(null);
                   return;
@@ -2083,7 +2192,16 @@
     apiCall.then(function (resp) {
       if (requestId !== state._requestId) return;
       if (!resp.ok) {
-        throw new Error('API 请求失败: ' + resp.status + ' ' + (resp.statusText || ''));
+        return resp.text().then(function(text) {
+          var errMsg = 'API 请求失败: ' + resp.status + ' ' + (resp.statusText || '');
+          try {
+            var json = JSON.parse(text);
+            if (json && json.error) errMsg = 'API 请求失败: ' + json.error;
+          } catch(e) {
+            if (text && text.length < 200) errMsg = 'API 请求失败: ' + text;
+          }
+          throw new Error(errMsg);
+        });
       }
       return resp.json();
     }).then(function (data) {
@@ -2504,12 +2622,16 @@
     }
 
     if (op.type === 'create') {
-      // Create operation: use createFileByPath with proper existence check
-      // Save snapshot with existed=false before creating
-      if (!state.snapshots[op.path]) {
-        state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
-      }
-      return fs.createFileByPath(op.path, op.new_content || '').then(function (writeResult) {
+      return fs.fileExistsByPath(op.path).then(function(exists) {
+        if (exists) {
+          throw new Error('目标文件已存在');
+        }
+        // Save snapshot BEFORE creating the file
+        if (!state.snapshots[op.path]) {
+          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
+        }
+        return fs.createFileByPath(op.path, op.new_content || '');
+      }).then(function (writeResult) {
         // Optionally open the new file in a tab
         for (var i = 0; i < state.openTabs.length; i++) {
           if (state.openTabs[i].path === op.path) {
@@ -2586,6 +2708,10 @@
   // applyAllOperations()
   // ──────────────────────────────────────────────
   function applyAllOperations() {
+    if (state._isReadOnly) {
+      showToast('当前为只读模式，不支持应用修改', 'error');
+      return;
+    }
     if (state._applyLock) return;
     state._applyLock = true;
     state.applying = true;
