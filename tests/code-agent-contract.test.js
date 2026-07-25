@@ -8,8 +8,8 @@ const server = fs.readFileSync('render-api/server.js', 'utf8');
 // ============================================================
 // 1. API Key 不出现在前端文件
 // ============================================================
-test('DEEPSEEK_API_KEY is read from process.env, not hardcoded', () => {
-  assert.match(codeAgent, /process\.env\.DEEPSEEK_API_KEY/);
+test('DEEPSEEK_API_KEY is read from deps, not hardcoded', () => {
+  assert.match(codeAgent, /deps\.getDeepSeekApiKey/);
   assert.ok(!/sk-[a-zA-Z0-9]{20,}/.test(codeAgent), 'API key should not be hardcoded in code-agent.js');
 });
 
