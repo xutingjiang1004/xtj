@@ -24,7 +24,7 @@ app.use(express.json({ limit: '5mb' }));
 registerCodeAgentRoutes(app, deps);
 
 test('Code agent document API test suite', async (t) => {
-  await t.test('Extract DOCX text via multipart', async () => {
+  await t.test('Extract Text via multipart', async () => {
     // Generate a simple dummy docx or use a text file pretending to be docx
     // Wait, if mammoth parses it, it might fail if it's not real docx.
     // Let's just pass a text file and mimeType=text/plain to test multipart extract
