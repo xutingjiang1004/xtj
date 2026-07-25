@@ -296,7 +296,9 @@ test('desktop-shell has code refreshTab case', () => {
 });
 
 test('desktop-shell lazy-loads code modules on click', () => {
-  assert.match(desktopShell, /tab === 'code' && typeof window\.__xtjCodeInit !== 'function'/);
+  // P0: 新的状态机模式 — 使用 ensureCodeModulesLoaded 而不是直接检查 __xtjCodeInit
+  assert.match(desktopShell, /tab === 'code'/);
+  assert.match(desktopShell, /ensureCodeModulesLoaded\(\)/);
   assert.match(desktopShell, /loadModuleScript\('code-fs'/);
   assert.match(desktopShell, /loadModuleScript\('code-workspace'/);
   assert.match(desktopShell, /loadModuleStyle\('code-css'/);
@@ -765,9 +767,9 @@ test('AbortController is created with new AbortController()', () => {
 });
 
 test('abort signal is passed to fetch', () => {
-  // signal must be passed to fetch options
-  assert.match(codeWorkspace, /signal:\s*state\._abortController/);
+  // P0: signal 从 AbortController 派生并传递给 fetch
   assert.match(codeWorkspace, /state\._abortController \? state\._abortController\.signal : undefined/);
+  assert.match(codeWorkspace, /signal:\s*signal/);
 });
 
 test('cleanup cancels current request and invalidates requestId', () => {

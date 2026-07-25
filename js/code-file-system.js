@@ -125,9 +125,27 @@
   // ──────────────────────────────────────────────
   // IndexedDB
   // ──────────────────────────────────────────────
+  var _dbConnection = null;
+
   function openDB() {
     return new Promise(function (resolve, reject) {
       try {
+        // 关闭旧连接
+        if (_dbConnection) {
+          try { _dbConnection.close(); } catch (e) {}
+          _dbConnection = null;
+        }
+
+        var resolved = false;
+        // P0: IndexedDB 打开超时 (3 秒)
+        var timeoutId = setTimeout(function () {
+          if (!resolved) {
+            resolved = true;
+            console.error('[CODE-IDB] Open timeout after 3s');
+            reject(new Error('[IndexedDB.open] Timeout'));
+          }
+        }, 3000);
+
         var req = indexedDB.open(DB_NAME, 1);
         req.onupgradeneeded = function (e) {
           var db = e.target.result;
@@ -136,12 +154,38 @@
           }
         };
         req.onsuccess = function (e) {
-          resolve(e.target.result);
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeoutId);
+          var db = e.target.result;
+          _dbConnection = db;
+          // 监听 versionchange，当其他页面升级数据库时主动关闭
+          db.onversionchange = function () {
+            console.log('[CODE-IDB] Database version change detected, closing connection');
+            db.close();
+            _dbConnection = null;
+          };
+          resolve(db);
         };
         req.onerror = function (e) {
-          reject(wrapError(e.target.error, 'IndexedDB.open'));
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeoutId);
+          var err = e.target.error;
+          console.error('[CODE-IDB] Open error:', err && err.message ? err.message : String(err));
+          reject(wrapError(err, 'IndexedDB.open'));
+        };
+        req.onblocked = function (e) {
+          console.warn('[CODE-IDB] Database open blocked by another connection');
+          // 尝试关闭旧连接后重试
+          if (_dbConnection) {
+            try { _dbConnection.close(); } catch (ex) {}
+            _dbConnection = null;
+          }
+          // 不直接 reject，让 onerror 或 onsuccess 处理
         };
       } catch (err) {
+        console.error('[CODE-IDB] Open exception:', err && err.message ? err.message : String(err));
         reject(wrapError(err, 'IndexedDB.open'));
       }
     });
@@ -336,31 +380,66 @@
   }
 
   function restoreWorkspace(options) {
-    return restoreHandle().then(function (handle) {
-      if (!handle) return { status: 'missing', handle: null };
+    // 带超时的恢复，最多等待 5 秒
+    return new Promise(function (resolve) {
+      var resolved = false;
+      var timeoutId = setTimeout(function () {
+        if (!resolved) {
+          resolved = true;
+          console.warn('[CODE-IDB] restoreWorkspace timed out');
+          resolve({ status: 'timeout', handle: null, error: 'IndexedDB operation timed out' });
+        }
+      }, 5000);
 
-      return handle.queryPermission({ mode: 'readwrite' }).then(function (permission) {
-        if (permission === 'granted') {
-          _dirHandle = handle;
-          return { status: 'granted', handle: handle };
+      restoreHandle().then(function (handle) {
+        if (resolved) return;
+        if (!handle) {
+          resolved = true;
+          clearTimeout(timeoutId);
+          return resolve({ status: 'missing', handle: null });
         }
 
-        if (permission === 'prompt' && options && options.requestPermission) {
-          return handle.requestPermission({ mode: 'readwrite' }).then(function (result) {
-            if (result === 'granted') {
-              _dirHandle = handle;
-              return { status: 'granted', handle: handle };
-            }
-            return { status: 'denied', handle: handle };
+        return handle.queryPermission({ mode: 'readwrite' }).then(function (permission) {
+          if (resolved) return;
+          if (permission === 'granted') {
+            _dirHandle = handle;
+            resolved = true;
+            clearTimeout(timeoutId);
+            return resolve({ status: 'granted', handle: handle });
+          }
+
+          if (permission === 'prompt' && options && options.requestPermission) {
+            return handle.requestPermission({ mode: 'readwrite' }).then(function (result) {
+              if (resolved) return;
+              resolved = true;
+              clearTimeout(timeoutId);
+              if (result === 'granted') {
+                _dirHandle = handle;
+                return resolve({ status: 'granted', handle: handle });
+              }
+              return resolve({ status: 'denied', handle: handle });
+            });
+          }
+
+          resolved = true;
+          clearTimeout(timeoutId);
+          return resolve({
+            status: permission === 'denied' ? 'denied' : 'prompt',
+            handle: handle
           });
-        }
-
-        return {
-          status: permission === 'denied' ? 'denied' : 'prompt',
-          handle: handle
-        };
-      }).catch(function () {
-        return { status: 'error', handle: handle };
+        }).catch(function (err) {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeoutId);
+          console.error('[CODE-IDB] Permission query error:', err && err.message ? err.message : String(err));
+          return resolve({ status: 'error', handle: handle, error: err && err.message ? err.message : String(err) });
+        });
+      }).catch(function (err) {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeoutId);
+        console.error('[CODE-IDB] restoreHandle error:', err && err.message ? err.message : String(err));
+        return resolve({ status: 'error', handle: null, error: err && err.message ? err.message : String(err) });
       });
     });
   }
@@ -385,6 +464,39 @@
       });
     }).then(function () {
       try { localStorage.removeItem('xtj_code_workspace_name'); } catch (e) { /* ignore */ }
+    });
+  }
+
+  function clearWorkspaceStorage() {
+    console.log('[CODE-IDB] Clearing workspace storage');
+    // 关闭当前连接
+    if (_dbConnection) {
+      try { _dbConnection.close(); } catch (e) {}
+      _dbConnection = null;
+    }
+    _dirHandle = null;
+    // 清理 localStorage
+    try { localStorage.removeItem('xtj_code_workspace_name'); } catch (e) {}
+    // 删除 IndexedDB 数据库
+    return new Promise(function (resolve) {
+      try {
+        var delReq = indexedDB.deleteDatabase(DB_NAME);
+        delReq.onsuccess = function () {
+          console.log('[CODE-IDB] Database deleted successfully');
+          resolve();
+        };
+        delReq.onerror = function (e) {
+          console.warn('[CODE-IDB] Database delete error:', e && e.target && e.target.error ? e.target.error.message : 'unknown');
+          resolve(); // 即使删除失败也继续
+        };
+        delReq.onblocked = function () {
+          console.warn('[CODE-IDB] Database delete blocked');
+          resolve(); // 被阻塞也继续
+        };
+      } catch (e) {
+        console.warn('[CODE-IDB] deleteDatabase error:', e && e.message ? e.message : String(e));
+        resolve();
+      }
     });
   }
 
@@ -1188,7 +1300,8 @@
     // IndexedDB
     _storeHandle: storeHandle,
     _restoreHandle: restoreHandle,
-    clearWorkspaceRecord: clearWorkspaceRecord
+    clearWorkspaceRecord: clearWorkspaceRecord,
+    clearWorkspaceStorage: clearWorkspaceStorage
   };
 
 })();

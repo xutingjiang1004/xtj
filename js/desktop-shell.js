@@ -9,9 +9,10 @@
     var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
     var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
     if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
-      // P0 #2: increment generation to invalidate any in-flight Code module loads
+      // P0: increment generation to invalidate any in-flight Code module loads
       _codeLoadGeneration++;
-      // P2 #9: check cleanup return value — cancel navigation if user declined
+      codeModuleState.generation++;
+      // P0: check cleanup return value — cancel navigation if user declined
       if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
     }
 
@@ -269,13 +270,10 @@
             await window.__xtjCodeRefreshWorkspace();
           } else {
             _codeLoadGeneration++;
+            codeModuleState.generation++;
             var gen = _codeLoadGeneration;
             try {
-              await Promise.all([
-                loadModuleScript('code-fs', 'xtj-module-code-fs'),
-                loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
-                loadModuleStyle('code-css', 'xtj-module-code-style')
-              ]);
+              await ensureCodeModulesLoaded();
               if (gen !== _codeLoadGeneration) break;
               if (typeof window.__xtjCodeInit === 'function') {
                 window.__xtjCodeInit();
@@ -297,8 +295,139 @@
   }
 
   
+  // ── P0: Code 模块加载状态机 ──────────────────────────────
+  var codeModuleState = {
+    status: 'idle',   // idle | loading | ready | error
+    promise: null,
+    generation: 0,
+    error: null
+  };
+
   var _loadedModules = {};
   var _codeLoadGeneration = 0;
+
+  function ensureCodeModulesLoaded() {
+    if (codeModuleState.status === 'ready') {
+      // 验证完整成功条件
+      var panelCode = document.getElementById('panelCode');
+      if (!panelCode || !panelCode.offsetParent) {
+        // 页面不可见，需要重新初始化
+        codeModuleState.status = 'idle';
+      } else if (window.__xtjCodeFS && window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeInit === 'function') {
+        return Promise.resolve();
+      } else {
+        // 部分模块丢失，重置状态
+        codeModuleState.status = 'idle';
+        codeModuleState.promise = null;
+      }
+    }
+
+    if (codeModuleState.status === 'loading' && codeModuleState.promise) {
+      return codeModuleState.promise;
+    }
+
+    // 创建新加载 Promise
+    codeModuleState.generation++;
+    var gen = codeModuleState.generation;
+    codeModuleState.status = 'loading';
+    codeModuleState.error = null;
+    _codeLoadGeneration++;
+
+    var panelCode = document.getElementById('panelCode');
+    if (panelCode) {
+      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+    }
+
+    // 超时 Promise
+    var timeoutPromise = new Promise(function (_, reject) {
+      setTimeout(function () {
+        reject(new Error('Code 工作区加载超时，请检查网络后重试'));
+      }, 10000);
+    });
+
+    var loadPromise = Promise.all([
+      loadModuleScript('code-fs', 'xtj-module-code-fs'),
+      loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
+      loadModuleStyle('code-css', 'xtj-module-code-style')
+    ]);
+
+    codeModuleState.promise = Promise.race([loadPromise, timeoutPromise])
+      .then(function () {
+        if (gen !== codeModuleState.generation) return;
+        // 检查页面是否仍为 Code 且可见
+        var pc = document.getElementById('panelCode');
+        if (!pc || !pc.offsetParent) {
+          // 用户已离开，不标记 ready
+          codeModuleState.status = 'idle';
+          codeModuleState.promise = null;
+          return;
+        }
+        if (typeof window.__xtjCodeInit === 'function') {
+          codeModuleState.status = 'ready';
+          codeModuleState.promise = null;
+        } else {
+          throw new Error('Code init function not found');
+        }
+      }).catch(function (e) {
+        if (gen !== codeModuleState.generation) {
+          codeModuleState.status = 'idle';
+          codeModuleState.promise = null;
+          return;
+        }
+        codeModuleState.status = 'error';
+        codeModuleState.error = e;
+        codeModuleState.promise = null;
+        console.error('[CODE-LOADER] Module load failed:', e && e.message ? e.message : String(e));
+        var pc2 = document.getElementById('panelCode');
+        if (pc2) {
+          pc2.innerHTML = '<div class="code-loading-state"><p>Code 工作区加载失败: ' + (e && e.message ? e.message.replace(/</g, '&lt;') : '未知错误') + '</p><button class="code-retry-btn" id="codeRetryBtn">重试</button></div>';
+          // 使用 addEventListener 而非内联 onclick
+          var retryBtn = document.getElementById('codeRetryBtn');
+          if (retryBtn) {
+            retryBtn.addEventListener('click', function () {
+              retryCodeModuleLoad();
+            });
+          }
+        }
+        if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
+      });
+
+    return codeModuleState.promise;
+  }
+
+  function retryCodeModuleLoad() {
+    // 清除失败模块的缓存
+    codeModuleState.status = 'idle';
+    codeModuleState.promise = null;
+    codeModuleState.error = null;
+    codeModuleState.generation++;
+    _codeLoadGeneration++;
+    // 移除失败的 script/link 元素
+    var failedScripts = document.querySelectorAll('script[data-xtj-code-module]');
+    for (var i = 0; i < failedScripts.length; i++) {
+      try { failedScripts[i].remove(); } catch (e) {}
+    }
+    var failedLinks = document.querySelectorAll('link[data-xtj-code-module]');
+    for (var j = 0; j < failedLinks.length; j++) {
+      try { failedLinks[j].remove(); } catch (e) {}
+    }
+    // 清除模块缓存
+    _loadedModules['code-fs'] = false;
+    _loadedModules['code-workspace'] = false;
+    _loadedModules['code-css'] = false;
+    delete window.__xtjCodeInit;
+    // 重新加载
+    ensureCodeModulesLoaded().then(function () {
+      var gen = codeModuleState.generation;
+      var pc = document.getElementById('panelCode');
+      if (pc && pc.offsetParent && gen === codeModuleState.generation) {
+        if (typeof window.__xtjCodeInit === 'function') {
+          window.__xtjCodeInit();
+        }
+      }
+    }).catch(function () {});
+  }
+
   function loadModuleScript(id, metaName) {
     if (_loadedModules[id]) return Promise.resolve();
     return new Promise(function (resolve, reject) {
@@ -306,11 +435,15 @@
       if (!meta || !meta.content) return reject(new Error('Missing meta ' + metaName));
       var script = document.createElement('script');
       script.src = meta.content;
+      script.setAttribute('data-xtj-code-module', id);
+      console.log('[CODE-LOADER] Loading script:', meta.content);
       script.onload = function () {
         _loadedModules[id] = true;
+        console.log('[CODE-LOADER] Script loaded:', meta.content);
         resolve();
       };
       script.onerror = function () {
+        console.error('[CODE-LOADER] Script failed:', meta.content);
         reject(new Error('Failed to load ' + meta.content));
       };
       document.body.appendChild(script);
@@ -325,11 +458,15 @@
       var link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = meta.content;
+      link.setAttribute('data-xtj-code-module', id);
+      console.log('[CODE-LOADER] Loading CSS:', meta.content);
       link.onload = function () {
         _loadedModules[id] = true;
+        console.log('[CODE-LOADER] CSS loaded:', meta.content);
         resolve();
       };
       link.onerror = function () {
+        console.error('[CODE-LOADER] CSS failed:', meta.content);
         reject(new Error('Failed to load ' + meta.content));
       };
       document.head.appendChild(link);
@@ -360,39 +497,23 @@
       if (tabButton) {
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
-        if (tab === 'code' && typeof window.__xtjCodeInit !== 'function') {
-          // Show loading state first
-          var panelCode = document.getElementById('panelCode');
-          if (panelCode) {
-            panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
-          }
-          // Increment loading generation token
-          _codeLoadGeneration++;
+        if (tab === 'code') {
+          // P0: 使用状态机管理模块加载
           var gen = _codeLoadGeneration;
-          Promise.all([
-            loadModuleScript('code-fs', 'xtj-module-code-fs'),
-            loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
-            loadModuleStyle('code-css', 'xtj-module-code-style')
-          ]).then(function () {
-            if (gen !== _codeLoadGeneration) return; // User navigated away
-            if (typeof window.__xtjCodeInit === 'function') {
-              window.__xtjCodeInit();
-            }
-          }).catch(function (e) {
+          ensureCodeModulesLoaded().then(function () {
             if (gen !== _codeLoadGeneration) return;
-            console.error('[CODE] workspace load failed:', e);
-            if (panelCode) {
-              panelCode.innerHTML = '<div class="code-loading-state"><p>Code 工作区加载失败，请重试</p><button class="code-retry-btn" onclick="delete window.__xtjCodeInit;var d=document;var s=d.querySelector(\'[data-desktop-tab=code]\');if(s){d.querySelector(\'#panelCode\').innerHTML=\'\';var evt=new MouseEvent(\'click\',{bubbles:true});s.dispatchEvent(evt);}">重试</button></div>';
+            var pc = document.getElementById('panelCode');
+            if (!pc || !pc.offsetParent) return;
+            // P0: 即使 __xtjCodeInit 已存在，也检查 workspace 是否已激活
+            if (typeof window.__xtjCodeInit === 'function') {
+              var codeState = window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.getState ? window.__xtjCodeWorkspaceAPI.getState() : null;
+              if (!codeState || !codeState.active) {
+                window.__xtjCodeInit();
+              }
             }
-            if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
+          }).catch(function () {
+            // 错误已在 ensureCodeModulesLoaded 中处理
           });
-        }
-        // P0 #2 / P1 #3: if __xtjCodeInit exists but workspace is not active, re-initialize
-        if (tab === 'code' && typeof window.__xtjCodeInit === 'function') {
-          var codeState = window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.getState ? window.__xtjCodeWorkspaceAPI.getState() : null;
-          if (!codeState || !codeState.active) {
-            Promise.resolve().then(function() { window.__xtjCodeInit(); });
-          }
         }
         openTab(tab);
         window.requestAnimationFrame(syncActiveTab);
