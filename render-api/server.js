@@ -14543,7 +14543,21 @@ function startDmUnreadNotifier() {
 }
 
 // ── Code workspace AI agent routes ──
-registerCodeAgentRoutes(app, { supabase, rateLimit, authenticateUser, sanitizeError });
+registerCodeAgentRoutes(app, {
+  supabase,
+  rateLimit,
+  authenticateUser,
+  sanitizeError,
+  getDeepSeekModel: function () {
+    return getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER);
+  },
+  getDeepSeekApiUrl: function () {
+    return DEEPSEEK_API_URL;
+  },
+  getDeepSeekApiKey: function () {
+    return DEEPSEEK_API_KEY;
+  }
+});
 
 app.listen(port, () => {
   console.log(`[xtj-admin-api] running on port ${port}`);
