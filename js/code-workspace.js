@@ -2078,11 +2078,16 @@
     input.value = '';
     input.style.height = 'auto';
 
-    // Re-render chat
+    // P0: 追加用户消息到聊天，而不是重建整个面板
+    // renderChatPanel() 会重建 input/button，新建的 DOM 是启用状态，
+    // 但 state.sending 仍为 true → 导致点击发送被 guard 拦截，用户无法发送
     try {
-      renderChatPanel();
-      // Show typing indicator
+      var messagesContainer = document.getElementById('codeChatMessages');
+      if (messagesContainer) {
+        appendChatMessage(state.messages[state.messages.length - 1], messagesContainer);
+      }
       showTypingIndicator();
+      scrollChatToBottom();
     } catch (e) {
       state.sending = false;
       var curInput = document.getElementById('codeChatInput');
