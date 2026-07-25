@@ -84,7 +84,17 @@
   isolation: isolate;
 }
 
-/* ── 1a. Workspace Layout (three-column: sidebar | editor | chat) ── */
+/* ── 1a. Workspace Shell (vertical: banner + workspace) ── */
+.code-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ── 1b. Workspace Layout (three-column: sidebar | editor | chat) ── */
 .code-workspace {
   display: flex;
   flex: 1;
@@ -93,7 +103,7 @@
   overflow: hidden;
 }
 
-/* ── 1b. Editor Column (center) ── */
+/* ── 1c. Editor Column (center) ── */
 .code-editor-column {
   flex: 1;
   min-width: 0;
