@@ -51,7 +51,7 @@
   ];
 
   var IMAGE_EXTENSIONS = [
-    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico',
     '.avif', '.heic', '.heif', '.tiff', '.tif'
   ];
 
@@ -62,17 +62,11 @@
     '.rtf', '.odt', '.ods', '.odp'
   ];
 
-  var DOCUMENT_MIME_MAP = {
+    var DOCUMENT_MIME_MAP = {
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.doc': 'application/msword',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.xls': 'application/vnd.ms-excel',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.rtf': 'application/rtf',
-    '.odt': 'application/vnd.oasis.opendocument.text',
-    '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
-    '.odp': 'application/vnd.oasis.opendocument.presentation'
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
   };
 
   // ──────────────────────────────────────────────
@@ -946,6 +940,84 @@
   }
 
   // ──────────────────────────────────────────────
+  // List all files recursively (for workspace overview)
+  // ──────────────────────────────────────────────
+  function listAllFiles(maxDepth, maxFiles) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('listAllFiles: no workspace selected'));
+    }
+    maxDepth = maxDepth || 5;
+    maxFiles = maxFiles || 200;
+
+    var allFiles = [];
+    var allDirs = [];
+
+    function scanDir(dirHandle, currentPath, depth) {
+      if (depth > maxDepth || allFiles.length >= maxFiles) {
+        return Promise.resolve();
+      }
+
+      return new Promise(function (res, rej) {
+        var items = [];
+        var it;
+        try {
+          it = dirHandle.values();
+        } catch (e) {
+          try { it = dirHandle.entries(); } catch (e2) { res(); return; }
+        }
+
+        function pump() {
+          it.next().then(function (result) {
+            if (result.done) {
+              var promises = [];
+              for (var i = 0; i < items.length; i++) {
+                var handle = items[i];
+                var entryPath = currentPath ? currentPath + '/' + handle.name : handle.name;
+                if (handle.kind === 'directory') {
+                  if (!shouldSkip(handle.name)) {
+                    allDirs.push({ path: entryPath, name: handle.name });
+                    if (depth < maxDepth) {
+                      promises.push(scanDir(handle, entryPath, depth + 1));
+                    }
+                  }
+                } else {
+                  var fileType = getFileType(handle.name);
+                  allFiles.push({
+                    path: entryPath,
+                    name: handle.name,
+                    type: fileType,
+                    size: 0
+                  });
+                  if (allFiles.length >= maxFiles) break;
+                }
+              }
+              Promise.all(promises).then(function() { res(); }).catch(rej);
+            } else {
+              var handle;
+              if (Array.isArray(result.value)) handle = result.value[1];
+              else handle = result.value;
+              items.push(handle);
+              pump();
+            }
+          }).catch(function (err) {
+            rej(err);
+          });
+        }
+        pump();
+      });
+    }
+
+    return scanDir(_dirHandle, '', 0).then(function () {
+      return {
+        files: allFiles.slice(0, maxFiles),
+        directories: allDirs,
+        totalCount: allFiles.length,
+        truncated: allFiles.length >= maxFiles
+      };
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // Binary file writing (for document operations)
   // ──────────────────────────────────────────────
   function writeBinaryFile(fileHandle, buffer) {
@@ -1070,11 +1142,14 @@
     // File tree
     buildFileTree: buildFileTree,
     expandDirectory: expandDirectory,
+    listAllFiles: listAllFiles,
 
     // File reading
     getFileType: getFileType,
     readFile: readFile,
     readFileByPath: readFileByPath,
+    isTextExtension: isTextExtension,
+    isImageExtension: isImageExtension,
 
     // Document extraction
     readDocumentText: readDocumentText,

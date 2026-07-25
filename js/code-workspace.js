@@ -154,7 +154,7 @@
       '.gif': 'file-img', '.webp': 'file-img', '.svg': 'file-img',
       '.bmp': 'file-img', '.ico': 'file-img',
       '.pdf': 'file-pdf',
-      '.docx': 'file-doc', '.doc': 'file-doc',
+      '.docx': 'file-doc',
       '.xlsx': 'file-xls', '.xls': 'file-xls',
       '.csv': 'file-csv'
     };
@@ -175,7 +175,7 @@
   function fileIsDocument(fileName) {
     if (!fileName) return false;
     var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
-    return ['.docx', '.doc', '.xlsx', '.xls'].indexOf(ext) !== -1;
+    return ['.docx', '.xlsx', '.xls', '.pptx'].indexOf(ext) !== -1;
   }
 
   // ──────────────────────────────────────────────
@@ -1373,9 +1373,9 @@
       var docIcon = '📄';
       var docLabel = '文档';
       var ext = (docData.ext || '').toLowerCase();
-      if (ext === '.docx' || ext === '.doc') { docIcon = '📝'; docLabel = 'Word 文档'; }
+      if (ext === '.docx') { docIcon = '📝'; docLabel = 'Word 文档'; }
       else if (ext === '.xlsx' || ext === '.xls') { docIcon = '📊'; docLabel = 'Excel 表格'; }
-      else if (ext === '.pptx' || ext === '.ppt') { docIcon = '📽️'; docLabel = 'PPT 演示'; }
+      else if (ext === '.pptx') { docIcon = '📽️'; docLabel = 'PPT 演示'; }
 
       var html = '<div class="doc-preview-header">';
       html += '<span class="doc-preview-icon">' + docIcon + '</span>';
@@ -1504,6 +1504,61 @@
       }
     }
     return removed;
+  }
+
+  // ──────────────────────────────────────────────
+  // Batch Add Functions
+  // ──────────────────────────────────────────────
+  function addAllTextFilesToContext() {
+    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
+      showToast('文件系统不支持此操作', 'error');
+      return;
+    }
+    showToast('正在扫描工作区文件...', 'info');
+    window.__xtjCodeFS.listAllFiles(4, 300).then(function (result) {
+      var added = 0;
+      var count = Object.keys(state.contextPaths).length;
+      for (var i = 0; i < result.files.length; i++) {
+        if (count >= 50) break;
+        var f = result.files[i];
+        if (f.type === 'text' && !state.contextPaths[f.path]) {
+          state.contextPaths[f.path] = true;
+          added++;
+          count++;
+        }
+      }
+      renderContextPanel();
+      renderTabs();
+      showToast('已添加 ' + added + ' 个文本文件到上下文', 'success');
+    }).catch(function (err) {
+      showToast('扫描文件失败: ' + err.message, 'error');
+    });
+  }
+
+  function addAllDocumentsToContext() {
+    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
+      showToast('文件系统不支持此操作', 'error');
+      return;
+    }
+    showToast('正在扫描工作区文档...', 'info');
+    window.__xtjCodeFS.listAllFiles(4, 300).then(function (result) {
+      var added = 0;
+      var count = Object.keys(state.contextPaths).length;
+      for (var i = 0; i < result.files.length; i++) {
+        if (count >= 50) break;
+        var f = result.files[i];
+        if (f.type === 'document' && !state.contextPaths[f.path]) {
+          state.contextPaths[f.path] = true;
+          added++;
+          count++;
+        }
+      }
+      renderContextPanel();
+      renderTabs();
+      showToast('已添加 ' + added + ' 个文档到上下文', 'success');
+    }).catch(function (err) {
+      showToast('扫描文档失败: ' + err.message, 'error');
+    });
   }
 
   // ──────────────────────────────────────────────
