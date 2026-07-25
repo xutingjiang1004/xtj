@@ -305,6 +305,118 @@ test('desktop-shell lazy-loads code modules on click', () => {
 });
 
 // ============================================================
+// ★ P0: 代码模块加载器回归测试 — PR #372 修复
+// ============================================================
+
+test('P0: recoverCodeInitAlias restores __xtjCodeInit from API.init', () => {
+  assert.match(desktopShell, /function recoverCodeInitAlias/);
+  assert.match(desktopShell, /window\.__xtjCodeInit = window\.__xtjCodeWorkspaceAPI\.init/);
+  assert.match(desktopShell, /typeof window\.__xtjCodeInit !== 'function'/);
+  assert.match(desktopShell, /__xtjCodeWorkspaceAPI/);
+  assert.match(desktopShell, /__xtjCodeWorkspaceAPI\.init/);
+});
+
+test('P0: retryCodeModuleLoad does NOT delete __xtjCodeInit', () => {
+  // retryCodeModuleLoad 中不应该有 delete window.__xtjCodeInit
+  var retryFn = desktopShell.match(/function retryCodeModuleLoad[\s\S]*?(?=function \w+)/);
+  assert.ok(retryFn, 'retryCodeModuleLoad function should exist');
+  assert.ok(!/delete window\.__xtjCodeInit/.test(retryFn[0]), 'retryCodeModuleLoad should NOT delete __xtjCodeInit');
+});
+
+test('P0: retryCodeModuleLoad does NOT double-increment generation', () => {
+  // retryCodeModuleLoad should NOT increment generation before calling ensureCodeModulesLoaded
+  var retryFn = desktopShell.match(/function retryCodeModuleLoad[\s\S]*?(?=function \w+)/);
+  assert.ok(retryFn, 'retryCodeModuleLoad function should exist');
+  // The generation increment should NOT be in retryCodeModuleLoad (only in ensureCodeModulesLoaded)
+  var genIncrements = retryFn[0].match(/codeModuleState\.generation\+\+/g);
+  assert.ok(!genIncrements || genIncrements.length === 0, 'retryCodeModuleLoad should NOT increment generation');
+});
+
+test('P0: verifyModule checks real API availability not just onload', () => {
+  assert.match(desktopShell, /function verifyModule/);
+  // code-fs: check __xtjCodeFS.readFileByPath
+  assert.match(desktopShell, /__xtjCodeFS && typeof window\.__xtjCodeFS\.readFileByPath/);
+  // code-workspace: check __xtjCodeWorkspaceAPI.init
+  assert.match(desktopShell, /__xtjCodeWorkspaceAPI && typeof window\.__xtjCodeWorkspaceAPI\.init/);
+  // code-css: check sheet exists
+  assert.match(desktopShell, /links\[i\]\.sheet/);
+});
+
+test('P0: codeModuleState has errorShownGeneration for dedup toast', () => {
+  assert.match(desktopShell, /errorShownGeneration/);
+  assert.match(desktopShell, /codeModuleState\.errorShownGeneration !== gen/);
+  assert.match(desktopShell, /codeModuleState\.errorShownGeneration = gen/);
+});
+
+test('P0: damaged state detected when __xtjCodeWorkspace true but API missing', () => {
+  assert.match(desktopShell, /window\.__xtjCodeWorkspace === true/);
+  assert.match(desktopShell, /!window\.__xtjCodeWorkspaceAPI/);
+  assert.match(desktopShell, /Code 工作区脚本初始化不完整，请刷新页面后重试/);
+  assert.match(desktopShell, /window\.location\.reload\(\)/);
+});
+
+test('P0: loadModuleScript verifies module after onload, not just onload', () => {
+  // loadModuleScript should call verifyModule after onload
+  assert.match(desktopShell, /verifyModule\(id\)/);
+  // Should reject if verification fails
+  assert.match(desktopShell, /Module.*loaded but API not available/);
+});
+
+test('P0: refreshTab code case does NOT pre-save stale generation', () => {
+  // refreshTab code case should not have `var gen = codeModuleState.generation` before ensureCodeModulesLoaded
+  var refreshFn = desktopShell.match(/case 'code':[\s\S]*?break;/);
+  assert.ok(refreshFn, 'refreshTab code case should exist');
+  // Should NOT pre-save generation
+  assert.ok(!/var gen = codeModuleState\.generation/.test(refreshFn[0]), 'refreshTab code case should NOT pre-save generation');
+  // Should use ensureCodeModulesLoaded
+  assert.match(refreshFn[0], /ensureCodeModulesLoaded/);
+});
+
+test('P0: click handler does NOT pre-save generation before ensureCodeModulesLoaded', () => {
+  // Click handler in init() should call ensureCodeModulesLoaded without pre-saving generation
+  var clickFn = desktopShell.match(/tab === 'code'[\s\S]*?ensureCodeModulesLoaded[\s\S]*?catch/);
+  assert.ok(clickFn, 'click handler should exist');
+  assert.ok(!/var gen = codeModuleState\.generation/.test(clickFn[0]), 'click handler should NOT pre-save generation');
+});
+
+test('P0: init is idempotent — returns early if already active', () => {
+  assert.match(codeWorkspace, /if \(state\.active\)/);
+  assert.match(codeWorkspace, /return Promise\.resolve\(\{ status: 'already-active' \}\)/);
+});
+
+test('P0: init returns status when panel not visible', () => {
+  assert.match(codeWorkspace, /return Promise\.resolve\(\{ status: 'hidden' \}\)/);
+});
+
+test('P0: welcome page renders immediately before IndexedDB restore', () => {
+  // renderWelcome() must be called before tryRestoreWorkspace()
+  var initFn = codeWorkspace.match(/function init[\s\S]*?(?=function tryRestore)/);
+  assert.ok(initFn, 'init function should exist');
+  var renderWelcomeIdx = initFn[0].indexOf('renderWelcome()');
+  var tryRestoreIdx = initFn[0].indexOf('tryRestoreWorkspace()');
+  assert.ok(renderWelcomeIdx !== -1, 'renderWelcome should be called in init');
+  assert.ok(tryRestoreIdx !== -1, 'tryRestoreWorkspace should be called in init');
+  assert.ok(renderWelcomeIdx < tryRestoreIdx, 'renderWelcome must be called BEFORE tryRestoreWorkspace');
+});
+
+test('P0: retry only reloads failed modules, not all', () => {
+  // retryCodeModuleLoad should use verifyModule to determine failed modules
+  var retryFn = desktopShell.match(/function retryCodeModuleLoad[\s\S]*?(?=function \w+)/);
+  assert.ok(retryFn, 'retryCodeModuleLoad function should exist');
+  assert.match(retryFn[0], /verifyModule\('code-fs'\)/);
+  assert.match(retryFn[0], /verifyModule\('code-workspace'\)/);
+  assert.match(retryFn[0], /verifyModule\('code-css'\)/);
+  assert.match(retryFn[0], /failedModules\.push/);
+});
+
+test('P0: only one generation management — no _codeLoadGeneration', () => {
+  // There should be NO _codeLoadGeneration variable anywhere
+  assert.ok(!/_codeLoadGeneration/.test(desktopShell), 'should NOT have _codeLoadGeneration');
+  // Only codeModuleState.generation should exist
+  assert.match(desktopShell, /codeModuleState\.generation/);
+});
+
+// ============================================================
 // Additional: Diff view
 // ============================================================
 test('Diff view is rendered for pending operations', () => {
@@ -753,8 +865,9 @@ test('cleanup preserves directoryHandle and workspace authorization', () => {
 test('init sets state.active = true and can be called after cleanup', () => {
   // init must set state.active = true
   assert.match(codeWorkspace, /state\.active = true/);
-  // init must return early if already active
-  assert.match(codeWorkspace, /if \(state\.active\) return/);
+  // init must return early if already active (P0: 幂等)
+  assert.match(codeWorkspace, /if \(state\.active\)/);
+  assert.match(codeWorkspace, /already-active/);
   // After cleanup sets state.active = false, init can be called again
   assert.match(codeWorkspace, /state\.active = false/);
 });
