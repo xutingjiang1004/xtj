@@ -72,3 +72,53 @@ test('admin type filters are constrained before Supabase equality filters', () =
   assert.match(source, /!\/\^\[a-z0-9_\\-\]\+\$\/i\.test\(alertType\)/);
   assert.match(source, /!\/\^\[a-z0-9_\\-\]\+\$\/i\.test\(logType\)/);
 });
+
+test('CSP must not contain strict-dynamic without nonce/hash coverage for all scripts', () => {
+  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
+  assert.ok(cspMatch, 'Content-Security-Policy header must exist in server.js');
+  const csp = cspMatch[1];
+  assert.doesNotMatch(csp, /'strict-dynamic'/, "CSP script-src MUST NOT contain 'strict-dynamic' without per-script nonces/hashes (PR #366 production outage)");
+});
+
+test('CSP script-src allows self, unsafe-inline, Supabase CDN, and jsDelivr', () => {
+  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
+  assert.ok(cspMatch);
+  const csp = cspMatch[1];
+  const scriptSrc = csp.split(';').find(function(d) { return d.trim().startsWith('script-src'); });
+  assert.ok(scriptSrc, 'script-src directive must exist');
+  assert.match(scriptSrc, /'self'/);
+  assert.match(scriptSrc, /'unsafe-inline'/);
+  assert.match(scriptSrc, /https:\/\/ithowxqignlhkwaykglt\.supabase\.co/);
+  assert.match(scriptSrc, /https:\/\/cdn\.jsdelivr\.net/);
+});
+
+test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
+  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
+  assert.ok(cspMatch);
+  const csp = cspMatch[1];
+  const styleSrc = csp.split(';').find(function(d) { return d.trim().startsWith('style-src'); });
+  assert.ok(styleSrc, 'style-src directive must exist');
+  assert.match(styleSrc, /'self'/);
+  assert.match(styleSrc, /'unsafe-inline'/);
+  assert.match(styleSrc, /https:\/\/cdn\.jsdelivr\.net/);
+});
+
+test('CSP font-src allows self and jsDelivr', () => {
+  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
+  assert.ok(cspMatch);
+  const csp = cspMatch[1];
+  const fontSrc = csp.split(';').find(function(d) { return d.trim().startsWith('font-src'); });
+  assert.ok(fontSrc, 'font-src directive must exist');
+  assert.match(fontSrc, /'self'/);
+  assert.match(fontSrc, /https:\/\/cdn\.jsdelivr\.net/);
+});
+
+test('CSP includes security hardening directives', () => {
+  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
+  assert.ok(cspMatch);
+  const csp = cspMatch[1];
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /base-uri 'self'/);
+  assert.match(csp, /form-action 'self'/);
+  assert.match(csp, /default-src 'self'/);
+});
