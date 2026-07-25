@@ -129,11 +129,12 @@ test('file size exceeds limit is rejected', () => {
 });
 
 // ============================================================
-// 10. 上下文最多 50 个文件
+// 10. Phase 1: Context is managed by project index, not 50-file hard limit
 // ============================================================
-test('context limit is 50 files', () => {
-  assert.match(codeWorkspace, /count >= 50/);
-  assert.match(codeWorkspace, /最多添加 50 个文件/);
+test('context is managed by project index, not 50-file hard limit', () => {
+  assert.ok(!/count >= 50/.test(codeWorkspace), 'should not have 50-file count check');
+  assert.ok(!/最多添加 50 个文件/.test(codeWorkspace), 'should not have 50-file limit message');
+  assert.match(codeWorkspace, /pinnedFiles/);
 });
 
 // ============================================================
@@ -480,30 +481,45 @@ test('tab middle-click close uses tab.path from closure', () => {
 // ============================================================
 // Real behavior tests — AI context reading
 // ============================================================
-test('AI context reads files from disk, not just open tabs', () => {
-  assert.match(codeWorkspace, /fs\.readFileByPath\(p\)/);
-  assert.match(codeWorkspace, /contextPaths = Object\.keys\(state\.contextPaths\)/);
+// Phase 1: AI context is now managed via project index + token budget,
+// not by reading all contextPaths from disk for every request.
+test('AI context uses project index instead of static contextPaths', () => {
+  assert.match(codeWorkspace, /pinnedFiles/);
+  assert.match(codeWorkspace, /buildProjectIndex/);
+  assert.match(codeWorkspace, /projectIndexStatus/);
+  // Old contextPaths pattern should be removed
+  assert.ok(!/contextPaths = Object\.keys\(state\.contextPaths\)/.test(codeWorkspace),
+    'should not use old contextPaths disk read pattern');
 });
 
 test('AI context uses _currentContent for unsaved modifications', () => {
-  assert.match(codeWorkspace, /openTab\._currentContent/);
-  assert.match(codeWorkspace, /openTab\.modified/);
+  assert.match(codeWorkspace, /_currentContent/);
+  assert.match(codeWorkspace, /\.modified/);
 });
 
-test('AI context fails loudly for unreadable files', () => {
-  assert.match(codeWorkspace, /Failed to read context file/);
-  assert.match(codeWorkspace, /failedFiles\.push/);
-  assert.match(codeWorkspace, /部分文件读取失败/);
+// Phase 1: Old contextPaths-based file reading is removed.
+// File reading errors are now handled through project index at the backend level.
+test('AI context handles index build failures gracefully', () => {
+  assert.match(codeWorkspace, /Index build failed/);
+  assert.match(codeWorkspace, /projectIndexStatus/);
 });
 
-test('AI context respects 900 KB limit', () => {
-  assert.match(codeWorkspace, /900 \* 1024/);
-  assert.match(codeWorkspace, /超过 900 KB 限制/);
+// Phase 1: 900KB hard limit is deprecated. Context is managed by token budget.
+test('AI context uses token budget, not 900KB hard limit', () => {
+  // Token budget is managed on backend via code-index.js
+  assert.ok(!/超过 900 KB 限制/.test(codeWorkspace),
+    'should not have 900KB hard limit in frontend');
+  assert.match(codeWorkspace, /lastReadContext/);
+  assert.match(codeWorkspace, /truncated/);
 });
 
-test('AI context max 50 files', () => {
-  assert.match(codeWorkspace, /count >= 50/);
-  assert.match(codeWorkspace, /最多添加 50 个文件/);
+// Phase 1: 50-file hard limit is deprecated. Context is managed by project index.
+test('AI context uses project index, not 50-file hard limit', () => {
+  assert.ok(!/count >= 50/.test(codeWorkspace),
+    'should not have 50-file hard limit in frontend');
+  assert.ok(!/最多添加 50 个文件/.test(codeWorkspace),
+    'should not have 50-file hard limit message');
+  assert.match(codeWorkspace, /pinnedFiles/);
 });
 
 // ============================================================
@@ -631,9 +647,10 @@ test('server parseOperations returns empty array on failure', () => {
 // ============================================================
 // Real behavior tests — system prompt
 // ============================================================
-test('system prompt constrains AI to only see provided files', () => {
+// Phase 1: System prompt now uses project index with code snippets from context
+test('system prompt shows code snippets from project index, not static files', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /You can see the files that are included/);
+  assert.match(codeAgent, /项目代码/);
   assert.match(codeAgent, /Never claim to have read or inspected files/);
   assert.match(codeAgent, /Do not claim tests, builds, commands, or Git operations/);
 });

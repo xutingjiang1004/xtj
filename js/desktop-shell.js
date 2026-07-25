@@ -38,6 +38,8 @@
     var aiActive = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     var activePanel = document.querySelector('.dock-panel.active');
     var tab = activePanel && activePanel.id ? activePanel.id.replace(/^panel/, '').toLowerCase() : 'posts';
+    // P0: 跟踪当前 tab 用于 Code 模块可见性判断
+    codeModuleState.currentTab = tab;
     document.querySelectorAll('.desktop-nav-item').forEach(function (button) {
       var active = aiActive
         ? button.getAttribute('data-desktop-action') === 'ai-chat'
@@ -297,17 +299,67 @@
     promise: null,
     generation: 0,
     error: null,
-    errorShownGeneration: -1  // 防止同一 generation 重复显示错误
+    errorShownGeneration: -1,  // 防止同一 generation 重复显示错误
+    // P0: 每个模块独立状态
+    modules: {
+      'code-fs':      { status: 'idle', url: '', startTime: 0 },
+      'code-workspace': { status: 'idle', url: '', startTime: 0 },
+      'code-css':     { status: 'idle', url: '', startTime: 0 }
+    },
+    // P0: 当前 active tab 用于可靠的可见性判断
+    currentTab: 'posts'
   };
 
   var _loadedModules = {};
+  var _pendingModulePromises = {};  // P0: 防止重复加载同一个模块
+  var _codeErrorListenerInstalled = false;
+
+  // P0: 安装全局错误监听器，捕获 Code 模块脚本执行错误
+  function _installCodeErrorListeners() {
+    if (_codeErrorListenerInstalled) return;
+    _codeErrorListenerInstalled = true;
+
+    window.addEventListener('error', function (event) {
+      var filename = event.filename || '';
+      var message = event.message || '';
+      if (filename.indexOf('code-file-system') !== -1 ||
+          filename.indexOf('code-workspace') !== -1 ||
+          message.indexOf('__xtjCode') !== -1) {
+        console.error('[CODE-LOADER] Script error caught:');
+        console.error('  Module: ' + (filename.indexOf('code-file-system') !== -1 ? 'code-fs' : 'code-workspace'));
+        console.error('  URL: ' + filename);
+        console.error('  Error: ' + message + ' at ' + (event.lineno || '?') + ':' + (event.colno || '?'));
+        if (event.error && event.error.stack) {
+          console.error('  Stack: ' + event.error.stack);
+        }
+      }
+    }, true);
+
+    window.addEventListener('unhandledrejection', function (event) {
+      var reason = event.reason;
+      var msg = reason && reason.message ? reason.message : String(reason || '');
+      if (msg.indexOf('code-fs') !== -1 ||
+          msg.indexOf('code-workspace') !== -1 ||
+          msg.indexOf('code-css') !== -1 ||
+          msg.indexOf('Code') !== -1) {
+        console.error('[CODE-LOADER] Unhandled rejection:');
+        console.error('  Message: ' + msg);
+        if (reason && reason.stack) {
+          console.error('  Stack: ' + reason.stack);
+        }
+      }
+    });
+  }
 
   function ensureCodeModulesLoaded() {
+    // P0: 确保错误监听器已安装（兜底）
+    _installCodeErrorListeners();
+
     // P0: 检查 ready 状态时验证完整成功条件
     if (codeModuleState.status === 'ready') {
-      var panelCode = document.getElementById('panelCode');
-      if (!panelCode || !panelCode.offsetParent) {
+      if (!isCodePanelVisible()) {
         codeModuleState.status = 'idle';
+        codeModuleState.promise = null;
       } else if (verifyModule('code-fs') && verifyModule('code-workspace') && verifyModule('code-css') && typeof window.__xtjCodeInit === 'function') {
         return Promise.resolve();
       } else {
@@ -341,24 +393,60 @@
       panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
     }
 
-    // 超时 Promise
-    var timeoutPromise = new Promise(function (_, reject) {
-      setTimeout(function () {
-        reject(new Error('Code 工作区加载超时，请检查网络后重试'));
-      }, 10000);
-    });
+    var loadStartTime = Date.now();
+    var MODULE_TIMEOUT_MS = 15000;  // P0: 每个模块 15 秒超时
+
+    // P0: 每个模块独立加载 + 独立超时 + 详细错误
+    function loadModuleWithTimeout(id, metaName, loaderFn) {
+      var mod = codeModuleState.modules[id];
+      mod.status = 'loading';
+      mod.startTime = Date.now();
+      var meta = document.querySelector('meta[name="' + metaName + '"]');
+      mod.url = (meta && meta.content) ? meta.content : '(meta not found)';
+
+      return new Promise(function (resolve, reject) {
+        var timeoutId = setTimeout(function () {
+          var elapsed = Date.now() - mod.startTime;
+          var detail = [
+            'Code 工作区加载超时',
+            '模块: ' + id,
+            'URL: ' + mod.url,
+            'script loaded: ' + (_loadedModules[id] === true),
+            'API exported: ' + verifyModule(id),
+            '已等待: ' + (elapsed / 1000).toFixed(1) + ' 秒'
+          ];
+          mod.status = 'timeout';
+          reject(new Error(detail.join('\n')));
+        }, MODULE_TIMEOUT_MS);
+
+        loaderFn().then(function () {
+          clearTimeout(timeoutId);
+          mod.status = 'loaded';
+          resolve();
+        }).catch(function (e) {
+          clearTimeout(timeoutId);
+          mod.status = 'error';
+          reject(e);
+        });
+      });
+    }
 
     var loadPromise = Promise.all([
-      loadModuleScript('code-fs', 'xtj-module-code-fs'),
-      loadModuleScript('code-workspace', 'xtj-module-code-workspace'),
-      loadModuleStyle('code-css', 'xtj-module-code-style')
+      loadModuleWithTimeout('code-fs', 'xtj-module-code-fs', function () {
+        return loadModuleScript('code-fs', 'xtj-module-code-fs');
+      }),
+      loadModuleWithTimeout('code-workspace', 'xtj-module-code-workspace', function () {
+        return loadModuleScript('code-workspace', 'xtj-module-code-workspace');
+      }),
+      loadModuleWithTimeout('code-css', 'xtj-module-code-style', function () {
+        return loadModuleStyle('code-css', 'xtj-module-code-style');
+      })
     ]);
 
-    codeModuleState.promise = Promise.race([loadPromise, timeoutPromise])
+    codeModuleState.promise = loadPromise
       .then(function () {
         if (gen !== codeModuleState.generation) return;
-        var pc = document.getElementById('panelCode');
-        if (!pc || !pc.offsetParent) {
+        if (!isCodePanelVisible()) {
           codeModuleState.status = 'idle';
           codeModuleState.promise = null;
           return;
@@ -368,6 +456,7 @@
         if (typeof window.__xtjCodeInit === 'function') {
           codeModuleState.status = 'ready';
           codeModuleState.promise = null;
+          console.log('[CODE-LOADER] All modules loaded successfully in ' + (Date.now() - loadStartTime) + 'ms');
         } else {
           throw new Error('Code init function not found');
         }
@@ -375,20 +464,19 @@
         if (gen !== codeModuleState.generation) {
           codeModuleState.status = 'idle';
           codeModuleState.promise = null;
-          // P1: 保持 rejected，不转为成功
           return Promise.reject(e);
         }
         codeModuleState.status = 'error';
         codeModuleState.error = e;
         codeModuleState.promise = null;
         console.error('[CODE-LOADER] Module load failed:', e && e.message ? e.message : String(e));
-        renderErrorPage(e && e.message ? e.message : '未知错误', false);
-        // P0: 同一 generation 只显示一次 toast
+        // P0: 显示详细错误信息
+        var errMsg = e && e.message ? e.message : '未知错误';
+        renderErrorPage(errMsg, false);
         if (codeModuleState.errorShownGeneration !== gen) {
           codeModuleState.errorShownGeneration = gen;
           if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
         }
-        // P1: 保持 rejected，防止调用方认为加载成功并进行半残初始化
         return Promise.reject(e);
       });
 
@@ -411,7 +499,11 @@
   // P0: 检查 Code 面板是否可见
   function isCodePanelVisible() {
     var pc = document.getElementById('panelCode');
-    return !!(pc && pc.offsetParent);
+    if (!pc) return false;
+    // P0: 双重检查 — offsetParent 和 active tab 状态
+    if (pc.offsetParent) return true;
+    if (codeModuleState.currentTab === 'code' && pc.classList.contains('active') && !pc.classList.contains('hidden')) return true;
+    return false;
   }
 
   // P0: 渲染错误页面
@@ -482,6 +574,8 @@
     // 只清除失败模块的缓存
     for (var k = 0; k < failedModules.length; k++) {
       _loadedModules[failedModules[k]] = false;
+      // P0: 清除 pending promise，允许重新加载
+      delete _pendingModulePromises[failedModules[k]];
     }
 
     // 重置状态（不递增 generation，ensureCodeModulesLoaded 内部会递增）
@@ -500,58 +594,134 @@
   }
 
   function loadModuleScript(id, metaName) {
-    if (_loadedModules[id]) return Promise.resolve();
-    return new Promise(function (resolve, reject) {
+    // P0: 如果已加载且验证通过，直接返回
+    if (_loadedModules[id] && verifyModule(id)) return Promise.resolve();
+
+    // P0: 如果正在加载，复用同一个 Promise
+    if (_pendingModulePromises[id]) return _pendingModulePromises[id];
+
+    // P0: 检查页面中是否已存在相同 ID 的 script
+    var existingScripts = document.querySelectorAll('script[data-xtj-code-module="' + id + '"]');
+    for (var i = 0; i < existingScripts.length; i++) {
+      var existing = existingScripts[i];
+      if (existing.getAttribute('data-xtj-loaded') === 'true') {
+        if (verifyModule(id)) {
+          _loadedModules[id] = true;
+          return Promise.resolve();
+        }
+        // API 丢失，移除后重新加载
+        try { existing.remove(); } catch (e) {}
+        _loadedModules[id] = false;
+      } else if (existing.getAttribute('data-xtj-loading') === 'true') {
+        // 正在加载中，等待已有的 Promise
+        if (_pendingModulePromises[id]) return _pendingModulePromises[id];
+      } else {
+        // 未知状态，移除旧脚本
+        try { existing.remove(); } catch (e) {}
+        _loadedModules[id] = false;
+      }
+    }
+
+    var promise = new Promise(function (resolve, reject) {
       var meta = document.querySelector('meta[name="' + metaName + '"]');
-      if (!meta || !meta.content) return reject(new Error('Missing meta ' + metaName));
+      if (!meta || !meta.content) {
+        delete _pendingModulePromises[id];
+        return reject(new Error('Missing meta ' + metaName));
+      }
       var script = document.createElement('script');
       script.src = meta.content;
       script.setAttribute('data-xtj-code-module', id);
+      script.setAttribute('data-xtj-loading', 'true');
       console.log('[CODE-LOADER] Loading script:', meta.content);
       script.onload = function () {
-        _loadedModules[id] = true;
+        script.setAttribute('data-xtj-loaded', 'true');
+        script.removeAttribute('data-xtj-loading');
         console.log('[CODE-LOADER] Script loaded:', meta.content);
         // P0: script.onload 不等于脚本成功导出 API，验证后再 resolve
         if (verifyModule(id)) {
+          _loadedModules[id] = true;
+          delete _pendingModulePromises[id];
           resolve();
         } else {
           console.warn('[CODE-LOADER] Script loaded but module not verified:', id);
           // 脚本已下载但未正确导出 — 标记为失败
           _loadedModules[id] = false;
+          delete _pendingModulePromises[id];
           reject(new Error('Module ' + id + ' loaded but API not available'));
         }
       };
       script.onerror = function () {
         console.error('[CODE-LOADER] Script failed:', meta.content);
+        script.removeAttribute('data-xtj-loading');
         _loadedModules[id] = false;
+        delete _pendingModulePromises[id];
         reject(new Error('Failed to load ' + meta.content));
       };
       document.body.appendChild(script);
     });
+
+    _pendingModulePromises[id] = promise;
+    return promise;
   }
 
   function loadModuleStyle(id, metaName) {
-    if (_loadedModules[id]) return Promise.resolve();
-    return new Promise(function (resolve, reject) {
+    // P0: 如果已加载且验证通过，直接返回
+    if (_loadedModules[id] && verifyModule(id)) return Promise.resolve();
+
+    // P0: 如果正在加载，复用同一个 Promise
+    if (_pendingModulePromises[id]) return _pendingModulePromises[id];
+
+    // P0: 检查页面中是否已存在相同 ID 的 link
+    var existingLinks = document.querySelectorAll('link[data-xtj-code-module="' + id + '"]');
+    for (var i = 0; i < existingLinks.length; i++) {
+      var existing = existingLinks[i];
+      if (existing.getAttribute('data-xtj-loaded') === 'true') {
+        if (verifyModule(id)) {
+          _loadedModules[id] = true;
+          return Promise.resolve();
+        }
+        try { existing.remove(); } catch (e) {}
+        _loadedModules[id] = false;
+      } else if (existing.getAttribute('data-xtj-loading') === 'true') {
+        if (_pendingModulePromises[id]) return _pendingModulePromises[id];
+      } else {
+        try { existing.remove(); } catch (e) {}
+        _loadedModules[id] = false;
+      }
+    }
+
+    var promise = new Promise(function (resolve, reject) {
       var meta = document.querySelector('meta[name="' + metaName + '"]');
-      if (!meta || !meta.content) return reject(new Error('Missing meta ' + metaName));
+      if (!meta || !meta.content) {
+        delete _pendingModulePromises[id];
+        return reject(new Error('Missing meta ' + metaName));
+      }
       var link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = meta.content;
       link.setAttribute('data-xtj-code-module', id);
+      link.setAttribute('data-xtj-loading', 'true');
       console.log('[CODE-LOADER] Loading CSS:', meta.content);
       link.onload = function () {
+        link.setAttribute('data-xtj-loaded', 'true');
+        link.removeAttribute('data-xtj-loading');
         _loadedModules[id] = true;
         console.log('[CODE-LOADER] CSS loaded:', meta.content);
+        delete _pendingModulePromises[id];
         resolve();
       };
       link.onerror = function () {
         console.error('[CODE-LOADER] CSS failed:', meta.content);
+        link.removeAttribute('data-xtj-loading');
         _loadedModules[id] = false;
+        delete _pendingModulePromises[id];
         reject(new Error('Failed to load ' + meta.content));
       };
       document.head.appendChild(link);
     });
+
+    _pendingModulePromises[id] = promise;
+    return promise;
   }
 
   // P0: 验证模块是否真正可用（不只是 script.onload 触发）
@@ -563,17 +733,38 @@
       return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
     }
     if (id === 'code-css') {
-      // CSS 验证：检查是否有对应的 link 元素且 sheet 存在
+      // P0: 多维度验证 CSS 加载
+      // 1. 检查 link 元素
       var links = document.querySelectorAll('link[data-xtj-code-module="code-css"]');
       for (var i = 0; i < links.length; i++) {
         if (links[i].sheet) return true;
+        if (links[i].getAttribute('data-xtj-loaded') === 'true') return true;
       }
+      // 2. 检查 document.styleSheets 中的 Code 样式 (跨浏览器兼容)
+      try {
+        var sheets = document.styleSheets;
+        for (var j = 0; j < sheets.length; j++) {
+          var href = sheets[j].href || '';
+          if (href.indexOf('code-workspace') !== -1) return true;
+        }
+      } catch (e) {}
+      // 3. 检查 CSS 探针 — 特定 Code 样式是否生效
+      try {
+        var probe = document.querySelector('.code-welcome');
+        if (probe) {
+          var style = window.getComputedStyle(probe);
+          if (style && style.display !== 'none') return true;
+        }
+      } catch (e) {}
       return _loadedModules[id] === true;
     }
     return !!_loadedModules[id];
   }
 
   function init() {
+    // P0: 安装全局错误监听器
+    _installCodeErrorListeners();
+
     // ★ 双击刷新处理
     document.addEventListener('dblclick', function (event) {
       var tabButton = event.target.closest('[data-desktop-tab]');
@@ -598,19 +789,27 @@
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
         if (tab === 'code') {
-          // P0: 使用状态机管理模块加载，不预先保存 generation
-          ensureCodeModulesLoaded().then(function () {
-            if (!isCodePanelVisible()) return;
-            recoverCodeInitAlias();
-            if (window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function') {
-              var codeState = window.__xtjCodeWorkspaceAPI.getState ? window.__xtjCodeWorkspaceAPI.getState() : null;
-              if (!codeState || !codeState.active) {
-                window.__xtjCodeWorkspaceAPI.init();
-              }
-            }
-          }).catch(function () {
-            // 错误已在 ensureCodeModulesLoaded 中处理
+          // P0: 先打开面板，再用 requestAnimationFrame 延迟加载模块
+          // 确保面板可见后再开始加载，避免 offsetParent 检查失败
+          openTab(tab);
+          window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () {
+              ensureCodeModulesLoaded().then(function () {
+                if (!isCodePanelVisible()) return;
+                recoverCodeInitAlias();
+                if (window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function') {
+                  var codeState = window.__xtjCodeWorkspaceAPI.getState ? window.__xtjCodeWorkspaceAPI.getState() : null;
+                  if (!codeState || !codeState.active) {
+                    window.__xtjCodeWorkspaceAPI.init();
+                  }
+                }
+              }).catch(function () {
+                // 错误已在 ensureCodeModulesLoaded 中处理
+              });
+            });
           });
+          window.requestAnimationFrame(syncActiveTab);
+          return;
         }
         openTab(tab);
         window.requestAnimationFrame(syncActiveTab);
