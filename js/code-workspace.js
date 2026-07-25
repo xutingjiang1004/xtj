@@ -456,7 +456,74 @@
         if (!e.target.files || !e.target.files.length) return;
         var files = Array.from(e.target.files);
         var dirName = files[0].webkitRelativePath.split('/')[0] || 'Workspace';
-        state.directoryHandle = { _isMock: true, name: dirName, files: files };
+
+        function createMockDirHandle(name, pathPrefix) {
+          return {
+            _isMock: true,
+            name: name,
+            kind: 'directory',
+            getFileHandle: function(fileName) {
+              return new Promise(function(resolve, reject) {
+                var targetPath = pathPrefix + fileName;
+                var file = files.find(function(f) { return f.webkitRelativePath === targetPath; });
+                if (file) {
+                  resolve({
+                    name: fileName,
+                    kind: 'file',
+                    getFile: function() { return Promise.resolve(file); }
+                  });
+                } else {
+                  reject(new Error("File not found"));
+                }
+              });
+            },
+            getDirectoryHandle: function(dirNameStr) {
+              return new Promise(function(resolve, reject) {
+                var targetPrefix = pathPrefix + dirNameStr + '/';
+                var hasFiles = files.some(function(f) { return f.webkitRelativePath.startsWith(targetPrefix); });
+                if (hasFiles) {
+                  resolve(createMockDirHandle(dirNameStr, targetPrefix));
+                } else {
+                  reject(new Error("Directory not found"));
+                }
+              });
+            },
+            values: function() {
+              var children = {};
+              files.forEach(function(f) {
+                if (f.webkitRelativePath.startsWith(pathPrefix)) {
+                  var remainder = f.webkitRelativePath.substring(pathPrefix.length);
+                  var slashIdx = remainder.indexOf('/');
+                  if (slashIdx === -1) {
+                    children[remainder] = {
+                      name: remainder,
+                      kind: 'file',
+                      getFile: function() { return Promise.resolve(f); }
+                    };
+                  } else {
+                    var childDirName = remainder.substring(0, slashIdx);
+                    if (!children[childDirName]) {
+                      children[childDirName] = createMockDirHandle(childDirName, pathPrefix + childDirName + '/');
+                    }
+                  }
+                }
+              });
+              var handles = Object.values(children);
+              var idx = 0;
+              return {
+                next: function() {
+                  if (idx < handles.length) {
+                    return Promise.resolve({ value: handles[idx++], done: false });
+                  } else {
+                    return Promise.resolve({ done: true });
+                  }
+                }
+              };
+            }
+          };
+        }
+
+        state.directoryHandle = createMockDirHandle(dirName, dirName + '/');
         state.workspaceName = dirName;
         renderWorkspace();
       };
@@ -833,6 +900,7 @@
         e.stopPropagation();
         row._toggle();
       });
+      wrapper._toggle = row._toggle;
     } else {
       // File click — open in editor
       row.addEventListener('click', function (e) {
@@ -1446,7 +1514,7 @@
         // File not open — check by extension
         var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
         var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
-        if (ext === '.pdf' || imgExts.indexOf(ext) !== -1) {
+        if (imgExts.indexOf(ext) !== -1) {
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
@@ -1493,7 +1561,7 @@
       if (!shouldRemove) {
         var ext = p.slice(p.lastIndexOf('.')).toLowerCase();
         var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
-        if (ext === '.pdf' || imgExts.indexOf(ext) !== -1) {
+        if (imgExts.indexOf(ext) !== -1) {
           shouldRemove = true;
         }
       }
@@ -2310,45 +2378,32 @@
       }
 
       // result.content is an ArrayBuffer for document files.
-      // Convert ArrayBuffer to base64 for sending to the backend API.
       var buffer = result.content;
-      var bytes = new Uint8Array(buffer);
-      var binaryStr = '';
-      for (var i = 0; i < bytes.length; i++) {
-        binaryStr += String.fromCharCode(bytes[i]);
-      }
-      var base64 = btoa(binaryStr);
-
-      // Call backend API to apply document operations, sending the file content
       var ext = op.path.split('.').pop().toLowerCase();
       var mimeType = ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
                      ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
                      'application/octet-stream';
 
+      // Create FormData
+      var formData = new FormData();
+      formData.append('file', new Blob([buffer], { type: mimeType }), op.path.split('/').pop());
+      formData.append('fileName', op.path.split('/').pop());
+      formData.append('mimeType', mimeType);
+      formData.append('documentType', op.document_type || ext);
+      formData.append('operations', JSON.stringify(op.document_operations || []));
+
+      // Call backend API
       var apiCall;
       if (window.xtjProtectedFetch) {
         apiCall = window.xtjProtectedFetch('/api/code/document/apply', {
           method: 'POST',
-          body: JSON.stringify({
-            file: base64,
-            fileName: op.path.split('/').pop(),
-            mimeType: mimeType,
-            document_type: op.document_type || ext,
-            operations: op.document_operations || []
-          })
+          body: formData
         });
       } else {
         apiCall = fetch('/api/code/document/apply', {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file: base64,
-            fileName: op.path.split('/').pop(),
-            mimeType: mimeType,
-            document_type: op.document_type || ext,
-            operations: op.document_operations || []
-          })
+          body: formData
         });
       }
 
@@ -2356,17 +2411,32 @@
         if (!resp.ok) {
           return resp.json().then(function (data) {
             throw new Error(data.error || '文档操作失败');
+          }).catch(function (err) {
+            throw new Error(err.message || '文档操作失败');
           });
         }
-        return resp.json();
+        
+        var newMimeType = resp.headers.get('Content-Type') || '';
+        var disposition = resp.headers.get('Content-Disposition') || '';
+        
+        // Extract filename from disposition if present
+        var match = disposition.match(/filename="([^"]+)"/);
+        var returnedFileName = match ? decodeURIComponent(match[1]) : op.path.split('/').pop();
+        
+        return resp.arrayBuffer().then(function (ab) {
+           return {
+             newFileBuffer: ab,
+             newFileName: returnedFileName,
+             newMimeType: newMimeType
+           };
+        });
       }).then(function (data) {
-        if (!data.ok || !data.newFile) {
-          throw new Error(data.error || '文档操作返回数据无效');
+        if (!data || !data.newFileBuffer) {
+          throw new Error('文档操作返回数据无效');
         }
 
-        // Use backend-returned file info. Default to original ext if not provided.
-        var newFileName = data.fileName || op.path.split('/').pop();
-        var newMimeType = data.newMimeType || '';
+        var newFileName = data.newFileName;
+        var newMimeType = data.newMimeType;
         var newExt = newFileName.split('.').pop().toLowerCase();
 
         // Validate MIME vs extension before saving
@@ -2379,7 +2449,6 @@
         if (newMimeType === 'text/plain' && newExt !== 'txt') {
           throw new Error('text/plain 只能保存为 .txt 文件');
         }
-        if (newMimeType !== newMimeType) {} // noop
 
         // DOCX is read-only for now
         var origExt = op.path.split('.').pop().toLowerCase();
@@ -2387,18 +2456,11 @@
           throw new Error('DOCX 暂仅支持读取，真实 DOCX 写入功能尚未完成');
         }
 
-        // Decode returned base64 content
-        var newBinaryStr = atob(data.newFile);
-        var newBytes = new Uint8Array(newBinaryStr.length);
-        for (var i = 0; i < newBinaryStr.length; i++) {
-          newBytes[i] = newBinaryStr.charCodeAt(i);
-        }
-
         // Save as new file (don't overwrite original)
         var parentPath = op.path.indexOf('/') >= 0 ? op.path.substring(0, op.path.lastIndexOf('/') + 1) : '';
-        var newPath = parentPath + newFileName.replace(/(\.[^.]+)$/, '_AI\u4fee\u6539\u7248$1');
+        var newPath = parentPath + newFileName; // The backend already append _AI修改版
 
-        return fs.createBinaryFileByPath(newPath, newBytes.buffer).then(function () {
+        return fs.createBinaryFileByPath(newPath, data.newFileBuffer).then(function () {
           // Remove operation from pending
           state.pendingOperations.splice(index, 1);
 

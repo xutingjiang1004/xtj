@@ -58,8 +58,7 @@
   var PDF_EXTENSIONS = ['.pdf'];
 
   var DOCUMENT_EXTENSIONS = [
-    '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
-    '.rtf', '.odt', '.ods', '.odp'
+    '.docx', '.xlsx', '.xls', '.pptx'
   ];
 
     var DOCUMENT_MIME_MAP = {
@@ -539,7 +538,8 @@
                   size: file.size,
                   type: fileType,
                   name: fileName,
-                  mimeType: file.type || 'application/octet-stream'
+                  mimeType: file.type || 'application/octet-stream',
+                  _arrayBuffer: buffer
                 });
               });
             }).catch(function (err) {
