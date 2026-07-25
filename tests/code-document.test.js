@@ -72,16 +72,17 @@ test('Code agent document API test suite', async (t) => {
       .field('mimeType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       .field('documentType', 'xlsx')
       .field('operations', JSON.stringify(ops))
-      .attach('file', buffer, 'test.xlsx');
+      .attach('file', buffer, 'test.xlsx')
+      .responseType('blob');
 
     assert.equal(res.status, 200);
     
     // Read the returned binary
-    const outBuffer = res.body; // supertest returns buffer for application/octet-stream?
+    const outBuffer = Buffer.isBuffer(res.body) ? res.body : Buffer.from(res.text || '', 'binary'); // supertest returns buffer for application/octet-stream?
     // Wait, supertest parsing for binary needs responseType('blob') or similar, 
     // but we can just check headers first.
     assert.equal(res.headers['content-type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    assert.ok(res.headers['content-disposition'].includes('test_AI修改版.xlsx'));
+    assert.ok(decodeURIComponent(res.headers['content-disposition']).includes('test_AI修改版.xlsx'));
     
     // Parse it back to verify
     const outWb = xlsx.read(outBuffer, { type: 'buffer' });
