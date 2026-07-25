@@ -316,11 +316,8 @@
   function cleanup() {
     var hasUnsaved = state.openTabs.some(function(t) { return t.modified && t._currentContent !== undefined; });
     if (hasUnsaved) {
-      // Unsaved changes, prompt
       if (!window.confirm('文件存在未保存修改，是否继续？')) {
-        // Unfortunately, cleanup is called after navigation has started in this SPA.
-        // Returning here would leave UI in an inconsistent state since the container is already hidden.
-        // We will just let it proceed but we won't clear the unsaved state, so it restores later!
+        return false; // Signal cancellation to caller
       }
     }
     // Cancel any in-flight request
@@ -335,6 +332,7 @@
     state.active = false;
     _dom = {};
     // Don't clear directoryHandle so workspace can be restored
+    return true;
   }
 
   // ──────────────────────────────────────────────
@@ -410,6 +408,7 @@
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
 
           if (result.status === 'granted') {
+            resetWorkspaceState();
             state.directoryHandle = result.handle;
             state.workspaceName = result.handle.name;
             try {
@@ -556,7 +555,7 @@
               return {
                 next: function() {
                   if (idx < handles.length) {
-                    return Promise.resolve({ value: handles[idx], done: false });
+                    return Promise.resolve({ value: handles[idx++], done: false });
                   } else {
                     return Promise.resolve({ done: true });
                   }
@@ -566,9 +565,14 @@
           };
         }
 
+        resetWorkspaceState();
         state.directoryHandle = createMockDirHandle(dirName, dirName + '/');
         state.workspaceName = dirName;
         state._isReadOnly = true;
+        // P1 #4: notify FS module of the mock handle so readFileByPath works
+        if (window.__xtjCodeFS && window.__xtjCodeFS.setDirHandle) {
+          window.__xtjCodeFS.setDirHandle(state.directoryHandle);
+        }
         renderWorkspace();
       };
       input.click();
@@ -597,6 +601,7 @@
         btn.innerHTML = originalText;
       }
       if (!handle) return; // User cancelled
+      resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name;
       try {
@@ -628,17 +633,20 @@
     _dom.panelCode.innerHTML = '';
 
     // Main workspace container — true three-column layout
-    var workspace = document.createElement('div');
-    workspace.className = 'code-workspace';
+    var shell = document.createElement('div');
+    shell.className = 'code-workspace-shell';
 
-    // Read-only mode banner
+    // Read-only mode banner (placed above workspace, not inside flex container)
     if (state._isReadOnly) {
       var banner = document.createElement('div');
       banner.className = 'code-readonly-banner';
       banner.style.cssText = 'background:#fff3cd;color:#856404;padding:8px 12px;font-size:12px;text-align:center;border-bottom:1px solid var(--cw-border);';
       banner.innerHTML = '当前浏览器使用只读文件夹模式。可以查看和分析文件，但不能直接保存修改。建议使用最新版 Chrome 或 Edge 获得完整读写能力。';
-      workspace.appendChild(banner);
+      shell.appendChild(banner);
     }
+
+    var workspace = document.createElement('div');
+    workspace.className = 'code-workspace';
 
     // ── Sidebar (left) ──
     var sidebar = document.createElement('div');
@@ -695,7 +703,8 @@
     chatPanel.id = 'codeChatPanel';
     workspace.appendChild(chatPanel);
 
-    _dom.panelCode.appendChild(workspace);
+    _dom.panelCode.appendChild(shell);
+    shell.appendChild(workspace);
 
     // Cache DOM refs
     _dom.fileTree = fileTree;
@@ -2479,6 +2488,29 @@
   }
 
   // ──────────────────────────────────────────────
+  // findAvailableBinaryPath(fs, basePath)
+  // 递增计数器直到找到不存在的文件路径
+  // ──────────────────────────────────────────────
+  function findAvailableBinaryPath(fs, basePath) {
+    return fs.fileExistsByPath(basePath).then(function (exists) {
+      if (!exists) return basePath;
+      var dotIdx = basePath.lastIndexOf('.');
+      var base = dotIdx >= 0 ? basePath.slice(0, dotIdx) : basePath;
+      var ext = dotIdx >= 0 ? basePath.slice(dotIdx) : '';
+      var counter = 2;
+      function tryNext() {
+        var candidate = base + '_' + counter + ext;
+        return fs.fileExistsByPath(candidate).then(function (e) {
+          if (!e) return candidate;
+          counter++;
+          return tryNext();
+        });
+      }
+      return tryNext();
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // applyDocumentOperation(op, index)
   // 由 applyOperation 调用，不自行管理 _applyLock
   // 批量锁由 applyAllOperations 统一管理
@@ -2578,18 +2610,21 @@
         var parentPath = op.path.indexOf('/') >= 0 ? op.path.substring(0, op.path.lastIndexOf('/') + 1) : '';
         var newPath = parentPath + newFileName; // The backend already append _AI修改版
 
-        return fs.createBinaryFileByPath(newPath, data.newFileBuffer).then(function () {
-          // Remove operation from pending
-          state.pendingOperations.splice(index, 1);
+        // P2 #10: if file already exists, generate unique name (e.g., _AI修改版_2.xlsx)
+        return findAvailableBinaryPath(fs, newPath).then(function (availablePath) {
+          return fs.createBinaryFileByPath(availablePath, data.newFileBuffer).then(function () {
+            // Remove operation from pending
+            state.pendingOperations.splice(index, 1);
 
-          // Refresh file tree
-          refreshFileTree();
+            // Refresh file tree
+            refreshFileTree();
 
-          // Open the new file
-          openFile(newPath);
+            // Open the new file
+            openFile(availablePath);
 
-          showToast('\u5df2\u4fdd\u5b58\u4e3a: ' + newPath.split('/').pop(), 'success');
-          return true;
+            showToast('\u5df2\u4fdd\u5b58\u4e3a: ' + availablePath.split('/').pop(), 'success');
+            return true;
+          });
         });
       });
     }).catch(function (err) {
@@ -2626,12 +2661,12 @@
         if (exists) {
           throw new Error('目标文件已存在');
         }
-        // Save snapshot BEFORE creating the file
+        return fs.createFileByPath(op.path, op.new_content || '');
+      }).then(function (writeResult) {
+        // Save snapshot ONLY after successful creation (not before, to avoid phantom undo)
         if (!state.snapshots[op.path]) {
           state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
         }
-        return fs.createFileByPath(op.path, op.new_content || '');
-      }).then(function (writeResult) {
         // Optionally open the new file in a tab
         for (var i = 0; i < state.openTabs.length; i++) {
           if (state.openTabs[i].path === op.path) {
@@ -2648,6 +2683,10 @@
         }
         showToast('已创建: ' + op.path, 'success');
         return true;
+      }).catch(function (err) {
+        // Clean up residual snapshot on failure
+        delete state.snapshots[op.path];
+        throw err;
       });
     }
 

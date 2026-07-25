@@ -677,14 +677,16 @@ test('applyOperation create uses createFileByPath not writeFileByPath', () => {
 });
 
 test('applyOperation create saves snapshot with existed=false', () => {
-  // The create branch must save snapshot before calling createFileByPath
+  // The create branch must save snapshot AFTER createFileByPath succeeds (to avoid phantom undo on failure)
   var createBranch = codeWorkspace.match(/op\.type === 'create'[\s\S]*?(?=Update operation)/);
   assert.ok(createBranch, 'create branch should exist');
   assert.ok(createBranch[0].indexOf('existed: false') !== -1, 'create should save snapshot with existed=false');
-  // Snapshot must be set BEFORE fs.createFileByPath is called (not comment)
+  // Snapshot must be set AFTER fs.createFileByPath succeeds (on failure, snapshot is cleaned up)
   var snapshotIdx = createBranch[0].indexOf('existed: false');
   var createCallIdx = createBranch[0].indexOf('fs.createFileByPath');
-  assert.ok(snapshotIdx < createCallIdx, 'snapshot must be saved BEFORE createFileByPath');
+  assert.ok(snapshotIdx > createCallIdx, 'snapshot must be saved AFTER successful createFileByPath');
+  // Must also clean up snapshot on failure
+  assert.ok(createBranch[0].indexOf('delete state.snapshots') !== -1, 'must clean up snapshot on failure');
 });
 
 // ============================================================
