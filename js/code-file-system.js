@@ -22,25 +22,26 @@
   ];
 
   var SIZE_LIMITS = {
-    text: 1 * 1024 * 1024,      // 1 MB
-    image: 15 * 1024 * 1024,    // 15 MB
-    pdf: 30 * 1024 * 1024,      // 30 MB
-    binary: 5 * 1024 * 1024     // 5 MB
+    text: 2 * 1024 * 1024,
+    image: 15 * 1024 * 1024,
+    pdf: 50 * 1024 * 1024,
+    binary: 10 * 1024 * 1024,
+    document: 50 * 1024 * 1024
   };
 
   var TEXT_EXTENSIONS = [
     '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
-    '.html', '.htm', '.css', '.scss', '.less',
+    '.html', '.htm', '.css', '.scss', '.less', '.sass',
     '.json', '.jsonc', '.json5',
-    '.md', '.mdx', '.markdown',
+    '.md', '.mdx', '.markdown', '.rst', '.tex',
     '.py', '.rb', '.go', '.rs', '.java', '.kt', '.kts',
-    '.c', '.cpp', '.h', '.hpp', '.cs', '.swift',
+    '.c', '.cpp', '.h', '.hpp', '.cs', '.swift', '.m', '.mm',
     '.xml', '.svg', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
     '.env', '.env.local', '.env.development', '.env.production',
-    '.sh', '.bat', '.ps1', '.psm1',
-    '.sql', '.txt', '.log', '.csv', '.tsv',
+    '.sh', '.bat', '.ps1', '.psm1', '.cmd', '.bash', '.zsh', '.fish',
+    '.sql', '.txt', '.log', '.csv', '.tsv', '.properties',
     '.vue', '.svelte', '.astro',
-    '.gitignore', '.dockerignore', '.editorconfig',
+    '.gitignore', '.dockerignore', '.editorconfig', '.npmrc',
     '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.eslintrc.yaml',
     '.prettierrc', '.prettierrc.js', '.prettierrc.json', '.prettierrc.yaml',
     '.babelrc', '.browserslistrc', '.stylelintrc',
@@ -50,19 +51,28 @@
   ];
 
   var IMAGE_EXTENSIONS = [
-    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico'
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg',
+    '.avif', '.heic', '.heif', '.tiff', '.tif'
   ];
 
   var PDF_EXTENSIONS = ['.pdf'];
 
   var DOCUMENT_EXTENSIONS = [
-    '.docx', '.xlsx', '.xls'
+    '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+    '.rtf', '.odt', '.ods', '.odp'
   ];
 
   var DOCUMENT_MIME_MAP = {
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel'
+    '.xls': 'application/vnd.ms-excel',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.rtf': 'application/rtf',
+    '.odt': 'application/vnd.oasis.opendocument.text',
+    '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+    '.odp': 'application/vnd.oasis.opendocument.presentation'
   };
 
   // ──────────────────────────────────────────────

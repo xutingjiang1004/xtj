@@ -118,9 +118,9 @@ test('PDF preview is supported', () => {
 // ============================================================
 test('SIZE_LIMITS are defined', () => {
   assert.match(codeFS, /SIZE_LIMITS/);
-  assert.match(codeFS, /text.*1.*1024.*1024/);
+  assert.match(codeFS, /text.*2.*1024.*1024/);
   assert.match(codeFS, /image.*15.*1024.*1024/);
-  assert.match(codeFS, /pdf.*30.*1024.*1024/);
+  assert.match(codeFS, /pdf.*50.*1024.*1024/);
 });
 
 test('file size exceeds limit is rejected', () => {
@@ -129,11 +129,11 @@ test('file size exceeds limit is rejected', () => {
 });
 
 // ============================================================
-// 10. 上下文最多 12 个文件
+// 10. 上下文最多 50 个文件
 // ============================================================
-test('context limit is 12 files', () => {
-  assert.match(codeWorkspace, /count >= 12/);
-  assert.match(codeWorkspace, /最多添加 12 个文件/);
+test('context limit is 50 files', () => {
+  assert.match(codeWorkspace, /count >= 50/);
+  assert.match(codeWorkspace, /最多添加 50 个文件/);
 });
 
 // ============================================================
@@ -382,14 +382,14 @@ test('AI context fails loudly for unreadable files', () => {
   assert.match(codeWorkspace, /部分文件读取失败/);
 });
 
-test('AI context respects 600 KB limit', () => {
-  assert.match(codeWorkspace, /600 \* 1024/);
-  assert.match(codeWorkspace, /超过 600 KB 限制/);
+test('AI context respects 900 KB limit', () => {
+  assert.match(codeWorkspace, /900 \* 1024/);
+  assert.match(codeWorkspace, /超过 900 KB 限制/);
 });
 
-test('AI context max 12 files', () => {
-  assert.match(codeWorkspace, /count >= 12/);
-  assert.match(codeWorkspace, /最多添加 12 个文件/);
+test('AI context max 50 files', () => {
+  assert.match(codeWorkspace, /count >= 50/);
+  assert.match(codeWorkspace, /最多添加 50 个文件/);
 });
 
 // ============================================================
@@ -491,9 +491,9 @@ test('server uses Buffer.byteLength for UTF-8', () => {
   assert.match(codeAgent, /Buffer\.byteLength\(content,\s*'utf8'\)/);
 });
 
-test('server limits operations to 6', () => {
+test('server limits operations to 10', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /MAX_OPERATIONS\s*=\s*6/);
+  assert.match(codeAgent, /MAX_OPERATIONS\s*=\s*10/);
   assert.match(codeAgent, /ops\.length >= MAX_OPERATIONS/);
 });
 
@@ -524,9 +524,9 @@ test('system prompt constrains AI to only see provided files', () => {
   assert.match(codeAgent, /Do not claim tests, builds, commands, or Git operations/);
 });
 
-test('system prompt limits operations to 6', () => {
+test('system prompt limits operations to 10', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /at most 6 file operations/);
+  assert.match(codeAgent, /at most 10 file operations/);
 });
 
 test('system prompt instructs to ask user for missing context', () => {

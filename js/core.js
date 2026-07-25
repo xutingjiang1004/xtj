@@ -9795,6 +9795,11 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
+                if (tab === 'code') {
+                    if (typeof window.__xtjCodeInit === 'function' && (!window.__xtjCodeWorkspaceAPI || !window.__xtjCodeWorkspaceAPI.getState() || !window.__xtjCodeWorkspaceAPI.getState().active)) {
+                        Promise.resolve().then(function() { window.__xtjCodeInit(); });
+                    }
+                }
             };
 
             // Animation class mapping
