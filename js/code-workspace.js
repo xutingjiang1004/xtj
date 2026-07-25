@@ -268,12 +268,15 @@
   // init() — called when Code tab is first activated
   // ──────────────────────────────────────────────
   function init() {
-    if (state.active) return;
+    // P0: 幂等 — 已激活时直接返回
+    if (state.active) {
+      return Promise.resolve({ status: 'already-active' });
+    }
 
     var panelCode = document.getElementById('panelCode');
     if (!panelCode || !panelCode.offsetParent) {
-      // User navigated away while scripts were loading
-      return;
+      // P0: 面板不可见时返回明确状态
+      return Promise.resolve({ status: 'hidden' });
     }
 
     state.active = true;
@@ -282,19 +285,23 @@
     if (!_dom.panelCode) {
       console.warn('[code-workspace] panelCode not found');
       state.active = false;
-      return;
+      return Promise.resolve({ status: 'no-panel' });
     }
 
-    // Try to restore previous workspace (auto-load, no permission prompt)
+    // P0: 先立即显示欢迎页，IndexedDB 恢复在后台进行
+    renderWelcome();
+
+    // P0: 后台尝试恢复工作区
     tryRestoreWorkspace().then(function (result) {
       if (result && result.status === 'granted') {
         renderWorkspace();
-      } else {
-        renderWelcome();
       }
+      // 如果不是 granted，欢迎页已经显示，用户可以看到恢复入口
     }).catch(function () {
-      renderWelcome();
+      // 欢迎页已经显示，忽略恢复错误
     });
+
+    return Promise.resolve({ status: 'ok' });
   }
 
   function tryRestoreWorkspace() {
