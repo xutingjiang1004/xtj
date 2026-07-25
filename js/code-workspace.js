@@ -26,7 +26,9 @@
     _objectUrls: [],
     _abortController: null,
     _requestId: 0,
-    _themeObserver: null
+    _themeObserver: null,
+    _isReadOnly: false,
+    workspaceGeneration: 0
   };
 
   // ──────────────────────────────────────────────
@@ -425,24 +427,35 @@
           } else if (result.status === 'denied') {
             statusText.textContent = '您拒绝了访问权限，请重新选择文件夹';
             statusText.className = 'welcome-status error';
+          } else if (result.status === 'timeout') {
+            statusText.innerHTML = '工作区恢复超时，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
+            statusText.className = 'welcome-status error';
+            bindClearStorageBtn(statusText, recentEl);
+          } else if (result.status === 'error') {
+            statusText.innerHTML = '工作区恢复失败，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
+            statusText.className = 'welcome-status error';
+            bindClearStorageBtn(statusText, recentEl);
           } else if (result.status === 'prompt') {
             statusText.textContent = '需要授权才能恢复工作区，请点击按钮重试';
             statusText.className = 'welcome-status warning';
           } else {
-            statusText.textContent = '恢复失败，请重新选择文件夹';
+            statusText.innerHTML = '恢复失败，请重新选择文件夹<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
             statusText.className = 'welcome-status error';
+            bindClearStorageBtn(statusText, recentEl);
           }
         }).catch(function (err) {
           restoreBtn.disabled = false;
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
-          statusText.textContent = '恢复失败: ' + (err && err.message ? err.message : String(err));
+          statusText.innerHTML = '恢复失败，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
           statusText.className = 'welcome-status error';
+          bindClearStorageBtn(statusText, recentEl);
         });
       });
     }
   }
 
   function resetWorkspaceState() {
+    state.workspaceGeneration++;
     state.openTabs = [];
     state.activePath = '';
     state.contextPaths = {};
@@ -450,11 +463,26 @@
     state.snapshots = {};
     state.fileHandles = {};
     state.messages = [];
+    state._isReadOnly = false;
     revokeAllUrls();
     disposeMonaco();
   }
 
+  function hasUnsavedChanges() {
+    return state.openTabs.some(function(t) { return t.modified && t._currentContent !== undefined; }) ||
+           state.pendingOperations.length > 0 ||
+           state.applying ||
+           state.sending;
+  }
+
   function selectAndOpenWorkspace() {
+    // P0: 检查未保存修改
+    if (hasUnsavedChanges()) {
+      if (!confirm('当前工作区存在未保存内容。更换文件夹将放弃这些修改，是否继续？')) {
+        return;
+      }
+    }
+
     var btn = document.getElementById('codeWelcomeOpenBtn');
     if (!window.showDirectoryPicker) {
       // Fallback for browsers without File System Access API
@@ -1953,6 +1981,9 @@
     var message = input.value.trim();
     if (!message) return;
 
+    // P0: 保存当前 workspace generation 用于隔离
+    var wsGen = state.workspaceGeneration;
+
     // Disable UI
     state.sending = true;
     input.disabled = true;
@@ -2107,8 +2138,9 @@
     }
 
     Promise.all(readPromises).then(function (results) {
-      // Check if request was cancelled
+      // Check if request was cancelled or workspace changed
       if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
 
       var files = [];
       var failedFiles = [];
@@ -2181,12 +2213,22 @@
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
+    var signal = state._abortController ? state._abortController.signal : undefined;
+
+    // P0: AI 请求超时 (90 秒)
+    var timeoutId;
+    var timeoutPromise = new Promise(function (_, reject) {
+      timeoutId = setTimeout(function () {
+        reject(new Error('AI 响应超时，请稍后重试'));
+      }, 90000);
+    });
+
     var apiCall;
     if (window.xtjProtectedFetch) {
       apiCall = window.xtjProtectedFetch('/api/code/chat', {
         method: 'POST',
         body: JSON.stringify(body),
-        signal: state._abortController ? state._abortController.signal : undefined
+        signal: signal
       });
     } else {
       apiCall = fetch('/api/code/chat', {
@@ -2194,26 +2236,38 @@
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: state._abortController ? state._abortController.signal : undefined
+        signal: signal
       });
     }
 
-    apiCall.then(function (resp) {
+    Promise.race([apiCall, timeoutPromise]).then(function (resp) {
+      clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
       if (!resp.ok) {
         return resp.text().then(function(text) {
-          var errMsg = 'API 请求失败: ' + resp.status + ' ' + (resp.statusText || '');
-          try {
-            var json = JSON.parse(text);
-            if (json && json.error) errMsg = 'API 请求失败: ' + json.error;
-          } catch(e) {
-            if (text && text.length < 200) errMsg = 'API 请求失败: ' + text;
+          var errMsg;
+          var json = null;
+          try { json = JSON.parse(text); } catch(e) {}
+          // P0: 根据状态码显示具体错误
+          if (resp.status === 401) {
+            errMsg = '登录已失效，请重新登录';
+          } else if (resp.status === 403) {
+            errMsg = (json && json.error) ? json.error : '权限不足';
+          } else if (resp.status === 413) {
+            errMsg = '请求内容过大';
+          } else if (resp.status === 429) {
+            errMsg = (json && json.error) ? json.error : '请求过于频繁，请稍后重试';
+          } else if (resp.status >= 500) {
+            errMsg = (json && json.error) ? '服务器错误: ' + json.error : '服务器错误: ' + resp.status;
+          } else {
+            errMsg = (json && json.error) ? json.error : ('API 请求失败: ' + resp.status);
           }
           throw new Error(errMsg);
         });
       }
       return resp.json();
     }).then(function (data) {
+      clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
 
       // Remove typing indicator
@@ -2237,6 +2291,7 @@
         renderDiffView();
       }
     }).catch(function (err) {
+      clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
       // AbortError is not a real failure
       if (err && err.name === 'AbortError') return;
@@ -2244,12 +2299,14 @@
       removeTypingIndicator();
 
       var errMsg = (err && err.message) ? err.message : String(err);
-      state.messages.push({ role: 'assistant', content: '抱歉，请求失败: ' + errMsg, time: timeStr });
+      console.error('[CODE-AI] Request failed:', errMsg);
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr });
 
       renderChatPanel();
     }).then(function () {
+      // P0: finally — 统一恢复 UI 状态
+      clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
-      // Re-enable UI
       state.sending = false;
       state._abortController = null;
       var inp = document.getElementById('codeChatInput');
@@ -2755,6 +2812,9 @@
     state._applyLock = true;
     state.applying = true;
 
+    // P0: 保存当前 workspace generation
+    var wsGen = state.workspaceGeneration;
+
     var applyBtn = document.getElementById('codeApplyAllBtn');
     if (applyBtn) {
       applyBtn.disabled = true;
@@ -2762,6 +2822,12 @@
     }
 
     function applyNext(idx) {
+      if (wsGen !== state.workspaceGeneration) {
+        // Workspace changed, stop applying
+        state._applyLock = false;
+        state.applying = false;
+        return;
+      }
       if (idx >= state.pendingOperations.length) {
         // All done
         state._applyLock = false;
@@ -2887,9 +2953,15 @@
   }
 
   // ──────────────────────────────────────────────
-  // Event: window beforeunload
+  // Event: window beforeunload — P0: 浏览器刷新和关闭保护
   // ──────────────────────────────────────────────
-  window.addEventListener('beforeunload', function () {
+  window.addEventListener('beforeunload', function (event) {
+    if (state.active && hasUnsavedChanges()) {
+      // 触发浏览器原生离开确认，不在 beforeunload 中弹自定义 confirm
+      event.preventDefault();
+      event.returnValue = '';
+    }
+    // 正常清理
     cleanup();
   });
 

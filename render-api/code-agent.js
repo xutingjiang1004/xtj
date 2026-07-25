@@ -443,11 +443,40 @@ async function extractPptxText(buffer) {
 }
 
 // ── XLSX modification operations ──────────────────────────────────────
-var CELL_REF_RE = /^[A-Z]{1,3}[0-9]{1,7}$/;
+var CELL_REF_RE = /^[A-Z]{1,3}[1-9]\d{0,6}$/; // 列 A-XFD，行 1-1048576
+var MAX_DOC_OPS = 50; // P1: 单次最多 50 个操作
+var MAX_CELL_VALUE_LEN = 32767; // P1: 单元格值最大长度
+var MAX_SHEET_NAME_LEN = 31; // P1: 工作表名称最大长度
+var SHEET_NAME_FORBIDDEN = /[\\\/\?\*\[\]:]/; // P1: 工作表名称禁止字符
 
 function validateCellRef(cell) {
   if (!cell || typeof cell !== 'string') return false;
-  return CELL_REF_RE.test(cell.toUpperCase().trim());
+  var upper = cell.toUpperCase().trim();
+  if (!CELL_REF_RE.test(upper)) return false;
+  // 进一步验证列范围 A-XFD
+  var colMatch = upper.match(/^([A-Z]{1,3})/);
+  if (!colMatch) return false;
+  var col = colMatch[1];
+  if (col.length === 3) {
+    // 三字母列: AAA-XFD
+    if (col > 'XFD') return false;
+  }
+  // 验证行范围 1-1048576
+  var rowMatch = upper.match(/(\d+)$/);
+  if (!rowMatch) return false;
+  var row = parseInt(rowMatch[1], 10);
+  if (row < 1 || row > 1048576) return false;
+  return true;
+}
+
+function validateSheetName(name) {
+  if (!name || typeof name !== 'string') return false;
+  var trimmed = name.trim();
+  if (!trimmed.length || trimmed.length > MAX_SHEET_NAME_LEN) return false;
+  if (SHEET_NAME_FORBIDDEN.test(trimmed)) return false;
+  // 禁止特殊属性名
+  if (trimmed === '__proto__' || trimmed === 'constructor' || trimmed === 'prototype') return false;
+  return true;
 }
 
 function updateSheetRef(workbook, sheetName, xlsx) {
@@ -469,6 +498,11 @@ function updateSheetRef(workbook, sheetName, xlsx) {
 async function applyXlsxOperations(buffer, operations, fileName) {
   var xlsx = getXlsxParser();
   if (!xlsx) return { ok: false, error: 'XLSX 解析库不可用' };
+
+  // P1: 操作数量限制
+  if (operations.length > MAX_DOC_OPS) {
+    return { ok: false, error: '单次最多支持 ' + MAX_DOC_OPS + ' 个修改操作' };
+  }
 
   var workbook, beforeText, afterText, appliedOps = [], changes = [];
 
@@ -493,9 +527,22 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           var cell = (op.cell || '').toUpperCase().trim();
           var value = op.value !== undefined ? op.value : '';
 
+          // P1: 验证工作表名称
+          if (!validateSheetName(sheetName)) {
+            changes.push({ type: 'cell_update', sheet: sheetName, cell: cell || '(empty)', error: '无效的工作表名称' });
+            continue;
+          }
+
           // Validate cell reference
           if (!validateCellRef(cell)) {
             changes.push({ type: 'cell_update', sheet: sheetName, cell: cell || '(empty)', error: '无效的单元格地址' });
+            continue;
+          }
+
+          // P1: 单元格值长度限制
+          var strValue = String(value);
+          if (strValue.length > MAX_CELL_VALUE_LEN) {
+            changes.push({ type: 'cell_update', sheet: sheetName, cell: cell, error: '单元格值超过最大长度 ' + MAX_CELL_VALUE_LEN });
             continue;
           }
 
@@ -544,15 +591,27 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           }
         } else if (op.type === 'sheet_add') {
           var newSheetName = op.sheet || ('Sheet' + (workbook.SheetNames.length + 1));
+          // P1: 验证工作表名称
+          if (!validateSheetName(newSheetName)) {
+            changes.push({ type: 'sheet_add', sheet: newSheetName, error: '无效的工作表名称' });
+            continue;
+          }
           if (workbook.SheetNames.indexOf(newSheetName) === -1) {
             workbook.SheetNames.push(newSheetName);
             workbook.Sheets[newSheetName] = {};
             appliedOps.push({ type: 'sheet_add', sheet: newSheetName });
             changes.push({ type: 'sheet_add', sheet: newSheetName });
+          } else {
+            changes.push({ type: 'sheet_add', sheet: newSheetName, error: '工作表名称重复' });
           }
         } else if (op.type === 'sheet_rename') {
           var oldName = op.sheet || '';
           var newName = op.new_name || '';
+          // P1: 验证新工作表名称
+          if (!validateSheetName(newName)) {
+            changes.push({ type: 'sheet_rename', old: oldName, new: newName, error: '无效的工作表名称' });
+            continue;
+          }
           var idx = workbook.SheetNames.indexOf(oldName);
           if (idx >= 0 && newName && workbook.SheetNames.indexOf(newName) === -1) {
             workbook.SheetNames[idx] = newName;
@@ -560,6 +619,8 @@ async function applyXlsxOperations(buffer, operations, fileName) {
             delete workbook.Sheets[oldName];
             appliedOps.push({ type: 'sheet_rename', sheet: oldName, newName: newName });
             changes.push({ type: 'sheet_rename', old: oldName, new: newName });
+          } else {
+            changes.push({ type: 'sheet_rename', old: oldName, new: newName, error: '工作表名称重复或不存在' });
           }
         }
       } catch (opErr) {
@@ -581,6 +642,29 @@ async function applyXlsxOperations(buffer, operations, fileName) {
     }
 
     var newBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    // P1: 验证生成的文件可以重新读取
+    try {
+      var verifyWorkbook = xlsx.read(newBuffer, { type: 'buffer' });
+      if (!verifyWorkbook || !verifyWorkbook.SheetNames) {
+        return { ok: false, error: 'XLSX 生成验证失败：无法重新打开文件' };
+      }
+      // 验证修改后的单元格真实存在
+      for (var v = 0; v < appliedOps.length; v++) {
+        var aop = appliedOps[v];
+        if (aop.type === 'cell_update') {
+          var verifySheet = verifyWorkbook.Sheets[aop.sheet];
+          if (!verifySheet) {
+            return { ok: false, error: 'XLSX 生成验证失败：工作表 ' + aop.sheet + ' 不存在' };
+          }
+          if (!verifySheet[aop.cell]) {
+            return { ok: false, error: 'XLSX 生成验证失败：单元格 ' + aop.cell + ' 不存在' };
+          }
+        }
+      }
+    } catch (ve) {
+      return { ok: false, error: 'XLSX 生成验证失败: ' + (ve.message || '') };
+    }
 
     return {
       ok: true,
