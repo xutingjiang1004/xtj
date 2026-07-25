@@ -1145,6 +1145,181 @@
   }
 
   // ──────────────────────────────────────────────
+  // listAllFilesWithMetadata — for project index building
+  // ──────────────────────────────────────────────
+  function listAllFilesWithMetadata(maxDepth, maxFiles) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('listAllFilesWithMetadata: no workspace selected'));
+    }
+    maxDepth = maxDepth || 4;
+    maxFiles = maxFiles || 500;
+
+    var allFiles = [];
+    var allDirs = [];
+
+    function scanDir(dirHandle, currentPath, depth) {
+      if (depth > maxDepth || allFiles.length >= maxFiles) {
+        return Promise.resolve();
+      }
+
+      return new Promise(function (res, rej) {
+        var items = [];
+        var it;
+        try {
+          it = dirHandle.values();
+        } catch (e) {
+          try { it = dirHandle.entries(); } catch (e2) { res(); return; }
+        }
+
+        function pump() {
+          it.next().then(function (result) {
+            if (result.done) {
+              var promises = [];
+              for (var i = 0; i < items.length; i++) {
+                var handle = items[i];
+                var entryPath = currentPath ? currentPath + '/' + handle.name : handle.name;
+                if (handle.kind === 'directory') {
+                  if (!shouldSkip(handle.name)) {
+                    allDirs.push({ path: entryPath, name: handle.name });
+                    if (depth < maxDepth) {
+                      promises.push(scanDir(handle, entryPath, depth + 1));
+                    }
+                  }
+                } else {
+                  // Skip excluded files
+                  if (shouldSkipFile(handle.name)) {
+                    if (allFiles.length >= maxFiles) return;
+                    continue;
+                  }
+
+                  var fileType = getFileType(handle.name);
+                  if (fileType === 'text') {
+                    // Read file content for metadata
+                    promises.push(
+                      readFile(handle).then(function (fileResult) {
+                        if (allFiles.length >= maxFiles) return;
+                        if (fileResult && fileResult.type === 'text') {
+                          allFiles.push({
+                            path: entryPath,
+                            name: handle.name,
+                            type: 'text',
+                            size: fileResult.size || 0,
+                            sha256: fileResult.sha256 || '',
+                            content: fileResult.content || '',
+                            language: getLanguageFromExt(handle.name)
+                          });
+                        } else {
+                          allFiles.push({
+                            path: entryPath,
+                            name: handle.name,
+                            type: fileType,
+                            size: 0
+                          });
+                        }
+                      }).catch(function () {
+                        allFiles.push({
+                          path: entryPath,
+                          name: handle.name,
+                          type: fileType,
+                          size: 0
+                        });
+                      })
+                    );
+                  } else {
+                    allFiles.push({
+                      path: entryPath,
+                      name: handle.name,
+                      type: fileType,
+                      size: 0
+                    });
+                  }
+                }
+              }
+              Promise.all(promises).then(function () { res(); }).catch(rej);
+            } else {
+              var handle;
+              if (Array.isArray(result.value)) handle = result.value[1];
+              else handle = result.value;
+              items.push(handle);
+              pump();
+            }
+          }).catch(function (err) {
+            rej(err);
+          });
+        }
+        pump();
+      });
+    }
+
+    return scanDir(_dirHandle, '', 0).then(function () {
+      return {
+        files: allFiles.slice(0, maxFiles),
+        directories: allDirs,
+        totalCount: allFiles.length,
+        truncated: allFiles.length >= maxFiles
+      };
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // shouldSkipFile — exclude files that shouldn't be indexed
+  // ──────────────────────────────────────────────
+  function shouldSkipFile(fileName) {
+    if (!fileName) return true;
+
+    var lower = fileName.toLowerCase();
+
+    // Skip binary and large files
+    var skipExts = [
+      '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg',
+      '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.webm', '.wav', '.ogg',
+      '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2', '.xz',
+      '.exe', '.dll', '.so', '.dylib', '.bin', '.dat',
+      '.pdf', '.docx', '.pptx', '.xlsx', '.xls',
+      '.woff', '.woff2', '.ttf', '.eot', '.otf',
+      '.map', // source maps
+      '.lock', // lock files
+      '.min.js', '.min.css', // minified files (skip when source exists)
+      '.pyc', '.pyo', '.class', '.o', '.obj',
+      '.tsbuildinfo'
+    ];
+
+    for (var i = 0; i < skipExts.length; i++) {
+      if (lower.endsWith(skipExts[i])) return true;
+    }
+
+    return false;
+  }
+
+  function getLanguageFromExt(fileName) {
+    if (!fileName) return '';
+    var ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+    var map = {
+      '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
+      '.ts': 'typescript', '.tsx': 'typescript', '.jsx': 'javascript',
+      '.html': 'html', '.htm': 'html',
+      '.css': 'css', '.scss': 'scss', '.less': 'less',
+      '.json': 'json', '.jsonc': 'json',
+      '.md': 'markdown', '.mdx': 'markdown',
+      '.py': 'python', '.rb': 'ruby',
+      '.go': 'go', '.rs': 'rust', '.java': 'java', '.kt': 'kotlin',
+      '.c': 'c', '.cpp': 'cpp', '.h': 'c', '.hpp': 'cpp',
+      '.cs': 'csharp', '.swift': 'swift',
+      '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'toml',
+      '.sh': 'shell', '.bat': 'bat', '.ps1': 'powershell',
+      '.sql': 'sql', '.graphql': 'graphql',
+      '.php': 'php', '.r': 'r', '.lua': 'lua',
+      '.vue': 'html', '.svelte': 'html', '.astro': 'html',
+      '.dart': 'dart', '.scala': 'scala',
+      '.ex': 'elixir', '.exs': 'elixir', '.erl': 'erlang',
+      '.hs': 'haskell', '.jl': 'julia',
+      '.zig': 'rust', '.nim': 'nim',
+      '.dockerfile': 'dockerfile'
+    };
+    return map[ext] || '';
+  }
+
+  // ──────────────────────────────────────────────
   // Binary file writing (for document operations)
   // ──────────────────────────────────────────────
   function writeBinaryFile(fileHandle, buffer) {
@@ -1271,6 +1446,7 @@
     buildFileTree: buildFileTree,
     expandDirectory: expandDirectory,
     listAllFiles: listAllFiles,
+    listAllFilesWithMetadata: listAllFilesWithMetadata,
 
     // File reading
     getFileType: getFileType,
