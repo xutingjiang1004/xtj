@@ -154,10 +154,14 @@
           }
         };
         req.onsuccess = function (e) {
-          if (resolved) return;
+          var db = e.target.result;
+          // P1: 超时后连接才到达，关闭迟到连接防止泄漏
+          if (resolved) {
+            try { db.close(); } catch (_) {}
+            return;
+          }
           resolved = true;
           clearTimeout(timeoutId);
-          var db = e.target.result;
           _dbConnection = db;
           // 监听 versionchange，当其他页面升级数据库时主动关闭
           db.onversionchange = function () {
@@ -358,8 +362,13 @@
   function selectDirectory() {
     try {
       return window.showDirectoryPicker({ mode: 'readwrite' }).then(function (handle) {
-        return storeHandle(handle).then(function () {
-          _dirHandle = handle;
+        // P0: 立即使用获得的句柄，不等 IndexedDB
+        _dirHandle = handle;
+
+        // P0: 保存恢复记录失败，不能阻止当前工作区使用
+        return storeHandle(handle).catch(function (err) {
+          console.warn('[CODE-IDB] 无法保存工作区恢复记录:', err);
+        }).then(function () {
           return handle;
         });
       }).catch(function (err) {
@@ -483,19 +492,25 @@
         var delReq = indexedDB.deleteDatabase(DB_NAME);
         delReq.onsuccess = function () {
           console.log('[CODE-IDB] Database deleted successfully');
-          resolve();
+          resolve({ ok: true });
         };
         delReq.onerror = function (e) {
-          console.warn('[CODE-IDB] Database delete error:', e && e.target && e.target.error ? e.target.error.message : 'unknown');
-          resolve(); // 即使删除失败也继续
+          var errMsg = e && e.target && e.target.error ? e.target.error.message : 'unknown';
+          console.warn('[CODE-IDB] Database delete error:', errMsg);
+          resolve({ ok: false, blocked: false, error: errMsg });
         };
         delReq.onblocked = function () {
           console.warn('[CODE-IDB] Database delete blocked');
-          resolve(); // 被阻塞也继续
+          // P1: 不能当作成功，返回明确状态
+          resolve({
+            ok: false,
+            blocked: true,
+            error: '数据库正在被其他页面占用，请关闭其他 XTJ 页面后重试'
+          });
         };
       } catch (e) {
         console.warn('[CODE-IDB] deleteDatabase error:', e && e.message ? e.message : String(e));
-        resolve();
+        resolve({ ok: false, blocked: false, error: e && e.message ? e.message : String(e) });
       }
     });
   }

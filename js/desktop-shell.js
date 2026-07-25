@@ -375,7 +375,8 @@
         if (gen !== codeModuleState.generation) {
           codeModuleState.status = 'idle';
           codeModuleState.promise = null;
-          return;
+          // P1: 保持 rejected，不转为成功
+          return Promise.reject(e);
         }
         codeModuleState.status = 'error';
         codeModuleState.error = e;
@@ -387,6 +388,8 @@
           codeModuleState.errorShownGeneration = gen;
           if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
         }
+        // P1: 保持 rejected，防止调用方认为加载成功并进行半残初始化
+        return Promise.reject(e);
       });
 
     return codeModuleState.promise;
