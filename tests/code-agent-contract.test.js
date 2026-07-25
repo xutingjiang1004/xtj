@@ -52,27 +52,27 @@ test('server.js requires and registers code-agent', () => {
 // ============================================================
 test('code-agent validates message length', () => {
   assert.match(codeAgent, /MAX_MESSAGE_LEN/);
-  assert.match(codeAgent, /4000/);
+  assert.match(codeAgent, /12000/);
 });
 
 test('code-agent validates history length', () => {
   assert.match(codeAgent, /MAX_HISTORY_ITEMS/);
-  assert.match(codeAgent, /20/);
+  assert.match(codeAgent, /50/);
 });
 
 test('code-agent validates files count', () => {
   assert.match(codeAgent, /MAX_FILES/);
-  assert.match(codeAgent, /12/);
+  assert.match(codeAgent, /50/);
 });
 
 test('code-agent validates files total content size', () => {
   assert.match(codeAgent, /MAX_FILES_TOTAL_CONTENT/);
-  assert.match(codeAgent, /600 \* 1024/);
+  assert.match(codeAgent, /900 \* 1024/);
 });
 
 test('code-agent validates single file content size', () => {
   assert.match(codeAgent, /MAX_SINGLE_FILE_CONTENT/);
-  assert.match(codeAgent, /1 \* 1024 \* 1024/);
+  assert.match(codeAgent, /2 \* 1024 \* 1024/);
 });
 
 // ============================================================
