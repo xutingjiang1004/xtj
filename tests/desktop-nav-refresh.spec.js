@@ -49,7 +49,14 @@ test('double-click only triggers on active tab', () => {
 });
 
 test('no location.reload() in refresh handlers', () => {
-  assert.ok(!/location\.reload/.test(shell));
+  // P0: location.reload() is only allowed in renderErrorPage (damaged state refresh button),
+  // NOT in refreshTab or performRefresh handlers
+  var refreshFn = shell.match(/function performRefresh[\s\S]*?(?=function \w+)/);
+  assert.ok(refreshFn, 'performRefresh function should exist');
+  assert.ok(!/location\.reload/.test(refreshFn[0]), 'performRefresh should NOT use location.reload');
+  var refreshTabFn = shell.match(/function refreshTab[\s\S]*?(?=function \w+)/);
+  assert.ok(refreshTabFn, 'refreshTab function should exist');
+  assert.ok(!/location\.reload/.test(refreshTabFn[0]), 'refreshTab should NOT use location.reload');
 });
 
 test('refresh provides toast feedback', () => {
