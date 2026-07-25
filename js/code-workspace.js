@@ -979,10 +979,10 @@
       renderTabs();
       renderEditor();
       
-      // Auto-add to context if text and not in context
-      if (tab.type === 'text' && !state.contextPaths[path]) {
+      // Auto-add to context if text/document and not in context
+      if ((tab.type === 'text' || tab.type === 'document') && !state.contextPaths[path]) {
         var count = Object.keys(state.contextPaths).length;
-        if (count < 12 && !isRestrictedContextFile(path)) {
+        if (count < 50 && !isRestrictedContextFile(path)) {
           state.contextPaths[path] = true;
           renderContextPanel();
         }
@@ -1385,12 +1385,13 @@
       if (docData.metadata) {
         if (docData.metadata.pages) html += '<span class="doc-preview-meta">' + docData.metadata.pages + ' 页</span>';
         if (docData.metadata.sheetCount) html += '<span class="doc-preview-meta">' + docData.metadata.sheetCount + ' 个工作表</span>';
+        if (docData.metadata.slideCount) html += '<span class="doc-preview-meta">' + docData.metadata.slideCount + ' 页幻灯片</span>';
       }
       html += '</div></div>';
 
       html += '<div class="doc-preview-content">';
       if (docData.truncated) {
-        html += '<div class="doc-preview-truncated">⚠ 内容过长，已截断显示前 100KB</div>';
+        html += '<div class="doc-preview-truncated">⚠ 内容过长，已截断显示</div>';
       }
       html += '<pre class="doc-preview-text">' + escapeHTML(docData.text) + '</pre>';
       html += '</div>';
@@ -1416,8 +1417,8 @@
       delete state.contextPaths[path];
     } else {
       var count = Object.keys(state.contextPaths).length;
-      if (count >= 12) {
-        showToast('最多添加 12 个文件到 AI 上下文', 'error');
+      if (count >= 50) {
+        showToast('最多添加 50 个文件到 AI 上下文', 'error');
         return;
       }
 
@@ -1809,10 +1810,9 @@
                   }
                   var encoder = new TextEncoder();
                   var contentBytes = encoder.encode(docContent).length;
-                  if (contentBytes > 500 * 1024) {
-                    // Truncate to 500KB for AI context
-                    var truncated = docContent.slice(0, 500 * 1024);
-                    docContent = truncated + '\n\n[文档内容过长，已截断至 500KB]';
+                  if (contentBytes > 800 * 1024) {
+                    var truncated = docContent.slice(0, 800 * 1024);
+                    docContent = truncated + '\n\n[文档内容过长，已截断至 800KB]';
                   }
                   resolve({
                     path: p,
@@ -1882,8 +1882,8 @@
         }
         // Recalculate SHA-256 for files with unsaved changes
         var contentBytes = new TextEncoder().encode(r.content).length;
-        if (totalBytes + contentBytes > 600 * 1024) {
-          showToast('AI 上下文文件总内容超过 600 KB 限制，请减少上下文文件', 'error');
+        if (totalBytes + contentBytes > 900 * 1024) {
+          showToast('AI 上下文文件总内容超过 900 KB 限制，请减少上下文文件', 'error');
           state.sending = false;
           var curInput = document.getElementById('codeChatInput');
           if (curInput) curInput.disabled = false;
@@ -1908,7 +1908,7 @@
 
       // Build history WITHOUT the current message (dedup)
       // The current message was just pushed to state.messages, so exclude it
-      var historyMsgs = state.messages.slice(0, -1).slice(-20).map(function (m) {
+      var historyMsgs = state.messages.slice(0, -1).slice(-50).map(function (m) {
         return { role: m.role, content: m.content };
       });
 
