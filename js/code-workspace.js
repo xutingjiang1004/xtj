@@ -11,10 +11,13 @@
     active: false,
     directoryHandle: null,
     workspaceName: '',
+    workspaceMode: 'local', // 'local' or 'github'
     fileHandles: {},
     openTabs: [],
     activePath: '',
-    contextPaths: {},
+    pinnedFiles: [], // Replaces contextPaths — only priority hints, not full uploads
+    projectIndexStatus: null, // { totalFiles, totalChunks, builtAt, indexed }
+    lastReadContext: null, // { files_read: [], total_chunks, total_tokens, truncated }
     messages: [],
     pendingOperations: [],
     snapshots: {},
@@ -362,21 +365,32 @@
 
     welcome.innerHTML =
       '<div class="welcome-icon">📁</div>' +
-      '<h2 class="welcome-title">打开文件夹开始</h2>' +
-      '<p class="welcome-desc">选择一个本地文件夹作为工作区，浏览和编辑文件，或使用 AI 助手进行代码操作。</p>' +
+      '<h2 class="welcome-title">打开工作区开始</h2>' +
+      '<p class="welcome-desc">选择 GitHub 仓库（推荐）或本地文件夹作为工作区，浏览和编辑文件，或使用 AI 助手进行代码操作。</p>' +
       '<div class="welcome-actions">' +
-        '<button class="folder-picker-btn-large" id="codeWelcomeOpenBtn">' +
-          '<span class="folder-icon">📂</span> 重新选择文件夹' +
+        '<button class="folder-picker-btn-large primary" id="codeWelcomeGitHubBtn">' +
+          '<span class="folder-icon">🔗</span> 打开 GitHub 仓库（推荐）' +
+        '</button>' +
+        '<button class="folder-picker-btn-large" id="codeWelcomeLocalBtn">' +
+          '<span class="folder-icon">📂</span> 打开本地文件夹' +
         '</button>' +
       '</div>' +
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
 
     _dom.panelCode.appendChild(welcome);
 
-    // Bind open folder button
-    var btn = document.getElementById('codeWelcomeOpenBtn');
-    if (btn) {
-      btn.addEventListener('click', function () {
+    // Bind GitHub repo button
+    var githubBtn = document.getElementById('codeWelcomeGitHubBtn');
+    if (githubBtn) {
+      githubBtn.addEventListener('click', function () {
+        renderGitHubRepoSelector();
+      });
+    }
+
+    // Bind local folder button
+    var localBtn = document.getElementById('codeWelcomeLocalBtn');
+    if (localBtn) {
+      localBtn.addEventListener('click', function () {
         selectAndOpenWorkspace();
       });
     }
@@ -394,7 +408,7 @@
       var restoreBtn = document.createElement('button');
       restoreBtn.className = 'folder-picker-btn-large';
       restoreBtn.id = 'codeWelcomeRestoreBtn';
-      restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+      restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
       restoreBtn.title = '上次打开: ' + stored;
 
       var statusText = document.createElement('span');
@@ -414,18 +428,19 @@
           statusText.textContent = '文件系统 API 不可用';
           statusText.className = 'welcome-status error';
           restoreBtn.disabled = false;
-          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
           return;
         }
 
         window.__xtjCodeFS.restoreWorkspace({ requestPermission: true }).then(function (result) {
           restoreBtn.disabled = false;
-          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
 
           if (result.status === 'granted') {
             resetWorkspaceState();
             state.directoryHandle = result.handle;
             state.workspaceName = result.handle.name;
+            state.workspaceMode = 'local';
             try {
               localStorage.setItem('xtj_code_workspace_name', result.handle.name);
             } catch (e) { /* ignore */ }
@@ -458,7 +473,7 @@
           }
         }).catch(function (err) {
           restoreBtn.disabled = false;
-          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复 xtj 工作区';
+          restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
           statusText.innerHTML = '恢复失败，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
           statusText.className = 'welcome-status error';
           bindClearStorageBtn(statusText, recentEl);
@@ -516,12 +531,18 @@
     state.workspaceGeneration++;
     state.openTabs = [];
     state.activePath = '';
-    state.contextPaths = {};
+    state.pinnedFiles = [];
+    state.projectIndexStatus = null;
+    state.lastReadContext = null;
     state.pendingOperations = [];
     state.snapshots = {};
     state.fileHandles = {};
     state.messages = [];
     state._isReadOnly = false;
+    // Clear backend index
+    try {
+      fetch('/api/code/agent/clear_index', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function () {});
+    } catch (e) { /* ignore */ }
     revokeAllUrls();
     disposeMonaco();
   }
@@ -657,6 +678,7 @@
         resetWorkspaceState();
         state.directoryHandle = createMockDirHandle(dirName, dirName + '/');
         state.workspaceName = dirName;
+        state.workspaceMode = 'local';
         state._isReadOnly = true;
         // P1 #4: notify FS module of the mock handle so readFileByPath works
         if (window.__xtjCodeFS && window.__xtjCodeFS.setDirHandle) {
@@ -693,6 +715,7 @@
       resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name;
+      state.workspaceMode = 'local';
       try {
         localStorage.setItem('xtj_code_workspace_name', handle.name);
       } catch (e) { /* ignore */ }
@@ -760,7 +783,7 @@
     fileTree.id = 'codeFileTree';
     sidebar.appendChild(fileTree);
 
-    // Context panel
+    // Project status panel (replaces old context panel)
     var contextPanel = document.createElement('div');
     contextPanel.className = 'code-context-panel';
     contextPanel.id = 'codeContextPanel';
@@ -807,8 +830,11 @@
     // Render sub-components
     renderFileTree();
     renderEmptyState();
-    renderContextPanel();
+    renderProjectStatus();
     renderChatPanel();
+
+    // Build project index asynchronously
+    buildProjectIndex();
 
     // Restore open tabs after re-entering Code
     restoreTabs();
@@ -1088,8 +1114,8 @@
     menu.style.top = e.clientY + 'px';
     menu.style.position = 'fixed';
 
-    var inContext = state.contextPaths[path];
-    var contextLabel = inContext ? '从 AI 上下文移除' : '添加到 AI 上下文';
+    var inContext = state.pinnedFiles.indexOf(path) !== -1;
+    var contextLabel = inContext ? '取消固定' : '固定到 AI 上下文';
 
     menu.innerHTML =
       '<div class="menu-item" data-action="toggle-context">' +
@@ -1204,13 +1230,12 @@
 
       renderTabs();
       renderEditor();
-      
-      // Auto-add to context if text/document and not in context
-      if ((tab.type === 'text' || tab.type === 'document') && !state.contextPaths[path]) {
-        var count = Object.keys(state.contextPaths).length;
-        if (count < 50 && !isRestrictedContextFile(path)) {
-          state.contextPaths[path] = true;
-          renderContextPanel();
+
+      // Auto-pin opened file as high priority (not full context upload)
+      if ((tab.type === 'text' || tab.type === 'document') && state.pinnedFiles.indexOf(path) === -1) {
+        if (!isRestrictedContextFile(path)) {
+          state.pinnedFiles.push(path);
+          renderProjectStatus();
         }
       }
     }).catch(function (err) {
@@ -1276,7 +1301,7 @@
         el.className = 'code-tab' + (tab.path === state.activePath ? ' active' : '') + (tab.modified ? ' modified' : '');
         el.setAttribute('data-path', tab.path);
 
-        var inContext = state.contextPaths[tab.path];
+        var inContext = state.pinnedFiles.indexOf(tab.path) !== -1;
         var contextDot = inContext ? '<span class="code-tab-context"></span>' : '';
 
         el.innerHTML =
@@ -1683,23 +1708,25 @@
   }
 
   // ──────────────────────────────────────────────
-  // toggleContext(path)
+  // toggleContext(path) — now pinFile
   // ──────────────────────────────────────────────
   function toggleContext(path) {
+    pinFile(path);
+  }
+
+  // ──────────────────────────────────────────────
+  // pinFile(path) — pin a file as high priority for AI
+  // ──────────────────────────────────────────────
+  function pinFile(path) {
     if (!path) return;
 
-    if (state.contextPaths[path]) {
-      delete state.contextPaths[path];
+    var idx = state.pinnedFiles.indexOf(path);
+    if (idx !== -1) {
+      state.pinnedFiles.splice(idx, 1);
     } else {
-      var count = Object.keys(state.contextPaths).length;
-      if (count >= 50) {
-        showToast('最多添加 50 个文件到 AI 上下文', 'error');
-        return;
-      }
-
       // Check if file is restricted (sensitive files)
       if (isRestrictedContextFile(path)) {
-        showToast('该文件包含敏感信息，不能作为 AI 文本上下文', 'error');
+        showToast('该文件包含敏感信息，不能添加到 AI 上下文', 'error');
         return;
       }
 
@@ -1716,212 +1743,413 @@
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
-        // document and pdf types are allowed — will be extracted at send time
       } else {
-        // File not open — check by extension
         var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
         var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
         if (imgExts.indexOf(ext) !== -1) {
           showToast('该文件仅支持本地预览，不能作为 AI 文本上下文', 'error');
           return;
         }
-        // document and pdf extensions are allowed — will be extracted at send time
       }
 
-      state.contextPaths[path] = true;
+      state.pinnedFiles.push(path);
     }
 
-    renderContextPanel();
+    // Sync with backend
+    var isPinned = state.pinnedFiles.indexOf(path) !== -1;
+    try {
+      fetch('/api/code/agent/pin_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path, pinned: isPinned })
+      }).catch(function () {});
+    } catch (e) { /* ignore */ }
+
+    renderProjectStatus();
+    renderTabs();
+  }
+
+  function unpinFile(path) {
+    var idx = state.pinnedFiles.indexOf(path);
+    if (idx !== -1) {
+      state.pinnedFiles.splice(idx, 1);
+    }
+    try {
+      fetch('/api/code/agent/pin_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path, pinned: false })
+      }).catch(function () {});
+    } catch (e) { /* ignore */ }
+    renderProjectStatus();
     renderTabs();
   }
 
   // ──────────────────────────────────────────────
-  // sanitizeContextPaths() — remove invalid paths
+  // buildProjectIndex() — scan workspace and build index
   // ──────────────────────────────────────────────
-  function sanitizeContextPaths() {
-    var removed = [];
-    var paths = Object.keys(state.contextPaths);
-    for (var i = 0; i < paths.length; i++) {
-      var p = paths[i];
-      var shouldRemove = false;
-
-      // Check restricted files
-      if (isRestrictedContextFile(p)) {
-        shouldRemove = true;
+  function buildProjectIndex() {
+    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFilesWithMetadata) {
+      // Fallback: use listAllFiles
+      if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
+        state.projectIndexStatus = null;
+        renderProjectStatus();
+        return;
       }
 
-      // Check if open tab is image/PDF/binary
-      if (!shouldRemove) {
-        for (var j = 0; j < state.openTabs.length; j++) {
-          if (state.openTabs[j].path === p) {
-            var t = state.openTabs[j];
-            if (t.type === 'image' || t.type === 'binary') {
-              shouldRemove = true;
-            }
-            // pdf and document types are allowed — will be extracted at send time
-            break;
+      window.__xtjCodeFS.listAllFiles(4, 500).then(function (result) {
+        var files = [];
+        for (var i = 0; i < result.files.length; i++) {
+          var f = result.files[i];
+          if (f.type === 'text') {
+            files.push({
+              path: f.path,
+              name: f.name || f.path.split('/').pop(),
+              language: getFileLanguage(f.name || f.path),
+              size: f.size || 0,
+              sha256: '',
+              content: ''
+            });
           }
         }
-      }
 
-      // Check extension for unopened files
-      if (!shouldRemove) {
-        var ext = p.slice(p.lastIndexOf('.')).toLowerCase();
-        var imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif'];
-        if (imgExts.indexOf(ext) !== -1) {
-          shouldRemove = true;
+        // Send to backend for indexing
+        return fetch('/api/code/index/build', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: state.workspaceName || 'local',
+            files: files
+          })
+        }).then(function (r) { return r.json(); });
+      }).then(function (result) {
+        if (result && result.ok) {
+          state.projectIndexStatus = {
+            totalFiles: result.totalFiles,
+            totalChunks: result.totalChunks,
+            builtAt: result.builtAt,
+            indexed: true
+          };
+        } else {
+          state.projectIndexStatus = { indexed: false, error: (result && result.error) || '索引构建失败' };
         }
-      }
-
-      if (shouldRemove) {
-        delete state.contextPaths[p];
-        removed.push(p);
-      }
-    }
-    return removed;
-  }
-
-  // ──────────────────────────────────────────────
-  // Batch Add Functions
-  // ──────────────────────────────────────────────
-  function addAllTextFilesToContext() {
-    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
-      showToast('文件系统不支持此操作', 'error');
+        renderProjectStatus();
+      }).catch(function (err) {
+        console.error('[code-workspace] Index build failed:', err);
+        state.projectIndexStatus = { indexed: false, error: (err && err.message) || '索引构建失败' };
+        renderProjectStatus();
+      });
       return;
     }
-    showToast('正在扫描工作区文件...', 'info');
-    window.__xtjCodeFS.listAllFiles(4, 300).then(function (result) {
-      var added = 0;
-      var count = Object.keys(state.contextPaths).length;
+
+    // Use listAllFilesWithMetadata for better index
+    window.__xtjCodeFS.listAllFilesWithMetadata(4, 500).then(function (result) {
+      var files = [];
       for (var i = 0; i < result.files.length; i++) {
-        if (count >= 50) break;
         var f = result.files[i];
-        if (f.type === 'text' && !state.contextPaths[f.path]) {
-          state.contextPaths[f.path] = true;
-          added++;
-          count++;
+        if (f.type === 'text') {
+          files.push({
+            path: f.path,
+            name: f.name || f.path.split('/').pop(),
+            language: f.language || getFileLanguage(f.name || f.path),
+            size: f.size || 0,
+            sha256: f.sha256 || '',
+            modifiedAt: f.modifiedAt || null,
+            content: f.content || ''
+          });
         }
       }
-      renderContextPanel();
-      renderTabs();
-      showToast('已添加 ' + added + ' 个文本文件到上下文', 'success');
+
+      return fetch('/api/code/index/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: state.workspaceName || 'local',
+          files: files
+        })
+      }).then(function (r) { return r.json(); });
+    }).then(function (result) {
+      if (result && result.ok) {
+        state.projectIndexStatus = {
+          totalFiles: result.totalFiles,
+          totalChunks: result.totalChunks,
+          builtAt: result.builtAt,
+          indexed: true
+        };
+      } else {
+        state.projectIndexStatus = { indexed: false, error: (result && result.error) || '索引构建失败' };
+      }
+      renderProjectStatus();
     }).catch(function (err) {
-      showToast('扫描文件失败: ' + err.message, 'error');
+      console.error('[code-workspace] Index build failed:', err);
+      state.projectIndexStatus = { indexed: false, error: (err && err.message) || '索引构建失败' };
+      renderProjectStatus();
     });
   }
 
-  function addAllDocumentsToContext() {
-    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
-      showToast('文件系统不支持此操作', 'error');
-      return;
-    }
-    showToast('正在扫描工作区文档...', 'info');
-    window.__xtjCodeFS.listAllFiles(4, 300).then(function (result) {
-      var added = 0;
-      var count = Object.keys(state.contextPaths).length;
-      for (var i = 0; i < result.files.length; i++) {
-        if (count >= 50) break;
-        var f = result.files[i];
-        if (f.type === 'document' && !state.contextPaths[f.path]) {
-          state.contextPaths[f.path] = true;
-          added++;
-          count++;
-        }
-      }
-      renderContextPanel();
-      renderTabs();
-      showToast('已添加 ' + added + ' 个文档到上下文', 'success');
-    }).catch(function (err) {
-      showToast('扫描文档失败: ' + err.message, 'error');
-    });
-  }
-
   // ──────────────────────────────────────────────
-  // renderContextPanel()
+  // renderProjectStatus() — compact status area (replaces old context panel)
   // ──────────────────────────────────────────────
-  function renderContextPanel() {
+  function renderProjectStatus() {
     if (!_dom.contextPanel) return;
-
-    // Clean up invalid paths
-    var removed = sanitizeContextPaths();
-    if (removed.length > 0) {
-      renderTabs();
-    }
-
-    var paths = Object.keys(state.contextPaths);
-    var totalSize = 0;
-
     _dom.contextPanel.innerHTML = '';
-
-    if (paths.length === 0) {
-      _dom.contextPanel.innerHTML =
-        '<div class="context-header">' +
-          '<span>AI 上下文</span>' +
-          '<span class="context-count">0</span>' +
-        '</div>' +
-        '<div class="context-list" style="padding:8px 12px;font-size:11px;color:var(--cw-text-muted);">' +
-          '右键点击文件，选择"添加到 AI 上下文"以添加文件供 AI 分析' +
-        '</div>';
-      return;
-    }
 
     var header = document.createElement('div');
     header.className = 'context-header';
-    header.innerHTML =
-      '<span>AI 上下文</span>' +
-      '<span class="context-count">' + paths.length + ' / 50</span>';
+    header.innerHTML = '<span>项目状态</span>';
     _dom.contextPanel.appendChild(header);
 
-    var list = document.createElement('div');
-    list.className = 'context-list';
+    var body = document.createElement('div');
+    body.className = 'context-list';
 
-    for (var i = 0; i < paths.length; i++) {
-      var p = paths[i];
-      var name = fileNameFromPath(p);
+    // Index status
+    var indexDiv = document.createElement('div');
+    indexDiv.style.cssText = 'padding:8px 12px;font-size:11px;line-height:1.6;';
 
-      // Calculate size from open tabs
-      var sizeText = '';
-      for (var j = 0; j < state.openTabs.length; j++) {
-        if (state.openTabs[j].path === p) {
-          sizeText = formatSize(state.openTabs[j].size || 0);
-          break;
-        }
+    if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
+      var idx = state.projectIndexStatus;
+      indexDiv.innerHTML =
+        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">项目已索引</div>' +
+        '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
+        '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
+        '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : '本地文件夹') + '</div>';
+    } else if (state.projectIndexStatus && state.projectIndexStatus.error) {
+      indexDiv.innerHTML =
+        '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +
+        '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + '</div>' +
+        '<button class="code-retry-btn" style="margin-top:4px;font-size:10px;" id="codeRetryIndex">重试索引</button>';
+    } else {
+      indexDiv.innerHTML =
+        '<div style="color:var(--cw-text-muted);">正在建立索引...</div>';
+    }
+    body.appendChild(indexDiv);
+
+    // Last read context info
+    if (state.lastReadContext && state.lastReadContext.files_read && state.lastReadContext.files_read.length > 0) {
+      var lrc = state.lastReadContext;
+      var readDiv = document.createElement('div');
+      readDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
+
+      var readHtml = '<div style="color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;">AI 本次读取:</div>';
+      for (var ri = 0; ri < Math.min(lrc.files_read.length, 5); ri++) {
+        var fr = lrc.files_read[ri];
+        var ranges = fr.ranges.map(function (r) { return 'L' + r[0] + '-' + r[1]; }).join(', ');
+        readHtml += '<div style="color:var(--cw-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+          escapeHTML(fr.path) + ': ' + ranges + '</div>';
       }
-
-      var item = document.createElement('span');
-      item.className = 'code-context-item';
-      item.title = p;
-      item.innerHTML =
-        '<span class="context-item-icon">📄</span>' +
-        '<span class="context-item-name">' + escapeHTML(name) + '</span>' +
-        (sizeText ? '<span style="font-size:10px;color:var(--cw-text-muted);margin-left:2px">' + sizeText + '</span>' : '') +
-        '<span class="context-item-remove">✕</span>';
-
-      // Click to open file
-      item.addEventListener('click', function (path) {
-        return function (e) {
-          if (e.target.classList.contains('context-item-remove')) return;
-          openFile(path);
-        };
-      }(p));
-
-      // Remove button
-      var removeBtn = item.querySelector('.context-item-remove');
-      if (removeBtn) {
-        removeBtn.addEventListener('click', function (path) {
-          return function (e) {
-            e.stopPropagation();
-            delete state.contextPaths[path];
-            renderContextPanel();
-            renderTabs();
-          };
-        }(p));
+      if (lrc.files_read.length > 5) {
+        readHtml += '<div style="color:var(--cw-text-muted);">...还有 ' + (lrc.files_read.length - 5) + ' 个文件</div>';
       }
-
-      list.appendChild(item);
+      if (lrc.truncated) {
+        readHtml += '<div style="color:var(--cw-warning);font-size:9px;">已自动裁剪低相关代码块</div>';
+      }
+      readHtml += '<div style="color:var(--cw-text-muted);font-size:9px;">' + lrc.total_tokens + ' tokens / ' + lrc.total_chunks + ' 块</div>';
+      readDiv.innerHTML = readHtml;
+      body.appendChild(readDiv);
     }
 
-    _dom.contextPanel.appendChild(list);
+    // Pinned files
+    if (state.pinnedFiles.length > 0) {
+      var pinnedDiv = document.createElement('div');
+      pinnedDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
+      pinnedDiv.innerHTML = '<div style="color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;">固定文件 (' + state.pinnedFiles.length + '):</div>';
+
+      for (var pi = 0; pi < state.pinnedFiles.length; pi++) {
+        var pp = state.pinnedFiles[pi];
+        var pname = fileNameFromPath(pp);
+        var pitem = document.createElement('div');
+        pitem.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:2px 0;';
+        pitem.innerHTML =
+          '<span style="color:var(--cw-text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;" title="' + escapeHTML(pp) + '">📌 ' + escapeHTML(pname) + '</span>' +
+          '<span style="cursor:pointer;color:var(--cw-text-muted);margin-left:4px;flex-shrink:0;" data-action="unpin" data-path="' + escapeHTML(pp) + '">✕</span>';
+        pitem.querySelector('[style*="cursor:pointer;color:var(--cw-text)"]').addEventListener('click', function (path) {
+          return function () { openFile(path); };
+        }(pp));
+        pitem.querySelector('[data-action="unpin"]').addEventListener('click', function (path) {
+          return function (e) { e.stopPropagation(); unpinFile(path); };
+        }(pp));
+        pinnedDiv.appendChild(pitem);
+      }
+      body.appendChild(pinnedDiv);
+    }
+
+    // Actions
+    var actionsDiv = document.createElement('div');
+    actionsDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;';
+    actionsDiv.innerHTML =
+      '<button class="code-retry-btn" style="font-size:10px;" id="codeRefreshIndex">刷新索引</button>' +
+      '<button class="code-retry-btn" style="font-size:10px;" id="codeSwitchWorkspace">切换工作区</button>';
+    body.appendChild(actionsDiv);
+
+    _dom.contextPanel.appendChild(body);
+
+    // Bind buttons
+    var refreshBtn = document.getElementById('codeRefreshIndex');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function () {
+        state.projectIndexStatus = null;
+        renderProjectStatus();
+        buildProjectIndex();
+      });
+    }
+    var switchBtn = document.getElementById('codeSwitchWorkspace');
+    if (switchBtn) {
+      switchBtn.addEventListener('click', function () {
+        renderWelcome();
+      });
+    }
+    var retryBtn = document.getElementById('codeRetryIndex');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', function () {
+        state.projectIndexStatus = null;
+        renderProjectStatus();
+        buildProjectIndex();
+      });
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // renderGitHubRepoSelector() — GitHub repo selection UI
+  // ──────────────────────────────────────────────
+  function renderGitHubRepoSelector() {
+    if (!_dom.panelCode) return;
+    _dom.panelCode.innerHTML = '';
+
+    var container = document.createElement('div');
+    container.className = 'code-welcome';
+    container.innerHTML =
+      '<div class="welcome-icon">🔗</div>' +
+      '<h2 class="welcome-title">打开 GitHub 仓库</h2>' +
+      '<p class="welcome-desc">输入仓库地址（如 xutingjiang1004/xtj），选择分支后即可浏览和分析代码。</p>' +
+      '<div class="github-repo-input" style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:16px;">' +
+        '<input type="text" id="githubRepoInput" placeholder="owner/repo（如 xutingjiang1004/xtj）" ' +
+        'style="flex:1;max-width:400px;padding:10px 14px;border:1px solid var(--cw-border);border-radius:8px;font-size:14px;background:var(--cw-bg);color:var(--cw-text);">' +
+        '<button class="folder-picker-btn-large" id="githubRepoLoadBtn" style="padding:10px 20px;font-size:14px;">加载仓库</button>' +
+      '</div>' +
+      '<div id="githubRepoBranches" style="display:none;margin-bottom:16px;"></div>' +
+      '<div id="githubRepoFiles" style="display:none;max-height:300px;overflow-y:auto;text-align:left;border:1px solid var(--cw-border);border-radius:8px;padding:12px;"></div>' +
+      '<div id="githubRepoActions" style="display:none;margin-top:12px;"></div>' +
+      '<button class="folder-picker-btn-large" id="githubBackBtn" style="margin-top:16px;background:var(--cw-bg);">← 返回</button>';
+
+    _dom.panelCode.appendChild(container);
+
+    // Bind back button
+    var backBtn = document.getElementById('githubBackBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', function () { renderWelcome(); });
+    }
+
+    // Bind load button
+    var loadBtn = document.getElementById('githubRepoLoadBtn');
+    var repoInput = document.getElementById('githubRepoInput');
+    if (loadBtn && repoInput) {
+      loadBtn.addEventListener('click', function () {
+        var repo = repoInput.value.trim();
+        if (!repo || repo.indexOf('/') === -1) {
+          showToast('请输入有效的仓库地址（owner/repo）', 'error');
+          return;
+        }
+
+        loadBtn.disabled = true;
+        loadBtn.textContent = '加载中...';
+
+        // Fetch repo info via GitHub API
+        fetch('https://api.github.com/repos/' + repo, {
+          headers: { 'Accept': 'application/vnd.github.v3+json' }
+        }).then(function (r) {
+          if (!r.ok) throw new Error('仓库不存在或无权限访问 (HTTP ' + r.status + ')');
+          return r.json();
+        }).then(function (repoData) {
+          // Fetch branches
+          return fetch('https://api.github.com/repos/' + repo + '/branches?per_page=20', {
+            headers: { 'Accept': 'application/vnd.github.v3+json' }
+          }).then(function (r) { return r.json(); }).then(function (branches) {
+            return { repoData: repoData, branches: branches };
+          });
+        }).then(function (data) {
+          loadBtn.disabled = false;
+          loadBtn.textContent = '加载仓库';
+
+          var branchesDiv = document.getElementById('githubRepoBranches');
+          var filesDiv = document.getElementById('githubRepoFiles');
+          var actionsDiv = document.getElementById('githubRepoActions');
+
+          // Show branches
+          branchesDiv.style.display = 'block';
+          var defaultBranch = data.repoData.default_branch || 'main';
+          branchesDiv.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">分支:</div>' +
+            data.branches.map(function (b) {
+              return '<label style="display:inline-block;margin:4px 8px;cursor:pointer;font-size:13px;">' +
+                '<input type="radio" name="githubBranch" value="' + escapeHTML(b.name) + '"' +
+                (b.name === defaultBranch ? ' checked' : '') + '> ' + escapeHTML(b.name) +
+                '</label>';
+            }).join('');
+
+          // Show repo info
+          filesDiv.style.display = 'block';
+          filesDiv.innerHTML =
+            '<div style="font-weight:600;margin-bottom:8px;">仓库信息:</div>' +
+            '<div style="font-size:13px;color:var(--cw-text-muted);">' +
+            '名称: ' + escapeHTML(data.repoData.full_name) + '<br>' +
+            '描述: ' + escapeHTML(data.repoData.description || '无') + '<br>' +
+            '默认分支: ' + escapeHTML(defaultBranch) + '<br>' +
+            'Stars: ' + data.repoData.stargazers_count + ' | Forks: ' + data.repoData.forks_count + '<br>' +
+            '语言: ' + (data.repoData.language || '未知') + '<br>' +
+            '最近更新: ' + new Date(data.repoData.updated_at).toLocaleString() +
+            '</div>';
+
+          // Show open button
+          actionsDiv.style.display = 'block';
+          actionsDiv.innerHTML =
+            '<button class="folder-picker-btn-large primary" id="githubOpenWorkspaceBtn" style="padding:10px 24px;font-size:14px;">打开此仓库</button>';
+
+          var openBtn = document.getElementById('githubOpenWorkspaceBtn');
+          if (openBtn) {
+            openBtn.addEventListener('click', function () {
+              var selectedBranch = document.querySelector('input[name="githubBranch"]:checked');
+              var branch = selectedBranch ? selectedBranch.value : defaultBranch;
+
+              resetWorkspaceState();
+              state.workspaceMode = 'github';
+              state.workspaceName = repo;
+              state.directoryHandle = {
+                _isGitHub: true,
+                name: repo,
+                repo: repo,
+                branch: branch,
+                defaultBranch: defaultBranch
+              };
+
+              // Fetch file tree
+              openBtn.disabled = true;
+              openBtn.textContent = '正在获取文件树...';
+
+              fetch('https://api.github.com/repos/' + repo + '/git/trees/' + branch + '?recursive=1', {
+                headers: { 'Accept': 'application/vnd.github.v3+json' }
+              }).then(function (r) { return r.json(); }).then(function (treeData) {
+                if (treeData.tree) {
+                  state.directoryHandle._tree = treeData.tree;
+                }
+                renderWorkspace();
+              }).catch(function (err) {
+                showToast('获取文件树失败: ' + (err.message || '未知错误'), 'error');
+                openBtn.disabled = false;
+                openBtn.textContent = '打开此仓库';
+              });
+            });
+          }
+        }).catch(function (err) {
+          loadBtn.disabled = false;
+          loadBtn.textContent = '加载仓库';
+          showToast('加载失败: ' + (err.message || '未知错误'), 'error');
+        });
+      });
+
+      // Enter key support
+      repoInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') loadBtn.click();
+      });
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -2097,193 +2325,23 @@
       return;
     }
 
-    // Final defense: clean up invalid context paths before sending
-    sanitizeContextPaths();
-
-    // Read all context files from disk (not just open tabs)
-    var contextPaths = Object.keys(state.contextPaths);
-    var fs = window.__xtjCodeFS;
-    var readPromises = [];
-
-    for (var i = 0; i < contextPaths.length; i++) {
-      (function (p) {
-        readPromises.push(
-          new Promise(function (resolve) {
-            // Check if file is open and has unsaved changes
-            var openTab = null;
-            for (var j = 0; j < state.openTabs.length; j++) {
-              if (state.openTabs[j].path === p) {
-                openTab = state.openTabs[j];
-                break;
-              }
-            }
-
-            // If file is an image or binary, skip for context
-            if (openTab && (openTab.type === 'image' || openTab.type === 'binary')) {
-              resolve(null);
-              return;
-            }
-
-            // If file is a restricted context file, skip
-            if (isRestrictedContextFile(p)) {
-              resolve(null);
-              return;
-            }
-
-            // Read from disk
-            if (!fs || !fs.readFileByPath) {
-              resolve(null);
-              return;
-            }
-
-            fs.readFileByPath(p).then(function (result) {
-              if (!result) {
-                resolve(null);
-                return;
-              }
-
-              // Handle document type: extract text via backend API
-              if (result.type === 'document' || result.type === 'pdf') {
-                if (!fs.readDocumentText) {
-                  resolve(null);
-                  return;
-                }
-                fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType).then(function (docData) {
-                  if (!docData || !docData.text) {
-                    resolve(null);
-                    return;
-                  }
-                  var docContent = '【文档: ' + p + '】\n' + docData.text;
-                  if (docData.truncated) {
-                    docContent += '\n\n[注意: 文档内容过长，已截断]';
-                  }
-                  var encoder = new TextEncoder();
-                  var contentBytes = encoder.encode(docContent).length;
-                  if (contentBytes > 800 * 1024) {
-                    var truncated = docContent.slice(0, 800 * 1024);
-                    docContent = truncated + '\n\n[文档内容过长，已截断至 800KB]';
-                  }
-                  resolve({
-                    path: p,
-                    language: 'document',
-                    content: docContent,
-                    sha256: result.sha256 || ''
-                  });
-                }).catch(function (err) {
-                  console.error('[code-workspace] Document extraction failed:', p, err);
-                  resolve({ path: p, error: '文档提取失败: ' + ((err && err.message) || '未知错误') });
-                });
-                return;
-              }
-
-              // For text files
-              if (result.type !== 'text') {
-                resolve(null);
-                return;
-              }
-
-              // Use _currentContent if file has unsaved modifications
-              var content = result.content;
-              if (openTab && openTab.modified && openTab._currentContent !== undefined) {
-                content = openTab._currentContent;
-              }
-
-              // Compute SHA-256 of the actual content being sent to AI
-              getSHA256(content).then(function (computedSha) {
-                resolve({
-                  path: p,
-                  language: getFileLanguage(p),
-                  content: content,
-                  sha256: computedSha || result.sha256 || ''
-                });
-              }).catch(function () {
-                // Fallback: use disk SHA if computation fails
-                resolve({
-                  path: p,
-                  language: getFileLanguage(p),
-                  content: content,
-                  sha256: result.sha256 || ''
-                });
-              });
-            }).catch(function (err) {
-              console.error('[code-workspace] Failed to read context file:', p, err);
-              resolve({ path: p, error: (err && err.message) ? err.message : String(err) });
-            });
-          })
-        );
-      })(contextPaths[i]);
-    }
-
-    Promise.all(readPromises).then(function (results) {
-      // Check if request was cancelled or workspace changed
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
-
-      var files = [];
-      var failedFiles = [];
-      var totalBytes = 0;
-
-      for (var k = 0; k < results.length; k++) {
-        var r = results[k];
-        if (!r) continue;
-        if (r.error) {
-          failedFiles.push(r.path + ': ' + r.error);
-          continue;
-        }
-        // Recalculate SHA-256 for files with unsaved changes
-        var contentBytes = new TextEncoder().encode(r.content).length;
-        if (totalBytes + contentBytes > 900 * 1024) {
-          showToast('AI 上下文文件总内容超过 900 KB 限制，请减少上下文文件', 'error');
-          state.sending = false;
-          var curInput = document.getElementById('codeChatInput');
-          if (curInput) curInput.disabled = false;
-          var curSendBtn = document.getElementById('codeChatSendBtn');
-          if (curSendBtn) curSendBtn.disabled = false;
-          removeTypingIndicator();
-          return;
-        }
-        totalBytes += contentBytes;
-
-        files.push({
-          path: r.path,
-          language: r.language,
-          content: r.content,
-          sha256: r.sha256
-        });
-      }
-
-      if (failedFiles.length > 0) {
-        showToast('部分文件读取失败: ' + failedFiles.join('; '), 'error');
-      }
-
-      // Build history WITHOUT the current message (dedup)
-      // The current message was just pushed to state.messages, so exclude it
-      var historyMsgs = state.messages.slice(0, -1).slice(-50).map(function (m) {
-        return { role: m.role, content: m.content };
-      });
-
-      // Build request
-      var body = {
-        workspace_name: state.workspaceName || '',
-        message: message,
-        active_path: state.activePath || '',
-        history: historyMsgs,
-        files: files
-      };
-
-      return sendApiRequest(body, requestId, timeStr, wsGen);
-    }).catch(function (err) {
-      if (requestId !== state._requestId) return;
-      removeTypingIndicator();
-      var errMsg = (err && err.message) ? err.message : String(err);
-      state.messages.push({ role: 'assistant', content: '抱歉，请求失败: ' + errMsg, time: timeStr });
-      renderChatPanel();
-      state.sending = false;
-      var curInput = document.getElementById('codeChatInput');
-      if (curInput) curInput.disabled = false;
-      var curSendBtn = document.getElementById('codeChatSendBtn');
-      if (curSendBtn) curSendBtn.disabled = false;
+    // Phase 1: Use backend index for context selection (no more full file uploads)
+    // Build history WITHOUT the current message (dedup)
+    var historyMsgs = state.messages.slice(0, -1).slice(-50).map(function (m) {
+      return { role: m.role, content: m.content };
     });
+
+    // Build request with pinned_paths and active_path — backend handles chunk selection
+    var body = {
+      workspace_name: state.workspaceName || '',
+      message: message,
+      active_path: state.activePath || '',
+      history: historyMsgs,
+      pinned_paths: state.pinnedFiles.slice(),
+      files: [] // No longer sending full files — backend uses index
+    };
+
+    return sendApiRequest(body, requestId, timeStr, wsGen);
   }
 
   function sendApiRequest(body, requestId, timeStr, wsGen) {
@@ -2366,6 +2424,12 @@
       // Store operations
       if (data && data.operations && Array.isArray(data.operations)) {
         state.pendingOperations = data.operations;
+      }
+
+      // Update last read context for display
+      if (data && data.context_info) {
+        state.lastReadContext = data.context_info;
+        renderProjectStatus();
       }
 
       renderChatPanel();
@@ -3083,7 +3147,9 @@
     openFile: openFile,
     closeTab: closeTab,
     saveFile: saveFile,
-    toggleContext: toggleContext,
+    pinFile: pinFile,
+    unpinFile: unpinFile,
+    toggleContext: toggleContext, // Kept for backward compat
     getState: function () { return state; },
     selectAndOpenWorkspace: selectAndOpenWorkspace
   };
@@ -3094,7 +3160,7 @@
     // Refresh: re-render file tree and chat
     if (state.active && state.directoryHandle) {
       renderFileTree();
-      renderContextPanel();
+      renderProjectStatus();
       showToast('工作区已刷新', 'info');
     }
     return Promise.resolve();

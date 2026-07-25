@@ -765,6 +765,159 @@
   align-content: flex-start;
 }
 
+
+/* ── 19a. Project Status Area (Compact) ───────────────────── */
+.project-status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--cw-bg-secondary);
+  border-radius: var(--cw-radius-sm);
+  margin: 0 8px 8px 8px;
+}
+
+.project-status-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--cw-radius-xs);
+  background: var(--cw-bg-tertiary);
+  border: 1px solid var(--cw-border);
+  transition: all var(--cw-dur-base) var(--cw-ease);
+}
+
+.project-status-block:hover {
+  border-color: var(--cw-border-strong);
+  background: var(--cw-bg-hover);
+}
+
+.project-status-block.split-top {
+  border-top: 1px solid var(--cw-border-strong);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  margin-top: -8px;
+}
+
+.status-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cw-text);
+  margin-bottom: 2px;
+}
+
+.status-title.success { color: var(--cw-success); }
+.status-title.error { color: var(--cw-danger); }
+.status-title.warning { color: var(--cw-warning); }
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cw-text-muted);
+}
+.status-dot.success { background: var(--cw-success); box-shadow: 0 0 6px var(--cw-success-soft); }
+.status-dot.error { background: var(--cw-danger); box-shadow: 0 0 6px var(--cw-danger-soft); }
+.status-dot.warning { background: var(--cw-warning); box-shadow: 0 0 6px var(--cw-warning-soft); }
+.status-dot.pulsing {
+  animation: status-pulse 1.5s infinite var(--cw-ease);
+}
+
+@keyframes status-pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 var(--cw-warning-soft); opacity: 0.7; }
+  50% { transform: scale(1); box-shadow: 0 0 0 4px rgba(245, 158, 11, 0); opacity: 1; }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); opacity: 0.7; }
+}
+
+.status-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--cw-text-muted);
+  font-family: var(--cw-font-mono);
+}
+
+.status-msg.error {
+  font-size: 11px;
+  color: var(--cw-danger);
+  margin-top: 4px;
+}
+
+.status-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cw-text-secondary);
+  margin-bottom: 4px;
+  letter-spacing: 0.2px;
+}
+
+.status-read-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-read-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-family: var(--cw-font-mono);
+  background: rgba(0,0,0,0.1);
+  padding: 4px 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.status-read-path {
+  color: var(--cw-text-muted);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  flex: 1;
+}
+
+.status-read-range {
+  color: var(--cw-accent);
+  margin-left: 6px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.status-read-more {
+  font-size: 10px;
+  color: var(--cw-text-muted);
+  text-align: center;
+  font-style: italic;
+  padding-top: 4px;
+}
+
+.code-retry-btn {
+  background: var(--cw-bg);
+  border: 1px solid var(--cw-border);
+  color: var(--cw-text);
+  border-radius: var(--cw-radius-xs);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--cw-dur-fast) var(--cw-ease);
+  margin-top: 6px;
+  align-self: flex-start;
+}
+.code-retry-btn:hover {
+  background: var(--cw-bg-hover);
+  border-color: var(--cw-border-strong);
+}
+
+
 /* ── 20. Context Item ─────────────────────────────────────── */
 .code-context-item {
   display: inline-flex;
