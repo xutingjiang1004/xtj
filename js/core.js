@@ -601,7 +601,10 @@ const ADMIN_NAME = "xxz";
                 }
                 async function send(token) {
                     var headers = Object.assign({}, options.headers || {});
-                    if (!headers['Content-Type'] && options.body != null) headers['Content-Type'] = 'application/json';
+                    var isFormData = options.body instanceof FormData;
+                    if (!isFormData && !headers['Content-Type'] && options.body != null) {
+                        headers['Content-Type'] = 'application/json';
+                    }
                     headers.Authorization = 'Bearer ' + token;
                     return fetch((window.API_BASE || '') + path, Object.assign({}, options, {
                         credentials: 'include',
