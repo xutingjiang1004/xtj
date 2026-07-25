@@ -108,8 +108,8 @@ console.log('\n=== 2. code-workspace.js 欢迎页 ===');
 const wsSrc = fs.readFileSync(path.join(ROOT, 'js/code-workspace.js'), 'utf8');
 
 assert(
-  wsSrc.includes('恢复 xtj 工作区'),
-  '欢迎页有"恢复 xtj 工作区"按钮'
+  wsSrc.includes('恢复上次工作区'),
+  '欢迎页有"恢复上次工作区"按钮'
 );
 
 assert(
