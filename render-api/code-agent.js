@@ -130,7 +130,7 @@ function parseOperations(raw) {
     if (type === 'document') {
       // Document operations: require document_type and document_operations
       var docType = (typeof op.document_type === 'string' ? op.document_type.trim().toLowerCase() : '');
-      if (docType !== 'xlsx' && docType !== 'docx') continue;
+      if (docType !== 'xlsx') continue;
       var docOps = op.document_operations;
       if (!Array.isArray(docOps) || docOps.length === 0) continue;
       if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
@@ -195,7 +195,7 @@ function buildSystemPrompt() {
     'You are an expert coding assistant integrated into a code workspace IDE.',
     'You can see the files that are included in the "项目文件" section below.',
     'Each file is labeled with its path, language, and SHA-256 hash.',
-    'For document files (DOCX, DOC, XLSX, XLS, PPTX, PDF, TXT, CSV, MD), you will see their extracted text content.',
+    'For document files (XLSX, XLS, PPTX, DOCX, PDF, TXT, CSV, MD), you will see their extracted text content.',
     'Never claim to have read or inspected files that were not provided.',
     'Do not claim tests, builds, commands, or Git operations were executed.',
     'Do not modify unrelated files.',
@@ -211,7 +211,7 @@ function buildSystemPrompt() {
     '  - expected_sha256: (for "update" type only) the SHA-256 hex hash of the file content you were given',
     '  - summary: a brief description of the change (max 200 chars)',
     '  - new_content: (for "update"/"create") the complete new file content as a string',
-    '  - document_type: (for "document" type) "xlsx" or "docx"',
+    '  - document_type: (for "document" type) "xlsx"',
     '  - document_operations: (for "document" type) array of sub-operations',
     '',
     'For XLSX document operations, use:',
@@ -220,11 +220,7 @@ function buildSystemPrompt() {
     '  { "type": "sheet_add", "sheet": "NewSheet" }',
     '  { "type": "sheet_rename", "sheet": "OldName", "new_name": "NewName" }',
     '',
-    'For DOCX document operations, use:',
-    '  { "type": "text_replace", "find": "old text", "replace": "new text" }',
-    '  { "type": "text_append", "content": "text to append" }',
-    '  { "type": "text_prepend", "content": "text to prepend" }',
-    '',
+
     'IMPORTANT RULES:',
     '- Only return update, create, or document operations.',
     '- Return at most 10 file operations.',
@@ -559,68 +555,6 @@ async function applyXlsxOperations(buffer, operations, fileName) {
   }
 }
 
-// ── DOCX text modification operations ─────────────────────────────────
-async function applyDocxTextOperations(buffer, operations, fileName) {
-  var mammoth = getMammothParser();
-  if (!mammoth) return { ok: false, error: 'DOCX 解析库不可用' };
-
-  try {
-    var mammothResult = await mammoth.extractRawText({ buffer: buffer });
-    var beforeText = mammothResult.value || '';
-    var afterText = beforeText;
-    var appliedOps = [];
-    var changes = [];
-
-    for (var i = 0; i < operations.length; i++) {
-      var op = operations[i];
-      if (!op || typeof op !== 'object') continue;
-
-      try {
-        if (op.type === 'text_replace') {
-          var find = op.find || '';
-          var replace = op.replace || '';
-          if (find) {
-            var count = 0;
-            var escaped = find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            var regex = new RegExp(escaped, 'g');
-            afterText = afterText.replace(regex, function() { count++; return replace; });
-            appliedOps.push({ type: 'text_replace', find: find, replace: replace, count: count });
-            changes.push({ type: 'text_replace', find: find, replace: replace, count: count });
-          }
-        } else if (op.type === 'text_append') {
-          var content = op.content || '';
-          afterText += '\n' + content;
-          appliedOps.push({ type: 'text_append', content: content });
-          changes.push({ type: 'text_append' });
-        } else if (op.type === 'text_prepend') {
-          var preContent = op.content || '';
-          afterText = preContent + '\n' + afterText;
-          appliedOps.push({ type: 'text_prepend', content: preContent });
-          changes.push({ type: 'text_prepend' });
-        }
-      } catch (opErr) {
-        changes.push({ type: op.type, error: opErr.message || '操作失败' });
-      }
-    }
-
-    var newBuffer = Buffer.from(afterText, 'utf-8');
-    var newFile = newBuffer.toString('base64');
-
-    return {
-      ok: true,
-      newFile: newFile,
-      newMimeType: 'text/plain',
-      fileName: fileName ? fileName.replace(/\.(docx|doc)$/i, '_modified.txt') : 'modified.txt',
-      beforeText: beforeText,
-      afterText: afterText,
-      changes: changes,
-      appliedOps: appliedOps
-    };
-  } catch (e) {
-    return { ok: false, error: 'DOCX 修改失败: ' + (e.message || '') };
-  }
-}
-
 // ── Main route registration ────────────────────────────────────────────
 
 module.exports = function registerCodeAgentRoutes(app, deps) {
@@ -798,13 +732,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var userMessage = buildUserMessage(message, workspaceName, activePath, history, files);
 
       // ── Call DeepSeek API ──────────────────────────────────────────
-      var apiKey = process.env.DEEPSEEK_API_KEY || '';
+      var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
       if (!apiKey) {
         console.error('[code-agent] DEEPSEEK_API_KEY not configured');
         return res.status(500).json({ ok: false, error: 'AI 服务未配置' });
       }
 
-      var baseUrl = process.env.DEEPSEEK_BASE_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+      var baseUrl = deps.getDeepSeekApiUrl ? deps.getDeepSeekApiUrl() : 'https://api.deepseek.com/chat/completions';
       // Ensure we have a valid URL ending
       if (!/\/chat\/completions$/.test(baseUrl)) {
         if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
@@ -813,7 +747,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
       }
 
-      var model = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-coder';
+      var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
+      if (!model) {
+        return res.status(500).json({ ok: false, error: 'Code AI 模型未配置' });
+      }
 
       deepSeekController = new AbortController();
       var timer = setTimeout(function() { deepSeekController.abort(); }, DEEPSEEK_TIMEOUT_MS);
