@@ -443,6 +443,29 @@ async function extractPptxText(buffer) {
 }
 
 // ── XLSX modification operations ──────────────────────────────────────
+var CELL_REF_RE = /^[A-Z]{1,3}[0-9]{1,7}$/;
+
+function validateCellRef(cell) {
+  if (!cell || typeof cell !== 'string') return false;
+  return CELL_REF_RE.test(cell.toUpperCase().trim());
+}
+
+function updateSheetRef(workbook, sheetName, xlsx) {
+  try {
+    var sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+    var range = xlsx.utils.decode_range(sheet['!ref'] || 'A1');
+    var keys = Object.keys(sheet).filter(function(k) { return k.charAt(0) !== '!'; });
+    var maxR = range.e.r, maxC = range.e.c;
+    for (var i = 0; i < keys.length; i++) {
+      var addr = xlsx.utils.decode_cell(keys[i]);
+      if (addr.r > maxR) maxR = addr.r;
+      if (addr.c > maxC) maxC = addr.c;
+    }
+    sheet['!ref'] = xlsx.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
+  } catch (e) { /* ignore range update errors */ }
+}
+
 async function applyXlsxOperations(buffer, operations, fileName) {
   var xlsx = getXlsxParser();
   if (!xlsx) return { ok: false, error: 'XLSX 解析库不可用' };
@@ -467,8 +490,14 @@ async function applyXlsxOperations(buffer, operations, fileName) {
       try {
         if (op.type === 'cell_update') {
           var sheetName = op.sheet || workbook.SheetNames[0];
-          var cell = (op.cell || '').toUpperCase();
+          var cell = (op.cell || '').toUpperCase().trim();
           var value = op.value !== undefined ? op.value : '';
+
+          // Validate cell reference
+          if (!validateCellRef(cell)) {
+            changes.push({ type: 'cell_update', sheet: sheetName, cell: cell || '(empty)', error: '无效的单元格地址' });
+            continue;
+          }
 
           if (!workbook.Sheets[sheetName]) {
             if (op.create_sheet) {
@@ -486,18 +515,27 @@ async function applyXlsxOperations(buffer, operations, fileName) {
           }
 
           if (typeof value === 'string' && value.startsWith('=')) {
-            workbook.Sheets[sheetName][cell] = { t: 'n', f: value };
+            // Strip leading '=' for formula field (XLSX stores formula without '=')
+            workbook.Sheets[sheetName][cell] = { t: 'n', f: value.slice(1) };
           } else if (typeof value === 'number') {
             workbook.Sheets[sheetName][cell] = { t: 'n', v: value };
           } else {
             workbook.Sheets[sheetName][cell] = { t: 's', v: String(value) };
           }
 
+          // Update sheet range to include new cell
+          updateSheetRef(workbook, sheetName, xlsx);
+
           appliedOps.push({ type: 'cell_update', sheet: sheetName, cell: cell, oldValue: oldValue, newValue: String(value) });
           changes.push({ type: 'cell_update', sheet: sheetName, cell: cell, old: oldValue, new: String(value) });
         } else if (op.type === 'cell_delete') {
           var sName = op.sheet || workbook.SheetNames[0];
-          var cellRef = (op.cell || '').toUpperCase();
+          var cellRef = (op.cell || '').toUpperCase().trim();
+          // Validate cell reference
+          if (!validateCellRef(cellRef)) {
+            changes.push({ type: 'cell_delete', sheet: sName, cell: cellRef || '(empty)', error: '无效的单元格地址' });
+            continue;
+          }
           if (workbook.Sheets[sName] && workbook.Sheets[sName][cellRef]) {
             var oldVal = String(workbook.Sheets[sName][cellRef].v || '');
             delete workbook.Sheets[sName][cellRef];
