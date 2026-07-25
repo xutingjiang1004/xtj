@@ -28,7 +28,8 @@
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
-    workspaceGeneration: 0
+    workspaceGeneration: 0,
+    restoreGeneration: 0
   };
 
   // ──────────────────────────────────────────────
@@ -291,8 +292,13 @@
     // P0: 先立即显示欢迎页，IndexedDB 恢复在后台进行
     renderWelcome();
 
-    // P0: 后台尝试恢复工作区
+    // P0: 后台尝试恢复工作区，使用 restoreGeneration 防止覆盖用户新选择
+    var restoreGeneration = ++state.restoreGeneration;
+
     tryRestoreWorkspace().then(function (result) {
+      if (restoreGeneration !== state.restoreGeneration) return;
+      if (!state.active) return;
+
       if (result && result.status === 'granted') {
         renderWorkspace();
       }
@@ -461,7 +467,52 @@
     }
   }
 
+  function bindClearStorageBtn(statusText, recentEl) {
+    var clearBtn = document.getElementById('codeClearStorageBtn');
+    if (!clearBtn) return;
+    clearBtn.addEventListener('click', function () {
+      clearBtn.disabled = true;
+      clearBtn.textContent = '正在清除...';
+      if (!window.__xtjCodeFS || !window.__xtjCodeFS.clearWorkspaceStorage) {
+        statusText.textContent = '文件系统 API 不可用';
+        statusText.className = 'welcome-status error';
+        clearBtn.disabled = false;
+        clearBtn.textContent = '清除旧记录';
+        return;
+      }
+
+      window.__xtjCodeFS.clearWorkspaceStorage().then(function (result) {
+        clearBtn.disabled = false;
+        clearBtn.textContent = '清除旧记录';
+
+        if (result && result.ok) {
+          statusText.textContent = '旧记录已清除，请重新选择文件夹';
+          statusText.className = 'welcome-status success';
+          if (recentEl) recentEl.style.display = 'none';
+        } else if (result && result.blocked) {
+          statusText.textContent = result.error || '数据库被占用，请关闭其他 XTJ 页面后重试';
+          statusText.className = 'welcome-status error';
+        } else {
+          statusText.textContent = '清除失败: ' + (result && result.error ? result.error : '未知错误');
+          statusText.className = 'welcome-status error';
+        }
+      }).catch(function (err) {
+        clearBtn.disabled = false;
+        clearBtn.textContent = '清除旧记录';
+        statusText.textContent = '清除失败: ' + (err && err.message ? err.message : String(err));
+        statusText.className = 'welcome-status error';
+      });
+    });
+  }
+
   function resetWorkspaceState() {
+    // P0: 中止所有进行中的 AI 请求
+    if (state._abortController) {
+      try { state._abortController.abort(); } catch (e) { /* ignore */ }
+      state._abortController = null;
+    }
+    state._requestId++;
+    state.sending = false;
     state.workspaceGeneration++;
     state.openTabs = [];
     state.activePath = '';
@@ -483,6 +534,9 @@
   }
 
   function selectAndOpenWorkspace() {
+    // P0: 递增 restoreGeneration，使后台旧恢复立即失效
+    state.restoreGeneration++;
+
     // P0: 检查未保存修改
     if (hasUnsavedChanges()) {
       if (!confirm('当前工作区存在未保存内容。更换文件夹将放弃这些修改，是否继续？')) {
@@ -1932,10 +1986,21 @@
   function parseSimpleMarkdown(text) {
     if (typeof window.marked !== 'undefined') {
       try {
-        return window.marked.parse(text);
-      } catch (e) { /* ignore */ }
+        var rendered = window.marked.parse(text);
+        // P0: 净化 AI 返回的 HTML，防止 XSS 注入
+        if (typeof window.DOMPurify !== 'undefined') {
+          return DOMPurify.sanitize(rendered, {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
+            FORBID_ATTR: ['onerror', 'onload', 'onclick', 'style']
+          });
+        }
+        // 没有 DOMPurify 时，退回先转义再替换方案，不允许直接使用 marked 原始 HTML
+        console.warn('[CODE] DOMPurify not available, falling back to safe markdown renderer');
+        // fall through to safe fallback
+      } catch (e) { /* ignore, fall through to safe fallback */ }
     }
-    // Escape HTML first
+    // Safe fallback: Escape HTML first, then apply simple formatting
     var html = escapeHTML(text);
     // Code blocks
     html = html.replace(/```[a-z]*\n([\s\S]*?)```/gi, '<pre><code>$1</code></pre>');
@@ -2201,7 +2266,7 @@
         files: files
       };
 
-      return sendApiRequest(body, requestId, timeStr);
+      return sendApiRequest(body, requestId, timeStr, wsGen);
     }).catch(function (err) {
       if (requestId !== state._requestId) return;
       removeTypingIndicator();
@@ -2216,16 +2281,21 @@
     });
   }
 
-  function sendApiRequest(body, requestId, timeStr) {
+  function sendApiRequest(body, requestId, timeStr, wsGen) {
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
     var signal = state._abortController ? state._abortController.signal : undefined;
 
-    // P0: AI 请求超时 (90 秒)
+    // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
+    var controller = state._abortController;
     var timeoutId;
     var timeoutPromise = new Promise(function (_, reject) {
       timeoutId = setTimeout(function () {
+        // P1: 超时时真正中止网络请求，不只是 reject
+        if (controller) {
+          try { controller.abort(); } catch (e) { /* ignore */ }
+        }
         reject(new Error('AI 响应超时，请稍后重试'));
       }, 90000);
     });
@@ -2250,6 +2320,7 @@
     Promise.race([apiCall, timeoutPromise]).then(function (resp) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
       if (!resp.ok) {
         return resp.text().then(function(text) {
           var errMsg;
@@ -2276,6 +2347,7 @@
     }).then(function (data) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
 
       // Remove typing indicator
       removeTypingIndicator();
@@ -2300,6 +2372,7 @@
     }).catch(function (err) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
       // AbortError is not a real failure
       if (err && err.name === 'AbortError') return;
 
@@ -2314,6 +2387,7 @@
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
       state.sending = false;
       state._abortController = null;
       var inp = document.getElementById('codeChatInput');

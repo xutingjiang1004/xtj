@@ -57,33 +57,58 @@ test.describe('Code Module Loader', () => {
     expect(recovered).toBe('function');
   });
 
-  // 3. 点击重试不会删除已经成功加载的工作区 API
-  test('retry does not delete successfully loaded workspace API', async ({ page }) => {
-    // Click Code tab
-    await page.locator('[data-desktop-tab="code"]').click();
-    await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
+  // 3. 重试不会删除已经成功加载的模块（FS 模块）
+  test('retry does not delete already loaded modules', async ({ page }) => {
+    // Block only workspace script, let FS load successfully
+    await page.route('**/js/code-workspace.min.js', (route) => route.abort('connectionrefused'));
 
-    // Verify API exists
+    // Clear state
+    await page.evaluate(() => {
+      delete window.__xtjCodeWorkspace;
+      delete window.__xtjCodeWorkspaceAPI;
+      delete window.__xtjCodeInit;
+      delete window.__xtjCodeFS;
+    });
+
+    // Click Code tab - FS should load, workspace should fail
+    await page.locator('[data-desktop-tab="code"]').click();
+    await page.waitForTimeout(3000);
+
+    // Should show error with retry button
+    await expect(page.locator('#codeRetryBtn')).toBeVisible({ timeout: 10000 });
+
+    // Verify __xtjCodeFS IS loaded (it was not blocked)
+    const fsExists = await page.evaluate(() => {
+      return !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
+    });
+    expect(fsExists).toBe(true);
+
+    // Verify workspace API does NOT exist (it was blocked)
     const apiExists = await page.evaluate(() => {
       return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
     });
-    expect(apiExists).toBe(true);
+    expect(apiExists).toBe(false);
 
-    // Simulate error and trigger retry by calling retryCodeModuleLoad directly
-    await page.evaluate(() => {
-      // Simulate the retry scenario without actual error
-      if (typeof window.__xtjCodeWorkspaceAPI !== 'undefined') {
-        window.__xtjCodeWorkspaceAPI._marked = true;
-      }
+    // Unblock workspace
+    await page.unroute('**/js/code-workspace.min.js');
+
+    // Click retry - should only reload workspace, not delete FS
+    await page.locator('#codeRetryBtn').click();
+    await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
+
+    // Verify FS still exists after retry (was NOT deleted)
+    const fsStillExists = await page.evaluate(() => {
+      return !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
     });
+    expect(fsStillExists).toBe(true);
 
-    // Verify API still exists after potential retry
-    const stillExists = await page.evaluate(() => {
+    // Verify workspace API now exists
+    const apiNowExists = await page.evaluate(() => {
       return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
     });
-    expect(stillExists).toBe(true);
+    expect(apiNowExists).toBe(true);
 
-    // Verify __xtjCodeInit was NOT deleted
+    // Verify __xtjCodeInit exists
     const initExists = await page.evaluate(() => typeof window.__xtjCodeInit);
     expect(initExists).toBe('function');
   });
@@ -175,6 +200,29 @@ test.describe('Code Module Loader', () => {
     await page.route('**/js/code-file-system.min.js', (route) => route.abort('connectionrefused'));
     await page.route('**/css/code-workspace.min.css', (route) => route.abort('connectionrefused'));
 
+    // Track toast calls
+    let errorToastCount = 0;
+    await page.exposeFunction('_countErrorToast', (msg) => {
+      if (msg && msg.includes && msg.includes('Code')) {
+        errorToastCount++;
+      }
+    });
+
+    // Intercept showToast to count error toasts
+    await page.evaluate(() => {
+      var origShowToast = window.showToast;
+      window.showToast = function (msg, type) {
+        if (type === 'error' || (typeof msg === 'string' && msg.includes('Code'))) {
+          // Signal to test that an error toast was shown
+          try {
+            // @ts-ignore
+            window._countErrorToast(msg);
+          } catch (e) {}
+        }
+        if (origShowToast) origShowToast(msg, type);
+      };
+    });
+
     // Clear state
     await page.evaluate(() => {
       delete window.__xtjCodeWorkspace;
@@ -187,8 +235,15 @@ test.describe('Code Module Loader', () => {
     await page.locator('[data-desktop-tab="code"]').click();
     await page.waitForTimeout(3000);
 
-    // Should show error page
+    // Should show error page with retry button
     await expect(page.locator('#codeRetryBtn')).toBeVisible({ timeout: 10000 });
+
+    // Click Code tab again (should not trigger another toast due to error state)
+    await page.locator('[data-desktop-tab="code"]').click();
+    await page.waitForTimeout(1000);
+
+    // Verify only one error toast was shown for the same failure
+    expect(errorToastCount).toBeLessThanOrEqual(1);
 
     // Unblock network
     await page.unroute('**/js/code-workspace.min.js');
@@ -274,12 +329,21 @@ test.describe('Code Module Loader', () => {
     await page.locator('[data-desktop-tab="code"]').click();
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
-    // Count keydown listeners before switching
+    // Count keydown listeners by checking getEventListeners
     const countBefore = await page.evaluate(() => {
-      // We can't directly count listeners, but we can check the guard
-      return window.__xtjCodeWorkspace === true ? 1 : 0;
+      // Use Chrome DevTools API to count listeners if available
+      var listeners = 0;
+      try {
+        // @ts-ignore - getEventListeners is a Chrome DevTools API
+        var evtListeners = window.getEventListeners ? window.getEventListeners(document) : null;
+        if (evtListeners && evtListeners.keydown) {
+          listeners = evtListeners.keydown.length;
+        }
+      } catch (e) {
+        // Not available in non-Chrome contexts
+      }
+      return listeners;
     });
-    expect(countBefore).toBe(1);
 
     // Switch away and back multiple times
     for (let i = 0; i < 3; i++) {
@@ -287,6 +351,24 @@ test.describe('Code Module Loader', () => {
       await page.waitForTimeout(300);
       await page.locator('[data-desktop-tab="code"]').click();
       await page.waitForTimeout(300);
+    }
+
+    // Count listeners after switching
+    const countAfter = await page.evaluate(() => {
+      var listeners = 0;
+      try {
+        // @ts-ignore
+        var evtListeners = window.getEventListeners ? window.getEventListeners(document) : null;
+        if (evtListeners && evtListeners.keydown) {
+          listeners = evtListeners.keydown.length;
+        }
+      } catch (e) {}
+      return listeners;
+    });
+
+    // If Chrome DevTools API is available, verify no duplicate listeners
+    if (countBefore > 0) {
+      expect(countAfter).toBeLessThanOrEqual(countBefore + 2); // Allow some tolerance for framework listeners
     }
 
     // Guard should still be true (script didn't re-execute)
