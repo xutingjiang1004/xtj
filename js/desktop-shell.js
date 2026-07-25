@@ -9,7 +9,10 @@
     var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
     var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
     if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
-      window.__xtjCodeWorkspaceAPI.cleanup();
+      // P0 #2: increment generation to invalidate any in-flight Code module loads
+      _codeLoadGeneration++;
+      // P2 #9: check cleanup return value — cancel navigation if user declined
+      if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
     }
 
     var aiPanel = document.getElementById('panelAiChat');
@@ -379,10 +382,17 @@
             if (gen !== _codeLoadGeneration) return;
             console.error('[CODE] workspace load failed:', e);
             if (panelCode) {
-              panelCode.innerHTML = '<div class="code-loading-state"><p>Code 工作区加载失败，请重试</p><button class="code-retry-btn" onclick="this.closest(\'#panelCode\').innerHTML=\'\';var evt=new MouseEvent(\'click\',{bubbles:true});document.querySelector(\'[data-desktop-tab=code]\').dispatchEvent(evt);">重试</button></div>';
+              panelCode.innerHTML = '<div class="code-loading-state"><p>Code 工作区加载失败，请重试</p><button class="code-retry-btn" onclick="delete window.__xtjCodeInit;var d=document;var s=d.querySelector(\'[data-desktop-tab=code]\');if(s){d.querySelector(\'#panelCode\').innerHTML=\'\';var evt=new MouseEvent(\'click\',{bubbles:true});s.dispatchEvent(evt);}">重试</button></div>';
             }
             if (typeof window.showToast === 'function') window.showToast('Code 工作区加载失败', 'error');
           });
+        }
+        // P0 #2 / P1 #3: if __xtjCodeInit exists but workspace is not active, re-initialize
+        if (tab === 'code' && typeof window.__xtjCodeInit === 'function') {
+          var codeState = window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.getState ? window.__xtjCodeWorkspaceAPI.getState() : null;
+          if (!codeState || !codeState.active) {
+            Promise.resolve().then(function() { window.__xtjCodeInit(); });
+          }
         }
         openTab(tab);
         window.requestAnimationFrame(syncActiveTab);
