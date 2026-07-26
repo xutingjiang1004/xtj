@@ -184,6 +184,24 @@ test('attachment extraction recovers after an error and sends the supported docu
   assert.equal(loaded.state.attachments.length, 0);
 });
 
+test('attachment size limit matches the backend 20MB multipart limit', async () => {
+  let called = false;
+  const loaded = loadWorkspace(async () => {
+    called = true;
+    return response(200, { ok: true, text: 'unexpected' });
+  });
+  await assert.rejects(
+    loaded.hooks.processAttachmentFile({
+      name: 'oversized.pdf',
+      size: 20 * 1024 * 1024 + 1,
+      type: 'application/pdf'
+    }),
+    /20MB/
+  );
+  assert.equal(called, false);
+  assert.equal(loaded.state.attachments.length, 0);
+});
+
 test('GitHub selector is single-flight and uses only same-origin authenticated proxy paths', async () => {
   const calls = [];
   const loaded = loadWorkspace(async (url, options) => {
@@ -270,4 +288,59 @@ test('project index uploads oversized workspaces sequentially and finalizes the 
   assert.ok(bodies.every((body) => body.append === true));
   assert.equal(bodies[0].finalize, false);
   assert.equal(bodies[bodies.length - 1].finalize, true);
+});
+
+test('opening the same file is single-flight and stale workspace reads are discarded', async () => {
+  let resolveRead;
+  let reads = 0;
+  const loaded = loadWorkspace(async () => response(200, {}), {
+    readFileByPath() {
+      reads++;
+      return new Promise((resolve) => { resolveRead = resolve; });
+    }
+  });
+  loaded.state.active = true;
+  loaded.state.workspaceGeneration = 3;
+
+  const first = loaded.hooks.openFile('guide.md');
+  const second = loaded.hooks.openFile('guide.md');
+  assert.equal(first, second);
+  assert.equal(reads, 1);
+
+  loaded.state.workspaceGeneration = 4;
+  resolveRead({ type: 'text', content: '# stale guide', sha256: 'old' });
+  assert.equal(await first, null);
+  assert.equal(loaded.state.openTabs.length, 0);
+});
+
+test('tab restore retains unsaved content when the backing file read fails transiently', async () => {
+  const loaded = loadWorkspace(async () => response(200, {}), {
+    readFileByPath() {
+      const error = new Error('permission temporarily unavailable');
+      error.name = 'NotAllowedError';
+      return Promise.reject(error);
+    }
+  });
+  loaded.state.active = true;
+  loaded.state.workspaceGeneration = 8;
+  loaded.state.activePath = 'trip.md';
+  loaded.state.openTabs = [{
+    path: 'trip.md',
+    name: 'trip.md',
+    type: 'text',
+    content: 'saved',
+    _currentContent: 'unsaved itinerary',
+    modified: true
+  }];
+
+  await loaded.hooks.restoreTabs();
+  assert.equal(loaded.state.openTabs.length, 1);
+  assert.equal(loaded.state.openTabs[0]._currentContent, 'unsaved itinerary');
+  assert.equal(loaded.state.openTabs[0].modified, true);
+});
+
+test('beforeunload does not eagerly cleanup a workspace when navigation can be cancelled', () => {
+  const handler = source.match(/window\.addEventListener\('beforeunload',[\s\S]*?\n  \}\);/);
+  assert.ok(handler);
+  assert.doesNotMatch(handler[0], /\bcleanup\s*\(/);
 });

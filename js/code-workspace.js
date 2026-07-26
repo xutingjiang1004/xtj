@@ -44,6 +44,7 @@
     _indexStatusPromise: null,
     _indexBuildKey: '',
     _capabilitiesPromise: null,
+    _openFilePromises: {},
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
@@ -61,7 +62,8 @@
   var MAX_ATTACHMENTS = 8;
   // Keep each index request comfortably below the server JSON/body limit.
   var MAX_INDEX_BATCH_BYTES = 3 * 1024 * 1024;
-  var MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
+  // Must stay aligned with render-api/code-agent.js MAX_DOCUMENT_UPLOAD_BYTES.
+  var MAX_ATTACHMENT_FILE_BYTES = 20 * 1024 * 1024;
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
@@ -328,6 +330,10 @@
       if (!state.active) return;
 
       if (result && result.status === 'granted') {
+        state.directoryHandle = result.handle;
+        state.workspaceName = result.handle.name;
+        state.workspaceMode = 'local';
+        state._isReadOnly = false;
         renderWorkspace();
         if (result.kind === 'file') {
           window.setTimeout(function () { openFile(state.workspaceName); }, 0);
@@ -346,11 +352,6 @@
       return Promise.resolve({ status: 'missing' });
     }
     return window.__xtjCodeFS.restoreWorkspace({ requestPermission: false }).then(function (result) {
-      if (result.status === 'granted') {
-        state.directoryHandle = result.handle;
-        state.workspaceName = result.handle.name;
-        state._isReadOnly = false;
-      }
       return result;
     }).catch(function () {
       return { status: 'error' };
@@ -382,6 +383,7 @@
     state._indexStatusController = null;
     state._githubLoadPromise = null;
     state._indexBuildPromise = null;
+    state._openFilePromises = {};
     state._requestId++;
     revokeAllUrls();
     disposeMonaco();
@@ -461,6 +463,7 @@
       recentEl.appendChild(statusText);
 
       restoreBtn.addEventListener('click', function () {
+        var manualRestoreGeneration = ++state.restoreGeneration;
         restoreBtn.disabled = true;
         restoreBtn.innerHTML = '<span class="folder-icon">⏳</span> 正在恢复...';
         statusText.textContent = '';
@@ -475,6 +478,7 @@
         }
 
         window.__xtjCodeFS.restoreWorkspace({ requestPermission: true }).then(function (result) {
+          if (!state.active || manualRestoreGeneration !== state.restoreGeneration) return;
           restoreBtn.disabled = false;
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
 
@@ -514,6 +518,7 @@
             bindClearStorageBtn(statusText, recentEl);
           }
         }).catch(function (err) {
+          if (!state.active || manualRestoreGeneration !== state.restoreGeneration) return;
           restoreBtn.disabled = false;
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
           statusText.innerHTML = '恢复失败，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
@@ -563,7 +568,7 @@
   }
 
   function selectAndOpenFile() {
-    state.restoreGeneration++;
+    var selectionGeneration = ++state.restoreGeneration;
     if (hasUnsavedChanges() && !confirm('当前工作区存在未保存内容。打开单个文件将放弃这些修改，是否继续？')) {
       return;
     }
@@ -576,6 +581,7 @@
 
     function openSelectedHandle(handle, readOnly) {
       if (!handle) return;
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name || '单个文件';
@@ -707,6 +713,7 @@
     state._indexBuildPromise = null;
     state._indexStatusPromise = null;
     state._indexBuildKey = '';
+    state._openFilePromises = {};
     state._requestId++;
     state.sending = false;
     state.workspaceGeneration++;
@@ -741,7 +748,7 @@
 
   function selectAndOpenWorkspace() {
     // P0: 递增 restoreGeneration，使后台旧恢复立即失效
-    state.restoreGeneration++;
+    var selectionGeneration = ++state.restoreGeneration;
 
     // P0: 检查未保存修改
     if (hasUnsavedChanges()) {
@@ -758,6 +765,7 @@
       input.webkitdirectory = true;
       input.multiple = true;
       input.onchange = function(e) {
+        if (!state.active || selectionGeneration !== state.restoreGeneration) return;
         if (!e.target.files || !e.target.files.length) return;
         var files = Array.from(e.target.files);
         var dirName = files[0].webkitRelativePath.split('/')[0] || 'Workspace';
@@ -897,6 +905,7 @@
         btn.innerHTML = originalText;
       }
       if (!handle) return; // User cancelled
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name;
@@ -1038,7 +1047,9 @@
   // restoreTabs() — restore open tabs after cleanup
   // ──────────────────────────────────────────────
   function restoreTabs() {
-    if (state.openTabs.length === 0) return;
+    if (state.openTabs.length === 0) return Promise.resolve([]);
+    var wsGen = state.workspaceGeneration;
+    var tabsToRestore = state.openTabs.slice();
 
     // Validate activePath
     var found = false;
@@ -1056,19 +1067,26 @@
     if (!fs || !fs.readFileByPath) {
       renderTabs();
       renderEditor();
-      return;
+      return Promise.resolve([]);
     }
 
     // Re-read all open tabs to refresh content and blob URLs
     var readPromises = [];
-    for (var i = 0; i < state.openTabs.length; i++) {
+    for (var i = 0; i < tabsToRestore.length; i++) {
       (function (tab) {
         readPromises.push(
           new Promise(function (resolve) {
             fs.readFileByPath(tab.path).then(function (result) {
+              if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+                if (result && (result.type === 'image' || result.type === 'pdf') && result.content) {
+                  try { URL.revokeObjectURL(result.content); } catch (e) { /* ignore */ }
+                }
+                resolve({ tab: tab, stale: true });
+                return;
+              }
               if (!result) {
                 // File was deleted externally
-                resolve({ tab: tab, deleted: true });
+                resolve({ tab: tab, deleted: !tab.modified, failed: !!tab.modified });
                 return;
               }
               // Update content for text files
@@ -1097,19 +1115,27 @@
                 }
               }
               resolve({ tab: tab, deleted: false });
-            }).catch(function () {
-              // Read failed — file may be deleted
-              resolve({ tab: tab, deleted: true });
+            }).catch(function (error) {
+              var notFound = error && (error.name === 'NotFoundError' || /\bnot found\b/i.test(error.message || ''));
+              resolve({
+                tab: tab,
+                deleted: notFound && !tab.modified,
+                failed: !notFound || !!tab.modified,
+                error: error
+              });
             });
           })
         );
-      })(state.openTabs[i]);
+      })(tabsToRestore[i]);
     }
 
-    Promise.all(readPromises).then(function (results) {
+    return Promise.all(readPromises).then(function (results) {
+      if (wsGen !== state.workspaceGeneration) return results;
       // Remove tabs for deleted files
       var deletedPaths = [];
+      var failedPaths = [];
       for (var k = results.length - 1; k >= 0; k--) {
+        if (results[k].failed) failedPaths.push(results[k].tab.path);
         if (results[k].deleted) {
           var t = results[k].tab;
           deletedPaths.push(t.path);
@@ -1143,6 +1169,10 @@
       if (deletedPaths.length > 0) {
         showToast('部分文件已被外部删除，已关闭对应标签', 'warning');
       }
+      if (failedPaths.length > 0) {
+        showToast('部分文件暂时无法重新读取，已保留标签和未保存内容', 'warning');
+      }
+      return results;
     });
   }
 
@@ -1364,13 +1394,13 @@
   // openFile(path)
   // ──────────────────────────────────────────────
   function openFile(path) {
-    if (!path) return;
+    if (!path) return Promise.resolve(null);
 
     try {
       validatePath(path);
     } catch (e) {
       showToast('无效的文件路径', 'error');
-      return;
+      return Promise.resolve(null);
     }
 
     // Check if already open
@@ -1379,7 +1409,7 @@
         state.activePath = path;
         renderTabs();
         renderEditor();
-        return;
+        return Promise.resolve(state.openTabs[i]);
       }
     }
 
@@ -1387,13 +1417,33 @@
     var fs = window.__xtjCodeFS;
     if (!fs || !fs.readFileByPath) {
       showToast('文件系统不可用', 'error');
-      return;
+      return Promise.resolve(null);
     }
 
-    fs.readFileByPath(path).then(function (result) {
+    var wsGen = state.workspaceGeneration;
+    var openKey = wsGen + ':' + path;
+    if (state._openFilePromises[openKey]) return state._openFilePromises[openKey];
+
+    var promise = fs.readFileByPath(path).then(function (result) {
+      if (wsGen !== state.workspaceGeneration || !state.active) {
+        if (result && (result.type === 'image' || result.type === 'pdf') && result.content) {
+          try { URL.revokeObjectURL(result.content); } catch (e) { /* ignore */ }
+        }
+        return null;
+      }
       if (!result) {
         showToast('无法读取文件: ' + path, 'error');
-        return;
+        return null;
+      }
+
+      // Another asynchronous path may have opened this file while it was read.
+      for (var existingIndex = 0; existingIndex < state.openTabs.length; existingIndex++) {
+        if (state.openTabs[existingIndex].path === path) {
+          state.activePath = path;
+          renderTabs();
+          renderEditor();
+          return state.openTabs[existingIndex];
+        }
       }
 
       var tab = {
@@ -1432,10 +1482,19 @@
           renderProjectStatus();
         }
       }
+      return tab;
     }).catch(function (err) {
-
+      if (wsGen !== state.workspaceGeneration || !state.active) return null;
       showToast('打开文件失败: ' + (err && err.message ? err.message : String(err)), 'error');
+      return null;
+    }).then(function (result) {
+      if (state._openFilePromises[openKey] === promise) {
+        delete state._openFilePromises[openKey];
+      }
+      return result;
     });
+    state._openFilePromises[openKey] = promise;
+    return promise;
   }
 
   // ──────────────────────────────────────────────
@@ -2600,7 +2659,7 @@
       return Promise.reject(new Error('仅支持 DOCX、PDF、XLSX、XLS、PPTX、TXT、CSV、MD、JSON'));
     }
     if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
-      return Promise.reject(new Error('资料文件不能超过 50MB'));
+      return Promise.reject(new Error('资料文件不能超过 20MB'));
     }
     if (state.attachments.length >= MAX_ATTACHMENTS) {
       return Promise.reject(new Error('每个会话最多添加 ' + MAX_ATTACHMENTS + ' 份资料'));
@@ -3749,8 +3808,9 @@
       event.preventDefault();
       event.returnValue = '';
     }
-    // 正常清理
-    cleanup();
+    // Do not clear workspace state here: the browser may cancel navigation after the
+    // native prompt, in which case clearing editors/blob URLs corrupts the
+    // still-visible workspace.
   });
 
   // ──────────────────────────────────────────────
@@ -3801,6 +3861,8 @@
       openGitHubWorkspace: openGitHubWorkspace,
       buildProjectIndex: buildProjectIndex,
       loadProjectIndexStatus: loadProjectIndexStatus,
+      openFile: openFile,
+      restoreTabs: restoreTabs,
       getWorkspaceId: getWorkspaceId,
       getState: function () { return state; }
     };

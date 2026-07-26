@@ -87,6 +87,12 @@ test('builds large indexes through bounded batches and publishes only on finaliz
   assert.equal(duplicate.ok, false);
   assert.equal(duplicate.code, 'DUPLICATE_PATH');
 
+  const rejectedBatch = codeIndex.appendIndexBatch(scope, [
+    file('src/second.js', 'const second = true;'),
+    file('src/first.js', 'const duplicate = true;')
+  ]);
+  assert.equal(rejectedBatch.ok, false);
+
   const final = codeIndex.appendIndexBatch(scope, [file('src/second.js', 'const second = true;')], { finalize: true });
   assert.equal(final.ok, true);
   assert.equal(final.status, 'ready');
