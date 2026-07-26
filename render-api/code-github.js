@@ -89,6 +89,7 @@ function mimeForFile(filePath) {
 
 function upstreamError(status) {
   var errors = {
+    429: { code: 'github_rate_limited', message: 'GitHub 请求过于频繁，请稍后重试' },
     401: { code: 'github_token_invalid', message: 'GitHub 服务凭据无效' },
     403: { code: 'github_forbidden', message: 'GitHub 拒绝访问该资源' },
     404: { code: 'github_not_found', message: 'GitHub 资源不存在' },

@@ -237,13 +237,14 @@ test('rejects oversized files and incomplete recursive trees truthfully', async 
 });
 
 test('maps known GitHub statuses without exposing upstream response bodies', async function() {
-  var statuses = [401, 403, 404, 409, 422];
+  var statuses = [401, 403, 404, 409, 422, 429];
   var expectedCodes = [
     'github_token_invalid',
     'github_forbidden',
     'github_not_found',
     'github_conflict',
-    'github_unprocessable'
+    'github_unprocessable',
+    'github_rate_limited'
   ];
   for (var i = 0; i < statuses.length; i++) {
     var status = statuses[i];
