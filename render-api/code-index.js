@@ -610,6 +610,7 @@ function buildIndex(scope, files, options) {
     indexedFiles: totalFiles,
     skippedFiles: 0,
     failedFiles: 0,
+    truncated: options && options.truncated === true,
     status: 'ready',
     builtAt: new Date().toISOString()
   };
@@ -626,6 +627,7 @@ function buildIndex(scope, files, options) {
       indexedFiles: projectIndex.indexedFiles,
       skippedFiles: projectIndex.skippedFiles,
       failedFiles: projectIndex.failedFiles,
+      truncated: projectIndex.truncated === true,
       status: 'validated'
     };
   }
@@ -660,6 +662,7 @@ function buildIndex(scope, files, options) {
     indexedFiles: projectIndex.indexedFiles,
     skippedFiles: projectIndex.skippedFiles,
     failedFiles: projectIndex.failedFiles,
+    truncated: projectIndex.truncated === true,
     status: projectIndex.status,
     builtAt: projectIndex.builtAt
   };
@@ -696,6 +699,7 @@ function appendIndexBatch(scope, files, options) {
     files: [],
     paths: new Set(),
     totalBytes: 0,
+    truncated: false,
     expiresAt: Date.now() + INDEX_BATCH_TTL_MS
   };
 
@@ -723,6 +727,7 @@ function appendIndexBatch(scope, files, options) {
     pending.files.push(files[j]);
   }
   pending.totalBytes += batchBytes;
+  pending.truncated = pending.truncated || options.truncated === true;
   pending.expiresAt = Date.now() + INDEX_BATCH_TTL_MS;
 
   var finalize = options.finalize === true;
@@ -742,7 +747,7 @@ function appendIndexBatch(scope, files, options) {
     };
   }
 
-  var result = buildIndex(scope, pending.files);
+  var result = buildIndex(scope, pending.files, { truncated: pending.truncated });
   if (result.ok) pendingIndexBatches.delete(key);
   else pendingIndexBatches.set(key, pending);
   return result;
@@ -764,6 +769,7 @@ function getIndexSummary(scope) {
     indexedFiles: projectIndex.indexedFiles,
     skippedFiles: projectIndex.skippedFiles,
     failedFiles: projectIndex.failedFiles,
+    truncated: projectIndex.truncated === true,
     status: projectIndex.status,
     builtAt: projectIndex.builtAt
   };

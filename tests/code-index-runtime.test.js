@@ -54,6 +54,13 @@ test('read ranges report the real total line count separately from the returned 
   assert.equal(result.totalFileLines, 4);
 });
 
+test('index summaries preserve a partial-scan marker for bounded workspaces', () => {
+  const scope = { userId: 'partial-user', workspaceId: 'partial-project', generation: 1 };
+  const built = codeIndex.buildIndex(scope, [file('src/partial.js', 'const partial = true;')], { truncated: true });
+  assert.equal(built.ok, true);
+  assert.equal(codeIndex.getIndexSummary(scope).truncated, true);
+});
+
 test('rejects stale generation and enforces an exact generation when reading', () => {
   const gen2 = { userId: 'alice', workspaceId: 'project', generation: 2 };
   const gen1 = { userId: 'alice', workspaceId: 'project', generation: 1 };

@@ -2217,7 +2217,8 @@
           var payload = {
             workspaceId: workspaceId,
             workspaceGeneration: wsGen,
-            files: batch
+            files: batch,
+            truncated: result.truncated === true
           };
           if (useBatches) {
             payload.append = true;
@@ -2238,6 +2239,7 @@
         builtAt: result.builtAt,
         skippedFiles: result.skippedFiles || 0,
         failedFiles: result.failedFiles || 0,
+        truncated: result.truncated === true,
         indexed: true
       };
       renderProjectStatus();
@@ -2287,6 +2289,12 @@
         '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
         '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
+      if (idx.truncated) {
+        var truncationWarning = document.createElement('div');
+        truncationWarning.className = 'code-index-warning';
+        truncationWarning.textContent = '⚠ 仅索引扫描上限内的文件';
+        indexDiv.appendChild(truncationWarning);
+      }
     } else if (state.projectIndexStatus && state.projectIndexStatus.error) {
       indexDiv.innerHTML =
         '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +

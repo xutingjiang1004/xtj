@@ -222,6 +222,11 @@ test('code-agent builds user message with code context', () => {
   assert.match(codeAgent, /SHA256/);
 });
 
+test('code-agent warns the model when the project index is partial', () => {
+  assert.match(codeAgent, /project index is partial/);
+  assert.match(codeAgent, /Never claim that the entire workspace was inspected/);
+});
+
 test('code-agent prioritizes open documents when the project index is missing', () => {
   assert.match(codeAgent, /do not ask to rebuild the project index/i);
   assert.match(codeAgent, /未建立（当前打开文件和上传资料仍可读取）/);

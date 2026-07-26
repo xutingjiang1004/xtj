@@ -440,7 +440,11 @@ function fileToToolResult(file, startLine, endLine) {
 }
 
 function buildAgentMessages(history, currentMessage, workspaceName, indexSummary, activePath, openFiles, attachments) {
-  var messages = [{ role: 'system', content: buildSystemPrompt() }];
+  var systemPrompt = buildSystemPrompt();
+  if (indexSummary && indexSummary.truncated === true) {
+    systemPrompt += '\nThe project index is partial because the workspace scan limit was reached. Never claim that the entire workspace was inspected; say which indexed scope was used.';
+  }
+  var messages = [{ role: 'system', content: systemPrompt }];
   for (var i = 0; i < history.length; i++) messages.push(history[i]);
   messages.push({
     role: 'user',
@@ -1123,9 +1127,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var result = useBatches
         ? codeIndex.appendIndexBatch(scopeResult.value, body.files, {
           finalize: body.finalize === true,
-          reset: body.reset === true || body.batchIndex === 0
+          reset: body.reset === true || body.batchIndex === 0,
+          truncated: body.truncated === true
         })
-        : codeIndex.buildIndex(scopeResult.value, body.files);
+        : codeIndex.buildIndex(scopeResult.value, body.files, { truncated: body.truncated === true });
 
       if (!result.ok) {
         return res.status(400).json({ ok: false, error: result.error });
@@ -1146,6 +1151,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         indexedFiles: result.indexedFiles,
         skippedFiles: result.skippedFiles || 0,
         failedFiles: result.failedFiles || 0,
+        truncated: result.truncated === true,
         status: result.status,
         totalBytes: result.totalBytes || 0,
         batchComplete: result.batchComplete === true,
