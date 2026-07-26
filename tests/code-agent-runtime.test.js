@@ -12,10 +12,10 @@ function sha(text) {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-function createApp(callDeepSeek, capabilitySnapshot) {
+function createApp(callDeepSeek, capabilitySnapshot, extras) {
   const app = express();
   app.use(express.json({ limit: '12mb' }));
-  registerCodeAgentRoutes(app, {
+  registerCodeAgentRoutes(app, Object.assign({
     supabase: {},
     rateLimit: () => (req, res, next) => next(),
     authenticateUser: (req, res, next) => {
@@ -28,12 +28,87 @@ function createApp(callDeepSeek, capabilitySnapshot) {
     getDeepSeekApiKey: () => 'test-key',
     getDeepSeekCapabilities: capabilitySnapshot ? () => capabilitySnapshot : undefined,
     callDeepSeek
-  });
+  }, extras || {}));
   return app;
 }
 
 test.afterEach(() => {
   codeIndex._resetRegistryForTests();
+});
+
+test('freshness questions select web_search and return structured server results', async () => {
+  let toolResult;
+  const app = createApp(async (_messages, options) => {
+    toolResult = await options.tool_executor({
+      id: 'web-1',
+      function: { name: 'web_search', arguments: JSON.stringify({ query: 'today Guangzhou weather', max_results: 2 }) }
+    });
+    return { content: '根据联网结果回答', model: 'deepseek-v4-flash', usage: {} };
+  }, null, {
+    webSearch: async () => ({ results: [{ title: 'Weather', url: 'https://example.com/weather', snippet: 'Sunny', published_at: '2026-07-26T08:00:00Z' }] })
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 1,
+    message: '今天广州天气怎么样？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(toolResult.ok, true);
+  assert.equal(toolResult.results[0].url, 'https://example.com/weather');
+  assert.equal(toolResult.results[0].published_at, '2026-07-26T08:00:00Z');
+  assert.equal(response.body.tool_trace[0].tool, 'web_search');
+});
+
+test('web tools fail clearly when search is not configured', async () => {
+  let toolResult;
+  const app = createApp(async (_messages, options) => {
+    toolResult = await options.tool_executor({ id: 'web-2', function: { name: 'web_search', arguments: JSON.stringify({ query: 'latest news' }) } });
+    return { content: '未配置', model: 'deepseek-v4-flash', usage: {} };
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 2,
+    message: '最新新闻有什么？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(toolResult.ok, false);
+  assert.equal(toolResult.code, 'WEB_SEARCH_NOT_CONFIGURED');
+  assert.match(toolResult.error, /CODE_AGENT_WEB_SEARCH_URL/);
+});
+
+test('fetch_web_page rejects localhost and private-network targets before fetch', async () => {
+  let calls = 0;
+  const app = createApp(async (_messages, options) => {
+    const result = await options.tool_executor({ id: 'web-3', function: { name: 'fetch_web_page', arguments: JSON.stringify({ url: 'https://localhost/admin' }) } });
+    calls++;
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'WEB_FETCH_FAILED');
+    assert.match(result.error, /主机/);
+    return { content: '已拒绝', model: 'deepseek-v4-flash', usage: {} };
+  }, null, { fetchImpl: async () => { throw new Error('must not fetch'); } });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 3,
+    message: '请查看最新网页内容', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+});
+
+test('fetch_web_page rejects DNS rebinding to private addresses', async () => {
+  let fetched = false;
+  const app = createApp(async (_messages, options) => {
+    const result = await options.tool_executor({ id: 'web-4', function: { name: 'fetch_web_page', arguments: JSON.stringify({ url: 'https://public.example/page' }) } });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /内网地址/);
+    return { content: '已拒绝', model: 'deepseek-v4-flash', usage: {} };
+  }, null, {
+    lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+    fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); }
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 4,
+    message: '请查看最新网页内容', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(fetched, false);
 });
 
 test('capabilities distinguish configured from verified model availability', async () => {
@@ -144,7 +219,7 @@ test('runs a real multi-step code tool flow and reports actual reads plus cache 
   assert.equal(receivedOptions.max_tool_rounds, 8);
   assert.deepEqual(
     receivedOptions.tools.map(tool => tool.function.name),
-    ['list_files', 'search_code', 'read_file', 'read_file_range', 'get_symbols', 'get_active_file', 'get_open_files']
+    ['list_files', 'search_code', 'read_file', 'read_file_range', 'get_symbols', 'get_active_file', 'get_open_files', 'web_search', 'fetch_web_page']
   );
   assert.equal(response.body.context_info.total_tool_calls, 2);
   assert.equal(response.body.context_info.files_read[0].path, 'src/example.js');

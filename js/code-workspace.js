@@ -21,6 +21,7 @@
     lastToolTrace: [],
     capabilities: null,
     attachments: [],
+    lastSentAttachmentPaths: [],
     attachmentProcessing: false,
     attachmentError: '',
     messages: [],
@@ -392,6 +393,8 @@
     revokeAllUrls();
     disposeMonaco();
     state.sending = false;
+    clearAttachments();
+    state.lastSentAttachmentPaths = [];
     state.active = false;
     _dom = {};
     // Don't clear directoryHandle so workspace can be restored
@@ -747,7 +750,8 @@
     state.projectIndexStatus = null;
     state.lastReadContext = null;
     state.lastToolTrace = [];
-    state.attachments = [];
+    clearAttachments();
+    state.lastSentAttachmentPaths = [];
     state.attachmentProcessing = false;
     state.attachmentError = '';
     state.pendingOperations = [];
@@ -2395,7 +2399,8 @@
     }
 
     appendPathSection('固定文件', state.pinnedFiles, '📌', true);
-    appendPathSection('上传资料', state.attachments.map(function (attachment) { return attachment.path; }), '📎', false);
+    appendPathSection('本轮附件', state.lastSentAttachmentPaths.length ? state.lastSentAttachmentPaths : state.attachments.filter(function (attachment) { return !attachment.pinned; }).map(function (attachment) { return attachment.path; }), '📎', false);
+    appendPathSection('固定附件', state.attachments.filter(function (attachment) { return attachment.pinned; }).map(function (attachment) { return attachment.path; }), '📌', false);
 
     // Actions
     var actionsDiv = document.createElement('div');
@@ -2713,6 +2718,38 @@
     }, 0);
   }
 
+  // Attachments are in-memory context. Release any browser-owned resources
+  // when a chip is removed or its workspace is replaced.
+  function releaseAttachment(attachment) {
+    if (!attachment) return;
+    var urlApi = (window && window.URL) || (typeof URL !== 'undefined' ? URL : null);
+    var objectUrl = attachment.objectUrl || attachment.previewUrl || attachment.blobUrl;
+    if (objectUrl && urlApi && typeof urlApi.revokeObjectURL === 'function') {
+      try { urlApi.revokeObjectURL(objectUrl); } catch (e) { /* ignore */ }
+    }
+    attachment.objectUrl = null;
+    attachment.previewUrl = null;
+    attachment.blobUrl = null;
+    attachment.content = '';
+  }
+
+  function clearAttachments() {
+    for (var i = 0; i < state.attachments.length; i++) releaseAttachment(state.attachments[i]);
+    state.attachments = [];
+    state.attachmentProcessing = false;
+    state.attachmentError = '';
+  }
+
+  function consumeTransientAttachments() {
+    var retained = [];
+    for (var i = 0; i < state.attachments.length; i++) {
+      var attachment = state.attachments[i];
+      if (attachment && attachment.pinned === true) retained.push(attachment);
+      else releaseAttachment(attachment);
+    }
+    state.attachments = retained;
+  }
+
   function processAttachmentFile(file) {
     if (!file || !isAllowedAttachment(file.name)) {
       return Promise.reject(new Error('仅支持 DOCX、PDF、XLSX、XLS、PPTX、TXT、CSV、MD、JSON'));
@@ -2724,6 +2761,7 @@
       return Promise.reject(new Error('每个会话最多添加 ' + MAX_ATTACHMENTS + ' 份资料'));
     }
 
+    var attachmentGeneration = state.workspaceGeneration;
     abortController(state._attachmentController);
     state._attachmentController = new AbortController();
     var controller = state._attachmentController;
@@ -2743,6 +2781,9 @@
     }).then(function (response) {
       return responseJson(response, '资料解析失败');
     }).then(function (data) {
+      if (attachmentGeneration !== state.workspaceGeneration) {
+        throw createNamedAbortError();
+      }
       var content = String(data.text || '');
       if (!content.trim()) throw new Error('资料中没有可读取的文字');
       if (currentAttachmentChars() + content.length > MAX_ATTACHMENT_TOTAL_CHARS) {
@@ -2757,17 +2798,24 @@
           content: content,
           sha256: sha256,
           source: 'attachment',
+          pinned: false,
           truncated: !!data.truncated,
           metadata: data.metadata || {}
         });
+        if (attachmentGeneration !== state.workspaceGeneration) {
+          releaseAttachment(state.attachments[state.attachments.length - 1]);
+          state.attachments.pop();
+          throw createNamedAbortError();
+        }
         state.attachmentProcessing = false;
-        state._attachmentController = null;
+        if (state._attachmentController === controller) state._attachmentController = null;
         renderChatPanel();
         return state.attachments[state.attachments.length - 1];
       });
     }).catch(function (error) {
+      if (attachmentGeneration !== state.workspaceGeneration) throw error;
       state.attachmentProcessing = false;
-      state._attachmentController = null;
+      if (state._attachmentController === controller) state._attachmentController = null;
       if (error && error.name !== 'AbortError') {
         state.attachmentError = error.message || '资料解析失败';
         renderChatPanel();
@@ -2778,8 +2826,15 @@
 
   function removeAttachment(index) {
     if (index < 0 || index >= state.attachments.length) return;
+    releaseAttachment(state.attachments[index]);
     state.attachments.splice(index, 1);
     state.attachmentError = '';
+    renderChatPanel();
+  }
+
+  function toggleAttachmentPinned(index) {
+    if (index < 0 || index >= state.attachments.length) return;
+    state.attachments[index].pinned = state.attachments[index].pinned !== true;
     renderChatPanel();
   }
 
@@ -2828,14 +2883,20 @@
       var attachmentHtml = '';
       for (var ai = 0; ai < state.attachments.length; ai++) {
         var attachment = state.attachments[ai];
-        attachmentHtml += '<span class="code-attachment-chip" title="' + escapeHTML(attachment.path) + '">' +
-          '📎 ' + escapeHTML(attachment.name) +
+        attachmentHtml += '<span class="code-attachment-chip ' + (attachment.pinned ? 'is-pinned' : '') + '" title="' + escapeHTML(attachment.path) + '">' +
+          (attachment.pinned ? '📌 固定资料 ' : '📎 本次发送 ') + escapeHTML(attachment.name) +
           (attachment.truncated ? '（已截断）' : '') +
+          '<button type="button" class="code-attachment-pin-toggle" data-pin-attachment="' + ai + '" aria-label="' + (attachment.pinned ? '取消固定 ' : '固定 ') + escapeHTML(attachment.name) + '">' + (attachment.pinned ? '取消固定' : '固定') + '</button>' +
           '<button type="button" data-remove-attachment="' + ai + '" aria-label="移除 ' + escapeHTML(attachment.name) + '">×</button></span>';
       }
       if (state.attachmentProcessing) attachmentHtml += '<span class="code-attachment-status">正在解析资料...</span>';
       if (state.attachmentError) attachmentHtml += '<span class="code-attachment-error">' + escapeHTML(state.attachmentError) + '</span>';
       attachmentsContainer.innerHTML = attachmentHtml;
+      Array.prototype.forEach.call(attachmentsContainer.querySelectorAll('[data-pin-attachment]'), function (button) {
+        button.addEventListener('click', function () {
+          toggleAttachmentPinned(parseInt(button.getAttribute('data-pin-attachment'), 10));
+        });
+      });
       Array.prototype.forEach.call(attachmentsContainer.querySelectorAll('[data-remove-attachment]'), function (button) {
         button.addEventListener('click', function () {
           removeAttachment(parseInt(button.getAttribute('data-remove-attachment'), 10));
@@ -2914,18 +2975,57 @@
         // fall through to safe fallback
       } catch (e) { /* ignore, fall through to safe fallback */ }
     }
-    // Safe fallback: Escape HTML first, then apply simple formatting
-    var html = escapeHTML(text);
-    // Code blocks
-    html = html.replace(/```[a-z]*\n([\s\S]*?)```/gi, '<pre><code>$1</code></pre>');
-    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // Bold
-    html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
-    return html;
+    // Safe fallback: escape *before* building our small, fixed HTML subset.
+    // This still covers useful answers when optional markdown libraries were
+    // not loaded: headings, lists, fenced/inline code and GFM-style tables.
+    function inline(value) {
+      return escapeHTML(value)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    }
+    function tableCells(row) {
+      return row.trim().replace(/^\||\|$/g, '').split('|').map(function(cell) { return inline(cell.trim()); });
+    }
+    var lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+    var output = [];
+    var inCode = false;
+    var codeLines = [];
+    var inList = false;
+    function closeList() { if (inList) { output.push('</ul>'); inList = false; } }
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      if (/^```/.test(line)) {
+        closeList();
+        if (inCode) { output.push('<pre><code>' + escapeHTML(codeLines.join('\n')) + '</code></pre>'); codeLines = []; }
+        inCode = !inCode;
+        continue;
+      }
+      if (inCode) { codeLines.push(line); continue; }
+      var tableDivider = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[li + 1] || '');
+      if (line.indexOf('|') >= 0 && tableDivider) {
+        closeList();
+        var headers = tableCells(line);
+        output.push('<table><thead><tr>' + headers.map(function(cell) { return '<th>' + cell + '</th>'; }).join('') + '</tr></thead><tbody>');
+        li += 2;
+        while (li < lines.length && lines[li].indexOf('|') >= 0 && lines[li].trim()) {
+          output.push('<tr>' + tableCells(lines[li]).map(function(cell) { return '<td>' + cell + '</td>'; }).join('') + '</tr>');
+          li += 1;
+        }
+        output.push('</tbody></table>');
+        li -= 1;
+        continue;
+      }
+      var heading = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (heading) { closeList(); output.push('<h' + heading[1].length + '>' + inline(heading[2]) + '</h' + heading[1].length + '>'); continue; }
+      var list = /^\s*[-*+]\s+(.+)$/.exec(line);
+      if (list) { if (!inList) { output.push('<ul>'); inList = true; } output.push('<li>' + inline(list[1]) + '</li>'); continue; }
+      closeList();
+      if (!line.trim()) { continue; }
+      output.push('<p>' + inline(line) + '</p>');
+    }
+    if (inCode) output.push('<pre><code>' + escapeHTML(codeLines.join('\n')) + '</code></pre>');
+    closeList();
+    return output.join('');
   }
 
   function appendChatMessage(msg, container) {
@@ -2936,8 +3036,14 @@
     var avatarText = msg.role === 'user' ? '你' : 'AI';
     var avatar = '<div class="msg-avatar">' + escapeHTML(avatarText) + '</div>';
 
+    // Defense in depth: the server owns protocol parsing, but never render a
+    // provider tool frame if an old proxy/cache somehow returns one.
+    var visibleContent = String(msg.content || '');
+    if (msg.role === 'assistant' && /<[|\uff5c]DSML[|\uff5c]|\b(?:reasoning_content|tool_calls)\b/i.test(visibleContent)) {
+      visibleContent = '工具调用未生成可显示答案，请重试。';
+    }
     var body = '<div class="msg-body">';
-    body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(msg.content) + '</div>';
+    body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(visibleContent) + '</div>';
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
@@ -3262,6 +3368,8 @@
       var now2 = new Date();
       var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
 
+      state.lastSentAttachmentPaths = state.attachments.filter(function (attachment) { return !attachment.pinned; }).map(function (attachment) { return attachment.path; });
+      consumeTransientAttachments();
       state.lastFailedMessage = '';
       state.messages.push({ role: 'assistant', content: replyContent, time: timeStr2 });
 
@@ -4089,9 +4197,13 @@
   if (window.__XTJ_TEST_MODE__) {
     window.__xtjCodeWorkspaceTestHooks = {
       buildChatRequestBody: buildChatRequestBody,
+      parseSimpleMarkdown: parseSimpleMarkdown,
       ensureOpenFileContexts: ensureOpenFileContexts,
       processAttachmentFile: processAttachmentFile,
       removeAttachment: removeAttachment,
+      toggleAttachmentPinned: toggleAttachmentPinned,
+      consumeTransientAttachments: consumeTransientAttachments,
+      clearAttachments: clearAttachments,
       loadGitHubRepositoryInfo: loadGitHubRepositoryInfo,
       openGitHubWorkspace: openGitHubWorkspace,
       buildProjectIndex: buildProjectIndex,

@@ -123,6 +123,16 @@ test('chat request carries scoped workspace, prioritized open files and extracte
   );
 });
 
+test('safe markdown fallback renders headings, lists, code and tables without raw HTML', () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  const html = loaded.hooks.parseSimpleMarkdown('# 行程\n- 机场\n\n| 城市 | 天数 |\n| --- | --- |\n| 深圳 | 2 |\n\n```js\nconst ok = true;\n```\n<script>alert(1)</script>');
+  assert.match(html, /<h1>行程<\/h1>/);
+  assert.match(html, /<ul><li>机场<\/li><\/ul>/);
+  assert.match(html, /<table>/);
+  assert.match(html, /<pre><code>const ok = true;<\/code><\/pre>/);
+  assert.doesNotMatch(html, /<script>/i);
+});
+
 test('AI context waits for an in-flight document extraction before sending', async () => {
   const loaded = loadWorkspace(async () => response(200, {}));
   let resolveExtraction;
@@ -408,6 +418,55 @@ test('undoOperations ignores duplicate clicks while the first undo is running', 
   resolveWrite({ sha256: 'old-sha' });
   assert.equal(await first, true);
   assert.equal(Object.keys(loaded.state.snapshots).length, 0);
+});
+
+test('attachment lifecycle consumes transient context but retains pinned context', () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  const revoked = [];
+  loaded.state.attachments = [
+    { name: 'one.md', content: 'one', pinned: false, objectUrl: 'blob:one' },
+    { name: 'plan.docx', content: 'plan', pinned: true, objectUrl: 'blob:plan' }
+  ];
+  const originalRevoke = URL.revokeObjectURL;
+  URL.revokeObjectURL = (url) => revoked.push(url);
+  try {
+    loaded.hooks.consumeTransientAttachments();
+  } finally {
+    URL.revokeObjectURL = originalRevoke;
+  }
+  assert.deepEqual(Array.from(loaded.state.attachments, (item) => item.name), ['plan.docx']);
+  assert.deepEqual(revoked, ['blob:one']);
+  assert.equal(loaded.state.attachments[0].content, 'plan');
+});
+
+test('removing or clearing attachments releases object URLs and content', () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  const revoked = [];
+  const originalRevoke = URL.revokeObjectURL;
+  URL.revokeObjectURL = (url) => revoked.push(url);
+  loaded.state.attachments = [{ name: 'guide.pdf', content: 'guide', objectUrl: 'blob:guide' }];
+  try {
+    loaded.hooks.removeAttachment(0);
+    loaded.state.attachments = [{ name: 'trip.md', content: 'trip', objectUrl: 'blob:trip' }];
+    loaded.hooks.clearAttachments();
+  } finally {
+    URL.revokeObjectURL = originalRevoke;
+  }
+  assert.deepEqual(revoked, ['blob:guide', 'blob:trip']);
+  assert.equal(loaded.state.attachments.length, 0);
+});
+
+test('late attachment extraction cannot leak into a replaced workspace', async () => {
+  let resolveExtract;
+  const loaded = loadWorkspace(async () => new Promise((resolve) => { resolveExtract = resolve; }), {
+    getSHA256() { return Promise.resolve('sha'); }
+  });
+  loaded.state.workspaceGeneration = 4;
+  const pending = loaded.hooks.processAttachmentFile({ name: 'old.md', size: 10, type: 'text/markdown' });
+  loaded.state.workspaceGeneration = 5;
+  resolveExtract(response(200, { text: 'old workspace content', fileName: 'old.md', mimeType: 'text/plain' }));
+  await assert.rejects(pending, (error) => error && error.name === 'AbortError');
+  assert.equal(loaded.state.attachments.length, 0);
 });
 
 test('undo refuses to overwrite a file changed after the AI apply', async () => {
