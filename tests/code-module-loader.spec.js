@@ -25,7 +25,7 @@ test.describe('Code Module Loader', () => {
 
     // Should show welcome page, not loading or error
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.code-welcome .welcome-title')).toContainText('打开文件夹开始');
+    await expect(page.locator('.code-welcome .welcome-title')).toContainText('打开工作区开始');
   });
 
   // 2. __xtjCodeWorkspaceAPI 存在但 __xtjCodeInit 丢失时，可以从 API.init 恢复
