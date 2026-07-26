@@ -8,6 +8,7 @@ const fs = require('fs');
 const registerCodeAgentRoutes = require('../render-api/code-agent.js');
 const xlsx = require('xlsx');
 const JSZip = require('jszip');
+const pdfParseModule = require('pdf-parse');
 
 // Mock deps
 const deps = {
@@ -23,6 +24,18 @@ const deps = {
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 registerCodeAgentRoutes(app, deps);
+
+test('installed pdf-parse API shape is supported by code-agent', () => {
+  assert.ok(
+    typeof pdfParseModule === 'function' || typeof pdfParseModule.PDFParse === 'function',
+    'pdf-parse must expose either the v1 callable API or the v2 PDFParse class'
+  );
+  const source = fs.readFileSync(path.join(__dirname, '../render-api/code-agent.js'), 'utf8');
+  if (typeof pdfParseModule.PDFParse === 'function') {
+    assert.match(source, /new library\.PDFParse/);
+    assert.match(source, /await parser\.destroy\(\)/);
+  }
+});
 
 test('Code agent document API test suite', async (t) => {
   await t.test('Extract Text via multipart', async () => {
@@ -80,6 +93,23 @@ test('Code agent document API test suite', async (t) => {
     assert.match(res.body.error, /另存为 DOCX/);
   });
 
+  await t.test('Reject renamed or corrupt binary documents instead of returning fake extracted text', async () => {
+    const cases = [
+      { name: 'fake.pdf', buffer: Buffer.from('not a pdf') },
+      { name: 'fake.docx', buffer: Buffer.from('not a zip') },
+      { name: 'fake.xlsx', buffer: Buffer.from('not a workbook') },
+      { name: 'fake.pptx', buffer: Buffer.from('not a presentation') },
+      { name: 'fake.txt', buffer: Buffer.from([0x41, 0x00, 0x42]) }
+    ];
+    for (const item of cases) {
+      const res = await request(app)
+        .post('/api/code/document/extract')
+        .attach('file', item.buffer, item.name);
+      assert.equal(res.status, 422, item.name);
+      assert.equal(res.body.ok, false, item.name);
+    }
+  });
+
   await t.test('Extract PPTX slide text with source labels', async () => {
     const zip = new JSZip();
     zip.file('ppt/slides/slide1.xml',
@@ -94,6 +124,17 @@ test('Code agent document API test suite', async (t) => {
     assert.match(res.body.text, /幻灯片: 第1页/);
     assert.match(res.body.text, /沙面步行路线/);
     assert.equal(res.body.metadata.slideCount, 1);
+  });
+
+  await t.test('Reject a valid ZIP with no PPTX slides', async () => {
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types/>');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const res = await request(app)
+      .post('/api/code/document/extract')
+      .attach('file', buffer, 'empty.pptx');
+    assert.equal(res.status, 422);
+    assert.equal(res.body.ok, false);
   });
 
   await t.test('Apply DOCX operation should be rejected', async () => {

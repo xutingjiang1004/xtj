@@ -219,6 +219,23 @@ function getDeepSeekProbeSnapshot() {
     preferred_model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
   };
 }
+function getDeepSeekCapabilitySnapshot() {
+  var probe = getDeepSeekProbeSnapshot();
+  var model = probe.preferred_model;
+  var probeReady = probe.status === 'ready';
+  var modelAvailable = probeReady ? probe.models.indexOf(model) !== -1 : null;
+  return {
+    configured: !!DEEPSEEK_API_KEY,
+    model: model,
+    probeStatus: probe.status,
+    probeError: probe.error,
+    modelAvailable: modelAvailable,
+    verifiedAvailable: !!DEEPSEEK_API_KEY && modelAvailable === true,
+    providerContextTokens: 1000000,
+    providerMaxOutputTokens: 384000,
+    apiFormat: 'openai-chat-completions'
+  };
+}
 let pdfParser = null, mammothParser = null, xlsxParser = null;
 let pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
 function loadFileParser(name) {
@@ -4363,13 +4380,15 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
-  // ★ U3 修复: signal listener 内存泄漏 — 用 { once: true } 自动清理
-  if (options && options.signal) {
-    var _onExternalAbort = function() { try { controller.abort(); } catch (e) {} };
-    if (options.signal.aborted) {
+  var externalSignal = options && options.signal ? options.signal : null;
+  var externalAbortHandler = null;
+  // ★ U3 修复: signal listener 在完成时也要主动移除，避免长期外部 signal 持有闭包
+  if (externalSignal) {
+    externalAbortHandler = function() { try { controller.abort(); } catch (e) {} };
+    if (externalSignal.aborted) {
       try { controller.abort(); } catch (e) {}
     } else {
-      options.signal.addEventListener('abort', _onExternalAbort, { once: true });
+      externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
     }
   }
 
@@ -4390,6 +4409,227 @@ async function callDeepSeek(messages, options) {
     var finalModel = model;
     var workingMessages = messages.slice();
     var lastUsage = null;
+    // DeepSeek may occasionally return a partial/malformed tool call (most
+    // commonly an omitted id or an incomplete JSON argument string).  Never
+    // echo that malformed shape back into the next chat-completions request:
+    // the provider requires a stable id and a JSON string for every function
+    // tool call, otherwise the following round fails with HTTP 400.
+    function normalizeToolCalls(rawCalls, roundNumber) {
+      if (!Array.isArray(rawCalls)) return [];
+      var normalized = [];
+      for (var ni = 0; ni < rawCalls.length; ni++) {
+        var rawCall = rawCalls[ni];
+        if (!rawCall || typeof rawCall !== 'object') continue;
+        var rawFunction = rawCall.function && typeof rawCall.function === 'object' ? rawCall.function : {};
+        var name = typeof rawFunction.name === 'string' ? rawFunction.name.trim() : '';
+        if (!name) continue;
+        var callId = typeof rawCall.id === 'string' ? rawCall.id.trim() : String(rawCall.id || '').trim();
+        if (!callId) callId = 'call_' + (roundNumber + 1) + '_' + (normalized.length + 1);
+        var rawArguments = rawFunction.arguments;
+        if (rawArguments && typeof rawArguments === 'object') {
+          try { rawArguments = JSON.stringify(rawArguments); } catch (_) { rawArguments = '{}'; }
+        }
+        if (typeof rawArguments !== 'string' || !rawArguments.trim()) rawArguments = '{}';
+        else {
+          // Tool results are generated locally, so malformed arguments must
+          // become a valid object before being echoed to the provider.
+          try {
+            var parsedArguments = JSON.parse(rawArguments);
+            if (!parsedArguments || typeof parsedArguments !== 'object' || Array.isArray(parsedArguments)) rawArguments = '{}';
+          } catch (_) { rawArguments = '{}'; }
+        }
+        normalized.push({
+          id: callId,
+          type: 'function',
+          function: { name: name, arguments: rawArguments }
+        });
+      }
+      return normalized;
+    }
+    // DeepSeek V4 normally returns OpenAI-compatible message.tool_calls.  A
+    // provider/proxy compatibility path has also been observed returning the
+    // DSML wire representation in message.content instead.  DSML is an
+    // internal protocol, never user-visible text: parse it into the same
+    // normalized tool-call shape or fail the turn safely.  This deliberately
+    // does not "strip and continue" -- incomplete or invalid DSML is never
+    // executed and cannot be mistaken for a final answer.
+    function parseDsmlToolCalls(rawText, roundNumber) {
+      var raw = String(rawText || '');
+      var marker = /<[|\uff5c]DSML[|\uff5c]([A-Za-z_][A-Za-z0-9_\-]*)([^>]*)>/g;
+      var records = [];
+      var match;
+      while ((match = marker.exec(raw)) !== null) {
+        records.push({ name: String(match[1] || '').toLowerCase(), attrs: String(match[2] || ''), start: match.index, end: marker.lastIndex });
+      }
+      var startIndex = -1;
+      for (var di = 0; di < records.length; di++) {
+        if (records[di].name === 'tool_calls' || records[di].name === 'function_calls') { startIndex = di; break; }
+      }
+      if (startIndex < 0) {
+        // A partial marker is still protocol, not a natural language answer.
+        return { detected: /<[|\uff5c]DSML[|\uff5c]/i.test(raw), calls: [], error: /<[|\uff5c]DSML[|\uff5c]/i.test(raw) ? 'incomplete DSML header' : '', visibleContent: raw };
+      }
+      function decodeValue(value) {
+        var text = String(value === undefined || value === null ? '' : value).trim();
+        text = text.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        if (/^(?:true|false|null)$/i.test(text)) return text.toLowerCase() === 'true' ? true : (text.toLowerCase() === 'false' ? false : null);
+        if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) return Number(text);
+        return text;
+      }
+      function parseAttributes(source) {
+        var attrs = {};
+        var attr = /([A-Za-z_][A-Za-z0-9_\-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+        var item;
+        while ((item = attr.exec(source)) !== null) attrs[item[1]] = decodeValue(item[2] !== undefined ? item[2] : item[3]);
+        return attrs;
+      }
+      function invalidDsmlCall(name, args) {
+        var definitions = options && Array.isArray(options.tools) ? options.tools : [];
+        var definition = null;
+        for (var ti = 0; ti < definitions.length; ti++) {
+          if (definitions[ti] && definitions[ti].function && definitions[ti].function.name === name) { definition = definitions[ti].function; break; }
+        }
+        if (!definition) return 'unsupported tool';
+        var schema = definition.parameters && typeof definition.parameters === 'object' ? definition.parameters : {};
+        var required = Array.isArray(schema.required) ? schema.required : [];
+        for (var ri = 0; ri < required.length; ri++) {
+          if (!Object.prototype.hasOwnProperty.call(args, required[ri]) || args[required[ri]] === '' || args[required[ri]] === null) return 'missing required parameter: ' + required[ri];
+        }
+        var props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+        var keys = Object.keys(args);
+        for (var ki = 0; ki < keys.length; ki++) {
+          var key = keys[ki];
+          if (!Object.prototype.hasOwnProperty.call(props, key)) return 'unexpected parameter: ' + key;
+          var value = args[key];
+          var expected = props[key] && props[key].type;
+          if (expected === 'string' && typeof value !== 'string') return 'invalid parameter type: ' + key;
+          if ((expected === 'integer' || expected === 'number') && (!Number.isFinite(value) || (expected === 'integer' && !Number.isInteger(value)))) return 'invalid parameter type: ' + key;
+          if (expected === 'array' && !Array.isArray(value)) return 'invalid parameter type: ' + key;
+        }
+        // All Code workspace paths must stay relative and cannot traverse the
+        // project. The executor validates again; this early check guarantees a
+        // malformed DSML call never reaches any tool implementation.
+        if (Object.prototype.hasOwnProperty.call(args, 'path')) {
+          var path = args.path;
+          if (typeof path !== 'string' || !path.trim() || path.indexOf('..') >= 0 || path.indexOf('\\') >= 0 || path.charAt(0) === '/' || /^[A-Za-z]:/.test(path)) return 'invalid path';
+        }
+        if (Object.prototype.hasOwnProperty.call(args, 'start_line') && args.start_line < 1) return 'invalid start_line';
+        if (Object.prototype.hasOwnProperty.call(args, 'end_line') && args.end_line < 1) return 'invalid end_line';
+        if (Object.prototype.hasOwnProperty.call(args, 'start_line') && Object.prototype.hasOwnProperty.call(args, 'end_line') && args.end_line < args.start_line) return 'invalid line range';
+        return '';
+      }
+      var calls = [];
+      var current = null;
+      var complete = false;
+      var protocolEnd = raw.length;
+      for (var mi = startIndex + 1; mi < records.length; mi++) {
+        var record = records[mi];
+        if (record.name === 'end' || record.name === 'end_tool_calls' || record.name === 'tool_calls_end' || record.name === 'end_function_calls') {
+          complete = true;
+          protocolEnd = record.end;
+          break;
+        }
+        if (record.name === 'invoke') {
+          if (current) calls.push(current);
+          var invokeAttrs = parseAttributes(record.attrs);
+          current = { name: typeof invokeAttrs.name === 'string' ? invokeAttrs.name.trim() : '', args: {}, malformed: !invokeAttrs.name };
+          continue;
+        }
+        if (record.name === 'parameter') {
+          if (!current) return { detected: true, calls: [], error: 'parameter without invoke', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+          var parameterAttrs = parseAttributes(record.attrs);
+          var nextStart = mi + 1 < records.length ? records[mi + 1].start : raw.length;
+          var body = raw.slice(record.end, nextStart).trim();
+          var paramName = typeof parameterAttrs.name === 'string' ? parameterAttrs.name : (typeof parameterAttrs.key === 'string' ? parameterAttrs.key : '');
+          var valueKey = Object.prototype.hasOwnProperty.call(parameterAttrs, 'value') ? 'value' :
+            (Object.prototype.hasOwnProperty.call(parameterAttrs, 'string') ? 'string' :
+              (Object.prototype.hasOwnProperty.call(parameterAttrs, 'number') ? 'number' :
+                (Object.prototype.hasOwnProperty.call(parameterAttrs, 'integer') ? 'integer' :
+                  (Object.prototype.hasOwnProperty.call(parameterAttrs, 'boolean') ? 'boolean' :
+                    (Object.prototype.hasOwnProperty.call(parameterAttrs, 'json') ? 'json' : '')))));
+          var hasValue = !!valueKey;
+          var value = hasValue ? parameterAttrs[valueKey] : (body ? decodeValue(body) : undefined);
+          if (valueKey === 'json' && typeof value === 'string') {
+            try { value = JSON.parse(value); } catch (_) { current.malformed = true; }
+          }
+          if (paramName) {
+            if (value === undefined) current.malformed = true;
+            else current.args[paramName] = value;
+          } else {
+            var copied = false;
+            Object.keys(parameterAttrs).forEach(function(key) {
+              if (key !== 'name' && key !== 'key' && key !== 'value' && key !== 'string' && key !== 'number' && key !== 'integer' && key !== 'boolean' && key !== 'json' && key !== 'type' && key !== 'encoding') { current.args[key] = parameterAttrs[key]; copied = true; }
+            });
+            if (!copied) current.malformed = true;
+          }
+          continue;
+        }
+        // Unknown DSML frames are not safe to reinterpret as prose.
+        return { detected: true, calls: [], error: 'unknown DSML frame: ' + record.name, visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+      }
+      if (current) calls.push(current);
+      // Some compatible gateways omit an explicit end frame. Accept only a
+      // fully formed final invoke; a dangling partial marker remains an error.
+      if (!complete && /<[|\uff5c]DSML[|\uff5c][^>]*$/.test(raw)) return { detected: true, calls: [], error: 'incomplete DSML frame', visibleContent: raw.slice(0, records[startIndex].start).trim() };
+      if (!calls.length) return { detected: true, calls: [], error: 'missing DSML invoke', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+      var normalizedDsml = [];
+      for (var ci = 0; ci < calls.length; ci++) {
+        var call = calls[ci];
+        var reason = call.malformed ? 'malformed parameter' : invalidDsmlCall(call.name, call.args);
+        if (reason) return { detected: true, calls: [], error: reason, visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+        normalizedDsml.push({ id: 'dsml_' + (roundNumber + 1) + '_' + (ci + 1), type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } });
+      }
+      return { detected: true, calls: normalizedDsml, error: '', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+    }
+    function finalReplyContainsInternalProtocol(text) {
+      var candidate = String(text || '');
+      if (/<[|\uff5c]DSML[|\uff5c]/i.test(candidate)) return true;
+      // Raw JSON tool payloads are not prose. Do not expose them even if an
+      // upstream gateway mislabels the response as a completed assistant turn.
+      return /^\s*[\[{][\s\S]{0,20000}(?:"tool_calls"|"reasoning_content"|"invoke"|"parameter")[\s\S]*[\]}]\s*$/i.test(candidate);
+    }
+    // Keep caller supplied budgets within the provider's documented output
+    // limit and avoid serializing NaN/Infinity as JSON null.
+    var requestedMaxTokens = null;
+    if (options && options.max_tokens !== undefined && options.max_tokens !== null) {
+      var maxTokenNumber = Number(options.max_tokens);
+      if (Number.isFinite(maxTokenNumber) && maxTokenNumber > 0) {
+        requestedMaxTokens = Math.min(Math.floor(maxTokenNumber), 384000);
+      }
+    }
+    async function executeToolWithAbort(toolCall) {
+      // Both the caller's cancellation and this request's own timeout must
+      // interrupt a tool round.  The HTTP fetch signal alone is insufficient:
+      // a custom tool executor can keep Promise.all pending after fetch aborts.
+      var abortSignals = [controller.signal];
+      if (externalSignal && externalSignal !== controller.signal) abortSignals.push(externalSignal);
+      for (var si = 0; si < abortSignals.length; si++) {
+        if (abortSignals[si].aborted) {
+          var alreadyAborted = new Error('AI request cancelled');
+          alreadyAborted.name = 'AbortError';
+          throw alreadyAborted;
+        }
+      }
+      var abortListeners = [];
+      var abortPromise = new Promise(function(_, reject) {
+        abortSignals.forEach(function(signal) {
+          var abortListener = function() {
+            var cancelled = new Error('AI request cancelled');
+            cancelled.name = 'AbortError';
+            reject(cancelled);
+          };
+          abortListeners.push({ signal: signal, listener: abortListener });
+          signal.addEventListener('abort', abortListener, { once: true });
+        });
+      });
+      try {
+        return await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+      } finally {
+        abortListeners.forEach(function(item) {
+          try { item.signal.removeEventListener('abort', item.listener); } catch (_) {}
+        });
+      }
+    }
 
     for (var round = 0; round < maxToolRounds; round++) {
       if (round > 0) {
@@ -4407,19 +4647,30 @@ async function callDeepSeek(messages, options) {
         messages: workingMessages,
         stream: useStream
       };
-      if (useThinking) {
-        apiBody.thinking = { type: 'enabled' };
-        apiBody.reasoning_effort = thinkingLevel;
+      if (useStream) {
+        // DeepSeek only emits the final usage/cache counters when explicitly
+        // requested. The final usage chunk has choices: [], so it must also be
+        // parsed before the choice guard below.
+        apiBody.stream_options = { include_usage: true };
       }
+      // Be explicit for both modes. DeepSeek currently defaults reasoning on
+      // for reasoning-capable models; omitting `thinking` would make the UI's
+      // "off" selection ambiguous and can also change tool-call behaviour.
+      apiBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
+      if (useThinking) apiBody.reasoning_effort = thinkingLevel;
       if (options && options.response_format) {
         apiBody.response_format = options.response_format;
       }
       if (useTools) {
         apiBody.tools = options.tools;
-        if (toolChoice) apiBody.tool_choice = toolChoice;
+        var roundToolChoice = round === 0 && options && options.first_tool_choice
+          ? options.first_tool_choice
+          : toolChoice;
+        if (roundToolChoice) apiBody.tool_choice = roundToolChoice;
       }
-      if (options && options.max_tokens && typeof options.max_tokens === 'number') {
-        apiBody.max_tokens = options.max_tokens;
+      if (requestedMaxTokens !== null) apiBody.max_tokens = requestedMaxTokens;
+      if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
+        apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
       }
 
       var resp = await fetch(DEEPSEEK_API_URL, {
@@ -4444,7 +4695,11 @@ async function callDeepSeek(messages, options) {
 
       var content = '';
       var toolCalls = [];
+      var roundReasoning = '';
       var streamToolCallMap = {};
+      // DSML tool frames can be split across SSE chunks. Never stream a
+      // tool-enabled round until the complete content has been classified.
+      var deferToolRoundContent = useTools && hasContentCb;
 
       if (useStream) {
         // ===== 流式解析 (round 0 with thinking) =====
@@ -4455,9 +4710,23 @@ async function callDeepSeek(messages, options) {
 
         while (!streamDone) {
           var rd;
-          try { rd = await reader.read(); } catch (e) { break; }
-          if (rd.done) break;
-          sBuffer += decoder.decode(rd.value, { stream: true });
+          try {
+            rd = await reader.read();
+          } catch (e) {
+            // A broken/aborted stream is not a successful partial response.
+            // Let the common error path distinguish cancellation from timeout.
+            throw e;
+          }
+          if (rd.done) {
+            // Some proxies/providers omit the final newline. Flush the
+            // decoder and feed the trailing SSE record through the same
+            // parser instead of silently dropping the final answer/tool call.
+            sBuffer += decoder.decode();
+            if (!sBuffer) break;
+            sBuffer += '\n';
+          } else {
+            sBuffer += decoder.decode(rd.value, { stream: true });
+          }
           var sLines = sBuffer.split('\n');
           sBuffer = sLines.pop() || '';
 
@@ -4468,18 +4737,31 @@ async function callDeepSeek(messages, options) {
             if (sData === '[DONE]') { streamDone = true; break; }
             var sJson;
             try { sJson = JSON.parse(sData); } catch (e) { continue; }
-            if (!sJson || !sJson.choices || !sJson.choices[0]) continue;
+            if (!sJson) continue;
+
+            // With stream_options.include_usage DeepSeek sends an additional
+            // final chunk whose choices array is empty.
+            if (sJson.usage) {
+              lastUsage = sJson.usage;
+              totalUsage.prompt_tokens += sJson.usage.prompt_tokens || 0;
+              totalUsage.completion_tokens += sJson.usage.completion_tokens || 0;
+              totalUsage.total_tokens += sJson.usage.total_tokens || 0;
+              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
+            }
+            if (!sJson.choices || !sJson.choices[0]) continue;
             var sChoice = sJson.choices[0];
             var sDelta = sChoice.delta || {};
 
             // reasoning_content chunk → 推给回调
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
+              roundReasoning += sDelta.reasoning_content;
               try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
-              try { if (hasContentCb) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
+              try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
@@ -4500,16 +4782,8 @@ async function callDeepSeek(messages, options) {
                 }
               }
             }
-            // usage (last delta usually)
-            if (sJson.usage) {
-              lastUsage = sJson.usage;
-              totalUsage.prompt_tokens = sJson.usage.prompt_tokens || 0;
-              totalUsage.completion_tokens = sJson.usage.completion_tokens || 0;
-              totalUsage.total_tokens = sJson.usage.total_tokens || 0;
-              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
-              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
-            }
           }
+          if (rd.done) break;
         }
         try { reader.cancel(); } catch (e) {}
 
@@ -4518,8 +4792,9 @@ async function callDeepSeek(messages, options) {
         for (var sk=0; sk<stcKeys.length; sk++) {
           toolCalls.push(streamToolCallMap[stcKeys[sk]]);
         }
-        // reasoning_content 已通过 onThinkingChunk 实时推送, finalReasoning 置空
-        finalReasoning = '';
+        toolCalls = normalizeToolCalls(toolCalls, round);
+        // reasoning_content 既要实时推送，也要随 assistant tool-call 消息续传。
+        finalReasoning = roundReasoning;
       } else {
         // ===== 非流式 (standard) =====
         var data = await resp.json().catch(function() { return {}; });
@@ -4530,7 +4805,7 @@ async function callDeepSeek(messages, options) {
         var choice = data.choices[0];
         var message = choice.message || {};
         content = typeof message.content === 'string' ? message.content : '';
-        toolCalls = message.tool_calls || [];
+        toolCalls = normalizeToolCalls(message.tool_calls || [], round);
         if (data.usage) {
           lastUsage = data.usage;
           totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
@@ -4541,23 +4816,50 @@ async function callDeepSeek(messages, options) {
         }
         if (useThinking) {
           var r = message.reasoning_content;
-          if (typeof r === 'string' && r) finalReasoning = r;
+          if (typeof r === 'string' && r) {
+            roundReasoning = r;
+            finalReasoning = r;
+          }
         }
         finalModel = normalizeDeepSeekUsageModel(data.model || message.model || finalModel, model);
       }
 
+      // Prefer provider-native tool_calls. If a compatible gateway instead
+      // puts DSML in content, convert it to the same validated server-only
+      // tool call shape. DSML must never flow to an assistant reply.
+      var dsmlResult = parseDsmlToolCalls(content, round);
+      if (dsmlResult.detected) {
+        content = dsmlResult.visibleContent;
+        if (dsmlResult.error) {
+          console.error('[DEEPSEEK] DSML tool protocol parse failed:', dsmlResult.error, 'round', round);
+          finalContent = '（工具调用解析失败，请重试。）';
+          break;
+        }
+        if (!toolCalls || toolCalls.length === 0) toolCalls = dsmlResult.calls;
+      }
+
       // 没 tool_calls：最终回复
       if (!toolCalls || toolCalls.length === 0) {
-        finalContent = content;
+        if (finalReplyContainsInternalProtocol(content)) {
+          console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
+          finalContent = '（工具调用解析失败，请重试。）';
+        } else {
+          finalContent = content;
+          try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(String(content).slice(0, 4000)); } catch (e) {}
+        }
         break;
       }
 
       // 有 tool_calls：追加 assistant 消息 → 执行 tool → 进入下一轮
-      workingMessages.push({
+      var assistantToolMessage = {
         role: 'assistant',
         content: content || '',
         tool_calls: toolCalls
-      });
+      };
+      // DeepSeek thinking/tool-call rounds require the reasoning trace to be
+      // echoed on the assistant message before tool results are appended.
+      if (useThinking && roundReasoning) assistantToolMessage.reasoning_content = roundReasoning;
+      workingMessages.push(assistantToolMessage);
 
       // ★ 并行执行所有工具调用 (原串行 for 循环改为 Promise.all)
       var toolResults = await Promise.all(toolCalls.map(async function(tc, t) {
@@ -4566,7 +4868,10 @@ async function callDeepSeek(messages, options) {
         var tcId = tc.id || ('call_' + Date.now() + '_' + t);
         var tStart = Date.now();
         var toolResult = null;
-        try { toolResult = await toolExecutor(tc); } catch (e) { toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' }; }
+        try { toolResult = await executeToolWithAbort(tc); } catch (e) {
+          if (externalSignal && externalSignal.aborted) throw e;
+          toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' };
+        }
         var tElapsed = Date.now() - tStart;
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
         return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
@@ -4596,25 +4901,33 @@ async function callDeepSeek(messages, options) {
             messages: workingMessages.slice(),
             stream: false
           };
-          if (useThinking) {
-            noToolBody.thinking = { type: 'enabled' };
-            noToolBody.reasoning_effort = thinkingLevel;
+          noToolBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
+          if (useThinking) noToolBody.reasoning_effort = thinkingLevel;
+          if (requestedMaxTokens !== null) noToolBody.max_tokens = requestedMaxTokens;
+          if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
+            noToolBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
           }
-          if (options && options.max_tokens && typeof options.max_tokens === 'number') {
-            noToolBody.max_tokens = options.max_tokens;
-          }
-          var noToolController = new AbortController();
-          var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
-          var noToolResp = await fetch(DEEPSEEK_API_URL, {
+            var noToolController = new AbortController();
+            var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
+            var noToolAbortHandler = null;
+            if (externalSignal) {
+              noToolAbortHandler = function() { try { noToolController.abort(); } catch (e) {} };
+              if (externalSignal.aborted) noToolAbortHandler();
+              else externalSignal.addEventListener('abort', noToolAbortHandler, { once: true });
+            }
+            var noToolResp = await fetch(DEEPSEEK_API_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
             },
             body: JSON.stringify(noToolBody),
-            signal: noToolController.signal
-          });
+              signal: noToolController.signal
+            });
           clearTimeout(noToolTimer);
+          if (externalSignal && noToolAbortHandler) {
+            try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (e) {}
+          }
           var noToolData = await noToolResp.json().catch(function() { return {}; });
           if (noToolResp.ok && noToolData && noToolData.usage) {
             lastUsage = noToolData.usage;
@@ -4626,7 +4939,16 @@ async function callDeepSeek(messages, options) {
           }
           if (noToolResp.ok && noToolData && noToolData.choices && noToolData.choices[0] && noToolData.choices[0].message) {
             var noToolMsg = noToolData.choices[0].message;
+            if (typeof noToolMsg.reasoning_content === 'string' && noToolMsg.reasoning_content) {
+              finalReasoning = noToolMsg.reasoning_content;
+            }
             var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
+            var noToolDsml = parseDsmlToolCalls(noToolContent, maxToolRounds);
+            if (noToolDsml.detected) {
+              console.error('[DEEPSEEK] DSML protocol appeared during no-tool recovery:', noToolDsml.error || 'tool request suppressed');
+              finalContent = '（工具调用解析失败，请重试。）';
+              noToolContent = '';
+            }
             if (noToolContent && noToolContent.length > 10) {
               // 过滤疑似 JSON 残留
               if (noToolContent.indexOf('{') === 0 && noToolContent.length < 500) {
@@ -4636,8 +4958,19 @@ async function callDeepSeek(messages, options) {
               }
             }
           }
-        } catch (e) {
-          clearTimeout(noToolTimer);
+          } catch (e) {
+            clearTimeout(noToolTimer);
+            if (externalSignal && noToolAbortHandler) {
+              try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (ignore) {}
+            }
+            // Cancellation during the final no-tool recovery request must
+            // propagate to the caller. Otherwise a user stop is swallowed and
+            // the UI receives a misleading "too many rounds" fallback reply.
+            if (externalSignal && externalSignal.aborted) {
+              var noToolCancelled = new Error('AI request cancelled');
+              noToolCancelled.name = 'AbortError';
+              throw noToolCancelled;
+            }
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
         }
       }
@@ -4661,6 +4994,10 @@ async function callDeepSeek(messages, options) {
       }
     }
 
+    if (finalReplyContainsInternalProtocol(finalContent)) {
+      console.error('[DEEPSEEK] final reply still contained internal protocol; suppressed');
+      finalContent = '（工具调用解析失败，请重试。）';
+    }
     // off 模式强制清空 reasoning
     if (!useThinking) finalReasoning = '';
     finalModel = normalizeDeepSeekUsageModel(finalModel, model);
@@ -4707,6 +5044,11 @@ async function callDeepSeek(messages, options) {
   } catch (e) {
     clearTimeout(timer);
     if (e && e.name === 'AbortError') {
+      if (externalSignal && externalSignal.aborted) {
+        var cancelledError = new Error('AI 调用已取消');
+        cancelledError.code = 'AI_CANCELLED';
+        throw cancelledError;
+      }
       console.error('[DEEPSEEK] request timeout after', DEEPSEEK_TIMEOUT_MS, 'ms');
       throw new Error('AI 调用超时，请稍后再试');
     }
@@ -4715,6 +5057,9 @@ async function callDeepSeek(messages, options) {
     throw new Error('AI 调用异常，请稍后再试');
   } finally {
     clearTimeout(timer);
+    if (externalSignal && externalAbortHandler) {
+      try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
+    }
   }
 }
 
@@ -14575,6 +14920,7 @@ registerCodeAgentRoutes(app, {
   getDeepSeekApiKey: function () {
     return DEEPSEEK_API_KEY;
   },
+  getDeepSeekCapabilities: getDeepSeekCapabilitySnapshot,
   callDeepSeek: callDeepSeek
 });
 registerCodeGitHubRoutes(app, {

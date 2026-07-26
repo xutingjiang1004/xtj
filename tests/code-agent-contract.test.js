@@ -54,6 +54,17 @@ test('Code Agent JSON payload has a scoped large-body parser', () => {
   assert.ok(defaultParser > codeParser, 'default parser must remain after scoped Code parser');
 });
 
+test('DeepSeek tool rounds preserve reasoning_content and clean abort listeners', () => {
+  assert.match(server, /roundReasoning\s*\+=\s*sDelta\.reasoning_content/);
+  assert.match(server, /assistantToolMessage\.reasoning_content\s*=\s*roundReasoning/);
+  assert.match(server, /externalSignal\.removeEventListener\('abort', externalAbortHandler\)/);
+  assert.match(server, /noToolAbortHandler = function\(\) \{ try \{ noToolController\.abort\(\)/);
+  assert.match(server, /externalSignal\.removeEventListener\('abort', noToolAbortHandler\)/);
+  assert.match(server, /sBuffer \+= decoder\.decode\(\);[\s\S]*sBuffer \+= '\\n';/);
+  assert.match(server, /round === 0 && options && options\.first_tool_choice/);
+  assert.match(codeAgent, /inferInitialToolChoice/);
+});
+
 // ============================================================
 // 6. 请求验证
 // ============================================================
@@ -211,6 +222,11 @@ test('code-agent builds user message with code context', () => {
   assert.match(codeAgent, /SHA256/);
 });
 
+test('code-agent warns the model when the project index is partial', () => {
+  assert.match(codeAgent, /project index is partial/);
+  assert.match(codeAgent, /Never claim that the entire workspace was inspected/);
+});
+
 test('code-agent prioritizes open documents when the project index is missing', () => {
   assert.match(codeAgent, /do not ask to rebuild the project index/i);
   assert.match(codeAgent, /未建立（当前打开文件和上传资料仍可读取）/);
@@ -237,4 +253,23 @@ test('code-agent accepts deps (supabase, rateLimit, authenticateUser, sanitizeEr
   assert.match(codeAgent, /deps\.rateLimit/);
   assert.match(codeAgent, /deps\.authenticateUser/);
   assert.match(codeAgent, /deps\.sanitizeError/);
+});
+
+test('Code Agent web tools are server-only, freshness-guided, and key-authenticated', () => {
+  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_URL/);
+  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_API_KEY/);
+  assert.match(codeAgent, /headers\.Authorization = 'Bearer ' \+ WEB_SEARCH_API_KEY/);
+  assert.match(codeAgent, /published_at/);
+  assert.match(codeAgent, /fetch_web_page/);
+  assert.match(codeAgent, /isFreshnessQuery/);
+  assert.match(codeAgent, /WEB_SEARCH_NOT_CONFIGURED/);
+});
+
+test('Code Agent web fetch enforces HTTPS, DNS/private-address checks, redirects and size limits', () => {
+  assert.match(codeAgent, /parsed\.protocol !== 'https:'/);
+  assert.match(codeAgent, /isBlockedWebHost/);
+  assert.match(codeAgent, /isPrivateAddress/);
+  assert.match(codeAgent, /WEB_MAX_REDIRECTS/);
+  assert.match(codeAgent, /WEB_MAX_BYTES/);
+  assert.match(codeAgent, /lookup:/);
 });

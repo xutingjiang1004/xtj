@@ -530,6 +530,19 @@ test('sendMessage does not duplicate current user message', () => {
   assert.match(codeWorkspace, /state\.messages\.slice\(0,\s*-1\)/);
 });
 
+test('Code chat timeout covers response-body decoding, not only fetch headers', () => {
+  assert.match(codeWorkspace, /apiCall\.then\(decodeCodeChatResponse\)/);
+  assert.match(codeWorkspace, /return Promise\.race\(\[apiCall\.then\(decodeCodeChatResponse\), timeoutPromise\]\)/);
+});
+
+test('Code chat rebuilds a lost server index and retries the original message once', () => {
+  assert.match(codeWorkspace, /INDEX_REBUILD_REQUIRED/);
+  assert.match(codeWorkspace, /索引已丢失，正在自动重建/);
+  assert.match(codeWorkspace, /return buildProjectIndex\(\)\.then/);
+  assert.match(codeWorkspace, /state\.projectIndexStatus\.indexed !== true/);
+  assert.match(codeWorkspace, /sendApiRequest\(body, requestId, timeStr, wsGen, true\)/);
+});
+
 // ============================================================
 // Real behavior tests — SHA-256 and update
 // ============================================================
@@ -583,6 +596,12 @@ test('undo reports failed paths', () => {
 
 test('undo restores open tab content', () => {
   assert.match(codeWorkspace, /state\.openTabs\[j\]\.content = snapshot\.beforeContent/);
+});
+
+test('undo verifies the post-apply SHA before writing or deleting', () => {
+  assert.match(codeWorkspace, /afterSha256/);
+  assert.match(codeWorkspace, /readFileByPath\(p\)/);
+  assert.match(codeWorkspace, /current\.sha256 !== snapshot\.afterSha256/);
 });
 
 // ============================================================
@@ -664,11 +683,41 @@ test('system prompt instructs the agent to search before asking for files', () =
   assert.match(codeAgent, /use the project tools to locate it before asking the user/);
 });
 
+test('P1: stale save failures do not toast into a replacement workspace', () => {
+  var saveFn = codeWorkspace.match(/function saveFile\(path\)[\s\S]*?(?=\/\/ [^\n]*renderImagePreview)/);
+  assert.ok(saveFn, 'saveFile function should exist');
+  assert.match(saveFn[0], /wsGen !== state\.workspaceGeneration/);
+  assert.match(saveFn[0], /state\.openTabs\.indexOf\(tab\) === -1/);
+});
+
+test('AI chat exposes a real cancel control and abort path', () => {
+  assert.match(codeWorkspace, /id="codeChatCancelBtn"/);
+  assert.match(codeWorkspace, /function cancelCurrentRequest\(\)/);
+  assert.match(codeWorkspace, /_abortController\.abort\(\)/);
+  assert.match(codeWorkspace, /removeTypingIndicator\(\)/);
+});
+
+test('AI chat preserves a failed message for retry', () => {
+  assert.match(codeWorkspace, /lastFailedMessage/);
+  assert.match(codeWorkspace, /function restoreFailedMessage\(message\)/);
+  assert.match(codeWorkspace, /restoreFailedMessage\(body && body\.message\)/);
+  assert.match(codeWorkspace, /input\.value = message/);
+});
+
 test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /id="codeWelcomeFileBtn"/);
   assert.match(codeWorkspace, /function selectAndOpenFile\(\)/);
   assert.match(codeWorkspace, /fs\.selectFile/);
   assert.match(codeWorkspace, /openFile\(handle\.name\)/);
+  assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
+});
+
+test('read-only Code workspaces do not expose write controls', () => {
+  assert.match(codeWorkspace, /readOnly: !!state\._isReadOnly/);
+  assert.match(codeWorkspace, /textarea\.readOnly = !!state\._isReadOnly/);
+  assert.match(codeWorkspace, /state\._isReadOnly \? '<span class="toolbar-readonly-label">/);
+  assert.match(codeWorkspace, /readOnlyApplyActions\.replaceChildren\(\)/);
+  assert.match(fs.readFileSync('css/code-workspace.css', 'utf8'), /\.code-readonly-banner/);
 });
 
 // ============================================================
