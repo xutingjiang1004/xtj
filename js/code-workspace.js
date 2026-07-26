@@ -3200,8 +3200,7 @@
       });
     }
 
-    Promise.race([apiCall, timeoutPromise]).then(function (resp) {
-      clearTimeout(timeoutId);
+    function decodeCodeChatResponse(resp) {
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
       if (!resp.ok) {
@@ -3227,7 +3226,12 @@
         });
       }
       return resp.json();
-    }).then(function (data) {
+    }
+
+    // Keep the timeout active through response-body decoding as well as the
+    // network request. A fetch can resolve with headers while text()/json()
+    // hangs, which otherwise leaves the typing indicator stuck forever.
+    Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;

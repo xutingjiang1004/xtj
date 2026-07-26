@@ -530,6 +530,11 @@ test('sendMessage does not duplicate current user message', () => {
   assert.match(codeWorkspace, /state\.messages\.slice\(0,\s*-1\)/);
 });
 
+test('Code chat timeout covers response-body decoding, not only fetch headers', () => {
+  assert.match(codeWorkspace, /apiCall\.then\(decodeCodeChatResponse\)/);
+  assert.match(codeWorkspace, /Promise\.race\(\[apiCall\.then\(decodeCodeChatResponse\), timeoutPromise\]\)/);
+});
+
 // ============================================================
 // Real behavior tests — SHA-256 and update
 // ============================================================
