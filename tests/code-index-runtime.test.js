@@ -76,6 +76,24 @@ test('validates duplicate paths, traversal, size, and SHA-256', () => {
   assert.equal(codeIndex.buildIndex(scope, [{ ...good, sha256: '0'.repeat(64) }]).code, 'SHA256_MISMATCH');
 });
 
+test('builds large indexes through bounded batches and publishes only on finalize', () => {
+  const scope = { userId: 'alice', workspaceId: 'batched-project', generation: 1 };
+  const first = codeIndex.appendIndexBatch(scope, [file('src/first.js', 'const first = true;')]);
+  assert.equal(first.ok, true);
+  assert.equal(first.status, 'building');
+  assert.equal(codeIndex.getIndexSummary(scope), null);
+
+  const duplicate = codeIndex.appendIndexBatch(scope, [file('src/first.js', 'const changed = true;')]);
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.code, 'DUPLICATE_PATH');
+
+  const final = codeIndex.appendIndexBatch(scope, [file('src/second.js', 'const second = true;')], { finalize: true });
+  assert.equal(final.ok, true);
+  assert.equal(final.status, 'ready');
+  assert.equal(final.totalFiles, 2);
+  assert.equal(codeIndex.searchCode(scope, 'second').results.length, 1);
+});
+
 test('expands Chinese search intent into code aliases', () => {
   const scope = { userId: 'alice', workspaceId: 'project', generation: 1 };
   const content = 'function authenticateToken(token) { return Boolean(token); }';
