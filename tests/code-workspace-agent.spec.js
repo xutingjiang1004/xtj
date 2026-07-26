@@ -191,6 +191,7 @@ test.describe('Code workspace Agent browser flow', () => {
     await expect(page.locator('#codeChatMessages')).toContainText('测试中的临时上游故障');
     await expect(page.locator('#codeChatInput')).toBeEnabled();
     await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
+    await expect(page.locator('#codeChatInput')).toHaveValue('\u518d\u6b21\u8bf7\u6c42\u4ee5\u9a8c\u8bc1\u9519\u8bef\u6062\u590d');
 
     expect(githubCalls.filter((url) => /\/xtj$/.test(url)).length).toBe(1);
     expect(githubCalls.every((url) => url.startsWith('/api/code/github/'))).toBe(true);

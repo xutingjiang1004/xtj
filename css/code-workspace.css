@@ -1405,6 +1405,18 @@
   flex-shrink: 0;
 }
 
+.code-readonly-banner {
+  background: var(--cw-bg-secondary) !important;
+  color: var(--cw-text-muted) !important;
+}
+
+.code-apply-bar .apply-readonly-label,
+.code-toolbar .toolbar-readonly-label {
+  color: var(--cw-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 /* ── 34. Reusable Button ──────────────────────────────────── */
 .code-btn {
   display: inline-flex;
