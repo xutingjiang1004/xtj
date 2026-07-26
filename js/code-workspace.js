@@ -397,6 +397,11 @@
     state.lastSentAttachmentPaths = [];
     state.active = false;
     _dom = {};
+    if (typeof _dragState !== 'undefined' && _dragState) {
+      document.body.classList.remove('code-is-resizing');
+      document.body.classList.remove('code-is-resizing-row');
+      _dragState = null;
+    }
     // Don't clear directoryHandle so workspace can be restored
     return true;
   }
@@ -963,15 +968,155 @@
   // ──────────────────────────────────────────────
   // renderWorkspace()
   // ──────────────────────────────────────────────
+
+  var _layoutState = {
+    sidebarWidth: 260,
+    chatWidth: 360,
+    contextHeight: 180,
+    sidebarCollapsed: false,
+    chatCollapsed: false,
+    contextCollapsed: false,
+    maximizedPanel: null // 'editor' | 'chat' | null
+  };
+
+  function loadLayoutConfig() {
+    try {
+      var saved = localStorage.getItem('xtj_code_layout_v1');
+      if (saved) {
+        var p = JSON.parse(saved);
+        if (typeof p.sidebarWidth === 'number') _layoutState.sidebarWidth = p.sidebarWidth;
+        if (typeof p.chatWidth === 'number') _layoutState.chatWidth = p.chatWidth;
+        if (typeof p.contextHeight === 'number') _layoutState.contextHeight = p.contextHeight;
+        if (typeof p.sidebarCollapsed === 'boolean') _layoutState.sidebarCollapsed = p.sidebarCollapsed;
+        if (typeof p.chatCollapsed === 'boolean') _layoutState.chatCollapsed = p.chatCollapsed;
+        if (typeof p.contextCollapsed === 'boolean') _layoutState.contextCollapsed = p.contextCollapsed;
+        if (p.maximizedPanel === 'editor' || p.maximizedPanel === 'chat' || p.maximizedPanel === null) _layoutState.maximizedPanel = p.maximizedPanel;
+      }
+    } catch (err) {}
+  }
+
+  function saveLayoutConfig() {
+    try {
+      localStorage.setItem('xtj_code_layout_v1', JSON.stringify(_layoutState));
+    } catch (err) {}
+  }
+
+  var _saveLayoutDebounce = null;
+  function triggerLayoutSave() {
+    if (_saveLayoutDebounce) clearTimeout(_saveLayoutDebounce);
+    _saveLayoutDebounce = setTimeout(saveLayoutConfig, 500);
+  }
+
+  function applyLayoutToDOM() {
+    if (!_dom.panelCode) return;
+    
+    // Apply inline vars
+    _dom.panelCode.style.setProperty('--cw-sidebar-width', _layoutState.sidebarWidth + 'px');
+    _dom.panelCode.style.setProperty('--cw-chat-width', _layoutState.chatWidth + 'px');
+    _dom.panelCode.style.setProperty('--cw-context-height', _layoutState.contextHeight + 'px');
+
+    // Apply collapsed classes
+    if (_layoutState.sidebarCollapsed || _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor') {
+      _dom.panelCode.classList.add('is-sidebar-collapsed');
+    } else {
+      _dom.panelCode.classList.remove('is-sidebar-collapsed');
+    }
+
+    if (_layoutState.chatCollapsed || _layoutState.maximizedPanel === 'editor') {
+      _dom.panelCode.classList.add('is-chat-collapsed');
+    } else {
+      _dom.panelCode.classList.remove('is-chat-collapsed');
+    }
+
+    if (_layoutState.contextCollapsed && _dom.sidebar) {
+      _dom.sidebar.classList.add('is-context-collapsed');
+    } else if (_dom.sidebar) {
+      _dom.sidebar.classList.remove('is-context-collapsed');
+    }
+    
+    // Maximized chat handles hiding editor
+    if (_layoutState.maximizedPanel === 'chat' && _dom.editorColumn) {
+      _dom.editorColumn.style.display = 'none';
+      _dom.panelCode.style.setProperty('--cw-chat-width', '100%');
+    } else if (_dom.editorColumn) {
+      _dom.editorColumn.style.display = 'flex';
+      if (_layoutState.maximizedPanel !== 'chat') {
+        _dom.panelCode.style.setProperty('--cw-chat-width', _layoutState.chatWidth + 'px');
+      }
+    }
+    
+    // If window is small (<1024), we should clamp things and override max
+    if (window.innerWidth < 1024) {
+      _dom.panelCode.classList.add('is-narrow-viewport');
+    } else {
+      _dom.panelCode.classList.remove('is-narrow-viewport');
+    }
+    
+    if (window.monacoEditorInstance) {
+      // Defer layout slightly so DOM is ready
+      requestAnimationFrame(function() {
+        if (window.monacoEditorInstance) window.monacoEditorInstance.layout();
+      });
+    }
+  }
+
+  function toggleSidebar() {
+    _layoutState.sidebarCollapsed = !_layoutState.sidebarCollapsed;
+    _layoutState.maximizedPanel = null;
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function toggleChat() {
+    _layoutState.chatCollapsed = !_layoutState.chatCollapsed;
+    _layoutState.maximizedPanel = null;
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function toggleMaximizeEditor() {
+    if (_layoutState.maximizedPanel === 'editor') {
+      _layoutState.maximizedPanel = null;
+    } else {
+      _layoutState.maximizedPanel = 'editor';
+    }
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function toggleMaximizeChat() {
+    if (_layoutState.maximizedPanel === 'chat') {
+      _layoutState.maximizedPanel = null;
+    } else {
+      _layoutState.maximizedPanel = 'chat';
+    }
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function resetLayout() {
+    _layoutState = {
+      sidebarWidth: 260,
+      chatWidth: 360,
+      contextHeight: 180,
+      sidebarCollapsed: false,
+      chatCollapsed: false,
+      contextCollapsed: false,
+      maximizedPanel: null
+    };
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
   function renderWorkspace() {
     if (!_dom.panelCode) return;
     _dom.panelCode.innerHTML = '';
+    
+    loadLayoutConfig();
 
-    // Main workspace container — true three-column layout
     var shell = document.createElement('div');
     shell.className = 'code-workspace-shell';
 
-    // Read-only mode banner (placed above workspace, not inside flex container)
     if (state._isReadOnly) {
       var banner = document.createElement('div');
       banner.className = 'code-readonly-banner';
@@ -991,86 +1136,238 @@
     sidebarHeader.className = 'code-sidebar-header';
     sidebarHeader.innerHTML =
       '<span class="workspace-name">' + escapeHTML(state.workspaceName || 'Workspace') + '</span>' +
-      '<span class="workspace-picker-actions">' +
+      '<span class="code-panel-actions">' +
         '<button class="folder-picker-btn" title="更换文件夹">📁</button>' +
         '<button class="folder-picker-btn file-picker-btn" title="直接打开文件">📄</button>' +
+        '<button class="code-panel-action-btn fold-sidebar-btn" title="折叠侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>' +
       '</span>';
+    
     var changeBtn = sidebarHeader.querySelector('.folder-picker-btn');
-    if (changeBtn) {
-      changeBtn.addEventListener('click', function () {
-        selectAndOpenWorkspace();
-      });
-    }
+    if (changeBtn) changeBtn.addEventListener('click', selectAndOpenWorkspace);
     var directFileBtn = sidebarHeader.querySelector('.file-picker-btn');
-    if (directFileBtn) {
-      directFileBtn.addEventListener('click', function () {
-        selectAndOpenFile();
-      });
-    }
+    if (directFileBtn) directFileBtn.addEventListener('click', selectAndOpenFile);
+    var foldSidebarBtn = sidebarHeader.querySelector('.fold-sidebar-btn');
+    if (foldSidebarBtn) foldSidebarBtn.addEventListener('click', toggleSidebar);
+
     sidebar.appendChild(sidebarHeader);
 
-    // File tree
     var fileTree = document.createElement('div');
     fileTree.className = 'code-file-tree';
     fileTree.id = 'codeFileTree';
     sidebar.appendChild(fileTree);
+    
+    // Resizer for Context Panel
+    var resizerContext = document.createElement('div');
+    resizerContext.className = 'code-resizer code-resizer-context';
+    resizerContext.setAttribute('role', 'separator');
+    resizerContext.setAttribute('tabindex', '0');
+    resizerContext.setAttribute('aria-orientation', 'horizontal');
+    sidebar.appendChild(resizerContext);
 
-    // Project status panel (replaces old context panel)
     var contextPanel = document.createElement('div');
     contextPanel.className = 'code-context-panel';
     contextPanel.id = 'codeContextPanel';
     sidebar.appendChild(contextPanel);
 
     workspace.appendChild(sidebar);
+    
+    // Resizer Left (Sidebar / Editor)
+    var resizerLeft = document.createElement('div');
+    resizerLeft.className = 'code-resizer code-resizer-left';
+    resizerLeft.setAttribute('role', 'separator');
+    resizerLeft.setAttribute('tabindex', '0');
+    resizerLeft.setAttribute('aria-orientation', 'vertical');
+    resizerLeft.addEventListener('dblclick', resetLayout);
+    workspace.appendChild(resizerLeft);
 
     // ── Editor column (center) ──
     var editorColumn = document.createElement('div');
     editorColumn.className = 'code-editor-column';
 
-    // Tab bar
     var tabBar = document.createElement('div');
     tabBar.className = 'code-tab-bar';
     tabBar.id = 'codeTabBar';
+
+    var tabList = document.createElement('div');
+    tabList.style.cssText = 'display:flex;flex:1;overflow-x:auto;';
+    tabBar.appendChild(tabList);
+
+    // Add maximize button to tabBar
+    var tabBarActions = document.createElement('div');
+    tabBarActions.style.cssText = 'display:flex;align-items:center;padding:0 8px;border-left:1px solid var(--cw-border);';
+    tabBarActions.innerHTML = 
+      '<button class="code-panel-action-btn restore-layout-btn" title="恢复默认布局" style="margin-right:4px;">🪟</button>' +
+      '<button class="code-panel-action-btn max-editor-btn" title="最大化编辑器"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
+    tabBar.appendChild(tabBarActions);
+    tabBarActions.querySelector('.restore-layout-btn').addEventListener('click', resetLayout);
+    tabBarActions.querySelector('.max-editor-btn').addEventListener('click', toggleMaximizeEditor);
     editorColumn.appendChild(tabBar);
 
-    // Editor area
     var editorArea = document.createElement('div');
     editorArea.className = 'code-editor-area';
     editorArea.id = 'codeEditorArea';
     editorColumn.appendChild(editorArea);
 
     workspace.appendChild(editorColumn);
+    
+    // Resizer Right (Editor / Chat)
+    var resizerRight = document.createElement('div');
+    resizerRight.className = 'code-resizer code-resizer-right';
+    resizerRight.setAttribute('role', 'separator');
+    resizerRight.setAttribute('tabindex', '0');
+    resizerRight.setAttribute('aria-orientation', 'vertical');
+    resizerRight.addEventListener('dblclick', resetLayout);
+    workspace.appendChild(resizerRight);
 
     // ── Chat panel (right) ──
     var chatPanel = document.createElement('div');
     chatPanel.className = 'code-chat-panel';
     chatPanel.id = 'codeChatPanel';
+    
+    // We need a header in chat panel for collapse/maximize
+    var chatHeader = document.createElement('div');
+    chatHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--cw-border);min-height:44px;flex-shrink:0;';
+    chatHeader.innerHTML = 
+      '<div style="font-weight:600;font-size:13px;">AI 助手</div>' +
+      '<div class="code-panel-actions">' +
+        '<button class="code-panel-action-btn max-chat-btn" title="最大化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>' +
+        '<button class="code-panel-action-btn fold-chat-btn" title="折叠"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>' +
+      '</div>';
+    chatHeader.querySelector('.max-chat-btn').addEventListener('click', toggleMaximizeChat);
+    chatHeader.querySelector('.fold-chat-btn').addEventListener('click', toggleChat);
+    chatPanel.appendChild(chatHeader);
+    
+    // Container for original chat app
+    var chatAppContainer = document.createElement('div');
+    chatAppContainer.id = 'codeChatAppContainer';
+    chatAppContainer.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;';
+    chatPanel.appendChild(chatAppContainer);
+
     workspace.appendChild(chatPanel);
 
     _dom.panelCode.appendChild(shell);
     shell.appendChild(workspace);
 
-    // Cache DOM refs
     _dom.fileTree = fileTree;
     _dom.contextPanel = contextPanel;
-    _dom.tabBar = tabBar;
+    _dom.tabBar = tabList;
     _dom.editorArea = editorArea;
-    _dom.chatPanel = chatPanel;
+    _dom.chatPanel = chatAppContainer; // redirect original chat rendering here
     _dom.sidebar = sidebar;
     _dom.editorColumn = editorColumn;
+    
+    _dom.resizerLeft = resizerLeft;
+    _dom.resizerRight = resizerRight;
+    _dom.resizerContext = resizerContext;
 
-    // Render sub-components
     renderFileTree();
     renderEmptyState();
     renderProjectStatus();
     renderChatPanel();
+    
+    initResizerDragLogic();
+    applyLayoutToDOM();
 
-    // Restore an existing scoped index or build a fresh one.
     loadProjectIndexStatus();
-
-    // Restore open tabs after re-entering Code
     restoreTabs();
   }
+
+  // Pointer Events Drag Logic
+  var _dragState = null;
+
+  function initResizerDragLogic() {
+    if (!_dom.resizerLeft || !_dom.resizerRight || !_dom.resizerContext) return;
+    
+    function onPointerDown(e, type) {
+      if (e.button !== 0) return; // only left click
+      e.preventDefault();
+      var target = e.currentTarget;
+      target.setPointerCapture(e.pointerId);
+      
+      var wsWidth = _dom.panelCode.offsetWidth || window.innerWidth;
+      var sbHeight = _dom.sidebar.offsetHeight || window.innerHeight;
+      
+      _dragState = {
+        type: type,
+        target: target,
+        startX: e.clientX,
+        startY: e.clientY,
+        startSidebarWidth: _layoutState.sidebarWidth,
+        startChatWidth: _layoutState.chatWidth,
+        startContextHeight: _layoutState.contextHeight,
+        wsWidth: wsWidth,
+        sbHeight: sbHeight
+      };
+      
+      target.classList.add('is-resizing');
+      document.body.classList.add(type === 'context' ? 'code-is-resizing-row' : 'code-is-resizing');
+      
+      target.addEventListener('pointermove', onPointerMove);
+      target.addEventListener('pointerup', onPointerUp);
+      target.addEventListener('pointercancel', onPointerUp);
+    }
+
+    function onPointerMove(e) {
+      if (!_dragState) return;
+      e.preventDefault();
+      var dx = e.clientX - _dragState.startX;
+      var dy = e.clientY - _dragState.startY;
+      
+      if (_dragState.type === 'left') {
+        var newWidth = _dragState.startSidebarWidth + dx;
+        // Clamp: min 180, max 45% or 560
+        var maxW = Math.min(560, _dragState.wsWidth * 0.45);
+        newWidth = Math.max(180, Math.min(newWidth, maxW));
+        _layoutState.sidebarWidth = newWidth;
+      } else if (_dragState.type === 'right') {
+        // Dragging right resizer leftwards INCREASES chat width
+        var newWidth = _dragState.startChatWidth - dx;
+        // Clamp: min 280, max 55% or 760
+        var maxW = Math.min(760, _dragState.wsWidth * 0.55);
+        newWidth = Math.max(280, Math.min(newWidth, maxW));
+        _layoutState.chatWidth = newWidth;
+      } else if (_dragState.type === 'context') {
+        // Dragging context resizer upwards INCREASES context height (wait, context is at bottom)
+        // If context is at bottom, dragging up means smaller Y -> dx is negative.
+        // wait, sidebar flex direction is column. Context is at the bottom.
+        // So dy < 0 means context is getting taller.
+        var newHeight = _dragState.startContextHeight - dy;
+        var maxH = _dragState.sbHeight * 0.65;
+        newHeight = Math.max(80, Math.min(newHeight, maxH));
+        _layoutState.contextHeight = newHeight;
+      }
+      
+      applyLayoutToDOM();
+    }
+
+    function onPointerUp(e) {
+      if (!_dragState) return;
+      var target = _dragState.target;
+      target.releasePointerCapture(e.pointerId);
+      target.removeEventListener('pointermove', onPointerMove);
+      target.removeEventListener('pointerup', onPointerUp);
+      target.removeEventListener('pointercancel', onPointerUp);
+      
+      target.classList.remove('is-resizing');
+      document.body.classList.remove('code-is-resizing');
+      document.body.classList.remove('code-is-resizing-row');
+      
+      triggerLayoutSave();
+      _dragState = null;
+    }
+
+    _dom.resizerLeft.addEventListener('pointerdown', function(e) { onPointerDown(e, 'left'); });
+    _dom.resizerRight.addEventListener('pointerdown', function(e) { onPointerDown(e, 'right'); });
+    _dom.resizerContext.addEventListener('pointerdown', function(e) { onPointerDown(e, 'context'); });
+    
+    // Listen for resize to re-clamp
+    window.addEventListener('resize', function() {
+      if (_dom.panelCode && _dom.panelCode.offsetParent !== null) {
+        applyLayoutToDOM();
+      }
+    });
+  }
+
 
   // ──────────────────────────────────────────────
   // restoreTabs() — restore open tabs after cleanup
@@ -2789,11 +3086,28 @@
       if (currentAttachmentChars() + content.length > MAX_ATTACHMENT_TOTAL_CHARS) {
         throw new Error('已添加资料内容过多，请移除部分资料后重试');
       }
-      var safeName = safeAttachmentName(data.fileName || file.name);
+      var originalName = data.fileName || file.name;
+      var safeName = safeAttachmentName(originalName);
       return getSHA256(content).catch(function () { return ''; }).then(function (sha256) {
+        if (sha256 && state.attachments.some(function(a) { return a.sha256 === sha256; })) {
+          throw new Error('文件已在资料区中，无需重复添加');
+        }
+        var pathName = safeName;
+        var count = 1;
+        while (state.attachments.some(function(a) { return a.path === 'attachments/' + pathName; })) {
+          count++;
+          var parts = safeName.split('.');
+          if (parts.length > 1) {
+            var ext = parts.pop();
+            pathName = parts.join('.') + '_' + count + '.' + ext;
+          } else {
+            pathName = safeName + '_' + count;
+          }
+        }
+
         state.attachments.push({
-          name: safeName,
-          path: 'attachments/' + safeName,
+          name: originalName,
+          path: 'attachments/' + pathName,
           mimeType: data.mimeType || mimeType,
           content: content,
           sha256: sha256,
@@ -3110,28 +3424,39 @@
     return selected;
   }
 
-  function ensureOpenFileContexts() {
+  function ensureOpenFileContexts(message) {
     var pending = [];
     state.openTabs.forEach(function (tab) {
       if (tab.type === 'document' && !tab._extractedText && tab._extractPromise) {
         pending.push(tab._extractPromise);
       }
     });
-    if (!pending.length) {
-      var failedTab = state.openTabs.find(function (tab) {
+    
+    function checkFailedTabs() {
+      var failedTabs = state.openTabs.filter(function (tab) {
         return tab.type === 'document' && tab._extractError;
       });
-      return failedTab
-        ? Promise.reject(new Error('文档提取失败：' + failedTab._extractError))
-        : Promise.resolve([]);
+      var blockingError = null;
+      for (var i = 0; i < failedTabs.length; i++) {
+        var tab = failedTabs[i];
+        var isCurrent = (tab.path === state.activePath);
+        var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
+        var isReferenced = message && (message.indexOf(tab.name) !== -1 || message.indexOf(tab.path) !== -1);
+        var isAttachment = state.attachments.some(function(a) { return a.name === tab.name; });
+
+        if (isCurrent || isPinned || isReferenced || isAttachment) {
+          blockingError = '文档提取失败：' + tab._extractError;
+          break;
+        }
+      }
+      if (blockingError) throw new Error(blockingError);
+      return [];
     }
-    return Promise.all(pending).then(function (results) {
-      var failedTab = state.openTabs.find(function (tab) {
-        return tab.type === 'document' && tab._extractError;
-      });
-      if (failedTab) throw new Error('文档提取失败：' + failedTab._extractError);
-      return results;
-    });
+
+    if (!pending.length) {
+      return Promise.resolve().then(checkFailedTabs);
+    }
+    return Promise.all(pending).then(checkFailedTabs);
   }
 
   function buildChatRequestBody(message, historyMsgs) {
@@ -3221,7 +3546,7 @@
     // Documents are extracted asynchronously for preview. Wait for that
     // result before building the request, otherwise a fast send would omit
     // the document and the backend would incorrectly ask for an index.
-    return ensureOpenFileContexts().then(function () {
+    return ensureOpenFileContexts(message).then(function () {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       var body = buildChatRequestBody(message, historyMsgs);
       return sendApiRequest(body, requestId, timeStr, wsGen);

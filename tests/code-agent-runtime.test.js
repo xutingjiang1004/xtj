@@ -402,3 +402,6 @@ test('uploaded travel documents are available to tools without a project index',
   assert.deepEqual(response.body.context_info.attachments, ['attachments/guangzhou.md']);
   assert.equal(response.body.context_info.files_read[0].path, 'attachments/guangzhou.md');
 });
+
+const { after } = require('node:test');
+after(() => { setTimeout(() => process.exit(process.exitCode || 0), 10); });
