@@ -7,6 +7,7 @@ const fs = require('fs');
 
 const registerCodeAgentRoutes = require('../render-api/code-agent.js');
 const xlsx = require('xlsx');
+const JSZip = require('jszip');
 
 // Mock deps
 const deps = {
@@ -37,6 +38,62 @@ test('Code agent document API test suite', async (t) => {
     assert.equal(res.body.ok, true);
     assert.equal(res.body.text, 'hello world');
     assert.equal(res.body.fileName, 'test.txt');
+  });
+
+  await t.test('Extract real DOCX text for travel planning', async () => {
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>');
+    zip.folder('_rels').file('.rels',
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>');
+    zip.folder('word').file('document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      '<w:p><w:r><w:t>广州三日游：第一天参观陈家祠。</w:t></w:r></w:p>' +
+      '</w:body></w:document>');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const res = await request(app)
+      .post('/api/code/document/extract')
+      .attach('file', buffer, 'guangzhou.docx');
+
+    assert.equal(res.status, 200);
+    assert.match(res.body.text, /广州三日游/);
+    assert.equal(res.body.ext, '.docx');
+  });
+
+  await t.test('Reject legacy DOC truthfully instead of pretending mammoth supports it', async () => {
+    const res = await request(app)
+      .post('/api/code/document/extract')
+      .attach('file', Buffer.from('legacy binary'), 'old-guide.doc');
+
+    assert.equal(res.status, 415);
+    assert.equal(res.body.code, 'LEGACY_DOC_UNSUPPORTED');
+    assert.match(res.body.error, /另存为 DOCX/);
+  });
+
+  await t.test('Extract PPTX slide text with source labels', async () => {
+    const zip = new JSZip();
+    zip.file('ppt/slides/slide1.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>沙面步行路线</a:t><a:t>白鹅潭夜景</a:t></p:sld>');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const res = await request(app)
+      .post('/api/code/document/extract')
+      .attach('file', buffer, 'route.pptx');
+
+    assert.equal(res.status, 200);
+    assert.match(res.body.text, /幻灯片: 第1页/);
+    assert.match(res.body.text, /沙面步行路线/);
+    assert.equal(res.body.metadata.slideCount, 1);
   });
 
   await t.test('Apply DOCX operation should be rejected', async () => {
