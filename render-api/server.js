@@ -10,6 +10,7 @@ const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
 const registerCodeAgentRoutes = require('./code-agent');
+const registerCodeGitHubRoutes = require('./code-github');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -4530,8 +4531,8 @@ async function callDeepSeek(messages, options) {
           totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
           totalUsage.completion_tokens += data.usage.completion_tokens || 0;
           totalUsage.total_tokens += data.usage.total_tokens || 0;
-          if (typeof data.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = data.usage.prompt_cache_hit_tokens;
-          if (typeof data.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = data.usage.prompt_cache_miss_tokens;
+          if (typeof data.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += data.usage.prompt_cache_hit_tokens;
+          if (typeof data.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += data.usage.prompt_cache_miss_tokens;
         }
         if (useThinking) {
           var r = message.reasoning_content;
@@ -4570,7 +4571,11 @@ async function callDeepSeek(messages, options) {
         if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
           toolCallsInfo[toolCallsInfo.length - 1].results_count = r.toolResult.results_count;
         }
-        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 8000) : '{}';
+        var maxToolResultChars = Math.min(
+          Math.max(parseInt(options && options.max_tool_result_chars, 10) || 8000, 8000),
+          2000000
+        );
+        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, maxToolResultChars) : '{}';
         workingMessages.push({ role: 'tool', tool_call_id: r.tcId, content: toolContent });
       });
     }
@@ -4606,6 +4611,14 @@ async function callDeepSeek(messages, options) {
           });
           clearTimeout(noToolTimer);
           var noToolData = await noToolResp.json().catch(function() { return {}; });
+          if (noToolResp.ok && noToolData && noToolData.usage) {
+            lastUsage = noToolData.usage;
+            totalUsage.prompt_tokens += noToolData.usage.prompt_tokens || 0;
+            totalUsage.completion_tokens += noToolData.usage.completion_tokens || 0;
+            totalUsage.total_tokens += noToolData.usage.total_tokens || 0;
+            totalUsage.prompt_cache_hit_tokens += noToolData.usage.prompt_cache_hit_tokens || 0;
+            totalUsage.prompt_cache_miss_tokens += noToolData.usage.prompt_cache_miss_tokens || 0;
+          }
           if (noToolResp.ok && noToolData && noToolData.choices && noToolData.choices[0] && noToolData.choices[0].message) {
             var noToolMsg = noToolData.choices[0].message;
             var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
@@ -4669,8 +4682,8 @@ async function callDeepSeek(messages, options) {
         prompt_tokens: totalUsage.prompt_tokens || lastUsage.prompt_tokens || 0,
         completion_tokens: totalUsage.completion_tokens || lastUsage.completion_tokens || 0,
         total_tokens: totalUsage.total_tokens || lastUsage.total_tokens || 0,
-        prompt_cache_hit_tokens: typeof lastUsage.prompt_cache_hit_tokens === 'number' ? lastUsage.prompt_cache_hit_tokens : null,
-        prompt_cache_miss_tokens: typeof lastUsage.prompt_cache_miss_tokens === 'number' ? lastUsage.prompt_cache_miss_tokens : null,
+        prompt_cache_hit_tokens: hit,
+        prompt_cache_miss_tokens: miss,
         cost: cost,
         currency: DEEPSEEK_CURRENCY,
         // ★ U3: tool_call_rounds 是有 tool_call 的轮数, 即 max(round)+1; 简化用 count 替代
@@ -14556,7 +14569,11 @@ registerCodeAgentRoutes(app, {
   },
   getDeepSeekApiKey: function () {
     return DEEPSEEK_API_KEY;
-  }
+  },
+  callDeepSeek: callDeepSeek
+});
+registerCodeGitHubRoutes(app, {
+  authenticateUser: authenticateUser
 });
 
 app.listen(port, () => {
