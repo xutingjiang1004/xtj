@@ -100,6 +100,23 @@ test('listAllFilesWithMetadata keeps path/name/content paired under delayed out-
   assert.equal(result.files.map((entry) => entry.path).join(','), 'first.js,second.js,third.js');
 });
 
+test('listAllFilesWithMetadata bounds discovery and read queue by maxFiles', async () => {
+  let reads = 0;
+  const children = Array.from({ length: 40 }, (_, index) => {
+    const handle = delayedTextHandle('file-' + index + '.js', 'content-' + index, 1);
+    const originalGetFile = handle.getFile;
+    handle.getFile = function () { reads++; return originalGetFile(); };
+    return handle;
+  });
+  const codeFS = loadCodeFileSystem();
+  codeFS.setDirHandle(directoryHandle('workspace', children));
+
+  const result = await codeFS.listAllFilesWithMetadata(4, 5);
+  assert.equal(result.files.length, 5);
+  assert.equal(result.truncated, true);
+  assert.equal(reads, 5);
+});
+
 test('single-file workspace exposes one readable and writable file through the normal adapter', async () => {
   const codeFS = loadCodeFileSystem({
     showOpenFilePicker: async () => [{
