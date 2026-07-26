@@ -4792,6 +4792,14 @@ async function callDeepSeek(messages, options) {
             if (externalSignal && noToolAbortHandler) {
               try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (ignore) {}
             }
+            // Cancellation during the final no-tool recovery request must
+            // propagate to the caller. Otherwise a user stop is swallowed and
+            // the UI receives a misleading "too many rounds" fallback reply.
+            if (externalSignal && externalSignal.aborted) {
+              var noToolCancelled = new Error('AI request cancelled');
+              noToolCancelled.name = 'AbortError';
+              throw noToolCancelled;
+            }
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
         }
       }

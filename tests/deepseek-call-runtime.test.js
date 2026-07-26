@@ -280,6 +280,45 @@ test('external cancellation interrupts a pending tool round', async () => {
   );
 });
 
+test('external cancellation propagates through the no-tool recovery request', async () => {
+  let requestCount = 0;
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return jsonResponse({
+        model: 'deepseek-v4-flash',
+        choices: [{ message: {
+          content: '',
+          tool_calls: [{ id: 'call_recovery', type: 'function', function: { name: 'lookup', arguments: '{}' } }]
+        } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      });
+    }
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    });
+  });
+  const controller = new AbortController();
+  const pending = callDeepSeek(
+    [{ role: 'user', content: 'continue after tool round' }],
+    {
+      signal: controller.signal,
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }],
+      max_tool_rounds: 1,
+      tool_executor: async () => ({ ok: true })
+    }
+  );
+  setTimeout(() => controller.abort(), 15);
+  await assert.rejects(
+    () => Promise.race([
+      pending,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('recovery cancellation timed out')), 500))
+    ]),
+    error => error && error.code === 'AI_CANCELLED'
+  );
+  assert.equal(requestCount, 2);
+});
+
 test('request timeout signal is wired into pending tool cancellation', () => {
   const source = fs.readFileSync('render-api/server.js', 'utf8');
   const start = source.indexOf('async function executeToolWithAbort(toolCall)');
