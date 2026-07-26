@@ -143,6 +143,20 @@ test('AI context waits for an in-flight document extraction before sending', asy
   assert.equal(settled, true);
 });
 
+test('AI context refuses to send silently when an open document extraction failed', async () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  loaded.state.openTabs = [{
+    path: 'guide.docx',
+    name: 'guide.docx',
+    type: 'document',
+    _extractError: '文件格式无效'
+  }];
+  await assert.rejects(
+    loaded.hooks.ensureOpenFileContexts(),
+    /文件格式无效/
+  );
+});
+
 test('attachment extraction recovers after an error and sends the supported document through existing endpoint', async () => {
   let attempt = 0;
   const calls = [];
