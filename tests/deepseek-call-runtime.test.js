@@ -82,11 +82,35 @@ test('streaming requests include usage and preserve cache counters from the empt
 
   assert.equal(requestBody.stream, true);
   assert.deepEqual(requestBody.stream_options, { include_usage: true });
+  assert.deepEqual(requestBody.thinking, { type: 'disabled' });
+  assert.equal(requestBody.reasoning_effort, undefined);
   assert.equal(requestBody.temperature, 0.25);
   assert.equal(result.content, '完成');
   assert.equal(result.usage.prompt_tokens, 30);
   assert.equal(result.usage.prompt_cache_hit_tokens, 20);
   assert.equal(result.usage.prompt_cache_miss_tokens, 10);
+});
+
+test('thinking mode is explicit and carries the requested effort level', async () => {
+  let requestBody;
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: '已完成', reasoning_content: '先分析' } }],
+      usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 }
+    });
+  });
+
+  const result = await callDeepSeek(
+    [{ role: 'user', content: '请分析' }],
+    { model: 'deepseek-v4-flash', thinking_mode: 'low' }
+  );
+
+  assert.deepEqual(requestBody.thinking, { type: 'enabled' });
+  assert.equal(requestBody.reasoning_effort, 'low');
+  assert.equal(result.content, '已完成');
+  assert.equal(result.reasoning, '先分析');
 });
 
 test('multi-round tool calls aggregate usage and cache counters', async () => {

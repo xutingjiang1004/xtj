@@ -4432,10 +4432,11 @@ async function callDeepSeek(messages, options) {
         // parsed before the choice guard below.
         apiBody.stream_options = { include_usage: true };
       }
-      if (useThinking) {
-        apiBody.thinking = { type: 'enabled' };
-        apiBody.reasoning_effort = thinkingLevel;
-      }
+      // Be explicit for both modes. DeepSeek currently defaults reasoning on
+      // for reasoning-capable models; omitting `thinking` would make the UI's
+      // "off" selection ambiguous and can also change tool-call behaviour.
+      apiBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
+      if (useThinking) apiBody.reasoning_effort = thinkingLevel;
       if (options && options.response_format) {
         apiBody.response_format = options.response_format;
       }
@@ -4654,10 +4655,8 @@ async function callDeepSeek(messages, options) {
             messages: workingMessages.slice(),
             stream: false
           };
-          if (useThinking) {
-            noToolBody.thinking = { type: 'enabled' };
-            noToolBody.reasoning_effort = thinkingLevel;
-          }
+          noToolBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
+          if (useThinking) noToolBody.reasoning_effort = thinkingLevel;
           if (options && options.max_tokens && typeof options.max_tokens === 'number') {
             noToolBody.max_tokens = options.max_tokens;
           }
