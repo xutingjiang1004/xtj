@@ -36,8 +36,6 @@ const CODE_AGENT_MAX_OUTPUT_TOKENS = Math.min(
 );
 const MAX_OPEN_FILES = 12;
 const MAX_ATTACHMENTS = 8;
-const WEB_SEARCH_URL = String(process.env.CODE_AGENT_WEB_SEARCH_URL || '').trim();
-const WEB_SEARCH_API_KEY = String(process.env.CODE_AGENT_WEB_SEARCH_API_KEY || '').trim();
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
 const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
 const WEB_MAX_BYTES = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_MAX_BYTES) || 2 * 1024 * 1024, 32 * 1024), 8 * 1024 * 1024);
@@ -88,10 +86,10 @@ function buildCodeCapabilities(deps, options) {
     agentEnabled: succeeded || featureEnabled,
     toolCallingEnabled: succeeded || featureEnabled,
     apiFormat: provider.apiFormat || 'openai-chat-completions',
-    providerContextTokens: Number(provider.providerContextTokens) || 1000000,
-    providerMaxOutputTokens: Number(provider.providerMaxOutputTokens) || 384000,
-    maxContextTokens: Math.min(CODE_AGENT_CONTEXT_TOKENS, Number(provider.providerContextTokens) || 1000000),
-    maxOutputTokens: Math.min(CODE_AGENT_MAX_OUTPUT_TOKENS, Number(provider.providerMaxOutputTokens) || 384000),
+    providerContextTokens: Number.isSafeInteger(Number(provider.providerContextTokens)) && Number(provider.providerContextTokens) > 0 ? Number(provider.providerContextTokens) : null,
+    providerMaxOutputTokens: Number.isSafeInteger(Number(provider.providerMaxOutputTokens)) && Number(provider.providerMaxOutputTokens) > 0 ? Number(provider.providerMaxOutputTokens) : null,
+    maxContextTokens: Math.min(CODE_AGENT_CONTEXT_TOKENS, Number.isSafeInteger(Number(provider.providerContextTokens)) && Number(provider.providerContextTokens) > 0 ? Number(provider.providerContextTokens) : CODE_AGENT_CONTEXT_TOKENS),
+    maxOutputTokens: Math.min(CODE_AGENT_MAX_OUTPUT_TOKENS, Number.isSafeInteger(Number(provider.providerMaxOutputTokens)) && Number(provider.providerMaxOutputTokens) > 0 ? Number(provider.providerMaxOutputTokens) : CODE_AGENT_MAX_OUTPUT_TOKENS),
     maxToolRounds: Math.min(CODE_AGENT_MAX_TOOL_ROUNDS, 8),
     verifiedBy: succeeded ? 'chat_completion' : (available ? 'models_probe' : '')
   };
@@ -648,20 +646,14 @@ function normalizeWebSearchResults(payload, maxResults) {
 
 async function searchWebForCode(query, maxResults, options) {
   options = options || {};
-  if (typeof options.webSearch === 'function') {
-    var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10));
-    return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(injected, maxResults || 5) };
+  if (typeof options.webSearch !== 'function') {
+    return { ok: false, code: 'WEB_SEARCH_NOT_CONFIGURED', error: '网站联网搜索服务未接入，请检查服务器搜索供应商配置' };
   }
-  if (!WEB_SEARCH_URL) return { ok: false, code: 'WEB_SEARCH_NOT_CONFIGURED', error: '联网搜索未配置，请在服务器设置 CODE_AGENT_WEB_SEARCH_URL' };
-  var endpoint = new URL(WEB_SEARCH_URL);
-  endpoint.searchParams.set('q', String(query || '').slice(0, 240));
-  endpoint.searchParams.set('count', String(Math.min(maxResults || 5, 10)));
-  var headers = { Accept: 'application/json' };
-  if (WEB_SEARCH_API_KEY) headers.Authorization = 'Bearer ' + WEB_SEARCH_API_KEY;
-  var page = await fetchSafeWebPage(endpoint.toString(), { fetchImpl: options.fetchImpl, lookupImpl: options.lookupImpl, timeoutMs: options.timeoutMs, headers: headers });
-  if (!page.ok) return page;
-  var parsed; try { parsed = JSON.parse(page.content); } catch (_) { return { ok: false, code: 'WEB_SEARCH_INVALID_RESPONSE', error: '联网搜索返回格式无效' }; }
-  return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(parsed, maxResults || 5) };
+  var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10));
+  if (injected && injected.error && !(Array.isArray(injected.results) && injected.results.length)) {
+    return { ok: false, code: 'WEB_SEARCH_FAILED', error: String(injected.error).slice(0, 240) };
+  }
+  return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(injected, maxResults || 5), diagnostics: injected && injected.diagnostics ? injected.diagnostics : undefined, used_provider: injected && injected.used_provider ? injected.used_provider : null };
 }
 
 function parseToolArguments(toolCall) {

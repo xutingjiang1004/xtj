@@ -224,6 +224,13 @@ function getDeepSeekCapabilitySnapshot() {
   var model = probe.preferred_model;
   var probeReady = probe.status === 'ready';
   var modelAvailable = probeReady ? probe.models.indexOf(model) !== -1 : null;
+  // Provider limits must come from deployment configuration (or a future
+  // model-catalog response), never from a frontend claim. Keep them unknown
+  // when the deployment has not declared them.
+  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS);
+  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS);
+  var providerContextTokens = Number.isSafeInteger(configuredContext) && configuredContext > 0 ? configuredContext : null;
+  var providerMaxOutputTokens = Number.isSafeInteger(configuredOutput) && configuredOutput > 0 ? configuredOutput : null;
   return {
     configured: !!DEEPSEEK_API_KEY,
     model: model,
@@ -231,8 +238,8 @@ function getDeepSeekCapabilitySnapshot() {
     probeError: probe.error,
     modelAvailable: modelAvailable,
     verifiedAvailable: !!DEEPSEEK_API_KEY && modelAvailable === true,
-    providerContextTokens: 1000000,
-    providerMaxOutputTokens: 384000,
+    providerContextTokens: providerContextTokens,
+    providerMaxOutputTokens: providerMaxOutputTokens,
     apiFormat: 'openai-chat-completions'
   };
 }
@@ -14921,7 +14928,10 @@ registerCodeAgentRoutes(app, {
     return DEEPSEEK_API_KEY;
   },
   getDeepSeekCapabilities: getDeepSeekCapabilitySnapshot,
-  callDeepSeek: callDeepSeek
+  callDeepSeek: callDeepSeek,
+  // Code Agent 复用小猫 AI 已使用的联网搜索管线（同一组后端 provider、缓存和密钥）。
+  // 不把搜索密钥或 provider 配置暴露给浏览器，也不要求 Code 单独配置一套搜索服务。
+  webSearch: searchWeb
 });
 registerCodeGitHubRoutes(app, {
   authenticateUser: authenticateUser
