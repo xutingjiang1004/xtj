@@ -516,6 +516,342 @@
   }
 
   // ──────────────────────────────────────────────
+  // GitHub read-only FileSystemHandle adapter
+  // ──────────────────────────────────────────────
+  function createNamedError(name, message) {
+    var err;
+    try {
+      err = new DOMException(message, name);
+    } catch (e) {
+      err = new Error(message);
+      err.name = name;
+    }
+    return err;
+  }
+
+  function githubReadOnlyError(action) {
+    return createNamedError('NotAllowedError', 'GitHub workspace is read-only: ' + action);
+  }
+
+  function createPromiseIterator(items, withNames) {
+    var index = 0;
+    return {
+      next: function () {
+        if (index >= items.length) {
+          return Promise.resolve({ value: undefined, done: true });
+        }
+        var item = items[index++];
+        return Promise.resolve({
+          value: withNames ? [item.name, item] : item,
+          done: false
+        });
+      }
+    };
+  }
+
+  function encodeUtf8(value) {
+    return new TextEncoder().encode(String(value == null ? '' : value));
+  }
+
+  function decodeBase64(value) {
+    var input = String(value || '').replace(/\s+/g, '');
+    var binary;
+    if (typeof atob === 'function') {
+      binary = atob(input);
+    } else if (typeof Buffer !== 'undefined') {
+      return new Uint8Array(Buffer.from(input, 'base64'));
+    } else {
+      throw new Error('Base64 decoding is not available in this browser');
+    }
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function bytesToArrayBuffer(bytes) {
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }
+
+  function decodeUtf8(bytes) {
+    if (typeof TextDecoder === 'function') {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    var text = '';
+    for (var i = 0; i < bytes.length; i++) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    try {
+      return decodeURIComponent(escape(text));
+    } catch (e) {
+      return text;
+    }
+  }
+
+  function normalizeGitHubRepoConfig(config) {
+    config = config || {};
+    var owner = String(config.owner || '').trim();
+    var repo = String(config.repo || '').trim();
+    if (!owner && repo.indexOf('/') !== -1) {
+      var repoParts = repo.split('/');
+      if (repoParts.length === 2) {
+        owner = repoParts[0];
+        repo = repoParts[1];
+      }
+    }
+    if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+      throw new Error('createGitHubFileSystemAdapter: owner/repo is invalid');
+    }
+    var ref = String(config.ref || config.branch || 'main').trim();
+    if (!ref || ref.length > 255 || /[\u0000-\u001f\u007f]/.test(ref)) {
+      throw new Error('createGitHubFileSystemAdapter: ref is invalid');
+    }
+    return {
+      owner: owner,
+      repo: repo,
+      ref: ref,
+      fullName: owner + '/' + repo
+    };
+  }
+
+  function createGitHubFileSystemAdapter(config) {
+    config = config || {};
+    var repoConfig;
+    try {
+      repoConfig = normalizeGitHubRepoConfig(config);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    var fetchImpl = config.fetchImpl ||
+      (typeof window !== 'undefined' && window.xtjProtectedFetch) ||
+      (typeof fetch === 'function' ? fetch : null);
+    if (!fetchImpl) {
+      return Promise.reject(new Error('createGitHubFileSystemAdapter: fetch is unavailable'));
+    }
+
+    var basePath = '/api/code/github/repos/' +
+      encodeURIComponent(repoConfig.owner) + '/' +
+      encodeURIComponent(repoConfig.repo);
+
+    function fetchJson(url) {
+      return fetchImpl(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      }).then(function (response) {
+        if (!response || !response.ok) {
+          var status = response && response.status ? response.status : 0;
+          return (response && typeof response.text === 'function'
+            ? response.text()
+            : Promise.resolve('')
+          ).then(function (body) {
+            var parsed = null;
+            try { parsed = JSON.parse(body); } catch (e) {}
+            var message = parsed && parsed.error
+              ? parsed.error
+              : 'GitHub request failed (HTTP ' + status + ')';
+            var requestError = new Error(message);
+            requestError.status = status;
+            throw requestError;
+          });
+        }
+        return response.json();
+      });
+    }
+
+    function loadTree() {
+      if (Array.isArray(config.tree)) {
+        return Promise.resolve(config.tree);
+      }
+      var url = basePath + '/tree?ref=' + encodeURIComponent(repoConfig.ref);
+      return fetchJson(url).then(function (payload) {
+        var tree = payload && payload.data && Array.isArray(payload.data.tree)
+          ? payload.data.tree
+          : (payload && Array.isArray(payload.tree) ? payload.tree : null);
+        if (!tree) {
+          throw new Error('GitHub tree response is invalid');
+        }
+        return tree;
+      });
+    }
+
+    function loadFile(path) {
+      var url = basePath + '/file?ref=' + encodeURIComponent(repoConfig.ref) +
+        '&path=' + encodeURIComponent(path);
+      return fetchJson(url).then(function (payload) {
+        var data = payload && payload.data && typeof payload.data === 'object'
+          ? payload.data
+          : payload;
+        if (!data || typeof data.content !== 'string') {
+          throw new Error('GitHub file response is invalid for ' + path);
+        }
+        return data;
+      });
+    }
+
+    return loadTree().then(function (tree) {
+      var rootNode = {
+        name: repoConfig.fullName,
+        path: '',
+        kind: 'directory',
+        children: Object.create(null)
+      };
+
+      function ensureDirectory(pathParts) {
+        var node = rootNode;
+        var currentPath = '';
+        for (var i = 0; i < pathParts.length; i++) {
+          var part = pathParts[i];
+          currentPath = currentPath ? currentPath + '/' + part : part;
+          if (!node.children[part]) {
+            node.children[part] = {
+              name: part,
+              path: currentPath,
+              kind: 'directory',
+              children: Object.create(null)
+            };
+          }
+          if (node.children[part].kind !== 'directory') {
+            throw new Error('GitHub tree contains a file/directory conflict at ' + currentPath);
+          }
+          node = node.children[part];
+        }
+        return node;
+      }
+
+      for (var ti = 0; ti < tree.length; ti++) {
+        var entry = tree[ti] || {};
+        var rawPath = String(entry.path || '');
+        var parts;
+        try {
+          parts = validatePath(rawPath);
+        } catch (e) {
+          throw new Error('GitHub tree contains an invalid path: ' + rawPath);
+        }
+        var rawType = String(entry.type || entry.kind || '').toLowerCase();
+        var isDirectory = rawType === 'tree' || rawType === 'dir' || rawType === 'directory';
+        if (isDirectory) {
+          ensureDirectory(parts);
+          continue;
+        }
+        var parent = ensureDirectory(parts.slice(0, -1));
+        var fileName = parts[parts.length - 1];
+        if (parent.children[fileName] && parent.children[fileName].kind === 'directory') {
+          throw new Error('GitHub tree contains a file/directory conflict at ' + rawPath);
+        }
+        parent.children[fileName] = {
+          name: fileName,
+          path: parts.join('/'),
+          kind: 'file',
+          sha: String(entry.sha || ''),
+          size: Number(entry.size) || 0,
+          mimeType: String(entry.mimeType || entry.mime_type || '')
+        };
+      }
+
+      function sortedChildNodes(node) {
+        return Object.keys(node.children).map(function (name) {
+          return node.children[name];
+        }).sort(function (a, b) {
+          if (a.kind === 'directory' && b.kind !== 'directory') return -1;
+          if (a.kind !== 'directory' && b.kind === 'directory') return 1;
+          return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        });
+      }
+
+      function createFileHandle(node) {
+        return {
+          kind: 'file',
+          name: node.name,
+          _isGitHub: true,
+          _path: node.path,
+          _sha: node.sha,
+          getFile: function () {
+            return loadFile(node.path).then(function (data) {
+              var encoding = String(data.encoding || 'utf8').toLowerCase();
+              var bytes = encoding === 'base64'
+                ? decodeBase64(data.content)
+                : encodeUtf8(data.content);
+              var size = Number(data.size);
+              if (!Number.isFinite(size) || size < 0) size = bytes.byteLength;
+              var mimeType = String(data.mimeType || data.mime_type || node.mimeType || 'application/octet-stream');
+              var arrayBuffer = bytesToArrayBuffer(bytes);
+              return {
+                name: node.name,
+                size: size,
+                type: mimeType,
+                lastModified: 0,
+                sha: String(data.sha || node.sha || ''),
+                text: function () {
+                  return Promise.resolve(encoding === 'base64' ? decodeUtf8(bytes) : String(data.content));
+                },
+                arrayBuffer: function () {
+                  return Promise.resolve(arrayBuffer.slice(0));
+                }
+              };
+            });
+          },
+          createWritable: function () {
+            return Promise.reject(githubReadOnlyError('createWritable'));
+          }
+        };
+      }
+
+      function createDirectoryHandle(node) {
+        function childHandles() {
+          return sortedChildNodes(node).map(function (childNode) {
+            return childNode.kind === 'directory'
+              ? createDirectoryHandle(childNode)
+              : createFileHandle(childNode);
+          });
+        }
+
+        return {
+          kind: 'directory',
+          name: node.name,
+          _isGitHub: true,
+          _path: node.path,
+          _repo: repoConfig.fullName,
+          _branch: repoConfig.ref,
+          values: function () {
+            return createPromiseIterator(childHandles(), false);
+          },
+          entries: function () {
+            return createPromiseIterator(childHandles(), true);
+          },
+          getDirectoryHandle: function (name, options) {
+            if (options && options.create) {
+              return Promise.reject(githubReadOnlyError('getDirectoryHandle(create)'));
+            }
+            var child = node.children[String(name || '')];
+            if (!child || child.kind !== 'directory') {
+              return Promise.reject(createNamedError('NotFoundError', 'Directory not found: ' + name));
+            }
+            return Promise.resolve(createDirectoryHandle(child));
+          },
+          getFileHandle: function (name, options) {
+            if (options && options.create) {
+              return Promise.reject(githubReadOnlyError('getFileHandle(create)'));
+            }
+            var child = node.children[String(name || '')];
+            if (!child || child.kind !== 'file') {
+              return Promise.reject(createNamedError('NotFoundError', 'File not found: ' + name));
+            }
+            return Promise.resolve(createFileHandle(child));
+          },
+          removeEntry: function () {
+            return Promise.reject(githubReadOnlyError('removeEntry'));
+          }
+        };
+      }
+
+      return createDirectoryHandle(rootNode);
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // File tree (lazy loading)
   // ──────────────────────────────────────────────
   function buildFileTree(dirHandle, depth) {
@@ -1195,36 +1531,36 @@
                   var fileType = getFileType(handle.name);
                   if (fileType === 'text') {
                     // Read file content for metadata
-                    promises.push(
-                      readFile(handle).then(function (fileResult) {
+                    promises.push((function (capturedHandle, capturedPath, capturedType) {
+                      return readFile(capturedHandle).then(function (fileResult) {
                         if (allFiles.length >= maxFiles) return;
                         if (fileResult && fileResult.type === 'text') {
                           allFiles.push({
-                            path: entryPath,
-                            name: handle.name,
+                            path: capturedPath,
+                            name: capturedHandle.name,
                             type: 'text',
                             size: fileResult.size || 0,
                             sha256: fileResult.sha256 || '',
                             content: fileResult.content || '',
-                            language: getLanguageFromExt(handle.name)
+                            language: getLanguageFromExt(capturedHandle.name)
                           });
                         } else {
                           allFiles.push({
-                            path: entryPath,
-                            name: handle.name,
-                            type: fileType,
+                            path: capturedPath,
+                            name: capturedHandle.name,
+                            type: capturedType,
                             size: 0
                           });
                         }
                       }).catch(function () {
                         allFiles.push({
-                          path: entryPath,
-                          name: handle.name,
-                          type: fileType,
+                          path: capturedPath,
+                          name: capturedHandle.name,
+                          type: capturedType,
                           size: 0
                         });
-                      })
-                    );
+                      });
+                    })(handle, entryPath, fileType));
                   } else {
                     allFiles.push({
                       path: entryPath,
@@ -1437,6 +1773,7 @@
 
     // Directory operations
     selectDirectory: selectDirectory,
+    createGitHubFileSystemAdapter: createGitHubFileSystemAdapter,
     getWorkspaceName: getWorkspaceName,
     restoreWorkspace: restoreWorkspace,
     getDirHandle: function () { return _dirHandle; },

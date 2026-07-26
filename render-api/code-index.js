@@ -8,15 +8,159 @@ const crypto = require('crypto');
 
 // ── Constants ──────────────────────────────────────────────────────────
 const MAX_FILE_SIZE_INDEX = 2 * 1024 * 1024; // 2MB — skip larger files for indexing
+const MAX_INDEX_FILES = 1000;
+const MAX_INDEX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_CHUNK_SIZE = 4096; // ~4KB per chunk (roughly 60-100 lines)
 const DEFAULT_MAX_TOKENS = 128000; // Default context window
 const SYSTEM_RESERVE_TOKENS = 8000; // Reserve for system prompt
 const OUTPUT_RESERVE_TOKENS = 8192; // Reserve for model output
 const HISTORY_RESERVE_TOKENS = 4000; // Reserve for conversation history
 const MAX_CHUNKS_PER_REQUEST = 60; // Max chunks in one request
+const DEFAULT_INDEX_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_WORKSPACES = 32;
+const DEFAULT_MAX_REGISTRY_BYTES = 128 * 1024 * 1024;
+const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 
 // ── In-memory index store (per-process, not persistent) ─────────────────
-var projectIndex = null; // { workspaceId, files: Map<path, FileEntry>, chunks: Map<chunkId, ChunkEntry>, builtAt }
+// Map insertion order is the LRU order (oldest first).
+var indexRegistry = new Map();
+var latestGenerations = new Map();
+var registryConfig = {
+  ttlMs: DEFAULT_INDEX_TTL_MS,
+  maxWorkspaces: DEFAULT_MAX_WORKSPACES,
+  maxBytes: DEFAULT_MAX_REGISTRY_BYTES
+};
+var legacyGeneration = 0;
+var legacyWorkspaceId = 'default';
+
+function validatePath(path) {
+  if (typeof path !== 'string' || !path || path.length > 500) return false;
+  if (path.charAt(0) === '/' || path.indexOf('\\') !== -1 || /^[A-Za-z]:/.test(path)) return false;
+  var parts = path.split('/');
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i] || parts[i] === '.' || parts[i] === '..' || parts[i].indexOf('\0') !== -1) return false;
+  }
+  return true;
+}
+
+function normalizeScope(scope, requireGeneration) {
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    return { ok: false, error: 'Scope is required', code: 'INVALID_SCOPE' };
+  }
+  var userId = typeof scope.userId === 'string' ? scope.userId.trim() : '';
+  var workspaceId = typeof scope.workspaceId === 'string' ? scope.workspaceId.trim() : '';
+  if (!userId || userId.length > 200 || !workspaceId || workspaceId.length > 300) {
+    return { ok: false, error: 'Invalid userId or workspaceId', code: 'INVALID_SCOPE' };
+  }
+  var generation = scope.generation;
+  if (generation !== undefined && generation !== null) {
+    if (!Number.isSafeInteger(generation) || generation < 0) {
+      return { ok: false, error: 'Generation must be a non-negative integer', code: 'INVALID_GENERATION' };
+    }
+  } else if (requireGeneration) {
+    return { ok: false, error: 'Generation is required', code: 'INVALID_GENERATION' };
+  }
+  return {
+    ok: true,
+    userId: userId,
+    workspaceId: workspaceId,
+    generation: generation,
+    baseKey: JSON.stringify([userId, workspaceId]),
+    key: generation === undefined || generation === null ?
+      null : JSON.stringify([userId, workspaceId, generation])
+  };
+}
+
+function legacyScope(workspaceId, forBuild) {
+  if (forBuild) {
+    legacyGeneration++;
+    legacyWorkspaceId = typeof workspaceId === 'string' && workspaceId.trim() ? workspaceId.trim() : 'default';
+  }
+  return {
+    userId: '__legacy__',
+    workspaceId: typeof workspaceId === 'string' && workspaceId.trim() ? workspaceId.trim() : legacyWorkspaceId,
+    generation: forBuild ? legacyGeneration : undefined
+  };
+}
+
+function estimateIndexBytes(index) {
+  var bytes = 0;
+  index.files.forEach(function(entry) {
+    bytes += Buffer.byteLength(entry.path || '', 'utf8') + 256;
+  });
+  index.chunks.forEach(function(chunk) {
+    bytes += Buffer.byteLength(chunk.content || '', 'utf8') +
+      Buffer.byteLength(chunk.id || '', 'utf8') + 128;
+  });
+  return bytes;
+}
+
+function deleteRegistryEntry(key) {
+  var entry = indexRegistry.get(key);
+  if (!entry) return false;
+  indexRegistry.delete(key);
+  var baseKey = JSON.stringify([entry.index.userId, entry.index.workspaceId]);
+  if (latestGenerations.get(baseKey) === entry.index.generation) {
+    var latest = null;
+    indexRegistry.forEach(function(candidate) {
+      var candidateBase = JSON.stringify([candidate.index.userId, candidate.index.workspaceId]);
+      if (candidateBase === baseKey && (latest === null || candidate.index.generation > latest)) {
+        latest = candidate.index.generation;
+      }
+    });
+    if (latest === null) latestGenerations.delete(baseKey);
+    else latestGenerations.set(baseKey, latest);
+  }
+  return true;
+}
+
+function cleanupRegistry(now) {
+  now = typeof now === 'number' ? now : Date.now();
+  indexRegistry.forEach(function(entry, key) {
+    if (entry.expiresAt <= now) deleteRegistryEntry(key);
+  });
+
+  var bytes = 0;
+  indexRegistry.forEach(function(entry) { bytes += entry.estimatedBytes || 0; });
+  while (indexRegistry.size > registryConfig.maxWorkspaces || bytes > registryConfig.maxBytes) {
+    var oldestKey = indexRegistry.keys().next().value;
+    if (oldestKey === undefined) break;
+    var oldest = indexRegistry.get(oldestKey);
+    bytes -= oldest && oldest.estimatedBytes ? oldest.estimatedBytes : 0;
+    deleteRegistryEntry(oldestKey);
+  }
+}
+
+function touchEntry(key, entry) {
+  var now = Date.now();
+  entry.lastAccessedAt = now;
+  entry.expiresAt = now + registryConfig.ttlMs;
+  indexRegistry.delete(key);
+  indexRegistry.set(key, entry);
+}
+
+function resolveIndex(scope) {
+  var normalized = normalizeScope(scope, false);
+  if (!normalized.ok) return normalized;
+  cleanupRegistry();
+  var latestGeneration = latestGenerations.get(normalized.baseKey);
+  var key = normalized.key;
+  if (!key && latestGeneration !== undefined) {
+    key = JSON.stringify([normalized.userId, normalized.workspaceId, latestGeneration]);
+  }
+  var entry = key ? indexRegistry.get(key) : null;
+  if (!entry && latestGeneration !== undefined && normalized.generation !== undefined) {
+    return {
+      ok: false,
+      error: 'Index generation does not match',
+      code: 'GENERATION_MISMATCH',
+      currentGeneration: latestGeneration
+    };
+  }
+  if (!entry) return { ok: false, error: 'No project index built', code: 'INDEX_NOT_FOUND' };
+  touchEntry(key, entry);
+  return { ok: true, index: entry.index, scope: normalized };
+}
 
 // ── Token estimation ────────────────────────────────────────────────────
 function estimateTokens(text) {
@@ -251,6 +395,38 @@ function scoreChunkRelevance(chunk, queryKeywords) {
 }
 
 // ── Extract keywords from user query ────────────────────────────────────
+var CHINESE_SEARCH_ALIASES = {
+  '登录': ['login', 'auth', 'token', 'session'],
+  '登陆': ['login', 'auth', 'token', 'session'],
+  '鉴权': ['auth', 'authenticate', 'authorization', 'token'],
+  '认证': ['auth', 'authenticate', 'token'],
+  '头像': ['avatar', 'profile', 'photo'],
+  '用户': ['user', 'account', 'profile'],
+  '管理员': ['admin', 'administrator'],
+  '聊天': ['chat', 'message', 'conversation', 'dm'],
+  '消息': ['message', 'chat', 'notification'],
+  '照片': ['photo', 'image', 'gallery', 'wall'],
+  '图片': ['image', 'photo', 'preview'],
+  '导航': ['nav', 'navigation', 'sidebar', 'menu'],
+  '接口': ['api', 'route', 'endpoint'],
+  '后端': ['server', 'backend', 'api'],
+  '前端': ['frontend', 'client', 'ui'],
+  '上传': ['upload', 'file', 'storage'],
+  '文档': ['document', 'doc', 'docx', 'pdf'],
+  '表格': ['spreadsheet', 'xlsx', 'sheet'],
+  '索引': ['index', 'search', 'chunk'],
+  '缓存': ['cache', 'cached'],
+  '网络': ['network', 'fetch', 'request'],
+  '错误': ['error', 'failed', 'exception'],
+  '旅游': ['travel', 'trip', 'tourism', 'itinerary'],
+  '攻略': ['guide', 'itinerary', 'travel', 'route']
+};
+
+function pushUniqueKeyword(keywords, value) {
+  var normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized && keywords.indexOf(normalized) === -1) keywords.push(normalized);
+}
+
 function extractKeywords(message) {
   if (!message) return [];
   var keywords = [];
@@ -259,15 +435,14 @@ function extractKeywords(message) {
   var quotedRe = /["'`]([^"'`]+)["'`]/g;
   var qm;
   while ((qm = quotedRe.exec(message)) !== null) {
-    keywords.push(qm[1]);
+    pushUniqueKeyword(keywords, qm[1]);
   }
 
   // Extract file paths (e.g., js/code-workspace.js, src/App.tsx)
   var pathRe = /(?:[\w-]+\/)*[\w-]+\.[a-z]{2,4}/gi;
   var pm;
   while ((pm = pathRe.exec(message)) !== null) {
-    var p = pm[0].toLowerCase();
-    if (keywords.indexOf(p) === -1) keywords.push(p);
+    pushUniqueKeyword(keywords, pm[0]);
   }
 
   // Extract function/class names (capitalized words, camelCase, snake_case)
@@ -275,15 +450,38 @@ function extractKeywords(message) {
   var nm;
   while ((nm = nameRe.exec(message)) !== null) {
     var n = nm[1];
-    if (n.length > 2 && keywords.indexOf(n) === -1) keywords.push(n);
+    if (n.length > 2) pushUniqueKeyword(keywords, n);
+  }
+
+  // Expand common Chinese product intents to code identifiers. This avoids
+  // treating a whole sentence such as “修复登录功能” as one unmatchable token.
+  Object.keys(CHINESE_SEARCH_ALIASES).forEach(function(chineseTerm) {
+    if (message.indexOf(chineseTerm) === -1) return;
+    pushUniqueKeyword(keywords, chineseTerm);
+    CHINESE_SEARCH_ALIASES[chineseTerm].forEach(function(alias) {
+      pushUniqueKeyword(keywords, alias);
+    });
+  });
+
+  // Preserve short meaningful Chinese terms even when no alias exists.
+  var chineseRuns = message.match(/[\u4e00-\u9fff]{2,}/g) || [];
+  for (var cr = 0; cr < chineseRuns.length && keywords.length < 30; cr++) {
+    var run = chineseRuns[cr];
+    if (run.length <= 6) {
+      pushUniqueKeyword(keywords, run);
+    } else {
+      for (var cg = 0; cg < run.length - 1 && keywords.length < 30; cg++) {
+        pushUniqueKeyword(keywords, run.slice(cg, cg + 2));
+      }
+    }
   }
 
   // Extract remaining significant words
   var words = message.replace(/[^\w\s\u4e00-\u9fff]/g, ' ').split(/\s+/);
   for (var i = 0; i < words.length; i++) {
     var w = words[i].toLowerCase();
-    if (w.length > 2 && keywords.indexOf(w) === -1 && !/^(the|and|for|the|this|that|with|from|have|what|when|where|which|how|can|will|should|could|would|about|does|don't|isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't)$/i.test(w)) {
-      keywords.push(w);
+    if (w.length > 2 && !/^(the|and|for|this|that|with|from|have|what|when|where|which|how|can|will|should|could|would|about|does|don't|isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't)$/i.test(w)) {
+      pushUniqueKeyword(keywords, w);
     }
   }
 
@@ -291,37 +489,96 @@ function extractKeywords(message) {
 }
 
 // ── Build project index ─────────────────────────────────────────────────
-function buildIndex(workspaceId, files) {
+function buildIndex(scope, files) {
+  // Backward compatibility: buildIndex(workspaceId, files).
+  var explicitScope = scope && typeof scope === 'object' && !Array.isArray(scope);
+  var normalized = normalizeScope(explicitScope ? scope : legacyScope(scope, true), true);
+  if (!normalized.ok) return normalized;
   if (!files || !Array.isArray(files)) {
     return { ok: false, error: 'files must be an array' };
+  }
+  if (files.length > MAX_INDEX_FILES) {
+    return { ok: false, error: 'Too many files', code: 'FILE_LIMIT_EXCEEDED', maxFiles: MAX_INDEX_FILES };
+  }
+
+  cleanupRegistry();
+  var currentGeneration = latestGenerations.get(normalized.baseKey);
+  if (currentGeneration !== undefined && normalized.generation < currentGeneration) {
+    return {
+      ok: false,
+      error: 'Stale index generation',
+      code: 'STALE_GENERATION',
+      currentGeneration: currentGeneration
+    };
   }
 
   var fileMap = new Map();
   var chunkMap = new Map();
   var totalChunks = 0;
   var totalFiles = 0;
+  var totalBytes = 0;
+  var seenPaths = new Set();
 
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
-    if (!f || !f.path) continue;
+    if (!f || typeof f !== 'object') {
+      return { ok: false, error: 'Invalid file entry at index ' + i, code: 'INVALID_FILE' };
+    }
+    if (!validatePath(f.path)) {
+      return { ok: false, error: 'Invalid file path: ' + String(f.path || ''), code: 'INVALID_PATH' };
+    }
+    if (seenPaths.has(f.path)) {
+      return { ok: false, error: 'Duplicate file path: ' + f.path, code: 'DUPLICATE_PATH' };
+    }
+    seenPaths.add(f.path);
+
+    if (f.content !== undefined && typeof f.content !== 'string') {
+      return { ok: false, error: 'File content must be text: ' + f.path, code: 'INVALID_CONTENT' };
+    }
+    var content = typeof f.content === 'string' ? f.content : '';
+    var actualSize = Buffer.byteLength(content, 'utf8');
+    if (f.size !== undefined && (!Number.isSafeInteger(f.size) || f.size < 0)) {
+      return { ok: false, error: 'Invalid file size: ' + f.path, code: 'INVALID_SIZE' };
+    }
+    if (actualSize > MAX_FILE_SIZE_INDEX || (f.size !== undefined && f.size > MAX_FILE_SIZE_INDEX)) {
+      return { ok: false, error: 'File is too large to index: ' + f.path, code: 'FILE_TOO_LARGE' };
+    }
+    totalBytes += actualSize;
+    if (totalBytes > MAX_INDEX_TOTAL_BYTES) {
+      return { ok: false, error: 'Index content is too large', code: 'TOTAL_SIZE_EXCEEDED' };
+    }
+
+    var sha256 = typeof f.sha256 === 'string' ? f.sha256.trim().toLowerCase() : '';
+    if (sha256 && !SHA256_HEX_RE.test(sha256)) {
+      return { ok: false, error: 'Invalid SHA-256: ' + f.path, code: 'INVALID_SHA256' };
+    }
+    if (sha256 && crypto.createHash('sha256').update(content, 'utf8').digest('hex') !== sha256) {
+      return { ok: false, error: 'SHA-256 does not match content: ' + f.path, code: 'SHA256_MISMATCH' };
+    }
+    if (!sha256 && content) {
+      sha256 = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+    }
+
+    var language = typeof f.language === 'string' ? f.language.trim().toLowerCase() : '';
 
     var entry = {
       path: f.path,
-      name: f.name || f.path.split('/').pop(),
-      language: f.language || '',
-      size: f.size || 0,
-      sha256: f.sha256 || '',
+      name: f.path.split('/').pop(),
+      language: language,
+      size: actualSize,
+      sha256: sha256,
       modifiedAt: f.modifiedAt || null,
-      symbols: f.symbols || { functions: [], classes: [], exports: [], imports: [] },
+      symbols: extractSymbols(content, language),
       chunks: [],
       isPinned: false
     };
 
-    // Chunk larger files
-    if (f.content && f.size < MAX_FILE_SIZE_INDEX) {
-      var chunks = chunkContent(f.content, f.path);
+    if (content) {
+      var chunks = chunkContent(content, f.path);
       for (var c = 0; c < chunks.length; c++) {
         var chunk = chunks[c];
+        chunk.language = language;
+        chunk.sha256 = sha256;
         chunkMap.set(chunk.id, chunk);
         entry.chunks.push(chunk.id);
         totalChunks++;
@@ -332,37 +589,90 @@ function buildIndex(workspaceId, files) {
     totalFiles++;
   }
 
-  projectIndex = {
-    workspaceId: workspaceId || 'default',
+  var projectIndex = {
+    userId: normalized.userId,
+    workspaceId: normalized.workspaceId,
+    generation: normalized.generation,
     files: fileMap,
     chunks: chunkMap,
     totalFiles: totalFiles,
     totalChunks: totalChunks,
+    totalBytes: totalBytes,
+    scannedFiles: files.length,
+    indexedFiles: totalFiles,
+    skippedFiles: 0,
+    failedFiles: 0,
+    status: 'ready',
     builtAt: new Date().toISOString()
   };
+  var now = Date.now();
+  var registryEntry = {
+    index: projectIndex,
+    estimatedBytes: estimateIndexBytes(projectIndex),
+    createdAt: now,
+    lastAccessedAt: now,
+    expiresAt: now + registryConfig.ttlMs
+  };
+  indexRegistry.delete(normalized.key);
+  indexRegistry.set(normalized.key, registryEntry);
+  if (currentGeneration === undefined || normalized.generation >= currentGeneration) {
+    latestGenerations.set(normalized.baseKey, normalized.generation);
+  }
+  cleanupRegistry(now);
+
+  if (!indexRegistry.has(normalized.key)) {
+    return { ok: false, error: 'Index exceeds registry capacity', code: 'REGISTRY_CAPACITY_EXCEEDED' };
+  }
 
   return {
     ok: true,
+    userId: projectIndex.userId,
+    workspaceId: projectIndex.workspaceId,
+    generation: projectIndex.generation,
     totalFiles: totalFiles,
     totalChunks: totalChunks,
+    totalBytes: totalBytes,
+    scannedFiles: projectIndex.scannedFiles,
+    indexedFiles: projectIndex.indexedFiles,
+    skippedFiles: projectIndex.skippedFiles,
+    failedFiles: projectIndex.failedFiles,
+    status: projectIndex.status,
     builtAt: projectIndex.builtAt
   };
 }
 
 // ── Get index summary ───────────────────────────────────────────────────
-function getIndexSummary() {
-  if (!projectIndex) return null;
+function getIndexSummary(scope) {
+  var resolved = resolveIndex(scope && typeof scope === 'object' ? scope : legacyScope(scope, false));
+  if (!resolved.ok) return null;
+  var projectIndex = resolved.index;
   return {
+    userId: projectIndex.userId,
     workspaceId: projectIndex.workspaceId,
+    generation: projectIndex.generation,
     totalFiles: projectIndex.totalFiles,
     totalChunks: projectIndex.totalChunks,
+    totalBytes: projectIndex.totalBytes,
+    scannedFiles: projectIndex.scannedFiles,
+    indexedFiles: projectIndex.indexedFiles,
+    skippedFiles: projectIndex.skippedFiles,
+    failedFiles: projectIndex.failedFiles,
+    status: projectIndex.status,
     builtAt: projectIndex.builtAt
   };
 }
 
 // ── Search code ─────────────────────────────────────────────────────────
-function searchCode(query, options) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function searchCode(scope, query, options) {
+  // Backward compatibility: searchCode(query, options).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    options = query;
+    query = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
   if (!query) return { ok: false, error: 'Query is required' };
 
   var maxResults = (options && options.maxResults) || 20;
@@ -381,7 +691,6 @@ function searchCode(query, options) {
 
     // Check file-level relevance
     var fileScore = scoreRelevance(fileEntry, keywords);
-    if (fileScore <= 0 && keywords.length > 0) return;
 
     // Check chunk-level relevance
     for (var c = 0; c < fileEntry.chunks.length; c++) {
@@ -430,8 +739,18 @@ function searchCode(query, options) {
 }
 
 // ── Select best chunks within token budget ──────────────────────────────
-function selectBestChunks(query, budget, pinnedFilePaths, activeFilePath) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function selectBestChunks(scope, query, budget, pinnedFilePaths, activeFilePath) {
+  // Backward compatibility: selectBestChunks(query, budget, pinned, active).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    activeFilePath = pinnedFilePaths;
+    pinnedFilePaths = budget;
+    budget = query;
+    query = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
 
   var keywords = extractKeywords(query);
   var allCandidates = [];
@@ -566,8 +885,20 @@ function selectBestChunks(query, budget, pinnedFilePaths, activeFilePath) {
 }
 
 // ── Read file range ─────────────────────────────────────────────────────
-function readFileRange(path, startLine, endLine) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function readFileRange(scope, path, startLine, endLine) {
+  // Backward compatibility: readFileRange(path, startLine, endLine).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    endLine = startLine;
+    startLine = path;
+    path = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
+  if (!validatePath(path)) return { ok: false, error: 'Invalid file path', code: 'INVALID_PATH' };
+  startLine = Number.isSafeInteger(startLine) && startLine > 0 ? startLine : 1;
+  endLine = Number.isSafeInteger(endLine) && endLine >= startLine ? endLine : startLine + 999999;
 
   var entry = projectIndex.files.get(path);
   if (!entry) return { ok: false, error: 'File not found in index: ' + path };
@@ -585,7 +916,7 @@ function readFileRange(path, startLine, endLine) {
 
   // If no chunks match, return empty
   if (matchingChunks.length === 0) {
-    return { ok: true, path: path, chunks: [], startLine: startLine, endLine: endLine };
+    return { ok: true, path: path, sha256: entry.sha256, chunks: [], startLine: startLine, endLine: endLine };
   }
 
   // Extract the requested lines from chunks
@@ -604,6 +935,7 @@ function readFileRange(path, startLine, endLine) {
   return {
     ok: true,
     path: path,
+    sha256: entry.sha256,
     lines: lines,
     startLine: startLine,
     endLine: endLine,
@@ -612,8 +944,16 @@ function readFileRange(path, startLine, endLine) {
 }
 
 // ── Get file symbols ────────────────────────────────────────────────────
-function getFileSymbols(path) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function getFileSymbols(scope, path) {
+  // Backward compatibility: getFileSymbols(path).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    path = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
+  if (!validatePath(path)) return { ok: false, error: 'Invalid file path', code: 'INVALID_PATH' };
 
   var entry = projectIndex.files.get(path);
   if (!entry) return { ok: false, error: 'File not found in index: ' + path };
@@ -628,11 +968,23 @@ function getFileSymbols(path) {
 }
 
 // ── List files ──────────────────────────────────────────────────────────
-function listFiles(directory, depth, pattern) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function listFiles(scope, directory, depth, pattern) {
+  // Backward compatibility: listFiles(directory, depth, pattern).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    pattern = depth;
+    depth = directory;
+    directory = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
+  if (directory && !validatePath(directory)) {
+    return { ok: false, error: 'Invalid directory path', code: 'INVALID_PATH' };
+  }
 
   var results = [];
-  var maxDepth = depth || 3;
+  var maxDepth = Number.isSafeInteger(depth) ? Math.min(Math.max(depth, 0), 20) : 3;
   var dirPrefix = directory ? (directory.endsWith('/') ? directory : directory + '/') : '';
 
   projectIndex.files.forEach(function (entry) {
@@ -670,14 +1022,33 @@ function listFiles(directory, depth, pattern) {
 }
 
 // ── Clear index ─────────────────────────────────────────────────────────
-function clearIndex() {
-  projectIndex = null;
-  return { ok: true };
+function clearIndex(scope) {
+  var normalized = normalizeScope(scope && typeof scope === 'object' ? scope : legacyScope(scope, false), false);
+  if (!normalized.ok) return normalized;
+  cleanupRegistry();
+  var latestGeneration = latestGenerations.get(normalized.baseKey);
+  var key = normalized.key;
+  if (!key && latestGeneration !== undefined) {
+    key = JSON.stringify([normalized.userId, normalized.workspaceId, latestGeneration]);
+  }
+  var entry = key ? indexRegistry.get(key) : null;
+  if (!entry) return { ok: true, cleared: false };
+  deleteRegistryEntry(key);
+  return { ok: true, cleared: true };
 }
 
 // ── Pin/unpin files ─────────────────────────────────────────────────────
-function pinFile(path, pinned) {
-  if (!projectIndex) return { ok: false, error: 'No project index built' };
+function pinFile(scope, path, pinned) {
+  // Backward compatibility: pinFile(path, pinned).
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
+    pinned = path;
+    path = scope;
+    scope = legacyScope(null, false);
+  }
+  var resolved = resolveIndex(scope);
+  if (!resolved.ok) return resolved;
+  var projectIndex = resolved.index;
+  if (!validatePath(path)) return { ok: false, error: 'Invalid file path', code: 'INVALID_PATH' };
 
   var entry = projectIndex.files.get(path);
   if (!entry) return { ok: false, error: 'File not found: ' + path };
@@ -686,13 +1057,68 @@ function pinFile(path, pinned) {
   return { ok: true, path: path, isPinned: entry.isPinned };
 }
 
-function getPinnedFiles() {
-  if (!projectIndex) return [];
+function getPinnedFiles(scope) {
+  var resolved = resolveIndex(scope && typeof scope === 'object' ? scope : legacyScope(scope, false));
+  if (!resolved.ok) return [];
+  var projectIndex = resolved.index;
   var pinned = [];
   projectIndex.files.forEach(function (entry) {
     if (entry.isPinned) pinned.push(entry.path);
   });
   return pinned;
+}
+
+function configureRegistry(options) {
+  options = options || {};
+  if (options.ttlMs !== undefined) {
+    if (!Number.isSafeInteger(options.ttlMs) || options.ttlMs < 1) throw new Error('ttlMs must be a positive integer');
+    registryConfig.ttlMs = options.ttlMs;
+  }
+  if (options.maxWorkspaces !== undefined) {
+    if (!Number.isSafeInteger(options.maxWorkspaces) || options.maxWorkspaces < 1) throw new Error('maxWorkspaces must be a positive integer');
+    registryConfig.maxWorkspaces = options.maxWorkspaces;
+  }
+  if (options.maxBytes !== undefined) {
+    if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) throw new Error('maxBytes must be a positive integer');
+    registryConfig.maxBytes = options.maxBytes;
+  }
+  cleanupRegistry();
+  return getRegistryStats();
+}
+
+function getRegistryStats() {
+  cleanupRegistry();
+  var estimatedBytes = 0;
+  var workspaces = [];
+  indexRegistry.forEach(function(entry) {
+    estimatedBytes += entry.estimatedBytes || 0;
+    workspaces.push({
+      userId: entry.index.userId,
+      workspaceId: entry.index.workspaceId,
+      generation: entry.index.generation,
+      lastAccessedAt: entry.lastAccessedAt,
+      expiresAt: entry.expiresAt,
+      estimatedBytes: entry.estimatedBytes || 0
+    });
+  });
+  return {
+    workspaceCount: indexRegistry.size,
+    estimatedBytes: estimatedBytes,
+    maxWorkspaces: registryConfig.maxWorkspaces,
+    maxBytes: registryConfig.maxBytes,
+    ttlMs: registryConfig.ttlMs,
+    workspaces: workspaces
+  };
+}
+
+function resetRegistryForTests() {
+  indexRegistry.clear();
+  latestGenerations.clear();
+  registryConfig.ttlMs = DEFAULT_INDEX_TTL_MS;
+  registryConfig.maxWorkspaces = DEFAULT_MAX_WORKSPACES;
+  registryConfig.maxBytes = DEFAULT_MAX_REGISTRY_BYTES;
+  legacyGeneration = 0;
+  legacyWorkspaceId = 'default';
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────
@@ -721,6 +1147,12 @@ module.exports = {
   pinFile: pinFile,
   getPinnedFiles: getPinnedFiles,
 
+  // Registry lifecycle
+  configureRegistry: configureRegistry,
+  getRegistryStats: getRegistryStats,
+  cleanupExpired: cleanupRegistry,
+  _resetRegistryForTests: resetRegistryForTests,
+
   // Content utilities
   chunkContent: chunkContent,
   extractSymbols: extractSymbols,
@@ -728,5 +1160,7 @@ module.exports = {
 
   // Constants
   DEFAULT_MAX_TOKENS: DEFAULT_MAX_TOKENS,
-  MAX_CHUNKS_PER_REQUEST: MAX_CHUNKS_PER_REQUEST
+  MAX_CHUNKS_PER_REQUEST: MAX_CHUNKS_PER_REQUEST,
+  MAX_INDEX_FILES: MAX_INDEX_FILES,
+  MAX_INDEX_TOTAL_BYTES: MAX_INDEX_TOTAL_BYTES
 };

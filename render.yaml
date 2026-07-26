@@ -34,6 +34,20 @@ services:
       # 不设置的话，每次部署重启都会生成新密钥，导致所有已登录用户被迫重新登录
       - key: API_SECRET
         sync: false
+
+      # Code 工作区 AI 与私有 GitHub 只读代理
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
+      - key: CODE_AI_CONTEXT_TOKENS
+        value: "1000000"
+      - key: CODE_AI_MAX_OUTPUT_TOKENS
+        value: "32768"
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_ALLOWED_REPOS
+        value: xutingjiang1004/xtj
       
       - key: SUPABASE_URL
         value: https://ithowxqignlhkwaykglt.supabase.co

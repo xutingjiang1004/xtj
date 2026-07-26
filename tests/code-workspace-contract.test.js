@@ -647,12 +647,11 @@ test('server parseOperations returns empty array on failure', () => {
 // ============================================================
 // Real behavior tests — system prompt
 // ============================================================
-// Phase 1: System prompt now uses project index with code snippets from context
-test('system prompt shows code snippets from project index, not static files', () => {
+test('system prompt requires real tool reads before workspace claims', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /项目代码/);
-  assert.match(codeAgent, /Never claim to have read or inspected files/);
-  assert.match(codeAgent, /Do not claim tests, builds, commands, or Git operations/);
+  assert.match(codeAgent, /real read-only project tools/);
+  assert.match(codeAgent, /Never claim to have read a file unless a tool returned it successfully/);
+  assert.match(codeAgent, /Never claim tests, builds, terminal commands or Git operations were executed/);
 });
 
 test('system prompt limits operations to 10', () => {
@@ -660,9 +659,9 @@ test('system prompt limits operations to 10', () => {
   assert.match(codeAgent, /at most 10 file operations/);
 });
 
-test('system prompt instructs to ask user for missing context', () => {
+test('system prompt instructs the agent to search before asking for files', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /If information is missing, ask the user/);
+  assert.match(codeAgent, /use the project tools to locate it before asking the user/);
 });
 
 // ============================================================

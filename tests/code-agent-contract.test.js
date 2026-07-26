@@ -62,15 +62,16 @@ test('code-agent validates history length', () => {
 
 // Phase 1: MAX_FILES and MAX_FILES_TOTAL_CONTENT are deprecated.
 // Context is now managed via project index + token budget, not static file uploads.
-test('code-agent uses project index for context selection', () => {
+test('code-agent uses the scoped project index through real tools', () => {
   assert.match(codeAgent, /codeIndex/);
-  assert.match(codeAgent, /selectBestChunks/);
   assert.match(codeAgent, /getIndexSummary/);
+  assert.match(codeAgent, /createCodeToolExecutor/);
+  assert.match(codeAgent, /workspace_generation/);
 });
 
-test('code-agent uses token budget management', () => {
-  assert.match(codeAgent, /TokenBudget/);
-  assert.match(codeAgent, /DEFAULT_MAX_TOKENS/);
+test('code-agent budgets against the configured model context window', () => {
+  assert.match(codeAgent, /CODE_AGENT_CONTEXT_TOKENS/);
+  assert.match(codeAgent, /inputBudget/);
   assert.match(codeAgent, /estimateTokens/);
 });
 
@@ -147,10 +148,11 @@ test('code-agent handles malformed JSON gracefully', () => {
 // ============================================================
 // 11. DeepSeek API 调用
 // ============================================================
-test('code-agent calls DeepSeek API', () => {
-  assert.match(codeAgent, /fetch\(baseUrl/);
-  assert.match(codeAgent, /Authorization.*Bearer/);
-  assert.match(codeAgent, /apiKey/);
+test('code-agent delegates to the shared DeepSeek tool loop', () => {
+  assert.match(codeAgent, /deps\.callDeepSeek/);
+  assert.match(codeAgent, /tools:\s*CODE_AGENT_TOOLS/);
+  assert.match(codeAgent, /tool_choice:\s*'auto'/);
+  assert.match(codeAgent, /max_tool_rounds:\s*CODE_AGENT_MAX_TOOL_ROUNDS/);
 });
 
 test('code-agent handles DeepSeek timeout', () => {
@@ -185,7 +187,7 @@ test('code-agent handles aborted requests', () => {
 // ============================================================
 test('code-agent has system prompt builder', () => {
   assert.match(codeAgent, /function buildSystemPrompt/);
-  assert.match(codeAgent, /expert coding assistant/);
+  assert.match(codeAgent, /expert coding and document assistant/);
 });
 
 test('system prompt enforces update, create and document only', () => {
