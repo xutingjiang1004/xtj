@@ -24,6 +24,7 @@
     attachmentProcessing: false,
     attachmentError: '',
     messages: [],
+    lastFailedMessage: '',
     pendingOperations: [],
     snapshots: {},
     sending: false,
@@ -753,6 +754,7 @@
     state.snapshots = {};
     state.fileHandles = {};
     state.messages = [];
+    state.lastFailedMessage = '';
     state._isReadOnly = false;
     // Clear backend index
     try {
@@ -1735,7 +1737,8 @@
           smoothScrolling: true,
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
-          padding: { top: 12 }
+          padding: { top: 12 },
+          readOnly: !!state._isReadOnly
         });
 
         state._monacoEditor = editor;
@@ -1779,7 +1782,8 @@
         '<span class="crumb">' + escapeHTML(tab.path) + '</span>' +
       '</div>' +
       '<div class="toolbar-group">' +
-        '<button class="toolbar-btn" id="codeSaveBtn" title="保存 (Ctrl+S)">💾</button>' +
+        (state._isReadOnly ? '<span class="toolbar-readonly-label">只读</span>' :
+          '<button class="toolbar-btn" id="codeSaveBtn" title="保存 (Ctrl+S)">💾</button>') +
       '</div>';
     container.appendChild(toolbar);
 
@@ -1787,6 +1791,7 @@
     textarea.className = 'code-textarea';
     textarea.value = tab._currentContent !== undefined ? tab._currentContent : (tab.content || '');
     textarea.spellcheck = false;
+    textarea.readOnly = !!state._isReadOnly;
     textarea.setAttribute('placeholder', '// 文件内容...');
     container.appendChild(textarea);
 
@@ -2795,11 +2800,13 @@
       '<input type="file" id="codeAttachmentInput" accept="' + ATTACHMENT_ACCEPT + '" multiple hidden>' +
       '<textarea id="codeChatInput" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
       '<button class="send-btn" id="codeChatSendBtn" title="发送">➤</button>';
+    inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="&#21462;&#28040;&#35831;&#27714;">&#21462;&#28040;</button>';
     _dom.chatPanel.appendChild(inputArea);
 
     // Auto-resize textarea
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
+    var cancelBtn = document.getElementById('codeChatCancelBtn');
     var attachmentButton = document.getElementById('codeAttachmentBtn');
     var attachmentInput = document.getElementById('codeAttachmentInput');
     var attachmentsContainer = document.getElementById('codeChatAttachments');
@@ -2865,6 +2872,12 @@
         sendMessage();
       });
     }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function () {
+        cancelCurrentRequest();
+      });
+    }
+    updateChatRequestControls();
 
     // Scroll to bottom
     scrollChatToBottom();
@@ -3019,6 +3032,7 @@
     if (!input) return;
     var message = input.value.trim();
     if (!message) return;
+    state.lastFailedMessage = message;
 
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
@@ -3028,6 +3042,7 @@
     input.disabled = true;
     var sendBtn = document.getElementById('codeChatSendBtn');
     if (sendBtn) sendBtn.disabled = true;
+    updateChatRequestControls();
 
     // Cancel previous request
     if (state._abortController) {
@@ -3077,7 +3092,63 @@
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       var body = buildChatRequestBody(message, historyMsgs);
       return sendApiRequest(body, requestId, timeStr, wsGen);
+    }).catch(function (err) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+      if (err && err.name === 'AbortError') {
+        removeTypingIndicator();
+        state.sending = false;
+        state._abortController = null;
+        updateChatRequestControls();
+        return null;
+      }
+      removeTypingIndicator();
+      restoreFailedMessage(message);
+      state.messages.push({ role: 'assistant', content: 'Request failed: ' + ((err && err.message) || String(err)), time: timeStr });
+      renderChatPanel();
+      restoreFailedMessage(message);
+      state.sending = false;
+      state._abortController = null;
+      updateChatRequestControls();
+      return null;
     });
+  }
+
+  function restoreFailedMessage(message) {
+    if (!message) return;
+    state.lastFailedMessage = message;
+    var input = document.getElementById('codeChatInput');
+    if (input && !input.value) {
+      input.value = message;
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
+    }
+  }
+
+  function updateChatRequestControls() {
+    var input = document.getElementById('codeChatInput');
+    var sendBtn = document.getElementById('codeChatSendBtn');
+    var cancelBtn = document.getElementById('codeChatCancelBtn');
+    if (input) input.disabled = !!state.sending;
+    if (sendBtn) {
+      sendBtn.disabled = !!state.sending;
+      sendBtn.style.display = state.sending ? 'none' : '';
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = !state.sending;
+      cancelBtn.style.display = state.sending ? '' : 'none';
+    }
+  }
+
+  function cancelCurrentRequest() {
+    if (!state.sending || !state._abortController) return false;
+    state._requestId++;
+    try { state._abortController.abort(); } catch (e) { /* ignore */ }
+    state._abortController = null;
+    state.sending = false;
+    removeTypingIndicator();
+    restoreFailedMessage(state.lastFailedMessage);
+    updateChatRequestControls();
+    return true;
   }
 
   function sendApiRequest(body, requestId, timeStr, wsGen) {
@@ -3155,6 +3226,7 @@
       var now2 = new Date();
       var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
 
+      state.lastFailedMessage = '';
       state.messages.push({ role: 'assistant', content: replyContent, time: timeStr2 });
 
       // Store operations
@@ -3187,9 +3259,11 @@
 
       var errMsg = (err && err.message) ? err.message : String(err);
       console.error('[CODE-AI] Request failed:', errMsg);
+      restoreFailedMessage(body && body.message);
       state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr });
 
       renderChatPanel();
+      restoreFailedMessage(body && body.message);
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
@@ -3201,6 +3275,7 @@
       if (inp) inp.disabled = false;
       var sb = document.getElementById('codeChatSendBtn');
       if (sb) sb.disabled = false;
+      updateChatRequestControls();
     });
   }
 
@@ -3372,6 +3447,19 @@
       '</div>';
 
     _dom.editorArea.appendChild(applyBar);
+
+    // GitHub and browser-fallback workspaces are read-only. Do not expose
+    // controls that can only fail with a misleading error toast.
+    if (state._isReadOnly) {
+      var readOnlyApplyActions = applyBar.querySelector('.apply-actions');
+      if (readOnlyApplyActions) {
+        readOnlyApplyActions.replaceChildren();
+        var readOnlyLabel = document.createElement('span');
+        readOnlyLabel.className = 'apply-readonly-label';
+        readOnlyLabel.textContent = '只读工作区不可应用修改';
+        readOnlyApplyActions.appendChild(readOnlyLabel);
+      }
+    }
 
     // Bind buttons
     var undoBtn = document.getElementById('codeUndoBtn');
@@ -3925,6 +4013,7 @@
       buildProjectIndex: buildProjectIndex,
       saveFile: saveFile,
       undoOperations: undoOperations,
+      cancelCurrentRequest: cancelCurrentRequest,
       selectAndOpenFile: selectAndOpenFile,
       loadProjectIndexStatus: loadProjectIndexStatus,
       openFile: openFile,
