@@ -664,12 +664,34 @@ test('system prompt instructs the agent to search before asking for files', () =
   assert.match(codeAgent, /use the project tools to locate it before asking the user/);
 });
 
+test('AI chat exposes a real cancel control and abort path', () => {
+  assert.match(codeWorkspace, /id="codeChatCancelBtn"/);
+  assert.match(codeWorkspace, /function cancelCurrentRequest\(\)/);
+  assert.match(codeWorkspace, /_abortController\.abort\(\)/);
+  assert.match(codeWorkspace, /removeTypingIndicator\(\)/);
+});
+
+test('AI chat preserves a failed message for retry', () => {
+  assert.match(codeWorkspace, /lastFailedMessage/);
+  assert.match(codeWorkspace, /function restoreFailedMessage\(message\)/);
+  assert.match(codeWorkspace, /restoreFailedMessage\(body && body\.message\)/);
+  assert.match(codeWorkspace, /input\.value = message/);
+});
+
 test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /id="codeWelcomeFileBtn"/);
   assert.match(codeWorkspace, /function selectAndOpenFile\(\)/);
   assert.match(codeWorkspace, /fs\.selectFile/);
   assert.match(codeWorkspace, /openFile\(handle\.name\)/);
   assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
+});
+
+test('read-only Code workspaces do not expose write controls', () => {
+  assert.match(codeWorkspace, /readOnly: !!state\._isReadOnly/);
+  assert.match(codeWorkspace, /textarea\.readOnly = !!state\._isReadOnly/);
+  assert.match(codeWorkspace, /state\._isReadOnly \? '<span class="toolbar-readonly-label">/);
+  assert.match(codeWorkspace, /readOnlyApplyActions\.replaceChildren\(\)/);
+  assert.match(fs.readFileSync('css/code-workspace.css', 'utf8'), /\.code-readonly-banner/);
 });
 
 // ============================================================

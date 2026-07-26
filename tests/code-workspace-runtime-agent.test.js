@@ -40,6 +40,7 @@ function loadWorkspace(protectedFetch, codeFS) {
   };
   const documentObject = {
     addEventListener() {},
+    getElementById() { return null; },
     documentElement: {
       getAttribute() { return 'light'; }
     }
@@ -392,4 +393,18 @@ test('undoOperations ignores duplicate clicks while the first undo is running', 
   resolveWrite({ sha256: 'old-sha' });
   assert.equal(await first, true);
   assert.equal(Object.keys(loaded.state.snapshots).length, 0);
+});
+
+test('cancelCurrentRequest aborts the active request and restores idle state', () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  let aborted = 0;
+  loaded.state.sending = true;
+  loaded.state._abortController = { abort() { aborted++; } };
+  const before = loaded.state._requestId;
+  assert.equal(loaded.hooks.cancelCurrentRequest(), true);
+  assert.equal(aborted, 1);
+  assert.equal(loaded.state.sending, false);
+  assert.equal(loaded.state._abortController, null);
+  assert.equal(loaded.state._requestId, before + 1);
+  assert.equal(loaded.hooks.cancelCurrentRequest(), false);
 });
