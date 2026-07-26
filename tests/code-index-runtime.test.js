@@ -44,6 +44,23 @@ test('isolates indexes, pins, and clear operations by user and workspace', () =>
   assert.equal(codeIndex.getIndexSummary(scopeB).totalFiles, 1);
 });
 
+test('read ranges report the real total line count separately from the returned slice', () => {
+  const scope = { userId: 'alice', workspaceId: 'line-counts', generation: 1 };
+  const content = 'one\ntwo\nthree\nfour';
+  assert.equal(codeIndex.buildIndex(scope, [file('src/lines.js', content)]).ok, true);
+  const result = codeIndex.readFileRange(scope, 'src/lines.js', 2, 3);
+  assert.deepEqual(result.lines.map(line => line.lineNum), [2, 3]);
+  assert.equal(result.totalLines, 2);
+  assert.equal(result.totalFileLines, 4);
+});
+
+test('index summaries preserve a partial-scan marker for bounded workspaces', () => {
+  const scope = { userId: 'partial-user', workspaceId: 'partial-project', generation: 1 };
+  const built = codeIndex.buildIndex(scope, [file('src/partial.js', 'const partial = true;')], { truncated: true });
+  assert.equal(built.ok, true);
+  assert.equal(codeIndex.getIndexSummary(scope).truncated, true);
+});
+
 test('rejects stale generation and enforces an exact generation when reading', () => {
   const gen2 = { userId: 'alice', workspaceId: 'project', generation: 2 };
   const gen1 = { userId: 'alice', workspaceId: 'project', generation: 1 };
@@ -74,6 +91,30 @@ test('validates duplicate paths, traversal, size, and SHA-256', () => {
   assert.equal(codeIndex.buildIndex(scope, [{ ...good, size: -1 }]).code, 'INVALID_SIZE');
   assert.equal(codeIndex.buildIndex(scope, [{ ...good, sha256: 'bad' }]).code, 'INVALID_SHA256');
   assert.equal(codeIndex.buildIndex(scope, [{ ...good, sha256: '0'.repeat(64) }]).code, 'SHA256_MISMATCH');
+});
+
+test('builds large indexes through bounded batches and publishes only on finalize', () => {
+  const scope = { userId: 'alice', workspaceId: 'batched-project', generation: 1 };
+  const first = codeIndex.appendIndexBatch(scope, [file('src/first.js', 'const first = true;')]);
+  assert.equal(first.ok, true);
+  assert.equal(first.status, 'building');
+  assert.equal(codeIndex.getIndexSummary(scope), null);
+
+  const duplicate = codeIndex.appendIndexBatch(scope, [file('src/first.js', 'const changed = true;')]);
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.code, 'DUPLICATE_PATH');
+
+  const rejectedBatch = codeIndex.appendIndexBatch(scope, [
+    file('src/second.js', 'const second = true;'),
+    file('src/first.js', 'const duplicate = true;')
+  ]);
+  assert.equal(rejectedBatch.ok, false);
+
+  const final = codeIndex.appendIndexBatch(scope, [file('src/second.js', 'const second = true;')], { finalize: true });
+  assert.equal(final.ok, true);
+  assert.equal(final.status, 'ready');
+  assert.equal(final.totalFiles, 2);
+  assert.equal(codeIndex.searchCode(scope, 'second').results.length, 1);
 });
 
 test('expands Chinese search intent into code aliases', () => {

@@ -21,9 +21,11 @@
     lastToolTrace: [],
     capabilities: null,
     attachments: [],
+    lastSentAttachmentPaths: [],
     attachmentProcessing: false,
     attachmentError: '',
     messages: [],
+    lastFailedMessage: '',
     pendingOperations: [],
     snapshots: {},
     sending: false,
@@ -44,6 +46,9 @@
     _indexStatusPromise: null,
     _indexBuildKey: '',
     _capabilitiesPromise: null,
+    _openFilePromises: {},
+    _savePromises: {},
+    _undoLock: false,
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
@@ -59,7 +64,10 @@
   var MAX_OPEN_FILE_CHARS = 240000;
   var MAX_OPEN_FILES_TOTAL_CHARS = 900000;
   var MAX_ATTACHMENTS = 8;
-  var MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
+  // Keep each index request comfortably below the server JSON/body limit.
+  var MAX_INDEX_BATCH_BYTES = 3 * 1024 * 1024;
+  // Must stay aligned with render-api/code-agent.js MAX_DOCUMENT_UPLOAD_BYTES.
+  var MAX_ATTACHMENT_FILE_BYTES = 20 * 1024 * 1024;
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
@@ -326,6 +334,10 @@
       if (!state.active) return;
 
       if (result && result.status === 'granted') {
+        state.directoryHandle = result.handle;
+        state.workspaceName = result.handle.name;
+        state.workspaceMode = 'local';
+        state._isReadOnly = false;
         renderWorkspace();
         if (result.kind === 'file') {
           window.setTimeout(function () { openFile(state.workspaceName); }, 0);
@@ -344,11 +356,6 @@
       return Promise.resolve({ status: 'missing' });
     }
     return window.__xtjCodeFS.restoreWorkspace({ requestPermission: false }).then(function (result) {
-      if (result.status === 'granted') {
-        state.directoryHandle = result.handle;
-        state.workspaceName = result.handle.name;
-        state._isReadOnly = false;
-      }
       return result;
     }).catch(function () {
       return { status: 'error' };
@@ -380,10 +387,14 @@
     state._indexStatusController = null;
     state._githubLoadPromise = null;
     state._indexBuildPromise = null;
+    state._openFilePromises = {};
+    state._savePromises = {};
     state._requestId++;
     revokeAllUrls();
     disposeMonaco();
     state.sending = false;
+    clearAttachments();
+    state.lastSentAttachmentPaths = [];
     state.active = false;
     _dom = {};
     // Don't clear directoryHandle so workspace can be restored
@@ -435,6 +446,16 @@
       });
     }
 
+    // Bind the single-file entry point here.  The composer is rendered only
+    // after a workspace is open, so binding this button from renderComposer()
+    // leaves the welcome-page action inert.
+    var fileBtn = document.getElementById('codeWelcomeFileBtn');
+    if (fileBtn) {
+      fileBtn.addEventListener('click', function () {
+        selectAndOpenFile();
+      });
+    }
+
     // Check if there's a stored handle path — show restore section
     var stored = null;
     try {
@@ -459,6 +480,7 @@
       recentEl.appendChild(statusText);
 
       restoreBtn.addEventListener('click', function () {
+        var manualRestoreGeneration = ++state.restoreGeneration;
         restoreBtn.disabled = true;
         restoreBtn.innerHTML = '<span class="folder-icon">⏳</span> 正在恢复...';
         statusText.textContent = '';
@@ -473,6 +495,7 @@
         }
 
         window.__xtjCodeFS.restoreWorkspace({ requestPermission: true }).then(function (result) {
+          if (!state.active || manualRestoreGeneration !== state.restoreGeneration) return;
           restoreBtn.disabled = false;
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
 
@@ -512,6 +535,7 @@
             bindClearStorageBtn(statusText, recentEl);
           }
         }).catch(function (err) {
+          if (!state.active || manualRestoreGeneration !== state.restoreGeneration) return;
           restoreBtn.disabled = false;
           restoreBtn.innerHTML = '<span class="folder-icon">🔄</span> 恢复上次工作区';
           statusText.innerHTML = '恢复失败，可能是浏览器存储记录损坏。<br><button class="code-retry-btn" id="codeClearStorageBtn">清除旧记录</button>';
@@ -561,7 +585,7 @@
   }
 
   function selectAndOpenFile() {
-    state.restoreGeneration++;
+    var selectionGeneration = ++state.restoreGeneration;
     if (hasUnsavedChanges() && !confirm('当前工作区存在未保存内容。打开单个文件将放弃这些修改，是否继续？')) {
       return;
     }
@@ -574,6 +598,7 @@
 
     function openSelectedHandle(handle, readOnly) {
       if (!handle) return;
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name || '单个文件';
@@ -595,6 +620,13 @@
       }
       fs.selectFile().then(function (handle) {
         if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
+        if (!state.active || selectionGeneration !== state.restoreGeneration) {
+          // selectFile() installs its synthetic single-file root immediately.
+          // Restore the still-current workspace when an older picker resolves
+          // after the user has already switched elsewhere.
+          if (state.directoryHandle && fs.setDirHandle) fs.setDirHandle(state.directoryHandle);
+          return;
+        }
         openSelectedHandle(handle, false);
       }).catch(function (err) {
         if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
@@ -612,6 +644,7 @@
     input.multiple = false;
     input.accept = '*/*';
     input.onchange = function () {
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       var file = input.files && input.files[0];
       if (!file) return;
       var mockFileHandle = {
@@ -705,6 +738,9 @@
     state._indexBuildPromise = null;
     state._indexStatusPromise = null;
     state._indexBuildKey = '';
+    state._openFilePromises = {};
+    state._savePromises = {};
+    state._undoLock = false;
     state._requestId++;
     state.sending = false;
     state.workspaceGeneration++;
@@ -714,13 +750,15 @@
     state.projectIndexStatus = null;
     state.lastReadContext = null;
     state.lastToolTrace = [];
-    state.attachments = [];
+    clearAttachments();
+    state.lastSentAttachmentPaths = [];
     state.attachmentProcessing = false;
     state.attachmentError = '';
     state.pendingOperations = [];
     state.snapshots = {};
     state.fileHandles = {};
     state.messages = [];
+    state.lastFailedMessage = '';
     state._isReadOnly = false;
     // Clear backend index
     try {
@@ -739,7 +777,7 @@
 
   function selectAndOpenWorkspace() {
     // P0: 递增 restoreGeneration，使后台旧恢复立即失效
-    state.restoreGeneration++;
+    var selectionGeneration = ++state.restoreGeneration;
 
     // P0: 检查未保存修改
     if (hasUnsavedChanges()) {
@@ -756,6 +794,7 @@
       input.webkitdirectory = true;
       input.multiple = true;
       input.onchange = function(e) {
+        if (!state.active || selectionGeneration !== state.restoreGeneration) return;
         if (!e.target.files || !e.target.files.length) return;
         var files = Array.from(e.target.files);
         var dirName = files[0].webkitRelativePath.split('/')[0] || 'Workspace';
@@ -895,6 +934,7 @@
         btn.innerHTML = originalText;
       }
       if (!handle) return; // User cancelled
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       resetWorkspaceState();
       state.directoryHandle = handle;
       state.workspaceName = handle.name;
@@ -1036,7 +1076,9 @@
   // restoreTabs() — restore open tabs after cleanup
   // ──────────────────────────────────────────────
   function restoreTabs() {
-    if (state.openTabs.length === 0) return;
+    if (state.openTabs.length === 0) return Promise.resolve([]);
+    var wsGen = state.workspaceGeneration;
+    var tabsToRestore = state.openTabs.slice();
 
     // Validate activePath
     var found = false;
@@ -1054,19 +1096,26 @@
     if (!fs || !fs.readFileByPath) {
       renderTabs();
       renderEditor();
-      return;
+      return Promise.resolve([]);
     }
 
     // Re-read all open tabs to refresh content and blob URLs
     var readPromises = [];
-    for (var i = 0; i < state.openTabs.length; i++) {
+    for (var i = 0; i < tabsToRestore.length; i++) {
       (function (tab) {
         readPromises.push(
           new Promise(function (resolve) {
             fs.readFileByPath(tab.path).then(function (result) {
+              if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+                if (result && (result.type === 'image' || result.type === 'pdf') && result.content) {
+                  try { URL.revokeObjectURL(result.content); } catch (e) { /* ignore */ }
+                }
+                resolve({ tab: tab, stale: true });
+                return;
+              }
               if (!result) {
                 // File was deleted externally
-                resolve({ tab: tab, deleted: true });
+                resolve({ tab: tab, deleted: !tab.modified, failed: !!tab.modified });
                 return;
               }
               // Update content for text files
@@ -1095,19 +1144,27 @@
                 }
               }
               resolve({ tab: tab, deleted: false });
-            }).catch(function () {
-              // Read failed — file may be deleted
-              resolve({ tab: tab, deleted: true });
+            }).catch(function (error) {
+              var notFound = error && (error.name === 'NotFoundError' || /\bnot found\b/i.test(error.message || ''));
+              resolve({
+                tab: tab,
+                deleted: notFound && !tab.modified,
+                failed: !notFound || !!tab.modified,
+                error: error
+              });
             });
           })
         );
-      })(state.openTabs[i]);
+      })(tabsToRestore[i]);
     }
 
-    Promise.all(readPromises).then(function (results) {
+    return Promise.all(readPromises).then(function (results) {
+      if (wsGen !== state.workspaceGeneration) return results;
       // Remove tabs for deleted files
       var deletedPaths = [];
+      var failedPaths = [];
       for (var k = results.length - 1; k >= 0; k--) {
+        if (results[k].failed) failedPaths.push(results[k].tab.path);
         if (results[k].deleted) {
           var t = results[k].tab;
           deletedPaths.push(t.path);
@@ -1141,6 +1198,10 @@
       if (deletedPaths.length > 0) {
         showToast('部分文件已被外部删除，已关闭对应标签', 'warning');
       }
+      if (failedPaths.length > 0) {
+        showToast('部分文件暂时无法重新读取，已保留标签和未保存内容', 'warning');
+      }
+      return results;
     });
   }
 
@@ -1362,13 +1423,13 @@
   // openFile(path)
   // ──────────────────────────────────────────────
   function openFile(path) {
-    if (!path) return;
+    if (!path) return Promise.resolve(null);
 
     try {
       validatePath(path);
     } catch (e) {
       showToast('无效的文件路径', 'error');
-      return;
+      return Promise.resolve(null);
     }
 
     // Check if already open
@@ -1377,7 +1438,7 @@
         state.activePath = path;
         renderTabs();
         renderEditor();
-        return;
+        return Promise.resolve(state.openTabs[i]);
       }
     }
 
@@ -1385,13 +1446,33 @@
     var fs = window.__xtjCodeFS;
     if (!fs || !fs.readFileByPath) {
       showToast('文件系统不可用', 'error');
-      return;
+      return Promise.resolve(null);
     }
 
-    fs.readFileByPath(path).then(function (result) {
+    var wsGen = state.workspaceGeneration;
+    var openKey = wsGen + ':' + path;
+    if (state._openFilePromises[openKey]) return state._openFilePromises[openKey];
+
+    var promise = fs.readFileByPath(path).then(function (result) {
+      if (wsGen !== state.workspaceGeneration || !state.active) {
+        if (result && (result.type === 'image' || result.type === 'pdf') && result.content) {
+          try { URL.revokeObjectURL(result.content); } catch (e) { /* ignore */ }
+        }
+        return null;
+      }
       if (!result) {
         showToast('无法读取文件: ' + path, 'error');
-        return;
+        return null;
+      }
+
+      // Another asynchronous path may have opened this file while it was read.
+      for (var existingIndex = 0; existingIndex < state.openTabs.length; existingIndex++) {
+        if (state.openTabs[existingIndex].path === path) {
+          state.activePath = path;
+          renderTabs();
+          renderEditor();
+          return state.openTabs[existingIndex];
+        }
       }
 
       var tab = {
@@ -1430,10 +1511,19 @@
           renderProjectStatus();
         }
       }
+      return tab;
     }).catch(function (err) {
-
+      if (wsGen !== state.workspaceGeneration || !state.active) return null;
       showToast('打开文件失败: ' + (err && err.message ? err.message : String(err)), 'error');
+      return null;
+    }).then(function (result) {
+      if (state._openFilePromises[openKey] === promise) {
+        delete state._openFilePromises[openKey];
+      }
+      return result;
     });
+    state._openFilePromises[openKey] = promise;
+    return promise;
   }
 
   // ──────────────────────────────────────────────
@@ -1651,7 +1741,8 @@
           smoothScrolling: true,
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
-          padding: { top: 12 }
+          padding: { top: 12 },
+          readOnly: !!state._isReadOnly
         });
 
         state._monacoEditor = editor;
@@ -1695,7 +1786,8 @@
         '<span class="crumb">' + escapeHTML(tab.path) + '</span>' +
       '</div>' +
       '<div class="toolbar-group">' +
-        '<button class="toolbar-btn" id="codeSaveBtn" title="保存 (Ctrl+S)">💾</button>' +
+        (state._isReadOnly ? '<span class="toolbar-readonly-label">只读</span>' :
+          '<button class="toolbar-btn" id="codeSaveBtn" title="保存 (Ctrl+S)">💾</button>') +
       '</div>';
     container.appendChild(toolbar);
 
@@ -1703,6 +1795,7 @@
     textarea.className = 'code-textarea';
     textarea.value = tab._currentContent !== undefined ? tab._currentContent : (tab.content || '');
     textarea.spellcheck = false;
+    textarea.readOnly = !!state._isReadOnly;
     textarea.setAttribute('placeholder', '// 文件内容...');
     container.appendChild(textarea);
 
@@ -1771,16 +1864,39 @@
       return;
     }
 
-    fs.writeFileByPath(path, content).then(function (result) {
+    var wsGen = state.workspaceGeneration;
+    var saveKey = wsGen + ':' + path;
+    if (state._savePromises[saveKey]) return state._savePromises[saveKey];
+    var promise = fs.writeFileByPath(path, content).then(function (result) {
+      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) return false;
+      var currentContent = tab._currentContent;
+      if (state._monacoEditor && state.activePath === path) currentContent = state._monacoEditor.getValue();
+      var unchanged = currentContent === undefined || currentContent === content;
       tab.content = content;
-      tab.modified = false;
-      tab._currentContent = undefined;
       tab.sha256 = result.sha256 || '';
+      if (unchanged) {
+        tab.modified = false;
+        tab._currentContent = undefined;
+      } else {
+        tab.modified = true;
+      }
       renderTabs();
-      showToast('文件已保存', 'success');
+      showToast(unchanged ? 'File saved' : 'Previous version saved; newer edits remain unsaved', unchanged ? 'success' : 'warning');
+      return true;
     }).catch(function (err) {
+      // A save belonging to a replaced workspace must not surface an error
+      // toast in the new workspace. The operation is stale UI work.
+      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+        return false;
+      }
       showToast('保存失败: ' + (err && err.message ? err.message : String(err)), 'error');
+      return false;
+    }).then(function (result) {
+      if (state._savePromises[saveKey] === promise) delete state._savePromises[saveKey];
+      return result;
     });
+    state._savePromises[saveKey] = promise;
+    return promise;
   }
 
   // ──────────────────────────────────────────────
@@ -2079,13 +2195,46 @@
         indexableFiles: files.length
       };
       renderProjectStatus();
-      return postJson('/api/code/index/build', {
-        workspaceId: workspaceId,
-        workspaceGeneration: wsGen,
-        files: files
-      }, controller.signal).then(function (response) {
-        return responseJson(response, '索引构建失败');
-      });
+      var batches = [];
+      var currentBatch = [];
+      var currentBytes = 0;
+      for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
+        var fileBytes = 0;
+        try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
+        if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBytes = 0;
+        }
+        currentBatch.push(files[batchIndex]);
+        currentBytes += fileBytes;
+      }
+      if (currentBatch.length || !batches.length) batches.push(currentBatch);
+      var useBatches = batches.length > 1;
+      return batches.reduce(function (chain, batch, index) {
+        return chain.then(function () {
+          if (!isCurrentBuild()) throw createNamedAbortError();
+          state.projectIndexStatus.phase = useBatches
+            ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
+            : '正在上传索引...';
+          renderProjectStatus();
+          var payload = {
+            workspaceId: workspaceId,
+            workspaceGeneration: wsGen,
+            files: batch,
+            truncated: result.truncated === true
+          };
+          if (useBatches) {
+            payload.append = true;
+            payload.finalize = index === batches.length - 1;
+            payload.batchIndex = index;
+            payload.batchCount = batches.length;
+          }
+          return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
+            return responseJson(response, 'index build failed');
+          });
+        });
+      }, Promise.resolve());
     }).then(function (result) {
       if (!isCurrentBuild()) return null;
       state.projectIndexStatus = {
@@ -2094,6 +2243,7 @@
         builtAt: result.builtAt,
         skippedFiles: result.skippedFiles || 0,
         failedFiles: result.failedFiles || 0,
+        truncated: result.truncated === true,
         indexed: true
       };
       renderProjectStatus();
@@ -2143,6 +2293,12 @@
         '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
         '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
+      if (idx.truncated) {
+        var truncationWarning = document.createElement('div');
+        truncationWarning.className = 'code-index-warning';
+        truncationWarning.textContent = '⚠ 仅索引扫描上限内的文件';
+        indexDiv.appendChild(truncationWarning);
+      }
     } else if (state.projectIndexStatus && state.projectIndexStatus.error) {
       indexDiv.innerHTML =
         '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +
@@ -2243,7 +2399,8 @@
     }
 
     appendPathSection('固定文件', state.pinnedFiles, '📌', true);
-    appendPathSection('上传资料', state.attachments.map(function (attachment) { return attachment.path; }), '📎', false);
+    appendPathSection('本轮附件', state.lastSentAttachmentPaths.length ? state.lastSentAttachmentPaths : state.attachments.filter(function (attachment) { return !attachment.pinned; }).map(function (attachment) { return attachment.path; }), '📎', false);
+    appendPathSection('固定附件', state.attachments.filter(function (attachment) { return attachment.pinned; }).map(function (attachment) { return attachment.path; }), '📌', false);
 
     // Actions
     var actionsDiv = document.createElement('div');
@@ -2561,17 +2718,50 @@
     }, 0);
   }
 
+  // Attachments are in-memory context. Release any browser-owned resources
+  // when a chip is removed or its workspace is replaced.
+  function releaseAttachment(attachment) {
+    if (!attachment) return;
+    var urlApi = (window && window.URL) || (typeof URL !== 'undefined' ? URL : null);
+    var objectUrl = attachment.objectUrl || attachment.previewUrl || attachment.blobUrl;
+    if (objectUrl && urlApi && typeof urlApi.revokeObjectURL === 'function') {
+      try { urlApi.revokeObjectURL(objectUrl); } catch (e) { /* ignore */ }
+    }
+    attachment.objectUrl = null;
+    attachment.previewUrl = null;
+    attachment.blobUrl = null;
+    attachment.content = '';
+  }
+
+  function clearAttachments() {
+    for (var i = 0; i < state.attachments.length; i++) releaseAttachment(state.attachments[i]);
+    state.attachments = [];
+    state.attachmentProcessing = false;
+    state.attachmentError = '';
+  }
+
+  function consumeTransientAttachments() {
+    var retained = [];
+    for (var i = 0; i < state.attachments.length; i++) {
+      var attachment = state.attachments[i];
+      if (attachment && attachment.pinned === true) retained.push(attachment);
+      else releaseAttachment(attachment);
+    }
+    state.attachments = retained;
+  }
+
   function processAttachmentFile(file) {
     if (!file || !isAllowedAttachment(file.name)) {
       return Promise.reject(new Error('仅支持 DOCX、PDF、XLSX、XLS、PPTX、TXT、CSV、MD、JSON'));
     }
     if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
-      return Promise.reject(new Error('资料文件不能超过 50MB'));
+      return Promise.reject(new Error('资料文件不能超过 20MB'));
     }
     if (state.attachments.length >= MAX_ATTACHMENTS) {
       return Promise.reject(new Error('每个会话最多添加 ' + MAX_ATTACHMENTS + ' 份资料'));
     }
 
+    var attachmentGeneration = state.workspaceGeneration;
     abortController(state._attachmentController);
     state._attachmentController = new AbortController();
     var controller = state._attachmentController;
@@ -2591,6 +2781,9 @@
     }).then(function (response) {
       return responseJson(response, '资料解析失败');
     }).then(function (data) {
+      if (attachmentGeneration !== state.workspaceGeneration) {
+        throw createNamedAbortError();
+      }
       var content = String(data.text || '');
       if (!content.trim()) throw new Error('资料中没有可读取的文字');
       if (currentAttachmentChars() + content.length > MAX_ATTACHMENT_TOTAL_CHARS) {
@@ -2605,17 +2798,24 @@
           content: content,
           sha256: sha256,
           source: 'attachment',
+          pinned: false,
           truncated: !!data.truncated,
           metadata: data.metadata || {}
         });
+        if (attachmentGeneration !== state.workspaceGeneration) {
+          releaseAttachment(state.attachments[state.attachments.length - 1]);
+          state.attachments.pop();
+          throw createNamedAbortError();
+        }
         state.attachmentProcessing = false;
-        state._attachmentController = null;
+        if (state._attachmentController === controller) state._attachmentController = null;
         renderChatPanel();
         return state.attachments[state.attachments.length - 1];
       });
     }).catch(function (error) {
+      if (attachmentGeneration !== state.workspaceGeneration) throw error;
       state.attachmentProcessing = false;
-      state._attachmentController = null;
+      if (state._attachmentController === controller) state._attachmentController = null;
       if (error && error.name !== 'AbortError') {
         state.attachmentError = error.message || '资料解析失败';
         renderChatPanel();
@@ -2626,8 +2826,15 @@
 
   function removeAttachment(index) {
     if (index < 0 || index >= state.attachments.length) return;
+    releaseAttachment(state.attachments[index]);
     state.attachments.splice(index, 1);
     state.attachmentError = '';
+    renderChatPanel();
+  }
+
+  function toggleAttachmentPinned(index) {
+    if (index < 0 || index >= state.attachments.length) return;
+    state.attachments[index].pinned = state.attachments[index].pinned !== true;
     renderChatPanel();
   }
 
@@ -2661,11 +2868,13 @@
       '<input type="file" id="codeAttachmentInput" accept="' + ATTACHMENT_ACCEPT + '" multiple hidden>' +
       '<textarea id="codeChatInput" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
       '<button class="send-btn" id="codeChatSendBtn" title="发送">➤</button>';
+    inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="&#21462;&#28040;&#35831;&#27714;">&#21462;&#28040;</button>';
     _dom.chatPanel.appendChild(inputArea);
 
     // Auto-resize textarea
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
+    var cancelBtn = document.getElementById('codeChatCancelBtn');
     var attachmentButton = document.getElementById('codeAttachmentBtn');
     var attachmentInput = document.getElementById('codeAttachmentInput');
     var attachmentsContainer = document.getElementById('codeChatAttachments');
@@ -2674,14 +2883,20 @@
       var attachmentHtml = '';
       for (var ai = 0; ai < state.attachments.length; ai++) {
         var attachment = state.attachments[ai];
-        attachmentHtml += '<span class="code-attachment-chip" title="' + escapeHTML(attachment.path) + '">' +
-          '📎 ' + escapeHTML(attachment.name) +
+        attachmentHtml += '<span class="code-attachment-chip ' + (attachment.pinned ? 'is-pinned' : '') + '" title="' + escapeHTML(attachment.path) + '">' +
+          (attachment.pinned ? '📌 固定资料 ' : '📎 本次发送 ') + escapeHTML(attachment.name) +
           (attachment.truncated ? '（已截断）' : '') +
+          '<button type="button" class="code-attachment-pin-toggle" data-pin-attachment="' + ai + '" aria-label="' + (attachment.pinned ? '取消固定 ' : '固定 ') + escapeHTML(attachment.name) + '">' + (attachment.pinned ? '取消固定' : '固定') + '</button>' +
           '<button type="button" data-remove-attachment="' + ai + '" aria-label="移除 ' + escapeHTML(attachment.name) + '">×</button></span>';
       }
       if (state.attachmentProcessing) attachmentHtml += '<span class="code-attachment-status">正在解析资料...</span>';
       if (state.attachmentError) attachmentHtml += '<span class="code-attachment-error">' + escapeHTML(state.attachmentError) + '</span>';
       attachmentsContainer.innerHTML = attachmentHtml;
+      Array.prototype.forEach.call(attachmentsContainer.querySelectorAll('[data-pin-attachment]'), function (button) {
+        button.addEventListener('click', function () {
+          toggleAttachmentPinned(parseInt(button.getAttribute('data-pin-attachment'), 10));
+        });
+      });
       Array.prototype.forEach.call(attachmentsContainer.querySelectorAll('[data-remove-attachment]'), function (button) {
         button.addEventListener('click', function () {
           removeAttachment(parseInt(button.getAttribute('data-remove-attachment'), 10));
@@ -2731,6 +2946,12 @@
         sendMessage();
       });
     }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function () {
+        cancelCurrentRequest();
+      });
+    }
+    updateChatRequestControls();
 
     // Scroll to bottom
     scrollChatToBottom();
@@ -2754,18 +2975,57 @@
         // fall through to safe fallback
       } catch (e) { /* ignore, fall through to safe fallback */ }
     }
-    // Safe fallback: Escape HTML first, then apply simple formatting
-    var html = escapeHTML(text);
-    // Code blocks
-    html = html.replace(/```[a-z]*\n([\s\S]*?)```/gi, '<pre><code>$1</code></pre>');
-    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // Bold
-    html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
-    return html;
+    // Safe fallback: escape *before* building our small, fixed HTML subset.
+    // This still covers useful answers when optional markdown libraries were
+    // not loaded: headings, lists, fenced/inline code and GFM-style tables.
+    function inline(value) {
+      return escapeHTML(value)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    }
+    function tableCells(row) {
+      return row.trim().replace(/^\||\|$/g, '').split('|').map(function(cell) { return inline(cell.trim()); });
+    }
+    var lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+    var output = [];
+    var inCode = false;
+    var codeLines = [];
+    var inList = false;
+    function closeList() { if (inList) { output.push('</ul>'); inList = false; } }
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      if (/^```/.test(line)) {
+        closeList();
+        if (inCode) { output.push('<pre><code>' + escapeHTML(codeLines.join('\n')) + '</code></pre>'); codeLines = []; }
+        inCode = !inCode;
+        continue;
+      }
+      if (inCode) { codeLines.push(line); continue; }
+      var tableDivider = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[li + 1] || '');
+      if (line.indexOf('|') >= 0 && tableDivider) {
+        closeList();
+        var headers = tableCells(line);
+        output.push('<table><thead><tr>' + headers.map(function(cell) { return '<th>' + cell + '</th>'; }).join('') + '</tr></thead><tbody>');
+        li += 2;
+        while (li < lines.length && lines[li].indexOf('|') >= 0 && lines[li].trim()) {
+          output.push('<tr>' + tableCells(lines[li]).map(function(cell) { return '<td>' + cell + '</td>'; }).join('') + '</tr>');
+          li += 1;
+        }
+        output.push('</tbody></table>');
+        li -= 1;
+        continue;
+      }
+      var heading = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (heading) { closeList(); output.push('<h' + heading[1].length + '>' + inline(heading[2]) + '</h' + heading[1].length + '>'); continue; }
+      var list = /^\s*[-*+]\s+(.+)$/.exec(line);
+      if (list) { if (!inList) { output.push('<ul>'); inList = true; } output.push('<li>' + inline(list[1]) + '</li>'); continue; }
+      closeList();
+      if (!line.trim()) { continue; }
+      output.push('<p>' + inline(line) + '</p>');
+    }
+    if (inCode) output.push('<pre><code>' + escapeHTML(codeLines.join('\n')) + '</code></pre>');
+    closeList();
+    return output.join('');
   }
 
   function appendChatMessage(msg, container) {
@@ -2776,8 +3036,14 @@
     var avatarText = msg.role === 'user' ? '你' : 'AI';
     var avatar = '<div class="msg-avatar">' + escapeHTML(avatarText) + '</div>';
 
+    // Defense in depth: the server owns protocol parsing, but never render a
+    // provider tool frame if an old proxy/cache somehow returns one.
+    var visibleContent = String(msg.content || '');
+    if (msg.role === 'assistant' && /<[|\uff5c]DSML[|\uff5c]|\b(?:reasoning_content|tool_calls)\b/i.test(visibleContent)) {
+      visibleContent = '工具调用未生成可显示答案，请重试。';
+    }
     var body = '<div class="msg-body">';
-    body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(msg.content) + '</div>';
+    body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(visibleContent) + '</div>';
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
@@ -2851,7 +3117,21 @@
         pending.push(tab._extractPromise);
       }
     });
-    return pending.length ? Promise.all(pending) : Promise.resolve([]);
+    if (!pending.length) {
+      var failedTab = state.openTabs.find(function (tab) {
+        return tab.type === 'document' && tab._extractError;
+      });
+      return failedTab
+        ? Promise.reject(new Error('文档提取失败：' + failedTab._extractError))
+        : Promise.resolve([]);
+    }
+    return Promise.all(pending).then(function (results) {
+      var failedTab = state.openTabs.find(function (tab) {
+        return tab.type === 'document' && tab._extractError;
+      });
+      if (failedTab) throw new Error('文档提取失败：' + failedTab._extractError);
+      return results;
+    });
   }
 
   function buildChatRequestBody(message, historyMsgs) {
@@ -2885,6 +3165,7 @@
     if (!input) return;
     var message = input.value.trim();
     if (!message) return;
+    state.lastFailedMessage = message;
 
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
@@ -2894,6 +3175,7 @@
     input.disabled = true;
     var sendBtn = document.getElementById('codeChatSendBtn');
     if (sendBtn) sendBtn.disabled = true;
+    updateChatRequestControls();
 
     // Cancel previous request
     if (state._abortController) {
@@ -2943,10 +3225,66 @@
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       var body = buildChatRequestBody(message, historyMsgs);
       return sendApiRequest(body, requestId, timeStr, wsGen);
+    }).catch(function (err) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+      if (err && err.name === 'AbortError') {
+        removeTypingIndicator();
+        state.sending = false;
+        state._abortController = null;
+        updateChatRequestControls();
+        return null;
+      }
+      removeTypingIndicator();
+      restoreFailedMessage(message);
+      state.messages.push({ role: 'assistant', content: 'Request failed: ' + ((err && err.message) || String(err)), time: timeStr });
+      renderChatPanel();
+      restoreFailedMessage(message);
+      state.sending = false;
+      state._abortController = null;
+      updateChatRequestControls();
+      return null;
     });
   }
 
-  function sendApiRequest(body, requestId, timeStr, wsGen) {
+  function restoreFailedMessage(message) {
+    if (!message) return;
+    state.lastFailedMessage = message;
+    var input = document.getElementById('codeChatInput');
+    if (input && !input.value) {
+      input.value = message;
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
+    }
+  }
+
+  function updateChatRequestControls() {
+    var input = document.getElementById('codeChatInput');
+    var sendBtn = document.getElementById('codeChatSendBtn');
+    var cancelBtn = document.getElementById('codeChatCancelBtn');
+    if (input) input.disabled = !!state.sending;
+    if (sendBtn) {
+      sendBtn.disabled = !!state.sending;
+      sendBtn.style.display = state.sending ? 'none' : '';
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = !state.sending;
+      cancelBtn.style.display = state.sending ? '' : 'none';
+    }
+  }
+
+  function cancelCurrentRequest() {
+    if (!state.sending || !state._abortController) return false;
+    state._requestId++;
+    try { state._abortController.abort(); } catch (e) { /* ignore */ }
+    state._abortController = null;
+    state.sending = false;
+    removeTypingIndicator();
+    restoreFailedMessage(state.lastFailedMessage);
+    updateChatRequestControls();
+    return true;
+  }
+
+  function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
@@ -2982,8 +3320,7 @@
       });
     }
 
-    Promise.race([apiCall, timeoutPromise]).then(function (resp) {
-      clearTimeout(timeoutId);
+    function decodeCodeChatResponse(resp) {
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
       if (!resp.ok) {
@@ -2991,6 +3328,11 @@
           var errMsg;
           var json = null;
           try { json = JSON.parse(text); } catch(e) {}
+          if (resp.status === 409 && json && json.code === 'INDEX_REBUILD_REQUIRED') {
+            var rebuildError = new Error(json.error || '项目索引需要重建');
+            rebuildError.code = 'INDEX_REBUILD_REQUIRED';
+            throw rebuildError;
+          }
           // P0: 根据状态码显示具体错误
           if (resp.status === 401) {
             errMsg = '登录已失效，请重新登录';
@@ -3009,7 +3351,12 @@
         });
       }
       return resp.json();
-    }).then(function (data) {
+    }
+
+    // Keep the timeout active through response-body decoding as well as the
+    // network request. A fetch can resolve with headers while text()/json()
+    // hangs, which otherwise leaves the typing indicator stuck forever.
+    return Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
@@ -3021,6 +3368,9 @@
       var now2 = new Date();
       var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
 
+      state.lastSentAttachmentPaths = state.attachments.filter(function (attachment) { return !attachment.pinned; }).map(function (attachment) { return attachment.path; });
+      consumeTransientAttachments();
+      state.lastFailedMessage = '';
       state.messages.push({ role: 'assistant', content: replyContent, time: timeStr2 });
 
       // Store operations
@@ -3049,13 +3399,40 @@
       // AbortError is not a real failure
       if (err && err.name === 'AbortError') return;
 
+      // A Render restart or eviction can invalidate the server-side index
+      // between the status check and chat request. Rebuild once automatically
+      // and retry the same message instead of making the user resend it.
+      if (err && err.code === 'INDEX_REBUILD_REQUIRED' && !indexRetry) {
+        state.projectIndexStatus = { indexed: false, building: true, phase: '索引已丢失，正在自动重建...' };
+        renderProjectStatus();
+        return buildProjectIndex().then(function (result) {
+          if (!result || !state.projectIndexStatus || state.projectIndexStatus.indexed !== true) {
+            var rebuildFailed = new Error('索引重建失败，请点击“刷新索引”后重试');
+            rebuildFailed.code = 'INDEX_REBUILD_FAILED';
+            throw rebuildFailed;
+          }
+          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          return sendApiRequest(body, requestId, timeStr, wsGen, true);
+        }).catch(function (rebuildError) {
+          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          removeTypingIndicator();
+          restoreFailedMessage(body && body.message);
+          state.messages.push({ role: 'assistant', content: '索引重建失败：' + ((rebuildError && rebuildError.message) || '请稍后重试'), time: timeStr });
+          renderChatPanel();
+          restoreFailedMessage(body && body.message);
+          return null;
+        });
+      }
+
       removeTypingIndicator();
 
       var errMsg = (err && err.message) ? err.message : String(err);
       console.error('[CODE-AI] Request failed:', errMsg);
+      restoreFailedMessage(body && body.message);
       state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr });
 
       renderChatPanel();
+      restoreFailedMessage(body && body.message);
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
@@ -3067,6 +3444,7 @@
       if (inp) inp.disabled = false;
       var sb = document.getElementById('codeChatSendBtn');
       if (sb) sb.disabled = false;
+      updateChatRequestControls();
     });
   }
 
@@ -3238,6 +3616,19 @@
       '</div>';
 
     _dom.editorArea.appendChild(applyBar);
+
+    // GitHub and browser-fallback workspaces are read-only. Do not expose
+    // controls that can only fail with a misleading error toast.
+    if (state._isReadOnly) {
+      var readOnlyApplyActions = applyBar.querySelector('.apply-actions');
+      if (readOnlyApplyActions) {
+        readOnlyApplyActions.replaceChildren();
+        var readOnlyLabel = document.createElement('span');
+        readOnlyLabel.className = 'apply-readonly-label';
+        readOnlyLabel.textContent = '只读工作区不可应用修改';
+        readOnlyApplyActions.appendChild(readOnlyLabel);
+      }
+    }
 
     // Bind buttons
     var undoBtn = document.getElementById('codeUndoBtn');
@@ -3476,7 +3867,9 @@
       }).then(function (writeResult) {
         // Save snapshot ONLY after successful creation (not before, to avoid phantom undo)
         if (!state.snapshots[op.path]) {
-          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
+          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '', afterSha256: writeResult.sha256 || '' };
+        } else {
+          state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
         }
         // Optionally open the new file in a tab
         for (var i = 0; i < state.openTabs.length; i++) {
@@ -3527,6 +3920,7 @@
       // Write new content
       return fs.writeFileByPath(op.path, op.new_content || '');
     }).then(function (writeResult) {
+      if (state.snapshots[op.path]) state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
       // Update open tab if file is open
       for (var i = 0; i < state.openTabs.length; i++) {
         if (state.openTabs[i].path === op.path) {
@@ -3610,17 +4004,25 @@
   // undoOperations()
   // ──────────────────────────────────────────────
   function undoOperations() {
+    if (state._undoLock) return Promise.resolve(false);
+    if (state._isReadOnly) {
+      showToast('当前为只读模式，不支持撤销文件修改', 'error');
+      return Promise.resolve(false);
+    }
     var snapshotPaths = Object.keys(state.snapshots);
     if (snapshotPaths.length === 0) {
       showToast('没有可撤销的操作', 'info');
-      return;
+      return Promise.resolve(false);
     }
 
     var fs = window.__xtjCodeFS;
     if (!fs) {
       showToast('文件系统不可用', 'error');
-      return;
+      return Promise.resolve(false);
     }
+
+    state._undoLock = true;
+    var wsGen = state.workspaceGeneration;
 
     var promises = [];
     var successPaths = [];
@@ -3630,21 +4032,35 @@
       (function (p, snapshot) {
         promises.push(
           new Promise(function (resolve) {
+            if (wsGen !== state.workspaceGeneration) {
+              failedPaths.push(p);
+              resolve(false);
+              return;
+            }
             if (snapshot.existed === false) {
               // This was a create operation — delete the file
               if (!fs.deleteFileByPath) {
-                // Fallback: write empty string (not ideal but we can't delete)
-                fs.writeFileByPath(p, '').then(function () {
-                  successPaths.push(p);
-                  resolve(true);
-                }).catch(function (err) {
-                  console.error('[code-workspace] undo delete failed for', p, err);
-                  failedPaths.push(p);
-                  resolve(false);
-                });
+                // Replacing a newly-created file with an empty file is not an
+                // undo. Keep the snapshot so the user can retry safely.
+                failedPaths.push(p);
+                resolve(false);
                 return;
               }
-              fs.deleteFileByPath(p).then(function () {
+              if (!fs.readFileByPath || !snapshot.afterSha256) {
+                failedPaths.push(p);
+                resolve(false);
+                return;
+              }
+              fs.readFileByPath(p).then(function (current) {
+                if (!current || current.sha256 !== snapshot.afterSha256) {
+                  throw new Error('File changed after AI apply; undo was not applied');
+                }
+                return fs.deleteFileByPath(p);
+              }).then(function () {
+                if (wsGen !== state.workspaceGeneration) {
+                  resolve(false);
+                  return;
+                }
                 successPaths.push(p);
                 resolve(true);
               }).catch(function (err) {
@@ -3662,7 +4078,21 @@
               return;
             }
 
-            fs.writeFileByPath(p, snapshot.beforeContent || '').then(function () {
+            if (!fs.readFileByPath || !snapshot.afterSha256) {
+              failedPaths.push(p);
+              resolve(false);
+              return;
+            }
+            fs.readFileByPath(p).then(function (current) {
+              if (!current || current.sha256 !== snapshot.afterSha256) {
+                throw new Error('File changed after AI apply; undo was not applied');
+              }
+              return fs.writeFileByPath(p, snapshot.beforeContent || '');
+            }).then(function () {
+              if (wsGen !== state.workspaceGeneration) {
+                resolve(false);
+                return;
+              }
               // Update open tab
               for (var j = 0; j < state.openTabs.length; j++) {
                 if (state.openTabs[j].path === p) {
@@ -3685,13 +4115,16 @@
       })(snapshotPaths[i], state.snapshots[snapshotPaths[i]]);
     }
 
-    Promise.all(promises).then(function () {
+    return Promise.all(promises).then(function () {
+      if (wsGen !== state.workspaceGeneration) return false;
       // Only remove successful snapshots
       for (var k = 0; k < successPaths.length; k++) {
         delete state.snapshots[successPaths[k]];
       }
 
-      state.pendingOperations = [];
+      // pendingOperations contains AI suggestions that have not been applied.
+      // Undoing previously-applied snapshots must never discard that queue,
+      // including when only part of the undo succeeds.
       renderDiffView();
       renderTabs();
       if (state.activePath) {
@@ -3703,6 +4136,9 @@
       } else {
         showToast('已撤销所有更改 (' + successPaths.length + ' 个文件)', 'info');
       }
+      return failedPaths.length === 0;
+    }).finally(function () {
+      state._undoLock = false;
     });
   }
 
@@ -3715,8 +4151,9 @@
       event.preventDefault();
       event.returnValue = '';
     }
-    // 正常清理
-    cleanup();
+    // Do not clear workspace state here: the browser may cancel navigation after the
+    // native prompt, in which case clearing editors/blob URLs corrupts the
+    // still-visible workspace.
   });
 
   // ──────────────────────────────────────────────
@@ -3760,13 +4197,23 @@
   if (window.__XTJ_TEST_MODE__) {
     window.__xtjCodeWorkspaceTestHooks = {
       buildChatRequestBody: buildChatRequestBody,
+      parseSimpleMarkdown: parseSimpleMarkdown,
       ensureOpenFileContexts: ensureOpenFileContexts,
       processAttachmentFile: processAttachmentFile,
       removeAttachment: removeAttachment,
+      toggleAttachmentPinned: toggleAttachmentPinned,
+      consumeTransientAttachments: consumeTransientAttachments,
+      clearAttachments: clearAttachments,
       loadGitHubRepositoryInfo: loadGitHubRepositoryInfo,
       openGitHubWorkspace: openGitHubWorkspace,
       buildProjectIndex: buildProjectIndex,
+      saveFile: saveFile,
+      undoOperations: undoOperations,
+      cancelCurrentRequest: cancelCurrentRequest,
+      selectAndOpenFile: selectAndOpenFile,
       loadProjectIndexStatus: loadProjectIndexStatus,
+      openFile: openFile,
+      restoreTabs: restoreTabs,
       getWorkspaceId: getWorkspaceId,
       getState: function () { return state; }
     };

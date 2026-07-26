@@ -1564,9 +1564,31 @@
 
     var allFiles = [];
     var allDirs = [];
+    var discoveredFiles = 0;
+    var activeReads = 0;
+    var readQueue = [];
+    var MAX_CONCURRENT_READS = 8;
+
+    function withReadSlot(task) {
+      return new Promise(function (resolve, reject) {
+        readQueue.push({ task: task, resolve: resolve, reject: reject });
+        pumpReadQueue();
+      });
+    }
+
+    function pumpReadQueue() {
+      while (activeReads < MAX_CONCURRENT_READS && readQueue.length) {
+        var queued = readQueue.shift();
+        activeReads++;
+        Promise.resolve().then(queued.task).then(queued.resolve, queued.reject).then(function () {
+          activeReads--;
+          pumpReadQueue();
+        });
+      }
+    }
 
     function scanDir(dirHandle, currentPath, depth) {
-      if (depth > maxDepth || allFiles.length >= maxFiles) {
+      if (depth > maxDepth || discoveredFiles >= maxFiles) {
         return Promise.resolve();
       }
 
@@ -1594,9 +1616,13 @@
                     }
                   }
                 } else {
+                  // Reserve the slot before scheduling an async read. Without
+                  // this counter, a large directory can enqueue every text
+                  // file while allFiles is still empty.
+                  if (discoveredFiles >= maxFiles) break;
+                  discoveredFiles++;
                   // Skip excluded files
                   if (shouldSkipFile(handle.name)) {
-                    if (allFiles.length >= maxFiles) return;
                     continue;
                   }
 
@@ -1604,8 +1630,7 @@
                   if (fileType === 'text') {
                     // Read file content for metadata
                     promises.push((function (capturedHandle, capturedPath, capturedType) {
-                      return readFile(capturedHandle).then(function (fileResult) {
-                        if (allFiles.length >= maxFiles) return;
+                      return withReadSlot(function () { return readFile(capturedHandle); }).then(function (fileResult) {
                         if (fileResult && fileResult.type === 'text') {
                           allFiles.push({
                             path: capturedPath,
@@ -1660,11 +1685,13 @@
     }
 
     return scanDir(_dirHandle, '', 0).then(function () {
+      allFiles.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
+      allDirs.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
       return {
         files: allFiles.slice(0, maxFiles),
         directories: allDirs,
         totalCount: allFiles.length,
-        truncated: allFiles.length >= maxFiles
+        truncated: discoveredFiles >= maxFiles
       };
     });
   }

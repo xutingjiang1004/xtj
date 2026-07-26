@@ -184,13 +184,14 @@ test.describe('Code workspace Agent browser flow', () => {
     await expect(page.locator('#codeChatMessages')).toContainText('已读取 src/travel.js');
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await expect(page.locator('.code-attachment-chip')).toContainText('广州旅游计划.md');
+    await expect(page.locator('.code-attachment-chip')).toHaveCount(0);
 
     await page.locator('#codeChatInput').fill('再次请求以验证错误恢复');
     await page.locator('#codeChatSendBtn').click();
     await expect(page.locator('#codeChatMessages')).toContainText('测试中的临时上游故障');
     await expect(page.locator('#codeChatInput')).toBeEnabled();
     await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
+    await expect(page.locator('#codeChatInput')).toHaveValue('\u518d\u6b21\u8bf7\u6c42\u4ee5\u9a8c\u8bc1\u9519\u8bef\u6062\u590d');
 
     expect(githubCalls.filter((url) => /\/xtj$/.test(url)).length).toBe(1);
     expect(githubCalls.every((url) => url.startsWith('/api/code/github/'))).toBe(true);

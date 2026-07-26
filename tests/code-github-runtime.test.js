@@ -165,14 +165,86 @@ test('branches and recursive tree responses are normalized', async function() {
   assert.deepEqual(tree.body.tree.map(function(item) { return item.type; }), ['tree', 'blob']);
 });
 
+test('large GitHub files fall back from Contents API metadata to Git Blobs API', async function() {
+  var calls = [];
+  var sha = 'a'.repeat(40);
+  var app = createApp({
+    fetch: async function(url) {
+      calls.push(url);
+      if (url.includes('/contents/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async function() {
+            return { type: 'file', name: 'guide.docx', sha: sha, size: 2 * 1024 * 1024, encoding: 'none', content: '' };
+          }
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async function() {
+          return { sha: sha, size: 2 * 1024 * 1024, encoding: 'base64', content: 'UEsDBA==' };
+        }
+      };
+    }
+  });
+  var response = await authGet(
+    app,
+    '/api/code/github/repos/xutingjiang1004/xtj/file?ref=xtj-hotfix&path=docs%2Fguide.docx'
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.body.content, 'UEsDBA==');
+  assert.equal(response.body.mimeType, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], new RegExp('/git/blobs/' + sha + '$'));
+});
+
+test('rejects oversized files and incomplete recursive trees truthfully', async function() {
+  var oversizedApp = createApp({
+    fetch: async function() {
+      return {
+        ok: true,
+        status: 200,
+        json: async function() {
+          return { type: 'file', name: 'huge.pdf', sha: 'b'.repeat(40), size: 21 * 1024 * 1024, encoding: 'none', content: '' };
+        }
+      };
+    }
+  });
+  var oversized = await authGet(
+    oversizedApp,
+    '/api/code/github/repos/xutingjiang1004/xtj/file?ref=xtj-hotfix&path=huge.pdf'
+  );
+  assert.equal(oversized.status, 413);
+  assert.equal(oversized.body.code, 'github_file_too_large');
+
+  var truncatedApp = createApp({
+    fetch: async function() {
+      return {
+        ok: true,
+        status: 200,
+        json: async function() { return { truncated: true, tree: [] }; }
+      };
+    }
+  });
+  var truncated = await authGet(
+    truncatedApp,
+    '/api/code/github/repos/xutingjiang1004/xtj/tree?ref=xtj-hotfix'
+  );
+  assert.equal(truncated.status, 409);
+  assert.equal(truncated.body.code, 'github_tree_truncated');
+});
+
 test('maps known GitHub statuses without exposing upstream response bodies', async function() {
-  var statuses = [401, 403, 404, 409, 422];
+  var statuses = [401, 403, 404, 409, 422, 429];
   var expectedCodes = [
     'github_token_invalid',
     'github_forbidden',
     'github_not_found',
     'github_conflict',
-    'github_unprocessable'
+    'github_unprocessable',
+    'github_rate_limited'
   ];
   for (var i = 0; i < statuses.length; i++) {
     var status = statuses[i];
@@ -215,4 +287,20 @@ test('maps network errors and timeouts separately', async function() {
   var timeout = await authGet(timeoutApp, '/api/code/github/repos/xutingjiang1004/xtj');
   assert.equal(timeout.status, 504);
   assert.equal(timeout.body.code, 'github_timeout');
+});
+
+test('times out while decoding a hanging GitHub response body', async function() {
+  var app = createApp({
+    timeoutMs: 10,
+    fetch: async function() {
+      return {
+        ok: true,
+        status: 200,
+        json: function() { return new Promise(function() {}); }
+      };
+    }
+  });
+  var response = await authGet(app, '/api/code/github/repos/xutingjiang1004/xtj');
+  assert.equal(response.status, 504);
+  assert.equal(response.body.code, 'github_timeout');
 });
