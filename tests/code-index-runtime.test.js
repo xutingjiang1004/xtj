@@ -44,6 +44,16 @@ test('isolates indexes, pins, and clear operations by user and workspace', () =>
   assert.equal(codeIndex.getIndexSummary(scopeB).totalFiles, 1);
 });
 
+test('read ranges report the real total line count separately from the returned slice', () => {
+  const scope = { userId: 'alice', workspaceId: 'line-counts', generation: 1 };
+  const content = 'one\ntwo\nthree\nfour';
+  assert.equal(codeIndex.buildIndex(scope, [file('src/lines.js', content)]).ok, true);
+  const result = codeIndex.readFileRange(scope, 'src/lines.js', 2, 3);
+  assert.deepEqual(result.lines.map(line => line.lineNum), [2, 3]);
+  assert.equal(result.totalLines, 2);
+  assert.equal(result.totalFileLines, 4);
+});
+
 test('rejects stale generation and enforces an exact generation when reading', () => {
   const gen2 = { userId: 'alice', workspaceId: 'project', generation: 2 };
   const gen1 = { userId: 'alice', workspaceId: 'project', generation: 1 };
