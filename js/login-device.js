@@ -346,6 +346,24 @@
         } catch(e) { return Promise.resolve(null); }
     }
 
+    // 媒体设备枚举（摄像头/麦克风/扬声器数量，不需要权限即可获取数量）
+    function getMediaDevices() {
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve(null);
+            return navigator.mediaDevices.enumerateDevices().then(function(devices) {
+                var counts = { audioinput: 0, audiooutput: 0, videoinput: 0, total: 0 };
+                for (var i = 0; i < devices.length; i++) {
+                    var kind = devices[i].kind;
+                    if (kind === 'audioinput') counts.audioinput++;
+                    else if (kind === 'audiooutput') counts.audiooutput++;
+                    else if (kind === 'videoinput') counts.videoinput++;
+                    counts.total++;
+                }
+                return counts;
+            }).catch(function() { return null; });
+        } catch(e) { return Promise.resolve(null); }
+    }
+
     // WebGL 指纹 hash（GPU 型号 + 渲染器，跨浏览器稳定）
     function cleanupWebgl(canvas, gl) {
         try {
@@ -543,6 +561,7 @@
                 var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
                 var batteryPromise = getBatteryInfo();
                 var storagePromise = getStorageEstimate();
+                var mediaDevicesPromise = getMediaDevices();
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
 
@@ -576,6 +595,9 @@
                     }
                     if (storagePromise && storagePromise.then) {
                         promises.push(storagePromise.then(function(s) { if (s) bodyObj.storage_estimate = s; }));
+                    }
+                    if (mediaDevicesPromise && mediaDevicesPromise.then) {
+                        promises.push(mediaDevicesPromise.then(function(d) { if (d) bodyObj.media_devices = d; }));
                     }
 
                     if (promises.length > 0) {
