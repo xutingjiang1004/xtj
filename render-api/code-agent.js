@@ -214,6 +214,8 @@ function buildSystemPrompt() {
     'For an explicit file name, locate and read that file. For a broad project question, list files first.',
     'For debugging, search relevant terms, then read the strongest matching files and ranges.',
     'Pinned, active and open files are priority hints, never prerequisites for reading other files.',
+    'If an open file or uploaded document is available, use get_active_file/get_open_files and read_file before answering; do not ask to rebuild the project index just because the index is missing.',
+    'When the user asks to view, summarize or plan from a document, read the supplied document context first and cite the file name in your answer.',
     'Never claim to have read a file unless a tool returned it successfully in this turn.',
     'Never claim tests, builds, terminal commands or Git operations were executed; no such tools exist.',
     'Do not modify unrelated files.',
@@ -384,7 +386,7 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
     content: [
       '【本轮工作区状态】',
       '- 工作区: ' + (workspaceName || '未命名'),
-      '- 索引: ' + (indexSummary ? (indexSummary.totalFiles + ' files / ' + indexSummary.totalChunks + ' chunks') : '需要重新建立'),
+      '- 索引: ' + (indexSummary ? (indexSummary.totalFiles + ' files / ' + indexSummary.totalChunks + ' chunks') : '未建立（当前打开文件和上传资料仍可读取）'),
       '- 当前文件: ' + (activePath || '无'),
       '- 打开文件: ' + openFiles.map(function(file) { return file.path; }).join(', '),
       '- 已上传资料: ' + attachments.map(function(file) { return file.path; }).join(', '),

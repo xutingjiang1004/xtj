@@ -122,6 +122,26 @@ test('chat request carries scoped workspace, prioritized open files and extracte
   );
 });
 
+test('AI context waits for an in-flight document extraction before sending', async () => {
+  const loaded = loadWorkspace(async () => response(200, {}));
+  let resolveExtraction;
+  const extraction = new Promise((resolve) => { resolveExtraction = resolve; });
+  loaded.state.openTabs = [{
+    path: 'guide.docx',
+    name: 'guide.docx',
+    type: 'document',
+    _extractPromise: extraction
+  }];
+
+  let settled = false;
+  const waiting = loaded.hooks.ensureOpenFileContexts().then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(settled, false);
+  resolveExtraction({ text: '广州路线' });
+  await waiting;
+  assert.equal(settled, true);
+});
+
 test('attachment extraction recovers after an error and sends the supported document through existing endpoint', async () => {
   let attempt = 0;
   const calls = [];

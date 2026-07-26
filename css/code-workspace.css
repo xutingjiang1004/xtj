@@ -151,6 +151,13 @@
   letter-spacing: -0.01em;
 }
 
+.workspace-picker-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .code-sidebar-header .folder-picker-btn {
   width: 30px;
   height: 30px;
