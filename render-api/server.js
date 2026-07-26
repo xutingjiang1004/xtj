@@ -4446,6 +4446,148 @@ async function callDeepSeek(messages, options) {
       }
       return normalized;
     }
+    // DeepSeek V4 normally returns OpenAI-compatible message.tool_calls.  A
+    // provider/proxy compatibility path has also been observed returning the
+    // DSML wire representation in message.content instead.  DSML is an
+    // internal protocol, never user-visible text: parse it into the same
+    // normalized tool-call shape or fail the turn safely.  This deliberately
+    // does not "strip and continue" -- incomplete or invalid DSML is never
+    // executed and cannot be mistaken for a final answer.
+    function parseDsmlToolCalls(rawText, roundNumber) {
+      var raw = String(rawText || '');
+      var marker = /<[|\uff5c]DSML[|\uff5c]([A-Za-z_][A-Za-z0-9_\-]*)([^>]*)>/g;
+      var records = [];
+      var match;
+      while ((match = marker.exec(raw)) !== null) {
+        records.push({ name: String(match[1] || '').toLowerCase(), attrs: String(match[2] || ''), start: match.index, end: marker.lastIndex });
+      }
+      var startIndex = -1;
+      for (var di = 0; di < records.length; di++) {
+        if (records[di].name === 'tool_calls' || records[di].name === 'function_calls') { startIndex = di; break; }
+      }
+      if (startIndex < 0) {
+        // A partial marker is still protocol, not a natural language answer.
+        return { detected: /<[|\uff5c]DSML[|\uff5c]/i.test(raw), calls: [], error: /<[|\uff5c]DSML[|\uff5c]/i.test(raw) ? 'incomplete DSML header' : '', visibleContent: raw };
+      }
+      function decodeValue(value) {
+        var text = String(value === undefined || value === null ? '' : value).trim();
+        text = text.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        if (/^(?:true|false|null)$/i.test(text)) return text.toLowerCase() === 'true' ? true : (text.toLowerCase() === 'false' ? false : null);
+        if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) return Number(text);
+        return text;
+      }
+      function parseAttributes(source) {
+        var attrs = {};
+        var attr = /([A-Za-z_][A-Za-z0-9_\-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+        var item;
+        while ((item = attr.exec(source)) !== null) attrs[item[1]] = decodeValue(item[2] !== undefined ? item[2] : item[3]);
+        return attrs;
+      }
+      function invalidDsmlCall(name, args) {
+        var definitions = options && Array.isArray(options.tools) ? options.tools : [];
+        var definition = null;
+        for (var ti = 0; ti < definitions.length; ti++) {
+          if (definitions[ti] && definitions[ti].function && definitions[ti].function.name === name) { definition = definitions[ti].function; break; }
+        }
+        if (!definition) return 'unsupported tool';
+        var schema = definition.parameters && typeof definition.parameters === 'object' ? definition.parameters : {};
+        var required = Array.isArray(schema.required) ? schema.required : [];
+        for (var ri = 0; ri < required.length; ri++) {
+          if (!Object.prototype.hasOwnProperty.call(args, required[ri]) || args[required[ri]] === '' || args[required[ri]] === null) return 'missing required parameter: ' + required[ri];
+        }
+        var props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+        var keys = Object.keys(args);
+        for (var ki = 0; ki < keys.length; ki++) {
+          var key = keys[ki];
+          if (!Object.prototype.hasOwnProperty.call(props, key)) return 'unexpected parameter: ' + key;
+          var value = args[key];
+          var expected = props[key] && props[key].type;
+          if (expected === 'string' && typeof value !== 'string') return 'invalid parameter type: ' + key;
+          if ((expected === 'integer' || expected === 'number') && (!Number.isFinite(value) || (expected === 'integer' && !Number.isInteger(value)))) return 'invalid parameter type: ' + key;
+          if (expected === 'array' && !Array.isArray(value)) return 'invalid parameter type: ' + key;
+        }
+        // All Code workspace paths must stay relative and cannot traverse the
+        // project. The executor validates again; this early check guarantees a
+        // malformed DSML call never reaches any tool implementation.
+        if (Object.prototype.hasOwnProperty.call(args, 'path')) {
+          var path = args.path;
+          if (typeof path !== 'string' || !path.trim() || path.indexOf('..') >= 0 || path.indexOf('\\') >= 0 || path.charAt(0) === '/' || /^[A-Za-z]:/.test(path)) return 'invalid path';
+        }
+        if (Object.prototype.hasOwnProperty.call(args, 'start_line') && args.start_line < 1) return 'invalid start_line';
+        if (Object.prototype.hasOwnProperty.call(args, 'end_line') && args.end_line < 1) return 'invalid end_line';
+        if (Object.prototype.hasOwnProperty.call(args, 'start_line') && Object.prototype.hasOwnProperty.call(args, 'end_line') && args.end_line < args.start_line) return 'invalid line range';
+        return '';
+      }
+      var calls = [];
+      var current = null;
+      var complete = false;
+      var protocolEnd = raw.length;
+      for (var mi = startIndex + 1; mi < records.length; mi++) {
+        var record = records[mi];
+        if (record.name === 'end' || record.name === 'end_tool_calls' || record.name === 'tool_calls_end' || record.name === 'end_function_calls') {
+          complete = true;
+          protocolEnd = record.end;
+          break;
+        }
+        if (record.name === 'invoke') {
+          if (current) calls.push(current);
+          var invokeAttrs = parseAttributes(record.attrs);
+          current = { name: typeof invokeAttrs.name === 'string' ? invokeAttrs.name.trim() : '', args: {}, malformed: !invokeAttrs.name };
+          continue;
+        }
+        if (record.name === 'parameter') {
+          if (!current) return { detected: true, calls: [], error: 'parameter without invoke', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+          var parameterAttrs = parseAttributes(record.attrs);
+          var nextStart = mi + 1 < records.length ? records[mi + 1].start : raw.length;
+          var body = raw.slice(record.end, nextStart).trim();
+          var paramName = typeof parameterAttrs.name === 'string' ? parameterAttrs.name : (typeof parameterAttrs.key === 'string' ? parameterAttrs.key : '');
+          var valueKey = Object.prototype.hasOwnProperty.call(parameterAttrs, 'value') ? 'value' :
+            (Object.prototype.hasOwnProperty.call(parameterAttrs, 'string') ? 'string' :
+              (Object.prototype.hasOwnProperty.call(parameterAttrs, 'number') ? 'number' :
+                (Object.prototype.hasOwnProperty.call(parameterAttrs, 'integer') ? 'integer' :
+                  (Object.prototype.hasOwnProperty.call(parameterAttrs, 'boolean') ? 'boolean' :
+                    (Object.prototype.hasOwnProperty.call(parameterAttrs, 'json') ? 'json' : '')))));
+          var hasValue = !!valueKey;
+          var value = hasValue ? parameterAttrs[valueKey] : (body ? decodeValue(body) : undefined);
+          if (valueKey === 'json' && typeof value === 'string') {
+            try { value = JSON.parse(value); } catch (_) { current.malformed = true; }
+          }
+          if (paramName) {
+            if (value === undefined) current.malformed = true;
+            else current.args[paramName] = value;
+          } else {
+            var copied = false;
+            Object.keys(parameterAttrs).forEach(function(key) {
+              if (key !== 'name' && key !== 'key' && key !== 'value' && key !== 'string' && key !== 'number' && key !== 'integer' && key !== 'boolean' && key !== 'json' && key !== 'type' && key !== 'encoding') { current.args[key] = parameterAttrs[key]; copied = true; }
+            });
+            if (!copied) current.malformed = true;
+          }
+          continue;
+        }
+        // Unknown DSML frames are not safe to reinterpret as prose.
+        return { detected: true, calls: [], error: 'unknown DSML frame: ' + record.name, visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+      }
+      if (current) calls.push(current);
+      // Some compatible gateways omit an explicit end frame. Accept only a
+      // fully formed final invoke; a dangling partial marker remains an error.
+      if (!complete && /<[|\uff5c]DSML[|\uff5c][^>]*$/.test(raw)) return { detected: true, calls: [], error: 'incomplete DSML frame', visibleContent: raw.slice(0, records[startIndex].start).trim() };
+      if (!calls.length) return { detected: true, calls: [], error: 'missing DSML invoke', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+      var normalizedDsml = [];
+      for (var ci = 0; ci < calls.length; ci++) {
+        var call = calls[ci];
+        var reason = call.malformed ? 'malformed parameter' : invalidDsmlCall(call.name, call.args);
+        if (reason) return { detected: true, calls: [], error: reason, visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+        normalizedDsml.push({ id: 'dsml_' + (roundNumber + 1) + '_' + (ci + 1), type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } });
+      }
+      return { detected: true, calls: normalizedDsml, error: '', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
+    }
+    function finalReplyContainsInternalProtocol(text) {
+      var candidate = String(text || '');
+      if (/<[|\uff5c]DSML[|\uff5c]/i.test(candidate)) return true;
+      // Raw JSON tool payloads are not prose. Do not expose them even if an
+      // upstream gateway mislabels the response as a completed assistant turn.
+      return /^\s*[\[{][\s\S]{0,20000}(?:"tool_calls"|"reasoning_content"|"invoke"|"parameter")[\s\S]*[\]}]\s*$/i.test(candidate);
+    }
     // Keep caller supplied budgets within the provider's documented output
     // limit and avoid serializing NaN/Infinity as JSON null.
     var requestedMaxTokens = null;
@@ -4555,6 +4697,9 @@ async function callDeepSeek(messages, options) {
       var toolCalls = [];
       var roundReasoning = '';
       var streamToolCallMap = {};
+      // DSML tool frames can be split across SSE chunks. Never stream a
+      // tool-enabled round until the complete content has been classified.
+      var deferToolRoundContent = useTools && hasContentCb;
 
       if (useStream) {
         // ===== 流式解析 (round 0 with thinking) =====
@@ -4616,7 +4761,7 @@ async function callDeepSeek(messages, options) {
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
-              try { if (hasContentCb) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
+              try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
@@ -4679,9 +4824,29 @@ async function callDeepSeek(messages, options) {
         finalModel = normalizeDeepSeekUsageModel(data.model || message.model || finalModel, model);
       }
 
+      // Prefer provider-native tool_calls. If a compatible gateway instead
+      // puts DSML in content, convert it to the same validated server-only
+      // tool call shape. DSML must never flow to an assistant reply.
+      var dsmlResult = parseDsmlToolCalls(content, round);
+      if (dsmlResult.detected) {
+        content = dsmlResult.visibleContent;
+        if (dsmlResult.error) {
+          console.error('[DEEPSEEK] DSML tool protocol parse failed:', dsmlResult.error, 'round', round);
+          finalContent = '（工具调用解析失败，请重试。）';
+          break;
+        }
+        if (!toolCalls || toolCalls.length === 0) toolCalls = dsmlResult.calls;
+      }
+
       // 没 tool_calls：最终回复
       if (!toolCalls || toolCalls.length === 0) {
-        finalContent = content;
+        if (finalReplyContainsInternalProtocol(content)) {
+          console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
+          finalContent = '（工具调用解析失败，请重试。）';
+        } else {
+          finalContent = content;
+          try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(String(content).slice(0, 4000)); } catch (e) {}
+        }
         break;
       }
 
@@ -4778,6 +4943,12 @@ async function callDeepSeek(messages, options) {
               finalReasoning = noToolMsg.reasoning_content;
             }
             var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
+            var noToolDsml = parseDsmlToolCalls(noToolContent, maxToolRounds);
+            if (noToolDsml.detected) {
+              console.error('[DEEPSEEK] DSML protocol appeared during no-tool recovery:', noToolDsml.error || 'tool request suppressed');
+              finalContent = '（工具调用解析失败，请重试。）';
+              noToolContent = '';
+            }
             if (noToolContent && noToolContent.length > 10) {
               // 过滤疑似 JSON 残留
               if (noToolContent.indexOf('{') === 0 && noToolContent.length < 500) {
@@ -4823,6 +4994,10 @@ async function callDeepSeek(messages, options) {
       }
     }
 
+    if (finalReplyContainsInternalProtocol(finalContent)) {
+      console.error('[DEEPSEEK] final reply still contained internal protocol; suppressed');
+      finalContent = '（工具调用解析失败，请重试。）';
+    }
     // off 模式强制清空 reasoning
     if (!useThinking) finalReasoning = '';
     finalModel = normalizeDeepSeekUsageModel(finalModel, model);
