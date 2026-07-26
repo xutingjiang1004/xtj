@@ -36,6 +36,12 @@ const CODE_AGENT_MAX_OUTPUT_TOKENS = Math.min(
 );
 const MAX_OPEN_FILES = 12;
 const MAX_ATTACHMENTS = 8;
+// Phase 2: Checkpointing — when history exceeds MAX_HISTORY_ITEMS,
+// keep first CHECKPOINT_KEEP and last CHECKPOINT_KEEP rounds.
+// This preserves the Longest Common Prefix for KV Cache, unlike
+// the old slice(-N) sliding window which shifted every round.
+const CHECKPOINT_KEEP = 12;
+const MAX_HISTORY_CHECKPOINT = 50;
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
 const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
 const WEB_MAX_BYTES = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_MAX_BYTES) || 2 * 1024 * 1024, 32 * 1024), 8 * 1024 * 1024);
@@ -49,11 +55,24 @@ const MAX_PPTX_ENTRIES = 2000;
 const MAX_PPTX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
 const MAX_OFFICE_ARCHIVE_ENTRIES = 5000;
 const MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
-const OP_TYPES_ALLOWED = new Set(['update', 'create', 'document']);
+const OP_TYPES_ALLOWED = new Set(['replace_range', 'update', 'create', 'document']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
 const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
 const JSON_BLOCK_RE = /```json\s*([\s\S]*?)\s*```/i;
 const JSON_OBJECT_RE = /"operations"\s*:/;
+
+// ── Session Cache (Phase 1) ────────────────────────────────────────────
+const agentSessionCache = new Map();
+setInterval(function() {
+  var now = Date.now();
+  for (var _i = 0, _a = Array.from(agentSessionCache.entries()); _i < _a.length; _i++) {
+    var entry = _a[_i];
+    var id = entry[0], data = entry[1];
+    if (now - data.lastActive > 2 * 60 * 60 * 1000) { // 2 hours TTL
+      agentSessionCache.delete(id);
+    }
+  }
+}, 15 * 60 * 1000).unref();
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -276,11 +295,13 @@ function buildSystemPrompt() {
     '',
     'The JSON block must be fenced with ```json and ``` markers, and must contain an object with an "operations" array.',
     'Each operation in the array must have:',
-    '  - type: "update" (modify existing file), "create" (create new file), or "document" (modify a document)',
+    '  - type: "replace_range" (modify existing file), "create" (create new file), or "document" (modify a document)',
     '  - path: relative file path within the workspace (e.g., "src/components/App.jsx")',
-    '  - expected_sha256: (for "update" type only) the SHA-256 hex hash of the file content you were given',
+    '  - expected_sha256: (for "replace_range" only) the SHA-256 hex hash of the file content you were given',
     '  - summary: a brief description of the change (max 200 chars)',
-    '  - new_content: (for "update"/"create") the complete new file content as a string',
+    '  - start_line: (for "replace_range" only) the 1-indexed starting line number of the text to replace',
+    '  - end_line: (for "replace_range" only) the 1-indexed ending line number of the text to replace',
+    '  - new_content: (for "replace_range"/"create") the new content snippet to insert or the complete new file',
     '  - document_type: (for "document" type) "xlsx"',
     '  - document_operations: (for "document" type) array of sub-operations',
     '',
@@ -292,13 +313,13 @@ function buildSystemPrompt() {
     '',
 
     'IMPORTANT RULES:',
-    '- Only return update, create, or document operations.',
+    '- Only return replace_range, create, or document operations.',
     '- Return at most 10 file operations.',
     '- DOCX files are read-only. Do not return document operations for DOCX. For DOCX modification requests, explain that the file can currently be analyzed but cannot be safely rewritten while preserving the DOCX format.',
-    '- For "update" operations, new_content must contain the ENTIRE file, not just the changed parts.',
+    '- For "replace_range" operations, new_content must ONLY contain the replacement snippet, NOT the entire file. You MUST specify start_line and end_line accurately.',
     '- For "create" operations, new_content must contain the complete new file.',
     '- For "document" operations, include document_operations array with the specific changes.',
-    '- Only use "update", "create", and "document" types. Do NOT use delete, rename, execute, terminal, or git.',
+    '- Only use "replace_range", "create", and "document" types. Do NOT use delete, rename, execute, terminal, or git.',
     '- Paths must be relative (no absolute paths, no ".." traversal).',
     '- expected_sha256 must be exactly the 64-character hex hash of the file content sent to you.',
     '- If information is missing, use the project tools to locate it before asking the user.',
@@ -323,7 +344,17 @@ function buildSystemPrompt() {
     '    }',
     '  ]',
     '}',
-    '```'
+    '```',
+    '',
+    '【运行时身份与能力规则】',
+    '- 你是 XTJ Code Agent，站点部署在 DeepSeek 平台上。你的 provider 和 model 由服务器配置决定。',
+    '- 不要声称自己是 Claude、Anthropic、GPT、OpenAI、Gemini、Google 或其他提供商的模型。',
+    '- 用户询问"你是什么模型""你的上下文多大""上下文窗口""还剩多少上下文""最大输出""支持工具调用吗""当前思考模式""缓存命中"时，必须调用 get_runtime_capabilities 工具获取真实数据后回答。',
+    '- 不要根据训练知识猜测当前模型规格或上下文窗口大小。',
+    '- 如果你从工具获取的数据中某个字段为 null 或不存在，诚实说明"服务器未提供该数据"，不得编造。',
+    '- 项目索引中的"文件数"和"代码块数"只表示索引规模，不代表这些内容已进入当前上下文。用户询问上下文使用时，必须区分索引规模和实际读取量。',
+    '- 前端徽章、API capabilities 和你的自述必须使用同一数据源，不得矛盾。',
+    '- 绝对禁止回答中包含以下内容：自称 Claude、自称 Anthropic 模型、声称 200K tokens 上下文、声称 15 万英文单词等编造数字。'
   ].join('\n');
 }
 
@@ -409,6 +440,7 @@ const CODE_AGENT_TOOLS = [
   { type: 'function', function: { name: 'get_symbols', description: 'Return indexed functions, classes, exports and imports for a file.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false } } },
   { type: 'function', function: { name: 'get_active_file', description: 'Return the active editor file, including unsaved content when available.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
   { type: 'function', function: { name: 'get_open_files', description: 'List open editor files and uploaded documents. Read a selected file afterwards.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
+  { type: 'function', function: { name: 'get_runtime_capabilities', description: 'Return the current runtime capabilities: provider, model, context window size, output limits, token budget, thinking mode, and cache statistics. Call this when the user asks about your identity, model, context size, token usage, or current capacity.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
   { type: 'function', function: { name: 'web_search', description: 'Search current web information. Use for latest, current, prices, hours, weather, news, releases or other time-sensitive questions.', parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 240 }, max_results: { type: 'integer', minimum: 1, maximum: 10 } }, required: ['query'], additionalProperties: false } } },
   { type: 'function', function: { name: 'fetch_web_page', description: 'Fetch and extract readable text from one HTTPS web page found by web_search.', parameters: { type: 'object', properties: { url: { type: 'string', minLength: 1, maxLength: 2000 } }, required: ['url'], additionalProperties: false } } }
 ];
@@ -461,27 +493,54 @@ function fileToToolResult(file, startLine, endLine) {
   return { ok: true, path: file.path, name: file.name || file.path.split('/').pop(), sha256: file.sha256 || '', mimeType: file.mimeType || '', startLine: start, endLine: end, totalLines: allLines.length, content: allLines.slice(start - 1, end).join('\n'), source: file.source || 'open' };
 }
 
-function buildAgentMessages(history, currentMessage, workspaceName, indexSummary, activePath, openFiles, attachments) {
+// Phase 2: System prompt is 100% static to maximize KV Cache prefix hits.
+// All dynamic state (workspace name, open files, active path, index info) goes
+// into the user message. Never inject dynamic content into the system prompt.
+// Phase 3: Runtime capabilities are injected into the user message so the
+// model knows its real identity (provider/model) and actual limits instead of
+// hallucinating Claude/GPT/200K from training data.
+function buildAgentMessages(history, currentMessage, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, inputBudget) {
+  // Static system prompt — never modified per-request (KV Cache friendly)
   var systemPrompt = buildSystemPrompt();
-  if (indexSummary && indexSummary.truncated === true) {
-    systemPrompt += '\nThe project index is partial because the workspace scan limit was reached. Never claim that the entire workspace was inspected; say which indexed scope was used.';
-  }
   var messages = [{ role: 'system', content: systemPrompt }];
   for (var i = 0; i < history.length; i++) messages.push(history[i]);
-  messages.push({
-    role: 'user',
-    content: [
-      '【本轮工作区状态】',
-      '- 工作区: ' + (workspaceName || '未命名'),
-      '- 索引: ' + (indexSummary ? (indexSummary.totalFiles + ' files / ' + indexSummary.totalChunks + ' chunks') : '未建立（当前打开文件和上传资料仍可读取）'),
-      '- 当前文件: ' + (activePath || '无'),
-      '- 打开文件: ' + openFiles.map(function(file) { return file.path; }).join(', '),
-      '- 已上传资料: ' + attachments.map(function(file) { return file.path; }).join(', '),
-      '',
-      '【用户消息】',
-      currentMessage
-    ].join('\n')
-  });
+
+  // Build dynamic state block as a user message
+  var caps = capabilities || {};
+  var stateLines = [
+    '【本轮工作区状态】',
+    '- 工作区: ' + (workspaceName || '未命名'),
+    '- 索引: ' + (indexSummary ? (indexSummary.totalFiles + ' files / ' + indexSummary.totalChunks + ' chunks') : '未建立（当前打开文件和上传资料仍可读取）'),
+    '- 当前文件: ' + (activePath || '无'),
+    '- 打开文件: ' + openFiles.map(function(file) { return file.path; }).join(', '),
+    '- 已上传资料: ' + attachments.map(function(file) { return file.path; }).join(', ')
+  ];
+  // Partial index note — placed in user message, not system prompt
+  if (indexSummary && indexSummary.truncated === true) {
+    stateLines.push('');
+    stateLines.push('注意：项目索引不完整（扫描数量达到上限）。不要声称检查了整个工作区，请说明仅使用了已索引的范围。');
+  }
+
+  // Runtime capabilities — real server-verified identity and limits
+  stateLines.push('');
+  stateLines.push('【运行时环境】');
+  stateLines.push('- Provider: ' + (caps.provider || 'deepseek'));
+  stateLines.push('- 模型: ' + (caps.model || '服务器未声明'));
+  stateLines.push('- 站点配置上下文上限: ' + (caps.maxContextTokens ? caps.maxContextTokens.toLocaleString() + ' Token' : '服务器未声明'));
+  stateLines.push('- 站点配置最大输出: ' + (caps.maxOutputTokens ? caps.maxOutputTokens.toLocaleString() + ' Token' : '服务器未声明'));
+  stateLines.push('- 最大工具轮数: ' + (caps.maxToolRounds || '服务器未声明'));
+  stateLines.push('- 当前思考模式: ' + (thinkingMode || 'off'));
+  stateLines.push('- 本轮工具输入预算: ' + (typeof inputBudget === 'number' && inputBudget > 0 ? inputBudget.toLocaleString() + ' Token' : '未知'));
+  stateLines.push('');
+  stateLines.push('重要：以上是服务器提供的真实运行时数据。用户询问身份、模型、上下文窗口、输出上限等问题时，必须使用以上信息回答。');
+  stateLines.push('如果某个字段显示"服务器未声明"，诚实告知用户该数据当前不可用，不得编造。');
+  stateLines.push('项目索引规模（文件数/代码块数）不等于当前上下文使用量，Agent 只会按需读取所需文件。');
+
+  stateLines.push('');
+  stateLines.push('【用户消息】');
+  stateLines.push(currentMessage);
+
+  messages.push({ role: 'user', content: stateLines.join('\n') });
   return messages;
 }
 
@@ -677,23 +736,38 @@ function parseToolArguments(toolCall) {
   }
 }
 
-function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace, maxInputTokens, deps) {
+function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace, maxInputTokens, deps, runtimeCapabilities) {
   deps = deps || {};
+  runtimeCapabilities = runtimeCapabilities || {};
   var overlay = new Map();
   openFiles.concat(attachments).forEach(function(file) { overlay.set(file.path, file); });
   var remainingTokens = Math.max(0, maxInputTokens);
 
   function record(name, args, startedAt, result) {
     var content = result && typeof result.content === 'string' ? result.content : '';
-    var tokens = codeIndex.estimateTokens(content || JSON.stringify(result || {}));
-    remainingTokens = Math.max(0, remainingTokens - tokens);
-    var entry = { round: trace.length + 1, tool: name, args: args, ok: !!(result && result.ok !== false && !result.error), duration_ms: Date.now() - startedAt, context_tokens: tokens };
+    var resultJson = (result && result.error) ? JSON.stringify({ error: result.error }) : JSON.stringify(result || {});
+    var jsonBytes = Buffer.byteLength(resultJson, 'utf8');
+    var tokens = codeIndex.estimateTokens(content || resultJson);
+    var estimatedTokens = Math.max(tokens, Math.ceil(jsonBytes / 4)); // rough token estimate
+    remainingTokens = Math.max(0, remainingTokens - estimatedTokens);
+    var entry = {
+      round: trace.length + 1,
+      tool: name,
+      args: args,
+      ok: !!(result && result.ok !== false && !result.error),
+      duration_ms: Date.now() - startedAt,
+      context_tokens: tokens,
+      result_bytes: jsonBytes,
+      result_estimated_tokens: estimatedTokens
+    };
     if (result && result.path) entry.path = result.path;
     if (result && (result.startLine || result.endLine)) entry.ranges = [[result.startLine || 1, result.endLine || result.startLine || 1]];
     if (result && Array.isArray(result.results)) {
       entry.files = result.results.map(function(item) { return { path: item.path, ranges: [[item.startLine || 1, item.endLine || item.startLine || 1]] }; });
     }
     if (result && result.error) entry.error = String(result.error).slice(0, 240);
+    if (result && result.truncated === true) entry.truncated = true;
+    if (result && typeof result.totalFiles === 'number') entry.totalFiles = result.totalFiles;
     trace.push(entry);
     console.log('[code-agent] tool', JSON.stringify(entry));
     return result;
@@ -738,6 +812,25 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
       result = activePath ? readPath(activePath, 1, 1000000) : { ok: false, error: '当前没有打开文件' };
     } else if (name === 'get_open_files') {
       result = { ok: true, activePath: activePath || '', files: openFiles.concat(attachments).map(function(file) { return { path: file.path, name: file.name, sha256: file.sha256, source: file.source, size: Buffer.byteLength(file.content || '', 'utf8') }; }) };
+    } else if (name === 'get_runtime_capabilities') {
+      result = {
+        ok: true,
+        provider: runtimeCapabilities.provider || 'deepseek',
+        model: runtimeCapabilities.model || '服务器未声明',
+        configured: runtimeCapabilities.configured === true,
+        agentEnabled: runtimeCapabilities.agentEnabled === true,
+        toolCallingEnabled: runtimeCapabilities.toolCallingEnabled === true,
+        providerContextTokens: runtimeCapabilities.providerContextTokens || null,
+        providerMaxOutputTokens: runtimeCapabilities.providerMaxOutputTokens || null,
+        maxContextTokens: runtimeCapabilities.maxContextTokens || null,
+        maxOutputTokens: runtimeCapabilities.maxOutputTokens || null,
+        maxToolRounds: runtimeCapabilities.maxToolRounds || 8,
+        thinkingMode: runtimeCapabilities.thinkingMode || 'off',
+        inputBudgetTokens: typeof maxInputTokens === 'number' ? maxInputTokens : null,
+        currentPromptTokens: runtimeCapabilities.currentPromptTokens || null,
+        cacheHitTokens: runtimeCapabilities.cacheHitTokens || null,
+        cacheMissTokens: runtimeCapabilities.cacheMissTokens || null
+      };
     } else if (name === 'web_search') {
       result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
         webSearch: deps.webSearch,
@@ -1505,6 +1598,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   app.post('/api/code/chat', rateLimit(60000, 20), authenticateUser, async function(req, res) {
     var aborted = false;
     var requestController = new AbortController();
+    var requestId = 'req_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8);
+    var requestStartTime = Date.now();
+    var requestPhase = 'init';
     function abortRequest() {
       aborted = true;
       try { requestController.abort(); } catch (_) {}
@@ -1512,36 +1608,75 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     req.once('aborted', abortRequest);
     res.once('close', function() { if (!res.writableEnded) abortRequest(); });
 
+    function logPhase(phase, extra) {
+      requestPhase = phase;
+      var logObj = {
+        requestId: requestId,
+        phase: phase,
+        elapsedMs: Date.now() - requestStartTime
+      };
+      if (extra) Object.keys(extra).forEach(function(k) { logObj[k] = extra[k]; });
+      console.log('[code-agent] ' + JSON.stringify(logObj));
+    }
+
+    function sendError(code, message, status, extra) {
+      extra = extra || {};
+      var body = {
+        ok: false,
+        code: code,
+        error: message,
+        requestId: requestId,
+        phase: requestPhase
+      };
+      if (extra.retryable !== undefined) body.retryable = extra.retryable;
+      if (extra.tool_trace && Array.isArray(extra.tool_trace)) body.tool_trace = extra.tool_trace;
+      logPhase('error_response', { errorCode: code, errorMessage: message, httpStatus: status });
+      return res.status(status).json(body);
+    }
+
     try {
       var body = req.body;
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ ok: false, error: '请求无效' });
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return sendError('INVALID_REQUEST', '请求无效', 400);
 
       var msgResult = validateString(body.message, MAX_MESSAGE_LEN, '消息内容');
-      if (!msgResult.ok) return res.status(400).json({ ok: false, error: msgResult.error });
-      if (!msgResult.value) return res.status(400).json({ ok: false, error: '消息内容不能为空' });
+      if (!msgResult.ok) return sendError('INVALID_MESSAGE', msgResult.error, 400);
+      if (!msgResult.value) return sendError('EMPTY_MESSAGE', '消息内容不能为空', 400);
       var message = msgResult.value;
 
       var wsResult = validateString(body.workspace_name, 200, '工作区名称');
-      if (!wsResult.ok) return res.status(400).json({ ok: false, error: wsResult.error });
+      if (!wsResult.ok) return sendError('INVALID_WORKSPACE', wsResult.error, 400);
       var workspaceName = wsResult.value || '';
       var scopeResult = validateWorkspaceScope(req, body);
-      if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
+      if (!scopeResult.ok) return sendError('INVALID_WORKSPACE_SCOPE', scopeResult.error, 400);
       var scope = scopeResult.value;
 
       var apResult = validateString(body.active_path, 500, '当前路径');
-      if (!apResult.ok) return res.status(400).json({ ok: false, error: apResult.error });
+      if (!apResult.ok) return sendError('INVALID_PATH', apResult.error, 400);
       var activePath = apResult.value || '';
-      if (activePath && !validatePath(activePath)) return res.status(400).json({ ok: false, error: '当前路径无效' });
+      if (activePath && !validatePath(activePath)) return sendError('INVALID_PATH', '当前路径无效', 400);
 
       var histResult = validateHistory(body.history);
-      if (!histResult.ok) return res.status(400).json({ ok: false, error: histResult.error });
+      if (!histResult.ok) return sendError('INVALID_HISTORY', histResult.error, 400);
       var history = histResult.value;
 
+      var conversationId = String(body.conversation_id || '').trim();
+      var sessionData = null;
+      if (conversationId) {
+        sessionData = agentSessionCache.get(conversationId);
+        if (!sessionData) {
+          sessionData = { history: history, lastActive: Date.now() };
+          agentSessionCache.set(conversationId, sessionData);
+        } else {
+          sessionData.lastActive = Date.now();
+        }
+      }
+      var currentHistory = sessionData ? sessionData.history : history;
+
       var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
-      if (!openResult.ok) return res.status(413).json({ ok: false, error: openResult.error });
+      if (!openResult.ok) return sendError('OPEN_FILES_TOO_LARGE', openResult.error, 413);
       var attachmentInput = Array.isArray(body.attachments) ? body.attachments : body.files;
       var attachmentResult = validateRequestFiles(attachmentInput, MAX_ATTACHMENTS, '上传资料');
-      if (!attachmentResult.ok) return res.status(413).json({ ok: false, error: attachmentResult.error });
+      if (!attachmentResult.ok) return sendError('ATTACHMENTS_TOO_LARGE', attachmentResult.error, 413);
       var openFiles = openResult.value;
       var attachments = attachmentResult.value.map(function(file) { file.source = 'attachment'; return file; });
 
@@ -1559,28 +1694,65 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       var indexSummary = codeIndex.getIndexSummary(scope);
+      logPhase('validated', { workspaceId: scope.workspaceId, workspaceGeneration: scope.generation, hasIndex: !!indexSummary, hasOpenFiles: openFiles.length > 0, hasAttachments: attachments.length > 0, thinkingMode: String(body.thinking_mode || 'auto') });
       if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
-        return res.status(409).json({
-          ok: false,
-          code: 'INDEX_REBUILD_REQUIRED',
-          error: '项目索引需要重新建立',
-          rebuildRequired: true
-        });
+        return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 409, { retryable: true });
       }
 
       var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
       var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
-      if (!apiKey) return res.status(503).json({ ok: false, code: 'AI_NOT_CONFIGURED', error: 'AI 服务未配置' });
-      if (!model) return res.status(503).json({ ok: false, code: 'MODEL_NOT_CONFIGURED', error: 'Code AI 模型未配置' });
-      if (typeof deps.callDeepSeek !== 'function') return res.status(503).json({ ok: false, code: 'AGENT_NOT_AVAILABLE', error: 'Code Agent 未启用' });
+      if (!apiKey) return sendError('AI_NOT_CONFIGURED', 'AI 服务未配置', 503);
+      if (!model) return sendError('MODEL_NOT_CONFIGURED', 'Code AI 模型未配置', 503);
+      if (typeof deps.callDeepSeek !== 'function') return sendError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 503);
 
-      var messages = buildAgentMessages(history, message, workspaceName, indexSummary, activePath, openFiles, attachments);
+      // Phase 3: Compute capabilities and thinkingMode BEFORE building messages
+      // so that runtime identity and limits can be injected into the user message.
+      var capabilities = buildCodeCapabilities(deps);
+      var thinkingMode = String(body.thinking_mode || 'auto');
+      if (thinkingMode === 'auto' || thinkingMode === 'low') {
+        var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
+        if (simpleTaskRE.test(message.trim())) {
+          thinkingMode = 'off';
+        } else {
+          thinkingMode = 'high';
+        }
+      } else {
+        thinkingMode = /^(off|low|medium|high)$/.test(thinkingMode) ? thinkingMode : 'high';
+      }
+      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
+
+      // Build runtime capabilities for the tool executor
+      var runtimeCapabilities = {
+        provider: capabilities.provider,
+        model: capabilities.model,
+        configured: capabilities.configured,
+        agentEnabled: capabilities.agentEnabled,
+        toolCallingEnabled: capabilities.toolCallingEnabled,
+        providerContextTokens: capabilities.providerContextTokens,
+        providerMaxOutputTokens: capabilities.providerMaxOutputTokens,
+        maxContextTokens: capabilities.maxContextTokens,
+        maxOutputTokens: capabilities.maxOutputTokens,
+        maxToolRounds: capabilities.maxToolRounds,
+        thinkingMode: thinkingMode,
+        currentPromptTokens: null,
+        cacheHitTokens: null,
+        cacheMissTokens: null
+      };
+
+      var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
       var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
       var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
       var toolTrace = [];
-      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps);
-      var thinkingMode = /^(off|low|medium|high)$/.test(String(body.thinking_mode || 'low')) ? String(body.thinking_mode || 'low') : 'low';
-      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
+      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
+
+      // Rebuild messages with the now-known inputBudget
+      messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, inputBudget);
+      promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
+      inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+      runtimeCapabilities.inputBudgetTokens = inputBudget;
+      runtimeCapabilities.currentPromptTokens = promptTokens;
+
+      logPhase('ai_request_start', { model: model, thinkingMode: thinkingMode, firstToolChoice: firstToolChoice ? firstToolChoice.function.name : 'none', promptTokens: promptTokens, inputBudget: inputBudget });
 
       var aiResult = await deps.callDeepSeek(messages, {
         model: model,
@@ -1596,8 +1768,43 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
       if (aborted) return;
 
+      logPhase('ai_request_done', { toolCalls: toolTrace.length, toolTrace: toolTrace.map(function(t) { return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms }; }), usage: aiResult.usage ? { prompt: aiResult.usage.prompt_tokens, completion: aiResult.usage.completion_tokens } : null });
+
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
-      if (!rawContent) return res.status(502).json({ ok: false, error: 'AI 返回了空响应' });
+      if (!rawContent) {
+        return sendError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 502, { tool_trace: toolTrace, retryable: true });
+      }
+      var rawReasoning = aiResult && typeof aiResult.reasoning === 'string' ? aiResult.reasoning : '';
+
+      if (sessionData && aiResult.finalMessages) {
+        sessionData.history.push({ role: 'user', content: message });
+        var initialLen = messages.length;
+        if (aiResult.finalMessages.length > initialLen) {
+          for (var i = initialLen; i < aiResult.finalMessages.length; i++) {
+            sessionData.history.push(aiResult.finalMessages[i]);
+          }
+        }
+        sessionData.history.push({ role: 'assistant', content: rawContent, reasoning_content: rawReasoning });
+
+        // Phase 2: Checkpointing instead of sliding window.
+        // When history exceeds MAX_HISTORY_CHECKPOINT, keep first CHECKPOINT_KEEP
+        // and last CHECKPOINT_KEEP rounds, drop the middle.
+        // This preserves the Longest Common Prefix for KV Cache —
+        // the first N rounds never shift position across requests.
+        if (sessionData.history.length > MAX_HISTORY_CHECKPOINT) {
+          var keep = CHECKPOINT_KEEP;
+          var total = sessionData.history.length;
+          if (total > keep * 2) {
+            var head = sessionData.history.slice(0, keep);
+            var tail = sessionData.history.slice(total - keep);
+            sessionData.history = head.concat([
+              { role: 'user', content: '[早期对话已自动压缩，当前继续最近上下文。]' },
+              { role: 'assistant', content: '已理解，将继续基于当前上下文回复。' }
+            ]).concat(tail);
+            console.log('[code-agent] History checkpointed: ' + total + ' rounds -> ' + sessionData.history.length + ' rounds (prefix preserved)');
+          }
+        }
+      }
       var operations = [];
       var reply = rawContent;
       var parsed = extractJsonFromText(rawContent);
@@ -1626,16 +1833,36 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var cacheTotal = usage.prompt_cache_hit_tokens + (Number(usage.prompt_cache_miss_tokens) || 0);
         usage.prompt_cache_hit_ratio = cacheTotal > 0 ? usage.prompt_cache_hit_tokens / cacheTotal : 0;
       }
-      var capabilities = buildCodeCapabilities(deps, {
+      var caps = buildCodeCapabilities(deps, {
         requestSucceeded: true,
         model: aiResult.model || model
       });
+      var remainingEstimatedTokens = null;
+      if (caps.maxContextTokens && typeof promptTokens === 'number' && typeof readTokens === 'number') {
+        var outputReserve = caps.maxOutputTokens || CODE_AGENT_MAX_OUTPUT_TOKENS;
+        remainingEstimatedTokens = Math.max(0, caps.maxContextTokens - promptTokens - readTokens - outputReserve);
+      }
+      var runtimeInfo = {
+        provider: caps.provider,
+        model: caps.model,
+        configuredContextTokens: caps.maxContextTokens || null,
+        providerContextTokens: caps.providerContextTokens || null,
+        inputBudgetTokens: inputBudget,
+        promptTokens: promptTokens,
+        toolReadTokens: readTokens,
+        cacheHitTokens: usage && usage.prompt_cache_hit_tokens != null ? usage.prompt_cache_hit_tokens : null,
+        cacheMissTokens: usage && usage.prompt_cache_miss_tokens != null ? usage.prompt_cache_miss_tokens : null,
+        completionTokens: usage && usage.completion_tokens != null ? usage.completion_tokens : null,
+        remainingEstimatedTokens: remainingEstimatedTokens
+      };
       return res.json({
         ok: true,
+        requestId: requestId,
         reply: reply.trim(),
         operations: operations,
         usage: usage,
-        capabilities: capabilities,
+        capabilities: caps,
+        runtime: runtimeInfo,
         tool_trace: toolTrace,
         context_info: {
           indexed: !!indexSummary,
@@ -1650,15 +1877,62 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           total_tokens: readTokens,
           budget_tokens: inputBudget,
           cache_hit_tokens: usage && usage.prompt_cache_hit_tokens,
-          cache_miss_tokens: usage && usage.prompt_cache_miss_tokens
+          cache_miss_tokens: usage && usage.prompt_cache_miss_tokens,
+          runtime: runtimeInfo
         }
       });
     } catch (err) {
-      if (aborted || (err && err.name === 'AbortError')) return;
-      var message = err && err.message ? err.message : '';
-      console.error('[code-agent] Unhandled error:', message || err);
-      var status = /超时/.test(message) ? 504 : (/频繁|HTTP 429/.test(message) ? 429 : 502);
-      return res.status(status).json({ ok: false, error: sanitizeError ? sanitizeError(err) : 'Code AI 请求失败' });
+      if (aborted || (err && err.name === 'AbortError')) {
+        logPhase('cancelled', {});
+        return;
+      }
+      var errMsg = err && err.message ? err.message : '';
+      var errCode = err && err.code ? err.code : '';
+      console.error('[code-agent] Unhandled error:', errMsg || err, 'phase:', requestPhase);
+      logPhase('error', { errorMessage: errMsg, errorCode: errCode || 'UNKNOWN' });
+
+      // Phase 2: Map known error patterns to structured error codes
+      var code = errCode || 'INTERNAL_ERROR';
+      var status = 502;
+      var retryable = true;
+
+      if (/超时|timeout/i.test(errMsg)) {
+        code = 'PROVIDER_TIMEOUT';
+        status = 504;
+      } else if (/HTTP 429|频繁|rate.?limit/i.test(errMsg)) {
+        code = 'PROVIDER_HTTP_429';
+        status = 429;
+      } else if (/HTTP 400/i.test(errMsg)) {
+        code = 'PROVIDER_HTTP_400';
+        status = 502;
+      } else if (/HTTP 401/i.test(errMsg)) {
+        code = 'PROVIDER_HTTP_401';
+        status = 502;
+        retryable = false;
+      } else if (/HTTP 403/i.test(errMsg)) {
+        code = 'PROVIDER_HTTP_403';
+        status = 502;
+        retryable = false;
+      } else if (/取消|cancel|abort/i.test(errMsg)) {
+        code = 'REQUEST_CANCELLED';
+        status = 499;
+        retryable = true;
+      } else if (/工具调用解析失败|DSML|tool_call/i.test(errMsg)) {
+        code = 'TOOL_TRANSCRIPT_INVALID';
+        status = 502;
+      } else if (/上下文预算|context.*budget|token.*budget/i.test(errMsg)) {
+        code = 'CONTEXT_BUDGET_EXCEEDED';
+        status = 413;
+      } else if (/工具结果.*大|tool.*result.*large|超过.*限制/i.test(errMsg)) {
+        code = 'TOOL_RESULT_TOO_LARGE';
+        status = 413;
+      } else if (/序列化|serialize|JSON.*parse/i.test(errMsg)) {
+        code = 'INTERNAL_SERIALIZATION_ERROR';
+        status = 500;
+        retryable = false;
+      }
+
+      return sendError(code, sanitizeError ? sanitizeError(err) : ('Code AI 请求失败: ' + (errMsg || '未知错误')), status, { retryable: retryable });
     }
   });
 };

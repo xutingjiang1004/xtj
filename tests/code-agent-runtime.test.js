@@ -229,7 +229,7 @@ test('runs a real multi-step code tool flow and reports actual reads plus cache 
   assert.equal(receivedOptions.max_tool_rounds, 8);
   assert.deepEqual(
     receivedOptions.tools.map(tool => tool.function.name),
-    ['list_files', 'search_code', 'read_file', 'read_file_range', 'get_symbols', 'get_active_file', 'get_open_files', 'web_search', 'fetch_web_page']
+    ['list_files', 'search_code', 'read_file', 'read_file_range', 'get_symbols', 'get_active_file', 'get_open_files', 'get_runtime_capabilities', 'web_search', 'fetch_web_page']
   );
   assert.equal(response.body.context_info.total_tool_calls, 2);
   assert.equal(response.body.context_info.files_read[0].path, 'src/example.js');
@@ -331,7 +331,7 @@ test('keeps indexes isolated by authenticated user and asks for rebuild after re
     });
   assert.equal(bob.status, 409);
   assert.equal(bob.body.code, 'INDEX_REBUILD_REQUIRED');
-  assert.equal(bob.body.rebuildRequired, true);
+  assert.equal(bob.body.retryable, true);
 });
 
 test('accepts bounded index batches and keeps partial indexes private until finalization', async () => {
@@ -401,6 +401,182 @@ test('uploaded travel documents are available to tools without a project index',
   assert.equal(response.body.context_info.indexed, false);
   assert.deepEqual(response.body.context_info.attachments, ['attachments/guangzhou.md']);
   assert.equal(response.body.context_info.files_read[0].path, 'attachments/guangzhou.md');
+});
+
+// ── Runtime identity & capabilities tests ─────────────────────────────
+
+test('response includes runtime identity with provider=deepseek and model', async () => {
+  const app = createApp(async (_messages, _options) => {
+    return { content: '我是 XTJ Code Agent，运行在 DeepSeek 平台上。', model: 'deepseek-v4-flash', usage: { prompt_tokens: 100, completion_tokens: 50 } };
+  });
+  // Build a minimal index so the chat request is accepted
+  const source = 'const x = 1;';
+  await request(app).post('/api/code/index/build').send({
+    workspaceId: 'local:runtime-id', workspaceGeneration: 1,
+    files: [{ path: 'src/main.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  const response = await request(app).post('/api/code/chat').send({
+    workspace_id: 'local:runtime-id', workspace_generation: 1,
+    message: '你是什么模型？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.runtime, 'response should have runtime field');
+  assert.equal(response.body.runtime.provider, 'deepseek');
+  assert.ok(response.body.runtime.model, 'runtime should have model');
+  assert.ok(response.body.context_info.runtime, 'context_info should have runtime');
+  assert.equal(response.body.context_info.runtime.provider, 'deepseek');
+});
+
+test('system prompt forbids claiming to be Claude, GPT, or Gemini', async () => {
+  const codeAgent = require('fs').readFileSync('render-api/code-agent.js', 'utf8');
+  assert.match(codeAgent, /不要声称自己是 Claude/);
+  assert.match(codeAgent, /不要声称自己是.*Anthropic/);
+  assert.match(codeAgent, /不要声称自己是.*GPT/);
+  assert.match(codeAgent, /不要声称自己是.*Gemini/);
+  assert.match(codeAgent, /自称 Claude.*Anthropic.*200K tokens.*15 万英文单词/);
+});
+
+test('get_runtime_capabilities tool returns real server data', async () => {
+  let toolResult;
+  const app = createApp(async (_messages, options) => {
+    toolResult = await options.tool_executor({
+      id: 'cap-1',
+      function: { name: 'get_runtime_capabilities', arguments: '{}' }
+    });
+    return { content: '根据运行时数据，我是 deepseek-v4-flash。', model: 'deepseek-v4-flash', usage: {} };
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+  // Build a minimal index
+  var source = 'const x = 1;';
+  await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'local:rt-cap', workspaceGeneration: 1,
+    files: [{ path: 'src/main.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'test', workspace_id: 'local:rt-cap', workspace_generation: 1,
+    message: '你是什么模型？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.ok(toolResult, 'get_runtime_capabilities should have been called');
+  assert.equal(toolResult.ok, true);
+  assert.equal(toolResult.provider, 'deepseek');
+  assert.equal(toolResult.model, 'deepseek-v4-flash');
+  assert.equal(toolResult.configured, true);
+  assert.equal(toolResult.agentEnabled, true);
+  assert.equal(toolResult.toolCallingEnabled, true);
+  assert.equal(toolResult.maxToolRounds, 8);
+  assert.ok(typeof toolResult.thinkingMode === 'string');
+});
+
+test('get_runtime_capabilities returns null for unknown providerContextTokens', async () => {
+  let toolResult;
+  const app = createApp(async (_messages, options) => {
+    toolResult = await options.tool_executor({
+      id: 'cap-2',
+      function: { name: 'get_runtime_capabilities', arguments: '{}' }
+    });
+    return { content: '服务器未提供理论上下文上限。', model: 'deepseek-v4-flash', usage: {} };
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+  // Build a minimal index
+  var source = 'const x = 1;';
+  await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'local:rt-cap2', workspaceGeneration: 2,
+    files: [{ path: 'src/main.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'test', workspace_id: 'local:rt-cap2', workspace_generation: 2,
+    message: '你的上下文窗口多大？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(toolResult.providerContextTokens, null);
+  assert.equal(toolResult.providerMaxOutputTokens, null);
+  // AI should not answer 200K when providerContextTokens is null
+  assert.ok(!/200K|200,000|200 k/i.test(response.body.reply), 'should not fabricate 200K when data is null');
+});
+
+test('runtime response includes remainingEstimatedTokens when data is complete', async () => {
+  const app = createApp(async (_messages, _options) => {
+    return {
+      content: '上下文分析完成。',
+      model: 'deepseek-v4-flash',
+      usage: { prompt_tokens: 500, completion_tokens: 200, prompt_cache_hit_tokens: 300, prompt_cache_miss_tokens: 100 }
+    };
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+  // Build a minimal index
+  var source = 'const x = 1;';
+  await request(app).post('/api/code/index/build').send({
+    workspaceId: 'local:rt-remain', workspaceGeneration: 3,
+    files: [{ path: 'src/main.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  const response = await request(app).post('/api/code/chat').send({
+    workspace_id: 'local:rt-remain', workspace_generation: 3,
+    message: '还剩多少上下文？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.runtime, 'should have runtime');
+  assert.ok(typeof response.body.runtime.remainingEstimatedTokens === 'number', 'remainingEstimatedTokens should be a number');
+  assert.ok(response.body.runtime.remainingEstimatedTokens >= 0, 'remainingEstimatedTokens should be >= 0');
+  assert.equal(response.body.runtime.cacheHitTokens, 300);
+  assert.equal(response.body.runtime.cacheMissTokens, 100);
+  assert.equal(response.body.runtime.completionTokens, 200);
+});
+
+test('context_info.runtime separates project index from model context', async () => {
+  const app = createApp(async (_messages, _options) => {
+    return { content: '项目有 3 个文件，但本轮只读了 1 个。', model: 'deepseek-v4-flash', usage: { prompt_tokens: 200, completion_tokens: 80 } };
+  });
+  // Build index via API
+  var source = 'const c = 3;\n'.repeat(50);
+  var buildRes = await request(app).post('/api/code/index/build').send({
+    workspaceId: 'local:idx-sep', workspaceGeneration: 1,
+    files: [
+      { path: 'src/a.js', language: 'javascript', content: 'const a = 1;', sha256: sha('const a = 1;'), size: 12 },
+      { path: 'src/b.js', language: 'javascript', content: 'const b = 2;', sha256: sha('const b = 2;'), size: 12 },
+      { path: 'src/c.js', language: 'javascript', content: source, sha256: sha(source), size: Buffer.byteLength(source) }
+    ]
+  });
+  assert.equal(buildRes.status, 200, 'index build should succeed');
+  assert.ok(buildRes.body.ok, 'index build should return ok');
+  const response = await request(app).post('/api/code/chat').send({
+    workspace_id: 'local:idx-sep', workspace_generation: 1,
+    message: '项目有多少文件？', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.context_info.runtime, 'context_info should have runtime');
+  assert.ok(response.body.context_info.index, 'should have index summary');
+  // Index scale and runtime context are separate fields
+  assert.ok(response.body.context_info.index.totalFiles > 0, 'index should show file count');
+  assert.ok(response.body.context_info.runtime.provider, 'runtime should show provider');
+  // The reply should NOT equate index chunks with context usage
+  assert.ok(!/23966.*Token|400K/i.test(response.body.reply), 'reply should not claim index chunks = context usage');
+});
+
+test('first_tool_choice for identity question should call get_runtime_capabilities', async () => {
+  // Verify that inferInitialToolChoice does NOT force list_files for identity questions
+  const codeAgent = require('fs').readFileSync('render-api/code-agent.js', 'utf8');
+  // The system prompt instructs the model to call get_runtime_capabilities for identity questions
+  assert.match(codeAgent, /get_runtime_capabilities/);
+  assert.match(codeAgent, /你是什么模型.*get_runtime_capabilities/);
+});
+
+test('runtime info is present even when no tools were called', async () => {
+  const app = createApp(async (_messages, _options) => {
+    return { content: '你好！', model: 'deepseek-v4-flash', usage: { prompt_tokens: 50, completion_tokens: 10 } };
+  });
+  // Build a minimal index
+  var source = 'const x = 1;';
+  await request(app).post('/api/code/index/build').send({
+    workspaceId: 'local:rt-no-tools', workspaceGeneration: 4,
+    files: [{ path: 'src/main.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  const response = await request(app).post('/api/code/chat').send({
+    workspace_id: 'local:rt-no-tools', workspace_generation: 4,
+    message: '你好', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.runtime, 'should have runtime even without tool calls');
+  assert.equal(response.body.runtime.provider, 'deepseek');
+  assert.equal(response.body.runtime.toolReadTokens, 0);
+  assert.ok(response.body.runtime.promptTokens > 0, 'should have promptTokens');
 });
 
 const { after } = require('node:test');

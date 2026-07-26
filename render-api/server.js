@@ -4692,12 +4692,18 @@ async function callDeepSeek(messages, options) {
 
       if (!resp.ok) {
         var errTxt = '';
-        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; } catch (e) {}
+        var errCode = '';
+        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; } catch (e) {}
         console.error('[DEEPSEEK] API error', resp.status, errTxt, 'round', round);
         if (useThinking && (errTxt.indexOf('thinking') >= 0 || errTxt.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
-          throw new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
+          var thinkErr = new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
+          thinkErr.code = 'PROVIDER_HTTP_400';
+          throw thinkErr;
         }
-        throw new Error('AI 调用失败（HTTP ' + resp.status + '）');
+        var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
+        apiErr.code = 'PROVIDER_HTTP_' + resp.status;
+        if (errTxt) apiErr.providerMessage = errTxt;
+        throw apiErr;
       }
 
       var content = '';
@@ -4935,6 +4941,15 @@ async function callDeepSeek(messages, options) {
           if (externalSignal && noToolAbortHandler) {
             try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (e) {}
           }
+          if (!noToolResp.ok) {
+            var noToolErrTxt = '';
+            try { var noToolErrJson = await noToolResp.json().catch(function() { return {}; }); noToolErrTxt = (noToolErrJson && noToolErrJson.error && noToolErrJson.error.message) ? String(noToolErrJson.error.message).slice(0, 200) : ''; } catch (e) {}
+            console.error('[DEEPSEEK] noTool follow-up HTTP error', noToolResp.status, noToolErrTxt);
+            var noToolErr = new Error('AI 工具执行后回复失败（HTTP ' + noToolResp.status + '）');
+            noToolErr.code = 'DEEPSEEK_TOOL_FOLLOWUP_FAILED';
+            if (noToolErrTxt) noToolErr.providerMessage = noToolErrTxt;
+            throw noToolErr;
+          }
           var noToolData = await noToolResp.json().catch(function() { return {}; });
           if (noToolResp.ok && noToolData && noToolData.usage) {
             lastUsage = noToolData.usage;
@@ -4979,10 +4994,17 @@ async function callDeepSeek(messages, options) {
               throw noToolCancelled;
             }
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
+          // Re-throw the original error with proper code so the caller can handle it
+          if (e && e.code) throw e;
+          var recoveryErr = new Error('AI 工具执行后回复失败');
+          recoveryErr.code = 'DEEPSEEK_TOOL_FOLLOWUP_FAILED';
+          throw recoveryErr;
         }
       }
       if (!finalContent) {
-        finalContent = '（AI 思考过多轮但未给出最终回复, 请简化问题重试）';
+        var roundLimitErr = new Error('AI 工具调用已达上限（' + maxToolRounds + '轮），请简化问题重试');
+        roundLimitErr.code = 'AGENT_TOOL_ROUND_LIMIT';
+        finalContent = '（' + roundLimitErr.message + '）';
       }
     } else {
       // 已有 finalContent（最后一轮没 tool_call 时）

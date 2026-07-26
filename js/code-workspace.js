@@ -18,6 +18,7 @@
     pinnedFiles: [], // Replaces contextPaths — only priority hints, not full uploads
     projectIndexStatus: null, // { totalFiles, totalChunks, builtAt, indexed }
     lastReadContext: null, // { files_read: [], total_chunks, total_tokens, truncated }
+    lastRuntime: null, // { provider, model, configuredContextTokens, promptTokens, toolReadTokens, cacheHitTokens, cacheMissTokens, completionTokens, remainingEstimatedTokens }
     lastToolTrace: [],
     capabilities: null,
     attachments: [],
@@ -26,6 +27,7 @@
     attachmentError: '',
     messages: [],
     lastFailedMessage: '',
+    conversationId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
     pendingOperations: [],
     snapshots: {},
     sending: false,
@@ -743,6 +745,7 @@
     state._indexBuildPromise = null;
     state._indexStatusPromise = null;
     state._indexBuildKey = '';
+    _activeBuildContext = null;
     state._openFilePromises = {};
     state._savePromises = {};
     state._undoLock = false;
@@ -763,6 +766,7 @@
     state.snapshots = {};
     state.fileHandles = {};
     state.messages = [];
+    state.conversationId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     state.lastFailedMessage = '';
     state._isReadOnly = false;
     // Clear backend index
@@ -2434,41 +2438,100 @@
     return promise;
   }
 
+  // Phase 2: Index build context — immutable per-task state machine.
+  // Each build task owns its own buildContext; callbacks must only
+  // touch their own context.  Never set projectIndexStatus to null
+  // while an async task is still referencing it.
+  var _nextBuildId = 0;
+  var _activeBuildContext = null;
+
+  function createBuildContext(workspaceId, wsGen, controller) {
+    var ctx = {
+      id: ++_nextBuildId,
+      workspaceId: workspaceId,
+      workspaceGeneration: wsGen,
+      controller: controller,
+      startedAt: Date.now(),
+      status: 'scanning',   // idle | scanning | uploading | finalizing | ready | failed | cancelled
+      phase: '正在扫描文件...',
+      scannedFiles: 0,
+      indexableFiles: 0,
+      totalFiles: 0,
+      totalChunks: 0,
+      builtAt: null,
+      skippedFiles: 0,
+      failedFiles: 0,
+      truncated: false,
+      errorCode: '',
+      errorMessage: '',
+      batchIndex: 0,
+      totalBatches: 0
+    };
+    _activeBuildContext = ctx;
+    return ctx;
+  }
+
+  function isBuildContextCurrent(ctx) {
+    return _activeBuildContext === ctx &&
+      state.workspaceGeneration === ctx.workspaceGeneration &&
+      getWorkspaceId() === ctx.workspaceId;
+  }
+
+  function syncBuildContextToUI(ctx) {
+    if (!isBuildContextCurrent(ctx)) return;
+    state.projectIndexStatus = {
+      indexed: ctx.status === 'ready',
+      building: ctx.status === 'scanning' || ctx.status === 'uploading' || ctx.status === 'finalizing',
+      phase: ctx.phase,
+      scannedFiles: ctx.scannedFiles,
+      indexableFiles: ctx.indexableFiles,
+      totalFiles: ctx.totalFiles,
+      totalChunks: ctx.totalChunks,
+      builtAt: ctx.builtAt,
+      skippedFiles: ctx.skippedFiles,
+      failedFiles: ctx.failedFiles,
+      truncated: ctx.truncated,
+      error: ctx.errorMessage || '',
+      errorCode: ctx.errorCode || '',
+      buildId: ctx.id
+    };
+    renderProjectStatus();
+  }
+
   function buildProjectIndex() {
     var fs = window.__xtjCodeFS;
     if (!fs || (!fs.listAllFilesWithMetadata && !fs.listAllFiles)) {
-      state.projectIndexStatus = { indexed: false, error: '文件系统不支持项目索引' };
-      renderProjectStatus();
+      var noFsCtx = createBuildContext(getWorkspaceId(), state.workspaceGeneration, new AbortController());
+      noFsCtx.status = 'failed';
+      noFsCtx.errorCode = 'FS_NOT_AVAILABLE';
+      noFsCtx.errorMessage = '文件系统不支持项目索引';
+      syncBuildContextToUI(noFsCtx);
       return Promise.resolve(state.projectIndexStatus);
+    }
+
+    // Cancel any in-flight build before starting a new one
+    abortController(state._indexController);
+    if (state._indexBuildPromise) {
+      state._indexBuildKey = '';
+      state._indexBuildPromise = null;
     }
 
     var workspaceId = getWorkspaceId();
     var wsGen = state.workspaceGeneration;
-    var buildKey = workspaceId + '@' + wsGen;
-    if (state._indexBuildPromise && state._indexBuildKey === buildKey) {
-      return state._indexBuildPromise;
-    }
+    var controller = new AbortController();
+    state._indexController = controller;
 
-    abortController(state._indexController);
-    state._indexController = new AbortController();
+    var ctx = createBuildContext(workspaceId, wsGen, controller);
+    var buildKey = 'build_' + ctx.id + '@' + workspaceId + '@' + wsGen;
     state._indexBuildKey = buildKey;
-    var controller = state._indexController;
-
-    function isCurrentBuild() {
-      return state.workspaceGeneration === wsGen &&
-        getWorkspaceId() === workspaceId &&
-        state._indexBuildKey === buildKey;
-    }
-
-    state.projectIndexStatus = { indexed: false, building: true, phase: '正在扫描文件...' };
-    renderProjectStatus();
+    syncBuildContextToUI(ctx);
 
     var listPromise = fs.listAllFilesWithMetadata
       ? fs.listAllFilesWithMetadata(8, 1000)
       : fs.listAllFiles(8, 1000);
 
     var promise = listPromise.then(function (result) {
-      if (!isCurrentBuild()) throw createNamedAbortError();
+      if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
       var sourceFiles = result && Array.isArray(result.files) ? result.files : [];
       var files = [];
       for (var i = 0; i < sourceFiles.length; i++) {
@@ -2484,14 +2547,13 @@
           content: file.content || ''
         });
       }
-      state.projectIndexStatus = {
-        indexed: false,
-        building: true,
-        phase: '正在上传索引...',
-        scannedFiles: sourceFiles.length,
-        indexableFiles: files.length
-      };
-      renderProjectStatus();
+
+      ctx.status = 'uploading';
+      ctx.phase = '正在上传索引...';
+      ctx.scannedFiles = sourceFiles.length;
+      ctx.indexableFiles = files.length;
+      syncBuildContextToUI(ctx);
+
       var batches = [];
       var currentBatch = [];
       var currentBytes = 0;
@@ -2507,14 +2569,17 @@
         currentBytes += fileBytes;
       }
       if (currentBatch.length || !batches.length) batches.push(currentBatch);
+      ctx.totalBatches = batches.length;
       var useBatches = batches.length > 1;
+
       return batches.reduce(function (chain, batch, index) {
         return chain.then(function () {
-          if (!isCurrentBuild()) throw createNamedAbortError();
-          state.projectIndexStatus.phase = useBatches
+          if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+          ctx.batchIndex = index;
+          ctx.phase = useBatches
             ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
             : '正在上传索引...';
-          renderProjectStatus();
+          syncBuildContextToUI(ctx);
           var payload = {
             workspaceId: workspaceId,
             workspaceGeneration: wsGen,
@@ -2532,32 +2597,42 @@
           });
         });
       }, Promise.resolve());
-    }).then(function (result) {
-      if (!isCurrentBuild()) return null;
-      state.projectIndexStatus = {
-        totalFiles: result.totalFiles,
-        totalChunks: result.totalChunks,
-        builtAt: result.builtAt,
-        skippedFiles: result.skippedFiles || 0,
-        failedFiles: result.failedFiles || 0,
-        truncated: result.truncated === true,
-        indexed: true
-      };
-      renderProjectStatus();
-      return result;
+    }).then(function (buildResult) {
+      if (!isBuildContextCurrent(ctx)) return null;
+      ctx.status = 'ready';
+      ctx.phase = '索引构建完成';
+      ctx.totalFiles = buildResult.totalFiles;
+      ctx.totalChunks = buildResult.totalChunks;
+      ctx.builtAt = buildResult.builtAt;
+      ctx.skippedFiles = buildResult.skippedFiles || 0;
+      ctx.failedFiles = buildResult.failedFiles || 0;
+      ctx.truncated = buildResult.truncated === true;
+      syncBuildContextToUI(ctx);
+      return buildResult;
     }).catch(function (err) {
-      if (err && err.name === 'AbortError') return null;
-      if (!isCurrentBuild()) return null;
+      if (err && err.name === 'AbortError') {
+        if (isBuildContextCurrent(ctx)) {
+          ctx.status = 'cancelled';
+          ctx.phase = '索引构建已取消';
+          syncBuildContextToUI(ctx);
+        }
+        return null;
+      }
+      if (!isBuildContextCurrent(ctx)) return null;
       console.error('[code-workspace] Index build failed:', err);
-      state.projectIndexStatus = { indexed: false, error: (err && err.message) || '索引构建失败' };
-      renderProjectStatus();
+      ctx.status = 'failed';
+      ctx.errorCode = 'INDEX_BUILD_FAILED';
+      ctx.errorMessage = (err && err.message) || '索引构建失败';
+      ctx.phase = '索引构建失败';
+      syncBuildContextToUI(ctx);
       return null;
-    }).then(function (result) {
+    }).then(function (buildResult) {
+      // Only cleanup if this build is still the registered one
       if (state._indexBuildKey === buildKey) {
         state._indexBuildPromise = null;
         state._indexController = null;
       }
-      return result;
+      return buildResult;
     });
 
     state._indexBuildPromise = promise;
@@ -2613,6 +2688,51 @@
       indexDiv.innerHTML = '<div style="color:var(--cw-text-muted);">索引尚未建立</div>';
     }
     body.appendChild(indexDiv);
+
+    // Runtime info — real server-verified model identity and token stats
+    var runtime = state.lastRuntime;
+    if (runtime) {
+      var runtimeDiv = document.createElement('div');
+      runtimeDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
+
+      var runtimeTitle = document.createElement('div');
+      runtimeTitle.style.cssText = 'color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;';
+      runtimeTitle.textContent = '运行时';
+      runtimeDiv.appendChild(runtimeTitle);
+
+      var lines = [];
+      lines.push('模型：' + (runtime.model || '服务器未声明'));
+      lines.push('上下文配置：' + (runtime.configuredContextTokens ? runtime.configuredContextTokens.toLocaleString() + ' Token' : '服务器未声明'));
+      if (typeof runtime.promptTokens === 'number') {
+        lines.push('本轮输入：' + runtime.promptTokens.toLocaleString() + ' Token');
+      }
+      if (typeof runtime.toolReadTokens === 'number' && runtime.toolReadTokens > 0) {
+        lines.push('本轮工具读取：' + runtime.toolReadTokens.toLocaleString() + ' Token');
+      }
+      if (runtime.cacheHitTokens != null && runtime.cacheMissTokens != null) {
+        var cacheTotal = runtime.cacheHitTokens + runtime.cacheMissTokens;
+        if (cacheTotal > 0) {
+          lines.push('缓存命中：' + Math.round(runtime.cacheHitTokens / cacheTotal * 100) + '%');
+        }
+      }
+      if (runtime.remainingEstimatedTokens != null) {
+        lines.push('预估剩余：' + runtime.remainingEstimatedTokens.toLocaleString() + ' Token');
+      }
+
+      // Project index scale — clearly separated from model context
+      if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
+        lines.push('项目索引：' + state.projectIndexStatus.totalFiles + ' 文件 / ' + state.projectIndexStatus.totalChunks + ' 代码块');
+      }
+
+      lines.forEach(function (line) {
+        var lineDiv = document.createElement('div');
+        lineDiv.style.cssText = 'color:var(--cw-text-muted);font-size:9px;line-height:1.5;';
+        lineDiv.textContent = line;
+        runtimeDiv.appendChild(lineDiv);
+      });
+
+      body.appendChild(runtimeDiv);
+    }
 
     function appendPathSection(title, paths, icon, clickable) {
       var unique = [];
@@ -2713,8 +2833,8 @@
     var refreshBtn = document.getElementById('codeRefreshIndex');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', function () {
-        state.projectIndexStatus = null;
-        renderProjectStatus();
+        // Phase 2: Let buildProjectIndex() cancel old task and create new one.
+        // Never set projectIndexStatus to null while async tasks are pending.
         buildProjectIndex();
       });
     }
@@ -2727,8 +2847,7 @@
     var retryBtn = document.getElementById('codeRetryIndex');
     if (retryBtn) {
       retryBtn.addEventListener('click', function () {
-        state.projectIndexStatus = null;
-        renderProjectStatus();
+        // Phase 2: Let buildProjectIndex() cancel old task and create new one.
         buildProjectIndex();
       });
     }
@@ -3465,6 +3584,7 @@
       workspace_name: state.workspaceName || '',
       workspace_id: scope.workspace_id,
       workspace_generation: scope.workspace_generation,
+      conversation_id: state.conversationId,
       message: message,
       active_path: state.activePath || '',
       history: historyMsgs,
@@ -3658,6 +3778,19 @@
             rebuildError.code = 'INDEX_REBUILD_REQUIRED';
             throw rebuildError;
           }
+          // Phase 2: Preserve structured error from backend
+          if (json && json.code && json.error) {
+            var codeError = new Error(json.error);
+            codeError.code = json.code;
+            codeError.requestId = json.requestId || '';
+            codeError.phase = json.phase || '';
+            codeError.retryable = json.retryable === true;
+            // Preserve tool trace if tools succeeded
+            if (Array.isArray(json.tool_trace) && json.tool_trace.length > 0) {
+              codeError.toolTrace = json.tool_trace;
+            }
+            throw codeError;
+          }
           // P0: 根据状态码显示具体错误
           if (resp.status === 401) {
             errMsg = '登录已失效，请重新登录';
@@ -3686,6 +3819,9 @@
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
 
+      if (requestId !== state._requestId) return;
+      if (wsGen !== state.workspaceGeneration) return;
+
       // Remove typing indicator
       removeTypingIndicator();
 
@@ -3706,6 +3842,9 @@
       // Update last read context for display
       if (data && data.context_info) {
         state.lastReadContext = data.context_info;
+      }
+      if (data && data.runtime) {
+        state.lastRuntime = data.runtime;
       }
       state.lastToolTrace = data && Array.isArray(data.tool_trace) ? data.tool_trace : [];
       if (data && data.capabilities) state.capabilities = data.capabilities;
@@ -3752,9 +3891,24 @@
       removeTypingIndicator();
 
       var errMsg = (err && err.message) ? err.message : String(err);
-      console.error('[CODE-AI] Request failed:', errMsg);
+      var errCode = (err && err.code) ? err.code : '';
+      var errRequestId = (err && err.requestId) ? err.requestId : '';
+      console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
       restoreFailedMessage(body && body.message);
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr });
+
+      // Phase 2: Build enhanced error message with code and requestId
+      var displayMsg = errMsg;
+      if (errCode) displayMsg = '[' + errCode + '] ' + displayMsg;
+      var assistantMsg = { role: 'assistant', content: '抱歉，' + displayMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
+
+      // Phase 2: Preserve tool trace when tools succeeded but final answer failed
+      if (err && Array.isArray(err.toolTrace) && err.toolTrace.length > 0) {
+        assistantMsg.toolTrace = err.toolTrace;
+        assistantMsg.toolTraceNote = '工具执行成功，模型总结失败';
+        state.lastToolTrace = err.toolTrace;
+      }
+
+      state.messages.push(assistantMsg);
 
       renderChatPanel();
       restoreFailedMessage(body && body.message);
@@ -3806,6 +3960,48 @@
     if (el) {
       try { el.remove(); } catch (e) { /* ignore */ }
     }
+  }
+
+  // ──────────────────────────────────────────────
+  // computeDiff(oldText, newText) — line-by-line LCS diff
+  // ──────────────────────────────────────────────
+  function computeDiff(oldText, newText) {
+    var oldLines = oldText.split('\n');
+    var newLines = newText.split('\n');
+    var m = oldLines.length;
+    var n = newLines.length;
+
+    // Build LCS table
+    var dp = new Array(m + 1);
+    for (var i = 0; i <= m; i++) {
+      dp[i] = new Array(n + 1);
+      for (var j = 0; j <= n; j++) {
+        if (i === 0 || j === 0) {
+          dp[i][j] = 0;
+        } else if (oldLines[i - 1] === newLines[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    // Backtrack to generate diff
+    var i = m, j = n;
+    var diffLines = [];
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+        diffLines.unshift({ type: 'unchanged', lineNum: i, text: oldLines[i - 1] });
+        i--; j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        diffLines.unshift({ type: 'added', lineNum: j, text: newLines[j - 1] });
+        j--;
+      } else {
+        diffLines.unshift({ type: 'removed', lineNum: i, text: oldLines[i - 1] });
+        i--;
+      }
+    }
+    return diffLines;
   }
 
   // ──────────────────────────────────────────────
@@ -3910,6 +4106,14 @@
         before.appendChild(docInfo);
       } else {
         var newContent = op.new_content || '';
+        if (op.type === 'replace_range' && op.start_line && op.end_line) {
+          var lines = originalContent.split('\n');
+          var startIdx = Math.max(0, op.start_line - 1);
+          var endIdx = Math.max(0, op.end_line);
+          var prefix = lines.slice(0, startIdx).join('\n');
+          var suffix = lines.slice(endIdx).join('\n');
+          newContent = (prefix ? prefix + '\n' : '') + newContent + (suffix ? '\n' + suffix : '');
+        }
         var diffLines = computeDiff(originalContent, newContent);
 
         for (var k = 0; k < diffLines.length; k++) {
@@ -3956,55 +4160,6 @@
     }
 
     // Bind buttons
-    var undoBtn = document.getElementById('codeUndoBtn');
-    if (undoBtn) {
-      undoBtn.addEventListener('click', function () {
-        undoOperations();
-      });
-    }
-
-    var applyAllBtn = document.getElementById('codeApplyAllBtn');
-    if (applyAllBtn) {
-      applyAllBtn.addEventListener('click', function () {
-        applyAllOperations();
-      });
-    }
-  }
-
-  function computeDiff(original, newContent) {
-    var oldLines = (original || '').split('\n');
-    var newLines = (newContent || '').split('\n');
-
-    // Simple line-by-line diff
-    var result = [];
-    var maxLen = Math.max(oldLines.length, newLines.length);
-
-    // Find common prefix
-    var prefixLen = 0;
-    while (prefixLen < oldLines.length && prefixLen < newLines.length && oldLines[prefixLen] === newLines[prefixLen]) {
-      result.push({ type: 'unchanged', text: oldLines[prefixLen], lineNum: prefixLen + 1 });
-      prefixLen++;
-    }
-
-    // Find common suffix
-    var suffixLen = 0;
-    while (
-      suffixLen < oldLines.length - prefixLen &&
-      suffixLen < newLines.length - prefixLen &&
-      oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]
-    ) {
-      suffixLen++;
-    }
-
-    // Removed lines
-    for (var i = prefixLen; i < oldLines.length - suffixLen; i++) {
-      result.push({ type: 'removed', text: oldLines[i], lineNum: i + 1 });
-    }
-
-    // Added lines
-    for (var j = prefixLen; j < newLines.length - suffixLen; j++) {
-      result.push({ type: 'added', text: newLines[j], lineNum: j + 1 });
-    }
 
     // Suffix
     for (var k = oldLines.length - suffixLen; k < oldLines.length; k++) {
@@ -4233,23 +4388,35 @@
         throw new Error('文件 "' + op.path + '" 已被修改，与 AI 生成回复时的内容不一致。请重新生成。');
       }
 
-      // Take snapshot of current content before writing
+            // Take snapshot of current content before writing
+      var currentText = result.type === 'text' ? result.content : '';
       if (!state.snapshots[op.path]) {
         state.snapshots[op.path] = {
           existed: true,
-          beforeContent: result.type === 'text' ? result.content : '',
+          beforeContent: currentText,
           beforeSha256: result.sha256 || ''
         };
       }
 
-      // Write new content
-      return fs.writeFileByPath(op.path, op.new_content || '');
+      var contentToWrite = op.new_content || '';
+      if (op.type === 'replace_range' && op.start_line && op.end_line) {
+        var lines = currentText.split('\n');
+        var startIdx = Math.max(0, op.start_line - 1);
+        var endIdx = Math.max(0, op.end_line);
+        var prefix = lines.slice(0, startIdx).join('\n');
+        var suffix = lines.slice(endIdx).join('\n');
+        contentToWrite = (prefix ? prefix + '\n' : '') + contentToWrite + (suffix ? '\n' + suffix : '');
+      }
+
+      op._final_written_content = contentToWrite;
+      return fs.writeFileByPath(op.path, contentToWrite);
     }).then(function (writeResult) {
       if (state.snapshots[op.path]) state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
       // Update open tab if file is open
+      var finalContent = op._final_written_content || op.new_content || '';
       for (var i = 0; i < state.openTabs.length; i++) {
         if (state.openTabs[i].path === op.path) {
-          state.openTabs[i].content = op.new_content || '';
+          state.openTabs[i].content = finalContent;
           state.openTabs[i].sha256 = writeResult.sha256 || '';
           state.openTabs[i].modified = false;
           state.openTabs[i]._currentContent = undefined;
