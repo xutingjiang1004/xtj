@@ -574,6 +574,7 @@ function buildIndex(scope, files, options) {
       language: language,
       size: actualSize,
       sha256: sha256,
+      totalLines: content ? content.split('\n').length : 0,
       modifiedAt: f.modifiedAt || null,
       symbols: extractSymbols(content, language),
       chunks: [],
@@ -1045,7 +1046,8 @@ function readFileRange(scope, path, startLine, endLine) {
     lines: lines,
     startLine: startLine,
     endLine: endLine,
-    totalLines: lines.length
+    totalLines: lines.length,
+    totalFileLines: entry.totalLines || 0
   };
 }
 

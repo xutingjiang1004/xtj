@@ -1880,6 +1880,11 @@
       showToast(unchanged ? 'File saved' : 'Previous version saved; newer edits remain unsaved', unchanged ? 'success' : 'warning');
       return true;
     }).catch(function (err) {
+      // A save belonging to a replaced workspace must not surface an error
+      // toast in the new workspace. The operation is stale UI work.
+      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+        return false;
+      }
       showToast('保存失败: ' + (err && err.message ? err.message : String(err)), 'error');
       return false;
     }).then(function (result) {

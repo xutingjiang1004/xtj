@@ -4409,6 +4409,76 @@ async function callDeepSeek(messages, options) {
     var finalModel = model;
     var workingMessages = messages.slice();
     var lastUsage = null;
+    // DeepSeek may occasionally return a partial/malformed tool call (most
+    // commonly an omitted id or an incomplete JSON argument string).  Never
+    // echo that malformed shape back into the next chat-completions request:
+    // the provider requires a stable id and a JSON string for every function
+    // tool call, otherwise the following round fails with HTTP 400.
+    function normalizeToolCalls(rawCalls, roundNumber) {
+      if (!Array.isArray(rawCalls)) return [];
+      var normalized = [];
+      for (var ni = 0; ni < rawCalls.length; ni++) {
+        var rawCall = rawCalls[ni];
+        if (!rawCall || typeof rawCall !== 'object') continue;
+        var rawFunction = rawCall.function && typeof rawCall.function === 'object' ? rawCall.function : {};
+        var name = typeof rawFunction.name === 'string' ? rawFunction.name.trim() : '';
+        if (!name) continue;
+        var callId = typeof rawCall.id === 'string' ? rawCall.id.trim() : String(rawCall.id || '').trim();
+        if (!callId) callId = 'call_' + (roundNumber + 1) + '_' + (normalized.length + 1);
+        var rawArguments = rawFunction.arguments;
+        if (rawArguments && typeof rawArguments === 'object') {
+          try { rawArguments = JSON.stringify(rawArguments); } catch (_) { rawArguments = '{}'; }
+        }
+        if (typeof rawArguments !== 'string' || !rawArguments.trim()) rawArguments = '{}';
+        else {
+          // Tool results are generated locally, so malformed arguments must
+          // become a valid object before being echoed to the provider.
+          try {
+            var parsedArguments = JSON.parse(rawArguments);
+            if (!parsedArguments || typeof parsedArguments !== 'object' || Array.isArray(parsedArguments)) rawArguments = '{}';
+          } catch (_) { rawArguments = '{}'; }
+        }
+        normalized.push({
+          id: callId,
+          type: 'function',
+          function: { name: name, arguments: rawArguments }
+        });
+      }
+      return normalized;
+    }
+    // Keep caller supplied budgets within the provider's documented output
+    // limit and avoid serializing NaN/Infinity as JSON null.
+    var requestedMaxTokens = null;
+    if (options && options.max_tokens !== undefined && options.max_tokens !== null) {
+      var maxTokenNumber = Number(options.max_tokens);
+      if (Number.isFinite(maxTokenNumber) && maxTokenNumber > 0) {
+        requestedMaxTokens = Math.min(Math.floor(maxTokenNumber), 384000);
+      }
+    }
+    async function executeToolWithAbort(toolCall) {
+      if (!externalSignal) return toolExecutor(toolCall);
+      if (externalSignal.aborted) {
+        var alreadyAborted = new Error('AI request cancelled');
+        alreadyAborted.name = 'AbortError';
+        throw alreadyAborted;
+      }
+      var abortListener;
+      var abortPromise = new Promise(function(_, reject) {
+        abortListener = function() {
+          var cancelled = new Error('AI request cancelled');
+          cancelled.name = 'AbortError';
+          reject(cancelled);
+        };
+        externalSignal.addEventListener('abort', abortListener, { once: true });
+      });
+      try {
+        return await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+      } finally {
+        if (abortListener) {
+          try { externalSignal.removeEventListener('abort', abortListener); } catch (_) {}
+        }
+      }
+    }
 
     for (var round = 0; round < maxToolRounds; round++) {
       if (round > 0) {
@@ -4447,9 +4517,7 @@ async function callDeepSeek(messages, options) {
           : toolChoice;
         if (roundToolChoice) apiBody.tool_choice = roundToolChoice;
       }
-      if (options && options.max_tokens && typeof options.max_tokens === 'number') {
-        apiBody.max_tokens = options.max_tokens;
-      }
+      if (requestedMaxTokens !== null) apiBody.max_tokens = requestedMaxTokens;
       if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
         apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
       }
@@ -4570,6 +4638,7 @@ async function callDeepSeek(messages, options) {
         for (var sk=0; sk<stcKeys.length; sk++) {
           toolCalls.push(streamToolCallMap[stcKeys[sk]]);
         }
+        toolCalls = normalizeToolCalls(toolCalls, round);
         // reasoning_content 既要实时推送，也要随 assistant tool-call 消息续传。
         finalReasoning = roundReasoning;
       } else {
@@ -4582,7 +4651,7 @@ async function callDeepSeek(messages, options) {
         var choice = data.choices[0];
         var message = choice.message || {};
         content = typeof message.content === 'string' ? message.content : '';
-        toolCalls = message.tool_calls || [];
+        toolCalls = normalizeToolCalls(message.tool_calls || [], round);
         if (data.usage) {
           lastUsage = data.usage;
           totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
@@ -4625,7 +4694,10 @@ async function callDeepSeek(messages, options) {
         var tcId = tc.id || ('call_' + Date.now() + '_' + t);
         var tStart = Date.now();
         var toolResult = null;
-        try { toolResult = await toolExecutor(tc); } catch (e) { toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' }; }
+        try { toolResult = await executeToolWithAbort(tc); } catch (e) {
+          if (externalSignal && externalSignal.aborted) throw e;
+          toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' };
+        }
         var tElapsed = Date.now() - tStart;
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
         return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
@@ -4657,9 +4729,7 @@ async function callDeepSeek(messages, options) {
           };
           noToolBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
           if (useThinking) noToolBody.reasoning_effort = thinkingLevel;
-          if (options && options.max_tokens && typeof options.max_tokens === 'number') {
-            noToolBody.max_tokens = options.max_tokens;
-          }
+          if (requestedMaxTokens !== null) noToolBody.max_tokens = requestedMaxTokens;
           if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
             noToolBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
           }
