@@ -219,6 +219,23 @@ function getDeepSeekProbeSnapshot() {
     preferred_model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
   };
 }
+function getDeepSeekCapabilitySnapshot() {
+  var probe = getDeepSeekProbeSnapshot();
+  var model = probe.preferred_model;
+  var probeReady = probe.status === 'ready';
+  var modelAvailable = probeReady ? probe.models.indexOf(model) !== -1 : null;
+  return {
+    configured: !!DEEPSEEK_API_KEY,
+    model: model,
+    probeStatus: probe.status,
+    probeError: probe.error,
+    modelAvailable: modelAvailable,
+    verifiedAvailable: !!DEEPSEEK_API_KEY && modelAvailable === true,
+    providerContextTokens: 1000000,
+    providerMaxOutputTokens: 384000,
+    apiFormat: 'openai-chat-completions'
+  };
+}
 let pdfParser = null, mammothParser = null, xlsxParser = null;
 let pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
 function loadFileParser(name) {
@@ -14642,6 +14659,7 @@ registerCodeAgentRoutes(app, {
   getDeepSeekApiKey: function () {
     return DEEPSEEK_API_KEY;
   },
+  getDeepSeekCapabilities: getDeepSeekCapabilitySnapshot,
   callDeepSeek: callDeepSeek
 });
 registerCodeGitHubRoutes(app, {

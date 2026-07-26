@@ -442,6 +442,16 @@
       });
     }
 
+    // Bind the single-file entry point here.  The composer is rendered only
+    // after a workspace is open, so binding this button from renderComposer()
+    // leaves the welcome-page action inert.
+    var fileBtn = document.getElementById('codeWelcomeFileBtn');
+    if (fileBtn) {
+      fileBtn.addEventListener('click', function () {
+        selectAndOpenFile();
+      });
+    }
+
     // Check if there's a stored handle path — show restore section
     var stored = null;
     try {
@@ -606,6 +616,13 @@
       }
       fs.selectFile().then(function (handle) {
         if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
+        if (!state.active || selectionGeneration !== state.restoreGeneration) {
+          // selectFile() installs its synthetic single-file root immediately.
+          // Restore the still-current workspace when an older picker resolves
+          // after the user has already switched elsewhere.
+          if (state.directoryHandle && fs.setDirHandle) fs.setDirHandle(state.directoryHandle);
+          return;
+        }
         openSelectedHandle(handle, false);
       }).catch(function (err) {
         if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
@@ -623,6 +640,7 @@
     input.multiple = false;
     input.accept = '*/*';
     input.onchange = function () {
+      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
       var file = input.files && input.files[0];
       if (!file) return;
       var mockFileHandle = {
@@ -3727,6 +3745,10 @@
   // ──────────────────────────────────────────────
   function undoOperations() {
     if (state._undoLock) return Promise.resolve(false);
+    if (state._isReadOnly) {
+      showToast('当前为只读模式，不支持撤销文件修改', 'error');
+      return Promise.resolve(false);
+    }
     var snapshotPaths = Object.keys(state.snapshots);
     if (snapshotPaths.length === 0) {
       showToast('没有可撤销的操作', 'info');
@@ -3758,18 +3780,17 @@
             if (snapshot.existed === false) {
               // This was a create operation — delete the file
               if (!fs.deleteFileByPath) {
-                // Fallback: write empty string (not ideal but we can't delete)
-                fs.writeFileByPath(p, '').then(function () {
-                  successPaths.push(p);
-                  resolve(true);
-                }).catch(function (err) {
-                  console.error('[code-workspace] undo delete failed for', p, err);
-                  failedPaths.push(p);
-                  resolve(false);
-                });
+                // Replacing a newly-created file with an empty file is not an
+                // undo. Keep the snapshot so the user can retry safely.
+                failedPaths.push(p);
+                resolve(false);
                 return;
               }
               fs.deleteFileByPath(p).then(function () {
+                if (wsGen !== state.workspaceGeneration) {
+                  resolve(false);
+                  return;
+                }
                 successPaths.push(p);
                 resolve(true);
               }).catch(function (err) {
@@ -3788,6 +3809,10 @@
             }
 
             fs.writeFileByPath(p, snapshot.beforeContent || '').then(function () {
+              if (wsGen !== state.workspaceGeneration) {
+                resolve(false);
+                return;
+              }
               // Update open tab
               for (var j = 0; j < state.openTabs.length; j++) {
                 if (state.openTabs[j].path === p) {
@@ -3811,12 +3836,15 @@
     }
 
     return Promise.all(promises).then(function () {
+      if (wsGen !== state.workspaceGeneration) return false;
       // Only remove successful snapshots
       for (var k = 0; k < successPaths.length; k++) {
         delete state.snapshots[successPaths[k]];
       }
 
-      state.pendingOperations = [];
+      // pendingOperations contains AI suggestions that have not been applied.
+      // Undoing previously-applied snapshots must never discard that queue,
+      // including when only part of the undo succeeds.
       renderDiffView();
       renderTabs();
       if (state.activePath) {
@@ -3897,6 +3925,7 @@
       buildProjectIndex: buildProjectIndex,
       saveFile: saveFile,
       undoOperations: undoOperations,
+      selectAndOpenFile: selectAndOpenFile,
       loadProjectIndexStatus: loadProjectIndexStatus,
       openFile: openFile,
       restoreTabs: restoreTabs,

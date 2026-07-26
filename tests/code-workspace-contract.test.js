@@ -669,6 +669,7 @@ test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /function selectAndOpenFile\(\)/);
   assert.match(codeWorkspace, /fs\.selectFile/);
   assert.match(codeWorkspace, /openFile\(handle\.name\)/);
+  assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
 });
 
 // ============================================================
