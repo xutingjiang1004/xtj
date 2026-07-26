@@ -1313,7 +1313,8 @@ async function finishStream(res, opt) {
   }
 
   // 发送 done
-  try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered); } catch(_) {}
+  var totalMs = typeof opt.startTime === 'number' ? Date.now() - opt.startTime : 0;
+  try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered, 'total_ms:', totalMs); } catch(_) {}
   writeSse(res, {
     type: 'done',
     complete: isComplete,
@@ -1336,7 +1337,8 @@ async function finishStream(res, opt) {
     // ★ P1 关键修复：done 事件带完整 search_results 和 expires_at
     //   前端可立即渲染徽章和结果列表
     search_results: searchMeta && Array.isArray(searchMeta.results) ? searchMeta.results : undefined,
-    search_expires_at: searchMeta && typeof searchMeta.expires_at === 'number' ? searchMeta.expires_at : undefined
+    search_expires_at: searchMeta && typeof searchMeta.expires_at === 'number' ? searchMeta.expires_at : undefined,
+    total_ms: totalMs || undefined
   });
 
   // console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
@@ -4692,12 +4694,18 @@ async function callDeepSeek(messages, options) {
 
       if (!resp.ok) {
         var errTxt = '';
-        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; } catch (e) {}
+        var errCode = '';
+        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; } catch (e) {}
         console.error('[DEEPSEEK] API error', resp.status, errTxt, 'round', round);
         if (useThinking && (errTxt.indexOf('thinking') >= 0 || errTxt.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
-          throw new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
+          var thinkErr = new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
+          thinkErr.code = 'PROVIDER_HTTP_400';
+          throw thinkErr;
         }
-        throw new Error('AI 调用失败（HTTP ' + resp.status + '）');
+        var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
+        apiErr.code = 'PROVIDER_HTTP_' + resp.status;
+        if (errTxt) apiErr.providerMessage = errTxt;
+        throw apiErr;
       }
 
       var content = '';
@@ -4935,6 +4943,15 @@ async function callDeepSeek(messages, options) {
           if (externalSignal && noToolAbortHandler) {
             try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (e) {}
           }
+          if (!noToolResp.ok) {
+            var noToolErrTxt = '';
+            try { var noToolErrJson = await noToolResp.json().catch(function() { return {}; }); noToolErrTxt = (noToolErrJson && noToolErrJson.error && noToolErrJson.error.message) ? String(noToolErrJson.error.message).slice(0, 200) : ''; } catch (e) {}
+            console.error('[DEEPSEEK] noTool follow-up HTTP error', noToolResp.status, noToolErrTxt);
+            var noToolErr = new Error('AI 工具执行后回复失败（HTTP ' + noToolResp.status + '）');
+            noToolErr.code = 'DEEPSEEK_TOOL_FOLLOWUP_FAILED';
+            if (noToolErrTxt) noToolErr.providerMessage = noToolErrTxt;
+            throw noToolErr;
+          }
           var noToolData = await noToolResp.json().catch(function() { return {}; });
           if (noToolResp.ok && noToolData && noToolData.usage) {
             lastUsage = noToolData.usage;
@@ -4979,10 +4996,17 @@ async function callDeepSeek(messages, options) {
               throw noToolCancelled;
             }
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
+          // Re-throw the original error with proper code so the caller can handle it
+          if (e && e.code) throw e;
+          var recoveryErr = new Error('AI 工具执行后回复失败');
+          recoveryErr.code = 'DEEPSEEK_TOOL_FOLLOWUP_FAILED';
+          throw recoveryErr;
         }
       }
       if (!finalContent) {
-        finalContent = '（AI 思考过多轮但未给出最终回复, 请简化问题重试）';
+        var roundLimitErr = new Error('AI 工具调用已达上限（' + maxToolRounds + '轮），请简化问题重试');
+        roundLimitErr.code = 'AGENT_TOOL_ROUND_LIMIT';
+        finalContent = '（' + roundLimitErr.message + '）';
       }
     } else {
       // 已有 finalContent（最后一轮没 tool_call 时）
@@ -12582,6 +12606,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
 app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+  var T0 = Date.now();
+  var T_stage = {};
   var userName = req.userName;
   var aborted = false;
   var clientReqId = req.body && req.body.client_request_id;
@@ -12657,9 +12683,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (aborted) return safeEnd();
     
     // 读取全局 AI 配置 + 上下文 (并行)
+    T_stage.config_start = Date.now();
     var configPromise = getAiConfig();
     var ctxPromise = loadAiContext(userName, convId);
     var [config, ctx] = await Promise.all([configPromise, ctxPromise]);
+    T_stage.config_ms = Date.now() - T_stage.config_start;
     
     // 当前时间上下文
     var _now = new Date();
@@ -12728,7 +12756,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var isWeatherQuery = /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     var weatherResult = null;
     if (isWeatherQuery && !aborted) {
+      T_stage.weather_start = Date.now();
       weatherResult = await queryWeather(message);
+      T_stage.weather_ms = Date.now() - T_stage.weather_start;
     }
 
     // ★ 时间敏感词检测：仅当用户问"今天/现在/最新/刚刚/当前"等才注入时间，且放在 user 之后
@@ -12769,6 +12799,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var fcFallbackUsage = null;
 
     if (needsFcCheck && !aborted) {
+      T_stage.fc_preflight_start = Date.now();
       var fcBody = {
         model: usedModel,
         messages: messages,
@@ -12933,6 +12964,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         console.error('[AGENT-STREAM] FC error:', fcErr && fcErr.message);
       }
     }
+    T_stage.fc_preflight_ms = Date.now() - (T_stage.fc_preflight_start || Date.now());
 
     var _sharedSearchMeta;
     var reasoningStartedAt = 0;
@@ -12961,7 +12993,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           ctx: ctx,
           reasoningStartedAt: reasoningStartedAt,
           searchMeta: _sharedSearchMeta || null,
-          siteCards: siteToolCards
+          siteCards: siteToolCards,
+          startTime: T0
         });
       }
       return safeEnd();
@@ -13295,7 +13328,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   message: message,
                   streamSeq: streamSeq,
                   ctx: ctx,
-                  reasoningStartedAt: reasoningStartedAt
+                  reasoningStartedAt: reasoningStartedAt,
+                  startTime: T0
             });
           } else {
             writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
@@ -13316,7 +13350,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (!aborted) {
             var pc = contentBuffer && contentBuffer.length > 0;
             if (pc) {
-              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt });
+              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, startTime: T0 });
             } else {
               writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
             }
@@ -13405,7 +13439,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           message: message,
           streamSeq: streamSeq,
           ctx: ctx,
-          reasoningStartedAt: reasoningStartedAt
+          reasoningStartedAt: reasoningStartedAt,
+          startTime: T0
         });
         return safeEnd();
       }
@@ -13501,7 +13536,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           message: message,
           streamSeq: streamSeq,
           ctx: ctx,
-          reasoningStartedAt: reasoningStartedAt
+          reasoningStartedAt: reasoningStartedAt,
+          startTime: T0
         });
       }
     }

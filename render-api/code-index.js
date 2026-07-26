@@ -1100,12 +1100,16 @@ function listFiles(scope, directory, depth, pattern) {
   var results = [];
   var maxDepth = Number.isSafeInteger(depth) ? Math.min(Math.max(depth, 0), 20) : 3;
   var dirPrefix = directory ? (directory.endsWith('/') ? directory : directory + '/') : '';
+  var MAX_LIST_FILES = 200;
 
+  // First pass: collect directories to build a tree summary
+  var dirMap = {};
   projectIndex.files.forEach(function (entry) {
     if (dirPrefix && !entry.path.startsWith(dirPrefix)) return;
 
     var relativePath = dirPrefix ? entry.path.slice(dirPrefix.length) : entry.path;
-    var depthCount = relativePath.split('/').length - 1;
+    var parts = relativePath.split('/');
+    var depthCount = parts.length - 1;
     if (depthCount > maxDepth) return;
 
     if (pattern) {
@@ -1123,16 +1127,43 @@ function listFiles(scope, directory, depth, pattern) {
       symbols: entry.symbols,
       chunkCount: entry.chunks.length
     });
+
+    // Build directory tree
+    for (var d = 0; d < parts.length - 1; d++) {
+      var dirPath = dirPrefix + parts.slice(0, d + 1).join('/');
+      if (!dirMap[dirPath]) dirMap[dirPath] = [];
+      dirMap[dirPath].push(entry.path);
+    }
   });
 
   results.sort(function (a, b) { return a.path.localeCompare(b.path); });
 
-  return {
+  var totalFiles = results.length;
+  var truncated = totalFiles > MAX_LIST_FILES;
+  if (truncated) {
+    results = results.slice(0, MAX_LIST_FILES);
+  }
+
+  // Build directory summary
+  var directories = Object.keys(dirMap).sort().map(function (dir) {
+    return { path: dir, fileCount: dirMap[dir].length };
+  });
+
+  var resultObj = {
     ok: true,
     directory: directory || '/',
+    directories: directories,
     files: results,
-    totalCount: results.length
+    totalFiles: totalFiles,
+    returnedFiles: results.length,
+    truncated: truncated
   };
+
+  if (truncated) {
+    resultObj.hint = '目录内容已截断，请指定具体 directory 参数缩小范围';
+  }
+
+  return resultObj;
 }
 
 // ── Clear index ─────────────────────────────────────────────────────────
