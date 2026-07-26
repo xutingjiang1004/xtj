@@ -532,7 +532,15 @@ test('sendMessage does not duplicate current user message', () => {
 
 test('Code chat timeout covers response-body decoding, not only fetch headers', () => {
   assert.match(codeWorkspace, /apiCall\.then\(decodeCodeChatResponse\)/);
-  assert.match(codeWorkspace, /Promise\.race\(\[apiCall\.then\(decodeCodeChatResponse\), timeoutPromise\]\)/);
+  assert.match(codeWorkspace, /return Promise\.race\(\[apiCall\.then\(decodeCodeChatResponse\), timeoutPromise\]\)/);
+});
+
+test('Code chat rebuilds a lost server index and retries the original message once', () => {
+  assert.match(codeWorkspace, /INDEX_REBUILD_REQUIRED/);
+  assert.match(codeWorkspace, /索引已丢失，正在自动重建/);
+  assert.match(codeWorkspace, /return buildProjectIndex\(\)\.then/);
+  assert.match(codeWorkspace, /state\.projectIndexStatus\.indexed !== true/);
+  assert.match(codeWorkspace, /sendApiRequest\(body, requestId, timeStr, wsGen, true\)/);
 });
 
 // ============================================================
