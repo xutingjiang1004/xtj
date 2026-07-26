@@ -17,6 +17,24 @@ test.describe('Code Workspace', () => {
     await expect(welcomeIcon).toBeVisible();
   });
 
+  test('should open a single file directly from the welcome screen', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'direct-open.js',
+        getFile: async () => new File(['export const direct = true;'], 'direct-open.js', { type: 'text/javascript' })
+      }];
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
+    await page.click('button[data-desktop-tab="code"]');
+    await page.waitForSelector('#codeWelcomeFileBtn', { state: 'visible', timeout: 10000 });
+    await page.click('#codeWelcomeFileBtn');
+    await page.waitForSelector('.code-tab', { state: 'visible', timeout: 10000 });
+    await expect(page.locator('.code-tab').first()).toContainText('direct-open.js');
+  });
+
   test('should fallback to input when showDirectoryPicker is unavailable', async ({ page }) => {
     await page.addInitScript(() => {
       delete window.showDirectoryPicker;
