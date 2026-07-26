@@ -664,6 +664,13 @@ test('system prompt instructs the agent to search before asking for files', () =
   assert.match(codeAgent, /use the project tools to locate it before asking the user/);
 });
 
+test('Code welcome screen supports direct single-file opening', () => {
+  assert.match(codeWorkspace, /id="codeWelcomeFileBtn"/);
+  assert.match(codeWorkspace, /function selectAndOpenFile\(\)/);
+  assert.match(codeWorkspace, /fs\.selectFile/);
+  assert.match(codeWorkspace, /openFile\(handle\.name\)/);
+});
+
 // ============================================================
 // Real behavior tests — Code icon
 // ============================================================

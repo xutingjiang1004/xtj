@@ -72,6 +72,7 @@
   // Internal state
   // ──────────────────────────────────────────────
   var _dirHandle = null;
+  var _workspaceKind = 'directory';
   var _objectUrls = [];
   var _fileLocks = {};
 
@@ -189,19 +190,21 @@
           // 不直接 reject，让 onerror 或 onsuccess 处理
         };
       } catch (err) {
+        clearTimeout(timeoutId);
         console.error('[CODE-IDB] Open exception:', err && err.message ? err.message : String(err));
         reject(wrapError(err, 'IndexedDB.open'));
       }
     });
   }
 
-  function storeHandle(dirHandle) {
+  function storeHandle(handle, kind) {
+    var value = kind === 'file' ? { kind: 'file', handle: handle } : handle;
     return openDB().then(function (db) {
       return new Promise(function (resolve, reject) {
         try {
           var tx = db.transaction(STORE_NAME, 'readwrite');
           var store = tx.objectStore(STORE_NAME);
-          var req = store.put(dirHandle, HANDLE_KEY);
+          var req = store.put(value, HANDLE_KEY);
           req.onsuccess = function () { resolve(); };
           req.onerror = function (e) {
             db.close();
@@ -364,9 +367,10 @@
       return window.showDirectoryPicker({ mode: 'readwrite' }).then(function (handle) {
         // P0: 立即使用获得的句柄，不等 IndexedDB
         _dirHandle = handle;
+        _workspaceKind = 'directory';
 
         // P0: 保存恢复记录失败，不能阻止当前工作区使用
-        return storeHandle(handle).catch(function (err) {
+        return storeHandle(handle, 'directory').catch(function (err) {
           console.warn('[CODE-IDB] 无法保存工作区恢复记录:', err);
         }).then(function () {
           return handle;
@@ -400,21 +404,27 @@
         }
       }, 5000);
 
-      restoreHandle().then(function (handle) {
+      restoreHandle().then(function (record) {
         if (resolved) return;
-        if (!handle) {
+        if (!record) {
           resolved = true;
           clearTimeout(timeoutId);
           return resolve({ status: 'missing', handle: null });
         }
 
+        // Older records store the directory handle directly. Newer single-file
+        // records wrap the file handle with { kind: 'file', handle }.
+        var kind = record && record.kind === 'file' && record.handle ? 'file' : 'directory';
+        var handle = kind === 'file' ? record.handle : record;
+
         return handle.queryPermission({ mode: 'readwrite' }).then(function (permission) {
           if (resolved) return;
           if (permission === 'granted') {
-            _dirHandle = handle;
+            _dirHandle = kind === 'file' ? createSingleFileRoot(handle) : handle;
+            _workspaceKind = kind;
             resolved = true;
             clearTimeout(timeoutId);
-            return resolve({ status: 'granted', handle: handle });
+            return resolve({ status: 'granted', handle: _dirHandle, kind: kind });
           }
 
           if (permission === 'prompt' && options && options.requestPermission) {
@@ -423,8 +433,9 @@
               resolved = true;
               clearTimeout(timeoutId);
               if (result === 'granted') {
-                _dirHandle = handle;
-                return resolve({ status: 'granted', handle: handle });
+                _dirHandle = kind === 'file' ? createSingleFileRoot(handle) : handle;
+                _workspaceKind = kind;
+                return resolve({ status: 'granted', handle: _dirHandle, kind: kind });
               }
               return resolve({ status: 'denied', handle: handle });
             });
@@ -434,7 +445,8 @@
           clearTimeout(timeoutId);
           return resolve({
             status: permission === 'denied' ? 'denied' : 'prompt',
-            handle: handle
+            handle: _dirHandle || handle,
+            kind: kind
           });
         }).catch(function (err) {
           if (resolved) return;
@@ -484,6 +496,7 @@
       _dbConnection = null;
     }
     _dirHandle = null;
+    _workspaceKind = 'directory';
     // 清理 localStorage
     try { localStorage.removeItem('xtj_code_workspace_name'); } catch (e) {}
     // 删除 IndexedDB 数据库
@@ -513,6 +526,65 @@
         resolve({ ok: false, blocked: false, error: e && e.message ? e.message : String(e) });
       }
     });
+  }
+
+  function selectFile() {
+    if (typeof window.showOpenFilePicker !== 'function') {
+      return Promise.reject(new Error('当前浏览器不支持直接打开文件，请使用最新版 Chrome 或 Edge'));
+    }
+    try {
+      return window.showOpenFilePicker({ multiple: false }).then(function (handles) {
+        var handle = handles && handles[0];
+        if (!handle) return null;
+        _dirHandle = createSingleFileRoot(handle);
+        _workspaceKind = 'file';
+        return storeHandle(handle, 'file').catch(function (err) {
+          console.warn('[CODE-IDB] 无法保存单文件工作区记录:', err);
+        }).then(function () { return _dirHandle; });
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') return null;
+        throw wrapError(err, 'selectFile');
+      });
+    } catch (err) {
+      return Promise.reject(wrapError(err, 'selectFile'));
+    }
+  }
+
+  function createSingleFileRoot(fileHandle) {
+    var fileName = String(fileHandle && fileHandle.name || 'Untitled');
+    function notFound(message) {
+      return Promise.reject(createNamedError('NotFoundError', message));
+    }
+    function iterator(entries, withNames) {
+      var index = 0;
+      return {
+        next: function () {
+          if (index++) return Promise.resolve({ done: true });
+          return Promise.resolve({
+            done: false,
+            value: withNames ? [fileName, fileHandle] : fileHandle
+          });
+        }
+      };
+    }
+    return {
+      kind: 'directory',
+      name: fileName,
+      _isSingleFileRoot: true,
+      _fileHandle: fileHandle,
+      values: function () { return iterator(false, false); },
+      entries: function () { return iterator(false, true); },
+      getFileHandle: function (name) {
+        if (String(name || '') === fileName) return Promise.resolve(fileHandle);
+        return notFound('File not found: ' + name);
+      },
+      getDirectoryHandle: function (name) {
+        return notFound('Directory not found: ' + name);
+      },
+      removeEntry: function () {
+        return Promise.reject(new Error('单文件工作区不支持删除文件'));
+      }
+    };
   }
 
   // ──────────────────────────────────────────────
@@ -1773,11 +1845,21 @@
 
     // Directory operations
     selectDirectory: selectDirectory,
+    selectFile: selectFile,
     createGitHubFileSystemAdapter: createGitHubFileSystemAdapter,
     getWorkspaceName: getWorkspaceName,
     restoreWorkspace: restoreWorkspace,
     getDirHandle: function () { return _dirHandle; },
-    setDirHandle: function (handle) { _dirHandle = handle; },
+    setDirHandle: function (handle) {
+      if (handle && handle.kind === 'file') {
+        _dirHandle = createSingleFileRoot(handle);
+        _workspaceKind = 'file';
+      } else {
+        _dirHandle = handle;
+        _workspaceKind = 'directory';
+      }
+    },
+    getWorkspaceKind: function () { return _workspaceKind; },
 
     // File tree
     buildFileTree: buildFileTree,
