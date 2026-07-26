@@ -585,6 +585,12 @@ test('undo restores open tab content', () => {
   assert.match(codeWorkspace, /state\.openTabs\[j\]\.content = snapshot\.beforeContent/);
 });
 
+test('undo verifies the post-apply SHA before writing or deleting', () => {
+  assert.match(codeWorkspace, /afterSha256/);
+  assert.match(codeWorkspace, /readFileByPath\(p\)/);
+  assert.match(codeWorkspace, /current\.sha256 !== snapshot\.afterSha256/);
+});
+
 // ============================================================
 // Real behavior tests — request cancellation
 // ============================================================
