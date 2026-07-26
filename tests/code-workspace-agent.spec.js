@@ -122,8 +122,8 @@ test.describe('Code workspace Agent browser flow', () => {
           result: { path: 'src/travel.js', startLine: 1, endLine: 1 }
         }],
         context_info: {
-          files_read: [{ path: 'src/travel.js', startLine: 1, endLine: 1 }],
-          attachments: [{ path: 'attachments/广州旅游计划.md' }],
+          files_read: [{ path: 'src/travel.js', ranges: [[1, 1]] }],
+          attachments: ['attachments/广州旅游计划.md'],
           estimated_tokens: 128,
           prompt_cache_hit_tokens: 96,
           prompt_cache_miss_tokens: 32

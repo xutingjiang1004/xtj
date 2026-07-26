@@ -115,9 +115,8 @@
 
 /* ── 2. Sidebar ───────────────────────────────────────────── */
 .code-sidebar {
-  width: var(--cw-sidebar-width);
-  min-width: 200px;
-  max-width: 360px;
+  width: var(--cw-sidebar-width, 260px);
+  /* min/max widths controlled by JS */
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -988,9 +987,8 @@
 
 /* ── 21. Chat Panel ───────────────────────────────────────── */
 .code-chat-panel {
-  width: var(--cw-chat-width);
-  min-width: 280px;
-  max-width: 480px;
+  width: var(--cw-chat-width, 360px);
+  /* min/max widths controlled by JS */
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2145,4 +2143,134 @@
   height: 100%;
   max-width: 100%;
   max-height: 100%;
+}
+
+.code-tab .tab-failed {
+  color: var(--cw-danger);
+  font-weight: bold;
+  margin-right: 4px;
+  cursor: help;
+  display: inline-block;
+}
+
+
+/* ── Resizers (Pointer Events) ────────────────────────────── */
+.code-resizer {
+  background: var(--cw-border);
+  transition: background var(--cw-dur-fast) var(--cw-ease);
+  z-index: 50;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.code-resizer:hover, .code-resizer.is-resizing {
+  background: var(--cw-accent);
+}
+
+.code-resizer::after {
+  content: '';
+  position: absolute;
+  /* Extend grab area for better UX */
+}
+
+/* Vertical resizers (left and right) */
+.code-resizer-left,
+.code-resizer-right {
+  width: 4px;
+  cursor: col-resize;
+  margin: 0 -2px; /* Visual overlap for continuous layout */
+}
+
+.code-resizer-left::after,
+.code-resizer-right::after {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+/* Horizontal resizer (context panel) */
+.code-resizer-context {
+  height: 4px;
+  cursor: row-resize;
+  margin: -2px 0;
+}
+
+.code-resizer-context::after {
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
+}
+
+/* ── Collapsed / Maximized States ──────────────────────────── */
+.code-panel.is-sidebar-collapsed .code-sidebar {
+  display: none !important;
+}
+.code-panel.is-sidebar-collapsed .code-resizer-left {
+  display: none !important;
+}
+
+.code-panel.is-chat-collapsed .code-chat-panel {
+  display: none !important;
+}
+.code-panel.is-chat-collapsed .code-resizer-right {
+  display: none !important;
+}
+
+.code-sidebar.is-context-collapsed .code-context-panel {
+  display: none !important;
+}
+.code-sidebar.is-context-collapsed .code-resizer-context {
+  display: none !important;
+}
+
+/* Global dragging class to prevent iframe / selection issues */
+body.code-is-resizing {
+  cursor: col-resize;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body.code-is-resizing-row {
+  cursor: row-resize;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body.code-is-resizing *, body.code-is-resizing-row * {
+  pointer-events: none !important;
+}
+
+/* Title bar action buttons */
+.code-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.code-panel-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--cw-text-muted);
+  transition: all 0.2s;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.code-panel-action-btn:hover {
+  background: var(--cw-bg-hover);
+  color: var(--cw-text);
+}
+.code-panel-action-btn svg {
+  width: 14px;
+  height: 14px;
 }
