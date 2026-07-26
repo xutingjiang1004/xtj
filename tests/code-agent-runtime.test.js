@@ -12,7 +12,7 @@ function sha(text) {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-function createApp(callDeepSeek) {
+function createApp(callDeepSeek, capabilitySnapshot) {
   const app = express();
   app.use(express.json({ limit: '12mb' }));
   registerCodeAgentRoutes(app, {
@@ -26,6 +26,7 @@ function createApp(callDeepSeek) {
     getDeepSeekModel: () => 'deepseek-v4-flash',
     getDeepSeekApiUrl: () => 'https://api.deepseek.com/chat/completions',
     getDeepSeekApiKey: () => 'test-key',
+    getDeepSeekCapabilities: capabilitySnapshot ? () => capabilitySnapshot : undefined,
     callDeepSeek
   });
   return app;
@@ -33,6 +34,44 @@ function createApp(callDeepSeek) {
 
 test.afterEach(() => {
   codeIndex._resetRegistryForTests();
+});
+
+test('capabilities distinguish configured from verified model availability', async () => {
+  const app = createApp(async () => ({ content: 'unused' }), {
+    model: 'deepseek-v4-flash',
+    probeStatus: 'error',
+    probeError: 'HTTP 503',
+    modelAvailable: null,
+    verifiedAvailable: false,
+    providerContextTokens: 1000000,
+    providerMaxOutputTokens: 384000,
+    apiFormat: 'openai-chat-completions'
+  });
+  const response = await request(app).get('/api/code/capabilities').set('x-test-user', 'alice');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.configured, true);
+  assert.equal(response.body.available, false);
+  assert.equal(response.body.availability, 'unknown');
+  assert.equal(response.body.agentEnabled, true);
+  assert.equal(response.body.probeStatus, 'error');
+  assert.equal(response.body.maxContextTokens, 1000000);
+  assert.equal(response.body.maxOutputTokens, 32768);
+});
+
+test('capabilities disable an agent when a successful model probe excludes its model', async () => {
+  const app = createApp(async () => ({ content: 'unused' }), {
+    model: 'deepseek-v4-flash',
+    probeStatus: 'ready',
+    modelAvailable: false,
+    verifiedAvailable: false
+  });
+  const response = await request(app).get('/api/code/capabilities').set('x-test-user', 'alice');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.configured, true);
+  assert.equal(response.body.available, false);
+  assert.equal(response.body.availability, 'unavailable');
+  assert.equal(response.body.agentEnabled, false);
+  assert.equal(response.body.toolCallingEnabled, false);
 });
 
 test('runs a real multi-step code tool flow and reports actual reads plus cache usage', async () => {

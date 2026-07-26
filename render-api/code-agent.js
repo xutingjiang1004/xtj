@@ -49,6 +49,44 @@ const JSON_OBJECT_RE = /"operations"\s*:/;
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
+function buildCodeCapabilities(deps, options) {
+  options = options || {};
+  var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
+  var keyConfigured = !!(deps.getDeepSeekApiKey && deps.getDeepSeekApiKey());
+  var callable = typeof deps.callDeepSeek === 'function';
+  var provider = {};
+  if (typeof deps.getDeepSeekCapabilities === 'function') {
+    try { provider = deps.getDeepSeekCapabilities() || {}; } catch (_) { provider = {}; }
+  }
+  var configured = keyConfigured && callable;
+  var succeeded = options.requestSucceeded === true;
+  var modelAvailable = typeof provider.modelAvailable === 'boolean' ? provider.modelAvailable : null;
+  var probeStatus = typeof provider.probeStatus === 'string' ? provider.probeStatus : 'unknown';
+  var available = succeeded || (configured && provider.verifiedAvailable === true);
+  var availability = available ? 'ready' :
+    (!configured ? 'unavailable' : (probeStatus === 'ready' && modelAvailable === false ? 'unavailable' : 'unknown'));
+  var featureEnabled = configured && modelAvailable !== false;
+  return {
+    provider: 'deepseek',
+    model: options.model || provider.model || model || '',
+    configured: configured,
+    available: available,
+    availability: availability,
+    probeStatus: probeStatus,
+    probeError: typeof provider.probeError === 'string' ? provider.probeError.slice(0, 200) : '',
+    modelAvailable: succeeded ? true : modelAvailable,
+    agentEnabled: succeeded || featureEnabled,
+    toolCallingEnabled: succeeded || featureEnabled,
+    apiFormat: provider.apiFormat || 'openai-chat-completions',
+    providerContextTokens: Number(provider.providerContextTokens) || 1000000,
+    providerMaxOutputTokens: Number(provider.providerMaxOutputTokens) || 384000,
+    maxContextTokens: Math.min(CODE_AGENT_CONTEXT_TOKENS, Number(provider.providerContextTokens) || 1000000),
+    maxOutputTokens: Math.min(CODE_AGENT_MAX_OUTPUT_TOKENS, Number(provider.providerMaxOutputTokens) || 384000),
+    maxToolRounds: Math.min(CODE_AGENT_MAX_TOOL_ROUNDS, 8),
+    verifiedBy: succeeded ? 'chat_completion' : (available ? 'models_probe' : '')
+  };
+}
+
 function hasOwn(obj, key) {
   return obj && Object.prototype.hasOwnProperty.call(obj, key);
 }
@@ -1234,19 +1272,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   });
 
   app.get('/api/code/capabilities', rateLimit(60000, 60), authenticateUser, function(req, res) {
-    var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
-    var configured = !!(deps.getDeepSeekApiKey && deps.getDeepSeekApiKey());
-    return res.json({
-      ok: true,
-      provider: 'deepseek',
-      model: model || '',
-      configured: configured,
-      agentEnabled: configured && typeof deps.callDeepSeek === 'function',
-      toolCallingEnabled: configured && typeof deps.callDeepSeek === 'function',
-      maxContextTokens: CODE_AGENT_CONTEXT_TOKENS,
-      maxOutputTokens: CODE_AGENT_MAX_OUTPUT_TOKENS,
-      maxToolRounds: CODE_AGENT_MAX_TOOL_ROUNDS
-    });
+    return res.json(Object.assign({ ok: true }, buildCodeCapabilities(deps)));
   });
 
   // ── Code chat: a real DeepSeek tool-calling agent ───────────────────
@@ -1374,15 +1400,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var cacheTotal = usage.prompt_cache_hit_tokens + (Number(usage.prompt_cache_miss_tokens) || 0);
         usage.prompt_cache_hit_ratio = cacheTotal > 0 ? usage.prompt_cache_hit_tokens / cacheTotal : 0;
       }
-      var capabilities = {
-        provider: 'deepseek',
-        model: aiResult.model || model,
-        agentEnabled: true,
-        toolCallingEnabled: true,
-        maxContextTokens: CODE_AGENT_CONTEXT_TOKENS,
-        maxOutputTokens: CODE_AGENT_MAX_OUTPUT_TOKENS,
-        maxToolRounds: CODE_AGENT_MAX_TOOL_ROUNDS
-      };
+      var capabilities = buildCodeCapabilities(deps, {
+        requestSucceeded: true,
+        model: aiResult.model || model
+      });
       return res.json({
         ok: true,
         reply: reply.trim(),
