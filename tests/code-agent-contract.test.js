@@ -47,6 +47,13 @@ test('server.js requires and registers code-agent', () => {
   assert.match(server, /registerCodeAgentRoutes\(app,\s*\{/);
 });
 
+test('Code Agent JSON payload has a scoped large-body parser', () => {
+  const codeParser = server.indexOf("app.use('/api/code', express.json({ limit: '64mb' }));");
+  const defaultParser = server.indexOf("app.use(express.json({ limit: '5mb' }));");
+  assert.ok(codeParser >= 0, 'missing /api/code JSON parser');
+  assert.ok(defaultParser > codeParser, 'default parser must remain after scoped Code parser');
+});
+
 // ============================================================
 // 6. 请求验证
 // ============================================================

@@ -1959,6 +1959,11 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
+// Code workspace indexing uploads the selected text files as one JSON payload.
+// Keep the normal API body limit conservative, but give Code Agent its own
+// bounded parser so a real project (up to the indexer's 32MB content budget)
+// is not rejected before /api/code/index/build can validate it.
+app.use('/api/code', express.json({ limit: '64mb' }));
 app.use(express.json({ limit: '5mb' }));
 
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
