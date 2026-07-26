@@ -3164,7 +3164,7 @@
     return true;
   }
 
-  function sendApiRequest(body, requestId, timeStr, wsGen) {
+  function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
@@ -3208,6 +3208,11 @@
           var errMsg;
           var json = null;
           try { json = JSON.parse(text); } catch(e) {}
+          if (resp.status === 409 && json && json.code === 'INDEX_REBUILD_REQUIRED') {
+            var rebuildError = new Error(json.error || '项目索引需要重建');
+            rebuildError.code = 'INDEX_REBUILD_REQUIRED';
+            throw rebuildError;
+          }
           // P0: 根据状态码显示具体错误
           if (resp.status === 401) {
             errMsg = '登录已失效，请重新登录';
@@ -3231,7 +3236,7 @@
     // Keep the timeout active through response-body decoding as well as the
     // network request. A fetch can resolve with headers while text()/json()
     // hangs, which otherwise leaves the typing indicator stuck forever.
-    Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
+    return Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
       clearTimeout(timeoutId);
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
@@ -3271,6 +3276,31 @@
       if (wsGen !== state.workspaceGeneration) return;
       // AbortError is not a real failure
       if (err && err.name === 'AbortError') return;
+
+      // A Render restart or eviction can invalidate the server-side index
+      // between the status check and chat request. Rebuild once automatically
+      // and retry the same message instead of making the user resend it.
+      if (err && err.code === 'INDEX_REBUILD_REQUIRED' && !indexRetry) {
+        state.projectIndexStatus = { indexed: false, building: true, phase: '索引已丢失，正在自动重建...' };
+        renderProjectStatus();
+        return buildProjectIndex().then(function (result) {
+          if (!result || !state.projectIndexStatus || state.projectIndexStatus.indexed !== true) {
+            var rebuildFailed = new Error('索引重建失败，请点击“刷新索引”后重试');
+            rebuildFailed.code = 'INDEX_REBUILD_FAILED';
+            throw rebuildFailed;
+          }
+          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          return sendApiRequest(body, requestId, timeStr, wsGen, true);
+        }).catch(function (rebuildError) {
+          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          removeTypingIndicator();
+          restoreFailedMessage(body && body.message);
+          state.messages.push({ role: 'assistant', content: '索引重建失败：' + ((rebuildError && rebuildError.message) || '请稍后重试'), time: timeStr });
+          renderChatPanel();
+          restoreFailedMessage(body && body.message);
+          return null;
+        });
+      }
 
       removeTypingIndicator();
 
