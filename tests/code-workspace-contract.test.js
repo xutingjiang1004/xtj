@@ -712,6 +712,12 @@ test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
 });
 
+test('static Code welcome icon is bounded like the runtime welcome icon', () => {
+  const css = fs.readFileSync('css/code-workspace.css', 'utf8');
+  assert.match(css, /\.code-welcome \.code-welcome-icon\s*\{[\s\S]*?width:\s*80px;[\s\S]*?height:\s*80px;/);
+  assert.match(css, /\.code-welcome \.code-welcome-icon svg\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;/);
+});
+
 test('read-only Code workspaces do not expose write controls', () => {
   assert.match(codeWorkspace, /readOnly: !!state\._isReadOnly/);
   assert.match(codeWorkspace, /textarea\.readOnly = !!state\._isReadOnly/);
