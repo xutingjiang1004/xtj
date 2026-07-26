@@ -330,6 +330,11 @@ function buildSystemPrompt() {
 function inferInitialToolChoice(message, indexSummary, openFiles, activePath) {
   var text = String(message || '').toLowerCase();
   var hasOpenFiles = Array.isArray(openFiles) && openFiles.length > 0;
+  
+  if (isExplicitSearch(text)) {
+    return { type: 'function', function: { name: 'web_search' } };
+  }
+  
   // Public freshness questions must still search even when an editor tab is
   // open. Only explicit project/file wording gets priority over Web tools.
   if (isFreshnessQuery(text) && !/(project|workspace|repository|directory|file|code|[\u4ee3\u7801\u9879\u76ee\u5de5\u4f5c\u533a\u6587\u4ef6\u4ed3\u5e93])/i.test(text)) {
@@ -481,7 +486,11 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
 }
 
 function isFreshnessQuery(message) {
-  return /(最新|今天|昨日|昨天|明天|本周|本月|实时|截至|价格|票价|开放时间|营业时间|天气|新闻|版本|发布|更新|latest|today|recent|real[- ]?time|price|opening hours|weather|news|release|updated)/i.test(String(message || ''));
+  return /(最新|今天|昨日|昨天|明天|本周|本月|实时|截至|价格|票价|开放时间|营业时间|天气|新闻|版本|发布|更新|开通了吗|通车了吗|上线了吗|发布了吗|现在能用吗|现在能坐吗|是否运营|还营业吗|目前状态|latest|today|recent|real[- ]?time|price|opening hours|weather|news|release|updated)/i.test(String(message || ''));
+}
+
+function isExplicitSearch(message) {
+  return /(帮我上网搜|联网查一下|官网查一下|核实一下|查最新消息|上网搜|上网查一下|百度一下|谷歌一下)/i.test(String(message || ''));
 }
 
 function isPrivateAddress(address) {
@@ -651,7 +660,7 @@ async function searchWebForCode(query, maxResults, options) {
   }
   var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10));
   if (injected && injected.error && !(Array.isArray(injected.results) && injected.results.length)) {
-    return { ok: false, code: 'WEB_SEARCH_FAILED', error: String(injected.error).slice(0, 240) };
+    return { ok: false, code: 'WEB_SEARCH_FAILED', error: '搜索失败，无法核实最新信息，请明确告知用户，禁止编造虚假信息或日期。' };
   }
   return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(injected, maxResults || 5), diagnostics: injected && injected.diagnostics ? injected.diagnostics : undefined, used_provider: injected && injected.used_provider ? injected.used_provider : null };
 }
@@ -1550,7 +1559,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       var indexSummary = codeIndex.getIndexSummary(scope);
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message)) {
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
         return res.status(409).json({
           ok: false,
           code: 'INDEX_REBUILD_REQUIRED',
