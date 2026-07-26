@@ -6,8 +6,10 @@
 const path = require('node:path');
 
 const DEFAULT_TIMEOUT_MS = 15000;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const REPO_PART_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9_.-])?$/;
 const REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+const GIT_OBJECT_SHA_RE = /^[a-f0-9]{40,64}$/i;
 
 function parseAllowedRepos(raw) {
   return new Set(String(raw || '')
@@ -87,6 +89,7 @@ function mimeForFile(filePath) {
 
 function upstreamError(status) {
   var errors = {
+    429: { code: 'github_rate_limited', message: 'GitHub 请求过于频繁，请稍后重试' },
     401: { code: 'github_token_invalid', message: 'GitHub 服务凭据无效' },
     403: { code: 'github_forbidden', message: 'GitHub 拒绝访问该资源' },
     404: { code: 'github_not_found', message: 'GitHub 资源不存在' },
@@ -151,15 +154,11 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
   async function githubJson(req, url, token) {
     var controller = new AbortController();
     var timedOut = false;
-    var timer = setTimeout(function() {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
-    var abortFromClient = function() { controller.abort(); };
-    req.once('aborted', abortFromClient);
+    var timer = null;
+    var abortFromClient = null;
 
     try {
-      var response = await fetchImpl(url, {
+      var upstream = fetchImpl(url, {
         method: 'GET',
         headers: {
           Accept: 'application/vnd.github+json',
@@ -168,20 +167,42 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
           'X-GitHub-Api-Version': '2022-11-28'
         },
         signal: controller.signal
+      }).then(async function(response) {
+        var data = null;
+        try { data = await response.json(); } catch (_) {}
+        return { response: response, data: data };
       });
-
-      var data = null;
-      try { data = await response.json(); } catch (_) {}
+      var clientAbort = new Promise(function(_, reject) {
+        abortFromClient = function() {
+          controller.abort();
+          var error = new Error('client aborted');
+          error.code = 'client_aborted';
+          reject(error);
+        };
+        req.once('aborted', abortFromClient);
+      });
+      var timeout = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          timedOut = true;
+          controller.abort();
+          var error = new Error('github timeout');
+          error.code = 'github_timeout';
+          reject(error);
+        }, timeoutMs);
+      });
+      var settled = await Promise.race([upstream, timeout, clientAbort]);
+      var response = settled.response;
+      var data = settled.data;
       if (!response.ok) {
         var mapped = upstreamError(response.status);
         return { ok: false, status: response.status, code: mapped.code, error: mapped.message };
       }
       return { ok: true, data: data };
     } catch (error) {
-      if (timedOut) {
+      if (timedOut || (error && error.code === 'github_timeout')) {
         return { ok: false, status: 504, code: 'github_timeout', error: 'GitHub 请求超时' };
       }
-      if (error && error.name === 'AbortError' && req.aborted) {
+      if (error && error.code === 'client_aborted') {
         return { ok: false, aborted: true };
       }
       return { ok: false, status: 502, code: 'github_network_error', error: '无法连接 GitHub' };
@@ -203,7 +224,14 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
 
     try {
       return res.json(normalize(result.data, context));
-    } catch (_) {
+    } catch (error) {
+      if (error && error.code === 'github_tree_truncated') {
+        return res.status(409).json({
+          ok: false,
+          code: 'github_tree_truncated',
+          error: 'GitHub 返回的仓库树不完整，请缩小读取范围'
+        });
+      }
       return res.status(502).json({
         ok: false,
         code: 'github_invalid_response',
@@ -264,6 +292,11 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
     }, function(data, ctx) {
       var entries = Array.isArray(data) ? data : data.tree;
       if (!Array.isArray(entries)) throw new Error('invalid tree');
+      if (data && data.truncated === true) {
+        var truncatedError = new Error('truncated tree');
+        truncatedError.code = 'github_tree_truncated';
+        throw truncatedError;
+      }
       return {
         ok: true,
         repo: ctx.repo.fullName,
@@ -287,30 +320,69 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
   app.get('/api/code/github/tree', authenticateUser, treeHandler);
   app.get('/api/code/github/repos/:owner/:repo/tree', authenticateUser, treeHandler);
 
-  function fileHandler(req, res) {
-    return handle(req, res, { requireRef: true, requirePath: true }, function(ctx) {
-      return 'https://api.github.com/repos/' + encodeURIComponent(ctx.repo.owner) + '/' +
-        encodeURIComponent(ctx.repo.repo) + '/contents/' + encodeRepoPath(ctx.path) +
-        '?ref=' + encodeURIComponent(ctx.ref);
-    }, function(data, ctx) {
-      if (!data || Array.isArray(data) || data.type !== 'file' || data.encoding !== 'base64' ||
-          typeof data.content !== 'string') {
-        throw new Error('invalid file');
+  function sendGithubFailure(res, result) {
+    if (result.aborted || res.writableEnded) return;
+    return res.status(result.status).json({ ok: false, code: result.code, error: result.error });
+  }
+
+  function normalizeFile(data, ctx, metadata) {
+    metadata = metadata || data;
+    if (!data || Array.isArray(data) || data.encoding !== 'base64' || typeof data.content !== 'string') {
+      return null;
+    }
+    var size = Number(metadata.size);
+    if (!Number.isFinite(size) || size < 0) size = Math.floor(data.content.replace(/\s+/g, '').length * 3 / 4);
+    if (size > MAX_FILE_BYTES) return { tooLarge: true, size: size };
+    return {
+      ok: true,
+      repo: ctx.repo.fullName,
+      ref: ctx.ref,
+      path: ctx.path,
+      name: metadata.name || ctx.path.split('/').pop(),
+      sha: metadata.sha || data.sha || '',
+      size: size,
+      mimeType: mimeForFile(ctx.path),
+      encoding: 'base64',
+      content: data.content.replace(/\s+/g, '')
+    };
+  }
+
+  async function fileHandler(req, res) {
+    var ctx = prepareRequest(req, res, { requireRef: true, requirePath: true });
+    if (!ctx) return;
+    var base = 'https://api.github.com/repos/' + encodeURIComponent(ctx.repo.owner) + '/' +
+      encodeURIComponent(ctx.repo.repo);
+    var contentsUrl = base + '/contents/' + encodeRepoPath(ctx.path) + '?ref=' + encodeURIComponent(ctx.ref);
+    var metadataResult = await githubJson(req, contentsUrl, ctx.token);
+    if (!metadataResult.ok) return sendGithubFailure(res, metadataResult);
+
+    var metadata = metadataResult.data;
+    if (!metadata || Array.isArray(metadata) || metadata.type !== 'file') {
+      return res.status(502).json({ ok: false, code: 'github_invalid_response', error: 'GitHub 返回了无法识别的文件数据' });
+    }
+    if (Number(metadata.size) > MAX_FILE_BYTES) {
+      return res.status(413).json({ ok: false, code: 'github_file_too_large', error: 'GitHub 文件超过 20MB 读取上限' });
+    }
+
+    var normalized = normalizeFile(metadata, ctx, metadata);
+    if (!normalized) {
+      if (!GIT_OBJECT_SHA_RE.test(String(metadata.sha || ''))) {
+        return res.status(502).json({ ok: false, code: 'github_invalid_response', error: 'GitHub 文件内容不可用' });
       }
-      var content = data.content.replace(/\s+/g, '');
-      return {
-        ok: true,
-        repo: ctx.repo.fullName,
-        ref: ctx.ref,
-        path: ctx.path,
-        name: data.name || ctx.path.split('/').pop(),
-        sha: data.sha || '',
-        size: Number(data.size) || 0,
-        mimeType: mimeForFile(ctx.path),
-        encoding: 'base64',
-        content: content
-      };
-    });
+      // The Contents API omits inline base64 for files larger than 1 MB.
+      // Fall back to the Git Blobs API while keeping the token server-side.
+      var blobUrl = base + '/git/blobs/' + encodeURIComponent(metadata.sha);
+      var blobResult = await githubJson(req, blobUrl, ctx.token);
+      if (!blobResult.ok) return sendGithubFailure(res, blobResult);
+      normalized = normalizeFile(blobResult.data, ctx, metadata);
+    }
+    if (normalized && normalized.tooLarge) {
+      return res.status(413).json({ ok: false, code: 'github_file_too_large', error: 'GitHub 文件超过 20MB 读取上限' });
+    }
+    if (!normalized) {
+      return res.status(502).json({ ok: false, code: 'github_invalid_response', error: 'GitHub 文件内容不可用' });
+    }
+    return res.json(normalized);
   }
   app.get('/api/code/github/file', authenticateUser, fileHandler);
   app.get('/api/code/github/repos/:owner/:repo/file', authenticateUser, fileHandler);
