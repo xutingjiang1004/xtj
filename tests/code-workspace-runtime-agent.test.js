@@ -344,3 +344,52 @@ test('beforeunload does not eagerly cleanup a workspace when navigation can be c
   assert.ok(handler);
   assert.doesNotMatch(handler[0], /\bcleanup\s*\(/);
 });
+
+test('saveFile coalesces duplicate writes and preserves edits made during an in-flight save', async () => {
+  let resolveWrite;
+  let writes = 0;
+  const codeFS = {
+    writeFileByPath(path, content) {
+      writes++;
+      assert.equal(path, 'src/app.js');
+      assert.equal(content, 'v1');
+      return new Promise((resolve) => { resolveWrite = () => resolve({ sha256: 'sha-v1' }); });
+    }
+  };
+  const loaded = loadWorkspace(async () => response(200, {}), codeFS);
+  loaded.state.active = true;
+  loaded.state.openTabs = [{ path: 'src/app.js', type: 'text', content: 'old', _currentContent: 'v1', modified: true }];
+  loaded.state.activePath = 'src/app.js';
+
+  const first = loaded.hooks.saveFile('src/app.js');
+  const second = loaded.hooks.saveFile('src/app.js');
+  assert.equal(first, second);
+  loaded.state.openTabs[0]._currentContent = 'v2';
+  resolveWrite();
+  assert.equal(await first, true);
+  assert.equal(writes, 1);
+  assert.equal(loaded.state.openTabs[0].modified, true);
+  assert.equal(loaded.state.openTabs[0]._currentContent, 'v2');
+});
+
+test('undoOperations ignores duplicate clicks while the first undo is running', async () => {
+  let resolveWrite;
+  let writes = 0;
+  const codeFS = {
+    writeFileByPath() {
+      writes++;
+      return new Promise((resolve) => { resolveWrite = resolve; });
+    }
+  };
+  const loaded = loadWorkspace(async () => response(200, {}), codeFS);
+  loaded.state.active = true;
+  loaded.state.workspaceGeneration = 3;
+  loaded.state.snapshots = { 'src/app.js': { existed: true, beforeContent: 'old', beforeSha256: 'old-sha' } };
+  const first = loaded.hooks.undoOperations();
+  const second = await loaded.hooks.undoOperations();
+  assert.equal(second, false);
+  assert.equal(writes, 1);
+  resolveWrite({ sha256: 'old-sha' });
+  assert.equal(await first, true);
+  assert.equal(Object.keys(loaded.state.snapshots).length, 0);
+});
