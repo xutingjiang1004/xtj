@@ -1564,6 +1564,27 @@
 
     var allFiles = [];
     var allDirs = [];
+    var activeReads = 0;
+    var readQueue = [];
+    var MAX_CONCURRENT_READS = 8;
+
+    function withReadSlot(task) {
+      return new Promise(function (resolve, reject) {
+        readQueue.push({ task: task, resolve: resolve, reject: reject });
+        pumpReadQueue();
+      });
+    }
+
+    function pumpReadQueue() {
+      while (activeReads < MAX_CONCURRENT_READS && readQueue.length) {
+        var queued = readQueue.shift();
+        activeReads++;
+        Promise.resolve().then(queued.task).then(queued.resolve, queued.reject).then(function () {
+          activeReads--;
+          pumpReadQueue();
+        });
+      }
+    }
 
     function scanDir(dirHandle, currentPath, depth) {
       if (depth > maxDepth || allFiles.length >= maxFiles) {
@@ -1604,7 +1625,7 @@
                   if (fileType === 'text') {
                     // Read file content for metadata
                     promises.push((function (capturedHandle, capturedPath, capturedType) {
-                      return readFile(capturedHandle).then(function (fileResult) {
+                      return withReadSlot(function () { return readFile(capturedHandle); }).then(function (fileResult) {
                         if (allFiles.length >= maxFiles) return;
                         if (fileResult && fileResult.type === 'text') {
                           allFiles.push({
@@ -1660,6 +1681,8 @@
     }
 
     return scanDir(_dirHandle, '', 0).then(function () {
+      allFiles.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
+      allDirs.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
       return {
         files: allFiles.slice(0, maxFiles),
         directories: allDirs,
