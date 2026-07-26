@@ -4456,27 +4456,36 @@ async function callDeepSeek(messages, options) {
       }
     }
     async function executeToolWithAbort(toolCall) {
-      if (!externalSignal) return toolExecutor(toolCall);
-      if (externalSignal.aborted) {
-        var alreadyAborted = new Error('AI request cancelled');
-        alreadyAborted.name = 'AbortError';
-        throw alreadyAborted;
+      // Both the caller's cancellation and this request's own timeout must
+      // interrupt a tool round.  The HTTP fetch signal alone is insufficient:
+      // a custom tool executor can keep Promise.all pending after fetch aborts.
+      var abortSignals = [controller.signal];
+      if (externalSignal && externalSignal !== controller.signal) abortSignals.push(externalSignal);
+      for (var si = 0; si < abortSignals.length; si++) {
+        if (abortSignals[si].aborted) {
+          var alreadyAborted = new Error('AI request cancelled');
+          alreadyAborted.name = 'AbortError';
+          throw alreadyAborted;
+        }
       }
-      var abortListener;
+      var abortListeners = [];
       var abortPromise = new Promise(function(_, reject) {
-        abortListener = function() {
-          var cancelled = new Error('AI request cancelled');
-          cancelled.name = 'AbortError';
-          reject(cancelled);
-        };
-        externalSignal.addEventListener('abort', abortListener, { once: true });
+        abortSignals.forEach(function(signal) {
+          var abortListener = function() {
+            var cancelled = new Error('AI request cancelled');
+            cancelled.name = 'AbortError';
+            reject(cancelled);
+          };
+          abortListeners.push({ signal: signal, listener: abortListener });
+          signal.addEventListener('abort', abortListener, { once: true });
+        });
       });
       try {
         return await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
       } finally {
-        if (abortListener) {
-          try { externalSignal.removeEventListener('abort', abortListener); } catch (_) {}
-        }
+        abortListeners.forEach(function(item) {
+          try { item.signal.removeEventListener('abort', item.listener); } catch (_) {}
+        });
       }
     }
 
