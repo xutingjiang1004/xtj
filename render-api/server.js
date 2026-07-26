@@ -4409,6 +4409,12 @@ async function callDeepSeek(messages, options) {
         messages: workingMessages,
         stream: useStream
       };
+      if (useStream) {
+        // DeepSeek only emits the final usage/cache counters when explicitly
+        // requested. The final usage chunk has choices: [], so it must also be
+        // parsed before the choice guard below.
+        apiBody.stream_options = { include_usage: true };
+      }
       if (useThinking) {
         apiBody.thinking = { type: 'enabled' };
         apiBody.reasoning_effort = thinkingLevel;
@@ -4422,6 +4428,9 @@ async function callDeepSeek(messages, options) {
       }
       if (options && options.max_tokens && typeof options.max_tokens === 'number') {
         apiBody.max_tokens = options.max_tokens;
+      }
+      if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
+        apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
       }
 
       var resp = await fetch(DEEPSEEK_API_URL, {
@@ -4458,9 +4467,23 @@ async function callDeepSeek(messages, options) {
 
         while (!streamDone) {
           var rd;
-          try { rd = await reader.read(); } catch (e) { break; }
-          if (rd.done) break;
-          sBuffer += decoder.decode(rd.value, { stream: true });
+          try {
+            rd = await reader.read();
+          } catch (e) {
+            // A broken/aborted stream is not a successful partial response.
+            // Let the common error path distinguish cancellation from timeout.
+            throw e;
+          }
+          if (rd.done) {
+            // Some proxies/providers omit the final newline. Flush the
+            // decoder and feed the trailing SSE record through the same
+            // parser instead of silently dropping the final answer/tool call.
+            sBuffer += decoder.decode();
+            if (!sBuffer) break;
+            sBuffer += '\n';
+          } else {
+            sBuffer += decoder.decode(rd.value, { stream: true });
+          }
           var sLines = sBuffer.split('\n');
           sBuffer = sLines.pop() || '';
 
@@ -4471,7 +4494,19 @@ async function callDeepSeek(messages, options) {
             if (sData === '[DONE]') { streamDone = true; break; }
             var sJson;
             try { sJson = JSON.parse(sData); } catch (e) { continue; }
-            if (!sJson || !sJson.choices || !sJson.choices[0]) continue;
+            if (!sJson) continue;
+
+            // With stream_options.include_usage DeepSeek sends an additional
+            // final chunk whose choices array is empty.
+            if (sJson.usage) {
+              lastUsage = sJson.usage;
+              totalUsage.prompt_tokens += sJson.usage.prompt_tokens || 0;
+              totalUsage.completion_tokens += sJson.usage.completion_tokens || 0;
+              totalUsage.total_tokens += sJson.usage.total_tokens || 0;
+              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
+            }
+            if (!sJson.choices || !sJson.choices[0]) continue;
             var sChoice = sJson.choices[0];
             var sDelta = sChoice.delta || {};
 
@@ -4504,16 +4539,8 @@ async function callDeepSeek(messages, options) {
                 }
               }
             }
-            // usage (last delta usually)
-            if (sJson.usage) {
-              lastUsage = sJson.usage;
-              totalUsage.prompt_tokens = sJson.usage.prompt_tokens || 0;
-              totalUsage.completion_tokens = sJson.usage.completion_tokens || 0;
-              totalUsage.total_tokens = sJson.usage.total_tokens || 0;
-              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
-              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
-            }
           }
+          if (rd.done) break;
         }
         try { reader.cancel(); } catch (e) {}
 
@@ -4613,6 +4640,9 @@ async function callDeepSeek(messages, options) {
           }
           if (options && options.max_tokens && typeof options.max_tokens === 'number') {
             noToolBody.max_tokens = options.max_tokens;
+          }
+          if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
+            noToolBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
           }
             var noToolController = new AbortController();
             var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
@@ -4733,6 +4763,11 @@ async function callDeepSeek(messages, options) {
   } catch (e) {
     clearTimeout(timer);
     if (e && e.name === 'AbortError') {
+      if (externalSignal && externalSignal.aborted) {
+        var cancelledError = new Error('AI 调用已取消');
+        cancelledError.code = 'AI_CANCELLED';
+        throw cancelledError;
+      }
       console.error('[DEEPSEEK] request timeout after', DEEPSEEK_TIMEOUT_MS, 'ms');
       throw new Error('AI 调用超时，请稍后再试');
     }

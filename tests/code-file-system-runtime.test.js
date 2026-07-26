@@ -97,6 +97,7 @@ test('listAllFilesWithMetadata keeps path/name/content paired under delayed out-
   assert.equal(byPath['third.js'].name, 'third.js');
   assert.equal(byPath['third.js'].content, 'THIRD_CONTENT');
   assert.notEqual(byPath['first.js'].sha256, byPath['second.js'].sha256);
+  assert.equal(result.files.map((entry) => entry.path).join(','), 'first.js,second.js,third.js');
 });
 
 test('single-file workspace exposes one readable and writable file through the normal adapter', async () => {
