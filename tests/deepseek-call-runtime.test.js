@@ -158,6 +158,63 @@ test('multi-round tool calls aggregate usage and cache counters', async () => {
   assert.equal(result.usage.tool_call_count, 1);
 });
 
+test('malformed tool calls are normalized before the next provider round', async () => {
+  const requests = [];
+  const responses = [
+    jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: {
+        content: '',
+        tool_calls: [{ type: 'function', function: { name: 'lookup', arguments: '{broken' } }]
+      } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    }),
+    jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: '宸插畬鎴愭煡璇�', tool_calls: [] } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    })
+  ];
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return responses.shift();
+  });
+
+  await callDeepSeek(
+    [{ role: 'user', content: '璇锋煡璇�' }],
+    {
+      model: 'deepseek-v4-flash',
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }],
+      tool_executor: async tc => ({ ok: true, received: tc.function.arguments })
+    }
+  );
+
+  assert.equal(requests.length, 2);
+  const assistant = requests[1].messages.at(-2);
+  const tool = requests[1].messages.at(-1);
+  assert.match(assistant.tool_calls[0].id, /^call_1_1$/);
+  assert.equal(assistant.tool_calls[0].function.arguments, '{}');
+  assert.equal(tool.tool_call_id, assistant.tool_calls[0].id);
+});
+
+test('max_tokens is finite and clamped to the provider output limit', async () => {
+  let requestBody;
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: 'ok', tool_calls: [] } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    });
+  });
+
+  await callDeepSeek([{ role: 'user', content: 'test' }], {
+    model: 'deepseek-v4-flash',
+    max_tokens: 999999
+  });
+  assert.equal(requestBody.max_tokens, 384000);
+});
+
 test('a stream read failure rejects instead of returning a partial successful answer', async () => {
   const callDeepSeek = loadCallDeepSeek(async () => ({
     ok: true,
@@ -192,5 +249,33 @@ test('external cancellation is distinguished from an internal timeout', async ()
   await assert.rejects(
     () => callDeepSeek([{ role: 'user', content: '测试' }], { signal: controller.signal }),
     error => error && error.code === 'AI_CANCELLED' && error.message === 'AI 调用已取消'
+  );
+});
+
+test('external cancellation interrupts a pending tool round', async () => {
+  const callDeepSeek = loadCallDeepSeek(async () => jsonResponse({
+    model: 'deepseek-v4-flash',
+    choices: [{ message: {
+      content: '',
+      tool_calls: [{ id: 'call_pending', type: 'function', function: { name: 'lookup', arguments: '{}' } }]
+    } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+  }));
+  const controller = new AbortController();
+  const pendingTool = callDeepSeek(
+    [{ role: 'user', content: '绛夊緟宸ュ叿' }],
+    {
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }],
+      signal: controller.signal,
+      tool_executor: async () => new Promise(() => {})
+    }
+  );
+  setTimeout(() => controller.abort(), 10);
+  await assert.rejects(
+    () => Promise.race([
+      pendingTool,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('tool cancellation timed out')), 500))
+    ]),
+    error => error && error.code === 'AI_CANCELLED'
   );
 });

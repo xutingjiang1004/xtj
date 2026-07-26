@@ -664,6 +664,13 @@ test('system prompt instructs the agent to search before asking for files', () =
   assert.match(codeAgent, /use the project tools to locate it before asking the user/);
 });
 
+test('P1: stale save failures do not toast into a replacement workspace', () => {
+  var saveFn = codeWorkspace.match(/function saveFile\(path\)[\s\S]*?(?=\/\/ [^\n]*renderImagePreview)/);
+  assert.ok(saveFn, 'saveFile function should exist');
+  assert.match(saveFn[0], /wsGen !== state\.workspaceGeneration/);
+  assert.match(saveFn[0], /state\.openTabs\.indexOf\(tab\) === -1/);
+});
+
 test('AI chat exposes a real cancel control and abort path', () => {
   assert.match(codeWorkspace, /id="codeChatCancelBtn"/);
   assert.match(codeWorkspace, /function cancelCurrentRequest\(\)/);
