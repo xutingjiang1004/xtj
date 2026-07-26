@@ -99,6 +99,35 @@ test('listAllFilesWithMetadata keeps path/name/content paired under delayed out-
   assert.notEqual(byPath['first.js'].sha256, byPath['second.js'].sha256);
 });
 
+test('single-file workspace exposes one readable and writable file through the normal adapter', async () => {
+  const codeFS = loadCodeFileSystem({
+    showOpenFilePicker: async () => [{
+      kind: 'file',
+      name: 'trip.md',
+      async queryPermission() { return 'granted'; },
+      async getFile() {
+        return { name: 'trip.md', size: 10, text: async () => '# Guangzhou' };
+      },
+      async createWritable() {
+        return { write: async () => {}, close: async () => {} };
+      }
+    }]
+  });
+
+  const root = await codeFS.selectFile();
+  assert.equal(root.kind, 'directory');
+  assert.equal(root._isSingleFileRoot, true);
+  assert.equal(codeFS.getWorkspaceKind(), 'file');
+
+  const listing = await codeFS.listAllFilesWithMetadata(4, 10);
+  assert.equal(listing.files.map((file) => file.path).join(','), 'trip.md');
+  assert.equal(listing.files[0].content, '# Guangzhou');
+
+  const read = await codeFS.readFileByPath('trip.md');
+  assert.equal(read.content, '# Guangzhou');
+  await assert.rejects(root.getFileHandle('other.md'), /File not found/);
+});
+
 function jsonResponse(status, payload) {
   return {
     ok: status >= 200 && status < 300,
