@@ -994,13 +994,21 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         workspace_generation: body.workspaceGeneration === undefined ? body.workspace_generation : body.workspaceGeneration
       });
       if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
-      var result = codeIndex.buildIndex(scopeResult.value, body.files);
+      var useBatches = body.append === true || body.batch === true || body.finalize === true;
+      var result = useBatches
+        ? codeIndex.appendIndexBatch(scopeResult.value, body.files, {
+          finalize: body.finalize === true,
+          reset: body.reset === true || body.batchIndex === 0
+        })
+        : codeIndex.buildIndex(scopeResult.value, body.files);
 
       if (!result.ok) {
         return res.status(400).json({ ok: false, error: result.error });
       }
 
-      console.log('[code-agent] Index built: ' + result.totalFiles + ' files, ' + result.totalChunks + ' chunks');
+      if (result.status !== 'building') {
+        console.log('[code-agent] Index built: ' + result.totalFiles + ' files, ' + result.totalChunks + ' chunks');
+      }
 
       return res.json({
         ok: true,
@@ -1013,7 +1021,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         indexedFiles: result.indexedFiles,
         skippedFiles: result.skippedFiles || 0,
         failedFiles: result.failedFiles || 0,
-        status: result.status
+        status: result.status,
+        totalBytes: result.totalBytes || 0,
+        batchComplete: result.batchComplete === true,
+        finalizeRequired: result.finalizeRequired === true
       });
     } catch (err) {
       console.error('[code-agent] Index build error:', err && err.message ? err.message : err);

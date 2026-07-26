@@ -19,12 +19,16 @@ const MAX_CHUNKS_PER_REQUEST = 60; // Max chunks in one request
 const DEFAULT_INDEX_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_WORKSPACES = 32;
 const DEFAULT_MAX_REGISTRY_BYTES = 128 * 1024 * 1024;
+const INDEX_BATCH_TTL_MS = 10 * 60 * 1000;
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 
 // ── In-memory index store (per-process, not persistent) ─────────────────
 // Map insertion order is the LRU order (oldest first).
 var indexRegistry = new Map();
 var latestGenerations = new Map();
+// Pending batches are scoped by user/workspace/generation and are never
+// exposed as a usable index until the client sends the final batch.
+var pendingIndexBatches = new Map();
 var registryConfig = {
   ttlMs: DEFAULT_INDEX_TTL_MS,
   maxWorkspaces: DEFAULT_MAX_WORKSPACES,
@@ -129,6 +133,9 @@ function cleanupRegistry(now) {
     bytes -= oldest && oldest.estimatedBytes ? oldest.estimatedBytes : 0;
     deleteRegistryEntry(oldestKey);
   }
+  pendingIndexBatches.forEach(function (batch, key) {
+    if (!batch || batch.expiresAt <= now) pendingIndexBatches.delete(key);
+  });
 }
 
 function touchEntry(key, entry) {
@@ -489,7 +496,7 @@ function extractKeywords(message) {
 }
 
 // ── Build project index ─────────────────────────────────────────────────
-function buildIndex(scope, files) {
+function buildIndex(scope, files, options) {
   // Backward compatibility: buildIndex(workspaceId, files).
   var explicitScope = scope && typeof scope === 'object' && !Array.isArray(scope);
   var normalized = normalizeScope(explicitScope ? scope : legacyScope(scope, true), true);
@@ -605,6 +612,22 @@ function buildIndex(scope, files) {
     status: 'ready',
     builtAt: new Date().toISOString()
   };
+  if (options && options.validateOnly) {
+    return {
+      ok: true,
+      userId: projectIndex.userId,
+      workspaceId: projectIndex.workspaceId,
+      generation: projectIndex.generation,
+      totalFiles: totalFiles,
+      totalChunks: totalChunks,
+      totalBytes: totalBytes,
+      scannedFiles: projectIndex.scannedFiles,
+      indexedFiles: projectIndex.indexedFiles,
+      skippedFiles: projectIndex.skippedFiles,
+      failedFiles: projectIndex.failedFiles,
+      status: 'validated'
+    };
+  }
   var now = Date.now();
   var registryEntry = {
     index: projectIndex,
@@ -639,6 +662,80 @@ function buildIndex(scope, files) {
     status: projectIndex.status,
     builtAt: projectIndex.builtAt
   };
+}
+
+// Build an index from bounded client batches. Each batch is validated before
+// being retained, while the real project index remains unavailable until the
+// final batch is received. This keeps request/body memory bounded and prevents
+// AI from reading a half-built project.
+function appendIndexBatch(scope, files, options) {
+  options = options || {};
+  var normalized = normalizeScope(scope, true);
+  if (!normalized.ok) return normalized;
+  if (!Array.isArray(files)) return { ok: false, error: 'files must be an array', code: 'INVALID_FILES' };
+  cleanupRegistry();
+
+  var key = normalized.key;
+  if (options.reset === true) pendingIndexBatches.delete(key);
+  var existing = pendingIndexBatches.get(key);
+  if (existing && existing.generation !== normalized.generation) {
+    pendingIndexBatches.delete(key);
+    existing = null;
+  }
+
+  // Reuse the strict path, SHA and size validation from the normal builder,
+  // but skip registry publication for this intermediate batch.
+  var validated = buildIndex(scope, files, { validateOnly: true });
+  if (!validated.ok) return validated;
+
+  var pending = existing || {
+    userId: normalized.userId,
+    workspaceId: normalized.workspaceId,
+    generation: normalized.generation,
+    files: [],
+    paths: new Set(),
+    totalBytes: 0,
+    expiresAt: Date.now() + INDEX_BATCH_TTL_MS
+  };
+
+  if (pending.files.length + files.length > MAX_INDEX_FILES) {
+    return { ok: false, error: 'Too many files', code: 'FILE_LIMIT_EXCEEDED', maxFiles: MAX_INDEX_FILES };
+  }
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    if (pending.paths.has(file.path)) {
+      return { ok: false, error: 'Duplicate file path: ' + file.path, code: 'DUPLICATE_PATH' };
+    }
+    pending.paths.add(file.path);
+    pending.files.push(file);
+    pending.totalBytes += Buffer.byteLength(typeof file.content === 'string' ? file.content : '', 'utf8');
+  }
+  if (pending.totalBytes > MAX_INDEX_TOTAL_BYTES) {
+    return { ok: false, error: 'Index content is too large', code: 'TOTAL_SIZE_EXCEEDED' };
+  }
+  pending.expiresAt = Date.now() + INDEX_BATCH_TTL_MS;
+
+  var finalize = options.finalize === true;
+  if (!finalize) {
+    pendingIndexBatches.set(key, pending);
+    return {
+      ok: true,
+      status: 'building',
+      userId: pending.userId,
+      workspaceId: pending.workspaceId,
+      generation: pending.generation,
+      scannedFiles: pending.files.length,
+      indexedFiles: 0,
+      totalBytes: pending.totalBytes,
+      batchComplete: true,
+      finalizeRequired: true
+    };
+  }
+
+  var result = buildIndex(scope, pending.files);
+  if (result.ok) pendingIndexBatches.delete(key);
+  else pendingIndexBatches.set(key, pending);
+  return result;
 }
 
 // ── Get index summary ───────────────────────────────────────────────────
@@ -1032,8 +1129,10 @@ function clearIndex(scope) {
     key = JSON.stringify([normalized.userId, normalized.workspaceId, latestGeneration]);
   }
   var entry = key ? indexRegistry.get(key) : null;
-  if (!entry) return { ok: true, cleared: false };
-  deleteRegistryEntry(key);
+  var pending = key ? pendingIndexBatches.get(key) : null;
+  if (!entry && !pending) return { ok: true, cleared: false };
+  if (entry) deleteRegistryEntry(key);
+  if (pending) pendingIndexBatches.delete(key);
   return { ok: true, cleared: true };
 }
 
@@ -1113,6 +1212,7 @@ function getRegistryStats() {
 
 function resetRegistryForTests() {
   indexRegistry.clear();
+  pendingIndexBatches.clear();
   latestGenerations.clear();
   registryConfig.ttlMs = DEFAULT_INDEX_TTL_MS;
   registryConfig.maxWorkspaces = DEFAULT_MAX_WORKSPACES;
@@ -1130,6 +1230,7 @@ module.exports = {
 
   // Index operations
   buildIndex: buildIndex,
+  appendIndexBatch: appendIndexBatch,
   clearIndex: clearIndex,
   getIndexSummary: getIndexSummary,
 

@@ -148,6 +148,35 @@ test('keeps indexes isolated by authenticated user and asks for rebuild after re
   assert.equal(bob.body.rebuildRequired, true);
 });
 
+test('accepts bounded index batches and keeps partial indexes private until finalization', async () => {
+  const app = createApp(async () => ({ content: 'ok', model: 'deepseek-v4-flash' }));
+  const firstSource = 'const first = true;';
+  const secondSource = 'const second = true;';
+  const makeFile = (path, content) => ({ path, content, size: Buffer.byteLength(content), sha256: sha(content) });
+
+  const first = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'batch-project', workspaceGeneration: 1,
+    append: true, finalize: false, files: [makeFile('first.js', firstSource)]
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.status, 'building');
+  assert.equal(first.body.finalizeRequired, true);
+
+  const status = await request(app).post('/api/code/index/status').set('x-test-user', 'alice').send({
+    workspaceId: 'batch-project', workspaceGeneration: 1
+  });
+  assert.equal(status.body.summary, null);
+  assert.equal(status.body.rebuildRequired, true);
+
+  const final = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'batch-project', workspaceGeneration: 1,
+    append: true, finalize: true, files: [makeFile('second.js', secondSource)]
+  });
+  assert.equal(final.status, 200);
+  assert.equal(final.body.status, 'ready');
+  assert.equal(final.body.totalFiles, 2);
+});
+
 test('uploaded travel documents are available to tools without a project index', async () => {
   const app = createApp(async (_messages, options) => {
     const open = await options.tool_executor({

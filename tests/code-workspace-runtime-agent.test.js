@@ -244,3 +244,30 @@ test('project index build is single-flight and sends workspace scope with file c
   assert.equal(body.files[0].content, 'console.log(1)');
   assert.equal(loaded.state.projectIndexStatus.indexed, true);
 });
+
+test('project index uploads oversized workspaces sequentially and finalizes the last batch', async () => {
+  const calls = [];
+  const large = 'x'.repeat(2 * 1024 * 1024);
+  const codeFS = {
+    listAllFilesWithMetadata() {
+      return Promise.resolve({ files: [
+        { path: 'a.txt', name: 'a.txt', type: 'text', content: large },
+        { path: 'b.txt', name: 'b.txt', type: 'text', content: large }
+      ] });
+    }
+  };
+  const loaded = loadWorkspace(async (url, options) => {
+    calls.push({ url, options });
+    return response(200, { ok: true, status: 'building', totalFiles: 2, totalChunks: 2, builtAt: 123 });
+  }, codeFS);
+  loaded.state.workspaceName = 'large-trip';
+  loaded.state.workspaceMode = 'local';
+  loaded.state.workspaceGeneration = 2;
+
+  await loaded.hooks.buildProjectIndex();
+  assert.ok(calls.length >= 2);
+  const bodies = calls.map((call) => JSON.parse(call.options.body));
+  assert.ok(bodies.every((body) => body.append === true));
+  assert.equal(bodies[0].finalize, false);
+  assert.equal(bodies[bodies.length - 1].finalize, true);
+});

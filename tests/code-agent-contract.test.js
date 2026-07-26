@@ -54,6 +54,14 @@ test('Code Agent JSON payload has a scoped large-body parser', () => {
   assert.ok(defaultParser > codeParser, 'default parser must remain after scoped Code parser');
 });
 
+test('DeepSeek tool rounds preserve reasoning_content and clean abort listeners', () => {
+  assert.match(server, /roundReasoning\s*\+=\s*sDelta\.reasoning_content/);
+  assert.match(server, /assistantToolMessage\.reasoning_content\s*=\s*roundReasoning/);
+  assert.match(server, /externalSignal\.removeEventListener\('abort', externalAbortHandler\)/);
+  assert.match(server, /noToolAbortHandler = function\(\) \{ try \{ noToolController\.abort\(\)/);
+  assert.match(server, /externalSignal\.removeEventListener\('abort', noToolAbortHandler\)/);
+});
+
 // ============================================================
 // 6. 请求验证
 // ============================================================

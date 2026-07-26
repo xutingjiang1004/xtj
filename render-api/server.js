@@ -4363,13 +4363,15 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
-  // ★ U3 修复: signal listener 内存泄漏 — 用 { once: true } 自动清理
-  if (options && options.signal) {
-    var _onExternalAbort = function() { try { controller.abort(); } catch (e) {} };
-    if (options.signal.aborted) {
+  var externalSignal = options && options.signal ? options.signal : null;
+  var externalAbortHandler = null;
+  // ★ U3 修复: signal listener 在完成时也要主动移除，避免长期外部 signal 持有闭包
+  if (externalSignal) {
+    externalAbortHandler = function() { try { controller.abort(); } catch (e) {} };
+    if (externalSignal.aborted) {
       try { controller.abort(); } catch (e) {}
     } else {
-      options.signal.addEventListener('abort', _onExternalAbort, { once: true });
+      externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
     }
   }
 
@@ -4444,6 +4446,7 @@ async function callDeepSeek(messages, options) {
 
       var content = '';
       var toolCalls = [];
+      var roundReasoning = '';
       var streamToolCallMap = {};
 
       if (useStream) {
@@ -4474,6 +4477,7 @@ async function callDeepSeek(messages, options) {
 
             // reasoning_content chunk → 推给回调
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
+              roundReasoning += sDelta.reasoning_content;
               try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
@@ -4518,8 +4522,8 @@ async function callDeepSeek(messages, options) {
         for (var sk=0; sk<stcKeys.length; sk++) {
           toolCalls.push(streamToolCallMap[stcKeys[sk]]);
         }
-        // reasoning_content 已通过 onThinkingChunk 实时推送, finalReasoning 置空
-        finalReasoning = '';
+        // reasoning_content 既要实时推送，也要随 assistant tool-call 消息续传。
+        finalReasoning = roundReasoning;
       } else {
         // ===== 非流式 (standard) =====
         var data = await resp.json().catch(function() { return {}; });
@@ -4541,7 +4545,10 @@ async function callDeepSeek(messages, options) {
         }
         if (useThinking) {
           var r = message.reasoning_content;
-          if (typeof r === 'string' && r) finalReasoning = r;
+          if (typeof r === 'string' && r) {
+            roundReasoning = r;
+            finalReasoning = r;
+          }
         }
         finalModel = normalizeDeepSeekUsageModel(data.model || message.model || finalModel, model);
       }
@@ -4553,11 +4560,15 @@ async function callDeepSeek(messages, options) {
       }
 
       // 有 tool_calls：追加 assistant 消息 → 执行 tool → 进入下一轮
-      workingMessages.push({
+      var assistantToolMessage = {
         role: 'assistant',
         content: content || '',
         tool_calls: toolCalls
-      });
+      };
+      // DeepSeek thinking/tool-call rounds require the reasoning trace to be
+      // echoed on the assistant message before tool results are appended.
+      if (useThinking && roundReasoning) assistantToolMessage.reasoning_content = roundReasoning;
+      workingMessages.push(assistantToolMessage);
 
       // ★ 并行执行所有工具调用 (原串行 for 循环改为 Promise.all)
       var toolResults = await Promise.all(toolCalls.map(async function(tc, t) {
@@ -4603,18 +4614,27 @@ async function callDeepSeek(messages, options) {
           if (options && options.max_tokens && typeof options.max_tokens === 'number') {
             noToolBody.max_tokens = options.max_tokens;
           }
-          var noToolController = new AbortController();
-          var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
-          var noToolResp = await fetch(DEEPSEEK_API_URL, {
+            var noToolController = new AbortController();
+            var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
+            var noToolAbortHandler = null;
+            if (externalSignal) {
+              noToolAbortHandler = function() { try { noToolController.abort(); } catch (e) {} };
+              if (externalSignal.aborted) noToolAbortHandler();
+              else externalSignal.addEventListener('abort', noToolAbortHandler, { once: true });
+            }
+            var noToolResp = await fetch(DEEPSEEK_API_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
             },
             body: JSON.stringify(noToolBody),
-            signal: noToolController.signal
-          });
+              signal: noToolController.signal
+            });
           clearTimeout(noToolTimer);
+          if (externalSignal && noToolAbortHandler) {
+            try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (e) {}
+          }
           var noToolData = await noToolResp.json().catch(function() { return {}; });
           if (noToolResp.ok && noToolData && noToolData.usage) {
             lastUsage = noToolData.usage;
@@ -4626,6 +4646,9 @@ async function callDeepSeek(messages, options) {
           }
           if (noToolResp.ok && noToolData && noToolData.choices && noToolData.choices[0] && noToolData.choices[0].message) {
             var noToolMsg = noToolData.choices[0].message;
+            if (typeof noToolMsg.reasoning_content === 'string' && noToolMsg.reasoning_content) {
+              finalReasoning = noToolMsg.reasoning_content;
+            }
             var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
             if (noToolContent && noToolContent.length > 10) {
               // 过滤疑似 JSON 残留
@@ -4636,8 +4659,11 @@ async function callDeepSeek(messages, options) {
               }
             }
           }
-        } catch (e) {
-          clearTimeout(noToolTimer);
+          } catch (e) {
+            clearTimeout(noToolTimer);
+            if (externalSignal && noToolAbortHandler) {
+              try { externalSignal.removeEventListener('abort', noToolAbortHandler); } catch (ignore) {}
+            }
           console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
         }
       }
@@ -4715,6 +4741,9 @@ async function callDeepSeek(messages, options) {
     throw new Error('AI 调用异常，请稍后再试');
   } finally {
     clearTimeout(timer);
+    if (externalSignal && externalAbortHandler) {
+      try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
+    }
   }
 }
 

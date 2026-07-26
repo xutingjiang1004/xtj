@@ -59,6 +59,8 @@
   var MAX_OPEN_FILE_CHARS = 240000;
   var MAX_OPEN_FILES_TOTAL_CHARS = 900000;
   var MAX_ATTACHMENTS = 8;
+  // Keep each index request comfortably below the server JSON/body limit.
+  var MAX_INDEX_BATCH_BYTES = 3 * 1024 * 1024;
   var MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
@@ -2079,13 +2081,45 @@
         indexableFiles: files.length
       };
       renderProjectStatus();
-      return postJson('/api/code/index/build', {
-        workspaceId: workspaceId,
-        workspaceGeneration: wsGen,
-        files: files
-      }, controller.signal).then(function (response) {
-        return responseJson(response, '索引构建失败');
-      });
+      var batches = [];
+      var currentBatch = [];
+      var currentBytes = 0;
+      for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
+        var fileBytes = 0;
+        try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
+        if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBytes = 0;
+        }
+        currentBatch.push(files[batchIndex]);
+        currentBytes += fileBytes;
+      }
+      if (currentBatch.length || !batches.length) batches.push(currentBatch);
+      var useBatches = batches.length > 1;
+      return batches.reduce(function (chain, batch, index) {
+        return chain.then(function () {
+          if (!isCurrentBuild()) throw createNamedAbortError();
+          state.projectIndexStatus.phase = useBatches
+            ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
+            : '正在上传索引...';
+          renderProjectStatus();
+          var payload = {
+            workspaceId: workspaceId,
+            workspaceGeneration: wsGen,
+            files: batch
+          };
+          if (useBatches) {
+            payload.append = true;
+            payload.finalize = index === batches.length - 1;
+            payload.batchIndex = index;
+            payload.batchCount = batches.length;
+          }
+          return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
+            return responseJson(response, 'index build failed');
+          });
+        });
+      }, Promise.resolve());
     }).then(function (result) {
       if (!isCurrentBuild()) return null;
       state.projectIndexStatus = {
