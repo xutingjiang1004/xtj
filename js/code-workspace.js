@@ -327,6 +327,9 @@
 
       if (result && result.status === 'granted') {
         renderWorkspace();
+        if (result.kind === 'file') {
+          window.setTimeout(function () { openFile(state.workspaceName); }, 0);
+        }
       }
       // 如果不是 granted，欢迎页已经显示，用户可以看到恢复入口
     }).catch(function () {
@@ -344,6 +347,7 @@
       if (result.status === 'granted') {
         state.directoryHandle = result.handle;
         state.workspaceName = result.handle.name;
+        state._isReadOnly = false;
       }
       return result;
     }).catch(function () {
@@ -399,13 +403,16 @@
     welcome.innerHTML =
       '<div class="welcome-icon">📁</div>' +
       '<h2 class="welcome-title">打开工作区开始</h2>' +
-      '<p class="welcome-desc">选择 GitHub 仓库（推荐）或本地文件夹作为工作区，浏览和编辑文件，或使用 AI 助手进行代码操作。</p>' +
+      '<p class="welcome-desc">选择 GitHub 仓库、本地文件夹或单个文件，浏览和编辑内容，或使用 AI 助手进行代码操作。</p>' +
       '<div class="welcome-actions">' +
         '<button class="folder-picker-btn-large primary" id="codeWelcomeGitHubBtn">' +
           '<span class="folder-icon">🔗</span> 打开 GitHub 仓库（推荐）' +
         '</button>' +
         '<button class="folder-picker-btn-large" id="codeWelcomeLocalBtn">' +
           '<span class="folder-icon">📂</span> 打开本地文件夹' +
+        '</button>' +
+        '<button class="folder-picker-btn-large" id="codeWelcomeFileBtn">' +
+          '<span class="folder-icon">📄</span> 直接打开文件' +
         '</button>' +
       '</div>' +
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
@@ -553,6 +560,71 @@
     });
   }
 
+  function selectAndOpenFile() {
+    state.restoreGeneration++;
+    if (hasUnsavedChanges() && !confirm('当前工作区存在未保存内容。打开单个文件将放弃这些修改，是否继续？')) {
+      return;
+    }
+
+    var fs = window.__xtjCodeFS;
+    if (!fs) {
+      showToast('文件系统不可用', 'error');
+      return;
+    }
+
+    function openSelectedHandle(handle, readOnly) {
+      if (!handle) return;
+      resetWorkspaceState();
+      state.directoryHandle = handle;
+      state.workspaceName = handle.name || '单个文件';
+      state.workspaceMode = 'local';
+      state._isReadOnly = !!readOnly;
+      try { localStorage.setItem('xtj_code_workspace_name', state.workspaceName); } catch (e) { /* ignore */ }
+      renderWorkspace();
+      // A single-file workspace should be immediately usable, without a
+      // second click on the synthetic root tree node.
+      window.setTimeout(function () { openFile(handle.name); }, 0);
+    }
+
+    if (typeof fs.selectFile === 'function' && window.showOpenFilePicker && window.isSecureContext) {
+      var fileBtn = document.getElementById('codeWelcomeFileBtn');
+      var originalText = fileBtn ? fileBtn.innerHTML : '';
+      if (fileBtn) {
+        fileBtn.disabled = true;
+        fileBtn.innerHTML = '<span class="folder-icon">⏳</span> 请在弹窗中选择文件...';
+      }
+      fs.selectFile().then(function (handle) {
+        if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
+        openSelectedHandle(handle, false);
+      }).catch(function (err) {
+        if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
+        if (err && err.name === 'AbortError') return;
+        showToast('打开文件失败：' + (err && err.message ? err.message : String(err)), 'error');
+      });
+      return;
+    }
+
+    // Compatibility fallback for Firefox, HTTP development pages, and older
+    // Chromium: this remains read-only because a File object has no writable
+    // FileSystemFileHandle behind it.
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = false;
+    input.accept = '*/*';
+    input.onchange = function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var mockFileHandle = {
+        kind: 'file',
+        name: file.name,
+        getFile: function () { return Promise.resolve(file); }
+      };
+      if (fs.setDirHandle) fs.setDirHandle(mockFileHandle);
+      openSelectedHandle(fs.getDirHandle ? fs.getDirHandle() : mockFileHandle, true);
+    };
+    input.click();
+  }
+
   function apiFetch(url, options) {
     options = options || {};
     if (window.xtjProtectedFetch) {
@@ -676,7 +748,7 @@
       }
     }
 
-    var btn = document.getElementById('codeWelcomeOpenBtn');
+    var btn = document.getElementById('codeWelcomeLocalBtn');
     if (!window.showDirectoryPicker) {
       // Fallback for browsers without File System Access API
       var input = document.createElement('input');
@@ -879,11 +951,20 @@
     sidebarHeader.className = 'code-sidebar-header';
     sidebarHeader.innerHTML =
       '<span class="workspace-name">' + escapeHTML(state.workspaceName || 'Workspace') + '</span>' +
-      '<button class="folder-picker-btn" title="更换文件夹">📁</button>';
+      '<span class="workspace-picker-actions">' +
+        '<button class="folder-picker-btn" title="更换文件夹">📁</button>' +
+        '<button class="folder-picker-btn file-picker-btn" title="直接打开文件">📄</button>' +
+      '</span>';
     var changeBtn = sidebarHeader.querySelector('.folder-picker-btn');
     if (changeBtn) {
       changeBtn.addEventListener('click', function () {
         selectAndOpenWorkspace();
+      });
+    }
+    var directFileBtn = sidebarHeader.querySelector('.file-picker-btn');
+    if (directFileBtn) {
+      directFileBtn.addEventListener('click', function () {
+        selectAndOpenFile();
       });
     }
     sidebar.appendChild(sidebarHeader);
@@ -1770,11 +1851,12 @@
       return;
     }
 
-    // Read the file again to get ArrayBuffer
-    fs.readFileByPath(tab.path).then(function (result) {
+    // Read the file again to get ArrayBuffer. Keep the promise on the tab so
+    // sendMessage can wait for extraction instead of sending an empty context.
+    var extractionPromise = fs.readFileByPath(tab.path).then(function (result) {
       if (!result || result.type !== 'document') {
         preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>无法读取文档文件</p></div>';
-        return;
+        throw new Error('无法读取文档文件');
       }
 
       return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
@@ -1813,9 +1895,13 @@
       tab._extractedText = docData.text;
       tab._extractedTruncated = docData.truncated;
       tab._extractedMetadata = docData.metadata;
+      return docData;
     }).catch(function (err) {
       preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML((err && err.message) || '未知错误') + '</p></div>';
+      tab._extractError = err && err.message ? err.message : '文档提取失败';
+      return null;
     });
+    tab._extractPromise = extractionPromise;
   }
 
   // ──────────────────────────────────────────────
@@ -2056,7 +2142,7 @@
         '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">项目已索引</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
-        '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : '本地文件夹') + '</div>';
+        '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
     } else if (state.projectIndexStatus && state.projectIndexStatus.error) {
       indexDiv.innerHTML =
         '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +
@@ -2603,6 +2689,13 @@
       });
     }
 
+    var fileBtn = document.getElementById('codeWelcomeFileBtn');
+    if (fileBtn) {
+      fileBtn.addEventListener('click', function () {
+        selectAndOpenFile();
+      });
+    }
+
     if (attachmentButton && attachmentInput) {
       attachmentButton.disabled = state.attachmentProcessing || state.attachments.length >= MAX_ATTACHMENTS;
       attachmentButton.addEventListener('click', function () { attachmentInput.click(); });
@@ -2751,6 +2844,16 @@
     return selected;
   }
 
+  function ensureOpenFileContexts() {
+    var pending = [];
+    state.openTabs.forEach(function (tab) {
+      if (tab.type === 'document' && !tab._extractedText && tab._extractPromise) {
+        pending.push(tab._extractPromise);
+      }
+    });
+    return pending.length ? Promise.all(pending) : Promise.resolve([]);
+  }
+
   function buildChatRequestBody(message, historyMsgs) {
     var scope = getWorkspaceScope();
     return {
@@ -2833,10 +2936,14 @@
       return { role: m.role, content: m.content };
     });
 
-    // Build request with pinned_paths and active_path — backend handles chunk selection
-    var body = buildChatRequestBody(message, historyMsgs);
-
-    return sendApiRequest(body, requestId, timeStr, wsGen);
+    // Documents are extracted asynchronously for preview. Wait for that
+    // result before building the request, otherwise a fast send would omit
+    // the document and the backend would incorrectly ask for an index.
+    return ensureOpenFileContexts().then(function () {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+      var body = buildChatRequestBody(message, historyMsgs);
+      return sendApiRequest(body, requestId, timeStr, wsGen);
+    });
   }
 
   function sendApiRequest(body, requestId, timeStr, wsGen) {
@@ -3653,6 +3760,7 @@
   if (window.__XTJ_TEST_MODE__) {
     window.__xtjCodeWorkspaceTestHooks = {
       buildChatRequestBody: buildChatRequestBody,
+      ensureOpenFileContexts: ensureOpenFileContexts,
       processAttachmentFile: processAttachmentFile,
       removeAttachment: removeAttachment,
       loadGitHubRepositoryInfo: loadGitHubRepositoryInfo,
