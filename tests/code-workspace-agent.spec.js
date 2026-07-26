@@ -184,7 +184,7 @@ test.describe('Code workspace Agent browser flow', () => {
     await expect(page.locator('#codeChatMessages')).toContainText('已读取 src/travel.js');
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await expect(page.locator('.code-attachment-chip')).toContainText('广州旅游计划.md');
+    await expect(page.locator('.code-attachment-chip')).toHaveCount(0);
 
     await page.locator('#codeChatInput').fill('再次请求以验证错误恢复');
     await page.locator('#codeChatSendBtn').click();

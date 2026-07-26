@@ -7,6 +7,10 @@
 // Phase 1: Project index + Agent tool calls + Token budget management
 
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
+const https = require('https');
+const { URL } = require('url');
 const codeIndex = require('./code-index');
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -32,6 +36,12 @@ const CODE_AGENT_MAX_OUTPUT_TOKENS = Math.min(
 );
 const MAX_OPEN_FILES = 12;
 const MAX_ATTACHMENTS = 8;
+const WEB_SEARCH_URL = String(process.env.CODE_AGENT_WEB_SEARCH_URL || '').trim();
+const WEB_SEARCH_API_KEY = String(process.env.CODE_AGENT_WEB_SEARCH_API_KEY || '').trim();
+const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
+const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
+const WEB_MAX_BYTES = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_MAX_BYTES) || 2 * 1024 * 1024, 32 * 1024), 8 * 1024 * 1024);
+const WEB_MAX_REDIRECTS = 3;
 const MAX_REQUEST_OVERLAY_BYTES = 8 * 1024 * 1024;
 const MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 800 * 1024;
@@ -255,6 +265,8 @@ function buildSystemPrompt() {
     'For debugging, search relevant terms, then read the strongest matching files and ranges.',
     'Pinned, active and open files are priority hints, never prerequisites for reading other files.',
     'If an open file or uploaded document is available, use get_active_file/get_open_files and read_file before answering; do not ask to rebuild the project index just because the index is missing.',
+    'For current, latest, price, opening-hours, weather, news, release or other time-sensitive questions, call web_search first; use fetch_web_page only for a result URL when details are needed.',
+    'Web tools return structured results. For every time-sensitive conclusion, cite the source title/URL and published time when provided. If web search is not configured, failed, or a URL is rejected by safety policy, explain that clearly and do not invent current facts or claim verification.',
     'When the user asks to view, summarize or plan from a document, read the supplied document context first and cite the file name in your answer.',
     'Never claim to have read a file unless a tool returned it successfully in this turn.',
     'Never claim tests, builds, terminal commands or Git operations were executed; no such tools exist.',
@@ -320,6 +332,11 @@ function buildSystemPrompt() {
 function inferInitialToolChoice(message, indexSummary, openFiles, activePath) {
   var text = String(message || '').toLowerCase();
   var hasOpenFiles = Array.isArray(openFiles) && openFiles.length > 0;
+  // Public freshness questions must still search even when an editor tab is
+  // open. Only explicit project/file wording gets priority over Web tools.
+  if (isFreshnessQuery(text) && !/(project|workspace|repository|directory|file|code|[\u4ee3\u7801\u9879\u76ee\u5de5\u4f5c\u533a\u6587\u4ef6\u4ed3\u5e93])/i.test(text)) {
+    return { type: 'function', function: { name: 'web_search' } };
+  }
   if (!indexSummary && hasOpenFiles) {
     return { type: 'function', function: { name: 'get_open_files' } };
   }
@@ -388,7 +405,9 @@ const CODE_AGENT_TOOLS = [
   { type: 'function', function: { name: 'read_file_range', description: 'Read an inclusive line range from a text file.', parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer', minimum: 1 }, end_line: { type: 'integer', minimum: 1 } }, required: ['path', 'start_line', 'end_line'], additionalProperties: false } } },
   { type: 'function', function: { name: 'get_symbols', description: 'Return indexed functions, classes, exports and imports for a file.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false } } },
   { type: 'function', function: { name: 'get_active_file', description: 'Return the active editor file, including unsaved content when available.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
-  { type: 'function', function: { name: 'get_open_files', description: 'List open editor files and uploaded documents. Read a selected file afterwards.', parameters: { type: 'object', properties: {}, additionalProperties: false } } }
+  { type: 'function', function: { name: 'get_open_files', description: 'List open editor files and uploaded documents. Read a selected file afterwards.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
+  { type: 'function', function: { name: 'web_search', description: 'Search current web information. Use for latest, current, prices, hours, weather, news, releases or other time-sensitive questions.', parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 240 }, max_results: { type: 'integer', minimum: 1, maximum: 10 } }, required: ['query'], additionalProperties: false } } },
+  { type: 'function', function: { name: 'fetch_web_page', description: 'Fetch and extract readable text from one HTTPS web page found by web_search.', parameters: { type: 'object', properties: { url: { type: 'string', minLength: 1, maxLength: 2000 } }, required: ['url'], additionalProperties: false } } }
 ];
 
 function validateWorkspaceScope(req, body) {
@@ -463,6 +482,188 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
   return messages;
 }
 
+function isFreshnessQuery(message) {
+  return /(最新|今天|昨日|昨天|明天|本周|本月|实时|截至|价格|票价|开放时间|营业时间|天气|新闻|版本|发布|更新|latest|today|recent|real[- ]?time|price|opening hours|weather|news|release|updated)/i.test(String(message || ''));
+}
+
+function isPrivateAddress(address) {
+  var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (net.isIP(value) === 4) {
+    var octets = value.split('.').map(Number);
+    var first = octets[0];
+    return first === 0 || first === 10 || first === 127 || first >= 224 ||
+      (first === 100 && octets[1] >= 64 && octets[1] <= 127) ||
+      (first === 169 && octets[1] === 254) ||
+      (first === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (first === 192 && (octets[1] === 168 || octets[1] === 0 && octets[2] === 0 || octets[1] === 0 && octets[2] === 2)) ||
+      (first === 198 && (octets[1] === 18 || octets[1] === 19 || octets[1] === 51)) ||
+      (first === 203 && octets[1] === 0 && octets[2] === 113);
+  }
+  if (net.isIP(value) === 6) {
+    if (value.indexOf('::ffff:') === 0) {
+      var mapped = value.slice(7).split(':');
+      if (mapped.length === 2) {
+        var hi = parseInt(mapped[0], 16), lo = parseInt(mapped[1], 16);
+        if (Number.isFinite(hi) && Number.isFinite(lo)) {
+          if (isPrivateAddress([(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join('.'))) return true;
+        }
+      }
+    }
+    return value === '::' || value === '::1' || value.indexOf('fc') === 0 || value.indexOf('fd') === 0 ||
+      /^(fe[89ab]):/i.test(value) || value.indexOf('::ffff:127.') === 0 || value.indexOf('::ffff:10.') === 0 ||
+      value.indexOf('::ffff:192.168.') === 0 || value.indexOf('::ffff:169.254.') === 0;
+  }
+  return false;
+}
+
+function isBlockedWebHost(hostname) {
+  var host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return !host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
+    host === 'metadata.google.internal' || host === 'metadata' || host.endsWith('.internal') || isPrivateAddress(host);
+}
+
+function hostAllowed(hostname) {
+  if (!WEB_FETCH_HOSTS.length) return true;
+  var host = String(hostname || '').toLowerCase();
+  return WEB_FETCH_HOSTS.some(function (allowed) {
+    return host === allowed || host.endsWith('.' + allowed);
+  });
+}
+
+async function assertSafeWebUrl(rawUrl, lookupImpl) {
+  var parsed;
+  try { parsed = new URL(String(rawUrl || '')); } catch (_) { throw new Error('网址格式无效'); }
+  if (parsed.protocol !== 'https:') throw new Error('仅支持 HTTPS 网页');
+  if (parsed.username || parsed.password) throw new Error('网址不允许包含凭据');
+  if (isBlockedWebHost(parsed.hostname) || !hostAllowed(parsed.hostname)) throw new Error('网址主机不在允许范围内');
+  var lookup = lookupImpl || dns.lookup;
+  var addresses;
+  try { addresses = await lookup(parsed.hostname, { all: true, verbatim: true }); } catch (_) { throw new Error('无法解析网页主机'); }
+  if (!Array.isArray(addresses) || !addresses.length || addresses.some(function (item) { return isPrivateAddress(item && item.address); })) {
+    throw new Error('网页主机解析到禁止访问的内网地址');
+  }
+  return { parsed: parsed, addresses: addresses.map(function (item) { return item.address; }) };
+}
+
+function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers) {
+  return new Promise(function (resolve, reject) {
+    var chunks = [], total = 0, settled = false;
+    var request = https.request({
+      protocol: 'https:', hostname: parsed.hostname, port: parsed.port || 443, path: parsed.pathname + parsed.search,
+      method: 'GET', servername: parsed.hostname, rejectUnauthorized: true,
+      headers: Object.assign({ Host: parsed.host, Accept: 'text/html,application/xhtml+xml,text/plain,application/json' }, headers || {}),
+      lookup: function (_hostname, _options, callback) { callback(null, addresses[0], net.isIP(addresses[0]) || 4); }
+    }, function (response) {
+      var declared = Number(response.headers['content-length']);
+      if (Number.isFinite(declared) && declared > maxBytes) { request.destroy(); reject(new Error('网页内容超过大小限制')); return; }
+      response.on('data', function (chunk) {
+        total += chunk.length;
+        if (total > maxBytes) { request.destroy(); if (!settled) { settled = true; reject(new Error('网页内容超过大小限制')); } return; }
+        chunks.push(chunk);
+      });
+      response.on('end', function () {
+        if (settled) return; settled = true;
+        var body = Buffer.concat(chunks, total);
+        resolve({ status: response.statusCode || 0, ok: (response.statusCode || 0) >= 200 && (response.statusCode || 0) < 300, headers: { get: function (key) { return response.headers[String(key).toLowerCase()] || null; } }, arrayBuffer: function () { return Promise.resolve(body); } });
+      });
+      response.on('error', function (err) { if (!settled) { settled = true; reject(err); } });
+    });
+    request.setTimeout(timeoutMs, function () { request.destroy(new Error('网页请求超时')); });
+    request.on('error', function (err) { if (!settled) { settled = true; reject(err); } });
+    request.end();
+  });
+}
+
+async function readWebResponse(response, maxBytes) {
+  var declared = Number(response && response.headers && response.headers.get && response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error('网页内容超过大小限制');
+  if (!response || !response.body || typeof response.body.getReader !== 'function') {
+    var buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxBytes) throw new Error('网页内容超过大小限制');
+    return buffer;
+  }
+  var reader = response.body.getReader();
+  var chunks = [], total = 0;
+  while (true) {
+    var part = await reader.read();
+    if (part.done) break;
+    total += part.value ? part.value.byteLength : 0;
+    if (total > maxBytes) { try { await reader.cancel(); } catch (_) {} throw new Error('网页内容超过大小限制'); }
+    chunks.push(Buffer.from(part.value));
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function normalizeWebText(buffer, contentType) {
+  var text = buffer.toString('utf8');
+  if (/html/i.test(contentType || '')) {
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&');
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 120000);
+}
+
+async function fetchSafeWebPage(rawUrl, options) {
+  options = options || {};
+  var fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') return { ok: false, code: 'WEB_FETCH_UNAVAILABLE', error: '服务器未配置网页抓取能力' };
+  var lookupImpl = options.lookupImpl || dns.lookup;
+  var current = String(rawUrl || '');
+  for (var redirect = 0; redirect <= WEB_MAX_REDIRECTS; redirect++) {
+    var safeTarget = await assertSafeWebUrl(current, lookupImpl);
+    var parsed = safeTarget.parsed;
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, options.timeoutMs || WEB_TIMEOUT_MS);
+    var response;
+    try {
+      var requestHeaders = Object.assign({ Accept: 'text/html,application/xhtml+xml,text/plain,application/json' }, options.headers || {});
+      response = options.fetchImpl ? await fetchImpl(parsed.toString(), { method: 'GET', redirect: 'manual', signal: controller.signal, headers: requestHeaders }) : await requestPinnedHttps(parsed, safeTarget.addresses, options.maxBytes || WEB_MAX_BYTES, options.timeoutMs || WEB_TIMEOUT_MS, requestHeaders);
+    } catch (err) {
+      if (err && err.name === 'AbortError') throw new Error('网页请求超时');
+      throw new Error('网页请求失败');
+    } finally { clearTimeout(timer); }
+    if (response && response.status >= 300 && response.status < 400) {
+      if (redirect === WEB_MAX_REDIRECTS) throw new Error('网页重定向次数过多');
+      var location = response.headers && response.headers.get ? response.headers.get('location') : '';
+      if (!location) throw new Error('网页重定向缺少目标');
+      current = new URL(location, parsed).toString();
+      continue;
+    }
+    if (!response || !response.ok) throw new Error('网页返回 HTTP ' + (response && response.status || 0));
+    var body = await readWebResponse(response, options.maxBytes || WEB_MAX_BYTES);
+    var contentType = response.headers && response.headers.get ? response.headers.get('content-type') || '' : '';
+    return { ok: true, url: parsed.toString(), status: response.status, content_type: contentType.split(';')[0], bytes: body.length, content: normalizeWebText(body, contentType), truncated: body.length >= (options.maxBytes || WEB_MAX_BYTES) };
+  }
+  throw new Error('网页重定向失败');
+}
+
+function normalizeWebSearchResults(payload, maxResults) {
+  var rows = payload && (payload.results || payload.organic || payload.web || payload.data && payload.data.results);
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, maxResults).map(function (item) {
+    var published = item.published_at || item.publishedAt || item.date || item.published_time || null;
+    return { title: String(item.title || item.name || '').slice(0, 240), url: String(item.url || item.link || item.href || '').slice(0, 2000), snippet: String(item.snippet || item.description || item.content || '').slice(0, 1000), source: String(item.source || 'web').slice(0, 80), published_at: published == null ? null : String(published).slice(0, 80) };
+  }).filter(function (item) { try { var u = new URL(item.url); return u.protocol === 'https:' && !isBlockedWebHost(u.hostname) && hostAllowed(u.hostname); } catch (_) { return false; } });
+}
+
+async function searchWebForCode(query, maxResults, options) {
+  options = options || {};
+  if (typeof options.webSearch === 'function') {
+    var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10));
+    return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(injected, maxResults || 5) };
+  }
+  if (!WEB_SEARCH_URL) return { ok: false, code: 'WEB_SEARCH_NOT_CONFIGURED', error: '联网搜索未配置，请在服务器设置 CODE_AGENT_WEB_SEARCH_URL' };
+  var endpoint = new URL(WEB_SEARCH_URL);
+  endpoint.searchParams.set('q', String(query || '').slice(0, 240));
+  endpoint.searchParams.set('count', String(Math.min(maxResults || 5, 10)));
+  var headers = { Accept: 'application/json' };
+  if (WEB_SEARCH_API_KEY) headers.Authorization = 'Bearer ' + WEB_SEARCH_API_KEY;
+  var page = await fetchSafeWebPage(endpoint.toString(), { fetchImpl: options.fetchImpl, lookupImpl: options.lookupImpl, timeoutMs: options.timeoutMs, headers: headers });
+  if (!page.ok) return page;
+  var parsed; try { parsed = JSON.parse(page.content); } catch (_) { return { ok: false, code: 'WEB_SEARCH_INVALID_RESPONSE', error: '联网搜索返回格式无效' }; }
+  return { ok: true, query: String(query || '').slice(0, 240), results: normalizeWebSearchResults(parsed, maxResults || 5) };
+}
+
 function parseToolArguments(toolCall) {
   var raw = toolCall && toolCall.function ? toolCall.function.arguments : '{}';
   if (!raw) return {};
@@ -475,7 +676,8 @@ function parseToolArguments(toolCall) {
   }
 }
 
-function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace, maxInputTokens) {
+function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace, maxInputTokens, deps) {
+  deps = deps || {};
   var overlay = new Map();
   openFiles.concat(attachments).forEach(function(file) { overlay.set(file.path, file); });
   var remainingTokens = Math.max(0, maxInputTokens);
@@ -535,6 +737,18 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
       result = activePath ? readPath(activePath, 1, 1000000) : { ok: false, error: '当前没有打开文件' };
     } else if (name === 'get_open_files') {
       result = { ok: true, activePath: activePath || '', files: openFiles.concat(attachments).map(function(file) { return { path: file.path, name: file.name, sha256: file.sha256, source: file.source, size: Buffer.byteLength(file.content || '', 'utf8') }; }) };
+    } else if (name === 'web_search') {
+      result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
+        webSearch: deps.webSearch,
+        fetchImpl: deps.fetchImpl,
+        lookupImpl: deps.lookupImpl
+      });
+    } else if (name === 'fetch_web_page') {
+      try {
+        result = await fetchSafeWebPage(String(args.url || ''), { fetchImpl: deps.fetchImpl, lookupImpl: deps.lookupImpl });
+      } catch (error) {
+        result = { ok: false, code: 'WEB_FETCH_FAILED', error: error && error.message ? error.message : '网页抓取失败' };
+      }
     } else {
       result = { ok: false, error: '不支持的工具: ' + name };
     }
@@ -1344,7 +1558,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       var indexSummary = codeIndex.getIndexSummary(scope);
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0) {
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message)) {
         return res.status(409).json({
           ok: false,
           code: 'INDEX_REBUILD_REQUIRED',
@@ -1363,7 +1577,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
       var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
       var toolTrace = [];
-      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget);
+      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps);
       var thinkingMode = /^(off|low|medium|high)$/.test(String(body.thinking_mode || 'low')) ? String(body.thinking_mode || 'low') : 'low';
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 

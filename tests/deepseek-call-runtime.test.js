@@ -158,6 +158,114 @@ test('multi-round tool calls aggregate usage and cache counters', async () => {
   assert.equal(result.usage.tool_call_count, 1);
 });
 
+test('DSML content tool calls are parsed server-side, executed, and never returned as reply text', async () => {
+  const seen = [];
+  const requests = [];
+  const responses = [
+    jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: '<|DSML|tool_calls><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="src/app.js"><|DSML|parameter name="start_line" value="12"><|DSML|parameter name="end_line" value="24"><|DSML|end>' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    }),
+    jsonResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: '我已读取 src/app.js 的第 12 到 24 行。' } }],
+      usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 }
+    })
+  ];
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return responses.shift();
+  });
+  const result = await callDeepSeek([{ role: 'user', content: '检查文件' }], {
+    tools: [{ type: 'function', function: { name: 'read_file_range', parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer' }, end_line: { type: 'integer' } }, required: ['path', 'start_line', 'end_line'], additionalProperties: false } } }],
+    tool_executor: async call => { seen.push(JSON.parse(call.function.arguments)); return { ok: true, content: 'const ok = true;' }; }
+  });
+  assert.deepEqual(seen, [{ path: 'src/app.js', start_line: 12, end_line: 24 }]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].messages.at(-2).tool_calls[0].function.name, 'read_file_range');
+  assert.doesNotMatch(requests[1].messages.at(-2).content, /DSML/);
+  assert.equal(result.content, '我已读取 src/app.js 的第 12 到 24 行。');
+  assert.doesNotMatch(result.content, /DSML|tool_calls|invoke|parameter|reasoning_content/i);
+});
+
+test('DSML supports multiple read_file_range calls in one response', async () => {
+  const seen = [];
+  const responses = [
+    jsonResponse({ choices: [{ message: { content: '<|DSML|tool_calls><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="a.js"><|DSML|parameter name="start_line" value="1"><|DSML|parameter name="end_line" value="2"><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="b.js"><|DSML|parameter name="start_line" value="3"><|DSML|parameter name="end_line" value="4"><|DSML|end>' } }] }),
+    jsonResponse({ choices: [{ message: { content: '已对比两个文件。' } }] })
+  ];
+  const callDeepSeek = loadCallDeepSeek(async () => responses.shift());
+  const result = await callDeepSeek([{ role: 'user', content: '比较' }], {
+    tools: [{ type: 'function', function: { name: 'read_file_range', parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer' }, end_line: { type: 'integer' } }, required: ['path', 'start_line', 'end_line'], additionalProperties: false } } }],
+    tool_executor: async call => { seen.push(JSON.parse(call.function.arguments)); return { ok: true }; }
+  });
+  assert.deepEqual(seen, [{ path: 'a.js', start_line: 1, end_line: 2 }, { path: 'b.js', start_line: 3, end_line: 4 }]);
+  assert.equal(result.tool_calls_info.length, 2);
+  assert.equal(result.content, '已对比两个文件。');
+});
+
+test('fragmented streamed DSML is buffered and never emitted through content chunks', async () => {
+  const chunks = [];
+  const dsml = '<|DSML|tool_calls><|DSML|invoke name="get_open_files"><|DSML|end>';
+  const events = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: dsml.slice(0, 31) } }] }) + '\n\n',
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: dsml.slice(31) } }] }) + '\n\n',
+    'data: [DONE]\n\n'
+  ];
+  let requests = 0;
+  const callDeepSeek = loadCallDeepSeek(async () => {
+    requests += 1;
+    return requests === 1 ? streamResponse(events) : jsonResponse({ choices: [{ message: { content: '已查看当前打开的文件。' } }] });
+  });
+  const result = await callDeepSeek([{ role: 'user', content: '查看' }], {
+    tools: [{ type: 'function', function: { name: 'get_open_files', parameters: { type: 'object', properties: {}, additionalProperties: false } } }],
+    tool_executor: async () => ({ ok: true, files: [] }),
+    onContentChunk: text => chunks.push(text)
+  });
+  assert.equal(result.content, '已查看当前打开的文件。');
+  assert.equal(chunks.join(''), '已查看当前打开的文件。');
+  assert.doesNotMatch(chunks.join(''), /DSML/);
+});
+
+test('incomplete or illegal DSML is not executed and returns a safe parse error', async () => {
+  const invalidCases = [
+    '<|DSML|tool_calls><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="src/app.js"><|DSML|end>',
+    '<|DSML|tool_calls><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="../secret.js"><|DSML|parameter name="start_line" value="1"><|DSML|parameter name="end_line" value="2"><|DSML|end>'
+  ];
+  for (const content of invalidCases) {
+    let executions = 0;
+    const callDeepSeek = loadCallDeepSeek(async () => jsonResponse({ choices: [{ message: { content } }] }));
+    const result = await callDeepSeek([{ role: 'user', content: '检查' }], {
+      tools: [{ type: 'function', function: { name: 'read_file_range', parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer' }, end_line: { type: 'integer' } }, required: ['path', 'start_line', 'end_line'], additionalProperties: false } } }],
+      tool_executor: async () => { executions += 1; return { ok: true }; }
+    });
+    assert.equal(executions, 0);
+    assert.equal(result.content, '（工具调用解析失败，请重试。）');
+    assert.doesNotMatch(result.content, /DSML|tool_calls|invoke|parameter/i);
+  }
+});
+
+test('a DSML tool execution failure is returned to the model without leaking the protocol', async () => {
+  const requests = [];
+  const responses = [
+    jsonResponse({ choices: [{ message: { content: '<|DSML|tool_calls><|DSML|invoke name="read_file"><|DSML|parameter name="path" value="missing.js"><|DSML|end>' } }] }),
+    jsonResponse({ choices: [{ message: { content: '未能读取 missing.js，因此无法确认该文件的实现。' } }] })
+  ];
+  const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return responses.shift();
+  });
+  const result = await callDeepSeek([{ role: 'user', content: '读取不存在的文件' }], {
+    tools: [{ type: 'function', function: { name: 'read_file', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false } } }],
+    tool_executor: async () => ({ ok: false, error: '文件不存在' })
+  });
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].messages.at(-1).content, /文件不存在/);
+  assert.equal(result.content, '未能读取 missing.js，因此无法确认该文件的实现。');
+  assert.doesNotMatch(result.content, /DSML|tool_calls|invoke|parameter|reasoning_content/i);
+});
+
 test('malformed tool calls are normalized before the next provider round', async () => {
   const requests = [];
   const responses = [

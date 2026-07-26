@@ -254,3 +254,22 @@ test('code-agent accepts deps (supabase, rateLimit, authenticateUser, sanitizeEr
   assert.match(codeAgent, /deps\.authenticateUser/);
   assert.match(codeAgent, /deps\.sanitizeError/);
 });
+
+test('Code Agent web tools are server-only, freshness-guided, and key-authenticated', () => {
+  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_URL/);
+  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_API_KEY/);
+  assert.match(codeAgent, /headers\.Authorization = 'Bearer ' \+ WEB_SEARCH_API_KEY/);
+  assert.match(codeAgent, /published_at/);
+  assert.match(codeAgent, /fetch_web_page/);
+  assert.match(codeAgent, /isFreshnessQuery/);
+  assert.match(codeAgent, /WEB_SEARCH_NOT_CONFIGURED/);
+});
+
+test('Code Agent web fetch enforces HTTPS, DNS/private-address checks, redirects and size limits', () => {
+  assert.match(codeAgent, /parsed\.protocol !== 'https:'/);
+  assert.match(codeAgent, /isBlockedWebHost/);
+  assert.match(codeAgent, /isPrivateAddress/);
+  assert.match(codeAgent, /WEB_MAX_REDIRECTS/);
+  assert.match(codeAgent, /WEB_MAX_BYTES/);
+  assert.match(codeAgent, /lookup:/);
+});
