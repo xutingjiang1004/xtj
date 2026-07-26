@@ -45,6 +45,7 @@ test('server.js requires and registers code-agent', () => {
   assert.match(server, /require\('\.\/code-agent'\)/);
   assert.match(server, /registerCodeAgentRoutes/);
   assert.match(server, /registerCodeAgentRoutes\(app,\s*\{/);
+  assert.match(server, /webSearch:\s*searchWeb/);
 });
 
 test('Code Agent JSON payload has a scoped large-body parser', () => {
@@ -256,9 +257,8 @@ test('code-agent accepts deps (supabase, rateLimit, authenticateUser, sanitizeEr
 });
 
 test('Code Agent web tools are server-only, freshness-guided, and key-authenticated', () => {
-  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_URL/);
-  assert.match(codeAgent, /CODE_AGENT_WEB_SEARCH_API_KEY/);
-  assert.match(codeAgent, /headers\.Authorization = 'Bearer ' \+ WEB_SEARCH_API_KEY/);
+  assert.match(codeAgent, /options\.webSearch/);
+  assert.match(server, /webSearch:\s*searchWeb/);
   assert.match(codeAgent, /published_at/);
   assert.match(codeAgent, /fetch_web_page/);
   assert.match(codeAgent, /isFreshnessQuery/);
@@ -272,4 +272,15 @@ test('Code Agent web fetch enforces HTTPS, DNS/private-address checks, redirects
   assert.match(codeAgent, /WEB_MAX_REDIRECTS/);
   assert.match(codeAgent, /WEB_MAX_BYTES/);
   assert.match(codeAgent, /lookup:/);
+});
+
+test('DeepSeek capability snapshot reads provider limits from deployment metadata', () => {
+  const snapshot = server.match(/function getDeepSeekCapabilitySnapshot\(\)[\s\S]*?\n\}/);
+  assert.ok(snapshot, 'capability snapshot should exist');
+  assert.match(snapshot[0], /DEEPSEEK_PROVIDER_CONTEXT_TOKENS/);
+  assert.match(snapshot[0], /DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS/);
+  assert.match(snapshot[0], /providerContextTokens: providerContextTokens/);
+  assert.match(snapshot[0], /providerMaxOutputTokens: providerMaxOutputTokens/);
+  assert.doesNotMatch(snapshot[0], /providerContextTokens:\s*1000000/);
+  assert.doesNotMatch(snapshot[0], /providerMaxOutputTokens:\s*384000/);
 });
