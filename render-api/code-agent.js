@@ -317,13 +317,18 @@ function buildSystemPrompt() {
   ].join('\n');
 }
 
-function inferInitialToolChoice(message, indexSummary, openFiles) {
+function inferInitialToolChoice(message, indexSummary, openFiles, activePath) {
   var text = String(message || '').toLowerCase();
   var hasOpenFiles = Array.isArray(openFiles) && openFiles.length > 0;
   if (!indexSummary && hasOpenFiles) {
     return { type: 'function', function: { name: 'get_open_files' } };
   }
   if (!indexSummary) return null;
+  // Explicit current-file questions must begin with a real overlay-backed
+  // read instead of relying only on the model prompt.
+  if (activePath && /(current|active|open|this)\s+(file|document|code)|read|view|explain|修改|查看|读取|当前|打开|这个文件/i.test(text)) {
+    return { type: 'function', function: { name: 'get_active_file' } };
+  }
   if (/(聊天|发送|发消息|实时|realtime|消息|评论|登录|加载|卡住|报错|失败|bug|error)/i.test(text)) {
     return { type: 'function', function: { name: 'search_code' } };
   }
@@ -1354,7 +1359,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var toolTrace = [];
       var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget);
       var thinkingMode = /^(off|low|medium|high)$/.test(String(body.thinking_mode || 'low')) ? String(body.thinking_mode || 'low') : 'low';
-      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles);
+      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
       var aiResult = await deps.callDeepSeek(messages, {
         model: model,
