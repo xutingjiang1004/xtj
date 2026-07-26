@@ -174,6 +174,28 @@ test('forces a first directory tool call for broad project questions', async () 
   assert.deepEqual(receivedOptions.first_tool_choice, { type: 'function', function: { name: 'list_files' } });
 });
 
+test('forces a first active-file read for explicit current-file questions', async () => {
+  let receivedOptions;
+  const app = createApp(async (_messages, options) => {
+    receivedOptions = options;
+    return { content: 'active file inspected', model: 'deepseek-v4-flash' };
+  });
+  const source = 'const app = true;';
+  const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'active-file', workspaceGeneration: 1,
+    files: [{ path: 'src/app.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  assert.equal(build.status, 200);
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_id: 'active-file', workspace_generation: 1,
+    active_path: 'src/app.js',
+    open_files: [{ path: 'src/app.js', content: source }],
+    message: '请查看当前文件并解释这段代码', history: []
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedOptions.first_tool_choice, { type: 'function', function: { name: 'get_active_file' } });
+});
+
 test('keeps indexes isolated by authenticated user and asks for rebuild after restart/miss', async () => {
   const app = createApp(async () => {
     throw new Error('AI must not run without an index');
