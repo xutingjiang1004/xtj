@@ -3,6 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+
+test('Render deployment follows the protected xtj-hotfix branch', () => {
+  const renderYaml = fs.readFileSync('render.yaml', 'utf8');
+  assert.match(renderYaml, /branch:\s*xtj-hotfix/);
+  assert.doesNotMatch(renderYaml, /branch:\s*main/);
+});
 const path = require('node:path');
 
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');

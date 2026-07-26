@@ -9,7 +9,8 @@ services:
     repo: https://github.com/xutingjiang1004/xtj
     plan: free
     region: singapore
-    branch: main
+    # 生产部署跟随受保护的 hotfix 分支，禁止从 main 直接部署未审计改动。
+    branch: xtj-hotfix
     rootDir: .
     buildCommand: npm ci && npm run build && npm test
     startCommand: node render-api/server.js
