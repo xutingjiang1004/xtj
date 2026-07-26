@@ -71,7 +71,7 @@ test('web tools fail clearly when search is not configured', async () => {
   assert.equal(response.status, 200);
   assert.equal(toolResult.ok, false);
   assert.equal(toolResult.code, 'WEB_SEARCH_NOT_CONFIGURED');
-  assert.match(toolResult.error, /CODE_AGENT_WEB_SEARCH_URL/);
+  assert.match(toolResult.error, /网站联网搜索服务未接入/);
 });
 
 test('fetch_web_page rejects localhost and private-network targets before fetch', async () => {
@@ -147,6 +147,16 @@ test('capabilities disable an agent when a successful model probe excludes its m
   assert.equal(response.body.availability, 'unavailable');
   assert.equal(response.body.agentEnabled, false);
   assert.equal(response.body.toolCallingEnabled, false);
+});
+
+test('capabilities do not fabricate provider limits when the backend has no model metadata', async () => {
+  const app = createApp(async () => ({ content: 'unused' }), {});
+  const response = await request(app).get('/api/code/capabilities').set('x-test-user', 'alice');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.providerContextTokens, null);
+  assert.equal(response.body.providerMaxOutputTokens, null);
+  assert.equal(response.body.maxContextTokens, 1000000);
+  assert.equal(response.body.maxOutputTokens, 32768);
 });
 
 test('runs a real multi-step code tool flow and reports actual reads plus cache usage', async () => {
@@ -244,6 +254,26 @@ test('forces a first directory tool call for broad project questions', async () 
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_id: 'broad-project', workspace_generation: 1,
     message: 'inspect the entire project workspace', history: []
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedOptions.first_tool_choice, { type: 'function', function: { name: 'list_files' } });
+});
+
+test('forces a first directory tool call for broad Chinese project questions', async () => {
+  let receivedOptions;
+  const app = createApp(async (_messages, options) => {
+    receivedOptions = options;
+    return { content: '项目已检查', model: 'deepseek-v4-flash' };
+  });
+  const source = 'const project = true;';
+  const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'broad-project-cn', workspaceGeneration: 1,
+    files: [{ path: 'src/app.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  assert.equal(build.status, 200);
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_id: 'broad-project-cn', workspace_generation: 1,
+    message: '检查一下整个项目还有什么问题', history: []
   });
   assert.equal(response.status, 200);
   assert.deepEqual(receivedOptions.first_tool_choice, { type: 'function', function: { name: 'list_files' } });
