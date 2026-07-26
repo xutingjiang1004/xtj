@@ -39,6 +39,8 @@ const MAX_PDF_PAGES = 500;
 const MAX_WORKBOOK_SHEETS = 100;
 const MAX_PPTX_ENTRIES = 2000;
 const MAX_PPTX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
+const MAX_OFFICE_ARCHIVE_ENTRIES = 5000;
+const MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
 const OP_TYPES_ALLOWED = new Set(['update', 'create', 'document']);
 const OP_TYPES_REJECTED = new Set(['delete', 'rename', 'execute', 'terminal', 'git']);
 const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
@@ -489,6 +491,25 @@ function getPdfParser() {
   return pdfParser;
 }
 
+async function parsePdfBuffer(buffer) {
+  var library = getPdfParser();
+  if (!library) throw new Error('PDF 解析库不可用');
+  // pdf-parse v1 exported a callable function; v2 exports PDFParse.
+  if (typeof library === 'function') return library(buffer);
+  if (typeof library.PDFParse !== 'function') throw new Error('PDF 解析库版本不兼容');
+  var parser = new library.PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    var result = await parser.getText();
+    return {
+      text: result && result.text || '',
+      numpages: result && Number(result.total) || 0,
+      info: {}
+    };
+  } finally {
+    try { await parser.destroy(); } catch (_) {}
+  }
+}
+
 function getMammothParser() {
   if (!mammothParserLoaded) { mammothParser = loadFileParser('mammoth'); mammothParserLoaded = true; }
   return mammothParser;
@@ -524,19 +545,55 @@ function detectMimeFromFileName(fileName) {
   return 'application/octet-stream';
 }
 
+async function validateOfficeArchive(buffer, kind) {
+  var JSZip = require('jszip');
+  var zip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (_) {
+    throw new Error(String(kind || 'Office').toUpperCase() + ' 文件结构无效');
+  }
+  var names = Object.keys(zip.files);
+  if (names.length > MAX_OFFICE_ARCHIVE_ENTRIES) {
+    throw new Error('Office 文档内部文件数量过多');
+  }
+  var uncompressedBytes = 0;
+  for (var i = 0; i < names.length; i++) {
+    var entry = zip.files[names[i]];
+    if (entry && entry._data && Number(entry._data.uncompressedSize)) {
+      uncompressedBytes += Number(entry._data.uncompressedSize);
+      if (uncompressedBytes > MAX_OFFICE_UNCOMPRESSED_BYTES) {
+        throw new Error('Office 文档解压后内容过大');
+      }
+    }
+  }
+  var required = kind === 'docx'
+    ? 'word/document.xml'
+    : (kind === 'xlsx' ? 'xl/workbook.xml' : null);
+  if (required && !zip.files[required]) {
+    throw new Error(String(kind || 'Office').toUpperCase() + ' 文件结构无效');
+  }
+  if (kind === 'pptx' && !names.some(function(name) { return /^ppt\/slides\/slide\d+\.xml$/i.test(name); })) {
+    throw new Error('PPTX 文件中没有可读取的幻灯片');
+  }
+  return zip;
+}
+
 async function extractDocumentText(buffer, mimeType, fileName) {
   var text = '';
   var metadata = {};
 
   try {
     if (mimeType === 'application/pdf' && getPdfParser()) {
-      var pdfData = await pdfParser(buffer);
+      if (buffer.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('PDF 文件结构无效');
+      var pdfData = await parsePdfBuffer(buffer);
       if ((pdfData.numpages || 0) > MAX_PDF_PAGES) throw new Error('PDF 页数超过 ' + MAX_PDF_PAGES + ' 页');
       text = pdfData.text || '';
       metadata = { pages: pdfData.numpages || 0, info: pdfData.info || {} };
     } else if (
       mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()
     ) {
+      await validateOfficeArchive(buffer, 'docx');
       var mammothResult = await mammothParser.extractRawText({ buffer: buffer });
       text = mammothResult.value || '';
       metadata = mammothResult.messages || [];
@@ -544,6 +601,12 @@ async function extractDocumentText(buffer, mimeType, fileName) {
       (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
        mimeType === 'application/vnd.ms-excel') && getXlsxParser()
     ) {
+      if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        await validateOfficeArchive(buffer, 'xlsx');
+      } else {
+        var xlsMagic = buffer.subarray(0, 8).toString('hex');
+        if (xlsMagic !== 'd0cf11e0a1b11ae1') throw new Error('XLS 文件结构无效');
+      }
       var workbook = xlsxParser.read(buffer, { type: 'buffer' });
       if (workbook.SheetNames.length > MAX_WORKBOOK_SHEETS) throw new Error('工作表数量超过 ' + MAX_WORKBOOK_SHEETS + ' 个');
       var sheets = [];
@@ -557,10 +620,12 @@ async function extractDocumentText(buffer, mimeType, fileName) {
     } else if (
       mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
     ) {
+      await validateOfficeArchive(buffer, 'pptx');
       var pptxResult = await extractPptxText(buffer);
       text = pptxResult.text;
       metadata = pptxResult.metadata;
     } else if (mimeType === 'text/csv' || mimeType === 'text/plain') {
+      if (buffer.includes(0)) throw new Error('文本文件包含二进制内容');
       text = buffer.toString('utf-8');
     } else {
       return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（支持 PDF、DOCX、XLSX、XLS、PPTX、CSV、TXT、MD）' };
@@ -616,6 +681,7 @@ async function extractPptxText(buffer) {
     }
   } catch (e) {
     console.error('[code-agent] PPTX extraction error:', e.message);
+    throw e;
   }
 
   if (slides.length === 0) {

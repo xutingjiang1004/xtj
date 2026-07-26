@@ -701,18 +701,27 @@ function appendIndexBatch(scope, files, options) {
   if (pending.files.length + files.length > MAX_INDEX_FILES) {
     return { ok: false, error: 'Too many files', code: 'FILE_LIMIT_EXCEEDED', maxFiles: MAX_INDEX_FILES };
   }
+  // Validate the complete batch before mutating the pending accumulator. A
+  // rejected request must be safe to retry and must not leave half-appended
+  // paths or bytes behind.
+  var batchPaths = new Set();
+  var batchBytes = 0;
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
-    if (pending.paths.has(file.path)) {
+    if (pending.paths.has(file.path) || batchPaths.has(file.path)) {
       return { ok: false, error: 'Duplicate file path: ' + file.path, code: 'DUPLICATE_PATH' };
     }
-    pending.paths.add(file.path);
-    pending.files.push(file);
-    pending.totalBytes += Buffer.byteLength(typeof file.content === 'string' ? file.content : '', 'utf8');
+    batchPaths.add(file.path);
+    batchBytes += Buffer.byteLength(typeof file.content === 'string' ? file.content : '', 'utf8');
   }
-  if (pending.totalBytes > MAX_INDEX_TOTAL_BYTES) {
+  if (pending.totalBytes + batchBytes > MAX_INDEX_TOTAL_BYTES) {
     return { ok: false, error: 'Index content is too large', code: 'TOTAL_SIZE_EXCEEDED' };
   }
+  for (var j = 0; j < files.length; j++) {
+    pending.paths.add(files[j].path);
+    pending.files.push(files[j]);
+  }
+  pending.totalBytes += batchBytes;
   pending.expiresAt = Date.now() + INDEX_BATCH_TTL_MS;
 
   var finalize = options.finalize === true;
