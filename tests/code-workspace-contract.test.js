@@ -886,7 +886,7 @@ test('applyOperation create saves snapshot with existed=false', () => {
 // ============================================================
 test('applyOperation update continues to use writeFileByPath', () => {
   // The update branch must still use writeFileByPath
-  assert.match(codeWorkspace, /writeFileByPath\(op\.path,\s*op\.new_content/);
+  assert.match(codeWorkspace, /writeFileByPath\(op\.path,\s*contentToWrite\)/);
 });
 
 // ============================================================
