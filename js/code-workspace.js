@@ -18,6 +18,11 @@
     pinnedFiles: [], // Replaces contextPaths — only priority hints, not full uploads
     projectIndexStatus: null, // { totalFiles, totalChunks, builtAt, indexed }
     lastReadContext: null, // { files_read: [], total_chunks, total_tokens, truncated }
+    lastToolTrace: [],
+    capabilities: null,
+    attachments: [],
+    attachmentProcessing: false,
+    attachmentError: '',
     messages: [],
     pendingOperations: [],
     snapshots: {},
@@ -28,6 +33,17 @@
     _monacoEditor: null,
     _objectUrls: [],
     _abortController: null,
+    _attachmentController: null,
+    _githubController: null,
+    _githubLoadPromise: null,
+    _githubLoadKey: '',
+    _githubErrorKey: '',
+    _indexController: null,
+    _indexStatusController: null,
+    _indexBuildPromise: null,
+    _indexStatusPromise: null,
+    _indexBuildKey: '',
+    _capabilitiesPromise: null,
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
@@ -39,6 +55,13 @@
   // DOM cache
   // ──────────────────────────────────────────────
   var _dom = {};
+  var MAX_OPEN_FILE_CONTEXT = 12;
+  var MAX_OPEN_FILE_CHARS = 240000;
+  var MAX_OPEN_FILES_TOTAL_CHARS = 900000;
+  var MAX_ATTACHMENTS = 8;
+  var MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
+  var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
+  var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
   // ──────────────────────────────────────────────
   // Utilities
@@ -343,6 +366,16 @@
       try { state._abortController.abort(); } catch (e) { /* ignore */ }
       state._abortController = null;
     }
+    abortController(state._attachmentController);
+    abortController(state._githubController);
+    abortController(state._indexController);
+    abortController(state._indexStatusController);
+    state._attachmentController = null;
+    state._githubController = null;
+    state._indexController = null;
+    state._indexStatusController = null;
+    state._githubLoadPromise = null;
+    state._indexBuildPromise = null;
     state._requestId++;
     revokeAllUrls();
     disposeMonaco();
@@ -520,12 +553,86 @@
     });
   }
 
+  function apiFetch(url, options) {
+    options = options || {};
+    if (window.xtjProtectedFetch) {
+      return window.xtjProtectedFetch(url, options);
+    }
+    var fallbackOptions = {};
+    Object.keys(options).forEach(function (key) { fallbackOptions[key] = options[key]; });
+    fallbackOptions.credentials = 'include';
+    return fetch(url, fallbackOptions);
+  }
+
+  function postJson(url, body, signal) {
+    return apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      signal: signal
+    });
+  }
+
+  function responseJson(response, fallbackMessage) {
+    if (!response) return Promise.reject(new Error(fallbackMessage || '请求失败'));
+    return response.text().then(function (text) {
+      var data = null;
+      try { data = JSON.parse(text); } catch (e) {}
+      if (!response.ok) {
+        var error = new Error(data && data.error ? data.error : (fallbackMessage || ('请求失败: ' + response.status)));
+        error.status = response.status;
+        error.code = data && data.code;
+        throw error;
+      }
+      if (!data) throw new Error(fallbackMessage || '服务器返回格式无效');
+      return data;
+    });
+  }
+
+  function getWorkspaceId() {
+    var mode = state.workspaceMode === 'github' ? 'github' : 'local';
+    return mode + ':' + String(state.workspaceName || 'default').slice(0, 180);
+  }
+
+  function getWorkspaceScope(workspaceId, generation) {
+    return {
+      workspace_id: workspaceId || getWorkspaceId(),
+      workspace_generation: generation === undefined ? state.workspaceGeneration : generation
+    };
+  }
+
+  function abortController(controller) {
+    if (!controller) return;
+    try { controller.abort(); } catch (e) { /* ignore */ }
+  }
+
+  function createNamedAbortError() {
+    var error = new Error('Request aborted');
+    error.name = 'AbortError';
+    return error;
+  }
+
   function resetWorkspaceState() {
+    var previousWorkspaceId = getWorkspaceId();
+    var previousGeneration = state.workspaceGeneration;
     // P0: 中止所有进行中的 AI 请求
     if (state._abortController) {
       try { state._abortController.abort(); } catch (e) { /* ignore */ }
       state._abortController = null;
     }
+    abortController(state._attachmentController);
+    abortController(state._githubController);
+    abortController(state._indexController);
+    abortController(state._indexStatusController);
+    state._attachmentController = null;
+    state._githubController = null;
+    state._indexController = null;
+    state._indexStatusController = null;
+    state._githubLoadPromise = null;
+    state._githubLoadKey = '';
+    state._indexBuildPromise = null;
+    state._indexStatusPromise = null;
+    state._indexBuildKey = '';
     state._requestId++;
     state.sending = false;
     state.workspaceGeneration++;
@@ -534,6 +641,10 @@
     state.pinnedFiles = [];
     state.projectIndexStatus = null;
     state.lastReadContext = null;
+    state.lastToolTrace = [];
+    state.attachments = [];
+    state.attachmentProcessing = false;
+    state.attachmentError = '';
     state.pendingOperations = [];
     state.snapshots = {};
     state.fileHandles = {};
@@ -541,7 +652,7 @@
     state._isReadOnly = false;
     // Clear backend index
     try {
-      fetch('/api/code/agent/clear_index', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function () {});
+      postJson('/api/code/agent/clear_index', getWorkspaceScope(previousWorkspaceId, previousGeneration)).catch(function () {});
     } catch (e) { /* ignore */ }
     revokeAllUrls();
     disposeMonaco();
@@ -833,8 +944,8 @@
     renderProjectStatus();
     renderChatPanel();
 
-    // Build project index asynchronously
-    buildProjectIndex();
+    // Restore an existing scoped index or build a fresh one.
+    loadProjectIndexStatus();
 
     // Restore open tabs after re-entering Code
     restoreTabs();
@@ -1758,11 +1869,10 @@
     // Sync with backend
     var isPinned = state.pinnedFiles.indexOf(path) !== -1;
     try {
-      fetch('/api/code/agent/pin_file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: path, pinned: isPinned })
-      }).catch(function () {});
+      var pinBody = getWorkspaceScope();
+      pinBody.path = path;
+      pinBody.pinned = isPinned;
+      postJson('/api/code/agent/pin_file', pinBody).catch(function () {});
     } catch (e) { /* ignore */ }
 
     renderProjectStatus();
@@ -1775,11 +1885,10 @@
       state.pinnedFiles.splice(idx, 1);
     }
     try {
-      fetch('/api/code/agent/pin_file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: path, pinned: false })
-      }).catch(function () {});
+      var pinBody = getWorkspaceScope();
+      pinBody.path = path;
+      pinBody.pinned = false;
+      postJson('/api/code/agent/pin_file', pinBody).catch(function () {});
     } catch (e) { /* ignore */ }
     renderProjectStatus();
     renderTabs();
@@ -1788,103 +1897,138 @@
   // ──────────────────────────────────────────────
   // buildProjectIndex() — scan workspace and build index
   // ──────────────────────────────────────────────
-  function buildProjectIndex() {
-    if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFilesWithMetadata) {
-      // Fallback: use listAllFiles
-      if (!window.__xtjCodeFS || !window.__xtjCodeFS.listAllFiles) {
-        state.projectIndexStatus = null;
-        renderProjectStatus();
-        return;
-      }
-
-      window.__xtjCodeFS.listAllFiles(4, 500).then(function (result) {
-        var files = [];
-        for (var i = 0; i < result.files.length; i++) {
-          var f = result.files[i];
-          if (f.type === 'text') {
-            files.push({
-              path: f.path,
-              name: f.name || f.path.split('/').pop(),
-              language: getFileLanguage(f.name || f.path),
-              size: f.size || 0,
-              sha256: '',
-              content: ''
-            });
-          }
-        }
-
-        // Send to backend for indexing
-        return fetch('/api/code/index/build', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspaceId: state.workspaceName || 'local',
-            files: files
-          })
-        }).then(function (r) { return r.json(); });
-      }).then(function (result) {
-        if (result && result.ok) {
+  function loadProjectIndexStatus() {
+    if (state._indexStatusPromise) return state._indexStatusPromise;
+    var workspaceId = getWorkspaceId();
+    var wsGen = state.workspaceGeneration;
+    abortController(state._indexStatusController);
+    state._indexStatusController = new AbortController();
+    var controller = state._indexStatusController;
+    var promise = postJson('/api/code/index/status', getWorkspaceScope(workspaceId, wsGen), controller.signal)
+      .then(function (response) { return responseJson(response, '索引状态查询失败'); })
+      .then(function (result) {
+        if (state.workspaceGeneration !== wsGen || getWorkspaceId() !== workspaceId) return null;
+        if (result && result.summary) {
           state.projectIndexStatus = {
-            totalFiles: result.totalFiles,
-            totalChunks: result.totalChunks,
-            builtAt: result.builtAt,
+            totalFiles: result.summary.totalFiles,
+            totalChunks: result.summary.totalChunks,
+            builtAt: result.summary.builtAt,
             indexed: true
           };
-        } else {
-          state.projectIndexStatus = { indexed: false, error: (result && result.error) || '索引构建失败' };
+          state.pinnedFiles = Array.isArray(result.pinnedFiles) ? result.pinnedFiles.slice() : state.pinnedFiles;
+          renderProjectStatus();
+          return result;
         }
-        renderProjectStatus();
-      }).catch(function (err) {
-        console.error('[code-workspace] Index build failed:', err);
-        state.projectIndexStatus = { indexed: false, error: (err && err.message) || '索引构建失败' };
-        renderProjectStatus();
+        return buildProjectIndex();
+      }).catch(function (error) {
+        if (error && error.name === 'AbortError') return null;
+        if (state.workspaceGeneration !== wsGen || getWorkspaceId() !== workspaceId) return null;
+        return buildProjectIndex();
+      }).then(function (result) {
+        if (state._indexStatusPromise === promise) {
+          state._indexStatusPromise = null;
+          state._indexStatusController = null;
+        }
+        return result;
       });
-      return;
+    state._indexStatusPromise = promise;
+    return promise;
+  }
+
+  function buildProjectIndex() {
+    var fs = window.__xtjCodeFS;
+    if (!fs || (!fs.listAllFilesWithMetadata && !fs.listAllFiles)) {
+      state.projectIndexStatus = { indexed: false, error: '文件系统不支持项目索引' };
+      renderProjectStatus();
+      return Promise.resolve(state.projectIndexStatus);
     }
 
-    // Use listAllFilesWithMetadata for better index
-    window.__xtjCodeFS.listAllFilesWithMetadata(4, 500).then(function (result) {
-      var files = [];
-      for (var i = 0; i < result.files.length; i++) {
-        var f = result.files[i];
-        if (f.type === 'text') {
-          files.push({
-            path: f.path,
-            name: f.name || f.path.split('/').pop(),
-            language: f.language || getFileLanguage(f.name || f.path),
-            size: f.size || 0,
-            sha256: f.sha256 || '',
-            modifiedAt: f.modifiedAt || null,
-            content: f.content || ''
-          });
-        }
-      }
+    var workspaceId = getWorkspaceId();
+    var wsGen = state.workspaceGeneration;
+    var buildKey = workspaceId + '@' + wsGen;
+    if (state._indexBuildPromise && state._indexBuildKey === buildKey) {
+      return state._indexBuildPromise;
+    }
 
-      return fetch('/api/code/index/build', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: state.workspaceName || 'local',
-          files: files
-        })
-      }).then(function (r) { return r.json(); });
-    }).then(function (result) {
-      if (result && result.ok) {
-        state.projectIndexStatus = {
-          totalFiles: result.totalFiles,
-          totalChunks: result.totalChunks,
-          builtAt: result.builtAt,
-          indexed: true
-        };
-      } else {
-        state.projectIndexStatus = { indexed: false, error: (result && result.error) || '索引构建失败' };
+    abortController(state._indexController);
+    state._indexController = new AbortController();
+    state._indexBuildKey = buildKey;
+    var controller = state._indexController;
+
+    function isCurrentBuild() {
+      return state.workspaceGeneration === wsGen &&
+        getWorkspaceId() === workspaceId &&
+        state._indexBuildKey === buildKey;
+    }
+
+    state.projectIndexStatus = { indexed: false, building: true, phase: '正在扫描文件...' };
+    renderProjectStatus();
+
+    var listPromise = fs.listAllFilesWithMetadata
+      ? fs.listAllFilesWithMetadata(8, 1000)
+      : fs.listAllFiles(8, 1000);
+
+    var promise = listPromise.then(function (result) {
+      if (!isCurrentBuild()) throw createNamedAbortError();
+      var sourceFiles = result && Array.isArray(result.files) ? result.files : [];
+      var files = [];
+      for (var i = 0; i < sourceFiles.length; i++) {
+        var file = sourceFiles[i];
+        if (!file || file.type !== 'text') continue;
+        files.push({
+          path: file.path,
+          name: file.name || file.path.split('/').pop(),
+          language: file.language || getFileLanguage(file.name || file.path),
+          size: file.size || 0,
+          sha256: file.sha256 || '',
+          modifiedAt: file.modifiedAt || null,
+          content: file.content || ''
+        });
       }
+      state.projectIndexStatus = {
+        indexed: false,
+        building: true,
+        phase: '正在上传索引...',
+        scannedFiles: sourceFiles.length,
+        indexableFiles: files.length
+      };
       renderProjectStatus();
+      return postJson('/api/code/index/build', {
+        workspaceId: workspaceId,
+        workspaceGeneration: wsGen,
+        files: files
+      }, controller.signal).then(function (response) {
+        return responseJson(response, '索引构建失败');
+      });
+    }).then(function (result) {
+      if (!isCurrentBuild()) return null;
+      state.projectIndexStatus = {
+        totalFiles: result.totalFiles,
+        totalChunks: result.totalChunks,
+        builtAt: result.builtAt,
+        skippedFiles: result.skippedFiles || 0,
+        failedFiles: result.failedFiles || 0,
+        indexed: true
+      };
+      renderProjectStatus();
+      return result;
     }).catch(function (err) {
+      if (err && err.name === 'AbortError') return null;
+      if (!isCurrentBuild()) return null;
       console.error('[code-workspace] Index build failed:', err);
       state.projectIndexStatus = { indexed: false, error: (err && err.message) || '索引构建失败' };
       renderProjectStatus();
+      return null;
+    }).then(function (result) {
+      if (state._indexBuildKey === buildKey) {
+        state._indexBuildPromise = null;
+        state._indexController = null;
+      }
+      return result;
     });
+
+    state._indexBuildPromise = promise;
+    return promise;
   }
 
   // ──────────────────────────────────────────────
@@ -1918,11 +2062,47 @@
         '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +
         '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + '</div>' +
         '<button class="code-retry-btn" style="margin-top:4px;font-size:10px;" id="codeRetryIndex">重试索引</button>';
-    } else {
+    } else if (state.projectIndexStatus && state.projectIndexStatus.building) {
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text-muted);">正在建立索引...</div>';
+        '<div style="color:var(--cw-text);font-weight:600;">索引构建中</div>' +
+        '<div style="color:var(--cw-text-muted);">' + escapeHTML(state.projectIndexStatus.phase || '正在建立索引...') + '</div>' +
+        (state.projectIndexStatus.scannedFiles !== undefined
+          ? '<div style="color:var(--cw-text-muted);">已扫描 ' + state.projectIndexStatus.scannedFiles +
+            '，可索引 ' + state.projectIndexStatus.indexableFiles + '</div>'
+          : '');
+    } else {
+      indexDiv.innerHTML = '<div style="color:var(--cw-text-muted);">索引尚未建立</div>';
     }
     body.appendChild(indexDiv);
+
+    function appendPathSection(title, paths, icon, clickable) {
+      var unique = [];
+      (paths || []).forEach(function (path) {
+        if (path && unique.indexOf(path) === -1) unique.push(path);
+      });
+      if (!unique.length) return;
+      var section = document.createElement('div');
+      section.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
+      var label = document.createElement('div');
+      label.style.cssText = 'color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;';
+      label.textContent = title + ' (' + unique.length + ')';
+      section.appendChild(label);
+      unique.slice(0, 12).forEach(function (path) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.style.cssText = 'display:block;width:100%;padding:2px 0;border:0;background:transparent;color:var(--cw-text);font-size:10px;text-align:left;' +
+          (clickable === false ? 'cursor:default;' : 'cursor:pointer;') +
+          'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        button.title = path;
+        button.textContent = (icon || '📄') + ' ' + path;
+        if (clickable !== false) button.addEventListener('click', function () { openFile(path); });
+        section.appendChild(button);
+      });
+      body.appendChild(section);
+    }
+
+    appendPathSection('当前文件', state.activePath ? [state.activePath] : [], '▶', true);
+    appendPathSection('打开文件', state.openTabs.map(function (tab) { return tab.path; }), '◫', true);
 
     // Last read context info
     if (state.lastReadContext && state.lastReadContext.files_read && state.lastReadContext.files_read.length > 0) {
@@ -1930,48 +2110,54 @@
       var readDiv = document.createElement('div');
       readDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
 
-      var readHtml = '<div style="color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;">AI 本次读取:</div>';
+      var readTitle = document.createElement('div');
+      readTitle.style.cssText = 'color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;';
+      readTitle.textContent = 'AI 本次读取 (' + lrc.files_read.length + ')';
+      readDiv.appendChild(readTitle);
       for (var ri = 0; ri < Math.min(lrc.files_read.length, 5); ri++) {
         var fr = lrc.files_read[ri];
-        var ranges = fr.ranges.map(function (r) { return 'L' + r[0] + '-' + r[1]; }).join(', ');
-        readHtml += '<div style="color:var(--cw-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
-          escapeHTML(fr.path) + ': ' + ranges + '</div>';
+        var ranges = Array.isArray(fr.ranges)
+          ? fr.ranges.map(function (r) { return 'L' + r[0] + '-' + r[1]; }).join(', ')
+          : '';
+        var readButton = document.createElement('button');
+        readButton.type = 'button';
+        readButton.style.cssText = 'display:block;width:100%;padding:2px 0;border:0;background:transparent;color:var(--cw-text);font-size:10px;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        readButton.title = fr.path;
+        readButton.textContent = fr.path + (ranges ? ': ' + ranges : '');
+        readButton.addEventListener('click', function (path) {
+          return function () { openFile(path); };
+        }(fr.path));
+        readDiv.appendChild(readButton);
       }
-      if (lrc.files_read.length > 5) {
-        readHtml += '<div style="color:var(--cw-text-muted);">...还有 ' + (lrc.files_read.length - 5) + ' 个文件</div>';
-      }
-      if (lrc.truncated) {
-        readHtml += '<div style="color:var(--cw-warning);font-size:9px;">已自动裁剪低相关代码块</div>';
-      }
-      readHtml += '<div style="color:var(--cw-text-muted);font-size:9px;">' + lrc.total_tokens + ' tokens / ' + lrc.total_chunks + ' 块</div>';
-      readDiv.innerHTML = readHtml;
+      var readMeta = document.createElement('div');
+      readMeta.style.cssText = 'color:var(--cw-text-muted);font-size:9px;margin-top:3px;';
+      readMeta.textContent = (lrc.total_tokens || 0) + ' tokens / ' +
+        (lrc.total_tool_calls || state.lastToolTrace.length || 0) + ' 次工具调用';
+      readDiv.appendChild(readMeta);
       body.appendChild(readDiv);
     }
 
-    // Pinned files
-    if (state.pinnedFiles.length > 0) {
-      var pinnedDiv = document.createElement('div');
-      pinnedDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
-      pinnedDiv.innerHTML = '<div style="color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;">固定文件 (' + state.pinnedFiles.length + '):</div>';
-
-      for (var pi = 0; pi < state.pinnedFiles.length; pi++) {
-        var pp = state.pinnedFiles[pi];
-        var pname = fileNameFromPath(pp);
-        var pitem = document.createElement('div');
-        pitem.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:2px 0;';
-        pitem.innerHTML =
-          '<span style="color:var(--cw-text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;" title="' + escapeHTML(pp) + '">📌 ' + escapeHTML(pname) + '</span>' +
-          '<span style="cursor:pointer;color:var(--cw-text-muted);margin-left:4px;flex-shrink:0;" data-action="unpin" data-path="' + escapeHTML(pp) + '">✕</span>';
-        pitem.querySelector('[style*="cursor:pointer;color:var(--cw-text)"]').addEventListener('click', function (path) {
-          return function () { openFile(path); };
-        }(pp));
-        pitem.querySelector('[data-action="unpin"]').addEventListener('click', function (path) {
-          return function (e) { e.stopPropagation(); unpinFile(path); };
-        }(pp));
-        pinnedDiv.appendChild(pitem);
-      }
-      body.appendChild(pinnedDiv);
+    if (state.lastToolTrace.length > 0) {
+      var traceDiv = document.createElement('div');
+      traceDiv.style.cssText = 'padding:4px 12px 8px;font-size:10px;border-top:1px solid var(--cw-border);margin-top:4px;';
+      traceDiv.innerHTML = '<div style="color:var(--cw-text-muted);font-weight:600;margin-bottom:3px;">本轮工具轨迹 (' + state.lastToolTrace.length + ')</div>';
+      state.lastToolTrace.slice(0, 8).forEach(function (entry) {
+        var row = document.createElement(entry.path ? 'button' : 'div');
+        if (entry.path) row.type = 'button';
+        row.style.cssText = 'display:block;width:100%;padding:2px 0;border:0;background:transparent;color:' +
+          (entry.ok === false ? 'var(--cw-danger)' : 'var(--cw-text-muted)') +
+          ';font-size:9px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+          (entry.path ? 'cursor:pointer;' : '');
+        row.textContent = (entry.ok === false ? '✕ ' : '✓ ') + (entry.tool || 'tool') +
+          (entry.path ? ' · ' + entry.path : '') + ' · ' + (entry.duration_ms || 0) + 'ms';
+        if (entry.path) row.addEventListener('click', function () { openFile(entry.path); });
+        traceDiv.appendChild(row);
+      });
+      body.appendChild(traceDiv);
     }
+
+    appendPathSection('固定文件', state.pinnedFiles, '📌', true);
+    appendPathSection('上传资料', state.attachments.map(function (attachment) { return attachment.path; }), '📎', false);
 
     // Actions
     var actionsDiv = document.createElement('div');
@@ -2011,6 +2197,84 @@
   // ──────────────────────────────────────────────
   // renderGitHubRepoSelector() — GitHub repo selection UI
   // ──────────────────────────────────────────────
+  function splitGitHubRepo(value) {
+    var parts = String(value || '').trim().split('/');
+    if (parts.length !== 2 ||
+        !/^[A-Za-z0-9_.-]+$/.test(parts[0]) ||
+        !/^[A-Za-z0-9_.-]+$/.test(parts[1])) {
+      return null;
+    }
+    return { owner: parts[0], repo: parts[1], fullName: parts[0] + '/' + parts[1] };
+  }
+
+  function loadGitHubRepositoryInfo(repoValue) {
+    var parsed = splitGitHubRepo(repoValue);
+    if (!parsed) return Promise.reject(new Error('请输入有效的仓库地址（owner/repo）'));
+    var key = parsed.fullName.toLowerCase();
+    if (state._githubLoadPromise && state._githubLoadKey === key) {
+      return state._githubLoadPromise;
+    }
+
+    abortController(state._githubController);
+    state._githubController = new AbortController();
+    state._githubLoadKey = key;
+    var controller = state._githubController;
+    var base = '/api/code/github/repos/' +
+      encodeURIComponent(parsed.owner) + '/' + encodeURIComponent(parsed.repo);
+
+    var promise = Promise.all([
+      apiFetch(base, { method: 'GET', signal: controller.signal }).then(function (response) {
+        return responseJson(response, '无法读取 GitHub 仓库');
+      }),
+      apiFetch(base + '/branches', { method: 'GET', signal: controller.signal }).then(function (response) {
+        return responseJson(response, '无法读取 GitHub 分支');
+      })
+    ]).then(function (results) {
+      state._githubErrorKey = '';
+      return {
+        parsed: parsed,
+        repo: results[0].repo || results[0],
+        branches: Array.isArray(results[1].branches) ? results[1].branches : []
+      };
+    }).then(function (result) {
+      if (state._githubLoadKey === key) {
+        state._githubLoadPromise = null;
+        state._githubController = null;
+      }
+      return result;
+    }, function (error) {
+      if (state._githubLoadKey === key) {
+        state._githubLoadPromise = null;
+        state._githubController = null;
+      }
+      throw error;
+    });
+    state._githubLoadPromise = promise;
+    return promise;
+  }
+
+  function openGitHubWorkspace(repo, branch) {
+    var parsed = splitGitHubRepo(repo);
+    var fs = window.__xtjCodeFS;
+    if (!parsed || !fs || typeof fs.createGitHubFileSystemAdapter !== 'function') {
+      return Promise.reject(new Error('GitHub 文件系统适配器不可用，请刷新页面后重试'));
+    }
+    return fs.createGitHubFileSystemAdapter({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch: branch
+    }).then(function (adapter) {
+      resetWorkspaceState();
+      state.workspaceMode = 'github';
+      state.workspaceName = parsed.fullName;
+      state.directoryHandle = adapter;
+      state._isReadOnly = true;
+      fs.setDirHandle(adapter);
+      renderWorkspace();
+      return adapter;
+    });
+  }
+
   function renderGitHubRepoSelector() {
     if (!_dom.panelCode) return;
     _dom.panelCode.innerHTML = '';
@@ -2053,20 +2317,7 @@
         loadBtn.disabled = true;
         loadBtn.textContent = '加载中...';
 
-        // Fetch repo info via GitHub API
-        fetch('https://api.github.com/repos/' + repo, {
-          headers: { 'Accept': 'application/vnd.github.v3+json' }
-        }).then(function (r) {
-          if (!r.ok) throw new Error('仓库不存在或无权限访问 (HTTP ' + r.status + ')');
-          return r.json();
-        }).then(function (repoData) {
-          // Fetch branches
-          return fetch('https://api.github.com/repos/' + repo + '/branches?per_page=20', {
-            headers: { 'Accept': 'application/vnd.github.v3+json' }
-          }).then(function (r) { return r.json(); }).then(function (branches) {
-            return { repoData: repoData, branches: branches };
-          });
-        }).then(function (data) {
+        loadGitHubRepositoryInfo(repo).then(function (data) {
           loadBtn.disabled = false;
           loadBtn.textContent = '加载仓库';
 
@@ -2076,7 +2327,7 @@
 
           // Show branches
           branchesDiv.style.display = 'block';
-          var defaultBranch = data.repoData.default_branch || 'main';
+          var defaultBranch = data.repo.default_branch || 'main';
           branchesDiv.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">分支:</div>' +
             data.branches.map(function (b) {
               return '<label style="display:inline-block;margin:4px 8px;cursor:pointer;font-size:13px;">' +
@@ -2090,12 +2341,11 @@
           filesDiv.innerHTML =
             '<div style="font-weight:600;margin-bottom:8px;">仓库信息:</div>' +
             '<div style="font-size:13px;color:var(--cw-text-muted);">' +
-            '名称: ' + escapeHTML(data.repoData.full_name) + '<br>' +
-            '描述: ' + escapeHTML(data.repoData.description || '无') + '<br>' +
+            '名称: ' + escapeHTML(data.repo.full_name || data.parsed.fullName) + '<br>' +
+            '描述: ' + escapeHTML(data.repo.description || '无') + '<br>' +
             '默认分支: ' + escapeHTML(defaultBranch) + '<br>' +
-            'Stars: ' + data.repoData.stargazers_count + ' | Forks: ' + data.repoData.forks_count + '<br>' +
-            '语言: ' + (data.repoData.language || '未知') + '<br>' +
-            '最近更新: ' + new Date(data.repoData.updated_at).toLocaleString() +
+            '可见性: ' + (data.repo.private ? '私有仓库' : '公开仓库') + '<br>' +
+            '最近更新: ' + (data.repo.updated_at ? new Date(data.repo.updated_at).toLocaleString() : '未知') +
             '</div>';
 
           // Show open button
@@ -2109,29 +2359,9 @@
               var selectedBranch = document.querySelector('input[name="githubBranch"]:checked');
               var branch = selectedBranch ? selectedBranch.value : defaultBranch;
 
-              resetWorkspaceState();
-              state.workspaceMode = 'github';
-              state.workspaceName = repo;
-              state.directoryHandle = {
-                _isGitHub: true,
-                name: repo,
-                repo: repo,
-                branch: branch,
-                defaultBranch: defaultBranch
-              };
-
-              // Fetch file tree
               openBtn.disabled = true;
               openBtn.textContent = '正在获取文件树...';
-
-              fetch('https://api.github.com/repos/' + repo + '/git/trees/' + branch + '?recursive=1', {
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
-              }).then(function (r) { return r.json(); }).then(function (treeData) {
-                if (treeData.tree) {
-                  state.directoryHandle._tree = treeData.tree;
-                }
-                renderWorkspace();
-              }).catch(function (err) {
+              openGitHubWorkspace(repo, branch).catch(function (err) {
                 showToast('获取文件树失败: ' + (err.message || '未知错误'), 'error');
                 openBtn.disabled = false;
                 openBtn.textContent = '打开此仓库';
@@ -2141,7 +2371,12 @@
         }).catch(function (err) {
           loadBtn.disabled = false;
           loadBtn.textContent = '加载仓库';
-          showToast('加载失败: ' + (err.message || '未知错误'), 'error');
+          if (err && err.name === 'AbortError') return;
+          var errorKey = String((err && err.status) || 0) + ':' + String((err && err.message) || '未知错误');
+          if (state._githubErrorKey !== errorKey) {
+            state._githubErrorKey = errorKey;
+            showToast('加载失败: ' + (err.message || '未知错误'), 'error');
+          }
         });
       });
 
@@ -2155,15 +2390,171 @@
   // ──────────────────────────────────────────────
   // renderChatPanel()
   // ──────────────────────────────────────────────
+  function loadCapabilities() {
+    if (state.capabilities) return Promise.resolve(state.capabilities);
+    if (state._capabilitiesPromise) return state._capabilitiesPromise;
+    state._capabilitiesPromise = apiFetch('/api/code/capabilities', { method: 'GET' })
+      .then(function (response) { return responseJson(response, '能力信息加载失败'); })
+      .then(function (data) {
+        state.capabilities = data;
+        state._capabilitiesPromise = null;
+        updateCapabilitiesBadge();
+        return data;
+      }).catch(function (error) {
+        state._capabilitiesPromise = null;
+        state.capabilities = {
+          ok: false,
+          configured: false,
+          agentEnabled: false,
+          toolCallingEnabled: false,
+          error: error && error.message
+        };
+        updateCapabilitiesBadge();
+        return state.capabilities;
+      });
+    return state._capabilitiesPromise;
+  }
+
+  function capabilitiesLabel() {
+    var capabilities = state.capabilities;
+    if (!capabilities) return { text: '能力检测中', title: '正在读取服务端能力' };
+    if (capabilities.agentEnabled && capabilities.toolCallingEnabled) {
+      var provider = capabilities.provider || 'AI';
+      var model = capabilities.model || '模型未命名';
+      return {
+        text: provider + ' · Agent',
+        title: model + '；工具调用已启用；最多 ' + (capabilities.maxToolRounds || '?') + ' 轮'
+      };
+    }
+    if (capabilities.configured === false) {
+      return { text: 'AI 未配置', title: '服务端尚未配置 Code AI' };
+    }
+    return { text: '基础模式', title: '服务端未启用工具调用' };
+  }
+
+  function updateCapabilitiesBadge() {
+    if (!_dom.chatPanel) return;
+    var element = _dom.chatPanel.querySelector('.chat-model-badge');
+    if (!element) return;
+    var badge = capabilitiesLabel();
+    element.textContent = badge.text;
+    element.title = badge.title;
+  }
+
+  function attachmentMimeType(fileName, browserMime) {
+    var ext = String(fileName || '').slice(String(fileName || '').lastIndexOf('.')).toLowerCase();
+    var map = {
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.pdf': 'application/pdf',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xls': 'application/vnd.ms-excel',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.csv': 'text/csv',
+      '.md': 'text/plain',
+      '.markdown': 'text/plain',
+      '.json': 'text/plain'
+    };
+    return map[ext] || browserMime || '';
+  }
+
+  function isAllowedAttachment(fileName) {
+    var lower = String(fileName || '').toLowerCase();
+    return /\.(docx|pdf|xlsx|xls|pptx|txt|csv|md|markdown|json)$/.test(lower);
+  }
+
+  function safeAttachmentName(fileName) {
+    return String(fileName || 'attachment')
+      .replace(/[\/\\\u0000-\u001f\u007f]/g, '_')
+      .slice(0, 180);
+  }
+
+  function currentAttachmentChars() {
+    return state.attachments.reduce(function (total, attachment) {
+      return total + String(attachment.content || '').length;
+    }, 0);
+  }
+
+  function processAttachmentFile(file) {
+    if (!file || !isAllowedAttachment(file.name)) {
+      return Promise.reject(new Error('仅支持 DOCX、PDF、XLSX、XLS、PPTX、TXT、CSV、MD、JSON'));
+    }
+    if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
+      return Promise.reject(new Error('资料文件不能超过 50MB'));
+    }
+    if (state.attachments.length >= MAX_ATTACHMENTS) {
+      return Promise.reject(new Error('每个会话最多添加 ' + MAX_ATTACHMENTS + ' 份资料'));
+    }
+
+    abortController(state._attachmentController);
+    state._attachmentController = new AbortController();
+    var controller = state._attachmentController;
+    var mimeType = attachmentMimeType(file.name, file.type);
+    var formData = new FormData();
+    formData.append('file', file, file.name);
+    formData.append('fileName', file.name);
+    formData.append('mimeType', mimeType);
+    state.attachmentProcessing = true;
+    state.attachmentError = '';
+    renderChatPanel();
+
+    return apiFetch('/api/code/document/extract', {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal
+    }).then(function (response) {
+      return responseJson(response, '资料解析失败');
+    }).then(function (data) {
+      var content = String(data.text || '');
+      if (!content.trim()) throw new Error('资料中没有可读取的文字');
+      if (currentAttachmentChars() + content.length > MAX_ATTACHMENT_TOTAL_CHARS) {
+        throw new Error('已添加资料内容过多，请移除部分资料后重试');
+      }
+      var safeName = safeAttachmentName(data.fileName || file.name);
+      return getSHA256(content).catch(function () { return ''; }).then(function (sha256) {
+        state.attachments.push({
+          name: safeName,
+          path: 'attachments/' + safeName,
+          mimeType: data.mimeType || mimeType,
+          content: content,
+          sha256: sha256,
+          source: 'attachment',
+          truncated: !!data.truncated,
+          metadata: data.metadata || {}
+        });
+        state.attachmentProcessing = false;
+        state._attachmentController = null;
+        renderChatPanel();
+        return state.attachments[state.attachments.length - 1];
+      });
+    }).catch(function (error) {
+      state.attachmentProcessing = false;
+      state._attachmentController = null;
+      if (error && error.name !== 'AbortError') {
+        state.attachmentError = error.message || '资料解析失败';
+        renderChatPanel();
+      }
+      throw error;
+    });
+  }
+
+  function removeAttachment(index) {
+    if (index < 0 || index >= state.attachments.length) return;
+    state.attachments.splice(index, 1);
+    state.attachmentError = '';
+    renderChatPanel();
+  }
+
   function renderChatPanel() {
     if (!_dom.chatPanel) return;
     _dom.chatPanel.innerHTML = '';
 
     var header = document.createElement('div');
     header.className = 'chat-header';
+    var badge = capabilitiesLabel();
     header.innerHTML =
       '<span>AI 代码助手</span>' +
-      '<span class="chat-model-badge">Agent</span>';
+      '<span class="chat-model-badge" title="' + escapeHTML(badge.title) + '">' + escapeHTML(badge.text) + '</span>';
     _dom.chatPanel.appendChild(header);
 
     var messages = document.createElement('div');
@@ -2179,6 +2570,9 @@
     var inputArea = document.createElement('div');
     inputArea.className = 'code-chat-input-area';
     inputArea.innerHTML =
+      '<div class="code-chat-attachments" id="codeChatAttachments"></div>' +
+      '<button type="button" class="code-attachment-btn" id="codeAttachmentBtn" title="支持 DOCX、PDF、XLSX、PPTX、TXT、CSV、MD、JSON">添加资料</button>' +
+      '<input type="file" id="codeAttachmentInput" accept="' + ATTACHMENT_ACCEPT + '" multiple hidden>' +
       '<textarea id="codeChatInput" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
       '<button class="send-btn" id="codeChatSendBtn" title="发送">➤</button>';
     _dom.chatPanel.appendChild(inputArea);
@@ -2186,6 +2580,44 @@
     // Auto-resize textarea
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
+    var attachmentButton = document.getElementById('codeAttachmentBtn');
+    var attachmentInput = document.getElementById('codeAttachmentInput');
+    var attachmentsContainer = document.getElementById('codeChatAttachments');
+
+    if (attachmentsContainer) {
+      var attachmentHtml = '';
+      for (var ai = 0; ai < state.attachments.length; ai++) {
+        var attachment = state.attachments[ai];
+        attachmentHtml += '<span class="code-attachment-chip" title="' + escapeHTML(attachment.path) + '">' +
+          '📎 ' + escapeHTML(attachment.name) +
+          (attachment.truncated ? '（已截断）' : '') +
+          '<button type="button" data-remove-attachment="' + ai + '" aria-label="移除 ' + escapeHTML(attachment.name) + '">×</button></span>';
+      }
+      if (state.attachmentProcessing) attachmentHtml += '<span class="code-attachment-status">正在解析资料...</span>';
+      if (state.attachmentError) attachmentHtml += '<span class="code-attachment-error">' + escapeHTML(state.attachmentError) + '</span>';
+      attachmentsContainer.innerHTML = attachmentHtml;
+      Array.prototype.forEach.call(attachmentsContainer.querySelectorAll('[data-remove-attachment]'), function (button) {
+        button.addEventListener('click', function () {
+          removeAttachment(parseInt(button.getAttribute('data-remove-attachment'), 10));
+        });
+      });
+    }
+
+    if (attachmentButton && attachmentInput) {
+      attachmentButton.disabled = state.attachmentProcessing || state.attachments.length >= MAX_ATTACHMENTS;
+      attachmentButton.addEventListener('click', function () { attachmentInput.click(); });
+      attachmentInput.addEventListener('change', function () {
+        var selected = Array.prototype.slice.call(attachmentInput.files || []);
+        attachmentInput.value = '';
+        var chain = Promise.resolve();
+        selected.slice(0, Math.max(0, MAX_ATTACHMENTS - state.attachments.length)).forEach(function (file) {
+          chain = chain.then(function () { return processAttachmentFile(file); });
+        });
+        chain.catch(function (error) {
+          if (error && error.name !== 'AbortError') showToast(error.message || '资料解析失败', 'error');
+        });
+      });
+    }
 
     if (input) {
       input.addEventListener('input', function () {
@@ -2209,6 +2641,7 @@
 
     // Scroll to bottom
     scrollChatToBottom();
+    if (!state.capabilities && !state._capabilitiesPromise) loadCapabilities();
   }
 
   function parseSimpleMarkdown(text) {
@@ -2273,6 +2706,75 @@
   // ──────────────────────────────────────────────
   // sendMessage()
   // ──────────────────────────────────────────────
+  function buildOpenFilesContext() {
+    var candidates = state.openTabs.map(function (tab) {
+      var content = '';
+      if (typeof tab._currentContent === 'string') content = tab._currentContent;
+      else if (typeof tab._extractedText === 'string') content = tab._extractedText;
+      else if (typeof tab.content === 'string') content = tab.content;
+      return {
+        path: tab.path,
+        name: tab.name,
+        language: getFileLanguage(tab.name),
+        mimeType: tab.mimeType || '',
+        content: content,
+        sha256: tab.sha256 || '',
+        source: 'open',
+        priority: tab.path === state.activePath ? 3 :
+          (state.pinnedFiles.indexOf(tab.path) !== -1 ? 2 : 1)
+      };
+    }).filter(function (file) {
+      return file.path && file.content && !isRestrictedContextFile(file.path);
+    }).sort(function (a, b) {
+      return b.priority - a.priority || a.path.localeCompare(b.path);
+    });
+
+    var selected = [];
+    var usedChars = 0;
+    for (var i = 0; i < candidates.length && selected.length < MAX_OPEN_FILE_CONTEXT; i++) {
+      var candidate = candidates[i];
+      var remaining = MAX_OPEN_FILES_TOTAL_CHARS - usedChars;
+      if (remaining <= 0) break;
+      var content = candidate.content.slice(0, Math.min(MAX_OPEN_FILE_CHARS, remaining));
+      if (!content) continue;
+      selected.push({
+        path: candidate.path,
+        name: candidate.name,
+        language: candidate.language,
+        mimeType: candidate.mimeType,
+        content: content,
+        sha256: candidate.sha256,
+        source: 'open'
+      });
+      usedChars += content.length;
+    }
+    return selected;
+  }
+
+  function buildChatRequestBody(message, historyMsgs) {
+    var scope = getWorkspaceScope();
+    return {
+      workspace_name: state.workspaceName || '',
+      workspace_id: scope.workspace_id,
+      workspace_generation: scope.workspace_generation,
+      message: message,
+      active_path: state.activePath || '',
+      history: historyMsgs,
+      pinned_paths: state.pinnedFiles.slice(),
+      open_files: buildOpenFilesContext(),
+      attachments: state.attachments.map(function (attachment) {
+        return {
+          name: attachment.name,
+          path: attachment.path,
+          mimeType: attachment.mimeType,
+          content: attachment.content,
+          sha256: attachment.sha256 || '',
+          source: 'attachment'
+        };
+      })
+    };
+  }
+
   function sendMessage() {
     if (state.sending) return;
 
@@ -2332,14 +2834,7 @@
     });
 
     // Build request with pinned_paths and active_path — backend handles chunk selection
-    var body = {
-      workspace_name: state.workspaceName || '',
-      message: message,
-      active_path: state.activePath || '',
-      history: historyMsgs,
-      pinned_paths: state.pinnedFiles.slice(),
-      files: [] // No longer sending full files — backend uses index
-    };
+    var body = buildChatRequestBody(message, historyMsgs);
 
     return sendApiRequest(body, requestId, timeStr, wsGen);
   }
@@ -2429,8 +2924,10 @@
       // Update last read context for display
       if (data && data.context_info) {
         state.lastReadContext = data.context_info;
-        renderProjectStatus();
       }
+      state.lastToolTrace = data && Array.isArray(data.tool_trace) ? data.tool_trace : [];
+      if (data && data.capabilities) state.capabilities = data.capabilities;
+      renderProjectStatus();
 
       renderChatPanel();
 
@@ -3153,6 +3650,19 @@
     getState: function () { return state; },
     selectAndOpenWorkspace: selectAndOpenWorkspace
   };
+  if (window.__XTJ_TEST_MODE__) {
+    window.__xtjCodeWorkspaceTestHooks = {
+      buildChatRequestBody: buildChatRequestBody,
+      processAttachmentFile: processAttachmentFile,
+      removeAttachment: removeAttachment,
+      loadGitHubRepositoryInfo: loadGitHubRepositoryInfo,
+      openGitHubWorkspace: openGitHubWorkspace,
+      buildProjectIndex: buildProjectIndex,
+      loadProjectIndexStatus: loadProjectIndexStatus,
+      getWorkspaceId: getWorkspaceId,
+      getState: function () { return state; }
+    };
+  }
 
   // Exports for desktop-shell.js integration
   window.__xtjCodeInit = init;
