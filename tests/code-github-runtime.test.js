@@ -287,3 +287,19 @@ test('maps network errors and timeouts separately', async function() {
   assert.equal(timeout.status, 504);
   assert.equal(timeout.body.code, 'github_timeout');
 });
+
+test('times out while decoding a hanging GitHub response body', async function() {
+  var app = createApp({
+    timeoutMs: 10,
+    fetch: async function() {
+      return {
+        ok: true,
+        status: 200,
+        json: function() { return new Promise(function() {}); }
+      };
+    }
+  });
+  var response = await authGet(app, '/api/code/github/repos/xutingjiang1004/xtj');
+  assert.equal(response.status, 504);
+  assert.equal(response.body.code, 'github_timeout');
+});

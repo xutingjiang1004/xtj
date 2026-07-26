@@ -153,15 +153,11 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
   async function githubJson(req, url, token) {
     var controller = new AbortController();
     var timedOut = false;
-    var timer = setTimeout(function() {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
-    var abortFromClient = function() { controller.abort(); };
-    req.once('aborted', abortFromClient);
+    var timer = null;
+    var abortFromClient = null;
 
     try {
-      var response = await fetchImpl(url, {
+      var upstream = fetchImpl(url, {
         method: 'GET',
         headers: {
           Accept: 'application/vnd.github+json',
@@ -170,20 +166,42 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
           'X-GitHub-Api-Version': '2022-11-28'
         },
         signal: controller.signal
+      }).then(async function(response) {
+        var data = null;
+        try { data = await response.json(); } catch (_) {}
+        return { response: response, data: data };
       });
-
-      var data = null;
-      try { data = await response.json(); } catch (_) {}
+      var clientAbort = new Promise(function(_, reject) {
+        abortFromClient = function() {
+          controller.abort();
+          var error = new Error('client aborted');
+          error.code = 'client_aborted';
+          reject(error);
+        };
+        req.once('aborted', abortFromClient);
+      });
+      var timeout = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          timedOut = true;
+          controller.abort();
+          var error = new Error('github timeout');
+          error.code = 'github_timeout';
+          reject(error);
+        }, timeoutMs);
+      });
+      var settled = await Promise.race([upstream, timeout, clientAbort]);
+      var response = settled.response;
+      var data = settled.data;
       if (!response.ok) {
         var mapped = upstreamError(response.status);
         return { ok: false, status: response.status, code: mapped.code, error: mapped.message };
       }
       return { ok: true, data: data };
     } catch (error) {
-      if (timedOut) {
+      if (timedOut || (error && error.code === 'github_timeout')) {
         return { ok: false, status: 504, code: 'github_timeout', error: 'GitHub 请求超时' };
       }
-      if (error && error.name === 'AbortError' && req.aborted) {
+      if (error && error.code === 'client_aborted') {
         return { ok: false, aborted: true };
       }
       return { ok: false, status: 502, code: 'github_network_error', error: '无法连接 GitHub' };
