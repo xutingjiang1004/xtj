@@ -3011,7 +3011,21 @@
         pending.push(tab._extractPromise);
       }
     });
-    return pending.length ? Promise.all(pending) : Promise.resolve([]);
+    if (!pending.length) {
+      var failedTab = state.openTabs.find(function (tab) {
+        return tab.type === 'document' && tab._extractError;
+      });
+      return failedTab
+        ? Promise.reject(new Error('文档提取失败：' + failedTab._extractError))
+        : Promise.resolve([]);
+    }
+    return Promise.all(pending).then(function (results) {
+      var failedTab = state.openTabs.find(function (tab) {
+        return tab.type === 'document' && tab._extractError;
+      });
+      if (failedTab) throw new Error('文档提取失败：' + failedTab._extractError);
+      return results;
+    });
   }
 
   function buildChatRequestBody(message, historyMsgs) {
