@@ -14960,3 +14960,5 @@ app.listen(port, () => {
   startLocationTaskProcessor();
   console.log('[LOC-TASK] 定位地址解析任务处理器已启动（间隔30秒）');
 });
+
+module.exports = { app, callDeepSeek };
