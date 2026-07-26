@@ -279,3 +279,14 @@ test('external cancellation interrupts a pending tool round', async () => {
     error => error && error.code === 'AI_CANCELLED'
   );
 });
+
+test('request timeout signal is wired into pending tool cancellation', () => {
+  const source = fs.readFileSync('render-api/server.js', 'utf8');
+  const start = source.indexOf('async function executeToolWithAbort(toolCall)');
+  const end = source.indexOf('for (var round = 0;', start);
+  assert.ok(start >= 0 && end > start);
+  const helper = source.slice(start, end);
+  assert.match(helper, /controller\.signal/);
+  assert.match(helper, /Promise\.race/);
+  assert.match(helper, /removeEventListener/);
+});
