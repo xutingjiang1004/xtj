@@ -279,6 +279,22 @@ function buildSystemPrompt() {
   ].join('\n');
 }
 
+function inferInitialToolChoice(message, indexSummary, openFiles) {
+  var text = String(message || '').toLowerCase();
+  var hasOpenFiles = Array.isArray(openFiles) && openFiles.length > 0;
+  if (!indexSummary && hasOpenFiles) {
+    return { type: 'function', function: { name: 'get_open_files' } };
+  }
+  if (!indexSummary) return null;
+  if (/(聊天|发送|发消息|实时|realtime|消息|评论|登录|加载|卡住|报错|失败|bug|error)/i.test(text)) {
+    return { type: 'function', function: { name: 'search_code' } };
+  }
+  if (/(项目|工作区|目录|文件树|左侧|整体|全部|所有|检查|问题|bug|代码库|仓库|project|workspace|directory|file tree|repository)/i.test(text)) {
+    return { type: 'function', function: { name: 'list_files' } };
+  }
+  return null;
+}
+
 function buildUserMessage(message, workspaceName, activePath, history, contextChunks) {
   var parts = [];
 
@@ -1312,12 +1328,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var toolTrace = [];
       var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget);
       var thinkingMode = /^(off|low|medium|high)$/.test(String(body.thinking_mode || 'low')) ? String(body.thinking_mode || 'low') : 'low';
+      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles);
 
       var aiResult = await deps.callDeepSeek(messages, {
         model: model,
         thinking_mode: thinkingMode,
         tools: CODE_AGENT_TOOLS,
         tool_choice: 'auto',
+        first_tool_choice: firstToolChoice,
         tool_executor: executor,
         max_tool_rounds: CODE_AGENT_MAX_TOOL_ROUNDS,
         max_tool_result_chars: Math.min(inputBudget * 4, 2000000),
