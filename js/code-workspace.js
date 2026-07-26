@@ -3703,7 +3703,9 @@
       }).then(function (writeResult) {
         // Save snapshot ONLY after successful creation (not before, to avoid phantom undo)
         if (!state.snapshots[op.path]) {
-          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '' };
+          state.snapshots[op.path] = { existed: false, beforeContent: '', beforeSha256: '', afterSha256: writeResult.sha256 || '' };
+        } else {
+          state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
         }
         // Optionally open the new file in a tab
         for (var i = 0; i < state.openTabs.length; i++) {
@@ -3754,6 +3756,7 @@
       // Write new content
       return fs.writeFileByPath(op.path, op.new_content || '');
     }).then(function (writeResult) {
+      if (state.snapshots[op.path]) state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
       // Update open tab if file is open
       for (var i = 0; i < state.openTabs.length; i++) {
         if (state.openTabs[i].path === op.path) {
@@ -3879,7 +3882,17 @@
                 resolve(false);
                 return;
               }
-              fs.deleteFileByPath(p).then(function () {
+              if (!fs.readFileByPath || !snapshot.afterSha256) {
+                failedPaths.push(p);
+                resolve(false);
+                return;
+              }
+              fs.readFileByPath(p).then(function (current) {
+                if (!current || current.sha256 !== snapshot.afterSha256) {
+                  throw new Error('File changed after AI apply; undo was not applied');
+                }
+                return fs.deleteFileByPath(p);
+              }).then(function () {
                 if (wsGen !== state.workspaceGeneration) {
                   resolve(false);
                   return;
@@ -3901,7 +3914,17 @@
               return;
             }
 
-            fs.writeFileByPath(p, snapshot.beforeContent || '').then(function () {
+            if (!fs.readFileByPath || !snapshot.afterSha256) {
+              failedPaths.push(p);
+              resolve(false);
+              return;
+            }
+            fs.readFileByPath(p).then(function (current) {
+              if (!current || current.sha256 !== snapshot.afterSha256) {
+                throw new Error('File changed after AI apply; undo was not applied');
+              }
+              return fs.writeFileByPath(p, snapshot.beforeContent || '');
+            }).then(function () {
               if (wsGen !== state.workspaceGeneration) {
                 resolve(false);
                 return;

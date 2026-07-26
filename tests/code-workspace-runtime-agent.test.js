@@ -377,6 +377,7 @@ test('undoOperations ignores duplicate clicks while the first undo is running', 
   let resolveWrite;
   let writes = 0;
   const codeFS = {
+    readFileByPath() { return Promise.resolve({ sha256: 'after-sha' }); },
     writeFileByPath() {
       writes++;
       return new Promise((resolve) => { resolveWrite = resolve; });
@@ -385,7 +386,7 @@ test('undoOperations ignores duplicate clicks while the first undo is running', 
   const loaded = loadWorkspace(async () => response(200, {}), codeFS);
   loaded.state.active = true;
   loaded.state.workspaceGeneration = 3;
-  loaded.state.snapshots = { 'src/app.js': { existed: true, beforeContent: 'old', beforeSha256: 'old-sha' } };
+  loaded.state.snapshots = { 'src/app.js': { existed: true, beforeContent: 'old', beforeSha256: 'old-sha', afterSha256: 'after-sha' } };
   const first = loaded.hooks.undoOperations();
   const second = await loaded.hooks.undoOperations();
   assert.equal(second, false);
@@ -393,6 +394,21 @@ test('undoOperations ignores duplicate clicks while the first undo is running', 
   resolveWrite({ sha256: 'old-sha' });
   assert.equal(await first, true);
   assert.equal(Object.keys(loaded.state.snapshots).length, 0);
+});
+
+test('undo refuses to overwrite a file changed after the AI apply', async () => {
+  let writes = 0;
+  const codeFS = {
+    readFileByPath() { return Promise.resolve({ sha256: 'user-edit-sha' }); },
+    writeFileByPath() { writes++; return Promise.resolve({ sha256: 'old-sha' }); }
+  };
+  const loaded = loadWorkspace(async () => response(200, {}), codeFS);
+  loaded.state.active = true;
+  loaded.state.workspaceGeneration = 4;
+  loaded.state.snapshots = { 'src/app.js': { existed: true, beforeContent: 'old', beforeSha256: 'old-sha', afterSha256: 'ai-sha' } };
+  assert.equal(await loaded.hooks.undoOperations(), false);
+  assert.equal(writes, 0);
+  assert.equal(Object.keys(loaded.state.snapshots).length, 1);
 });
 
 test('cancelCurrentRequest aborts the active request and restores idle state', () => {
