@@ -45,6 +45,8 @@
     _indexBuildKey: '',
     _capabilitiesPromise: null,
     _openFilePromises: {},
+    _savePromises: {},
+    _undoLock: false,
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
@@ -384,6 +386,7 @@
     state._githubLoadPromise = null;
     state._indexBuildPromise = null;
     state._openFilePromises = {};
+    state._savePromises = {};
     state._requestId++;
     revokeAllUrls();
     disposeMonaco();
@@ -714,6 +717,8 @@
     state._indexStatusPromise = null;
     state._indexBuildKey = '';
     state._openFilePromises = {};
+    state._savePromises = {};
+    state._undoLock = false;
     state._requestId++;
     state.sending = false;
     state.workspaceGeneration++;
@@ -1832,16 +1837,34 @@
       return;
     }
 
-    fs.writeFileByPath(path, content).then(function (result) {
+    var wsGen = state.workspaceGeneration;
+    var saveKey = wsGen + ':' + path;
+    if (state._savePromises[saveKey]) return state._savePromises[saveKey];
+    var promise = fs.writeFileByPath(path, content).then(function (result) {
+      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) return false;
+      var currentContent = tab._currentContent;
+      if (state._monacoEditor && state.activePath === path) currentContent = state._monacoEditor.getValue();
+      var unchanged = currentContent === undefined || currentContent === content;
       tab.content = content;
-      tab.modified = false;
-      tab._currentContent = undefined;
       tab.sha256 = result.sha256 || '';
+      if (unchanged) {
+        tab.modified = false;
+        tab._currentContent = undefined;
+      } else {
+        tab.modified = true;
+      }
       renderTabs();
-      showToast('文件已保存', 'success');
+      showToast(unchanged ? 'File saved' : 'Previous version saved; newer edits remain unsaved', unchanged ? 'success' : 'warning');
+      return true;
     }).catch(function (err) {
       showToast('保存失败: ' + (err && err.message ? err.message : String(err)), 'error');
+      return false;
+    }).then(function (result) {
+      if (state._savePromises[saveKey] === promise) delete state._savePromises[saveKey];
+      return result;
     });
+    state._savePromises[saveKey] = promise;
+    return promise;
   }
 
   // ──────────────────────────────────────────────
@@ -3703,17 +3726,21 @@
   // undoOperations()
   // ──────────────────────────────────────────────
   function undoOperations() {
+    if (state._undoLock) return Promise.resolve(false);
     var snapshotPaths = Object.keys(state.snapshots);
     if (snapshotPaths.length === 0) {
       showToast('没有可撤销的操作', 'info');
-      return;
+      return Promise.resolve(false);
     }
 
     var fs = window.__xtjCodeFS;
     if (!fs) {
       showToast('文件系统不可用', 'error');
-      return;
+      return Promise.resolve(false);
     }
+
+    state._undoLock = true;
+    var wsGen = state.workspaceGeneration;
 
     var promises = [];
     var successPaths = [];
@@ -3723,6 +3750,11 @@
       (function (p, snapshot) {
         promises.push(
           new Promise(function (resolve) {
+            if (wsGen !== state.workspaceGeneration) {
+              failedPaths.push(p);
+              resolve(false);
+              return;
+            }
             if (snapshot.existed === false) {
               // This was a create operation — delete the file
               if (!fs.deleteFileByPath) {
@@ -3778,7 +3810,7 @@
       })(snapshotPaths[i], state.snapshots[snapshotPaths[i]]);
     }
 
-    Promise.all(promises).then(function () {
+    return Promise.all(promises).then(function () {
       // Only remove successful snapshots
       for (var k = 0; k < successPaths.length; k++) {
         delete state.snapshots[successPaths[k]];
@@ -3796,6 +3828,9 @@
       } else {
         showToast('已撤销所有更改 (' + successPaths.length + ' 个文件)', 'info');
       }
+      return failedPaths.length === 0;
+    }).finally(function () {
+      state._undoLock = false;
     });
   }
 
@@ -3860,6 +3895,8 @@
       loadGitHubRepositoryInfo: loadGitHubRepositoryInfo,
       openGitHubWorkspace: openGitHubWorkspace,
       buildProjectIndex: buildProjectIndex,
+      saveFile: saveFile,
+      undoOperations: undoOperations,
       loadProjectIndexStatus: loadProjectIndexStatus,
       openFile: openFile,
       restoreTabs: restoreTabs,

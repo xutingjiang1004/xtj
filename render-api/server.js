@@ -4424,7 +4424,10 @@ async function callDeepSeek(messages, options) {
       }
       if (useTools) {
         apiBody.tools = options.tools;
-        if (toolChoice) apiBody.tool_choice = toolChoice;
+        var roundToolChoice = round === 0 && options && options.first_tool_choice
+          ? options.first_tool_choice
+          : toolChoice;
+        if (roundToolChoice) apiBody.tool_choice = roundToolChoice;
       }
       if (options && options.max_tokens && typeof options.max_tokens === 'number') {
         apiBody.max_tokens = options.max_tokens;

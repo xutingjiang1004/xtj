@@ -61,6 +61,8 @@ test('DeepSeek tool rounds preserve reasoning_content and clean abort listeners'
   assert.match(server, /noToolAbortHandler = function\(\) \{ try \{ noToolController\.abort\(\)/);
   assert.match(server, /externalSignal\.removeEventListener\('abort', noToolAbortHandler\)/);
   assert.match(server, /sBuffer \+= decoder\.decode\(\);[\s\S]*sBuffer \+= '\\n';/);
+  assert.match(server, /round === 0 && options && options\.first_tool_choice/);
+  assert.match(codeAgent, /inferInitialToolChoice/);
 });
 
 // ============================================================

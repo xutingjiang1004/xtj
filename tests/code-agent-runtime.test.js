@@ -115,6 +115,26 @@ test('runs a real multi-step code tool flow and reports actual reads plus cache 
   assert.equal(response.body.capabilities.toolCallingEnabled, true);
 });
 
+test('forces a first directory tool call for broad project questions', async () => {
+  let receivedOptions;
+  const app = createApp(async (_messages, options) => {
+    receivedOptions = options;
+    return { content: 'project inspected', model: 'deepseek-v4-flash' };
+  });
+  const source = 'const project = true;';
+  const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
+    workspaceId: 'broad-project', workspaceGeneration: 1,
+    files: [{ path: 'src/app.js', content: source, size: Buffer.byteLength(source), sha256: sha(source) }]
+  });
+  assert.equal(build.status, 200);
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_id: 'broad-project', workspace_generation: 1,
+    message: 'inspect the entire project workspace', history: []
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedOptions.first_tool_choice, { type: 'function', function: { name: 'list_files' } });
+});
+
 test('keeps indexes isolated by authenticated user and asks for rebuild after restart/miss', async () => {
   const app = createApp(async () => {
     throw new Error('AI must not run without an index');
