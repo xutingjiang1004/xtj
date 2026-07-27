@@ -186,7 +186,10 @@ function buildCodeCapabilities(deps, options) {
     canReadXlsx: true,
     canWriteXlsx: true,
     canReadPdf: true,
-    canWritePdf: false
+    canWritePdf: false,
+    canReadPptx: true,
+    canWritePptx: false,
+    workspaceReadOnly: false
   };
 }
 
@@ -210,10 +213,17 @@ function validateHistory(history) {
   for (var i = 0; i < history.length; i++) {
     var item = history[i];
     if (!item || typeof item !== 'object') continue;
-    var contentStr = String(item.content || '');
-    if (contentStr === '[INDEX_REBUILD_REQUIRED]' || contentStr.startsWith('[PROVIDER_') || contentStr === 'STREAM_INTERRUPTED') continue;
-    if (contentStr === '（已停止）' || contentStr === '（无响应）' || !contentStr.trim()) continue;
     if (item.role !== 'user' && item.role !== 'assistant') continue;
+    // 结构化过滤：检查 errorCode、status 等字段
+    if (item.errorCode && typeof item.errorCode === 'string' && item.errorCode.trim()) continue;
+    if (item.status === 'error' || item.status === 'cancelled' || item.status === 'stopped') continue;
+    if (item.cancelled === true || item.stopped === true) continue;
+    var contentStr = String(item.content || '');
+    // 防御性过滤：包含错误标记的消息（不限于开头）
+    if (contentStr.indexOf('[INDEX_REBUILD_REQUIRED]') >= 0) continue;
+    if (contentStr.indexOf('[PROVIDER_') >= 0) continue;
+    if (contentStr.indexOf('STREAM_INTERRUPTED') >= 0) continue;
+    if (contentStr === '（已停止）' || contentStr === '（无响应）' || !contentStr.trim()) continue;
     if (typeof item.content !== 'string' || !item.content.trim()) continue;
     cleaned.push({ role: item.role, content: item.content.trim().slice(0, MAX_MESSAGE_LEN) });
   }
@@ -230,7 +240,12 @@ function validateFiles(files) {
     var f = files[i];
     if (!f || typeof f !== 'object') continue;
     if (typeof f.path !== 'string' || !f.path.trim()) continue;
-    if (!validatePath(f.path.trim())) continue;
+    // 对上下文文件使用 normalizeContextPath 安全规范化路径
+    var normalizedPath = normalizeContextPath(f.path);
+    if (!validatePath(normalizedPath)) {
+      console.warn('[code-agent] validateFiles: skipping file with unsafe path after normalization:', f.path);
+      continue;
+    }
     if (typeof f.content !== 'string') continue;
 
     var content = f.content;
@@ -247,7 +262,7 @@ function validateFiles(files) {
     totalContent += contentBytes;
 
     var item = {
-      path: f.path.trim(),
+      path: normalizedPath,
       language: typeof f.language === 'string' ? f.language.trim() : '',
       content: content,
       sha256: typeof f.sha256 === 'string' ? f.sha256.trim() : ''
@@ -615,8 +630,10 @@ function validateRequestFiles(files, limit, fieldName) {
   for (var i = 0; i < files.length; i++) {
     var item = files[i];
     if (!item || typeof item !== 'object') continue;
-    var path = typeof item.path === 'string' ? item.path.trim() :
+    var rawPath = typeof item.path === 'string' ? item.path.trim() :
       (typeof item.name === 'string' ? ('attachments/' + item.name.trim().replace(/[\/\\]/g, '_')) : '');
+    // 对上下文文件使用 normalizeContextPath 安全规范化路径
+    var path = normalizeContextPath(rawPath);
     if (!validatePath(path) || typeof item.content !== 'string') continue;
     var bytes = Buffer.byteLength(item.content, 'utf8');
     totalBytes += bytes;
@@ -1008,7 +1025,10 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
         canReadXlsx: runtimeCapabilities.canReadXlsx === true,
         canWriteXlsx: runtimeCapabilities.canWriteXlsx === true,
         canReadPdf: runtimeCapabilities.canReadPdf === true,
-        canWritePdf: runtimeCapabilities.canWritePdf === true
+        canWritePdf: runtimeCapabilities.canWritePdf === true,
+        canReadPptx: runtimeCapabilities.canReadPptx === true,
+        canWritePptx: runtimeCapabilities.canWritePptx === true,
+        workspaceReadOnly: runtimeCapabilities.workspaceReadOnly === true
       };
     } else if (name === 'web_search') {
       result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
@@ -2025,7 +2045,20 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         thinkingMode: thinkingMode,
         currentPromptTokens: null,
         cacheHitTokens: null,
-        cacheMissTokens: null
+        cacheMissTokens: null,
+        // 文档能力 — 来源必须是 buildCodeCapabilities()
+        canReadCode: capabilities.canReadCode === true,
+        canWriteCode: capabilities.canWriteCode === true,
+        canCreateFiles: capabilities.canCreateFiles === true,
+        canReadDocx: capabilities.canReadDocx === true,
+        canWriteDocx: capabilities.canWriteDocx === true,
+        canReadXlsx: capabilities.canReadXlsx === true,
+        canWriteXlsx: capabilities.canWriteXlsx === true,
+        canReadPdf: capabilities.canReadPdf === true,
+        canWritePdf: capabilities.canWritePdf === true,
+        canReadPptx: capabilities.canReadPptx === true,
+        canWritePptx: capabilities.canWritePptx === true,
+        workspaceReadOnly: capabilities.workspaceReadOnly === true
       };
 
       // Step 1: Build messages with initial estimate to get stable inputBudget
@@ -2045,6 +2078,19 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
 
       logPhase('ai_request_start', { model: model, thinkingMode: thinkingMode, firstToolChoice: firstToolChoice ? firstToolChoice.function.name : 'none', promptTokens: promptTokens, inputBudget: inputBudget });
+
+      // 脱敏诊断日志：跟踪 DOCX 上下文链路
+      console.log('[code-agent] request_diagnostics:', JSON.stringify({
+        request_id: requestId,
+        message_length: message ? message.length : 0,
+        history_count: currentHistory ? currentHistory.length : 0,
+        open_files_count: openFiles.length,
+        attachments_count: attachments.length,
+        open_files: openFiles.map(function(f) { return { path: f.path, content_length: f.content ? f.content.length : 0, mimeType: f.mimeType || '' }; }),
+        thinking_mode: thinkingMode,
+        tools_enabled: !!(Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0),
+        prompt_tokens_estimate: promptTokens
+      }));
 
       var callArgs = {
         model: model,
@@ -2223,13 +2269,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
         thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
         thinkingFallbackReason: aiResult && aiResult.thinkingFallbackReason ? aiResult.thinkingFallbackReason : null,
-        // AI 文档能力
-        canReadDocx: caps.canReadDocx === true,
-        canWriteDocx: caps.canWriteDocx === true,
-        canReadXlsx: caps.canReadXlsx === true,
-        canWriteXlsx: caps.canWriteXlsx === true,
-        canReadPdf: caps.canReadPdf === true,
-        canWritePdf: caps.canWritePdf === true
+        // AI 文档能力 — 来源必须是 buildCodeCapabilities()
+        canReadDocx: capabilities.canReadDocx === true,
+        canWriteDocx: capabilities.canWriteDocx === true,
+        canReadXlsx: capabilities.canReadXlsx === true,
+        canWriteXlsx: capabilities.canWriteXlsx === true,
+        canReadPdf: capabilities.canReadPdf === true,
+        canWritePdf: capabilities.canWritePdf === true,
+        canReadPptx: capabilities.canReadPptx === true,
+        canWritePptx: capabilities.canWritePptx === true,
+        workspaceReadOnly: capabilities.workspaceReadOnly === true
       };
       return res.json({
         ok: true,
@@ -2237,7 +2286,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         reply: reply.trim(),
         operations: operations,
         usage: usage,
-        capabilities: caps,
+        capabilities: capabilities,
         runtime: runtimeInfo,
         tool_trace: toolTrace,
         context_info: {
@@ -2281,7 +2330,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       } else if (/HTTP 400/i.test(errMsg)) {
         code = 'PROVIDER_HTTP_400';
         status = 502;
-        // P0 Fix: 记录脱敏后的请求诊断信息
+        // P0 Fix: 提取真实上游错误响应
+        var providerResponse = null;
+        if (err && err.response && err.response.data) {
+          providerResponse = err.response.data;
+        }
+        var providerError = (providerResponse && providerResponse.error) ? providerResponse.error : {};
         var diagnoseInfo = {
           requestId: requestId,
           model: model,
@@ -2292,8 +2346,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           msgCount: messages ? messages.length : 0,
           promptTokens: typeof promptTokens === 'number' ? promptTokens : 'unknown',
           upstreamStatus: 400,
-          upstreamCode: errCode || '',
-          upstreamMessage: (errMsg || '').slice(0, 300)
+          upstreamCode: errCode || providerError.code || '',
+          upstreamType: providerError.type || '',
+          upstreamMessage: (providerError.message || errMsg || '').slice(0, 300),
+          upstreamRequestId: providerResponse && providerResponse.request_id ? providerResponse.request_id : ''
         };
         console.error('[code-agent] PROVIDER_HTTP_400 diagnostics:', JSON.stringify(diagnoseInfo));
         // 根据上游错误信息细分
@@ -2664,7 +2720,20 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         thinkingMode: thinkingMode,
         currentPromptTokens: null,
         cacheHitTokens: null,
-        cacheMissTokens: null
+        cacheMissTokens: null,
+        // 文档能力 — 来源必须是 buildCodeCapabilities()
+        canReadCode: capabilities.canReadCode === true,
+        canWriteCode: capabilities.canWriteCode === true,
+        canCreateFiles: capabilities.canCreateFiles === true,
+        canReadDocx: capabilities.canReadDocx === true,
+        canWriteDocx: capabilities.canWriteDocx === true,
+        canReadXlsx: capabilities.canReadXlsx === true,
+        canWriteXlsx: capabilities.canWriteXlsx === true,
+        canReadPdf: capabilities.canReadPdf === true,
+        canWritePdf: capabilities.canWritePdf === true,
+        canReadPptx: capabilities.canReadPptx === true,
+        canWritePptx: capabilities.canWritePptx === true,
+        workspaceReadOnly: capabilities.workspaceReadOnly === true
       };
 
       var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
@@ -2718,6 +2787,20 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       // Send answer_start
       sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
+
+      // 脱敏诊断日志：跟踪 DOCX 上下文链路（SSE 流式路径）
+      console.log('[code-agent] stream_request_diagnostics:', JSON.stringify({
+        request_id: requestId,
+        stream_id: streamId,
+        message_length: message ? message.length : 0,
+        history_count: currentHistory ? currentHistory.length : 0,
+        open_files_count: openFiles.length,
+        attachments_count: attachments.length,
+        open_files: openFiles.map(function(f) { return { path: f.path, content_length: f.content ? f.content.length : 0, mimeType: f.mimeType || '' }; }),
+        thinking_mode: thinkingMode,
+        tools_enabled: !!(Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0),
+        prompt_tokens_estimate: promptTokens
+      }));
 
       var hasStartedStreaming = false;
       var callArgs = {
@@ -2915,12 +2998,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           completion_tokens: usage ? usage.completion_tokens : null,
           total_duration_ms: Date.now() - requestStartTime,
           // AI 文档能力
-          canReadDocx: caps.canReadDocx === true,
-          canWriteDocx: caps.canWriteDocx === true,
-          canReadXlsx: caps.canReadXlsx === true,
-          canWriteXlsx: caps.canWriteXlsx === true,
-          canReadPdf: caps.canReadPdf === true,
-          canWritePdf: caps.canWritePdf === true
+          canReadDocx: capabilities.canReadDocx === true,
+          canWriteDocx: capabilities.canWriteDocx === true,
+          canReadXlsx: capabilities.canReadXlsx === true,
+          canWriteXlsx: capabilities.canWriteXlsx === true,
+          canReadPdf: capabilities.canReadPdf === true,
+          canWritePdf: capabilities.canWritePdf === true
         },
         usage: usage
       });
