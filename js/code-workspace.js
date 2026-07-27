@@ -3619,7 +3619,7 @@
       client_request_id: 'code_cr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       message: message,
       active_path: state.activePath || '',
-      thinking_mode: 'auto',
+      thinking_mode: 'high',
       history: historyMsgs,
       pinned_paths: state.pinnedFiles.slice(),
       open_files: buildOpenFilesContext(),
@@ -3648,11 +3648,9 @@
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
 
-    // Disable UI
+    // P0 Fix: 不完全禁用输入框，用户可以输入下一条草稿
     state.sending = true;
-    input.disabled = true;
-    var sendBtn = document.getElementById('codeChatSendBtn');
-    if (sendBtn) sendBtn.disabled = true;
+    // 不禁用输入框，只切换按钮
     updateChatRequestControls();
 
     // Cancel previous request
@@ -3741,10 +3739,11 @@
         return null;
       }
       removeTypingIndicator();
-      restoreFailedMessage(message);
+      // P0 Fix: 失败时不重复恢复消息到输入框
+      // 只在真正发送失败时恢复一次（即网络层失败，消息未离开客户端）
+      // 如果已经收到错误响应（后端返回了错误），不恢复消息到输入框
       state.messages.push({ role: 'assistant', content: 'Request failed: ' + ((err && err.message) || String(err)), time: timeStr });
       renderChatPanel();
-      restoreFailedMessage(message);
       state.sending = false;
       state._abortController = null;
       state._sharedCtrl = null;
@@ -3769,9 +3768,9 @@
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
     var cancelBtn = document.getElementById('codeChatCancelBtn');
-    if (input) input.disabled = !!state.sending;
+    // P0 Fix: 不禁止输入框，用户可以输入下一条草稿
+    if (input) input.disabled = false;
     if (sendBtn) {
-      sendBtn.disabled = !!state.sending;
       sendBtn.style.display = state.sending ? 'none' : '';
     }
     if (cancelBtn) {
@@ -3794,7 +3793,7 @@
     state._telemetry = null;
     state.sending = false;
     removeTypingIndicator();
-    restoreFailedMessage(state.lastFailedMessage);
+    // P0 Fix: 用户主动取消不恢复消息到输入框
     updateChatRequestControls();
     return true;
   }
@@ -4440,14 +4439,14 @@
             throw rebuildFailed;
           }
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          // P0 Fix: 自动重试不再添加第二次用户消息
           return sendApiRequest(body, requestId, timeStr, wsGen, true);
         }).catch(function (rebuildError) {
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
           removeTypingIndicator();
-          restoreFailedMessage(body && body.message);
+          // P0 Fix: 索引重建失败，不重复恢复消息
           state.messages.push({ role: 'assistant', content: '索引重建失败：' + ((rebuildError && rebuildError.message) || '请稍后重试'), time: timeStr });
           renderChatPanel();
-          restoreFailedMessage(body && body.message);
           return null;
         });
       }
@@ -4477,7 +4476,10 @@
         try { state._sharedCtrl.error(errCode || 'code_request_error'); } catch (e) {}
         if (state._telemetry) { state._telemetry.finalize('error', { code: errCode, phase: 'code_request', message: errMsg }); }
       }
-      restoreFailedMessage(body && body.message);
+      // P0 Fix: 只在 400 类错误（客户端验证失败）时恢复消息到输入框
+      if (errCode === 'PROVIDER_HTTP_400' || errCode === 'PROVIDER_INVALID_REQUEST' || errCode === 'VALIDATION_FAILED') {
+        restoreFailedMessage(body && body.message);
+      }
 
       // Phase 2: Build enhanced error message with code and requestId
       var displayMsg = errMsg;
@@ -4499,7 +4501,7 @@
       state.messages.push(assistantMsg);
 
       renderChatPanel();
-      restoreFailedMessage(body && body.message);
+      // P0 Fix: 只恢复一次消息到输入框，不重复调用 restoreFailedMessage
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
@@ -4513,10 +4515,7 @@
       if (wsGen !== state.workspaceGeneration) return;
       state.sending = false;
       state._abortController = null;
-      var inp = document.getElementById('codeChatInput');
-      if (inp) inp.disabled = false;
-      var sb = document.getElementById('codeChatSendBtn');
-      if (sb) sb.disabled = false;
+      // P0 Fix: 不重新禁用输入框
       updateChatRequestControls();
     });
   }
