@@ -73,6 +73,11 @@
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
+  // Phase 2: Feature flag for streaming Code agent
+  var CODE_STREAM_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_STREAM_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
   // ──────────────────────────────────────────────
   // Utilities
   // ──────────────────────────────────────────────
@@ -3611,8 +3616,10 @@
       workspace_id: scope.workspace_id,
       workspace_generation: scope.workspace_generation,
       conversation_id: state.conversationId,
+      client_request_id: 'code_cr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       message: message,
       active_path: state.activePath || '',
+      thinking_mode: 'auto',
       history: historyMsgs,
       pinned_paths: state.pinnedFiles.slice(),
       open_files: buildOpenFilesContext(),
@@ -3713,6 +3720,10 @@
     return ensureOpenFileContexts(message).then(function () {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       var body = buildChatRequestBody(message, historyMsgs);
+      // Phase 2: Route to streaming endpoint when feature flag is enabled
+      if (CODE_STREAM_ENABLED) {
+        return sendStreamingRequest(body, requestId, timeStr, wsGen);
+      }
       return sendApiRequest(body, requestId, timeStr, wsGen);
     }).catch(function (err) {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
@@ -3786,6 +3797,490 @@
     restoreFailedMessage(state.lastFailedMessage);
     updateChatRequestControls();
     return true;
+  }
+
+  // ── Phase 2: Streaming SSE request handler ──────────────────────────────
+  function sendStreamingRequest(body, requestId, timeStr, wsGen) {
+    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
+    var controller = state._abortController;
+    var timeoutId;
+    var streamDone = false;
+
+    // Remove typing indicator — we create a real assistant node instead
+    removeTypingIndicator();
+
+    // Create the single assistant node immediately
+    var messagesContainer = document.getElementById('codeChatMessages');
+    if (!messagesContainer) {
+      state.sending = false;
+      state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      updateChatRequestControls();
+      return;
+    }
+
+    var assistantNode = document.createElement('div');
+    assistantNode.className = 'code-chat-message assistant streaming';
+    assistantNode.id = 'codeStreamingNode_' + requestId;
+    assistantNode.innerHTML =
+      '<div class="msg-avatar">AI</div>' +
+      '<div class="msg-body">' +
+        '<div class="code-stream-status">' +
+          '<span class="code-stream-status-text">正在分析任务...</span>' +
+          '<span class="code-stream-spinner"></span>' +
+        '</div>' +
+        '<div class="code-stream-tools" style="display:none">' +
+          '<div class="code-stream-tools-header">' +
+            '<span class="code-stream-tools-toggle">&#9654; 工具执行记录</span>' +
+          '</div>' +
+          '<div class="code-stream-tools-list"></div>' +
+        '</div>' +
+        '<div class="msg-content markdown-body code-stream-content"></div>' +
+        '<div class="code-stream-usage" style="display:none"></div>' +
+        '<div class="code-stream-error" style="display:none"></div>' +
+        '<div class="msg-time">' + escapeHTML(timeStr) + '</div>' +
+      '</div>';
+    messagesContainer.appendChild(assistantNode);
+    scrollChatToBottom();
+
+    // Cache DOM references
+    var statusEl = assistantNode.querySelector('.code-stream-status');
+    var statusText = assistantNode.querySelector('.code-stream-status-text');
+    var spinner = assistantNode.querySelector('.code-stream-spinner');
+    var toolsContainer = assistantNode.querySelector('.code-stream-tools');
+    var toolsList = assistantNode.querySelector('.code-stream-tools-list');
+    var toolsHeader = assistantNode.querySelector('.code-stream-tools-header');
+    var contentEl = assistantNode.querySelector('.code-stream-content');
+    var usageEl = assistantNode.querySelector('.code-stream-usage');
+    var errorEl = assistantNode.querySelector('.code-stream-error');
+    var timeEl = assistantNode.querySelector('.msg-time');
+
+    var toolCount = 0;
+    var toolsExpanded = false;
+    var answerBuffer = '';
+    var answerStarted = false;
+    var finalReply = '';
+    var finalOperations = [];
+    var finalUsage = null;
+    var finalContextInfo = null;
+    var finalToolTrace = null;
+    var finalRuntime = null;
+    var streamCancelled = false;
+
+    // Toggle tools section
+    if (toolsHeader) {
+      toolsHeader.addEventListener('click', function () {
+        toolsExpanded = !toolsExpanded;
+        toolsList.style.display = toolsExpanded ? '' : 'none';
+        var toggle = toolsHeader.querySelector('.code-stream-tools-toggle');
+        if (toggle) toggle.innerHTML = (toolsExpanded ? '&#9660;' : '&#9654;') + ' 工具执行记录';
+      });
+    }
+
+    // Scroll handler
+    var scrollCtrl = null;
+    if (window.XtjAiCore && window.XtjAiCore.Scroll) {
+      scrollCtrl = window.XtjAiCore.Scroll.create(messagesContainer);
+    }
+
+    function appendAnswerDelta(delta) {
+      if (streamCancelled) return;
+      answerStarted = true;
+      answerBuffer += String(delta);
+      if (statusEl) statusEl.style.display = 'none';
+      // Use StreamRenderer for smooth text output
+      if (!contentEl._streamRenderer && window.XtjAiCore && window.XtjAiCore.StreamRenderer) {
+        contentEl._streamRenderer = window.XtjAiCore.StreamRenderer.create(contentEl, { plainStream: true });
+      }
+      if (contentEl._streamRenderer) {
+        contentEl._streamRenderer.append(String(delta));
+      } else {
+        // Fallback: direct text update
+        contentEl.textContent = answerBuffer;
+      }
+      if (scrollCtrl) scrollCtrl.onNewContent();
+    }
+
+    function addToolStart(data) {
+      if (streamCancelled) return;
+      toolCount++;
+      if (toolsContainer) toolsContainer.style.display = '';
+      if (statusText) statusText.textContent = data.summary || ('执行工具: ' + (data.tool || ''));
+      var item = document.createElement('div');
+      item.className = 'code-stream-tool-item';
+      item.id = 'tool-item-' + (data.tool_call_id || toolCount);
+      item.innerHTML = '<span class="code-stream-tool-icon spinner"></span>' +
+        '<span class="code-stream-tool-name">' + escapeHTML(data.tool || '') + '</span>' +
+        '<span class="code-stream-tool-summary">' + escapeHTML(data.summary || '') + '</span>';
+      toolsList.appendChild(item);
+    }
+
+    function updateToolResult(data) {
+      if (streamCancelled) return;
+      var itemId = 'tool-item-' + (data.tool_call_id || toolCount);
+      var item = document.getElementById(itemId);
+      if (!item) {
+        // Item may have been created after tool_start, try finding by tool name
+        var items = toolsList.querySelectorAll('.code-stream-tool-item');
+        if (items.length > 0) item = items[items.length - 1];
+      }
+      if (item) {
+        var icon = item.querySelector('.code-stream-tool-icon');
+        if (icon) {
+          icon.className = 'code-stream-tool-icon ' + (data.ok ? 'success' : 'error');
+        }
+        var summary = item.querySelector('.code-stream-tool-summary');
+        if (summary) summary.textContent = data.summary || '';
+      }
+      if (statusText) statusText.textContent = '已完成 ' + toolCount + ' 个工具调用';
+    }
+
+    function showError(code, message, retryable) {
+      if (streamCancelled) return;
+      if (statusEl) statusEl.style.display = 'none';
+      if (spinner) spinner.style.display = 'none';
+      if (errorEl) {
+        errorEl.style.display = '';
+        var errorHtml = '<div class="code-stream-error-msg">';
+        if (code) errorHtml += '<span class="code-stream-error-code">[' + escapeHTML(code) + ']</span> ';
+        errorHtml += escapeHTML(message || '请求失败');
+        errorHtml += '</div>';
+        if (retryable) {
+          errorHtml += '<button class="code-stream-retry-btn" type="button">重新生成</button>';
+        }
+        errorEl.innerHTML = errorHtml;
+        var retryBtn = errorEl.querySelector('.code-stream-retry-btn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', function () {
+            sendMessage();
+          });
+        }
+      }
+      // Keep partial content
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.stop(); } catch (e) {}
+      }
+    }
+
+    function finalizeNode() {
+      streamDone = true;
+      if (spinner) spinner.style.display = 'none';
+      if (statusEl) statusEl.style.display = 'none';
+
+      // Final markdown render
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.finish(finalReply || answerBuffer); } catch (e) {}
+        contentEl._streamRenderer = null;
+      } else if (finalReply || answerBuffer) {
+        contentEl.innerHTML = parseSimpleMarkdown(finalReply || answerBuffer);
+      }
+
+      // Show usage
+      if (finalUsage && usageEl) {
+        usageEl.style.display = '';
+        var usageParts = [];
+        if (finalUsage.model) usageParts.push('模型: ' + escapeHTML(finalUsage.model));
+        if (finalUsage.input_tokens) usageParts.push('输入: ' + finalUsage.input_tokens.toLocaleString() + ' Token');
+        if (finalUsage.output_tokens) usageParts.push('输出: ' + finalUsage.output_tokens.toLocaleString() + ' Token');
+        if (finalUsage.cache_hit_tokens) usageParts.push('缓存命中: ' + finalUsage.cache_hit_tokens.toLocaleString() + ' Token');
+        if (finalUsage.total_duration_ms) usageParts.push('耗时: ' + (finalUsage.total_duration_ms / 1000).toFixed(1) + 's');
+        usageEl.textContent = usageParts.join(' | ');
+      }
+
+      // Update time
+      var now = new Date();
+      if (timeEl) timeEl.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+      assistantNode.classList.remove('streaming');
+    }
+
+    function cleanupStream() {
+      clearTimeout(timeoutId);
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.stop(); } catch (e) {}
+        contentEl._streamRenderer = null;
+      }
+      if (scrollCtrl) {
+        try { scrollCtrl.detach(); } catch (e) {}
+        scrollCtrl = null;
+      }
+    }
+
+    // Timeout
+    timeoutId = setTimeout(function () {
+      if (streamDone) return;
+      streamCancelled = true;
+      if (controller) {
+        try { controller.abort(); } catch (e) {}
+      }
+      showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true);
+      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true });
+      finalizeRequestState();
+    }, 120000);
+
+    // Send the SSE request
+    var apiCall;
+    if (window.xtjProtectedFetch) {
+      apiCall = window.xtjProtectedFetch('/api/code/chat/stream', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: signal
+      });
+    } else {
+      apiCall = fetch('/api/code/chat/stream', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: signal
+      });
+    }
+
+    apiCall.then(function (resp) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        cleanupStream();
+        return;
+      }
+      if (!resp.ok) {
+        return resp.text().then(function (text) {
+          var json = null;
+          try { json = JSON.parse(text); } catch (e) {}
+          var errMsg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
+          var errCode = (json && json.code) ? json.code : '';
+          showError(errCode, errMsg, json && json.retryable);
+          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
+          finalizeRequestState();
+        });
+      }
+
+      // Read SSE stream
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function readStream() {
+        if (streamCancelled) return;
+        reader.read().then(function (result) {
+          if (result.done) {
+            // Stream ended
+            if (!streamDone) {
+              finalizeNode();
+              state.messages.push({
+                role: 'assistant',
+                content: finalReply || answerBuffer || '（无响应）',
+                time: timeStr,
+                toolTrace: finalToolTrace,
+                operations: finalOperations,
+                contextInfo: finalContextInfo,
+                runtime: finalRuntime,
+                usage: finalUsage
+              });
+              finalizeRequestState();
+              cleanupStream();
+            }
+            return;
+          }
+
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop(); // Keep incomplete line
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line || !line.startsWith('data: ')) continue;
+            var jsonStr = line.slice(6);
+            var event;
+            try { event = JSON.parse(jsonStr); } catch (e) { continue; }
+            if (!event || !event.type) continue;
+
+            handleSSEEvent(event);
+          }
+
+          readStream();
+        }).catch(function (err) {
+          if (streamCancelled || streamDone) return;
+          if (err && err.name === 'AbortError') {
+            handleStreamCancelled();
+          } else {
+            showError('STREAM_INTERRUPTED', '流式连接中断', true);
+            state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED' });
+            finalizeRequestState();
+          }
+          cleanupStream();
+        });
+      }
+
+      function handleSSEEvent(event) {
+        if (streamCancelled || streamDone) return;
+        switch (event.type) {
+          case 'accepted':
+            if (statusText) statusText.textContent = '请求已接受，正在处理...';
+            break;
+          case 'planning':
+            if (statusText) statusText.textContent = (event.data && event.data.message) || '正在分析任务...';
+            break;
+          case 'tool_start':
+            addToolStart(event.data || {});
+            break;
+          case 'tool_result':
+            updateToolResult(event.data || {});
+            break;
+          case 'answer_start':
+            if (statusText) statusText.textContent = '正在生成回答...';
+            break;
+          case 'answer_delta':
+            var delta = (event.data && event.data.delta) ? event.data.delta : '';
+            if (delta) appendAnswerDelta(delta);
+            break;
+          case 'operation_preview':
+            if (event.data && event.data.files) {
+              if (statusText) statusText.textContent = '生成修改操作: ' + (event.data.files.length || 0) + ' 个文件';
+            }
+            break;
+          case 'usage':
+            finalUsage = event.data || null;
+            break;
+          case 'warning':
+            console.warn('[CODE-STREAM] Warning:', event.data);
+            break;
+          case 'heartbeat':
+            // Keep-alive, do nothing
+            break;
+          case 'done':
+            finalReply = (event.data && event.data.reply) ? event.data.reply : '';
+            finalOperations = (event.data && Array.isArray(event.data.operations)) ? event.data.operations : [];
+            finalContextInfo = (event.data && event.data.context_info) || null;
+            finalToolTrace = (event.data && Array.isArray(event.data.tool_trace)) ? event.data.tool_trace : [];
+            finalRuntime = (event.data && event.data.runtime) || null;
+            if (!finalUsage && event.data && event.data.usage) finalUsage = event.data.usage;
+
+            finalizeNode();
+
+            // Update state
+            state.lastSentAttachmentPaths = state.attachments.filter(function (a) { return !a.pinned; }).map(function (a) { return a.path; });
+            consumeTransientAttachments();
+            state.lastFailedMessage = '';
+            state.messages.push({
+              role: 'assistant',
+              content: finalReply || answerBuffer || '（无响应）',
+              time: timeStr,
+              operations: finalOperations,
+              toolTrace: finalToolTrace,
+              contextInfo: finalContextInfo,
+              runtime: finalRuntime,
+              usage: finalUsage
+            });
+
+            if (finalOperations.length > 0) {
+              state.pendingOperations = finalOperations;
+            }
+            if (finalContextInfo) {
+              state.lastReadContext = finalContextInfo;
+            }
+            if (finalRuntime) {
+              state.lastRuntime = finalRuntime;
+            }
+            state.lastToolTrace = finalToolTrace || [];
+
+            finalizeRequestState();
+            cleanupStream();
+
+            // Show diff if operations
+            if (finalOperations.length > 0) {
+              renderDiffView();
+            }
+            break;
+          case 'error':
+            var errCode = (event.data && event.data.code) || 'INTERNAL_ERROR';
+            var errMsg = (event.data && event.data.message) || '请求失败';
+            var retryable = (event.data && event.data.retryable) === true;
+            showError(errCode, errMsg, retryable);
+            state.messages.push({
+              role: 'assistant',
+              content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
+              time: timeStr,
+              errorCode: errCode,
+              retryable: retryable
+            });
+            finalizeRequestState();
+            cleanupStream();
+            break;
+        }
+      }
+
+      function handleStreamCancelled() {
+        streamCancelled = true;
+        if (spinner) spinner.style.display = 'none';
+        if (statusEl) statusEl.style.display = 'none';
+        if (contentEl._streamRenderer) {
+          try { contentEl._streamRenderer.stop(); } catch (e) {}
+        }
+        // Mark as stopped
+        assistantNode.classList.remove('streaming');
+        assistantNode.classList.add('cancelled');
+        if (statusText) {
+          statusText.textContent = '已停止';
+          statusEl.style.display = '';
+        }
+        state.messages.push({
+          role: 'assistant',
+          content: answerBuffer || '（已停止）',
+          time: timeStr,
+          stopped: true
+        });
+        finalizeRequestState();
+        cleanupStream();
+      }
+
+      readStream();
+    }).catch(function (err) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        cleanupStream();
+        return;
+      }
+      cleanupStream();
+      if (err && err.name === 'AbortError') {
+        if (!streamDone) {
+          streamCancelled = true;
+          if (spinner) spinner.style.display = 'none';
+          if (statusEl) statusEl.style.display = 'none';
+          assistantNode.classList.remove('streaming');
+          assistantNode.classList.add('cancelled');
+          state.messages.push({ role: 'assistant', content: answerBuffer || '（已停止）', time: timeStr, stopped: true });
+        }
+        finalizeRequestState();
+        return;
+      }
+      var errMsg = (err && err.message) ? err.message : String(err);
+      showError('NETWORK_ERROR', errMsg, true);
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true });
+      finalizeRequestState();
+    });
+
+    function finalizeRequestState() {
+      clearTimeout(timeoutId);
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.done(); } catch (e) {}
+        if (state._telemetry) {
+          if (finalUsage) state._telemetry.recordUsage(finalUsage);
+          state._telemetry.finalize(streamCancelled ? 'cancelled' : 'done');
+        }
+      }
+      if (state._sharedCtrl) {
+        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        state._sharedCtrl = null;
+      }
+      state._telemetry = null;
+      state.sending = false;
+      state._abortController = null;
+      var inp = document.getElementById('codeChatInput');
+      if (inp) inp.disabled = false;
+      var sb = document.getElementById('codeChatSendBtn');
+      if (sb) sb.disabled = false;
+      updateChatRequestControls();
+      renderProjectStatus();
+    }
   }
 
   function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
