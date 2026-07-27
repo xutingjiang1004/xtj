@@ -1312,52 +1312,72 @@ function persistIndexToDB(supabase, userId, identifier, projectIndex) {
     if (!ws || !ws.id) return null;
     var workspaceId = ws.id;
 
-    // Delete old files and chunks for this workspace, then insert new
-    return pi.deleteAllIndexFiles(supabase, workspaceId).then(function() {
-      var fileEntries = [];
+    // P0-5: Selective deletion — only remove files no longer in the index,
+    // instead of deleting everything and losing the full index on incremental updates.
+    return pi.getIndexFiles(supabase, workspaceId).then(function(existingFiles) {
+      var currentPaths = new Set();
       projectIndex.files.forEach(function(entry, path) {
-        fileEntries.push({ path: path, entry: entry });
+        currentPaths.add(path);
       });
 
-      var uploadFile = function(index) {
-        if (index >= fileEntries.length) return Promise.resolve();
-        var fe = fileEntries[index];
-        var entry = fe.entry;
+      // Delete only files that exist in DB but not in current projectIndex
+      var toDelete = existingFiles.filter(function(f) {
+        return !currentPaths.has(f.path);
+      });
 
-        return pi.upsertIndexFile(supabase, userId, workspaceId, {
-          path: fe.path,
-          name: entry.name,
-          language: entry.language,
-          size: entry.size,
-          modifiedAt: entry.modifiedAt,
-          sha256: entry.sha256
-        }).then(function(fileRecord) {
-          if (!fileRecord || !fileRecord.id) return uploadFile(index + 1);
+      var deletePromise = Promise.resolve();
+      if (toDelete.length > 0) {
+        deletePromise = Promise.all(toDelete.map(function(f) {
+          return pi.deleteIndexFile(supabase, workspaceId, f.path);
+        }));
+      }
 
-          // Collect chunks for this file
-          var chunkRows = [];
-          for (var c = 0; c < entry.chunks.length; c++) {
-            var chunkId = entry.chunks[c];
-            var chunk = projectIndex.chunks.get(chunkId);
-            if (chunk) {
-              chunkRows.push({
-                chunkKey: chunk.id,
-                startLine: chunk.startLine,
-                endLine: chunk.endLine,
-                content: chunk.content,
-                tokenEstimate: chunk.tokenEstimate,
-                contentHash: ''
-              });
-            }
-          }
-          return pi.upsertChunks(supabase, userId, workspaceId, fileRecord.id, chunkRows).then(function() {
-            return uploadFile(index + 1);
-          });
+      return deletePromise.then(function() {
+        var fileEntries = [];
+        projectIndex.files.forEach(function(entry, path) {
+          fileEntries.push({ path: path, entry: entry });
         });
-      };
 
-      return uploadFile(0).then(function() {
-        return workspaceId;
+        var uploadFile = function(index) {
+          if (index >= fileEntries.length) return Promise.resolve();
+          var fe = fileEntries[index];
+          var entry = fe.entry;
+
+          return pi.upsertIndexFile(supabase, userId, workspaceId, {
+            path: fe.path,
+            name: entry.name,
+            language: entry.language,
+            size: entry.size,
+            modifiedAt: entry.modifiedAt,
+            sha256: entry.sha256
+          }).then(function(fileRecord) {
+            if (!fileRecord || !fileRecord.id) return uploadFile(index + 1);
+
+            // Collect chunks for this file
+            var chunkRows = [];
+            for (var c = 0; c < entry.chunks.length; c++) {
+              var chunkId = entry.chunks[c];
+              var chunk = projectIndex.chunks.get(chunkId);
+              if (chunk) {
+                chunkRows.push({
+                  chunkKey: chunk.id,
+                  startLine: chunk.startLine,
+                  endLine: chunk.endLine,
+                  content: chunk.content,
+                  tokenEstimate: chunk.tokenEstimate,
+                  contentHash: ''
+                });
+              }
+            }
+            return pi.upsertChunks(supabase, userId, workspaceId, fileRecord.id, chunkRows).then(function() {
+              return uploadFile(index + 1);
+            });
+          });
+        };
+
+        return uploadFile(0).then(function() {
+          return workspaceId;
+        });
       });
     });
   }).catch(function(e) {
@@ -1394,10 +1414,10 @@ function recoverIndexFromDB(supabase, scope, identifier) {
         lastAccessedAt: now,
         expiresAt: now + registryConfig.ttlMs
       };
-      var key = JSON.stringify([recovered.userId, recovered.workspaceId, recovered.generation]);
+      var key = JSON.stringify([recovered.userId, normalized.workspaceId, recovered.generation]);
       indexRegistry.delete(key);
       indexRegistry.set(key, registryEntry);
-      var baseKey = JSON.stringify([recovered.userId, recovered.workspaceId]);
+      var baseKey = JSON.stringify([recovered.userId, normalized.workspaceId]);
       var currentGen = latestGenerations.get(baseKey);
       if (currentGen === undefined || recovered.generation >= currentGen) {
         latestGenerations.set(baseKey, recovered.generation);

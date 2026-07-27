@@ -19,7 +19,7 @@ function setupSSE(res, req) {
 
 // ── Safe SSE Write ───────────────────────────────────────────────────────
 // Prevents writing after response is closed/finished.
-function createSSEWriter(res) {
+function createSSEWriter(res, req) {
   var closed = false;
   var finished = false;
 
