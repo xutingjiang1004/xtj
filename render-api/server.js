@@ -4388,7 +4388,39 @@ async function callDeepSeek(messages, options) {
   var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  // P0: Multi-layer timeout strategy instead of single fixed timeout
+  var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000); // 3-5 min total
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000; // 60-90s for first response
+  var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s without progress
+  var SINGLE_TOOL_TIMEOUT_MS = 45000; // 45s per tool call
+  var firstTokenReceived = false;
+  var totalTimer = null;
+  var idleTimer = null;
+  var timeoutReason = '';
+
+  function refreshIdleTimeout() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function() {
+      timeoutReason = 'idle_timeout';
+      try { controller.abort(); } catch (e) {}
+    }, IDLE_TIMEOUT_MS);
+  }
+  function onProgress() {
+    if (!firstTokenReceived) firstTokenReceived = true;
+    refreshIdleTimeout();
+  }
+
+  totalTimer = setTimeout(function() {
+    timeoutReason = 'total_timeout';
+    try { controller.abort(); } catch (e) {}
+  }, TOTAL_TIMEOUT_MS);
+  var firstTokenTimer = setTimeout(function() {
+    if (!firstTokenReceived) {
+      timeoutReason = 'first_token_timeout';
+      try { controller.abort(); } catch (e) {}
+    }
+  }, FIRST_TOKEN_TIMEOUT_MS);
+  refreshIdleTimeout();
   var externalSignal = options && options.signal ? options.signal : null;
   var externalAbortHandler = null;
   // ★ U3 修复: signal listener 在完成时也要主动移除，避免长期外部 signal 持有闭包
@@ -4592,10 +4624,21 @@ async function callDeepSeek(messages, options) {
     }
     function finalReplyContainsInternalProtocol(text) {
       var candidate = String(text || '');
+      // 1. DSML protocol markers are always internal
       if (/<[|\uff5c]DSML[|\uff5c]/i.test(candidate)) return true;
-      // Raw JSON tool payloads are not prose. Do not expose them even if an
-      // upstream gateway mislabels the response as a completed assistant turn.
-      return /^\s*[\[{][\s\S]{0,20000}(?:"tool_calls"|"reasoning_content"|"invoke"|"parameter")[\s\S]*[\]}]\s*$/i.test(candidate);
+      // 2. Only match RAW tool-call JSON that starts/ends cleanly with JSON brackets
+      //    AND contains BOTH "function" AND either "tool_calls" or genuine tool-call structure.
+      //    This avoids false positives on natural prose that merely mentions field names.
+      if (/^\s*\{/.test(candidate) && /\}\s*$/.test(candidate)) {
+        // Looks like a single JSON object — require genuine tool-call structure
+        return /"tool_calls"\s*:/.test(candidate) && /"function"\s*:/.test(candidate) && /"name"\s*:/.test(candidate);
+      }
+      if (/^\s*\[/.test(candidate) && /\]\s*$/.test(candidate)) {
+        // Looks like a JSON array — require it to contain function-call objects
+        return /"type"\s*:\s*"function"/.test(candidate) && /"function"\s*:/.test(candidate);
+      }
+      // 3. Natural language mentioning field names is NOT protocol
+      return false;
     }
     // Keep caller supplied budgets within the provider's documented output
     // limit and avoid serializing NaN/Infinity as JSON null.
@@ -4607,9 +4650,7 @@ async function callDeepSeek(messages, options) {
       }
     }
     async function executeToolWithAbort(toolCall) {
-      // Both the caller's cancellation and this request's own timeout must
-      // interrupt a tool round.  The HTTP fetch signal alone is insufficient:
-      // a custom tool executor can keep Promise.all pending after fetch aborts.
+      // P0: Multi-layer timeout including per-tool timeout
       var abortSignals = [controller.signal];
       if (externalSignal && externalSignal !== controller.signal) abortSignals.push(externalSignal);
       for (var si = 0; si < abortSignals.length; si++) {
@@ -4620,7 +4661,14 @@ async function callDeepSeek(messages, options) {
         }
       }
       var abortListeners = [];
+      var toolTimeout = null;
       var abortPromise = new Promise(function(_, reject) {
+        // Per-tool timeout
+        toolTimeout = setTimeout(function() {
+          var toolTimeoutErr = new Error('Tool execution timeout');
+          toolTimeoutErr.name = 'ToolTimeoutError';
+          reject(toolTimeoutErr);
+        }, SINGLE_TOOL_TIMEOUT_MS);
         abortSignals.forEach(function(signal) {
           var abortListener = function() {
             var cancelled = new Error('AI request cancelled');
@@ -4631,9 +4679,13 @@ async function callDeepSeek(messages, options) {
           signal.addEventListener('abort', abortListener, { once: true });
         });
       });
+      onProgress();
       try {
-        return await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+        var result = await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+        onProgress();
+        return result;
       } finally {
+        if (toolTimeout) clearTimeout(toolTimeout);
         abortListeners.forEach(function(item) {
           try { item.signal.removeEventListener('abort', item.listener); } catch (_) {}
         });
@@ -4641,10 +4693,8 @@ async function callDeepSeek(messages, options) {
     }
 
     for (var round = 0; round < maxToolRounds; round++) {
-      if (round > 0) {
-        clearTimeout(timer);
-        timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
-      }
+      // Reset idle timeout at start of each round
+      onProgress();
       // V2: 只要给了 onThinkingChunk 或 onContentChunk 回调就用流式, 让答案也能流式推送
       var hasThinkCb = (options && typeof options.onThinkingChunk === 'function');
       var hasContentCb = (options && typeof options.onContentChunk === 'function');
@@ -4771,15 +4821,18 @@ async function callDeepSeek(messages, options) {
             // reasoning_content chunk → 推给回调
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
               roundReasoning += sDelta.reasoning_content;
+              onProgress();
               try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
+              onProgress();
               try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
+              onProgress();
               for (var st=0; st < sDelta.tool_calls.length; st++) {
                 var stc = sDelta.tool_calls[st];
                 var stcIdx = stc.index || 0;
@@ -5073,21 +5126,40 @@ async function callDeepSeek(messages, options) {
       finalMessages: workingMessages
     };
   } catch (e) {
-    clearTimeout(timer);
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
     if (e && e.name === 'AbortError') {
       if (externalSignal && externalSignal.aborted) {
         var cancelledError = new Error('AI 调用已取消');
         cancelledError.code = 'AI_CANCELLED';
         throw cancelledError;
       }
-      console.error('[DEEPSEEK] request timeout after', DEEPSEEK_TIMEOUT_MS, 'ms');
-      throw new Error('AI 调用超时，请稍后再试');
+      // Different timeout messages based on which timer fired
+      var timeoutMsg = 'AI 调用超时，请稍后再试';
+      if (timeoutReason === 'first_token_timeout') {
+        timeoutMsg = 'AI 响应超时（首包等待超时），请稍后再试';
+      } else if (timeoutReason === 'idle_timeout') {
+        timeoutMsg = 'AI 响应超时（长时间无进度），请稍后再试';
+      } else if (timeoutReason === 'total_timeout') {
+        timeoutMsg = 'AI 响应超时（任务总时长超时），请简化问题后重试';
+      }
+      console.error('[DEEPSEEK] request timeout:', timeoutReason);
+      var timeoutErr = new Error(timeoutMsg);
+      timeoutErr.code = 'AI_TIMEOUT';
+      throw timeoutErr;
+    }
+    if (e && e.name === 'ToolTimeoutError') {
+      console.error('[DEEPSEEK] tool execution timeout');
+      throw new Error('工具执行超时，请稍后再试');
     }
     if (e && e.message && (e.message.indexOf('AI 调用失败') === 0 || e.message.indexOf('AI 返回格式') === 0)) throw e;
     console.error('[DEEPSEEK] unexpected error:', e && e.message);
     throw new Error('AI 调用异常，请稍后再试');
   } finally {
-    clearTimeout(timer);
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
     if (externalSignal && externalAbortHandler) {
       try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
     }

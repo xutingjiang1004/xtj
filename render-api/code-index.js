@@ -1156,7 +1156,8 @@ function listFiles(scope, directory, depth, pattern) {
     files: results,
     totalFiles: totalFiles,
     returnedFiles: results.length,
-    truncated: truncated
+    truncated: truncated,
+    totalCount: totalFiles
   };
 
   if (truncated) {
