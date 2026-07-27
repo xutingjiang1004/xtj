@@ -109,10 +109,17 @@ test('code-agent validates single file content size', () => {
 // 7. 路径安全校验
 // ============================================================
 test('code-agent validatePath rejects ..', () => {
-  assert.match(codeAgent, /p\.indexOf\('\.\.'\) >= 0/);
+  assert.match(codeAgent, /s\.indexOf\('\\.\\.'\) >= 0/);
 });
 
+test('code-agent validatePath rejects absolute paths', () => {
+  assert.match(codeAgent, /s\.charCodeAt\(0\) === 47/);
+  assert.match(codeAgent, /\[A-Za-z\]:/);
+});
 
+test('code-agent validatePath rejects backslashes', () => {
+  assert.match(codeAgent, /s\.indexOf\('\\\\'\) >= 0/);
+});
 // ============================================================
 // 8. 操作类型限制
 // ============================================================
@@ -379,4 +386,20 @@ test('user message warns about partial index in user message, not system prompt'
   assert.match(codeAgent, /项目索引不完整/);
   // The warning should be inside the user message, not the system prompt
   assert.match(codeAgent, /stateLines\.push\('注意：项目索引不完整/);
+});
+
+
+// ============================================================
+// 19. HTTP 400 Classification & Thinking Fallback
+// ============================================================
+test('code-agent classifies HTTP 400 errors properly', () => {
+  assert.match(codeAgent, /PROVIDER_CONTEXT_TOO_LARGE/);
+  assert.match(codeAgent, /PROVIDER_INVALID_THINKING_MODE/);
+  assert.match(codeAgent, /PROVIDER_INVALID_MODEL/);
+  assert.match(codeAgent, /PROVIDER_TOOL_CALL_UNSUPPORTED/);
+});
+
+test('code-agent falls back to off for thinking mode incompatibility', () => {
+  assert.match(codeAgent, /thinking_mode\s*=\s*'off'/);
+  assert.match(codeAgent, /isThinkingIncompatible/);
 });

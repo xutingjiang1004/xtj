@@ -3023,13 +3023,36 @@
       else if (docTab._extractPromise) docStatus = '文档正在解析';
 
       var charCount = docTab._extractedText ? docTab._extractedText.length : 0;
-      var permStr = state._isReadOnly ? '只读' : '可编辑';
+      var permStr = state._isReadOnly ? '只读' : '可写';
+      
+      // AI 文档能力：优先使用服务端运行时能力，否则按扩展名推断
+      var runtime = state.lastRuntime;
+      var ext = (docTab.name || '').toLowerCase().split('.').pop();
+      var aiCapability = '仅支持读取和分析';
+      if (runtime && (typeof runtime.canReadXlsx !== 'undefined' || typeof runtime.canReadDocx !== 'undefined')) {
+        if (['xlsx', 'xls'].includes(ext)) {
+          aiCapability = runtime.canWriteXlsx ? '支持读取和单元格修改' : '仅支持读取和分析';
+        } else if (['docx', 'doc'].includes(ext)) {
+          aiCapability = runtime.canWriteDocx ? '支持读取和编辑' : '仅支持读取和分析，暂不支持修改';
+        } else if (['pdf'].includes(ext)) {
+          aiCapability = runtime.canWritePdf ? '支持读取和编辑' : '仅支持读取和分析，暂不支持修改';
+        } else {
+          aiCapability = '仅支持读取和分析';
+        }
+      } else {
+        if (['xlsx', 'xls'].includes(ext)) {
+          aiCapability = '支持读取和单元格修改';
+        } else if (['docx', 'pdf', 'pptx', 'txt', 'csv', 'md'].includes(ext)) {
+          aiCapability = '仅支持读取和分析，暂不支持修改';
+        }
+      }
       
       indexDiv.innerHTML =
         '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + docStatus + '</div>' +
         '<div style="color:var(--cw-text-muted);">' + escapeHTML(docTab.name) + '</div>' +
         (charCount > 0 ? '<div style="color:var(--cw-text-muted);">已解析文本：' + charCount + ' 字符</div>' : '') +
-        '<div style="color:var(--cw-text-muted);">当前权限：' + permStr + '</div>';
+        '<div style="color:var(--cw-text-muted);">文件系统权限：' + permStr + '</div>' +
+        '<div style="color:var(--cw-text-muted);">AI 文档能力：' + aiCapability + '</div>';
     } else if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
       var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
