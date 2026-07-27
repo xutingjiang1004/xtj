@@ -2527,8 +2527,8 @@
     syncBuildContextToUI(ctx);
 
     var listPromise = fs.listAllFilesWithMetadata
-      ? fs.listAllFilesWithMetadata(8, 1000)
-      : fs.listAllFiles(8, 1000);
+      ? fs.listAllFilesWithMetadata(8, 1000, controller.signal)
+      : fs.listAllFiles(8, 1000, controller.signal);
 
     var promise = listPromise.then(function (result) {
       if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
@@ -3544,31 +3544,57 @@
   }
 
   function ensureOpenFileContexts(message) {
+    // P0: Only wait for RELEVANT documents, not all open tabs
+    // Relevant = current file + pinned files + attachments + files explicitly mentioned in message
     var pending = [];
+    var relevantPaths = new Set();
+
+    // Add current active file
+    if (state.activePath) relevantPaths.add(state.activePath);
+
+    // Add pinned files
+    state.pinnedFiles.forEach(function(p) { relevantPaths.add(p); });
+
+    // Add attachments
+    state.attachments.forEach(function(a) { if (a.path) relevantPaths.add(a.path); });
+
+    // Check message for file references (simple path/name matching)
+    if (message) {
+      state.openTabs.forEach(function(tab) {
+        if (tab.path && (message.indexOf(tab.name) !== -1 || message.indexOf(tab.path) !== -1)) {
+          relevantPaths.add(tab.path);
+        }
+      });
+    }
+
+    // Only wait for relevant documents that are still extracting
     state.openTabs.forEach(function (tab) {
-      if (tab.type === 'document' && !tab._extractedText && tab._extractPromise) {
-        pending.push(tab._extractPromise);
+      if (tab.type === 'document' && !tab._extractedText && tab._extractPromise && relevantPaths.has(tab.path)) {
+        // Add timeout to relevant document extractions (30s max)
+        var extractWithTimeout = Promise.race([
+          tab._extractPromise,
+          new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 30000); })
+        ]);
+        pending.push(extractWithTimeout);
       }
     });
-    
-    function checkFailedTabs() {
-      var failedTabs = state.openTabs.filter(function (tab) {
-        return tab.type === 'document' && tab._extractError;
-      });
-      var blockingError = null;
-      for (var i = 0; i < failedTabs.length; i++) {
-        var tab = failedTabs[i];
-        var isCurrent = (tab.path === state.activePath);
-        var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
-        var isReferenced = message && (message.indexOf(tab.name) !== -1 || message.indexOf(tab.path) !== -1);
-        var isAttachment = state.attachments.some(function(a) { return a.name === tab.name; });
 
-        if (isCurrent || isPinned || isReferenced || isAttachment) {
-          blockingError = '文档提取失败：' + tab._extractError;
-          break;
+    function checkFailedTabs() {
+      // Only check failures for relevant files
+      var relevantTabs = state.openTabs.filter(function(tab) {
+        return tab.type === 'document' && relevantPaths.has(tab.path);
+      });
+      for (var i = 0; i < relevantTabs.length; i++) {
+        var tab = relevantTabs[i];
+        if (tab._extractError) {
+          var isCurrent = (tab.path === state.activePath);
+          var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
+          var isAttachment = state.attachments.some(function(a) { return a.path === tab.path; });
+          if (isCurrent || isPinned || isAttachment) {
+            throw new Error('文档提取失败：' + tab._extractError);
+          }
         }
       }
-      if (blockingError) throw new Error(blockingError);
       return [];
     }
 
@@ -4159,14 +4185,17 @@
       }
     }
 
-    // Bind buttons
-
-    // Suffix
-    for (var k = oldLines.length - suffixLen; k < oldLines.length; k++) {
-      result.push({ type: 'unchanged', text: oldLines[k], lineNum: k + 1 });
+    // Bind buttons (use _bound flag to avoid duplicate listeners on re-render)
+    var applyBtn = document.getElementById('codeApplyAllBtn');
+    var undoBtn = document.getElementById('codeUndoBtn');
+    if (applyBtn && !applyBtn._diffBound) {
+      applyBtn._diffBound = true;
+      applyBtn.addEventListener('click', applyAllOperations);
     }
-
-    return result;
+    if (undoBtn && !undoBtn._diffBound) {
+      undoBtn._diffBound = true;
+      undoBtn.addEventListener('click', function() { undoOperations(); });
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -4374,7 +4403,7 @@
       });
     }
 
-    // Update operation: re-read existing file and verify SHA-256
+    // replace_range/update: re-read existing file and verify SHA-256 + line ranges
     if (!fs.readFileByPath) {
       return Promise.reject(new Error('File system not available'));
     }
@@ -4384,11 +4413,22 @@
         throw new Error('无法读取文件: ' + op.path);
       }
 
-      if (op.expected_sha256 && result.sha256 !== op.expected_sha256) {
+      // Strict SHA-256 validation for replace_range
+      if (op.type === 'replace_range') {
+        if (!op.expected_sha256) {
+          throw new Error('replace_range 操作缺少 expected_sha256，拒绝执行');
+        }
+        if (!op.start_line || !op.end_line) {
+          throw new Error('replace_range 操作缺少 start_line 或 end_line，拒绝执行');
+        }
+        if (result.sha256 !== op.expected_sha256) {
+          throw new Error('文件 "' + op.path + '" 已被修改（SHA 不匹配），与 AI 生成回复时的内容不一致。请重新生成。');
+        }
+      } else if (op.expected_sha256 && result.sha256 !== op.expected_sha256) {
         throw new Error('文件 "' + op.path + '" 已被修改，与 AI 生成回复时的内容不一致。请重新生成。');
       }
 
-            // Take snapshot of current content before writing
+      // Take snapshot of current content BEFORE writing
       var currentText = result.type === 'text' ? result.content : '';
       if (!state.snapshots[op.path]) {
         state.snapshots[op.path] = {
@@ -4399,19 +4439,48 @@
       }
 
       var contentToWrite = op.new_content || '';
-      if (op.type === 'replace_range' && op.start_line && op.end_line) {
+
+      if (op.type === 'replace_range') {
         var lines = currentText.split('\n');
-        var startIdx = Math.max(0, op.start_line - 1);
-        var endIdx = Math.max(0, op.end_line);
+        var totalLines = lines.length;
+
+        // Strict line range validation: lines must be within actual file range
+        if (op.start_line < 1 || op.end_line < op.start_line) {
+          throw new Error('replace_range 行号无效: start_line=' + op.start_line + ', end_line=' + op.end_line);
+        }
+        if (op.start_line > totalLines) {
+          throw new Error('replace_range start_line (' + op.start_line + ') 超出文件范围（共 ' + totalLines + ' 行）');
+        }
+        if (op.end_line > totalLines + 1) {
+          throw new Error('replace_range end_line (' + op.end_line + ') 超出文件范围（共 ' + totalLines + ' 行）');
+        }
+
+        // Build candidate content in memory first
+        var startIdx = op.start_line - 1;
+        var endIdx = op.end_line;
         var prefix = lines.slice(0, startIdx).join('\n');
-        var suffix = lines.slice(endIdx).join('\n');
-        contentToWrite = (prefix ? prefix + '\n' : '') + contentToWrite + (suffix ? '\n' + suffix : '');
+        var suffix = lines.slice(Math.min(endIdx, totalLines)).join('\n');
+        contentToWrite = (prefix ? prefix + '\n' : '') + op.new_content + (suffix ? '\n' + suffix : '');
       }
 
       op._final_written_content = contentToWrite;
       return fs.writeFileByPath(op.path, contentToWrite);
     }).then(function (writeResult) {
-      if (state.snapshots[op.path]) state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
+      // Post-write verification: re-read and verify SHA
+      return fs.readFileByPath(op.path).then(function (verifyResult) {
+        var expectedSha = writeResult.sha256 || '';
+        if (verifyResult && verifyResult.sha256 && expectedSha && verifyResult.sha256 !== expectedSha) {
+          console.error('[code-workspace] Post-write SHA mismatch for', op.path);
+        }
+        if (state.snapshots[op.path]) {
+          state.snapshots[op.path].afterSha256 = (verifyResult && verifyResult.sha256) || writeResult.sha256 || '';
+        }
+        return writeResult;
+      }).catch(function() {
+        if (state.snapshots[op.path]) state.snapshots[op.path].afterSha256 = writeResult.sha256 || '';
+        return writeResult;
+      });
+    }).then(function (writeResult) {
       // Update open tab if file is open
       var finalContent = op._final_written_content || op.new_content || '';
       for (var i = 0; i < state.openTabs.length; i++) {
