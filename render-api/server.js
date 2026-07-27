@@ -2740,10 +2740,15 @@ async function resolveIpLocationUncached(ip) {
         if (!data.success) { diag.error_code = 'not_success'; throw new Error('ipwho.is not success'); }
         return {
           _diag: diag, provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
+          country_code: data.country_code || '',
+          latitude: data.latitude || null, longitude: data.longitude || null,
+          postal: data.postal || '',
           asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
           org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
           is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
           is_hosting: !!(data.security && data.security.hosting),
+          is_vpn: !!(data.security && data.security.vpn),
+          is_tor: !!(data.security && data.security.tor),
           timezone: data.timezone && data.timezone.id || ''
         };
       } catch(e) {
@@ -2760,18 +2765,18 @@ async function resolveIpLocationUncached(ip) {
         if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
         var data = await resp.json();
         if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
-        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', asn: data.asn || '', isp: data.org || '', org: data.org || '' };
+        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', country_code: data.country_code || '', latitude: data.latitude || null, longitude: data.longitude || null, postal: data.postal || '', asn: data.asn || '', isp: data.org || '', org: data.org || '', timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
     },
     async function() {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
       try {
-        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
+        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,countryCode,lat,lon,zip,query,as,org,isp,mobile,proxy,hosting,timezone', { signal: controller.signal });
         if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
         var data = await resp.json();
         if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
-        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting };
+        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', country_code: data.countryCode || '', latitude: data.lat || null, longitude: data.lon || null, postal: data.zip || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting, timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
     }
   ];
@@ -2795,7 +2800,13 @@ async function resolveIpLocationUncached(ip) {
         is_mobile: result.is_mobile || false,
         is_proxy: result.is_proxy || false,
         is_hosting: result.is_hosting || false,
-        timezone: result.timezone || ''
+        is_vpn: result.is_vpn || false,
+        is_tor: result.is_tor || false,
+        timezone: result.timezone || '',
+        country_code: result.country_code || '',
+        latitude: result.latitude || null,
+        longitude: result.longitude || null,
+        postal: result.postal || ''
       };
     } catch(e) {
       console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
@@ -10163,7 +10174,7 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
         if (evt[key]) { if (!fingerprintSet[key]) fingerprintSet[key] = []; if (fingerprintSet[key].indexOf(evt[key]) < 0) fingerprintSet[key].push(evt[key]); }
       });
       if (evt.proxy_detection && (evt.proxy_detection.risk_level === 'high' || evt.proxy_detection.risk_level === 'critical')) {
-        proxyAlerts.push({ risk_level: evt.proxy_detection.risk_level, timezone_match: evt.proxy_detection.timezone_match, time: evt.recorded_at, ip: evt.ip });
+        proxyAlerts.push({ risk_level: evt.proxy_detection.risk_level, timezone_match: evt.proxy_detection.timezone_match, risk_signals: evt.proxy_detection.risk_signals || [], language_match: evt.proxy_detection.language_match || 'unknown', time: evt.recorded_at, ip: evt.ip });
       } else if (evt.asn_info && evt.asn_info.is_proxy) {
         proxyAlerts.push({ risk_level: 'high', reason: 'proxy_ip', time: evt.recorded_at, ip: evt.ip });
       }
@@ -10563,11 +10574,40 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         suspicious_headers: suspiciousHeaders.length > 0 ? suspiciousHeaders : null,
         is_proxy: (asnInfo && asnInfo.is_proxy) || false,
         is_hosting: (asnInfo && asnInfo.is_hosting) || false,
-        risk_level: 'low'
+        is_vpn: (ipLocation && ipLocation.is_vpn) || false,
+        is_tor: (ipLocation && ipLocation.is_tor) || false,
+        language_match: 'unknown',
+        risk_level: 'low',
+        risk_signals: []
       };
-      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'medium';
-      if (proxyDetection.is_proxy) proxyDetection.risk_level = 'high';
-      if (proxyDetection.is_proxy && proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'critical';
+      // 语言与地区匹配检测
+      try {
+        var clientLangs = finalDeviceMeta && finalDeviceMeta.languages ? finalDeviceMeta.languages : [];
+        var ipCountryCode = ipLocation && ipLocation.country_code ? ipLocation.country_code.toUpperCase() : '';
+        if (clientLangs.length > 0 && ipCountryCode) {
+          var primaryLang = String(clientLangs[0] || '').slice(0, 5).toUpperCase();
+          var langCountryMap = { 'CN': ['ZH'], 'US': ['EN'], 'GB': ['EN'], 'JP': ['JA'], 'KR': ['KO'], 'DE': ['DE'], 'FR': ['FR'], 'RU': ['RU'], 'BR': ['PT'], 'ES': ['ES'], 'IT': ['IT'], 'TW': ['ZH'], 'HK': ['ZH'] };
+          var expectedLangs = langCountryMap[ipCountryCode];
+          if (expectedLangs) {
+            var langPrefix = primaryLang.split('-')[0];
+            proxyDetection.language_match = expectedLangs.indexOf(langPrefix) >= 0 ? 'match' : 'mismatch';
+          }
+        }
+      } catch(e) {}
+      // 风险信号聚合
+      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_signals.push('timezone_mismatch');
+      if (proxyDetection.language_match === 'mismatch') proxyDetection.risk_signals.push('language_mismatch');
+      if (proxyDetection.is_proxy) proxyDetection.risk_signals.push('proxy_ip');
+      if (proxyDetection.is_vpn) proxyDetection.risk_signals.push('vpn');
+      if (proxyDetection.is_tor) proxyDetection.risk_signals.push('tor');
+      if (proxyDetection.is_hosting) proxyDetection.risk_signals.push('hosting_ip');
+      if (suspiciousHeaders.length > 0) proxyDetection.risk_signals.push('suspicious_headers');
+      // 风险等级计算
+      var riskScore = proxyDetection.risk_signals.length;
+      if (riskScore === 0) proxyDetection.risk_level = 'low';
+      else if (riskScore === 1) proxyDetection.risk_level = 'medium';
+      else if (riskScore <= 3) proxyDetection.risk_level = 'high';
+      else proxyDetection.risk_level = 'critical';
     } catch(e) {}
 
     // 写入 posts 表（短期方案，不新建表）

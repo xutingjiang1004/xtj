@@ -5579,11 +5579,20 @@ async function initAdminClient() {
         h += '<div class="card" style="' + cardStyle + '">';
         h += '<div style="' + titleStyle + '"><span style="color:#10b981;display:flex">' + adminIcons.network + '</span>网络信息</div>';
         h += '<div style="' + rowStyle + '"><span>IP</span><span class="ip-text">' + escapeHtml(p.latest_ip || '') + '</span></div>';
-        if (p.latest_location) h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_location.text || '') + '</span></div>';
+        if (p.latest_location) {
+            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_location.text || '') + '</span></div>';
+            if (p.latest_location.latitude && p.latest_location.longitude) {
+                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + Number(p.latest_location.latitude).toFixed(4) + ', ' + Number(p.latest_location.longitude).toFixed(4) + '</span></div>';
+            }
+            if (p.latest_location.country_code) h += '<div style="' + rowStyle + '"><span>国家代码</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.country_code) + '</span></div>';
+            if (p.latest_location.postal) h += '<div style="' + rowStyle + '"><span>邮编</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.postal) + '</span></div>';
+        }
         if (p.latest_asn) {
-            h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px;border-top:1px dashed var(--border);padding-top:8px"><span>ISP</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_asn.isp || '') + '</span></div>';
+            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px;border-top:1px dashed var(--border);padding-top:8px"><span>ISP</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_asn.isp || '') + '</span></div>';
             h += '<div style="' + rowStyle + '"><span>ASN</span><span style="' + valStyle + '">' + escapeHtml(p.latest_asn.asn || '') + '</span></div>';
-            if (p.latest_asn.is_proxy) h += '<div style="' + rowStyle + '"><span>代理/VPN</span><span style="color:var(--danger);font-weight:600;display:flex;align-items:center;gap:4px">' + adminIcons.warning + ' 是</span></div>';
+            if (p.latest_asn.is_proxy) h += '<div style="' + rowStyle + '"><span>代理</span><span style="color:var(--danger);font-weight:600;display:flex;align-items:center;gap:4px">' + adminIcons.warning + ' 是</span></div>';
+            if (p.latest_asn.is_vpn) h += '<div style="' + rowStyle + '"><span>VPN</span><span style="color:var(--danger);font-weight:600">是</span></div>';
+            if (p.latest_asn.is_tor) h += '<div style="' + rowStyle + '"><span>Tor</span><span style="color:var(--danger);font-weight:600">是</span></div>';
             if (p.latest_asn.is_hosting) h += '<div style="' + rowStyle + '"><span>数据中心</span><span style="color:var(--warning);font-weight:600">是</span></div>';
         }
         h += '</div>';
@@ -5601,12 +5610,13 @@ async function initAdminClient() {
         // 代理警报
         if (p.proxy_alerts && p.proxy_alerts.length > 0) {
             h += '<div class="card" style="margin:12px 0;border-left:3px solid var(--danger)"><h4>\u26a0\ufe0f 代理/VPN 警报 (' + p.proxy_alerts.length + ')</h4>';
-            h += '<div class="table-wrap"><table><thead><tr><th>风险</th><th>IP</th><th>时区</th><th>时间</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>风险</th><th>IP</th><th>触发信号</th><th>时间</th></tr></thead><tbody>';
             p.proxy_alerts.forEach(function(a) {
                 var color = a.risk_level === 'critical' ? 'var(--danger)' : 'var(--warning)';
+                var signals = a.risk_signals ? a.risk_signals.join(', ') : (a.timezone_match || a.reason || '');
                 h += '<tr><td style="color:' + color + ';font-weight:600">' + escapeHtml(a.risk_level) + '</td>';
                 h += '<td>' + escapeHtml(a.ip || '') + '</td>';
-                h += '<td>' + escapeHtml(a.timezone_match || a.reason || '') + '</td>';
+                h += '<td style="font-size:12px">' + escapeHtml(signals) + '</td>';
                 h += '<td>' + formatTime(a.time) + '</td></tr>';
             });
             h += '</tbody></table></div></div>';
