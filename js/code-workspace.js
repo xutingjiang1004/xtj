@@ -805,11 +805,12 @@
       state.workspaceMode = 'local';
       state._isReadOnly = !!readOnly;
       try { localStorage.setItem('xtj_code_workspace_name', state.workspaceName); } catch (e) { /* ignore */ }
-      renderWorkspace().then(function () {
-        if (handle && handle._isSingleFileRoot) {
+      renderWorkspace();
+      if (handle && handle._isSingleFileRoot) {
+        window.setTimeout(function () {
           openFile(handle.name);
-        }
-      });
+        }, 0);
+      }
     }
 
     if (typeof fs.selectFile === 'function' && window.showOpenFilePicker && window.isSecureContext) {
@@ -3011,22 +3012,35 @@
     var indexDiv = document.createElement('div');
     indexDiv.style.cssText = 'padding:8px 12px;font-size:11px;line-height:1.6;';
 
-    if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
+    var docTab = state.openTabs && state.openTabs.find(function(t) { return t.type === 'document'; });
+    var kindStr = (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹'));
+    var isDocWorkspace = (state.projectIndexStatus && state.projectIndexStatus.totalFiles === 0) && (kindStr === '本地单文件' || (state.projectIndexStatus && state.projectIndexStatus.scannedFiles > 0) || docTab);
+
+    if (isDocWorkspace && docTab) {
+      var docStatus = '文档正在打开';
+      if (docTab._extractError) docStatus = '文档解析失败';
+      else if (docTab._extractedText) docStatus = '文档已就绪';
+      else if (docTab._extractPromise) docStatus = '文档正在解析';
+
+      var charCount = docTab._extractedText ? docTab._extractedText.length : 0;
+      var permStr = state._isReadOnly ? '只读' : '可编辑';
+      
+      indexDiv.innerHTML =
+        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + docStatus + '</div>' +
+        '<div style="color:var(--cw-text-muted);">' + escapeHTML(docTab.name) + '</div>' +
+        (charCount > 0 ? '<div style="color:var(--cw-text-muted);">已解析文本：' + charCount + ' 字符</div>' : '') +
+        '<div style="color:var(--cw-text-muted);">当前权限：' + permStr + '</div>';
+    } else if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
-      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已就绪';
-      var kindStr = (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹'));
-      var hasDocOpen = state.openTabs && state.openTabs.some(function(t) { return t.type === 'document'; });
-      // Identify doc-only workspace: no code files indexed, but files exist (or explicitly single file/doc open)
-      var isDocWorkspace = idx.totalFiles === 0 && (kindStr === '本地单文件' || idx.scannedFiles > 0 || hasDocOpen);
-      var statsHtml = isDocWorkspace ? 
-        '<div style="color:var(--cw-text-muted);">文档模式</div>' : 
-        ('<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
-         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>');
+      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
+      
+      var statsHtml = '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
+                      '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>';
 
       indexDiv.innerHTML =
         '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + '</div>' +
         statsHtml +
-        (isDocWorkspace && kindStr !== '本地单文件' ? '' : '<div style="color:var(--cw-text-muted);">' + kindStr + '</div>');
+        '<div style="color:var(--cw-text-muted);">' + kindStr + '</div>';
       if (idx.truncated) {
         var truncationWarning = document.createElement('div');
         truncationWarning.className = 'code-index-warning';
@@ -4083,11 +4097,16 @@
       return;
     }
 
-    // Phase 1: Use backend index for context selection (no more full file uploads)
     // Build history WITHOUT the current message (dedup)
-    var historyMsgs = state.messages.slice(0, -1).slice(-50).map(function (m) {
-      return { role: m.role, content: m.content };
-    });
+    var historyMsgs = [];
+    var recentMsgs = state.messages.slice(0, -1).slice(-50);
+    for (var mi = 0; mi < recentMsgs.length; mi++) {
+      var m = recentMsgs[mi];
+      if (m.errorCode || m.retryable || m.stopped || !m.content || m.content === '（已停止）' || m.content === '（无响应）') {
+        continue;
+      }
+      historyMsgs.push({ role: m.role, content: m.content });
+    }
 
     // Documents are extracted asynchronously for preview. Wait for that
     // result before building the request, otherwise a fast send would omit
@@ -4353,12 +4372,30 @@
       if (spinner) spinner.style.display = 'none';
       if (errorEl) {
         errorEl.style.display = '';
+        
+        var friendlyMessage = message || '请求失败';
+        if (code === 'INDEX_REBUILD_REQUIRED') {
+          friendlyMessage = '当前项目内容尚未准备完成，请等待文档解析或刷新索引。';
+        } else if (code && code.indexOf('PROVIDER_') === 0) {
+          friendlyMessage = 'AI 服务暂时无法处理该请求，请稍后重试。';
+        }
+
         var errorHtml = '<div class="code-stream-error-msg">';
-        if (code) errorHtml += '<span class="code-stream-error-code">[' + escapeHTML(code) + ']</span> ';
-        errorHtml += escapeHTML(message || '请求失败');
+        errorHtml += escapeHTML(friendlyMessage);
+        
+        if (code) {
+          errorHtml += '<details style="margin-top: 8px; font-size: 11px; opacity: 0.7; cursor: pointer;">';
+          errorHtml += '<summary>查看错误详情</summary>';
+          errorHtml += '<div style="margin-top: 4px;">错误码: ' + escapeHTML(code) + '</div>';
+          if (friendlyMessage !== message) {
+             errorHtml += '<div>原始信息: ' + escapeHTML(message) + '</div>';
+          }
+          errorHtml += '</details>';
+        }
+        
         errorHtml += '</div>';
         if (retryable) {
-          errorHtml += '<button class="code-stream-retry-btn" type="button">重新生成</button>';
+          errorHtml += '<button class="code-stream-retry-btn" type="button" style="margin-top: 8px;">重新生成</button>';
         }
         errorEl.innerHTML = errorHtml;
         var retryBtn = errorEl.querySelector('.code-stream-retry-btn');
