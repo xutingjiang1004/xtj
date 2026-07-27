@@ -390,6 +390,14 @@ function extractJsonFromText(text) {
 function buildSystemPrompt() {
   return [
     'You are the XTJ Code Agent, an expert coding and document assistant embedded in a workspace IDE.',
+    '',
+    '【对话规则 - 必须遵守】',
+    '- 只回答最后一条用户消息。历史消息仅用于理解上下文。',
+    '- 历史中已经存在助手回复的问题，不得重新回答。',
+    '- 除非用户明确要求总结、回顾或继续旧问题，否则禁止主动复述或回答历史问题。',
+    '- 用户发送"78是什么"就只回答"78是什么"，不得把之前的 Code、文档或工作区问题一起重新回答。',
+    '- 每次只处理当前用户提出的一个任务，不要合并处理历史中的多个问题。',
+    '',
     'You have real read-only project tools. Use them proactively before making claims about the workspace.',
     'For an explicit file name, locate and read that file. For a broad project question, list files first.',
     'For debugging, search relevant terms, then read the strongest matching files and ranges.',
@@ -1782,7 +1790,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           touchSession(sessionData);
         }
       }
-      var currentHistory = sessionData ? sessionData.history : history;
+      // P0 Fix: 前端 history 是当前请求的唯一历史快照。
+      // 当请求携带 history 时，以本次 history 为准，不合并服务端缓存。
+      // 服务端缓存仅在前端未提交 history 时作为回退。
+      var hasClientHistory = history.length > 0;
+      var currentHistory;
+      if (hasClientHistory) {
+        currentHistory = history;
+        if (sessionData) { sessionData.history = history.slice(); sessionData.messageCount = history.length; touchSession(sessionData); }
+      } else {
+        currentHistory = sessionData ? sessionData.history : [];
+      }
 
       var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
       if (!openResult.ok) return sendError('OPEN_FILES_TOO_LARGE', openResult.error, 413);
@@ -1820,17 +1838,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Phase 3: Compute capabilities and thinkingMode BEFORE building messages
       // so that runtime identity and limits can be injected into the user message.
       var capabilities = buildCodeCapabilities(deps);
-      var thinkingMode = String(body.thinking_mode || 'auto');
-      if (thinkingMode === 'auto' || thinkingMode === 'low') {
+      var thinkingMode = String(body.thinking_mode || 'high');
+      // P0 Fix: 前端明确发送的 thinking_mode 直接使用，不再用 auto 正则覆盖
+      // 只有当前端发送 'auto' 时才做推断
+      if (thinkingMode === 'auto') {
         var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
-        if (simpleTaskRE.test(message.trim())) {
-          thinkingMode = 'off';
-        } else {
-          thinkingMode = 'high';
-        }
+        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
       } else {
-        thinkingMode = /^(off|low|medium|high)$/.test(thinkingMode) ? thinkingMode : 'high';
+        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
       }
+      var requestedThinkingMode = thinkingMode;
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
       // Build runtime capabilities for the tool executor
@@ -1897,33 +1914,34 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var initialMsgsLen = messages.length;
         var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
 
-        // Deduplicate by content hash and role to avoid repeats on retry
-        var seen = new Set();
+        // P0 Fix: 使用稳定 message_id 去重，不再依赖 "role + 前200字符"
+        var seenIds = new Set();
         for (var m = 0; m < sessionData.history.length; m++) {
           var h = sessionData.history[m];
-          seen.add(h.role + ':' + String(h.content).slice(0, 200));
+          if (h.message_id) seenIds.add(h.message_id);
         }
 
-        // Add current user message first
+        // Add current user message with stable ID
+        var userMsgId = body.client_request_id || ('umsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8));
         var userKey = 'user:' + String(message).slice(0, 200);
-        if (!seen.has(userKey)) {
-          sessionData.history.push({ role: 'user', content: message });
-          seen.add(userKey);
+        if (!seenIds.has(userMsgId)) {
+          sessionData.history.push({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' });
+          seenIds.add(userMsgId);
         }
 
         // Add new messages from provider (tool calls, tool results, assistant)
         for (var i = 0; i < newMsgs.length; i++) {
           var msg = newMsgs[i];
           if (!msg || typeof msg !== 'object') continue;
-          // Skip reasoning_content — keep only server-side
           if (msg.reasoning_content) {
             msg = Object.assign({}, msg);
             delete msg.reasoning_content;
           }
-          var msgKey = msg.role + ':' + String(msg.content || '').slice(0, 200);
-          if (!seen.has(msgKey)) {
+          var msgId = msg.message_id || ('amsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8) + '_' + i);
+          if (!seenIds.has(msgId)) {
+            msg.message_id = msgId;
             sessionData.history.push(msg);
-            seen.add(msgKey);
+            seenIds.add(msgId);
           }
         }
 
@@ -1993,7 +2011,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         cacheHitTokens: usage && usage.prompt_cache_hit_tokens != null ? usage.prompt_cache_hit_tokens : null,
         cacheMissTokens: usage && usage.prompt_cache_miss_tokens != null ? usage.prompt_cache_miss_tokens : null,
         completionTokens: usage && usage.completion_tokens != null ? usage.completion_tokens : null,
-        remainingEstimatedTokens: remainingEstimatedTokens
+        remainingEstimatedTokens: remainingEstimatedTokens,
+        // P0 Fix: 思考模式验证字段
+        requestedThinkingMode: requestedThinkingMode,
+        effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : thinkingMode,
+        thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
+        reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
+        thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false
       };
       return res.json({
         ok: true,
@@ -2045,6 +2069,33 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       } else if (/HTTP 400/i.test(errMsg)) {
         code = 'PROVIDER_HTTP_400';
         status = 502;
+        // P0 Fix: 记录脱敏后的请求诊断信息
+        var diagnoseInfo = {
+          requestId: requestId,
+          model: model,
+          phase: requestPhase || 'unknown',
+          thinkingMode: thinkingMode,
+          hasTools: !!(Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0),
+          toolChoice: firstToolChoice ? firstToolChoice.function.name : 'auto',
+          msgCount: messages ? messages.length : 0,
+          promptTokens: typeof promptTokens === 'number' ? promptTokens : 'unknown',
+          upstreamStatus: 400,
+          upstreamCode: errCode || '',
+          upstreamMessage: (errMsg || '').slice(0, 300)
+        };
+        console.error('[code-agent] PROVIDER_HTTP_400 diagnostics:', JSON.stringify(diagnoseInfo));
+        // 根据上游错误信息细分
+        if (/model/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_MODEL';
+        } else if (/thinking|reasoning/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_THINKING_MODE';
+        } else if (/tool|function/i.test(errMsg)) {
+          code = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
+        } else if (/context|token|length/i.test(errMsg)) {
+          code = 'PROVIDER_CONTEXT_TOO_LARGE';
+        } else if (/invalid|format|parse/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_REQUEST';
+        }
       } else if (/HTTP 401/i.test(errMsg)) {
         code = 'PROVIDER_HTTP_401';
         status = 502;
@@ -2259,7 +2310,15 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           touchSession(sessionData);
         }
       }
-      var currentHistory = sessionData ? sessionData.history : history;
+      // P0 Fix: 前端 history 是当前请求的唯一历史快照。
+      var hasClientHistory2 = history.length > 0;
+      var currentHistory;
+      if (hasClientHistory2) {
+        currentHistory = history;
+        if (sessionData) { sessionData.history = history.slice(); sessionData.messageCount = history.length; touchSession(sessionData); }
+      } else {
+        currentHistory = sessionData ? sessionData.history : [];
+      }
 
       var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
       if (!openResult.ok) { sendStreamError('OPEN_FILES_TOO_LARGE', openResult.error, 'validation'); return; }
@@ -2307,13 +2366,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (typeof deps.callDeepSeek !== 'function') { sendStreamError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 'init'); return; }
 
       var capabilities = buildCodeCapabilities(deps);
-      var thinkingMode = String(body.thinking_mode || 'auto');
-      if (thinkingMode === 'auto' || thinkingMode === 'low') {
+      var thinkingMode = String(body.thinking_mode || 'high');
+      if (thinkingMode === 'auto') {
         var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
         thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
       } else {
-        thinkingMode = /^(off|low|medium|high)$/.test(thinkingMode) ? thinkingMode : 'high';
+        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
       }
+      var requestedThinkingMode = thinkingMode;
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
       var runtimeCapabilities = {
@@ -2431,15 +2491,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (sessionData && aiResult.finalMessages && Array.isArray(aiResult.finalMessages)) {
         var initialMsgsLen = messages.length;
         var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
-        var seen = new Set();
+        // P0 Fix: 使用稳定 message_id 去重
+        var seenIds = new Set();
         for (var m = 0; m < sessionData.history.length; m++) {
           var h = sessionData.history[m];
-          seen.add(h.role + ':' + String(h.content).slice(0, 200));
+          if (h.message_id) seenIds.add(h.message_id);
         }
-        var userKey = 'user:' + String(message).slice(0, 200);
-        if (!seen.has(userKey)) {
-          sessionData.history.push({ role: 'user', content: message });
-          seen.add(userKey);
+        var userMsgId = body.client_request_id || ('umsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8));
+        if (!seenIds.has(userMsgId)) {
+          sessionData.history.push({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' });
+          seenIds.add(userMsgId);
         }
         for (var i = 0; i < newMsgs.length; i++) {
           var msg = newMsgs[i];
@@ -2448,10 +2509,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             msg = Object.assign({}, msg);
             delete msg.reasoning_content;
           }
-          var msgKey = msg.role + ':' + String(msg.content || '').slice(0, 200);
-          if (!seen.has(msgKey)) {
+          var msgId = msg.message_id || ('amsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8) + '_' + i);
+          if (!seenIds.has(msgId)) {
+            msg.message_id = msgId;
             sessionData.history.push(msg);
-            seen.add(msgKey);
+            seenIds.add(msgId);
           }
         }
         if (sessionData.history.length > MAX_SESSION_MESSAGES) {
@@ -2523,6 +2585,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         runtime: {
           model: aiResult.model || model,
           thinking_mode: thinkingMode,
+          requestedThinkingMode: requestedThinkingMode,
+          effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : thinkingMode,
+          thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
+          reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
+          thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
           prompt_tokens: promptTokens,
           completion_tokens: usage ? usage.completion_tokens : null,
           total_duration_ms: Date.now() - requestStartTime
