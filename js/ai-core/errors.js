@@ -134,12 +134,36 @@
     MESSAGES: USER_MESSAGES,
     classify: classifyError,
     build: buildError,
-    // Format error for display: "[CODE] message"
+    // 用户可见消息：不显示错误码
+    formatUserMessage: function (err) {
+      var classified = classifyError(err, {});
+      if (classified.code === ERROR_CODES.INDEX_REBUILD_REQUIRED) {
+        return '当前项目内容尚未准备完成，请等待文档解析或刷新索引。';
+      }
+      if (classified.code && classified.code.indexOf('PROVIDER_') === 0) {
+        return 'AI 服务暂时无法处理该请求，请稍后重试。';
+      }
+      return classified.message;
+    },
+    // 调试详情：显示错误码和 request_id
+    formatDebugDetails: function (err) {
+      var classified = classifyError(err, {});
+      var details = [];
+      if (classified.code && classified.code !== ERROR_CODES.UNKNOWN) {
+        details.push('错误码: ' + classified.code);
+      }
+      if (classified.request_id) {
+        details.push('请求ID: ' + classified.request_id);
+      }
+      if (classified.phase) {
+        details.push('请求阶段: ' + classified.phase);
+      }
+      details.push('是否可重试: ' + (classified.retryable ? '是' : '否'));
+      return details;
+    },
+    // 格式化显示（保留向后兼容，但不再自动添加错误码前缀）
     formatDisplay: function (err) {
       var classified = classifyError(err, {});
-      if (classified.code && classified.code !== ERROR_CODES.UNKNOWN) {
-        return '[' + classified.code + '] ' + classified.message;
-      }
       return classified.message;
     }
   };
