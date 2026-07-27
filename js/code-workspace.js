@@ -5090,12 +5090,17 @@
         restoreFailedMessage(body && body.message);
       }
 
-      // Phase 2: Build enhanced error message with code and requestId
+      // Phase 2: Build enhanced error message — 用户可见消息不显示错误码
       var displayMsg = errMsg;
-      if (errCode && errCode !== 'INDEX_REBUILD_REQUIRED') {
-        displayMsg = '[' + errCode + '] ' + displayMsg;
+      var userFriendlyMsg = '抱歉，操作失败';
+      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.Errors.formatUserMessage) {
+        userFriendlyMsg = window.XtjAiCore.Errors.formatUserMessage(err);
+      } else if (errCode === 'INDEX_REBUILD_REQUIRED') {
+        userFriendlyMsg = '当前项目需要构建索引才能处理该问题，系统正在后台为您自动处理，请稍后再试。';
+      } else if (errCode && errCode.indexOf('PROVIDER_') === 0) {
+        userFriendlyMsg = 'AI 服务暂时无法处理该请求，请稍后重试。';
       }
-      var assistantMsg = { role: 'assistant', content: '抱歉，' + displayMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
+      var assistantMsg = { role: 'assistant', content: userFriendlyMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
 
       // Phase 3: Add retryable hint from shared error classification
       if (classified && classified.retryable) {
