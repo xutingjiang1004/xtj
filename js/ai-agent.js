@@ -3141,8 +3141,12 @@ window.throttleRAF = function(fn) {
     }
 
     function ensureThinkCardNode() {
-      return assistantNode;
-      safeRemoveProgressCard()
+      if (aiNodeRef.value) return aiNodeRef.value;
+      if (isResearchCard(progressCard)) {
+        aiNodeRef.value = progressCard;
+        return aiNodeRef.value;
+      }
+      safeRemoveProgressCard();
       var node = el('div', { class: 'ai-think-card expanded generating' });
       node.innerHTML =
         '<div class="ai-think-header">' +
@@ -3175,7 +3179,7 @@ window.throttleRAF = function(fn) {
         }
       });
       messagesEl.appendChild(node);
-      // P5: using assistantNode
+      aiNodeRef.value = node;
       S.autoScrollPinned = true;
       scrollToBottom(messagesEl, true);
       return node;
@@ -3746,10 +3750,10 @@ window.throttleRAF = function(fn) {
     }
 
     function ensureThinkCardNode() {
-      return assistantNode;
+      if (r && r.value) return r.value;
       if (isResearchCard(progressCard)) {
-        aiNode = progressCard;
-        return aiNode;
+        if (r) r.value = progressCard;
+        return progressCard;
       }
       safeRemoveProgressCard();
       var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
@@ -3765,7 +3769,7 @@ window.throttleRAF = function(fn) {
           '<div class="ai-msg-footer"></div>' +
         '</div>';
       dtMessagesEl.appendChild(node);
-      // P5: using assistantNode
+      if (r) r.value = node;
       scrollToBottom(dtMessagesEl, true);
       return node;
     }

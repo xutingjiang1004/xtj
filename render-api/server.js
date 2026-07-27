@@ -2740,10 +2740,15 @@ async function resolveIpLocationUncached(ip) {
         if (!data.success) { diag.error_code = 'not_success'; throw new Error('ipwho.is not success'); }
         return {
           _diag: diag, provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
+          country_code: data.country_code || '',
+          latitude: data.latitude || null, longitude: data.longitude || null,
+          postal: data.postal || '',
           asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
           org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
           is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
           is_hosting: !!(data.security && data.security.hosting),
+          is_vpn: !!(data.security && data.security.vpn),
+          is_tor: !!(data.security && data.security.tor),
           timezone: data.timezone && data.timezone.id || ''
         };
       } catch(e) {
@@ -2760,18 +2765,18 @@ async function resolveIpLocationUncached(ip) {
         if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
         var data = await resp.json();
         if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
-        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', asn: data.asn || '', isp: data.org || '', org: data.org || '' };
+        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', country_code: data.country_code || '', latitude: data.latitude || null, longitude: data.longitude || null, postal: data.postal || '', asn: data.asn || '', isp: data.org || '', org: data.org || '', timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
     },
     async function() {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
       try {
-        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
+        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,countryCode,lat,lon,zip,query,as,org,isp,mobile,proxy,hosting,timezone', { signal: controller.signal });
         if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
         var data = await resp.json();
         if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
-        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting };
+        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', country_code: data.countryCode || '', latitude: data.lat || null, longitude: data.lon || null, postal: data.zip || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting, timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
     }
   ];
@@ -2795,7 +2800,13 @@ async function resolveIpLocationUncached(ip) {
         is_mobile: result.is_mobile || false,
         is_proxy: result.is_proxy || false,
         is_hosting: result.is_hosting || false,
-        timezone: result.timezone || ''
+        is_vpn: result.is_vpn || false,
+        is_tor: result.is_tor || false,
+        timezone: result.timezone || '',
+        country_code: result.country_code || '',
+        latitude: result.latitude || null,
+        longitude: result.longitude || null,
+        postal: result.postal || ''
       };
     } catch(e) {
       console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
@@ -4388,7 +4399,39 @@ async function callDeepSeek(messages, options) {
   var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+  // P0: Multi-layer timeout strategy instead of single fixed timeout
+  var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000); // 3-5 min total
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000; // 60-90s for first response
+  var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s without progress
+  var SINGLE_TOOL_TIMEOUT_MS = 45000; // 45s per tool call
+  var firstTokenReceived = false;
+  var totalTimer = null;
+  var idleTimer = null;
+  var timeoutReason = '';
+
+  function refreshIdleTimeout() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function() {
+      timeoutReason = 'idle_timeout';
+      try { controller.abort(); } catch (e) {}
+    }, IDLE_TIMEOUT_MS);
+  }
+  function onProgress() {
+    if (!firstTokenReceived) firstTokenReceived = true;
+    refreshIdleTimeout();
+  }
+
+  totalTimer = setTimeout(function() {
+    timeoutReason = 'total_timeout';
+    try { controller.abort(); } catch (e) {}
+  }, TOTAL_TIMEOUT_MS);
+  var firstTokenTimer = setTimeout(function() {
+    if (!firstTokenReceived) {
+      timeoutReason = 'first_token_timeout';
+      try { controller.abort(); } catch (e) {}
+    }
+  }, FIRST_TOKEN_TIMEOUT_MS);
+  refreshIdleTimeout();
   var externalSignal = options && options.signal ? options.signal : null;
   var externalAbortHandler = null;
   // ★ U3 修复: signal listener 在完成时也要主动移除，避免长期外部 signal 持有闭包
@@ -4592,10 +4635,21 @@ async function callDeepSeek(messages, options) {
     }
     function finalReplyContainsInternalProtocol(text) {
       var candidate = String(text || '');
+      // 1. DSML protocol markers are always internal
       if (/<[|\uff5c]DSML[|\uff5c]/i.test(candidate)) return true;
-      // Raw JSON tool payloads are not prose. Do not expose them even if an
-      // upstream gateway mislabels the response as a completed assistant turn.
-      return /^\s*[\[{][\s\S]{0,20000}(?:"tool_calls"|"reasoning_content"|"invoke"|"parameter")[\s\S]*[\]}]\s*$/i.test(candidate);
+      // 2. Only match RAW tool-call JSON that starts/ends cleanly with JSON brackets
+      //    AND contains BOTH "function" AND either "tool_calls" or genuine tool-call structure.
+      //    This avoids false positives on natural prose that merely mentions field names.
+      if (/^\s*\{/.test(candidate) && /\}\s*$/.test(candidate)) {
+        // Looks like a single JSON object — require genuine tool-call structure
+        return /"tool_calls"\s*:/.test(candidate) && /"function"\s*:/.test(candidate) && /"name"\s*:/.test(candidate);
+      }
+      if (/^\s*\[/.test(candidate) && /\]\s*$/.test(candidate)) {
+        // Looks like a JSON array — require it to contain function-call objects
+        return /"type"\s*:\s*"function"/.test(candidate) && /"function"\s*:/.test(candidate);
+      }
+      // 3. Natural language mentioning field names is NOT protocol
+      return false;
     }
     // Keep caller supplied budgets within the provider's documented output
     // limit and avoid serializing NaN/Infinity as JSON null.
@@ -4607,9 +4661,7 @@ async function callDeepSeek(messages, options) {
       }
     }
     async function executeToolWithAbort(toolCall) {
-      // Both the caller's cancellation and this request's own timeout must
-      // interrupt a tool round.  The HTTP fetch signal alone is insufficient:
-      // a custom tool executor can keep Promise.all pending after fetch aborts.
+      // P0: Multi-layer timeout including per-tool timeout
       var abortSignals = [controller.signal];
       if (externalSignal && externalSignal !== controller.signal) abortSignals.push(externalSignal);
       for (var si = 0; si < abortSignals.length; si++) {
@@ -4620,7 +4672,14 @@ async function callDeepSeek(messages, options) {
         }
       }
       var abortListeners = [];
+      var toolTimeout = null;
       var abortPromise = new Promise(function(_, reject) {
+        // Per-tool timeout
+        toolTimeout = setTimeout(function() {
+          var toolTimeoutErr = new Error('Tool execution timeout');
+          toolTimeoutErr.name = 'ToolTimeoutError';
+          reject(toolTimeoutErr);
+        }, SINGLE_TOOL_TIMEOUT_MS);
         abortSignals.forEach(function(signal) {
           var abortListener = function() {
             var cancelled = new Error('AI request cancelled');
@@ -4631,9 +4690,13 @@ async function callDeepSeek(messages, options) {
           signal.addEventListener('abort', abortListener, { once: true });
         });
       });
+      onProgress();
       try {
-        return await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+        var result = await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+        onProgress();
+        return result;
       } finally {
+        if (toolTimeout) clearTimeout(toolTimeout);
         abortListeners.forEach(function(item) {
           try { item.signal.removeEventListener('abort', item.listener); } catch (_) {}
         });
@@ -4641,10 +4704,8 @@ async function callDeepSeek(messages, options) {
     }
 
     for (var round = 0; round < maxToolRounds; round++) {
-      if (round > 0) {
-        clearTimeout(timer);
-        timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
-      }
+      // Reset idle timeout at start of each round
+      onProgress();
       // V2: 只要给了 onThinkingChunk 或 onContentChunk 回调就用流式, 让答案也能流式推送
       var hasThinkCb = (options && typeof options.onThinkingChunk === 'function');
       var hasContentCb = (options && typeof options.onContentChunk === 'function');
@@ -4771,15 +4832,18 @@ async function callDeepSeek(messages, options) {
             // reasoning_content chunk → 推给回调
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
               roundReasoning += sDelta.reasoning_content;
+              onProgress();
               try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
+              onProgress();
               try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
+              onProgress();
               for (var st=0; st < sDelta.tool_calls.length; st++) {
                 var stc = sDelta.tool_calls[st];
                 var stcIdx = stc.index || 0;
@@ -5073,21 +5137,40 @@ async function callDeepSeek(messages, options) {
       finalMessages: workingMessages
     };
   } catch (e) {
-    clearTimeout(timer);
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
     if (e && e.name === 'AbortError') {
       if (externalSignal && externalSignal.aborted) {
         var cancelledError = new Error('AI 调用已取消');
         cancelledError.code = 'AI_CANCELLED';
         throw cancelledError;
       }
-      console.error('[DEEPSEEK] request timeout after', DEEPSEEK_TIMEOUT_MS, 'ms');
-      throw new Error('AI 调用超时，请稍后再试');
+      // Different timeout messages based on which timer fired
+      var timeoutMsg = 'AI 调用超时，请稍后再试';
+      if (timeoutReason === 'first_token_timeout') {
+        timeoutMsg = 'AI 响应超时（首包等待超时），请稍后再试';
+      } else if (timeoutReason === 'idle_timeout') {
+        timeoutMsg = 'AI 响应超时（长时间无进度），请稍后再试';
+      } else if (timeoutReason === 'total_timeout') {
+        timeoutMsg = 'AI 响应超时（任务总时长超时），请简化问题后重试';
+      }
+      console.error('[DEEPSEEK] request timeout:', timeoutReason);
+      var timeoutErr = new Error(timeoutMsg);
+      timeoutErr.code = 'AI_TIMEOUT';
+      throw timeoutErr;
+    }
+    if (e && e.name === 'ToolTimeoutError') {
+      console.error('[DEEPSEEK] tool execution timeout');
+      throw new Error('工具执行超时，请稍后再试');
     }
     if (e && e.message && (e.message.indexOf('AI 调用失败') === 0 || e.message.indexOf('AI 返回格式') === 0)) throw e;
     console.error('[DEEPSEEK] unexpected error:', e && e.message);
     throw new Error('AI 调用异常，请稍后再试');
   } finally {
-    clearTimeout(timer);
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
     if (externalSignal && externalAbortHandler) {
       try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
     }
@@ -10091,7 +10174,7 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
         if (evt[key]) { if (!fingerprintSet[key]) fingerprintSet[key] = []; if (fingerprintSet[key].indexOf(evt[key]) < 0) fingerprintSet[key].push(evt[key]); }
       });
       if (evt.proxy_detection && (evt.proxy_detection.risk_level === 'high' || evt.proxy_detection.risk_level === 'critical')) {
-        proxyAlerts.push({ risk_level: evt.proxy_detection.risk_level, timezone_match: evt.proxy_detection.timezone_match, time: evt.recorded_at, ip: evt.ip });
+        proxyAlerts.push({ risk_level: evt.proxy_detection.risk_level, timezone_match: evt.proxy_detection.timezone_match, risk_signals: evt.proxy_detection.risk_signals || [], language_match: evt.proxy_detection.language_match || 'unknown', time: evt.recorded_at, ip: evt.ip });
       } else if (evt.asn_info && evt.asn_info.is_proxy) {
         proxyAlerts.push({ risk_level: 'high', reason: 'proxy_ip', time: evt.recorded_at, ip: evt.ip });
       }
@@ -10368,7 +10451,7 @@ app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (re
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate } = req.body;
+    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate, media_devices } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -10415,6 +10498,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     if (finalDeviceMeta && typeof finalDeviceMeta === 'object') {
       if (battery_info) finalDeviceMeta.battery_info = battery_info;
       if (storage_estimate) finalDeviceMeta.storage_estimate = storage_estimate;
+      if (media_devices) finalDeviceMeta.media_devices = media_devices;
       possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: trustedUserAgent }));
       if (possibleDeviceModel) finalDeviceMeta.possible_device_model = possibleDeviceModel;
     }
@@ -10490,11 +10574,40 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         suspicious_headers: suspiciousHeaders.length > 0 ? suspiciousHeaders : null,
         is_proxy: (asnInfo && asnInfo.is_proxy) || false,
         is_hosting: (asnInfo && asnInfo.is_hosting) || false,
-        risk_level: 'low'
+        is_vpn: (ipLocation && ipLocation.is_vpn) || false,
+        is_tor: (ipLocation && ipLocation.is_tor) || false,
+        language_match: 'unknown',
+        risk_level: 'low',
+        risk_signals: []
       };
-      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'medium';
-      if (proxyDetection.is_proxy) proxyDetection.risk_level = 'high';
-      if (proxyDetection.is_proxy && proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_level = 'critical';
+      // 语言与地区匹配检测
+      try {
+        var clientLangs = finalDeviceMeta && finalDeviceMeta.languages ? finalDeviceMeta.languages : [];
+        var ipCountryCode = ipLocation && ipLocation.country_code ? ipLocation.country_code.toUpperCase() : '';
+        if (clientLangs.length > 0 && ipCountryCode) {
+          var primaryLang = String(clientLangs[0] || '').slice(0, 5).toUpperCase();
+          var langCountryMap = { 'CN': ['ZH'], 'US': ['EN'], 'GB': ['EN'], 'JP': ['JA'], 'KR': ['KO'], 'DE': ['DE'], 'FR': ['FR'], 'RU': ['RU'], 'BR': ['PT'], 'ES': ['ES'], 'IT': ['IT'], 'TW': ['ZH'], 'HK': ['ZH'] };
+          var expectedLangs = langCountryMap[ipCountryCode];
+          if (expectedLangs) {
+            var langPrefix = primaryLang.split('-')[0];
+            proxyDetection.language_match = expectedLangs.indexOf(langPrefix) >= 0 ? 'match' : 'mismatch';
+          }
+        }
+      } catch(e) {}
+      // 风险信号聚合
+      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_signals.push('timezone_mismatch');
+      if (proxyDetection.language_match === 'mismatch') proxyDetection.risk_signals.push('language_mismatch');
+      if (proxyDetection.is_proxy) proxyDetection.risk_signals.push('proxy_ip');
+      if (proxyDetection.is_vpn) proxyDetection.risk_signals.push('vpn');
+      if (proxyDetection.is_tor) proxyDetection.risk_signals.push('tor');
+      if (proxyDetection.is_hosting) proxyDetection.risk_signals.push('hosting_ip');
+      if (suspiciousHeaders.length > 0) proxyDetection.risk_signals.push('suspicious_headers');
+      // 风险等级计算
+      var riskScore = proxyDetection.risk_signals.length;
+      if (riskScore === 0) proxyDetection.risk_level = 'low';
+      else if (riskScore === 1) proxyDetection.risk_level = 'medium';
+      else if (riskScore <= 3) proxyDetection.risk_level = 'high';
+      else proxyDetection.risk_level = 'critical';
     } catch(e) {}
 
     // 写入 posts 表（短期方案，不新建表）

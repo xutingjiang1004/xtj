@@ -1474,10 +1474,16 @@
     });
   }
 
+  function createAbortError() {
+    var error = new Error('Index build aborted');
+    error.name = 'AbortError';
+    return error;
+  }
+
   // ──────────────────────────────────────────────
   // List all files recursively (for workspace overview)
   // ──────────────────────────────────────────────
-  function listAllFiles(maxDepth, maxFiles) {
+  function listAllFiles(maxDepth, maxFiles, signal) {
     if (!_dirHandle) {
       return Promise.reject(new Error('listAllFiles: no workspace selected'));
     }
@@ -1487,7 +1493,12 @@
     var allFiles = [];
     var allDirs = [];
 
+    function isAborted() {
+      return signal && signal.aborted;
+    }
+
     function scanDir(dirHandle, currentPath, depth) {
+      if (isAborted()) return Promise.reject(createAbortError());
       if (depth > maxDepth || allFiles.length >= maxFiles) {
         return Promise.resolve();
       }
@@ -1502,10 +1513,13 @@
         }
 
         function pump() {
+          if (isAborted()) { rej(createAbortError()); return; }
           it.next().then(function (result) {
+            if (isAborted()) { rej(createAbortError()); return; }
             if (result.done) {
               var promises = [];
               for (var i = 0; i < items.length; i++) {
+                if (isAborted()) break;
                 var handle = items[i];
                 var entryPath = currentPath ? currentPath + '/' + handle.name : handle.name;
                 if (handle.kind === 'directory') {
@@ -1526,6 +1540,7 @@
                   if (allFiles.length >= maxFiles) break;
                 }
               }
+              if (isAborted()) { rej(createAbortError()); return; }
               Promise.all(promises).then(function() { res(); }).catch(rej);
             } else {
               var handle;
@@ -1546,6 +1561,8 @@
       return {
         files: allFiles.slice(0, maxFiles),
         directories: allDirs,
+        totalFiles: allFiles.length,
+        returnedFiles: Math.min(allFiles.length, maxFiles),
         totalCount: allFiles.length,
         truncated: allFiles.length >= maxFiles
       };
@@ -1555,7 +1572,7 @@
   // ──────────────────────────────────────────────
   // listAllFilesWithMetadata — for project index building
   // ──────────────────────────────────────────────
-  function listAllFilesWithMetadata(maxDepth, maxFiles) {
+  function listAllFilesWithMetadata(maxDepth, maxFiles, signal) {
     if (!_dirHandle) {
       return Promise.reject(new Error('listAllFilesWithMetadata: no workspace selected'));
     }
@@ -1568,26 +1585,46 @@
     var activeReads = 0;
     var readQueue = [];
     var MAX_CONCURRENT_READS = 8;
+    var aborted = false;
+
+    function isAborted() {
+      return aborted || (signal && signal.aborted);
+    }
+
+    function rejectQueuedAndClear() {
+      aborted = true;
+      while (readQueue.length) {
+        var queued = readQueue.shift();
+        try { queued.reject(createAbortError()); } catch (e) {}
+      }
+    }
+
+    if (signal) {
+      if (signal.aborted) return Promise.reject(createAbortError());
+      signal.addEventListener('abort', rejectQueuedAndClear);
+    }
 
     function withReadSlot(task) {
       return new Promise(function (resolve, reject) {
+        if (isAborted()) { reject(createAbortError()); return; }
         readQueue.push({ task: task, resolve: resolve, reject: reject });
         pumpReadQueue();
       });
     }
 
     function pumpReadQueue() {
-      while (activeReads < MAX_CONCURRENT_READS && readQueue.length) {
+      while (!isAborted() && activeReads < MAX_CONCURRENT_READS && readQueue.length) {
         var queued = readQueue.shift();
         activeReads++;
-        Promise.resolve().then(queued.task).then(queued.resolve, queued.reject).then(function () {
-          activeReads--;
-          pumpReadQueue();
-        });
+        Promise.resolve().then(queued.task).then(
+          function(result) { activeReads--; if (!isAborted()) queued.resolve(result); pumpReadQueue(); },
+          function(err) { activeReads--; queued.reject(err); pumpReadQueue(); }
+        );
       }
     }
 
     function scanDir(dirHandle, currentPath, depth) {
+      if (isAborted()) return Promise.reject(createAbortError());
       if (depth > maxDepth || discoveredFiles >= maxFiles) {
         return Promise.resolve();
       }
@@ -1602,10 +1639,13 @@
         }
 
         function pump() {
+          if (isAborted()) { rej(createAbortError()); return; }
           it.next().then(function (result) {
+            if (isAborted()) { rej(createAbortError()); return; }
             if (result.done) {
               var promises = [];
               for (var i = 0; i < items.length; i++) {
+                if (isAborted()) break;
                 var handle = items[i];
                 var entryPath = currentPath ? currentPath + '/' + handle.name : handle.name;
                 if (handle.kind === 'directory') {
@@ -1628,9 +1668,12 @@
 
                   var fileType = getFileType(handle.name);
                   if (fileType === 'text') {
-                    // Read file content for metadata
                     promises.push((function (capturedHandle, capturedPath, capturedType) {
-                      return withReadSlot(function () { return readFile(capturedHandle); }).then(function (fileResult) {
+                      return withReadSlot(function () {
+                        if (isAborted()) throw createAbortError();
+                        return readFile(capturedHandle);
+                      }).then(function (fileResult) {
+                        if (isAborted()) return;
                         if (fileResult && fileResult.type === 'text') {
                           allFiles.push({
                             path: capturedPath,
@@ -1649,7 +1692,9 @@
                             size: 0
                           });
                         }
-                      }).catch(function () {
+                      }).catch(function (err) {
+                        if (err && err.name === 'AbortError') throw err;
+                        if (isAborted()) return;
                         allFiles.push({
                           path: capturedPath,
                           name: capturedHandle.name,
@@ -1668,6 +1713,7 @@
                   }
                 }
               }
+              if (isAborted()) { rej(createAbortError()); return; }
               Promise.all(promises).then(function () { res(); }).catch(rej);
             } else {
               var handle;
@@ -1685,14 +1731,24 @@
     }
 
     return scanDir(_dirHandle, '', 0).then(function () {
+      if (signal) {
+        try { signal.removeEventListener('abort', rejectQueuedAndClear); } catch (e) {}
+      }
       allFiles.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
       allDirs.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
       return {
         files: allFiles.slice(0, maxFiles),
         directories: allDirs,
+        totalFiles: allFiles.length,
+        returnedFiles: Math.min(allFiles.length, maxFiles),
         totalCount: allFiles.length,
         truncated: discoveredFiles >= maxFiles
       };
+    }).catch(function (err) {
+      if (signal) {
+        try { signal.removeEventListener('abort', rejectQueuedAndClear); } catch (e) {}
+      }
+      throw err;
     });
   }
 
