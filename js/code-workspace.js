@@ -805,10 +805,11 @@
       state.workspaceMode = 'local';
       state._isReadOnly = !!readOnly;
       try { localStorage.setItem('xtj_code_workspace_name', state.workspaceName); } catch (e) { /* ignore */ }
-      renderWorkspace();
-      // A single-file workspace should be immediately usable, without a
-      // second click on the synthetic root tree node.
-      window.setTimeout(function () { openFile(handle.name); }, 0);
+      renderWorkspace().then(function () {
+        if (handle && handle._isSingleFileRoot) {
+          openFile(handle.name);
+        }
+      });
     }
 
     if (typeof fs.selectFile === 'function' && window.showOpenFilePicker && window.isSecureContext) {
@@ -2461,16 +2462,7 @@
       return;
     }
 
-    // Read the file again to get ArrayBuffer. Keep the promise on the tab so
-    // sendMessage can wait for extraction instead of sending an empty context.
-    var extractionPromise = fs.readFileByPath(tab.path).then(function (result) {
-      if (!result || result.type !== 'document') {
-        preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>无法读取文档文件</p></div>';
-        throw new Error('无法读取文档文件');
-      }
-
-      return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
-    }).then(function (docData) {
+    function renderDocData(docData) {
       if (!docData) return;
 
       var docIcon = '📄';
@@ -2500,18 +2492,47 @@
       html += '</div>';
 
       preview.innerHTML = html;
+    }
 
-      // Store extracted text in tab for AI context
-      tab._extractedText = docData.text;
-      tab._extractedTruncated = docData.truncated;
-      tab._extractedMetadata = docData.metadata;
-      return docData;
+    if (tab._extractedText) {
+      renderDocData({
+        text: tab._extractedText,
+        truncated: tab._extractedTruncated,
+        metadata: tab._extractedMetadata,
+        ext: tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : ''
+      });
+      return;
+    }
+    
+    if (tab._extractError) {
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML(tab._extractError) + '</p></div>';
+      return;
+    }
+
+    if (!tab._extractPromise) {
+      tab._extractPromise = fs.readFileByPath(tab.path).then(function (result) {
+        if (!result || result.type !== 'document') {
+          throw new Error('无法读取文档文件');
+        }
+        return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
+      }).then(function (docData) {
+        if (!docData) return;
+        tab._extractedText = docData.text;
+        tab._extractedTruncated = docData.truncated;
+        tab._extractedMetadata = docData.metadata;
+        docData.ext = tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : '';
+        return docData;
+      }).catch(function (err) {
+        tab._extractError = err && err.message ? err.message : '文档提取失败';
+        throw err;
+      });
+    }
+
+    tab._extractPromise.then(function (docData) {
+      renderDocData(docData);
     }).catch(function (err) {
       preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML((err && err.message) || '未知错误') + '</p></div>';
-      tab._extractError = err && err.message ? err.message : '文档提取失败';
-      return null;
     });
-    tab._extractPromise = extractionPromise;
   }
 
   // ──────────────────────────────────────────────
@@ -2992,12 +3013,20 @@
 
     if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
-      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
+      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已就绪';
+      var kindStr = (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹'));
+      var hasDocOpen = state.openTabs && state.openTabs.some(function(t) { return t.type === 'document'; });
+      // Identify doc-only workspace: no code files indexed, but files exist (or explicitly single file/doc open)
+      var isDocWorkspace = idx.totalFiles === 0 && (kindStr === '本地单文件' || idx.scannedFiles > 0 || hasDocOpen);
+      var statsHtml = isDocWorkspace ? 
+        '<div style="color:var(--cw-text-muted);">文档模式</div>' : 
+        ('<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
+         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>');
+
       indexDiv.innerHTML =
         '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + '</div>' +
-        '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
-        '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
-        '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
+        statsHtml +
+        (isDocWorkspace && kindStr !== '本地单文件' ? '' : '<div style="color:var(--cw-text-muted);">' + kindStr + '</div>');
       if (idx.truncated) {
         var truncationWarning = document.createElement('div');
         truncationWarning.className = 'code-index-warning';
@@ -3067,7 +3096,14 @@
 
       // Project index scale — clearly separated from model context
       if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
-        lines.push('项目索引：' + state.projectIndexStatus.totalFiles + ' 文件 / ' + state.projectIndexStatus.totalChunks + ' 代码块');
+        var isDocWorkspaceRuntime = state.projectIndexStatus.totalFiles === 0 &&
+          ((window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file') ||
+           state.projectIndexStatus.scannedFiles > 0 ||
+           (state.openTabs && state.openTabs.some(function(t) { return t.type === 'document'; })));
+        
+        if (!isDocWorkspaceRuntime) {
+          lines.push('项目索引：' + state.projectIndexStatus.totalFiles + ' 文件 / ' + state.projectIndexStatus.totalChunks + ' 代码块');
+        }
       }
 
       lines.forEach(function (line) {
@@ -4836,7 +4872,7 @@
           var json = null;
           try { json = JSON.parse(text); } catch(e) {}
           if (resp.status === 409 && json && json.code === 'INDEX_REBUILD_REQUIRED') {
-            var rebuildError = new Error(json.error || '项目索引需要重建');
+            var rebuildError = new Error('项目需要构建索引，正在自动为您准备数据...');
             rebuildError.code = 'INDEX_REBUILD_REQUIRED';
             throw rebuildError;
           }
@@ -4979,6 +5015,10 @@
         errRequestId = classified.request_id || errRequestId;
       }
 
+      if (errCode === 'INDEX_REBUILD_REQUIRED') {
+        errMsg = '当前项目需要构建索引才能处理该问题，系统正在后台为您自动处理，请稍后再试。';
+      }
+
       console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
       // Phase 1: Shared controller error lifecycle
       if (state._sharedCtrl && state._sharedCtrl.isActive()) {
@@ -4992,7 +5032,9 @@
 
       // Phase 2: Build enhanced error message with code and requestId
       var displayMsg = errMsg;
-      if (errCode) displayMsg = '[' + errCode + '] ' + displayMsg;
+      if (errCode && errCode !== 'INDEX_REBUILD_REQUIRED') {
+        displayMsg = '[' + errCode + '] ' + displayMsg;
+      }
       var assistantMsg = { role: 'assistant', content: '抱歉，' + displayMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
 
       // Phase 3: Add retryable hint from shared error classification

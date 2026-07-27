@@ -673,6 +673,24 @@ function isExplicitSearch(message) {
   return /(帮我上网搜|联网查一下|官网查一下|核实一下|查最新消息|上网搜|上网查一下|百度一下|谷歌一下)/i.test(String(message || ''));
 }
 
+function needsProjectContext(message) {
+  var msg = String(message || '').trim();
+  if (!msg) return false;
+  
+  // 基础聊天、身份询问、功能说明不需要项目上下文 (allow symbols like ? ! etc)
+  var noContextRE = /^(你好|你是谁|你能做什么|怎么使用|解释功能|介绍一下|hi|hello|who are you|what can you do)[\s\?\!\。，、]*$/i;
+  if (noContextRE.test(msg)) return false;
+  
+  // 明确要求读取、检查、修改、分析项目、找bug、代码相关，需要项目上下文
+  var requiresContextRE = /(检查|分析|查找|bug|报错|整个项目|代码里|项目中|读取|这个文件|看看|有什么问题|重构|修改|写代码|阅读|解析|总结一下)/i;
+  // 如果明确提及了相关操作，就认为需要上下文
+  if (requiresContextRE.test(msg)) return true;
+
+  // 如果不包含明确的项目操作词汇，就不强求重建索引（避免普通问题被拦截）
+  // 比如用户随意输入 "啊", "测试", "哈哈"
+  return false;
+}
+
 function isPrivateAddress(address) {
   var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (net.isIP(value) === 4) {
@@ -1927,7 +1945,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var indexSummary = codeIndex.getIndexSummary(scope);
       logPhase('validated', { workspaceId: scope.workspaceId, workspaceGeneration: scope.generation, hasIndex: !!indexSummary, hasOpenFiles: openFiles.length > 0, hasAttachments: attachments.length > 0, thinkingMode: String(body.thinking_mode || 'auto') });
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
         return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 409, { retryable: true });
       }
 
@@ -2505,7 +2523,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       var indexSummary = codeIndex.getIndexSummary(scope);
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
         sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 'validation');
         return;
       }
