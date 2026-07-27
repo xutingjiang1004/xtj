@@ -210,6 +210,9 @@ function validateHistory(history) {
   for (var i = 0; i < history.length; i++) {
     var item = history[i];
     if (!item || typeof item !== 'object') continue;
+    var contentStr = String(item.content || '');
+    if (contentStr === '[INDEX_REBUILD_REQUIRED]' || contentStr.startsWith('[PROVIDER_') || contentStr === 'STREAM_INTERRUPTED') continue;
+    if (contentStr === '（已停止）' || contentStr === '（无响应）' || !contentStr.trim()) continue;
     if (item.role !== 'user' && item.role !== 'assistant') continue;
     if (typeof item.content !== 'string' || !item.content.trim()) continue;
     cleaned.push({ role: item.role, content: item.content.trim().slice(0, MAX_MESSAGE_LEN) });
@@ -260,11 +263,27 @@ function validateFiles(files) {
   return { ok: true, value: cleaned, warnings: truncationWarnings > 0 ? { truncatedFiles: truncationWarnings } : undefined };
 }
 
+function normalizeContextPath(p) {
+  if (typeof p !== 'string' || !p.trim()) return 'unnamed';
+  var s = p.trim().replace(/\\/g, '/');
+  if (s.charCodeAt(0) === 47 || /^[A-Za-z]:/.test(s) || s.indexOf('//') >= 0) {
+    var parts = s.split('/');
+    s = parts[parts.length - 1] || 'unnamed';
+  }
+  s = s.replace(/\.\./g, '').replace(/\/\//g, '/');
+  if (s.charCodeAt(0) === 47) s = s.substring(1);
+  return s;
+}
+
 function validatePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
-  // allow absolute paths, backslashes, etc. as they are just contextual indicators for AI.
-  // but prevent '..' to be safe.
-  if (p.indexOf('..') >= 0) return false;
+  var s = p.trim();
+  if (s.indexOf('..') >= 0) return false;
+  if (s.indexOf('//') >= 0 || s.indexOf('\\\\') >= 0) return false;
+  if (s.charCodeAt(0) === 47) return false;
+  if (/^[A-Za-z]:/.test(s)) return false;
+  if (s.indexOf('\\') >= 0) return false;
+  if (/\0/.test(s)) return false;
   return true;
 }
 
@@ -479,6 +498,9 @@ function buildSystemPrompt() {
     '- 用户询问"你是什么模型""你的上下文多大""上下文窗口""还剩多少上下文""最大输出""支持工具调用吗""当前思考模式""缓存命中"时，必须调用 get_runtime_capabilities 工具获取真实数据后回答。',
     '- 不要根据训练知识猜测当前模型规格或上下文窗口大小。',
     '- 如果你从工具获取的数据中某个字段为 null 或不存在，诚实说明"服务器未提供该数据"，不得编造。',
+    '- 必须根据 runtime capability 返回的字段来回答你的真实能力。',
+    '- 不得声称支持实际没有实现的文件修改能力。目前 DOCX 和 PDF 只能读取和分析，XLSX 才支持文件内容级别的修改（生成 document operation）。',
+    '- 文件系统级的权限（如句柄可写）不代表你具备修改该格式的能力。如果文件格式不在支持修改的列表中，请明确告知仅支持读取。',
     '- 项目索引中的"文件数"和"代码块数"只表示索引规模，不代表这些内容已进入当前上下文。用户询问上下文使用时，必须区分索引规模和实际读取量。',
     '- 前端徽章、API capabilities 和你的自述必须使用同一数据源，不得矛盾。',
     '- 绝对禁止回答中包含以下内容：自称 Claude、自称 Anthropic 模型、声称 200K tokens 上下文、声称 15 万英文单词等编造数字。'
@@ -977,7 +999,16 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
         inputBudgetTokens: typeof maxInputTokens === 'number' ? maxInputTokens : null,
         currentPromptTokens: runtimeCapabilities.currentPromptTokens || null,
         cacheHitTokens: runtimeCapabilities.cacheHitTokens || null,
-        cacheMissTokens: runtimeCapabilities.cacheMissTokens || null
+        cacheMissTokens: runtimeCapabilities.cacheMissTokens || null,
+        canReadCode: runtimeCapabilities.canReadCode !== false,
+        canWriteCode: runtimeCapabilities.canWriteCode !== false,
+        canCreateFiles: runtimeCapabilities.canCreateFiles !== false,
+        canReadDocx: runtimeCapabilities.canReadDocx === true,
+        canWriteDocx: runtimeCapabilities.canWriteDocx === true,
+        canReadXlsx: runtimeCapabilities.canReadXlsx === true,
+        canWriteXlsx: runtimeCapabilities.canWriteXlsx === true,
+        canReadPdf: runtimeCapabilities.canReadPdf === true,
+        canWritePdf: runtimeCapabilities.canWritePdf === true
       };
     } else if (name === 'web_search') {
       result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
@@ -2034,16 +2065,39 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         aiResult = await deps.callDeepSeek(messages, callArgs);
       } catch (err) {
         var errMsg = err && err.message ? err.message : String(err);
-        if (/HTTP 400/.test(errMsg) && thinkingMode !== 'none' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
-          console.warn('[code-agent] HTTP 400 with thinking + tools. Retrying once with thinking disabled.');
+        var errStatus = err && err.status ? err.status : (errMsg.indexOf('400') >= 0 ? 400 : 500);
+        var providerCode = err && err.response && err.response.data && err.response.data.error && err.response.data.error.code ? err.response.data.error.code : 'unknown';
+        var providerType = err && err.response && err.response.data && err.response.data.error && err.response.data.error.type ? err.response.data.error.type : 'unknown';
+        var providerMsg = err && err.response && err.response.data && err.response.data.error && err.response.data.error.message ? err.response.data.error.message : errMsg;
+        
+        var parsedError = 'PROVIDER_HTTP_400';
+        if (providerCode === 'context_length_exceeded' || providerMsg.indexOf('context_length') >= 0 || providerMsg.indexOf('maximum context length') >= 0) {
+          parsedError = 'PROVIDER_CONTEXT_TOO_LARGE';
+        } else if (providerCode === 'invalid_request_error' && providerMsg.indexOf('messages') >= 0) {
+          parsedError = 'PROVIDER_INVALID_MESSAGES';
+        } else if (providerMsg.indexOf('model not found') >= 0 || providerCode === 'model_not_found') {
+          parsedError = 'PROVIDER_INVALID_MODEL';
+        } else if (providerMsg.indexOf('tool') >= 0 || providerMsg.indexOf('function') >= 0 || providerCode === 'tool_calls_unsupported') {
+          parsedError = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
+        } else if (providerMsg.indexOf('thinking') >= 0 || providerMsg.indexOf('reasoning') >= 0) {
+          parsedError = 'PROVIDER_INVALID_THINKING_MODE';
+        }
+
+        var isThinkingIncompatible = parsedError === 'PROVIDER_INVALID_THINKING_MODE' || 
+                                     (parsedError === 'PROVIDER_TOOL_CALL_UNSUPPORTED' && thinkingMode !== 'off') ||
+                                     (errStatus === 400 && providerMsg.indexOf('thinking') >= 0);
+
+        if (errStatus === 400 && isThinkingIncompatible && thinkingMode !== 'off' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
+          console.warn('[code-agent] HTTP 400 explicitly incompatible with thinking + tools. Retrying once with thinking=off.');
           thinkingFallback = true;
-          callArgs.thinking_mode = 'none';
-          // Record the fallback explicitly for frontend
-          logPhase('thinking_fallback', { reason: 'HTTP 400 incompatibility' });
+          callArgs.thinking_mode = 'off';
+          logPhase('thinking_fallback', { reason: parsedError });
           aiResult = await deps.callDeepSeek(messages, callArgs);
           aiResult.thinking_fallback = true;
-          aiResult.thinking_mode = 'none';
+          aiResult.thinking_mode = 'off';
+          aiResult.thinkingFallbackReason = parsedError;
         } else {
+          err.parsedCode = parsedError;
           throw err;
         }
       }
@@ -2164,10 +2218,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         remainingEstimatedTokens: remainingEstimatedTokens,
         // P0 Fix: 思考模式验证字段
         requestedThinkingMode: requestedThinkingMode,
-        effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : thinkingMode,
+        effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : (thinkingFallback ? 'off' : thinkingMode),
         thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
         reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
-        thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false
+        thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
+        thinkingFallbackReason: aiResult && aiResult.thinkingFallbackReason ? aiResult.thinkingFallbackReason : null
       };
       return res.json({
         ok: true,
@@ -2682,18 +2737,40 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         aiResult = await deps.callDeepSeek(messages, callArgs);
       } catch (err) {
         var errMsg = err && err.message ? err.message : String(err);
-        if (/HTTP 400/.test(errMsg) && !hasStartedStreaming && thinkingMode !== 'none' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
-          console.warn('[code-agent-stream] HTTP 400 with thinking + tools. Retrying once with thinking disabled.');
+        var errStatus = err && err.status ? err.status : (errMsg.indexOf('400') >= 0 ? 400 : 500);
+        var providerCode = err && err.response && err.response.data && err.response.data.error && err.response.data.error.code ? err.response.data.error.code : 'unknown';
+        var providerType = err && err.response && err.response.data && err.response.data.error && err.response.data.error.type ? err.response.data.error.type : 'unknown';
+        var providerMsg = err && err.response && err.response.data && err.response.data.error && err.response.data.error.message ? err.response.data.error.message : errMsg;
+        
+        var parsedError = 'PROVIDER_HTTP_400';
+        if (providerCode === 'context_length_exceeded' || providerMsg.indexOf('context_length') >= 0 || providerMsg.indexOf('maximum context length') >= 0) {
+          parsedError = 'PROVIDER_CONTEXT_TOO_LARGE';
+        } else if (providerCode === 'invalid_request_error' && providerMsg.indexOf('messages') >= 0) {
+          parsedError = 'PROVIDER_INVALID_MESSAGES';
+        } else if (providerMsg.indexOf('model not found') >= 0 || providerCode === 'model_not_found') {
+          parsedError = 'PROVIDER_INVALID_MODEL';
+        } else if (providerMsg.indexOf('tool') >= 0 || providerMsg.indexOf('function') >= 0 || providerCode === 'tool_calls_unsupported') {
+          parsedError = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
+        } else if (providerMsg.indexOf('thinking') >= 0 || providerMsg.indexOf('reasoning') >= 0) {
+          parsedError = 'PROVIDER_INVALID_THINKING_MODE';
+        }
+
+        var isThinkingIncompatible = parsedError === 'PROVIDER_INVALID_THINKING_MODE' || 
+                                     (parsedError === 'PROVIDER_TOOL_CALL_UNSUPPORTED' && thinkingMode !== 'off') ||
+                                     (errStatus === 400 && providerMsg.indexOf('thinking') >= 0);
+
+        if (errStatus === 400 && isThinkingIncompatible && !hasStartedStreaming && thinkingMode !== 'off' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
+          console.warn('[code-agent] HTTP 400 explicitly incompatible with thinking + tools. Retrying once with thinking=off.');
           thinkingFallback = true;
-          callArgs.thinking_mode = 'none';
-          // Record the fallback explicitly for frontend
-          logPhase('thinking_fallback', { reason: 'HTTP 400 incompatibility' });
-          // Resend answer_start with updated thinking mode
-          sendSSE('answer_start', { model: model, thinking_mode: 'none' });
+          callArgs.thinking_mode = 'off';
+          logPhase('thinking_fallback', { reason: parsedError });
+          sendSSE('answer_start', { model: model, thinking_mode: 'off' });
           aiResult = await deps.callDeepSeek(messages, callArgs);
           aiResult.thinking_fallback = true;
-          aiResult.thinking_mode = 'none';
+          aiResult.thinking_mode = 'off';
+          aiResult.thinkingFallbackReason = parsedError;
         } else {
+          err.parsedCode = parsedError;
           throw err;
         }
       }
