@@ -1428,6 +1428,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     });
   }
 
+  // ── Phase 3: Stream abort controller registry ──────────────────────
+  // Track active stream controllers so cancel requests can abort them.
+  var streamAbortControllers = new Map();
+
   // ── Document text extraction ────────────────────────────────────────
     app.post('/api/code/document/extract', rateLimit(60000, 30), authenticateUser, documentUpload, async function(req, res) {
     try {
@@ -2316,6 +2320,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var userId = String(req.userName || '');
     var clientRequestId = String(req.body.client_request_id || '');
 
+    // Phase 3: Register controller for external cancellation
+    streamAbortControllers.set(streamId, requestController);
+
     // Phase 3: Stream resume — check idempotency for same client_request_id
     if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
       var existingSession = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
@@ -2349,7 +2356,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     // Setup SSE
     aiCoreSSE.setupSSE(res, req);
-    var writer = aiCoreSSE.createSSEWriter(res);
+    var writer = aiCoreSSE.createSSEWriter(res, req);
     var nextEventId = aiCoreRequestId.generateEventId();
 
     var baseEvent = {
@@ -2402,6 +2409,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     function cleanup() {
       heartbeat.stop();
       writer.cleanup();
+      streamAbortControllers.delete(streamId);
     }
 
     function sendStreamError(code, message, phase) {
@@ -2816,6 +2824,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权访问该流式会话' });
       }
 
+      // Phase 3-P0-4: Validate workspace_generation to prevent stale session recovery
+      if (workspaceGeneration && session.workspace_generation != null &&
+          session.workspace_generation !== workspaceGeneration) {
+        return res.status(409).json({ ok: false, code: 'GENERATION_MISMATCH', error: '工作区版本不匹配，可能已重建索引' });
+      }
+
+      // Phase 3-P0-4: Validate client_request_id to prevent cross-request recovery
+      if (clientRequestId && session.client_request_id !== clientRequestId) {
+        return res.status(409).json({ ok: false, code: 'REQUEST_ID_MISMATCH', error: '请求ID不匹配' });
+      }
+
       // Workspace match
       if (workspaceId && session.workspace_id && workspaceId !== session.workspace_id) {
         return res.status(409).json({ ok: false, code: 'WORKSPACE_MISMATCH', error: '工作区不匹配' });
@@ -2880,6 +2899,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
       if (session.user_id !== userId) {
         return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权操作该流式会话' });
+      }
+
+      // Phase 3-P0-3: Actually abort the running request
+      var controller = streamAbortControllers.get(streamId);
+      if (controller) {
+        try { controller.abort(); } catch (_) {}
+        streamAbortControllers.delete(streamId);
       }
 
       await streamSession.updateStreamSession(supabase, streamId, {
