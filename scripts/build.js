@@ -109,7 +109,14 @@ const JS_FILES = [
   'js/photo-wall/preview-hotfix.js',
   'js/admin/admin.js',
   'js/code-file-system.js',
-  'js/code-workspace.js'
+  'js/code-workspace.js',
+  'js/ai-core/errors.js',
+  'js/ai-core/request-controller.js',
+  'js/ai-core/transport.js',
+  'js/ai-core/markdown-renderer.js',
+  'js/ai-core/scroll-controller.js',
+  'js/ai-core/stream-renderer.js',
+  'js/ai-core/telemetry.js'
 ];
 
 const CSS_FILES = [
