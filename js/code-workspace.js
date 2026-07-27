@@ -213,7 +213,17 @@
     if (!workspaceId) return Promise.resolve();
     var workspaceKey = 'local_folder:' + workspaceId;
     var now = Date.now();
-    return idbClear('code_file_manifest').then(function () {
+
+    // P0-7: Only delete records for the current workspaceKey, not the entire store
+    return idbGetAll('code_file_manifest').then(function (allRecords) {
+      var deletePromises = [];
+      for (var i = 0; i < allRecords.length; i++) {
+        if (allRecords[i].workspaceKey === workspaceKey) {
+          deletePromises.push(idbDelete('code_file_manifest', allRecords[i].id));
+        }
+      }
+      return Promise.all(deletePromises);
+    }).then(function () {
       var promises = [];
       for (var i = 0; i < files.length && i < 1000; i++) {
         var f = files[i];
@@ -239,8 +249,13 @@
   // Phase 4: Get stored manifest from IndexedDB
   function getStoredManifest() {
     if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve([]);
+    var workspaceId = getWorkspaceId();
+    var workspaceKey = 'local_folder:' + workspaceId;
     return idbGetAll('code_file_manifest').then(function (records) {
-      return records.map(function (r) {
+      // P0-7: Filter by current workspaceKey to avoid cross-workspace pollution
+      return records.filter(function (r) {
+        return r.workspaceKey === workspaceKey;
+      }).map(function (r) {
         return {
           path: r.path,
           size: r.size || 0,

@@ -158,9 +158,9 @@ function createEventLogger(supabase, streamId, userId) {
   }
 
   function flush() {
-    flushed = true;
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     return doFlushDeltas().then(function(combined) {
+      flushed = true;
       if (combined) {
         return insertEvent(supabase, streamId, userId, 0, 'answer_delta', { delta: combined.slice(0, 10000) });
       }
