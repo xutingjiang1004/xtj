@@ -73,6 +73,184 @@
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
+  // Phase 2: Feature flag for streaming Code agent
+  var CODE_STREAM_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_STREAM_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
+  // Phase 3: Feature flag for stream resume
+  var CODE_STREAM_RESUME_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_STREAM_RESUME_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
+  // Phase 3: Stream resume state (saved to sessionStorage)
+  var STREAM_RESUME_MAX_RETRIES = 5;
+  var STREAM_RETRY_DELAYS = [500, 1000, 2000, 4000, 8000]; // Exponential backoff
+
+  // Phase 4: Feature flag for persistent index
+  var CODE_PERSISTENT_INDEX_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_PERSISTENT_INDEX_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
+  // Phase 4: IndexedDB stores for workspace manifest and file metadata
+  var _indexedDB = null;
+  var INDEXED_DB_NAME = 'xtj_code_index';
+  var INDEXED_DB_VERSION = 1;
+
+  function openIndexedDB() {
+    if (_indexedDB) return Promise.resolve(_indexedDB);
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve(null);
+    return new Promise(function (resolve, reject) {
+      var request = indexedDB.open(INDEXED_DB_NAME, INDEXED_DB_VERSION);
+      request.onupgradeneeded = function (e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains('code_workspaces')) {
+          db.createObjectStore('code_workspaces', { keyPath: 'workspaceKey' });
+        }
+        if (!db.objectStoreNames.contains('code_file_manifest')) {
+          var store = db.createObjectStore('code_file_manifest', { keyPath: 'id' });
+          store.createIndex('workspaceKey', 'workspaceKey', { unique: false });
+          store.createIndex('path', 'path', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('code_drafts')) {
+          db.createObjectStore('code_drafts', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = function (e) {
+        _indexedDB = e.target.result;
+        resolve(_indexedDB);
+      };
+      request.onerror = function (e) {
+        console.warn('[CODE-INDEXEDDB] Failed to open:', e.target.error);
+        resolve(null);
+      };
+    });
+  }
+
+  function idbGet(storeName, key) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var req = store.get(key);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { resolve(null); };
+      });
+    });
+  }
+
+  function idbPut(storeName, value) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.put(value);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  function idbGetAll(storeName) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return [];
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var req = store.getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { resolve([]); };
+      });
+    });
+  }
+
+  function idbDelete(storeName, key) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  function idbClear(storeName) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.clear();
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  // Phase 4: Save workspace info to IndexedDB
+  function saveWorkspaceToIDB(workspaceId, workspaceName) {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve();
+    var workspaceKey = 'local_folder:' + String(workspaceId || getWorkspaceId());
+    return idbPut('code_workspaces', {
+      workspaceKey: workspaceKey,
+      workspaceId: workspaceId || getWorkspaceId(),
+      workspaceName: workspaceName || getWorkspaceId(),
+      sourceType: 'local_folder',
+      generation: state.workspaceGeneration || 0,
+      lastOpenedAt: Date.now()
+    });
+  }
+
+  // Phase 4: Save file manifest to IndexedDB
+  function saveFileManifestToIDB(files) {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve();
+    var workspaceId = getWorkspaceId();
+    if (!workspaceId) return Promise.resolve();
+    var workspaceKey = 'local_folder:' + workspaceId;
+    var now = Date.now();
+    return idbClear('code_file_manifest').then(function () {
+      var promises = [];
+      for (var i = 0; i < files.length && i < 1000; i++) {
+        var f = files[i];
+        (function (file) {
+          promises.push(idbPut('code_file_manifest', {
+            id: workspaceKey + ':' + file.path,
+            workspaceKey: workspaceKey,
+            workspaceId: workspaceId,
+            path: file.path,
+            size: file.size || 0,
+            lastModified: file.modifiedAt || 0,
+            sha256: file.sha256 || '',
+            lastIndexedSha256: file.sha256 || '',
+            lastSeenGeneration: state.workspaceGeneration || 0,
+            updatedAt: now
+          }));
+        })(f);
+      }
+      return Promise.all(promises);
+    });
+  }
+
+  // Phase 4: Get stored manifest from IndexedDB
+  function getStoredManifest() {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve([]);
+    return idbGetAll('code_file_manifest').then(function (records) {
+      return records.map(function (r) {
+        return {
+          path: r.path,
+          size: r.size || 0,
+          modifiedAt: r.lastModified || 0,
+          sha256: r.lastIndexedSha256 || r.sha256 || ''
+        };
+      });
+    });
+  }
+
   // ──────────────────────────────────────────────
   // Utilities
   // ──────────────────────────────────────────────
@@ -2416,7 +2594,8 @@
             totalFiles: result.summary.totalFiles,
             totalChunks: result.summary.totalChunks,
             builtAt: result.summary.builtAt,
-            indexed: true
+            indexed: true,
+            recovered: result.recovered === true
           };
           state.pinnedFiles = Array.isArray(result.pinnedFiles) ? result.pinnedFiles.slice() : state.pinnedFiles;
           renderProjectStatus();
@@ -2452,7 +2631,7 @@
       workspaceGeneration: wsGen,
       controller: controller,
       startedAt: Date.now(),
-      status: 'scanning',   // idle | scanning | uploading | finalizing | ready | failed | cancelled
+      status: 'scanning',   // idle | scanning | comparing | uploading | finalizing | ready | failed | cancelled
       phase: '正在扫描文件...',
       scannedFiles: 0,
       indexableFiles: 0,
@@ -2481,7 +2660,7 @@
     if (!isBuildContextCurrent(ctx)) return;
     state.projectIndexStatus = {
       indexed: ctx.status === 'ready',
-      building: ctx.status === 'scanning' || ctx.status === 'uploading' || ctx.status === 'finalizing',
+      building: ctx.status === 'scanning' || ctx.status === 'comparing' || ctx.status === 'uploading' || ctx.status === 'finalizing',
       phase: ctx.phase,
       scannedFiles: ctx.scannedFiles,
       indexableFiles: ctx.indexableFiles,
@@ -2493,9 +2672,71 @@
       truncated: ctx.truncated,
       error: ctx.errorMessage || '',
       errorCode: ctx.errorCode || '',
-      buildId: ctx.id
+      buildId: ctx.id,
+      changedCount: ctx.changedCount,
+      unchangedCount: ctx.unchangedCount,
+      deletedCount: ctx.deletedCount
     };
     renderProjectStatus();
+  }
+
+  // Phase 4: Helper to upload files in batches (used by both full and incremental upload)
+  function uploadFilesInBatches(files, scanResult, ctx, controller, workspaceId, wsGen) {
+    if (files.length === 0) {
+      return Promise.resolve({
+        ok: true,
+        totalFiles: 0,
+        totalChunks: 0,
+        builtAt: new Date().toISOString(),
+        workspaceId: workspaceId,
+        generation: wsGen,
+        empty: true
+      });
+    }
+
+    var batches = [];
+    var currentBatch = [];
+    var currentBytes = 0;
+    for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
+      var fileBytes = 0;
+      try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
+      if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBytes = 0;
+      }
+      currentBatch.push(files[batchIndex]);
+      currentBytes += fileBytes;
+    }
+    if (currentBatch.length || !batches.length) batches.push(currentBatch);
+    ctx.totalBatches = batches.length;
+    var useBatches = batches.length > 1;
+
+    return batches.reduce(function (chain, batch, index) {
+      return chain.then(function () {
+        if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+        ctx.batchIndex = index;
+        ctx.phase = useBatches
+          ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
+          : '正在上传索引...';
+        syncBuildContextToUI(ctx);
+        var payload = {
+          workspaceId: workspaceId,
+          workspaceGeneration: wsGen,
+          files: batch,
+          truncated: scanResult.truncated === true
+        };
+        if (useBatches) {
+          payload.append = true;
+          payload.finalize = index === batches.length - 1;
+          payload.batchIndex = index;
+          payload.batchCount = batches.length;
+        }
+        return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
+          return responseJson(response, 'index build failed');
+        });
+      });
+    }, Promise.resolve());
   }
 
   function buildProjectIndex() {
@@ -2549,54 +2790,122 @@
       }
 
       ctx.status = 'uploading';
-      ctx.phase = '正在上传索引...';
       ctx.scannedFiles = sourceFiles.length;
       ctx.indexableFiles = files.length;
+
+      // Phase 4: Incremental manifest comparison
+      if (CODE_PERSISTENT_INDEX_ENABLED) {
+        ctx.phase = '正在比较索引...';
+        ctx.status = 'comparing';
+        syncBuildContextToUI(ctx);
+
+        return getStoredManifest().then(function (storedManifest) {
+          if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+
+          // Build manifest from current files
+          var manifestFiles = files.map(function (f) {
+            return {
+              path: f.path,
+              size: f.size || 0,
+              modified_at: f.modifiedAt || null,
+              sha256: f.sha256 || ''
+            };
+          });
+
+          // Send manifest to server for comparison
+          var manifestPayload = {
+            workspace_id: workspaceId,
+            workspace_generation: wsGen,
+            files: manifestFiles
+          };
+
+          return postJson('/api/code/index/manifest', manifestPayload, controller.signal)
+            .then(function (response) { return responseJson(response, '清单比较失败'); })
+            .then(function (manifestResult) {
+              if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+
+              if (manifestResult.persist_enabled && manifestResult.upload_paths) {
+                // Only upload changed files
+                var uploadPaths = manifestResult.upload_paths || [];
+                var unchangedPaths = manifestResult.unchanged_paths || [];
+                var deletePaths = manifestResult.delete_paths || [];
+
+                if (uploadPaths.length === 0 && deletePaths.length === 0) {
+                  // No changes needed
+                  ctx.status = 'ready';
+                  ctx.phase = '索引未变化，无需更新';
+                  ctx.totalFiles = files.length;
+                  ctx.totalChunks = unchangedPaths.length;
+                  ctx.builtAt = new Date().toISOString();
+                  syncBuildContextToUI(ctx);
+                  // Save current manifest to IDB
+                  saveFileManifestToIDB(files).catch(function () {});
+                  saveWorkspaceToIDB(workspaceId).catch(function () {});
+                  return {
+                    ok: true,
+                    totalFiles: files.length,
+                    totalChunks: unchangedPaths.length,
+                    builtAt: ctx.builtAt,
+                    workspaceId: workspaceId,
+                    generation: wsGen,
+                    scannedFiles: sourceFiles.length,
+                    indexedFiles: files.length,
+                    skippedFiles: 0,
+                    failedFiles: 0,
+                    truncated: result.truncated === true,
+                    status: 'ready',
+                    totalBytes: 0,
+                    batchComplete: true,
+                    unchanged: true
+                  };
+                }
+
+                // Filter files to only changed ones
+                var uploadPathSet = {};
+                for (var up = 0; up < uploadPaths.length; up++) {
+                  uploadPathSet[uploadPaths[up]] = true;
+                }
+
+                var changedFiles = files.filter(function (f) {
+                  return uploadPathSet[f.path];
+                });
+
+                ctx.phase = '发现 ' + uploadPaths.length + ' 个变化文件，' + unchangedPaths.length + ' 个未变化';
+                if (deletePaths.length > 0) {
+                  ctx.phase += '，' + deletePaths.length + ' 个已删除';
+                }
+                ctx.scannedFiles = sourceFiles.length;
+                ctx.indexableFiles = changedFiles.length;
+                ctx.changedCount = uploadPaths.length;
+                ctx.unchangedCount = unchangedPaths.length;
+                ctx.deletedCount = deletePaths.length;
+                syncBuildContextToUI(ctx);
+
+                // Use only changed files for upload
+                files = changedFiles;
+              }
+
+              ctx.status = 'uploading';
+              ctx.phase = '正在上传索引...';
+              syncBuildContextToUI(ctx);
+
+              return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
+            });
+        }).catch(function (err) {
+          if (err && err.name === 'AbortError') throw err;
+          // Manifest comparison failed, fall back to full upload
+          console.warn('[CODE-WORKSPACE] Manifest comparison failed, falling back to full upload:', err);
+          ctx.status = 'uploading';
+          ctx.phase = '增量比较失败，正在全量上传索引...';
+          syncBuildContextToUI(ctx);
+          return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
+        });
+      }
+
+      ctx.phase = '正在上传索引...';
       syncBuildContextToUI(ctx);
 
-      var batches = [];
-      var currentBatch = [];
-      var currentBytes = 0;
-      for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
-        var fileBytes = 0;
-        try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
-        if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
-          batches.push(currentBatch);
-          currentBatch = [];
-          currentBytes = 0;
-        }
-        currentBatch.push(files[batchIndex]);
-        currentBytes += fileBytes;
-      }
-      if (currentBatch.length || !batches.length) batches.push(currentBatch);
-      ctx.totalBatches = batches.length;
-      var useBatches = batches.length > 1;
-
-      return batches.reduce(function (chain, batch, index) {
-        return chain.then(function () {
-          if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
-          ctx.batchIndex = index;
-          ctx.phase = useBatches
-            ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
-            : '正在上传索引...';
-          syncBuildContextToUI(ctx);
-          var payload = {
-            workspaceId: workspaceId,
-            workspaceGeneration: wsGen,
-            files: batch,
-            truncated: result.truncated === true
-          };
-          if (useBatches) {
-            payload.append = true;
-            payload.finalize = index === batches.length - 1;
-            payload.batchIndex = index;
-            payload.batchCount = batches.length;
-          }
-          return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
-            return responseJson(response, 'index build failed');
-          });
-        });
-      }, Promise.resolve());
+      return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
     }).then(function (buildResult) {
       if (!isBuildContextCurrent(ctx)) return null;
       ctx.status = 'ready';
@@ -2608,6 +2917,14 @@
       ctx.failedFiles = buildResult.failedFiles || 0;
       ctx.truncated = buildResult.truncated === true;
       syncBuildContextToUI(ctx);
+
+      // Phase 4: Save manifest to IndexedDB after successful build
+      if (CODE_PERSISTENT_INDEX_ENABLED && !buildResult.unchanged) {
+        // Re-get the files list from the scan result to save to IDB
+        // (The files variable is already filtered, so we save from the original scan)
+        saveWorkspaceToIDB(workspaceId).catch(function () {});
+      }
+
       return buildResult;
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
@@ -2660,8 +2977,9 @@
 
     if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
+      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">项目已索引</div>' +
+        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + '</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
         '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
@@ -2677,13 +2995,26 @@
         '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + '</div>' +
         '<button class="code-retry-btn" style="margin-top:4px;font-size:10px;" id="codeRetryIndex">重试索引</button>';
     } else if (state.projectIndexStatus && state.projectIndexStatus.building) {
+      var idx = state.projectIndexStatus;
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;">索引构建中</div>' +
-        '<div style="color:var(--cw-text-muted);">' + escapeHTML(state.projectIndexStatus.phase || '正在建立索引...') + '</div>' +
-        (state.projectIndexStatus.scannedFiles !== undefined
-          ? '<div style="color:var(--cw-text-muted);">已扫描 ' + state.projectIndexStatus.scannedFiles +
-            '，可索引 ' + state.projectIndexStatus.indexableFiles + '</div>'
+        '<div style="color:var(--cw-text);font-weight:600;">' +
+        (idx.phase && idx.phase.indexOf('比较') !== -1 ? '索引比较中' : '索引构建中') +
+        '</div>' +
+        '<div style="color:var(--cw-text-muted);">' + escapeHTML(idx.phase || '正在建立索引...') + '</div>' +
+        (idx.scannedFiles !== undefined
+          ? '<div style="color:var(--cw-text-muted);">已扫描 ' + idx.scannedFiles +
+            '，可索引 ' + idx.indexableFiles + '</div>'
           : '');
+      // Phase 4: Show incremental stats
+      if (idx.changedCount !== undefined || idx.unchangedCount !== undefined || idx.deletedCount !== undefined) {
+        var incStats = [];
+        if (idx.changedCount !== undefined) incStats.push('本次新增/修改: ' + idx.changedCount);
+        if (idx.unchangedCount !== undefined) incStats.push('未变化: ' + idx.unchangedCount);
+        if (idx.deletedCount !== undefined) incStats.push('本次删除: ' + idx.deletedCount);
+        if (incStats.length > 0) {
+          indexDiv.innerHTML += '<div style="color:var(--cw-text-muted);font-size:10px;">' + incStats.join(' | ') + '</div>';
+        }
+      }
     } else {
       indexDiv.innerHTML = '<div style="color:var(--cw-text-muted);">索引尚未建立</div>';
     }
@@ -3611,8 +3942,10 @@
       workspace_id: scope.workspace_id,
       workspace_generation: scope.workspace_generation,
       conversation_id: state.conversationId,
+      client_request_id: 'code_cr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       message: message,
       active_path: state.activePath || '',
+      thinking_mode: 'high',
       history: historyMsgs,
       pinned_paths: state.pinnedFiles.slice(),
       open_files: buildOpenFilesContext(),
@@ -3641,11 +3974,9 @@
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
 
-    // Disable UI
+    // P0 Fix: 不完全禁用输入框，用户可以输入下一条草稿
     state.sending = true;
-    input.disabled = true;
-    var sendBtn = document.getElementById('codeChatSendBtn');
-    if (sendBtn) sendBtn.disabled = true;
+    // 不禁用输入框，只切换按钮
     updateChatRequestControls();
 
     // Cancel previous request
@@ -3654,6 +3985,24 @@
     }
     state._abortController = new AbortController();
     var requestId = ++state._requestId;
+
+    // Phase 1: Shared request controller + telemetry (feature-flagged)
+    state._sharedCtrl = null;
+    state._telemetry = null;
+    if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+      state._sharedCtrl = window.XtjAiCore.RequestController.create({
+        requestId: 'code_req_' + requestId,
+        clientRequestId: 'code_cr_' + requestId + '_' + Date.now(),
+        timeoutMs: 120000,
+        workspaceGeneration: wsGen
+      });
+      state._sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight('code_ai', state._sharedCtrl);
+      if (window.XtjAiCore.Telemetry) {
+        state._telemetry = window.XtjAiCore.Telemetry.create();
+        state._telemetry.start('code_req_' + requestId, 'code_cr_' + requestId);
+      }
+    }
 
     var now = new Date();
     var timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
@@ -3695,23 +4044,36 @@
     return ensureOpenFileContexts(message).then(function () {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       var body = buildChatRequestBody(message, historyMsgs);
+      // Phase 2: Route to streaming endpoint when feature flag is enabled
+      if (CODE_STREAM_ENABLED) {
+        return sendStreamingRequest(body, requestId, timeStr, wsGen);
+      }
       return sendApiRequest(body, requestId, timeStr, wsGen);
     }).catch(function (err) {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       if (err && err.name === 'AbortError') {
         removeTypingIndicator();
+        if (state._sharedCtrl) {
+          try { state._sharedCtrl.cancel('aborted'); } catch (e) {}
+          if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: 'aborted' }); }
+        }
         state.sending = false;
         state._abortController = null;
+        state._sharedCtrl = null;
+        state._telemetry = null;
         updateChatRequestControls();
         return null;
       }
       removeTypingIndicator();
-      restoreFailedMessage(message);
+      // P0 Fix: 失败时不重复恢复消息到输入框
+      // 只在真正发送失败时恢复一次（即网络层失败，消息未离开客户端）
+      // 如果已经收到错误响应（后端返回了错误），不恢复消息到输入框
       state.messages.push({ role: 'assistant', content: 'Request failed: ' + ((err && err.message) || String(err)), time: timeStr });
       renderChatPanel();
-      restoreFailedMessage(message);
       state.sending = false;
       state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
       updateChatRequestControls();
       return null;
     });
@@ -3732,9 +4094,9 @@
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
     var cancelBtn = document.getElementById('codeChatCancelBtn');
-    if (input) input.disabled = !!state.sending;
+    // P0 Fix: 不禁止输入框，用户可以输入下一条草稿
+    if (input) input.disabled = false;
     if (sendBtn) {
-      sendBtn.disabled = !!state.sending;
       sendBtn.style.display = state.sending ? 'none' : '';
     }
     if (cancelBtn) {
@@ -3746,20 +4108,679 @@
   function cancelCurrentRequest() {
     if (!state.sending || !state._abortController) return false;
     state._requestId++;
+    // Phase 1: Cancel shared controller
+    if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+      try { state._sharedCtrl.cancel('user_cancelled'); } catch (e) {}
+      if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: '用户取消' }); }
+    }
     try { state._abortController.abort(); } catch (e) { /* ignore */ }
     state._abortController = null;
+    state._sharedCtrl = null;
+    state._telemetry = null;
     state.sending = false;
     removeTypingIndicator();
-    restoreFailedMessage(state.lastFailedMessage);
+    // P0 Fix: 用户主动取消不恢复消息到输入框
     updateChatRequestControls();
     return true;
+  }
+
+  // ── Phase 3: Stream resume helpers ───────────────────────────────────────
+  function saveStreamState(streamState) {
+    if (!CODE_STREAM_RESUME_ENABLED) return;
+    try {
+      sessionStorage.setItem('xtj_stream_state', JSON.stringify(streamState));
+    } catch (e) { /* quota exceeded, ignore */ }
+  }
+
+  function clearStreamState() {
+    try { sessionStorage.removeItem('xtj_stream_state'); } catch (e) {}
+  }
+
+  function getStreamState() {
+    try {
+      var raw = sessionStorage.getItem('xtj_stream_state');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  // ── Phase 2: Streaming SSE request handler ──────────────────────────────
+  function sendStreamingRequest(body, requestId, timeStr, wsGen) {
+    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
+    var controller = state._abortController;
+    var timeoutId;
+    var streamDone = false;
+    var lastEventId = 0;
+    var streamId = null;
+    var resumeRetryCount = 0;
+
+    // Phase 3: Save stream state for resume
+    if (CODE_STREAM_RESUME_ENABLED) {
+      saveStreamState({
+        requestId: requestId,
+        workspaceGeneration: wsGen,
+        conversationId: state.conversationId,
+        workspaceId: getWorkspaceScope().workspace_id,
+        timeStr: timeStr,
+        clientRequestId: body.client_request_id || '',
+        startedAt: Date.now()
+      });
+    }
+
+    // Remove typing indicator — we create a real assistant node instead
+    removeTypingIndicator();
+
+    // Create the single assistant node immediately
+    var messagesContainer = document.getElementById('codeChatMessages');
+    if (!messagesContainer) {
+      state.sending = false;
+      state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      updateChatRequestControls();
+      return;
+    }
+
+    var assistantNode = document.createElement('div');
+    assistantNode.className = 'code-chat-message assistant streaming';
+    assistantNode.id = 'codeStreamingNode_' + requestId;
+    assistantNode.innerHTML =
+      '<div class="msg-avatar">AI</div>' +
+      '<div class="msg-body">' +
+        '<div class="code-stream-status">' +
+          '<span class="code-stream-status-text">正在分析任务...</span>' +
+          '<span class="code-stream-spinner"></span>' +
+        '</div>' +
+        '<div class="code-stream-tools" style="display:none">' +
+          '<div class="code-stream-tools-header">' +
+            '<span class="code-stream-tools-toggle">&#9654; 工具执行记录</span>' +
+          '</div>' +
+          '<div class="code-stream-tools-list"></div>' +
+        '</div>' +
+        '<div class="msg-content markdown-body code-stream-content"></div>' +
+        '<div class="code-stream-usage" style="display:none"></div>' +
+        '<div class="code-stream-error" style="display:none"></div>' +
+        '<div class="msg-time">' + escapeHTML(timeStr) + '</div>' +
+      '</div>';
+    messagesContainer.appendChild(assistantNode);
+    scrollChatToBottom();
+
+    // Cache DOM references
+    var statusEl = assistantNode.querySelector('.code-stream-status');
+    var statusText = assistantNode.querySelector('.code-stream-status-text');
+    var spinner = assistantNode.querySelector('.code-stream-spinner');
+    var toolsContainer = assistantNode.querySelector('.code-stream-tools');
+    var toolsList = assistantNode.querySelector('.code-stream-tools-list');
+    var toolsHeader = assistantNode.querySelector('.code-stream-tools-header');
+    var contentEl = assistantNode.querySelector('.code-stream-content');
+    var usageEl = assistantNode.querySelector('.code-stream-usage');
+    var errorEl = assistantNode.querySelector('.code-stream-error');
+    var timeEl = assistantNode.querySelector('.msg-time');
+
+    var toolCount = 0;
+    var toolsExpanded = false;
+    var answerBuffer = '';
+    var answerStarted = false;
+    var finalReply = '';
+    var finalOperations = [];
+    var finalUsage = null;
+    var finalContextInfo = null;
+    var finalToolTrace = null;
+    var finalRuntime = null;
+    var streamCancelled = false;
+
+    // Toggle tools section
+    if (toolsHeader) {
+      toolsHeader.addEventListener('click', function () {
+        toolsExpanded = !toolsExpanded;
+        toolsList.style.display = toolsExpanded ? '' : 'none';
+        var toggle = toolsHeader.querySelector('.code-stream-tools-toggle');
+        if (toggle) toggle.innerHTML = (toolsExpanded ? '&#9660;' : '&#9654;') + ' 工具执行记录';
+      });
+    }
+
+    // Scroll handler
+    var scrollCtrl = null;
+    if (window.XtjAiCore && window.XtjAiCore.Scroll) {
+      scrollCtrl = window.XtjAiCore.Scroll.create(messagesContainer);
+    }
+
+    function appendAnswerDelta(delta) {
+      if (streamCancelled) return;
+      answerStarted = true;
+      answerBuffer += String(delta);
+      if (statusEl) statusEl.style.display = 'none';
+      // Use StreamRenderer for smooth text output
+      if (!contentEl._streamRenderer && window.XtjAiCore && window.XtjAiCore.StreamRenderer) {
+        contentEl._streamRenderer = window.XtjAiCore.StreamRenderer.create(contentEl, { plainStream: true });
+      }
+      if (contentEl._streamRenderer) {
+        contentEl._streamRenderer.append(String(delta));
+      } else {
+        // Fallback: direct text update
+        contentEl.textContent = answerBuffer;
+      }
+      if (scrollCtrl) scrollCtrl.onNewContent();
+    }
+
+    function addToolStart(data) {
+      if (streamCancelled) return;
+      toolCount++;
+      if (toolsContainer) toolsContainer.style.display = '';
+      if (statusText) statusText.textContent = data.summary || ('执行工具: ' + (data.tool || ''));
+      var item = document.createElement('div');
+      item.className = 'code-stream-tool-item';
+      item.id = 'tool-item-' + (data.tool_call_id || toolCount);
+      item.innerHTML = '<span class="code-stream-tool-icon spinner"></span>' +
+        '<span class="code-stream-tool-name">' + escapeHTML(data.tool || '') + '</span>' +
+        '<span class="code-stream-tool-summary">' + escapeHTML(data.summary || '') + '</span>';
+      toolsList.appendChild(item);
+    }
+
+    function updateToolResult(data) {
+      if (streamCancelled) return;
+      var itemId = 'tool-item-' + (data.tool_call_id || toolCount);
+      var item = document.getElementById(itemId);
+      if (!item) {
+        // Item may have been created after tool_start, try finding by tool name
+        var items = toolsList.querySelectorAll('.code-stream-tool-item');
+        if (items.length > 0) item = items[items.length - 1];
+      }
+      if (item) {
+        var icon = item.querySelector('.code-stream-tool-icon');
+        if (icon) {
+          icon.className = 'code-stream-tool-icon ' + (data.ok ? 'success' : 'error');
+        }
+        var summary = item.querySelector('.code-stream-tool-summary');
+        if (summary) summary.textContent = data.summary || '';
+      }
+      if (statusText) statusText.textContent = '已完成 ' + toolCount + ' 个工具调用';
+    }
+
+    function showError(code, message, retryable) {
+      if (streamCancelled) return;
+      if (statusEl) statusEl.style.display = 'none';
+      if (spinner) spinner.style.display = 'none';
+      if (errorEl) {
+        errorEl.style.display = '';
+        var errorHtml = '<div class="code-stream-error-msg">';
+        if (code) errorHtml += '<span class="code-stream-error-code">[' + escapeHTML(code) + ']</span> ';
+        errorHtml += escapeHTML(message || '请求失败');
+        errorHtml += '</div>';
+        if (retryable) {
+          errorHtml += '<button class="code-stream-retry-btn" type="button">重新生成</button>';
+        }
+        errorEl.innerHTML = errorHtml;
+        var retryBtn = errorEl.querySelector('.code-stream-retry-btn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', function () {
+            sendMessage();
+          });
+        }
+      }
+      // Keep partial content
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.stop(); } catch (e) {}
+      }
+    }
+
+    function finalizeNode() {
+      streamDone = true;
+      if (spinner) spinner.style.display = 'none';
+      if (statusEl) statusEl.style.display = 'none';
+
+      // Final markdown render
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.finish(finalReply || answerBuffer); } catch (e) {}
+        contentEl._streamRenderer = null;
+      } else if (finalReply || answerBuffer) {
+        contentEl.innerHTML = parseSimpleMarkdown(finalReply || answerBuffer);
+      }
+
+      // Show usage
+      if (finalUsage && usageEl) {
+        usageEl.style.display = '';
+        var usageParts = [];
+        if (finalUsage.model) usageParts.push('模型: ' + escapeHTML(finalUsage.model));
+        if (finalUsage.input_tokens) usageParts.push('输入: ' + finalUsage.input_tokens.toLocaleString() + ' Token');
+        if (finalUsage.output_tokens) usageParts.push('输出: ' + finalUsage.output_tokens.toLocaleString() + ' Token');
+        if (finalUsage.cache_hit_tokens) usageParts.push('缓存命中: ' + finalUsage.cache_hit_tokens.toLocaleString() + ' Token');
+        if (finalUsage.total_duration_ms) usageParts.push('耗时: ' + (finalUsage.total_duration_ms / 1000).toFixed(1) + 's');
+        usageEl.textContent = usageParts.join(' | ');
+      }
+
+      // Update time
+      var now = new Date();
+      if (timeEl) timeEl.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+      assistantNode.classList.remove('streaming');
+    }
+
+    function cleanupStream() {
+      clearTimeout(timeoutId);
+      if (contentEl._streamRenderer) {
+        try { contentEl._streamRenderer.stop(); } catch (e) {}
+        contentEl._streamRenderer = null;
+      }
+      if (scrollCtrl) {
+        try { scrollCtrl.detach(); } catch (e) {}
+        scrollCtrl = null;
+      }
+    }
+
+    // Timeout
+    timeoutId = setTimeout(function () {
+      if (streamDone) return;
+      streamCancelled = true;
+      if (controller) {
+        try { controller.abort(); } catch (e) {}
+      }
+      showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true);
+      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true });
+      finalizeRequestState();
+    }, 120000);
+
+    // Send the SSE request
+    var apiCall;
+    if (window.xtjProtectedFetch) {
+      apiCall = window.xtjProtectedFetch('/api/code/chat/stream', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: signal
+      });
+    } else {
+      apiCall = fetch('/api/code/chat/stream', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: signal
+      });
+    }
+
+    apiCall.then(function (resp) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        cleanupStream();
+        return;
+      }
+      if (!resp.ok) {
+        return resp.text().then(function (text) {
+          var json = null;
+          try { json = JSON.parse(text); } catch (e) {}
+          var errMsg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
+          var errCode = (json && json.code) ? json.code : '';
+          showError(errCode, errMsg, json && json.retryable);
+          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
+          finalizeRequestState();
+        });
+      }
+
+      // Read SSE stream
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function readStream() {
+        if (streamCancelled) return;
+        reader.read().then(function (result) {
+          if (result.done) {
+            // Stream ended
+            if (!streamDone) {
+              finalizeNode();
+              state.messages.push({
+                role: 'assistant',
+                content: finalReply || answerBuffer || '（无响应）',
+                time: timeStr,
+                toolTrace: finalToolTrace,
+                operations: finalOperations,
+                contextInfo: finalContextInfo,
+                runtime: finalRuntime,
+                usage: finalUsage
+              });
+              finalizeRequestState();
+              cleanupStream();
+            }
+            return;
+          }
+
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop(); // Keep incomplete line
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line || !line.startsWith('data: ')) continue;
+            var jsonStr = line.slice(6);
+            var event;
+            try { event = JSON.parse(jsonStr); } catch (e) { continue; }
+            if (!event || !event.type) continue;
+
+            handleSSEEvent(event);
+          }
+
+          readStream();
+        }).catch(function (err) {
+          if (streamCancelled || streamDone) return;
+          if (err && err.name === 'AbortError') {
+            handleStreamCancelled();
+          } else {
+            // Phase 3: Auto-reconnect on stream interruption
+            if (CODE_STREAM_RESUME_ENABLED && streamId && !streamCancelled && resumeRetryCount < STREAM_RESUME_MAX_RETRIES) {
+              var delay = STREAM_RETRY_DELAYS[resumeRetryCount] || 8000;
+              resumeRetryCount++;
+              if (statusText) statusText.textContent = '连接中断，正在恢复 (' + resumeRetryCount + '/' + STREAM_RESUME_MAX_RETRIES + ')...';
+              console.log('[CODE-STREAM] Reconnecting in ' + delay + 'ms, attempt ' + resumeRetryCount);
+              setTimeout(function() {
+                if (streamCancelled || streamDone) return;
+                resumeStream(streamId, lastEventId, requestId, wsGen);
+              }, delay);
+            } else {
+              showError('STREAM_INTERRUPTED', '流式连接中断', true);
+              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED' });
+              finalizeRequestState();
+              cleanupStream();
+            }
+          }
+        });
+      }
+
+      function handleSSEEvent(event) {
+        if (streamCancelled || streamDone) return;
+        // Phase 3: Event deduplication by event_id
+        if (event.event_id && event.event_id <= lastEventId) return;
+        if (event.event_id) lastEventId = event.event_id;
+        // Capture stream_id from any event
+        if (event.stream_id) streamId = event.stream_id;
+
+        switch (event.type) {
+          case 'accepted':
+            if (statusText) statusText.textContent = '请求已接受，正在处理...';
+            // Phase 3: Update stream state
+            if (CODE_STREAM_RESUME_ENABLED && streamId) {
+              saveStreamState(Object.assign(getStreamState() || {}, {
+                streamId: streamId, lastEventId: lastEventId
+              }));
+            }
+            break;
+          case 'planning':
+            if (statusText) statusText.textContent = (event.data && event.data.message) || '正在分析任务...';
+            break;
+          case 'tool_start':
+            addToolStart(event.data || {});
+            break;
+          case 'tool_result':
+            updateToolResult(event.data || {});
+            break;
+          case 'answer_start':
+            if (statusText) statusText.textContent = '正在生成回答...';
+            break;
+          case 'answer_delta':
+            var delta = (event.data && event.data.delta) ? event.data.delta : '';
+            if (delta) appendAnswerDelta(delta);
+            break;
+          case 'operation_preview':
+            if (event.data && event.data.files) {
+              if (statusText) statusText.textContent = '生成修改操作: ' + (event.data.files.length || 0) + ' 个文件';
+            }
+            break;
+          case 'usage':
+            finalUsage = event.data || null;
+            break;
+          case 'warning':
+            console.warn('[CODE-STREAM] Warning:', event.data);
+            break;
+          case 'heartbeat':
+            // Keep-alive, do nothing
+            break;
+          case 'done':
+            finalReply = (event.data && event.data.reply) ? event.data.reply : '';
+            finalOperations = (event.data && Array.isArray(event.data.operations)) ? event.data.operations : [];
+            finalContextInfo = (event.data && event.data.context_info) || null;
+            finalToolTrace = (event.data && Array.isArray(event.data.tool_trace)) ? event.data.tool_trace : [];
+            finalRuntime = (event.data && event.data.runtime) || null;
+            if (!finalUsage && event.data && event.data.usage) finalUsage = event.data.usage;
+
+            finalizeNode();
+
+            // Update state
+            state.lastSentAttachmentPaths = state.attachments.filter(function (a) { return !a.pinned; }).map(function (a) { return a.path; });
+            consumeTransientAttachments();
+            state.lastFailedMessage = '';
+            state.messages.push({
+              role: 'assistant',
+              content: finalReply || answerBuffer || '（无响应）',
+              time: timeStr,
+              operations: finalOperations,
+              toolTrace: finalToolTrace,
+              contextInfo: finalContextInfo,
+              runtime: finalRuntime,
+              usage: finalUsage
+            });
+
+            if (finalOperations.length > 0) {
+              state.pendingOperations = finalOperations;
+            }
+            if (finalContextInfo) {
+              state.lastReadContext = finalContextInfo;
+            }
+            if (finalRuntime) {
+              state.lastRuntime = finalRuntime;
+            }
+            state.lastToolTrace = finalToolTrace || [];
+
+            finalizeRequestState();
+            cleanupStream();
+
+            // Show diff if operations
+            if (finalOperations.length > 0) {
+              renderDiffView();
+            }
+            // Phase 3: Clear stream state on done
+            clearStreamState();
+            break;
+          case 'error':
+            var errCode = (event.data && event.data.code) || 'INTERNAL_ERROR';
+            var errMsg = (event.data && event.data.message) || '请求失败';
+            var retryable = (event.data && event.data.retryable) === true;
+            showError(errCode, errMsg, retryable);
+            state.messages.push({
+              role: 'assistant',
+              content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
+              time: timeStr,
+              errorCode: errCode,
+              retryable: retryable
+            });
+            finalizeRequestState();
+            cleanupStream();
+            break;
+        }
+      }
+
+      function handleStreamCancelled() {
+        streamCancelled = true;
+        if (spinner) spinner.style.display = 'none';
+        if (statusEl) statusEl.style.display = 'none';
+        if (contentEl._streamRenderer) {
+          try { contentEl._streamRenderer.stop(); } catch (e) {}
+        }
+        // Mark as stopped
+        assistantNode.classList.remove('streaming');
+        assistantNode.classList.add('cancelled');
+        if (statusText) {
+          statusText.textContent = '已停止';
+          statusEl.style.display = '';
+        }
+        state.messages.push({
+          role: 'assistant',
+          content: answerBuffer || '（已停止）',
+          time: timeStr,
+          stopped: true
+        });
+        // Phase 3: Clear stream state on cancel — prevent auto-reconnect
+        clearStreamState();
+        finalizeRequestState();
+        cleanupStream();
+      }
+
+      readStream();
+    }).catch(function (err) {
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        cleanupStream();
+        return;
+      }
+      cleanupStream();
+      if (err && err.name === 'AbortError') {
+        if (!streamDone) {
+          streamCancelled = true;
+          if (spinner) spinner.style.display = 'none';
+          if (statusEl) statusEl.style.display = 'none';
+          assistantNode.classList.remove('streaming');
+          assistantNode.classList.add('cancelled');
+          state.messages.push({ role: 'assistant', content: answerBuffer || '（已停止）', time: timeStr, stopped: true });
+        }
+        finalizeRequestState();
+        return;
+      }
+      var errMsg = (err && err.message) ? err.message : String(err);
+      showError('NETWORK_ERROR', errMsg, true);
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true });
+      finalizeRequestState();
+    });
+
+    function finalizeRequestState() {
+      clearTimeout(timeoutId);
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.done(); } catch (e) {}
+        if (state._telemetry) {
+          if (finalUsage) state._telemetry.recordUsage(finalUsage);
+          state._telemetry.finalize(streamCancelled ? 'cancelled' : 'done');
+        }
+      }
+      if (state._sharedCtrl) {
+        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        state._sharedCtrl = null;
+      }
+      state._telemetry = null;
+      state.sending = false;
+      state._abortController = null;
+      var inp = document.getElementById('codeChatInput');
+      if (inp) inp.disabled = false;
+      var sb = document.getElementById('codeChatSendBtn');
+      if (sb) sb.disabled = false;
+      updateChatRequestControls();
+      renderProjectStatus();
+    }
+  }
+
+  // ── Phase 3: Stream resume function ────────────────────────────────────
+  function resumeStream(streamId, afterEventId, requestId, wsGen) {
+    if (!streamId) return;
+    if (requestId !== state._requestId) return;
+    if (wsGen !== state.workspaceGeneration) return;
+
+    var scope = getWorkspaceScope();
+    var params = 'stream_id=' + encodeURIComponent(streamId) +
+      '&after_event_id=' + afterEventId +
+      '&workspace_id=' + encodeURIComponent(scope.workspace_id || '') +
+      '&workspace_generation=' + (scope.workspace_generation || 0);
+
+    var resumeUrl = '/api/code/chat/stream/resume?' + params;
+
+    var fetchFn = window.xtjProtectedFetch || fetch;
+    fetchFn(resumeUrl, { credentials: 'include' })
+      .then(function(resp) { return resp.json(); })
+      .then(function(data) {
+        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
+        if (!data || !data.ok) {
+          console.error('[CODE-STREAM] Resume failed:', data);
+          showError('RESUME_FAILED', '流恢复失败', true);
+          return;
+        }
+
+        // Replay events
+        var events = data.events || [];
+        for (var i = 0; i < events.length; i++) {
+          handleSSEEvent(events[i]);
+        }
+
+        if (data.status === 'completed') {
+          // Already done
+          if (!streamDone) {
+            finalizeNode();
+            state.messages.push({
+              role: 'assistant',
+              content: finalReply || answerBuffer || '（无响应）',
+              time: timeStr,
+              toolTrace: finalToolTrace,
+              operations: finalOperations,
+              contextInfo: finalContextInfo,
+              runtime: finalRuntime,
+              usage: finalUsage
+            });
+            finalizeRequestState();
+            cleanupStream();
+          }
+        } else if (data.status === 'running') {
+          // Still running — reconnect to SSE
+          // We can't reconnect to the same SSE, but we can poll resume
+          if (statusText) statusText.textContent = '正在恢复中...';
+          setTimeout(function() {
+            if (requestId !== state._requestId || streamDone) return;
+            resumeStream(streamId, lastEventId, requestId, wsGen);
+          }, 2000);
+        } else if (data.status === 'failed') {
+          showError('STREAM_FAILED', '流式处理失败', false);
+        } else if (data.status === 'cancelled') {
+          handleStreamCancelled();
+        }
+      }).catch(function(err) {
+        console.error('[CODE-STREAM] Resume error:', err);
+        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
+        showError('RESUME_ERROR', '流恢复请求失败', true);
+      });
+  }
+
+  // ── Phase 3: Page refresh recovery — check for running streams ─────────
+  function checkStreamRecovery() {
+    if (!CODE_STREAM_RESUME_ENABLED) return;
+    var streamState = getStreamState();
+    if (!streamState) return;
+    // Check if the stream is still recent (within 1 hour)
+    if (Date.now() - streamState.startedAt > 60 * 60 * 1000) {
+      clearStreamState();
+      return;
+    }
+    // Check workspace match
+    var scope = getWorkspaceScope();
+    if (streamState.workspaceId && scope.workspace_id && streamState.workspaceId !== scope.workspace_id) {
+      return; // Don't recover streams from a different workspace
+    }
+    if (streamState.streamId) {
+      console.log('[CODE-STREAM] Recovering stream:', streamState.streamId);
+      // We need to create a partial assistant node and resume
+      // For now, we just check if there's a running session
+      var fetchFn = window.xtjProtectedFetch || fetch;
+      var statusUrl = '/api/code/chat/stream/status?workspace_id=' + encodeURIComponent(scope.workspace_id || '');
+      fetchFn(statusUrl, { credentials: 'include' })
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+          if (data && data.has_running && Array.isArray(data.sessions)) {
+            var session = data.sessions[0];
+            if (session) {
+              console.log('[CODE-STREAM] Found running session:', session.stream_id);
+              // If the stream was in this conversation, we could show a "recovering" indicator
+              // For now, we just clear the state since we don't have the UI context
+              clearStreamState();
+            }
+          }
+        }).catch(function() { clearStreamState(); });
+    }
   }
 
   function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
-    var signal = state._abortController ? state._abortController.signal : undefined;
+    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
 
     // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
     var controller = state._abortController;
@@ -3851,6 +4872,16 @@
       // Remove typing indicator
       removeTypingIndicator();
 
+      // Phase 1: Shared controller done lifecycle
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.done(); } catch (e) {}
+        if (state._telemetry) {
+          if (data && data.usage) state._telemetry.recordUsage(data.usage);
+          if (data && data.runtime) state._telemetry.recordToolCall(data.runtime.tool_calls || 0);
+          state._telemetry.finalize('done');
+        }
+      }
+
       var replyContent = (data && data.reply) ? data.reply : '（无响应）';
       var now2 = new Date();
       var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
@@ -3902,14 +4933,14 @@
             throw rebuildFailed;
           }
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
+          // P0 Fix: 自动重试不再添加第二次用户消息
           return sendApiRequest(body, requestId, timeStr, wsGen, true);
         }).catch(function (rebuildError) {
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
           removeTypingIndicator();
-          restoreFailedMessage(body && body.message);
+          // P0 Fix: 索引重建失败，不重复恢复消息
           state.messages.push({ role: 'assistant', content: '索引重建失败：' + ((rebuildError && rebuildError.message) || '请稍后重试'), time: timeStr });
           renderChatPanel();
-          restoreFailedMessage(body && body.message);
           return null;
         });
       }
@@ -3919,13 +4950,40 @@
       var errMsg = (err && err.message) ? err.message : String(err);
       var errCode = (err && err.code) ? err.code : '';
       var errRequestId = (err && err.requestId) ? err.requestId : '';
+
+      // Phase 3: Use shared error classification when enabled
+      var classified = null;
+      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+        classified = window.XtjAiCore.Errors.classify(err, {
+          requestId: errRequestId,
+          phase: 'code_request',
+          toolTrace: (err && err.toolTrace) || null
+        });
+        errCode = classified.code;
+        errMsg = classified.message;
+        errRequestId = classified.request_id || errRequestId;
+      }
+
       console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
-      restoreFailedMessage(body && body.message);
+      // Phase 1: Shared controller error lifecycle
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.error(errCode || 'code_request_error'); } catch (e) {}
+        if (state._telemetry) { state._telemetry.finalize('error', { code: errCode, phase: 'code_request', message: errMsg }); }
+      }
+      // P0 Fix: 只在 400 类错误（客户端验证失败）时恢复消息到输入框
+      if (errCode === 'PROVIDER_HTTP_400' || errCode === 'PROVIDER_INVALID_REQUEST' || errCode === 'VALIDATION_FAILED') {
+        restoreFailedMessage(body && body.message);
+      }
 
       // Phase 2: Build enhanced error message with code and requestId
       var displayMsg = errMsg;
       if (errCode) displayMsg = '[' + errCode + '] ' + displayMsg;
       var assistantMsg = { role: 'assistant', content: '抱歉，' + displayMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
+
+      // Phase 3: Add retryable hint from shared error classification
+      if (classified && classified.retryable) {
+        assistantMsg.retryable = true;
+      }
 
       // Phase 2: Preserve tool trace when tools succeeded but final answer failed
       if (err && Array.isArray(err.toolTrace) && err.toolTrace.length > 0) {
@@ -3937,18 +4995,21 @@
       state.messages.push(assistantMsg);
 
       renderChatPanel();
-      restoreFailedMessage(body && body.message);
+      // P0 Fix: 只恢复一次消息到输入框，不重复调用 restoreFailedMessage
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
+      // Phase 1: Cleanup shared controller
+      if (state._sharedCtrl) {
+        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        state._sharedCtrl = null;
+      }
+      state._telemetry = null;
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
       state.sending = false;
       state._abortController = null;
-      var inp = document.getElementById('codeChatInput');
-      if (inp) inp.disabled = false;
-      var sb = document.getElementById('codeChatSendBtn');
-      if (sb) sb.disabled = false;
+      // P0 Fix: 不重新禁用输入框
       updateChatRequestControls();
     });
   }

@@ -725,6 +725,14 @@ window.throttleRAF = function(fn) {
 
   function abortCurrentRequest() {
     clearStreamCleanup();
+    // Phase 1: Cancel shared controller in-flight request
+    if (window.XtjAiCore && window.XtjAiCore.RequestController) {
+      var inFlight = window.XtjAiCore.RequestController.getInFlight('cat_ai');
+      if (inFlight && inFlight.isActive()) {
+        try { inFlight.cancel('aborted'); } catch (e) {}
+      }
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai');
+    }
     if (S.abortController) {
       try {
         S.abortController._abortReason = 'aborted';
@@ -4589,6 +4597,23 @@ window.throttleRAF = function(fn) {
     S.abortController = controller;
     S.currentStreamAborted = false;
 
+    // Phase 1: Shared request controller + telemetry (feature-flagged)
+    var sharedCtrl = null;
+    var telemetry = null;
+    if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+      sharedCtrl = window.XtjAiCore.RequestController.create({
+        requestId: reqId,
+        clientRequestId: 'cr_' + S.clientRequestId,
+        timeoutMs: 120000
+      });
+      sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
+      if (window.XtjAiCore.Telemetry) {
+        telemetry = window.XtjAiCore.Telemetry.create();
+        telemetry.start(reqId, 'cr_' + S.clientRequestId);
+      }
+    }
+
     var url = API_BASE + '/chat/stream';
     var auth = await getUserAuthPayload({ forceNoToken: false });
     var headers = auth.headers || {};
@@ -4605,11 +4630,12 @@ window.throttleRAF = function(fn) {
         method: 'POST',
         headers: headers,
         body: fetchBody,
-        signal: controller.signal
+        signal: sharedCtrl ? sharedCtrl.signal : controller.signal
       });
       
       if (!resp.ok) {
         var responseMessage = 'AI 服务暂时不可用，请稍后重试';
+        var errorCode = '';
         try {
           var rawErrText = await resp.text().catch(function(){ return ''; });
           var errJson = null;
@@ -4619,13 +4645,28 @@ window.throttleRAF = function(fn) {
             }
           }
           if (errJson && errJson.error) responseMessage = String(errJson.error);
+          if (errJson && errJson.code) errorCode = String(errJson.code);
         } catch(e) {}
+        // Phase 3: Use shared error classification when enabled
+        if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+          var classified = window.XtjAiCore.Errors.classify(new Error(responseMessage), {
+            httpStatus: resp.status,
+            requestId: reqId,
+            phase: 'http_response'
+          });
+          responseMessage = classified.message;
+          errorCode = classified.code;
+        }
         if (S._currentReqId !== reqId) return;
+        if (sharedCtrl) {
+          sharedCtrl.error('http_' + (resp.status || 0));
+          if (telemetry) { telemetry.finalize('error', { code: errorCode, phase: 'http_response', message: responseMessage }); }
+        }
         hideAssistantTyping();
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         restoreInputText();
-        notify(responseMessage);
+        notify(errorCode ? '[' + errorCode + '] ' + responseMessage : responseMessage);
         resetSendingIfCurrent();
         return;
       }
@@ -5266,6 +5307,13 @@ window.throttleRAF = function(fn) {
             
             doneReceived = true;
             evtHandled = true;
+            if (sharedCtrl) {
+              sharedCtrl.done();
+              if (telemetry) {
+                if (evt.usage) telemetry.recordUsage(evt.usage);
+                telemetry.finalize('done');
+              }
+            }
             break;
           }
         }
@@ -5311,10 +5359,24 @@ window.throttleRAF = function(fn) {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
           restoreInputText();
-          notify('网络连接异常，请检查网络后重试');
+          // Phase 3: Use shared error classification
+          var netErrMsg = '网络连接异常，请检查网络后重试';
+          if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+            var netClassified = window.XtjAiCore.Errors.classify(fetchErr, { phase: 'stream_read', requestId: reqId });
+            netErrMsg = netClassified.message;
+          }
+          notify(netErrMsg);
+        }
+        if (sharedCtrl) {
+          sharedCtrl.error('stream_read_error');
+          if (telemetry) { telemetry.finalize('error', { code: 'STREAM_INTERRUPTED', phase: 'stream_read', message: String(fetchErr && fetchErr.message || '') }); }
         }
       } else {
         // AbortError: 用户主动停止
+        if (sharedCtrl) {
+          sharedCtrl.cancel('user_cancelled');
+          if (telemetry) { telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', phase: 'stream_read', message: '用户取消' }); }
+        }
         if (aiContent) {
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
         } else {
@@ -5325,6 +5387,10 @@ window.throttleRAF = function(fn) {
       }
     }
     
+    if (sharedCtrl) {
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai');
+      sharedCtrl.dispose();
+    }
     resetSendingIfCurrent();
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
