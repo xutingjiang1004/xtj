@@ -3655,6 +3655,24 @@
     state._abortController = new AbortController();
     var requestId = ++state._requestId;
 
+    // Phase 1: Shared request controller + telemetry (feature-flagged)
+    state._sharedCtrl = null;
+    state._telemetry = null;
+    if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+      state._sharedCtrl = window.XtjAiCore.RequestController.create({
+        requestId: 'code_req_' + requestId,
+        clientRequestId: 'code_cr_' + requestId + '_' + Date.now(),
+        timeoutMs: 120000,
+        workspaceGeneration: wsGen
+      });
+      state._sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight('code_ai', state._sharedCtrl);
+      if (window.XtjAiCore.Telemetry) {
+        state._telemetry = window.XtjAiCore.Telemetry.create();
+        state._telemetry.start('code_req_' + requestId, 'code_cr_' + requestId);
+      }
+    }
+
     var now = new Date();
     var timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
 
@@ -3700,8 +3718,14 @@
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       if (err && err.name === 'AbortError') {
         removeTypingIndicator();
+        if (state._sharedCtrl) {
+          try { state._sharedCtrl.cancel('aborted'); } catch (e) {}
+          if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: 'aborted' }); }
+        }
         state.sending = false;
         state._abortController = null;
+        state._sharedCtrl = null;
+        state._telemetry = null;
         updateChatRequestControls();
         return null;
       }
@@ -3712,6 +3736,8 @@
       restoreFailedMessage(message);
       state.sending = false;
       state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
       updateChatRequestControls();
       return null;
     });
@@ -3746,8 +3772,15 @@
   function cancelCurrentRequest() {
     if (!state.sending || !state._abortController) return false;
     state._requestId++;
+    // Phase 1: Cancel shared controller
+    if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+      try { state._sharedCtrl.cancel('user_cancelled'); } catch (e) {}
+      if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: '用户取消' }); }
+    }
     try { state._abortController.abort(); } catch (e) { /* ignore */ }
     state._abortController = null;
+    state._sharedCtrl = null;
+    state._telemetry = null;
     state.sending = false;
     removeTypingIndicator();
     restoreFailedMessage(state.lastFailedMessage);
@@ -3759,7 +3792,7 @@
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
-    var signal = state._abortController ? state._abortController.signal : undefined;
+    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
 
     // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
     var controller = state._abortController;
@@ -3851,6 +3884,16 @@
       // Remove typing indicator
       removeTypingIndicator();
 
+      // Phase 1: Shared controller done lifecycle
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.done(); } catch (e) {}
+        if (state._telemetry) {
+          if (data && data.usage) state._telemetry.recordUsage(data.usage);
+          if (data && data.runtime) state._telemetry.recordToolCall(data.runtime.tool_calls || 0);
+          state._telemetry.finalize('done');
+        }
+      }
+
       var replyContent = (data && data.reply) ? data.reply : '（无响应）';
       var now2 = new Date();
       var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
@@ -3919,13 +3962,37 @@
       var errMsg = (err && err.message) ? err.message : String(err);
       var errCode = (err && err.code) ? err.code : '';
       var errRequestId = (err && err.requestId) ? err.requestId : '';
+
+      // Phase 3: Use shared error classification when enabled
+      var classified = null;
+      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+        classified = window.XtjAiCore.Errors.classify(err, {
+          requestId: errRequestId,
+          phase: 'code_request',
+          toolTrace: (err && err.toolTrace) || null
+        });
+        errCode = classified.code;
+        errMsg = classified.message;
+        errRequestId = classified.request_id || errRequestId;
+      }
+
       console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
+      // Phase 1: Shared controller error lifecycle
+      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
+        try { state._sharedCtrl.error(errCode || 'code_request_error'); } catch (e) {}
+        if (state._telemetry) { state._telemetry.finalize('error', { code: errCode, phase: 'code_request', message: errMsg }); }
+      }
       restoreFailedMessage(body && body.message);
 
       // Phase 2: Build enhanced error message with code and requestId
       var displayMsg = errMsg;
       if (errCode) displayMsg = '[' + errCode + '] ' + displayMsg;
       var assistantMsg = { role: 'assistant', content: '抱歉，' + displayMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
+
+      // Phase 3: Add retryable hint from shared error classification
+      if (classified && classified.retryable) {
+        assistantMsg.retryable = true;
+      }
 
       // Phase 2: Preserve tool trace when tools succeeded but final answer failed
       if (err && Array.isArray(err.toolTrace) && err.toolTrace.length > 0) {
@@ -3941,6 +4008,12 @@
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
+      // Phase 1: Cleanup shared controller
+      if (state._sharedCtrl) {
+        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        state._sharedCtrl = null;
+      }
+      state._telemetry = null;
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
       state.sending = false;
