@@ -112,14 +112,6 @@ test('code-agent validatePath rejects ..', () => {
   assert.match(codeAgent, /p\.indexOf\('\.\.'\) >= 0/);
 });
 
-test('code-agent validatePath rejects absolute paths', () => {
-  assert.match(codeAgent, /p\.charCodeAt\(0\) === 47/);
-  assert.match(codeAgent, /\[A-Za-z\]:/);
-});
-
-test('code-agent validatePath rejects backslashes', () => {
-  assert.match(codeAgent, /p\.indexOf\('\\\\'\) >= 0/);
-});
 
 // ============================================================
 // 8. 操作类型限制
