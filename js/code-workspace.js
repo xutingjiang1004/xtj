@@ -78,6 +78,179 @@
     try { return localStorage.getItem('CODE_STREAM_ENABLED') === '1'; } catch (e) { return false; }
   })();
 
+  // Phase 3: Feature flag for stream resume
+  var CODE_STREAM_RESUME_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_STREAM_RESUME_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
+  // Phase 3: Stream resume state (saved to sessionStorage)
+  var STREAM_RESUME_MAX_RETRIES = 5;
+  var STREAM_RETRY_DELAYS = [500, 1000, 2000, 4000, 8000]; // Exponential backoff
+
+  // Phase 4: Feature flag for persistent index
+  var CODE_PERSISTENT_INDEX_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_PERSISTENT_INDEX_ENABLED') === '1'; } catch (e) { return false; }
+  })();
+
+  // Phase 4: IndexedDB stores for workspace manifest and file metadata
+  var _indexedDB = null;
+  var INDEXED_DB_NAME = 'xtj_code_index';
+  var INDEXED_DB_VERSION = 1;
+
+  function openIndexedDB() {
+    if (_indexedDB) return Promise.resolve(_indexedDB);
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve(null);
+    return new Promise(function (resolve, reject) {
+      var request = indexedDB.open(INDEXED_DB_NAME, INDEXED_DB_VERSION);
+      request.onupgradeneeded = function (e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains('code_workspaces')) {
+          db.createObjectStore('code_workspaces', { keyPath: 'workspaceKey' });
+        }
+        if (!db.objectStoreNames.contains('code_file_manifest')) {
+          var store = db.createObjectStore('code_file_manifest', { keyPath: 'id' });
+          store.createIndex('workspaceKey', 'workspaceKey', { unique: false });
+          store.createIndex('path', 'path', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('code_drafts')) {
+          db.createObjectStore('code_drafts', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = function (e) {
+        _indexedDB = e.target.result;
+        resolve(_indexedDB);
+      };
+      request.onerror = function (e) {
+        console.warn('[CODE-INDEXEDDB] Failed to open:', e.target.error);
+        resolve(null);
+      };
+    });
+  }
+
+  function idbGet(storeName, key) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var req = store.get(key);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { resolve(null); };
+      });
+    });
+  }
+
+  function idbPut(storeName, value) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.put(value);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  function idbGetAll(storeName) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return [];
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readonly');
+        var store = tx.objectStore(storeName);
+        var req = store.getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { resolve([]); };
+      });
+    });
+  }
+
+  function idbDelete(storeName, key) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  function idbClear(storeName) {
+    return openIndexedDB().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        var tx = db.transaction(storeName, 'readwrite');
+        var store = tx.objectStore(storeName);
+        store.clear();
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+      });
+    });
+  }
+
+  // Phase 4: Save workspace info to IndexedDB
+  function saveWorkspaceToIDB(workspaceId, workspaceName) {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve();
+    var workspaceKey = 'local_folder:' + String(workspaceId || getWorkspaceId());
+    return idbPut('code_workspaces', {
+      workspaceKey: workspaceKey,
+      workspaceId: workspaceId || getWorkspaceId(),
+      workspaceName: workspaceName || getWorkspaceId(),
+      sourceType: 'local_folder',
+      generation: state.workspaceGeneration || 0,
+      lastOpenedAt: Date.now()
+    });
+  }
+
+  // Phase 4: Save file manifest to IndexedDB
+  function saveFileManifestToIDB(files) {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve();
+    var workspaceId = getWorkspaceId();
+    if (!workspaceId) return Promise.resolve();
+    var workspaceKey = 'local_folder:' + workspaceId;
+    var now = Date.now();
+    return idbClear('code_file_manifest').then(function () {
+      var promises = [];
+      for (var i = 0; i < files.length && i < 1000; i++) {
+        var f = files[i];
+        (function (file) {
+          promises.push(idbPut('code_file_manifest', {
+            id: workspaceKey + ':' + file.path,
+            workspaceKey: workspaceKey,
+            workspaceId: workspaceId,
+            path: file.path,
+            size: file.size || 0,
+            lastModified: file.modifiedAt || 0,
+            sha256: file.sha256 || '',
+            lastIndexedSha256: file.sha256 || '',
+            lastSeenGeneration: state.workspaceGeneration || 0,
+            updatedAt: now
+          }));
+        })(f);
+      }
+      return Promise.all(promises);
+    });
+  }
+
+  // Phase 4: Get stored manifest from IndexedDB
+  function getStoredManifest() {
+    if (!CODE_PERSISTENT_INDEX_ENABLED) return Promise.resolve([]);
+    return idbGetAll('code_file_manifest').then(function (records) {
+      return records.map(function (r) {
+        return {
+          path: r.path,
+          size: r.size || 0,
+          modifiedAt: r.lastModified || 0,
+          sha256: r.lastIndexedSha256 || r.sha256 || ''
+        };
+      });
+    });
+  }
+
   // ──────────────────────────────────────────────
   // Utilities
   // ──────────────────────────────────────────────
@@ -2421,7 +2594,8 @@
             totalFiles: result.summary.totalFiles,
             totalChunks: result.summary.totalChunks,
             builtAt: result.summary.builtAt,
-            indexed: true
+            indexed: true,
+            recovered: result.recovered === true
           };
           state.pinnedFiles = Array.isArray(result.pinnedFiles) ? result.pinnedFiles.slice() : state.pinnedFiles;
           renderProjectStatus();
@@ -2457,7 +2631,7 @@
       workspaceGeneration: wsGen,
       controller: controller,
       startedAt: Date.now(),
-      status: 'scanning',   // idle | scanning | uploading | finalizing | ready | failed | cancelled
+      status: 'scanning',   // idle | scanning | comparing | uploading | finalizing | ready | failed | cancelled
       phase: '正在扫描文件...',
       scannedFiles: 0,
       indexableFiles: 0,
@@ -2486,7 +2660,7 @@
     if (!isBuildContextCurrent(ctx)) return;
     state.projectIndexStatus = {
       indexed: ctx.status === 'ready',
-      building: ctx.status === 'scanning' || ctx.status === 'uploading' || ctx.status === 'finalizing',
+      building: ctx.status === 'scanning' || ctx.status === 'comparing' || ctx.status === 'uploading' || ctx.status === 'finalizing',
       phase: ctx.phase,
       scannedFiles: ctx.scannedFiles,
       indexableFiles: ctx.indexableFiles,
@@ -2498,9 +2672,71 @@
       truncated: ctx.truncated,
       error: ctx.errorMessage || '',
       errorCode: ctx.errorCode || '',
-      buildId: ctx.id
+      buildId: ctx.id,
+      changedCount: ctx.changedCount,
+      unchangedCount: ctx.unchangedCount,
+      deletedCount: ctx.deletedCount
     };
     renderProjectStatus();
+  }
+
+  // Phase 4: Helper to upload files in batches (used by both full and incremental upload)
+  function uploadFilesInBatches(files, scanResult, ctx, controller, workspaceId, wsGen) {
+    if (files.length === 0) {
+      return Promise.resolve({
+        ok: true,
+        totalFiles: 0,
+        totalChunks: 0,
+        builtAt: new Date().toISOString(),
+        workspaceId: workspaceId,
+        generation: wsGen,
+        empty: true
+      });
+    }
+
+    var batches = [];
+    var currentBatch = [];
+    var currentBytes = 0;
+    for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
+      var fileBytes = 0;
+      try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
+      if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBytes = 0;
+      }
+      currentBatch.push(files[batchIndex]);
+      currentBytes += fileBytes;
+    }
+    if (currentBatch.length || !batches.length) batches.push(currentBatch);
+    ctx.totalBatches = batches.length;
+    var useBatches = batches.length > 1;
+
+    return batches.reduce(function (chain, batch, index) {
+      return chain.then(function () {
+        if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+        ctx.batchIndex = index;
+        ctx.phase = useBatches
+          ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
+          : '正在上传索引...';
+        syncBuildContextToUI(ctx);
+        var payload = {
+          workspaceId: workspaceId,
+          workspaceGeneration: wsGen,
+          files: batch,
+          truncated: scanResult.truncated === true
+        };
+        if (useBatches) {
+          payload.append = true;
+          payload.finalize = index === batches.length - 1;
+          payload.batchIndex = index;
+          payload.batchCount = batches.length;
+        }
+        return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
+          return responseJson(response, 'index build failed');
+        });
+      });
+    }, Promise.resolve());
   }
 
   function buildProjectIndex() {
@@ -2554,54 +2790,122 @@
       }
 
       ctx.status = 'uploading';
-      ctx.phase = '正在上传索引...';
       ctx.scannedFiles = sourceFiles.length;
       ctx.indexableFiles = files.length;
+
+      // Phase 4: Incremental manifest comparison
+      if (CODE_PERSISTENT_INDEX_ENABLED) {
+        ctx.phase = '正在比较索引...';
+        ctx.status = 'comparing';
+        syncBuildContextToUI(ctx);
+
+        return getStoredManifest().then(function (storedManifest) {
+          if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+
+          // Build manifest from current files
+          var manifestFiles = files.map(function (f) {
+            return {
+              path: f.path,
+              size: f.size || 0,
+              modified_at: f.modifiedAt || null,
+              sha256: f.sha256 || ''
+            };
+          });
+
+          // Send manifest to server for comparison
+          var manifestPayload = {
+            workspace_id: workspaceId,
+            workspace_generation: wsGen,
+            files: manifestFiles
+          };
+
+          return postJson('/api/code/index/manifest', manifestPayload, controller.signal)
+            .then(function (response) { return responseJson(response, '清单比较失败'); })
+            .then(function (manifestResult) {
+              if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+
+              if (manifestResult.persist_enabled && manifestResult.upload_paths) {
+                // Only upload changed files
+                var uploadPaths = manifestResult.upload_paths || [];
+                var unchangedPaths = manifestResult.unchanged_paths || [];
+                var deletePaths = manifestResult.delete_paths || [];
+
+                if (uploadPaths.length === 0 && deletePaths.length === 0) {
+                  // No changes needed
+                  ctx.status = 'ready';
+                  ctx.phase = '索引未变化，无需更新';
+                  ctx.totalFiles = files.length;
+                  ctx.totalChunks = unchangedPaths.length;
+                  ctx.builtAt = new Date().toISOString();
+                  syncBuildContextToUI(ctx);
+                  // Save current manifest to IDB
+                  saveFileManifestToIDB(files).catch(function () {});
+                  saveWorkspaceToIDB(workspaceId).catch(function () {});
+                  return {
+                    ok: true,
+                    totalFiles: files.length,
+                    totalChunks: unchangedPaths.length,
+                    builtAt: ctx.builtAt,
+                    workspaceId: workspaceId,
+                    generation: wsGen,
+                    scannedFiles: sourceFiles.length,
+                    indexedFiles: files.length,
+                    skippedFiles: 0,
+                    failedFiles: 0,
+                    truncated: result.truncated === true,
+                    status: 'ready',
+                    totalBytes: 0,
+                    batchComplete: true,
+                    unchanged: true
+                  };
+                }
+
+                // Filter files to only changed ones
+                var uploadPathSet = {};
+                for (var up = 0; up < uploadPaths.length; up++) {
+                  uploadPathSet[uploadPaths[up]] = true;
+                }
+
+                var changedFiles = files.filter(function (f) {
+                  return uploadPathSet[f.path];
+                });
+
+                ctx.phase = '发现 ' + uploadPaths.length + ' 个变化文件，' + unchangedPaths.length + ' 个未变化';
+                if (deletePaths.length > 0) {
+                  ctx.phase += '，' + deletePaths.length + ' 个已删除';
+                }
+                ctx.scannedFiles = sourceFiles.length;
+                ctx.indexableFiles = changedFiles.length;
+                ctx.changedCount = uploadPaths.length;
+                ctx.unchangedCount = unchangedPaths.length;
+                ctx.deletedCount = deletePaths.length;
+                syncBuildContextToUI(ctx);
+
+                // Use only changed files for upload
+                files = changedFiles;
+              }
+
+              ctx.status = 'uploading';
+              ctx.phase = '正在上传索引...';
+              syncBuildContextToUI(ctx);
+
+              return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
+            });
+        }).catch(function (err) {
+          if (err && err.name === 'AbortError') throw err;
+          // Manifest comparison failed, fall back to full upload
+          console.warn('[CODE-WORKSPACE] Manifest comparison failed, falling back to full upload:', err);
+          ctx.status = 'uploading';
+          ctx.phase = '增量比较失败，正在全量上传索引...';
+          syncBuildContextToUI(ctx);
+          return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
+        });
+      }
+
+      ctx.phase = '正在上传索引...';
       syncBuildContextToUI(ctx);
 
-      var batches = [];
-      var currentBatch = [];
-      var currentBytes = 0;
-      for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
-        var fileBytes = 0;
-        try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
-        if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
-          batches.push(currentBatch);
-          currentBatch = [];
-          currentBytes = 0;
-        }
-        currentBatch.push(files[batchIndex]);
-        currentBytes += fileBytes;
-      }
-      if (currentBatch.length || !batches.length) batches.push(currentBatch);
-      ctx.totalBatches = batches.length;
-      var useBatches = batches.length > 1;
-
-      return batches.reduce(function (chain, batch, index) {
-        return chain.then(function () {
-          if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
-          ctx.batchIndex = index;
-          ctx.phase = useBatches
-            ? '正在上传索引 (' + (index + 1) + '/' + batches.length + ')...'
-            : '正在上传索引...';
-          syncBuildContextToUI(ctx);
-          var payload = {
-            workspaceId: workspaceId,
-            workspaceGeneration: wsGen,
-            files: batch,
-            truncated: result.truncated === true
-          };
-          if (useBatches) {
-            payload.append = true;
-            payload.finalize = index === batches.length - 1;
-            payload.batchIndex = index;
-            payload.batchCount = batches.length;
-          }
-          return postJson('/api/code/index/build', payload, controller.signal).then(function (response) {
-            return responseJson(response, 'index build failed');
-          });
-        });
-      }, Promise.resolve());
+      return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
     }).then(function (buildResult) {
       if (!isBuildContextCurrent(ctx)) return null;
       ctx.status = 'ready';
@@ -2613,6 +2917,14 @@
       ctx.failedFiles = buildResult.failedFiles || 0;
       ctx.truncated = buildResult.truncated === true;
       syncBuildContextToUI(ctx);
+
+      // Phase 4: Save manifest to IndexedDB after successful build
+      if (CODE_PERSISTENT_INDEX_ENABLED && !buildResult.unchanged) {
+        // Re-get the files list from the scan result to save to IDB
+        // (The files variable is already filtered, so we save from the original scan)
+        saveWorkspaceToIDB(workspaceId).catch(function () {});
+      }
+
       return buildResult;
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
@@ -2665,8 +2977,9 @@
 
     if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
+      var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">项目已索引</div>' +
+        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + '</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalFiles + ' 个文件</div>' +
         '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>' +
         '<div style="color:var(--cw-text-muted);">' + (state.workspaceMode === 'github' ? 'GitHub 仓库' : (window.__xtjCodeFS && window.__xtjCodeFS.getWorkspaceKind && window.__xtjCodeFS.getWorkspaceKind() === 'file' ? '本地单文件' : '本地文件夹')) + '</div>';
@@ -2682,13 +2995,26 @@
         '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + '</div>' +
         '<button class="code-retry-btn" style="margin-top:4px;font-size:10px;" id="codeRetryIndex">重试索引</button>';
     } else if (state.projectIndexStatus && state.projectIndexStatus.building) {
+      var idx = state.projectIndexStatus;
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;">索引构建中</div>' +
-        '<div style="color:var(--cw-text-muted);">' + escapeHTML(state.projectIndexStatus.phase || '正在建立索引...') + '</div>' +
-        (state.projectIndexStatus.scannedFiles !== undefined
-          ? '<div style="color:var(--cw-text-muted);">已扫描 ' + state.projectIndexStatus.scannedFiles +
-            '，可索引 ' + state.projectIndexStatus.indexableFiles + '</div>'
+        '<div style="color:var(--cw-text);font-weight:600;">' +
+        (idx.phase && idx.phase.indexOf('比较') !== -1 ? '索引比较中' : '索引构建中') +
+        '</div>' +
+        '<div style="color:var(--cw-text-muted);">' + escapeHTML(idx.phase || '正在建立索引...') + '</div>' +
+        (idx.scannedFiles !== undefined
+          ? '<div style="color:var(--cw-text-muted);">已扫描 ' + idx.scannedFiles +
+            '，可索引 ' + idx.indexableFiles + '</div>'
           : '');
+      // Phase 4: Show incremental stats
+      if (idx.changedCount !== undefined || idx.unchangedCount !== undefined || idx.deletedCount !== undefined) {
+        var incStats = [];
+        if (idx.changedCount !== undefined) incStats.push('本次新增/修改: ' + idx.changedCount);
+        if (idx.unchangedCount !== undefined) incStats.push('未变化: ' + idx.unchangedCount);
+        if (idx.deletedCount !== undefined) incStats.push('本次删除: ' + idx.deletedCount);
+        if (incStats.length > 0) {
+          indexDiv.innerHTML += '<div style="color:var(--cw-text-muted);font-size:10px;">' + incStats.join(' | ') + '</div>';
+        }
+      }
     } else {
       indexDiv.innerHTML = '<div style="color:var(--cw-text-muted);">索引尚未建立</div>';
     }
@@ -3798,12 +4124,47 @@
     return true;
   }
 
+  // ── Phase 3: Stream resume helpers ───────────────────────────────────────
+  function saveStreamState(streamState) {
+    if (!CODE_STREAM_RESUME_ENABLED) return;
+    try {
+      sessionStorage.setItem('xtj_stream_state', JSON.stringify(streamState));
+    } catch (e) { /* quota exceeded, ignore */ }
+  }
+
+  function clearStreamState() {
+    try { sessionStorage.removeItem('xtj_stream_state'); } catch (e) {}
+  }
+
+  function getStreamState() {
+    try {
+      var raw = sessionStorage.getItem('xtj_stream_state');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
   // ── Phase 2: Streaming SSE request handler ──────────────────────────────
   function sendStreamingRequest(body, requestId, timeStr, wsGen) {
     var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
     var controller = state._abortController;
     var timeoutId;
     var streamDone = false;
+    var lastEventId = 0;
+    var streamId = null;
+    var resumeRetryCount = 0;
+
+    // Phase 3: Save stream state for resume
+    if (CODE_STREAM_RESUME_ENABLED) {
+      saveStreamState({
+        requestId: requestId,
+        workspaceGeneration: wsGen,
+        conversationId: state.conversationId,
+        workspaceId: getWorkspaceScope().workspace_id,
+        timeStr: timeStr,
+        clientRequestId: body.client_request_id || '',
+        startedAt: Date.now()
+      });
+    }
 
     // Remove typing indicator — we create a real assistant node instead
     removeTypingIndicator();
@@ -4102,19 +4463,43 @@
           if (err && err.name === 'AbortError') {
             handleStreamCancelled();
           } else {
-            showError('STREAM_INTERRUPTED', '流式连接中断', true);
-            state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED' });
-            finalizeRequestState();
+            // Phase 3: Auto-reconnect on stream interruption
+            if (CODE_STREAM_RESUME_ENABLED && streamId && !streamCancelled && resumeRetryCount < STREAM_RESUME_MAX_RETRIES) {
+              var delay = STREAM_RETRY_DELAYS[resumeRetryCount] || 8000;
+              resumeRetryCount++;
+              if (statusText) statusText.textContent = '连接中断，正在恢复 (' + resumeRetryCount + '/' + STREAM_RESUME_MAX_RETRIES + ')...';
+              console.log('[CODE-STREAM] Reconnecting in ' + delay + 'ms, attempt ' + resumeRetryCount);
+              setTimeout(function() {
+                if (streamCancelled || streamDone) return;
+                resumeStream(streamId, lastEventId, requestId, wsGen);
+              }, delay);
+            } else {
+              showError('STREAM_INTERRUPTED', '流式连接中断', true);
+              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED' });
+              finalizeRequestState();
+              cleanupStream();
+            }
           }
-          cleanupStream();
         });
       }
 
       function handleSSEEvent(event) {
         if (streamCancelled || streamDone) return;
+        // Phase 3: Event deduplication by event_id
+        if (event.event_id && event.event_id <= lastEventId) return;
+        if (event.event_id) lastEventId = event.event_id;
+        // Capture stream_id from any event
+        if (event.stream_id) streamId = event.stream_id;
+
         switch (event.type) {
           case 'accepted':
             if (statusText) statusText.textContent = '请求已接受，正在处理...';
+            // Phase 3: Update stream state
+            if (CODE_STREAM_RESUME_ENABLED && streamId) {
+              saveStreamState(Object.assign(getStreamState() || {}, {
+                streamId: streamId, lastEventId: lastEventId
+              }));
+            }
             break;
           case 'planning':
             if (statusText) statusText.textContent = (event.data && event.data.message) || '正在分析任务...';
@@ -4189,6 +4574,8 @@
             if (finalOperations.length > 0) {
               renderDiffView();
             }
+            // Phase 3: Clear stream state on done
+            clearStreamState();
             break;
           case 'error':
             var errCode = (event.data && event.data.code) || 'INTERNAL_ERROR';
@@ -4228,6 +4615,8 @@
           time: timeStr,
           stopped: true
         });
+        // Phase 3: Clear stream state on cancel — prevent auto-reconnect
+        clearStreamState();
         finalizeRequestState();
         cleanupStream();
       }
@@ -4279,6 +4668,111 @@
       if (sb) sb.disabled = false;
       updateChatRequestControls();
       renderProjectStatus();
+    }
+  }
+
+  // ── Phase 3: Stream resume function ────────────────────────────────────
+  function resumeStream(streamId, afterEventId, requestId, wsGen) {
+    if (!streamId) return;
+    if (requestId !== state._requestId) return;
+    if (wsGen !== state.workspaceGeneration) return;
+
+    var scope = getWorkspaceScope();
+    var params = 'stream_id=' + encodeURIComponent(streamId) +
+      '&after_event_id=' + afterEventId +
+      '&workspace_id=' + encodeURIComponent(scope.workspace_id || '') +
+      '&workspace_generation=' + (scope.workspace_generation || 0);
+
+    var resumeUrl = '/api/code/chat/stream/resume?' + params;
+
+    var fetchFn = window.xtjProtectedFetch || fetch;
+    fetchFn(resumeUrl, { credentials: 'include' })
+      .then(function(resp) { return resp.json(); })
+      .then(function(data) {
+        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
+        if (!data || !data.ok) {
+          console.error('[CODE-STREAM] Resume failed:', data);
+          showError('RESUME_FAILED', '流恢复失败', true);
+          return;
+        }
+
+        // Replay events
+        var events = data.events || [];
+        for (var i = 0; i < events.length; i++) {
+          handleSSEEvent(events[i]);
+        }
+
+        if (data.status === 'completed') {
+          // Already done
+          if (!streamDone) {
+            finalizeNode();
+            state.messages.push({
+              role: 'assistant',
+              content: finalReply || answerBuffer || '（无响应）',
+              time: timeStr,
+              toolTrace: finalToolTrace,
+              operations: finalOperations,
+              contextInfo: finalContextInfo,
+              runtime: finalRuntime,
+              usage: finalUsage
+            });
+            finalizeRequestState();
+            cleanupStream();
+          }
+        } else if (data.status === 'running') {
+          // Still running — reconnect to SSE
+          // We can't reconnect to the same SSE, but we can poll resume
+          if (statusText) statusText.textContent = '正在恢复中...';
+          setTimeout(function() {
+            if (requestId !== state._requestId || streamDone) return;
+            resumeStream(streamId, lastEventId, requestId, wsGen);
+          }, 2000);
+        } else if (data.status === 'failed') {
+          showError('STREAM_FAILED', '流式处理失败', false);
+        } else if (data.status === 'cancelled') {
+          handleStreamCancelled();
+        }
+      }).catch(function(err) {
+        console.error('[CODE-STREAM] Resume error:', err);
+        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
+        showError('RESUME_ERROR', '流恢复请求失败', true);
+      });
+  }
+
+  // ── Phase 3: Page refresh recovery — check for running streams ─────────
+  function checkStreamRecovery() {
+    if (!CODE_STREAM_RESUME_ENABLED) return;
+    var streamState = getStreamState();
+    if (!streamState) return;
+    // Check if the stream is still recent (within 1 hour)
+    if (Date.now() - streamState.startedAt > 60 * 60 * 1000) {
+      clearStreamState();
+      return;
+    }
+    // Check workspace match
+    var scope = getWorkspaceScope();
+    if (streamState.workspaceId && scope.workspace_id && streamState.workspaceId !== scope.workspace_id) {
+      return; // Don't recover streams from a different workspace
+    }
+    if (streamState.streamId) {
+      console.log('[CODE-STREAM] Recovering stream:', streamState.streamId);
+      // We need to create a partial assistant node and resume
+      // For now, we just check if there's a running session
+      var fetchFn = window.xtjProtectedFetch || fetch;
+      var statusUrl = '/api/code/chat/stream/status?workspace_id=' + encodeURIComponent(scope.workspace_id || '');
+      fetchFn(statusUrl, { credentials: 'include' })
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+          if (data && data.has_running && Array.isArray(data.sessions)) {
+            var session = data.sessions[0];
+            if (session) {
+              console.log('[CODE-STREAM] Found running session:', session.stream_id);
+              // If the stream was in this conversation, we could show a "recovering" indicator
+              // For now, we just clear the state since we don't have the UI context
+              clearStreamState();
+            }
+          }
+        }).catch(function() { clearStreamState(); });
     }
   }
 

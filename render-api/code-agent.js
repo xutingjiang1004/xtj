@@ -1567,6 +1567,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       if (result.status !== 'building') {
         console.log('[code-agent] Index built: ' + result.totalFiles + ' files, ' + result.totalChunks + ' chunks');
+        // Phase 4: Persist to DB (fire-and-forget, non-blocking)
+        if (result.status === 'ready' && supabase) {
+          var resolved = codeIndex._resolveIndexForPersistence(scopeResult.value);
+          if (resolved && resolved.ok && resolved.index) {
+            codeIndex.persistIndexToDB(supabase, scopeResult.value.userId, scopeResult.value.workspaceId, resolved.index)
+              .catch(function(e) { console.error('[code-agent] DB persist failed (non-blocking):', e.message); });
+          }
+        }
       }
 
       return res.json({
@@ -1600,15 +1608,105 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
       var summary = codeIndex.getIndexSummary(scopeResult.value);
       var pinnedFiles = codeIndex.getPinnedFiles(scopeResult.value);
+
+      // Phase 4: Try DB recovery if no in-memory index
+      var recovered = null;
+      if (!summary && supabase) {
+        try {
+          recovered = await codeIndex.recoverIndexFromDB(supabase, scopeResult.value, scopeResult.value.workspaceId);
+          if (recovered && recovered.ok) {
+            summary = recovered.summary || codeIndex.getIndexSummary(scopeResult.value);
+          }
+        } catch (e) { /* DB recovery is best-effort */ }
+      }
+
       return res.json({
         ok: true,
         summary: summary,
         pinnedFiles: pinnedFiles,
-        rebuildRequired: !summary
+        rebuildRequired: !summary,
+        recovered: !!(recovered && recovered.ok)
       });
     } catch (err) {
       console.error('[code-agent] Index status error:', err && err.message ? err.message : err);
       return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '索引状态查询失败' });
+    }
+  });
+
+  // ── Phase 4: Manifest comparison endpoint ───────────────────────────
+  app.post('/api/code/index/manifest', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      var scopeResult = validateWorkspaceScope(req, body);
+      if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
+
+      var files = Array.isArray(body.files) ? body.files : [];
+      if (files.length === 0) {
+        return res.status(400).json({ ok: false, error: '缺少文件清单' });
+      }
+
+      // Validate manifest entries
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        if (!f || typeof f.path !== 'string' || !f.path) {
+          return res.status(400).json({ ok: false, error: '清单文件缺少 path' });
+        }
+      }
+
+      var persistentIndexMod = null;
+      try { persistentIndexMod = require('./ai-core/persistent-index'); } catch (e) {}
+
+      if (!persistentIndexMod || !persistentIndexMod.isPersistEnabled() || !supabase) {
+        // Persistence not enabled, return all files for upload
+        return res.json({
+          ok: true,
+          upload_paths: files.map(function(f) { return f.path; }),
+          unchanged_paths: [],
+          delete_paths: [],
+          rebuild_required: false,
+          persist_enabled: false
+        });
+      }
+
+      var workspaceKey = persistentIndexMod.generateWorkspaceKey(
+        scopeResult.value.userId, 'local_folder', scopeResult.value.workspaceId
+      );
+      var ws = await persistentIndexMod.getWorkspace(supabase, scopeResult.value.userId, workspaceKey);
+
+      if (!ws) {
+        // No workspace found, full upload needed
+        return res.json({
+          ok: true,
+          upload_paths: files.map(function(f) { return f.path; }),
+          unchanged_paths: [],
+          delete_paths: [],
+          rebuild_required: true,
+          persist_enabled: true
+        });
+      }
+
+      var manifest = await persistentIndexMod.compareManifest(supabase, ws.id, files.map(function(f) {
+        return {
+          path: f.path,
+          size: f.size || 0,
+          modifiedAt: f.modified_at || f.modifiedAt || null,
+          sha256: f.sha256 || ''
+        };
+      }));
+
+      return res.json({
+        ok: true,
+        upload_paths: manifest.uploadPaths || [],
+        unchanged_paths: manifest.unchangedPaths || [],
+        delete_paths: manifest.deletePaths || [],
+        rebuild_required: manifest.rebuildRequired === true,
+        persist_enabled: true,
+        workspace_id: ws.id,
+        workspace_generation: body.workspace_generation || ws.generation
+      });
+    } catch (err) {
+      console.error('[code-agent] Manifest error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '清单比较失败' });
     }
   });
 
@@ -2200,6 +2298,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   var aiCoreSSE = require('./ai-core/sse');
   var aiCoreRequestId = require('./ai-core/request-id');
   var aiCoreErrorMapper = require('./ai-core/error-mapper');
+  var streamSession = require('./ai-core/stream-session');
 
   app.post('/api/code/chat/stream', rateLimit(60000, 20), authenticateUser, async function(req, res) {
     var streamEnabled = String(process.env.CODE_STREAM_ENABLED || '0') === '1';
@@ -2214,6 +2313,32 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var streamId = aiCoreRequestId.generateStreamId();
     var requestStartTime = Date.now();
     var toolTrace = [];
+    var userId = String(req.userName || '');
+    var clientRequestId = String(req.body.client_request_id || '');
+
+    // Phase 3: Stream resume — check idempotency for same client_request_id
+    if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
+      var existingSession = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
+      if (existingSession && existingSession.status === 'completed') {
+        return res.json({
+          ok: true,
+          stream_id: existingSession.stream_id,
+          status: 'completed',
+          duplicate: true,
+          message: '请求已完成，请通过恢复接口获取结果'
+        });
+      }
+      if (existingSession && existingSession.status === 'running') {
+        // Return existing stream_id so client can resume
+        return res.json({
+          ok: true,
+          stream_id: existingSession.stream_id,
+          status: 'running',
+          duplicate: true,
+          message: '请求正在处理中，请使用 stream_id 恢复'
+        });
+      }
+    }
 
     function abortRequest() {
       aborted = true;
@@ -2235,14 +2360,38 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       startTime: requestStartTime
     };
 
+    // Phase 3: Stream resume — create session and event logger
+    var eventLogger = streamSession.createEventLogger(supabase, streamId, userId);
+    if (streamSession.isResumeEnabled() && supabase) {
+      streamSession.createStreamSession(supabase, {
+        userId: userId,
+        streamId: streamId,
+        requestId: requestId,
+        clientRequestId: clientRequestId,
+        conversationId: String(req.body.conversation_id || ''),
+        workspaceId: String((req.body.workspace_id || req.body.workspace_name || '')).slice(0, 200),
+        workspaceGeneration: Number(req.body.workspace_generation || 0),
+        startedAt: new Date(requestStartTime).toISOString()
+      }).catch(function(e) { console.error('[code-agent-stream] session create error:', e.message); });
+    }
+
     function sendSSE(type, data) {
       if (finalized || aborted) return false;
       if (type === 'done' || type === 'error') finalized = true;
+      var eventId = nextEventId();
       var event = aiCoreSSE.buildSSEEvent(
-        Object.assign({}, baseEvent, { event_id: nextEventId() }),
+        Object.assign({}, baseEvent, { event_id: eventId }),
         type,
         data
       );
+      // Phase 3: Persist event (non-blocking, fire-and-forget)
+      if (streamSession.isPersistableEvent(type)) {
+        eventLogger.logEvent(type, data, eventId).catch(function() {});
+        // Update last_event_id in session
+        if (streamSession.isResumeEnabled() && supabase) {
+          streamSession.updateStreamSession(supabase, streamId, { last_event_id: eventId }).catch(function() {});
+        }
+      }
       return writer.write(aiCoreSSE.formatSSEEvent(event));
     }
 
@@ -2269,6 +2418,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         request_id: structured.requestId,
         phase: structured.phase
       });
+      // Phase 3: Mark session as failed
+      if (streamSession.isResumeEnabled() && supabase) {
+        streamSession.updateStreamSession(supabase, streamId, {
+          status: 'failed',
+          completed_at: new Date().toISOString()
+        }).catch(function() {});
+      }
       cleanup();
     }
 
@@ -2597,11 +2753,28 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         usage: usage
       });
 
+      // Phase 3: Flush pending deltas and mark session as completed
+      eventLogger.flush().catch(function() {});
+      if (streamSession.isResumeEnabled() && supabase) {
+        streamSession.updateStreamSession(supabase, streamId, {
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        }).catch(function() {});
+      }
+
       cleanup();
     } catch (err) {
       if (aborted || (err && err.name === 'AbortError')) {
         if (!finalized) {
           sendSSE('error', { code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
+        }
+        // Phase 3: Mark session as cancelled
+        if (streamSession.isResumeEnabled() && supabase) {
+          eventLogger.flush().catch(function() {});
+          streamSession.updateStreamSession(supabase, streamId, {
+            status: 'cancelled',
+            completed_at: new Date().toISOString()
+          }).catch(function() {});
         }
         cleanup();
         return;
@@ -2610,6 +2783,162 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       console.error('[code-agent-stream] Error:', errMsg, 'phase:', finalized ? 'finalized' : 'active');
       var structured = aiCoreErrorMapper.classifyError(err, { requestId: requestId, phase: 'stream' });
       sendStreamError(structured.code, structured.error, structured.phase);
+    }
+  });
+
+  // ── Phase 3: Stream resume endpoint ────────────────────────────────────
+  app.get('/api/code/chat/stream/resume', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.status(503).json({ ok: false, code: 'RESUME_DISABLED', error: '流式恢复功能未启用' });
+    }
+
+    var streamId = String(req.query.stream_id || '');
+    var afterEventId = parseInt(req.query.after_event_id, 10) || 0;
+    var userId = String(req.userName || '');
+    var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
+    var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
+    var clientRequestId = String(req.query.client_request_id || '');
+
+    if (!streamId) {
+      return res.status(400).json({ ok: false, code: 'INVALID_STREAM_ID', error: '缺少 stream_id' });
+    }
+
+    try {
+      // Validate session
+      var session = await streamSession.getStreamSession(supabase, streamId);
+      if (!session) {
+        return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
+      }
+
+      // Ownership check
+      if (session.user_id !== userId) {
+        return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权访问该流式会话' });
+      }
+
+      // Workspace match
+      if (workspaceId && session.workspace_id && workspaceId !== session.workspace_id) {
+        return res.status(409).json({ ok: false, code: 'WORKSPACE_MISMATCH', error: '工作区不匹配' });
+      }
+
+      // Expired check
+      if (session.status === 'expired' || (session.expires_at && new Date(session.expires_at) < new Date())) {
+        return res.status(410).json({ ok: false, code: 'STREAM_EXPIRED', error: '流式会话已过期' });
+      }
+
+      // Get events after the given event_id
+      var events = await streamSession.getEventsAfter(supabase, streamId, afterEventId);
+
+      // Determine response based on session status
+      var response = {
+        ok: true,
+        stream_id: streamId,
+        request_id: session.request_id,
+        client_request_id: session.client_request_id,
+        status: session.status,
+        last_event_id: session.last_event_id,
+        events: events,
+        started_at: session.started_at,
+        completed_at: session.completed_at
+      };
+
+      if (session.status === 'completed') {
+        response.message = '流式会话已完成';
+      } else if (session.status === 'running') {
+        response.message = '流式会话仍在进行中';
+      } else if (session.status === 'failed') {
+        response.message = '流式会话已失败';
+      } else if (session.status === 'cancelled') {
+        response.message = '流式会话已取消';
+      }
+
+      return res.json(response);
+    } catch (err) {
+      console.error('[code-agent-resume] Error:', err.message);
+      return res.status(500).json({ ok: false, code: 'RESUME_ERROR', error: '恢复失败: ' + (err.message || '') });
+    }
+  });
+
+  // ── Phase 3: Stream cancel endpoint ────────────────────────────────────
+  app.post('/api/code/chat/stream/cancel', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.status(503).json({ ok: false, code: 'CANCEL_DISABLED', error: '取消功能未启用' });
+    }
+
+    var streamId = String(req.body.stream_id || '');
+    var userId = String(req.userName || '');
+
+    if (!streamId) {
+      return res.status(400).json({ ok: false, code: 'INVALID_STREAM_ID', error: '缺少 stream_id' });
+    }
+
+    try {
+      var session = await streamSession.getStreamSession(supabase, streamId);
+      if (!session) {
+        return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
+      }
+      if (session.user_id !== userId) {
+        return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权操作该流式会话' });
+      }
+
+      await streamSession.updateStreamSession(supabase, streamId, {
+        status: 'cancelled',
+        completed_at: new Date().toISOString()
+      });
+
+      return res.json({ ok: true, stream_id: streamId, status: 'cancelled', message: '流式会话已取消' });
+    } catch (err) {
+      console.error('[code-agent-cancel] Error:', err.message);
+      return res.status(500).json({ ok: false, code: 'CANCEL_ERROR', error: '取消失败: ' + (err.message || '') });
+    }
+  });
+
+  // ── Phase 3: Stream status check (for page-refresh recovery) ───────────
+  app.get('/api/code/chat/stream/status', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.json({ ok: true, has_running: false, sessions: [] });
+    }
+
+    var userId = String(req.userName || '');
+    var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
+    var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
+
+    try {
+      var query = supabase.from('ai_stream_sessions').select('*')
+        .eq('user_id', userId)
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(5);
+
+      if (workspaceId) {
+        query = query.eq('workspace_id', workspaceId);
+      }
+
+      var result = await query;
+      if (result.error) {
+        return res.json({ ok: true, has_running: false, sessions: [] });
+      }
+
+      var sessions = (result.data || []).map(function(s) {
+        return {
+          stream_id: s.stream_id,
+          request_id: s.request_id,
+          client_request_id: s.client_request_id,
+          conversation_id: s.conversation_id,
+          workspace_id: s.workspace_id,
+          workspace_generation: s.workspace_generation,
+          status: s.status,
+          last_event_id: s.last_event_id,
+          started_at: s.started_at,
+          expires_at: s.expires_at
+        };
+      });
+
+      return res.json({ ok: true, has_running: sessions.length > 0, sessions: sessions });
+    } catch (err) {
+      return res.json({ ok: true, has_running: false, sessions: [] });
     }
   });
 
