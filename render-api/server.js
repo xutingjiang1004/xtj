@@ -10440,7 +10440,7 @@ app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (re
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate } = req.body;
+    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate, media_devices } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -10487,6 +10487,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     if (finalDeviceMeta && typeof finalDeviceMeta === 'object') {
       if (battery_info) finalDeviceMeta.battery_info = battery_info;
       if (storage_estimate) finalDeviceMeta.storage_estimate = storage_estimate;
+      if (media_devices) finalDeviceMeta.media_devices = media_devices;
       possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: trustedUserAgent }));
       if (possibleDeviceModel) finalDeviceMeta.possible_device_model = possibleDeviceModel;
     }
