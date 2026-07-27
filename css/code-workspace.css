@@ -1138,6 +1138,181 @@
   border: 1px solid var(--cw-border);
 }
 
+/* ── 25a. Streaming State ─────────────────────────────────── */
+.code-chat-message.streaming .msg-content {
+  border-color: var(--cw-accent);
+  border-left: 2px solid var(--cw-accent);
+}
+
+.code-chat-message.cancelled .msg-content {
+  border-color: var(--cw-text-muted);
+  opacity: 0.85;
+}
+
+.code-stream-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background: var(--cw-bg-secondary);
+  border-radius: var(--cw-radius-sm);
+  font-size: 12px;
+  color: var(--cw-text-muted);
+}
+
+.code-stream-status-text {
+  flex: 1;
+}
+
+.code-stream-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--cw-border);
+  border-top-color: var(--cw-accent);
+  border-radius: 50%;
+  animation: code-stream-spin 0.8s linear infinite;
+}
+
+@keyframes code-stream-spin {
+  to { transform: rotate(360deg); }
+}
+
+.code-stream-tools {
+  margin-bottom: 8px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  overflow: hidden;
+}
+
+.code-stream-tools-header {
+  padding: 6px 10px;
+  background: var(--cw-bg-secondary);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--cw-text-muted);
+  transition: background var(--cw-dur-fast);
+}
+
+.code-stream-tools-header:hover {
+  background: var(--cw-bg-tertiary);
+}
+
+.code-stream-tools-toggle {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.code-stream-tools-list {
+  padding: 4px 0;
+}
+
+.code-stream-tool-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--cw-border);
+}
+
+.code-stream-tool-item:last-child {
+  border-bottom: none;
+}
+
+.code-stream-tool-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.code-stream-tool-icon.spinner {
+  border: 2px solid var(--cw-border);
+  border-top-color: var(--cw-accent);
+  animation: code-stream-spin 0.8s linear infinite;
+}
+
+.code-stream-tool-icon.success {
+  background: #22c55e;
+}
+
+.code-stream-tool-icon.error {
+  background: #ef4444;
+}
+
+.code-stream-tool-name {
+  font-weight: 600;
+  color: var(--cw-accent);
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.code-stream-tool-summary {
+  color: var(--cw-text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-stream-content {
+  min-height: 20px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.code-stream-usage {
+  margin-top: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--cw-text-muted);
+  opacity: 0.7;
+  border-top: 1px solid var(--cw-border);
+}
+
+.code-stream-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--cw-radius-sm);
+  font-size: 12px;
+}
+
+.code-stream-error-msg {
+  color: var(--cw-text);
+  margin-bottom: 6px;
+}
+
+.code-stream-error-code {
+  font-weight: 600;
+  color: #ef4444;
+  font-family: var(--cw-font-mono);
+  font-size: 11px;
+}
+
+.code-stream-retry-btn {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--cw-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--cw-radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity var(--cw-dur-fast);
+}
+
+.code-stream-retry-btn:hover {
+  opacity: 0.85;
+}
+
 /* ── 26. Chat Input Area ──────────────────────────────────── */
 .code-chat-input-area {
   display: flex;

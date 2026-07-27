@@ -2075,4 +2075,475 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       return sendError(code, sanitizeError ? sanitizeError(err) : ('Code AI 请求失败: ' + (errMsg || '未知错误')), status, { retryable: retryable });
     }
   });
+
+  // ── Phase 2: Tool summary helpers for SSE events ────────────────────────
+  function getToolSummary(toolName, toolCall) {
+    var args = parseToolArguments(toolCall);
+    switch (toolName) {
+      case 'list_files':
+        return '列出项目文件' + (args.directory ? ' (' + String(args.directory).slice(0, 60) + ')' : '');
+      case 'search_code':
+        return '搜索代码: ' + String(args.query || '').slice(0, 80);
+      case 'read_file':
+        return '读取文件: ' + String(args.path || '').slice(0, 120);
+      case 'read_file_range':
+        return '读取文件片段: ' + String(args.path || '').slice(0, 80) + ' L' + (args.start_line || '') + '-' + (args.end_line || '');
+      case 'get_symbols':
+        return '获取符号: ' + String(args.path || '').slice(0, 120);
+      case 'get_active_file':
+        return '获取当前活动文件';
+      case 'get_open_files':
+        return '获取打开文件列表';
+      case 'get_runtime_capabilities':
+        return '获取运行时能力';
+      case 'web_search':
+        return '联网搜索: ' + String(args.query || '').slice(0, 80);
+      case 'fetch_web_page':
+        return '抓取网页: ' + String(args.url || '').slice(0, 120);
+      default:
+        return '执行工具: ' + String(toolName || 'unknown').slice(0, 40);
+    }
+  }
+
+  function getToolResultSummary(toolName, result, ok) {
+    if (!ok) {
+      var errMsg = (result && result.error) ? String(result.error).slice(0, 80) : '执行失败';
+      return '失败: ' + errMsg;
+    }
+    switch (toolName) {
+      case 'list_files':
+        var total = (result && typeof result.totalFiles === 'number') ? result.totalFiles : 0;
+        return '找到 ' + total + ' 个文件';
+      case 'search_code':
+        var results = (result && Array.isArray(result.results)) ? result.results.length : 0;
+        return '找到 ' + results + ' 个相关位置';
+      case 'read_file':
+      case 'read_file_range':
+        var lines = (result && typeof result.totalLines === 'number') ? result.totalLines : 0;
+        var start = (result && typeof result.startLine === 'number') ? result.startLine : 1;
+        var end = (result && typeof result.endLine === 'number') ? result.endLine : start;
+        if (result && result.truncated) return '已读取 L' + start + '-' + end + ' (共' + lines + '行，已截断)';
+        return '已读取 L' + start + '-' + end + ' (共' + lines + '行)';
+      case 'get_symbols':
+        var symbols = (result && Array.isArray(result.symbols)) ? result.symbols.length : 0;
+        return '获取到 ' + symbols + ' 个符号';
+      case 'get_active_file':
+        return '已获取当前文件';
+      case 'get_open_files':
+        var files = (result && Array.isArray(result.files)) ? result.files.length : 0;
+        return '已获取 ' + files + ' 个打开文件';
+      case 'get_runtime_capabilities':
+        return '已获取运行时能力';
+      case 'web_search':
+        var webResults = (result && Array.isArray(result.results)) ? result.results.length : 0;
+        return '搜索到 ' + webResults + ' 条结果';
+      case 'fetch_web_page':
+        var bytes = (result && typeof result.bytes === 'number') ? result.bytes : 0;
+        return '已抓取网页 (' + (bytes > 1024 ? (bytes / 1024).toFixed(1) + 'KB' : bytes + 'B') + ')';
+      default:
+        return '工具执行完成';
+    }
+  }
+
+  // ── Phase 2: Streaming SSE endpoint ────────────────────────────────────
+  var aiCoreSSE = require('./ai-core/sse');
+  var aiCoreRequestId = require('./ai-core/request-id');
+  var aiCoreErrorMapper = require('./ai-core/error-mapper');
+
+  app.post('/api/code/chat/stream', rateLimit(60000, 20), authenticateUser, async function(req, res) {
+    var streamEnabled = String(process.env.CODE_STREAM_ENABLED || '0') === '1';
+    if (!streamEnabled) {
+      return res.status(503).json({ ok: false, code: 'STREAM_DISABLED', error: '流式接口未启用，请使用 /api/code/chat' });
+    }
+
+    var aborted = false;
+    var finalized = false;
+    var requestController = new AbortController();
+    var requestId = aiCoreRequestId.generateRequestId('code');
+    var streamId = aiCoreRequestId.generateStreamId();
+    var requestStartTime = Date.now();
+    var toolTrace = [];
+
+    function abortRequest() {
+      aborted = true;
+      try { requestController.abort(); } catch (_) {}
+    }
+    req.once('aborted', abortRequest);
+    res.once('close', function() { if (!res.writableEnded) abortRequest(); });
+
+    // Setup SSE
+    aiCoreSSE.setupSSE(res, req);
+    var writer = aiCoreSSE.createSSEWriter(res);
+    var nextEventId = aiCoreRequestId.generateEventId();
+
+    var baseEvent = {
+      stream_id: streamId,
+      request_id: requestId,
+      client_request_id: String(req.body.client_request_id || ''),
+      conversation_id: String(req.body.conversation_id || ''),
+      startTime: requestStartTime
+    };
+
+    function sendSSE(type, data) {
+      if (finalized || aborted) return false;
+      if (type === 'done' || type === 'error') finalized = true;
+      var event = aiCoreSSE.buildSSEEvent(
+        Object.assign({}, baseEvent, { event_id: nextEventId() }),
+        type,
+        data
+      );
+      return writer.write(aiCoreSSE.formatSSEEvent(event));
+    }
+
+    // Heartbeat
+    var heartbeat = aiCoreSSE.createHeartbeat(writer, function() { return baseEvent; }, 10000);
+    heartbeat.start();
+
+    function cleanup() {
+      heartbeat.stop();
+      writer.cleanup();
+    }
+
+    function sendStreamError(code, message, phase) {
+      if (finalized) return;
+      var structured = aiCoreErrorMapper.buildErrorResponse(code, message, {
+        requestId: requestId,
+        phase: phase || 'stream',
+        retryable: (code === 'PROVIDER_TIMEOUT' || code === 'RATE_LIMITED')
+      });
+      sendSSE('error', {
+        code: structured.code,
+        message: structured.error,
+        retryable: structured.retryable,
+        request_id: structured.requestId,
+        phase: structured.phase
+      });
+      cleanup();
+    }
+
+    try {
+      var body = req.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        sendStreamError('VALIDATION_FAILED', '请求无效', 'validation');
+        return;
+      }
+
+      var msgResult = validateString(body.message, MAX_MESSAGE_LEN, '消息内容');
+      if (!msgResult.ok) { sendStreamError('INVALID_MESSAGE', msgResult.error, 'validation'); return; }
+      if (!msgResult.value) { sendStreamError('EMPTY_MESSAGE', '消息内容不能为空', 'validation'); return; }
+      var message = msgResult.value;
+
+      var wsResult = validateString(body.workspace_name, 200, '工作区名称');
+      if (!wsResult.ok) { sendStreamError('INVALID_WORKSPACE', wsResult.error, 'validation'); return; }
+      var workspaceName = wsResult.value || '';
+      var scopeResult = validateWorkspaceScope(req, body);
+      if (!scopeResult.ok) { sendStreamError('INVALID_WORKSPACE_SCOPE', scopeResult.error, 'validation'); return; }
+      var scope = scopeResult.value;
+
+      var apResult = validateString(body.active_path, 500, '当前路径');
+      if (!apResult.ok) { sendStreamError('INVALID_PATH', apResult.error, 'validation'); return; }
+      var activePath = apResult.value || '';
+      if (activePath && !validatePath(activePath)) { sendStreamError('INVALID_PATH', '当前路径无效', 'validation'); return; }
+
+      var histResult = validateHistory(body.history);
+      if (!histResult.ok) { sendStreamError('INVALID_HISTORY', histResult.error, 'validation'); return; }
+      var history = histResult.value;
+
+      var conversationId = String(body.conversation_id || '').trim();
+      var sessionData = null;
+      if (conversationId) {
+        sessionData = getSession(scope.userId, scope.workspaceId, scope.generation, conversationId);
+        if (!sessionData) {
+          sessionData = setSession(scope.userId, scope.workspaceId, scope.generation, conversationId, history);
+        } else {
+          touchSession(sessionData);
+        }
+      }
+      var currentHistory = sessionData ? sessionData.history : history;
+
+      var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
+      if (!openResult.ok) { sendStreamError('OPEN_FILES_TOO_LARGE', openResult.error, 'validation'); return; }
+      var attachmentInput = Array.isArray(body.attachments) ? body.attachments : body.files;
+      var attachmentResult = validateRequestFiles(attachmentInput, MAX_ATTACHMENTS, '上传资料');
+      if (!attachmentResult.ok) { sendStreamError('ATTACHMENTS_TOO_LARGE', attachmentResult.error, 'validation'); return; }
+      var openFiles = openResult.value;
+      var attachments = attachmentResult.value.map(function(file) { file.source = 'attachment'; return file; });
+
+      var pinnedPaths = [];
+      if (Array.isArray(body.pinned_paths)) {
+        for (var p = 0; p < body.pinned_paths.length && pinnedPaths.length < 50; p++) {
+          if (validatePath(body.pinned_paths[p])) pinnedPaths.push(body.pinned_paths[p]);
+        }
+      }
+      openFiles.sort(function(a, b) {
+        var ap = a.path === activePath ? 2 : (pinnedPaths.indexOf(a.path) >= 0 ? 1 : 0);
+        var bp = b.path === activePath ? 2 : (pinnedPaths.indexOf(b.path) >= 0 ? 1 : 0);
+        return bp - ap || a.path.localeCompare(b.path);
+      });
+
+      var indexSummary = codeIndex.getIndexSummary(scope);
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 'validation');
+        return;
+      }
+
+      // Send accepted
+      sendSSE('accepted', {
+        mode: 'modify',
+        workspace_id: scope.workspaceId,
+        workspace_generation: scope.generation,
+        has_index: !!indexSummary,
+        open_files_count: openFiles.length,
+        attachments_count: attachments.length
+      });
+
+      // Send planning
+      sendSSE('planning', { message: '正在分析任务和相关项目结构' });
+
+      var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
+      var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
+      if (!apiKey) { sendStreamError('AI_NOT_CONFIGURED', 'AI 服务未配置', 'init'); return; }
+      if (!model) { sendStreamError('MODEL_NOT_CONFIGURED', 'Code AI 模型未配置', 'init'); return; }
+      if (typeof deps.callDeepSeek !== 'function') { sendStreamError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 'init'); return; }
+
+      var capabilities = buildCodeCapabilities(deps);
+      var thinkingMode = String(body.thinking_mode || 'auto');
+      if (thinkingMode === 'auto' || thinkingMode === 'low') {
+        var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
+        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
+      } else {
+        thinkingMode = /^(off|low|medium|high)$/.test(thinkingMode) ? thinkingMode : 'high';
+      }
+      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
+
+      var runtimeCapabilities = {
+        provider: capabilities.provider,
+        model: capabilities.model,
+        configured: capabilities.configured,
+        agentEnabled: capabilities.agentEnabled,
+        toolCallingEnabled: capabilities.toolCallingEnabled,
+        providerContextTokens: capabilities.providerContextTokens,
+        providerMaxOutputTokens: capabilities.providerMaxOutputTokens,
+        maxContextTokens: capabilities.maxContextTokens,
+        maxOutputTokens: capabilities.maxOutputTokens,
+        maxToolRounds: capabilities.maxToolRounds,
+        thinkingMode: thinkingMode,
+        currentPromptTokens: null,
+        cacheHitTokens: null,
+        cacheMissTokens: null
+      };
+
+      var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
+      var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
+      var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+
+      messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, inputBudget);
+      promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
+      inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+
+      runtimeCapabilities.inputBudgetTokens = inputBudget;
+      runtimeCapabilities.currentPromptTokens = promptTokens;
+
+      // Phase 2: Wrapped tool executor that emits SSE events
+      var rawExecutor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
+      var wrappedExecutor = function(toolCall) {
+        var toolCallId = toolCall.id || ('tool_' + (toolTrace.length + 1));
+        var toolName = toolCall.function ? toolCall.function.name : (toolCall.name || 'unknown');
+        var toolSummary = getToolSummary(toolName, toolCall);
+
+        sendSSE('tool_start', {
+          tool_call_id: toolCallId,
+          tool: toolName,
+          summary: toolSummary
+        });
+
+        var toolStart = Date.now();
+        return rawExecutor(toolCall).then(function(result) {
+          var duration = Date.now() - toolStart;
+          var ok = !(result && result.error);
+          sendSSE('tool_result', {
+            tool_call_id: toolCallId,
+            tool: toolName,
+            ok: ok,
+            duration_ms: duration,
+            summary: getToolResultSummary(toolName, result, ok)
+          });
+          return result;
+        }).catch(function(err) {
+          var duration = Date.now() - toolStart;
+          sendSSE('tool_result', {
+            tool_call_id: toolCallId,
+            tool: toolName,
+            ok: false,
+            duration_ms: duration,
+            summary: '工具执行失败: ' + (err && err.message ? err.message.slice(0, 100) : '未知错误')
+          });
+          throw err;
+        });
+      };
+
+      // Send answer_start
+      sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
+
+      var aiResult = await deps.callDeepSeek(messages, {
+        model: model,
+        thinking_mode: thinkingMode,
+        tools: CODE_AGENT_TOOLS,
+        tool_choice: 'auto',
+        first_tool_choice: firstToolChoice,
+        tool_executor: wrappedExecutor,
+        max_tool_rounds: CODE_AGENT_MAX_TOOL_ROUNDS,
+        max_tool_result_chars: Math.min(inputBudget * 4, 2000000),
+        max_tokens: CODE_AGENT_MAX_OUTPUT_TOKENS,
+        signal: requestController.signal,
+        onContentChunk: function(chunk) {
+          if (aborted || finalized) return;
+          sendSSE('answer_delta', { delta: String(chunk).slice(0, 4000) });
+        }
+      });
+      if (aborted || finalized) { cleanup(); return; }
+
+      var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
+      if (!rawContent) {
+        sendStreamError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 'provider');
+        return;
+      }
+
+      // Parse operations
+      var operations = [];
+      var reply = rawContent;
+      var parsed = extractJsonFromText(rawContent);
+      if (parsed && Array.isArray(parsed.operations)) {
+        operations = parseOperations(parsed.operations);
+        var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
+        if (jsonBlockMatch) reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
+      }
+
+      // Send operation_preview
+      if (operations.length > 0) {
+        sendSSE('operation_preview', {
+          operation_count: operations.length,
+          files: operations.map(function(op) { return op.path || ''; }).filter(Boolean).slice(0, 20)
+        });
+      }
+
+      // Update session
+      if (sessionData && aiResult.finalMessages && Array.isArray(aiResult.finalMessages)) {
+        var initialMsgsLen = messages.length;
+        var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
+        var seen = new Set();
+        for (var m = 0; m < sessionData.history.length; m++) {
+          var h = sessionData.history[m];
+          seen.add(h.role + ':' + String(h.content).slice(0, 200));
+        }
+        var userKey = 'user:' + String(message).slice(0, 200);
+        if (!seen.has(userKey)) {
+          sessionData.history.push({ role: 'user', content: message });
+          seen.add(userKey);
+        }
+        for (var i = 0; i < newMsgs.length; i++) {
+          var msg = newMsgs[i];
+          if (!msg || typeof msg !== 'object') continue;
+          if (msg.reasoning_content) {
+            msg = Object.assign({}, msg);
+            delete msg.reasoning_content;
+          }
+          var msgKey = msg.role + ':' + String(msg.content || '').slice(0, 200);
+          if (!seen.has(msgKey)) {
+            sessionData.history.push(msg);
+            seen.add(msgKey);
+          }
+        }
+        if (sessionData.history.length > MAX_SESSION_MESSAGES) {
+          var keepHead = Math.floor(CHECKPOINT_KEEP / 2);
+          var keepTail = MAX_SESSION_MESSAGES - keepHead - 2;
+          var totalMsgs = sessionData.history.length;
+          if (totalMsgs > keepHead + keepTail + 2) {
+            var msgHead = sessionData.history.slice(0, keepHead);
+            var msgTail = sessionData.history.slice(totalMsgs - keepTail);
+            sessionData.history = msgHead.concat([
+              { role: 'user', content: '[早期对话已自动压缩，当前继续最近上下文。]' },
+              { role: 'assistant', content: '已理解，将继续基于当前上下文回复。' }
+            ]).concat(msgTail);
+          }
+        }
+        sessionData.messageCount = sessionData.history.length;
+        touchSession(sessionData);
+      }
+
+      // Build context info
+      var filesReadMap = {};
+      var readTokens = 0;
+      toolTrace.forEach(function(entry) {
+        readTokens += entry.context_tokens || 0;
+        if (entry.path) {
+          if (!filesReadMap[entry.path]) filesReadMap[entry.path] = [];
+          (entry.ranges || []).forEach(function(range) { filesReadMap[entry.path].push(range); });
+        }
+        (entry.files || []).forEach(function(file) {
+          if (!filesReadMap[file.path]) filesReadMap[file.path] = [];
+          (file.ranges || []).forEach(function(range) { filesReadMap[file.path].push(range); });
+        });
+      });
+      var filesRead = Object.keys(filesReadMap).sort().map(function(path) { return { path: path, ranges: filesReadMap[path] }; });
+      var usage = aiResult.usage || null;
+      if (usage && typeof usage.prompt_cache_hit_tokens === 'number') {
+        var cacheTotal = usage.prompt_cache_hit_tokens + (Number(usage.prompt_cache_miss_tokens) || 0);
+        usage.prompt_cache_hit_ratio = cacheTotal > 0 ? usage.prompt_cache_hit_tokens / cacheTotal : 0;
+      }
+
+      // Send usage
+      sendSSE('usage', {
+        model: aiResult.model || model,
+        input_tokens: usage ? usage.prompt_tokens : null,
+        output_tokens: usage ? usage.completion_tokens : null,
+        cache_hit_tokens: usage ? usage.prompt_cache_hit_tokens : null,
+        cache_miss_tokens: usage ? usage.prompt_cache_miss_tokens : null,
+        tool_read_tokens: readTokens,
+        tool_calls: toolTrace.length,
+        total_duration_ms: Date.now() - requestStartTime
+      });
+
+      // Send done
+      sendSSE('done', {
+        reply: reply.trim(),
+        operations: operations,
+        context_info: {
+          indexed: !!indexSummary,
+          active_file: activePath || null,
+          open_files: openFiles.map(function(file) { return file.path; }),
+          files_read: filesRead,
+          total_files_read: filesRead.length,
+          total_tool_calls: toolTrace.length,
+          total_tokens: readTokens
+        },
+        tool_trace: toolTrace.map(function(t) {
+          return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms, summary: t.summary || '' };
+        }),
+        runtime: {
+          model: aiResult.model || model,
+          thinking_mode: thinkingMode,
+          prompt_tokens: promptTokens,
+          completion_tokens: usage ? usage.completion_tokens : null,
+          total_duration_ms: Date.now() - requestStartTime
+        },
+        usage: usage
+      });
+
+      cleanup();
+    } catch (err) {
+      if (aborted || (err && err.name === 'AbortError')) {
+        if (!finalized) {
+          sendSSE('error', { code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
+        }
+        cleanup();
+        return;
+      }
+      var errMsg = err && err.message ? err.message : String(err);
+      console.error('[code-agent-stream] Error:', errMsg, 'phase:', finalized ? 'finalized' : 'active');
+      var structured = aiCoreErrorMapper.classifyError(err, { requestId: requestId, phase: 'stream' });
+      sendStreamError(structured.code, structured.error, structured.phase);
+    }
+  });
+
 };
