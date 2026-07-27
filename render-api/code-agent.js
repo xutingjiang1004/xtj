@@ -390,6 +390,14 @@ function extractJsonFromText(text) {
 function buildSystemPrompt() {
   return [
     'You are the XTJ Code Agent, an expert coding and document assistant embedded in a workspace IDE.',
+    '',
+    '【对话规则 - 必须遵守】',
+    '- 只回答最后一条用户消息。历史消息仅用于理解上下文。',
+    '- 历史中已经存在助手回复的问题，不得重新回答。',
+    '- 除非用户明确要求总结、回顾或继续旧问题，否则禁止主动复述或回答历史问题。',
+    '- 用户发送"78是什么"就只回答"78是什么"，不得把之前的 Code、文档或工作区问题一起重新回答。',
+    '- 每次只处理当前用户提出的一个任务，不要合并处理历史中的多个问题。',
+    '',
     'You have real read-only project tools. Use them proactively before making claims about the workspace.',
     'For an explicit file name, locate and read that file. For a broad project question, list files first.',
     'For debugging, search relevant terms, then read the strongest matching files and ranges.',
@@ -1559,6 +1567,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       if (result.status !== 'building') {
         console.log('[code-agent] Index built: ' + result.totalFiles + ' files, ' + result.totalChunks + ' chunks');
+        // Phase 4: Persist to DB (fire-and-forget, non-blocking)
+        if (result.status === 'ready' && supabase) {
+          var resolved = codeIndex._resolveIndexForPersistence(scopeResult.value);
+          if (resolved && resolved.ok && resolved.index) {
+            codeIndex.persistIndexToDB(supabase, scopeResult.value.userId, scopeResult.value.workspaceId, resolved.index)
+              .catch(function(e) { console.error('[code-agent] DB persist failed (non-blocking):', e.message); });
+          }
+        }
       }
 
       return res.json({
@@ -1592,15 +1608,105 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
       var summary = codeIndex.getIndexSummary(scopeResult.value);
       var pinnedFiles = codeIndex.getPinnedFiles(scopeResult.value);
+
+      // Phase 4: Try DB recovery if no in-memory index
+      var recovered = null;
+      if (!summary && supabase) {
+        try {
+          recovered = await codeIndex.recoverIndexFromDB(supabase, scopeResult.value, scopeResult.value.workspaceId);
+          if (recovered && recovered.ok) {
+            summary = recovered.summary || codeIndex.getIndexSummary(scopeResult.value);
+          }
+        } catch (e) { /* DB recovery is best-effort */ }
+      }
+
       return res.json({
         ok: true,
         summary: summary,
         pinnedFiles: pinnedFiles,
-        rebuildRequired: !summary
+        rebuildRequired: !summary,
+        recovered: !!(recovered && recovered.ok)
       });
     } catch (err) {
       console.error('[code-agent] Index status error:', err && err.message ? err.message : err);
       return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '索引状态查询失败' });
+    }
+  });
+
+  // ── Phase 4: Manifest comparison endpoint ───────────────────────────
+  app.post('/api/code/index/manifest', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    try {
+      var body = req.body || {};
+      var scopeResult = validateWorkspaceScope(req, body);
+      if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
+
+      var files = Array.isArray(body.files) ? body.files : [];
+      if (files.length === 0) {
+        return res.status(400).json({ ok: false, error: '缺少文件清单' });
+      }
+
+      // Validate manifest entries
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        if (!f || typeof f.path !== 'string' || !f.path) {
+          return res.status(400).json({ ok: false, error: '清单文件缺少 path' });
+        }
+      }
+
+      var persistentIndexMod = null;
+      try { persistentIndexMod = require('./ai-core/persistent-index'); } catch (e) {}
+
+      if (!persistentIndexMod || !persistentIndexMod.isPersistEnabled() || !supabase) {
+        // Persistence not enabled, return all files for upload
+        return res.json({
+          ok: true,
+          upload_paths: files.map(function(f) { return f.path; }),
+          unchanged_paths: [],
+          delete_paths: [],
+          rebuild_required: false,
+          persist_enabled: false
+        });
+      }
+
+      var workspaceKey = persistentIndexMod.generateWorkspaceKey(
+        scopeResult.value.userId, 'local_folder', scopeResult.value.workspaceId
+      );
+      var ws = await persistentIndexMod.getWorkspace(supabase, scopeResult.value.userId, workspaceKey);
+
+      if (!ws) {
+        // No workspace found, full upload needed
+        return res.json({
+          ok: true,
+          upload_paths: files.map(function(f) { return f.path; }),
+          unchanged_paths: [],
+          delete_paths: [],
+          rebuild_required: true,
+          persist_enabled: true
+        });
+      }
+
+      var manifest = await persistentIndexMod.compareManifest(supabase, ws.id, files.map(function(f) {
+        return {
+          path: f.path,
+          size: f.size || 0,
+          modifiedAt: f.modified_at || f.modifiedAt || null,
+          sha256: f.sha256 || ''
+        };
+      }));
+
+      return res.json({
+        ok: true,
+        upload_paths: manifest.uploadPaths || [],
+        unchanged_paths: manifest.unchangedPaths || [],
+        delete_paths: manifest.deletePaths || [],
+        rebuild_required: manifest.rebuildRequired === true,
+        persist_enabled: true,
+        workspace_id: ws.id,
+        workspace_generation: body.workspace_generation || ws.generation
+      });
+    } catch (err) {
+      console.error('[code-agent] Manifest error:', err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, error: sanitizeError ? sanitizeError(err) : '清单比较失败' });
     }
   });
 
@@ -1782,7 +1888,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           touchSession(sessionData);
         }
       }
-      var currentHistory = sessionData ? sessionData.history : history;
+      // P0 Fix: 前端 history 是当前请求的唯一历史快照。
+      // 当请求携带 history 时，以本次 history 为准，不合并服务端缓存。
+      // 服务端缓存仅在前端未提交 history 时作为回退。
+      var hasClientHistory = history.length > 0;
+      var currentHistory;
+      if (hasClientHistory) {
+        currentHistory = history;
+        if (sessionData) { sessionData.history = history.slice(); sessionData.messageCount = history.length; touchSession(sessionData); }
+      } else {
+        currentHistory = sessionData ? sessionData.history : [];
+      }
 
       var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
       if (!openResult.ok) return sendError('OPEN_FILES_TOO_LARGE', openResult.error, 413);
@@ -1820,17 +1936,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Phase 3: Compute capabilities and thinkingMode BEFORE building messages
       // so that runtime identity and limits can be injected into the user message.
       var capabilities = buildCodeCapabilities(deps);
-      var thinkingMode = String(body.thinking_mode || 'auto');
-      if (thinkingMode === 'auto' || thinkingMode === 'low') {
+      var thinkingMode = String(body.thinking_mode || 'high');
+      // P0 Fix: 前端明确发送的 thinking_mode 直接使用，不再用 auto 正则覆盖
+      // 只有当前端发送 'auto' 时才做推断
+      if (thinkingMode === 'auto') {
         var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
-        if (simpleTaskRE.test(message.trim())) {
-          thinkingMode = 'off';
-        } else {
-          thinkingMode = 'high';
-        }
+        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
       } else {
-        thinkingMode = /^(off|low|medium|high)$/.test(thinkingMode) ? thinkingMode : 'high';
+        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
       }
+      var requestedThinkingMode = thinkingMode;
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
       // Build runtime capabilities for the tool executor
@@ -1897,33 +2012,34 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var initialMsgsLen = messages.length;
         var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
 
-        // Deduplicate by content hash and role to avoid repeats on retry
-        var seen = new Set();
+        // P0 Fix: 使用稳定 message_id 去重，不再依赖 "role + 前200字符"
+        var seenIds = new Set();
         for (var m = 0; m < sessionData.history.length; m++) {
           var h = sessionData.history[m];
-          seen.add(h.role + ':' + String(h.content).slice(0, 200));
+          if (h.message_id) seenIds.add(h.message_id);
         }
 
-        // Add current user message first
+        // Add current user message with stable ID
+        var userMsgId = body.client_request_id || ('umsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8));
         var userKey = 'user:' + String(message).slice(0, 200);
-        if (!seen.has(userKey)) {
-          sessionData.history.push({ role: 'user', content: message });
-          seen.add(userKey);
+        if (!seenIds.has(userMsgId)) {
+          sessionData.history.push({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' });
+          seenIds.add(userMsgId);
         }
 
         // Add new messages from provider (tool calls, tool results, assistant)
         for (var i = 0; i < newMsgs.length; i++) {
           var msg = newMsgs[i];
           if (!msg || typeof msg !== 'object') continue;
-          // Skip reasoning_content — keep only server-side
           if (msg.reasoning_content) {
             msg = Object.assign({}, msg);
             delete msg.reasoning_content;
           }
-          var msgKey = msg.role + ':' + String(msg.content || '').slice(0, 200);
-          if (!seen.has(msgKey)) {
+          var msgId = msg.message_id || ('amsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8) + '_' + i);
+          if (!seenIds.has(msgId)) {
+            msg.message_id = msgId;
             sessionData.history.push(msg);
-            seen.add(msgKey);
+            seenIds.add(msgId);
           }
         }
 
@@ -1993,7 +2109,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         cacheHitTokens: usage && usage.prompt_cache_hit_tokens != null ? usage.prompt_cache_hit_tokens : null,
         cacheMissTokens: usage && usage.prompt_cache_miss_tokens != null ? usage.prompt_cache_miss_tokens : null,
         completionTokens: usage && usage.completion_tokens != null ? usage.completion_tokens : null,
-        remainingEstimatedTokens: remainingEstimatedTokens
+        remainingEstimatedTokens: remainingEstimatedTokens,
+        // P0 Fix: 思考模式验证字段
+        requestedThinkingMode: requestedThinkingMode,
+        effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : thinkingMode,
+        thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
+        reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
+        thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false
       };
       return res.json({
         ok: true,
@@ -2045,6 +2167,33 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       } else if (/HTTP 400/i.test(errMsg)) {
         code = 'PROVIDER_HTTP_400';
         status = 502;
+        // P0 Fix: 记录脱敏后的请求诊断信息
+        var diagnoseInfo = {
+          requestId: requestId,
+          model: model,
+          phase: requestPhase || 'unknown',
+          thinkingMode: thinkingMode,
+          hasTools: !!(Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0),
+          toolChoice: firstToolChoice ? firstToolChoice.function.name : 'auto',
+          msgCount: messages ? messages.length : 0,
+          promptTokens: typeof promptTokens === 'number' ? promptTokens : 'unknown',
+          upstreamStatus: 400,
+          upstreamCode: errCode || '',
+          upstreamMessage: (errMsg || '').slice(0, 300)
+        };
+        console.error('[code-agent] PROVIDER_HTTP_400 diagnostics:', JSON.stringify(diagnoseInfo));
+        // 根据上游错误信息细分
+        if (/model/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_MODEL';
+        } else if (/thinking|reasoning/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_THINKING_MODE';
+        } else if (/tool|function/i.test(errMsg)) {
+          code = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
+        } else if (/context|token|length/i.test(errMsg)) {
+          code = 'PROVIDER_CONTEXT_TOO_LARGE';
+        } else if (/invalid|format|parse/i.test(errMsg)) {
+          code = 'PROVIDER_INVALID_REQUEST';
+        }
       } else if (/HTTP 401/i.test(errMsg)) {
         code = 'PROVIDER_HTTP_401';
         status = 502;
@@ -2075,4 +2224,722 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       return sendError(code, sanitizeError ? sanitizeError(err) : ('Code AI 请求失败: ' + (errMsg || '未知错误')), status, { retryable: retryable });
     }
   });
+
+  // ── Phase 2: Tool summary helpers for SSE events ────────────────────────
+  function getToolSummary(toolName, toolCall) {
+    var args = parseToolArguments(toolCall);
+    switch (toolName) {
+      case 'list_files':
+        return '列出项目文件' + (args.directory ? ' (' + String(args.directory).slice(0, 60) + ')' : '');
+      case 'search_code':
+        return '搜索代码: ' + String(args.query || '').slice(0, 80);
+      case 'read_file':
+        return '读取文件: ' + String(args.path || '').slice(0, 120);
+      case 'read_file_range':
+        return '读取文件片段: ' + String(args.path || '').slice(0, 80) + ' L' + (args.start_line || '') + '-' + (args.end_line || '');
+      case 'get_symbols':
+        return '获取符号: ' + String(args.path || '').slice(0, 120);
+      case 'get_active_file':
+        return '获取当前活动文件';
+      case 'get_open_files':
+        return '获取打开文件列表';
+      case 'get_runtime_capabilities':
+        return '获取运行时能力';
+      case 'web_search':
+        return '联网搜索: ' + String(args.query || '').slice(0, 80);
+      case 'fetch_web_page':
+        return '抓取网页: ' + String(args.url || '').slice(0, 120);
+      default:
+        return '执行工具: ' + String(toolName || 'unknown').slice(0, 40);
+    }
+  }
+
+  function getToolResultSummary(toolName, result, ok) {
+    if (!ok) {
+      var errMsg = (result && result.error) ? String(result.error).slice(0, 80) : '执行失败';
+      return '失败: ' + errMsg;
+    }
+    switch (toolName) {
+      case 'list_files':
+        var total = (result && typeof result.totalFiles === 'number') ? result.totalFiles : 0;
+        return '找到 ' + total + ' 个文件';
+      case 'search_code':
+        var results = (result && Array.isArray(result.results)) ? result.results.length : 0;
+        return '找到 ' + results + ' 个相关位置';
+      case 'read_file':
+      case 'read_file_range':
+        var lines = (result && typeof result.totalLines === 'number') ? result.totalLines : 0;
+        var start = (result && typeof result.startLine === 'number') ? result.startLine : 1;
+        var end = (result && typeof result.endLine === 'number') ? result.endLine : start;
+        if (result && result.truncated) return '已读取 L' + start + '-' + end + ' (共' + lines + '行，已截断)';
+        return '已读取 L' + start + '-' + end + ' (共' + lines + '行)';
+      case 'get_symbols':
+        var symbols = (result && Array.isArray(result.symbols)) ? result.symbols.length : 0;
+        return '获取到 ' + symbols + ' 个符号';
+      case 'get_active_file':
+        return '已获取当前文件';
+      case 'get_open_files':
+        var files = (result && Array.isArray(result.files)) ? result.files.length : 0;
+        return '已获取 ' + files + ' 个打开文件';
+      case 'get_runtime_capabilities':
+        return '已获取运行时能力';
+      case 'web_search':
+        var webResults = (result && Array.isArray(result.results)) ? result.results.length : 0;
+        return '搜索到 ' + webResults + ' 条结果';
+      case 'fetch_web_page':
+        var bytes = (result && typeof result.bytes === 'number') ? result.bytes : 0;
+        return '已抓取网页 (' + (bytes > 1024 ? (bytes / 1024).toFixed(1) + 'KB' : bytes + 'B') + ')';
+      default:
+        return '工具执行完成';
+    }
+  }
+
+  // ── Phase 2: Streaming SSE endpoint ────────────────────────────────────
+  var aiCoreSSE = require('./ai-core/sse');
+  var aiCoreRequestId = require('./ai-core/request-id');
+  var aiCoreErrorMapper = require('./ai-core/error-mapper');
+  var streamSession = require('./ai-core/stream-session');
+
+  app.post('/api/code/chat/stream', rateLimit(60000, 20), authenticateUser, async function(req, res) {
+    var streamEnabled = String(process.env.CODE_STREAM_ENABLED || '0') === '1';
+    if (!streamEnabled) {
+      return res.status(503).json({ ok: false, code: 'STREAM_DISABLED', error: '流式接口未启用，请使用 /api/code/chat' });
+    }
+
+    var aborted = false;
+    var finalized = false;
+    var requestController = new AbortController();
+    var requestId = aiCoreRequestId.generateRequestId('code');
+    var streamId = aiCoreRequestId.generateStreamId();
+    var requestStartTime = Date.now();
+    var toolTrace = [];
+    var userId = String(req.userName || '');
+    var clientRequestId = String(req.body.client_request_id || '');
+
+    // Phase 3: Stream resume — check idempotency for same client_request_id
+    if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
+      var existingSession = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
+      if (existingSession && existingSession.status === 'completed') {
+        return res.json({
+          ok: true,
+          stream_id: existingSession.stream_id,
+          status: 'completed',
+          duplicate: true,
+          message: '请求已完成，请通过恢复接口获取结果'
+        });
+      }
+      if (existingSession && existingSession.status === 'running') {
+        // Return existing stream_id so client can resume
+        return res.json({
+          ok: true,
+          stream_id: existingSession.stream_id,
+          status: 'running',
+          duplicate: true,
+          message: '请求正在处理中，请使用 stream_id 恢复'
+        });
+      }
+    }
+
+    function abortRequest() {
+      aborted = true;
+      try { requestController.abort(); } catch (_) {}
+    }
+    req.once('aborted', abortRequest);
+    res.once('close', function() { if (!res.writableEnded) abortRequest(); });
+
+    // Setup SSE
+    aiCoreSSE.setupSSE(res, req);
+    var writer = aiCoreSSE.createSSEWriter(res);
+    var nextEventId = aiCoreRequestId.generateEventId();
+
+    var baseEvent = {
+      stream_id: streamId,
+      request_id: requestId,
+      client_request_id: String(req.body.client_request_id || ''),
+      conversation_id: String(req.body.conversation_id || ''),
+      startTime: requestStartTime
+    };
+
+    // Phase 3: Stream resume — create session and event logger
+    var eventLogger = streamSession.createEventLogger(supabase, streamId, userId);
+    if (streamSession.isResumeEnabled() && supabase) {
+      streamSession.createStreamSession(supabase, {
+        userId: userId,
+        streamId: streamId,
+        requestId: requestId,
+        clientRequestId: clientRequestId,
+        conversationId: String(req.body.conversation_id || ''),
+        workspaceId: String((req.body.workspace_id || req.body.workspace_name || '')).slice(0, 200),
+        workspaceGeneration: Number(req.body.workspace_generation || 0),
+        startedAt: new Date(requestStartTime).toISOString()
+      }).catch(function(e) { console.error('[code-agent-stream] session create error:', e.message); });
+    }
+
+    function sendSSE(type, data) {
+      if (finalized || aborted) return false;
+      if (type === 'done' || type === 'error') finalized = true;
+      var eventId = nextEventId();
+      var event = aiCoreSSE.buildSSEEvent(
+        Object.assign({}, baseEvent, { event_id: eventId }),
+        type,
+        data
+      );
+      // Phase 3: Persist event (non-blocking, fire-and-forget)
+      if (streamSession.isPersistableEvent(type)) {
+        eventLogger.logEvent(type, data, eventId).catch(function() {});
+        // Update last_event_id in session
+        if (streamSession.isResumeEnabled() && supabase) {
+          streamSession.updateStreamSession(supabase, streamId, { last_event_id: eventId }).catch(function() {});
+        }
+      }
+      return writer.write(aiCoreSSE.formatSSEEvent(event));
+    }
+
+    // Heartbeat
+    var heartbeat = aiCoreSSE.createHeartbeat(writer, function() { return baseEvent; }, 10000);
+    heartbeat.start();
+
+    function cleanup() {
+      heartbeat.stop();
+      writer.cleanup();
+    }
+
+    function sendStreamError(code, message, phase) {
+      if (finalized) return;
+      var structured = aiCoreErrorMapper.buildErrorResponse(code, message, {
+        requestId: requestId,
+        phase: phase || 'stream',
+        retryable: (code === 'PROVIDER_TIMEOUT' || code === 'RATE_LIMITED')
+      });
+      sendSSE('error', {
+        code: structured.code,
+        message: structured.error,
+        retryable: structured.retryable,
+        request_id: structured.requestId,
+        phase: structured.phase
+      });
+      // Phase 3: Mark session as failed
+      if (streamSession.isResumeEnabled() && supabase) {
+        streamSession.updateStreamSession(supabase, streamId, {
+          status: 'failed',
+          completed_at: new Date().toISOString()
+        }).catch(function() {});
+      }
+      cleanup();
+    }
+
+    try {
+      var body = req.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        sendStreamError('VALIDATION_FAILED', '请求无效', 'validation');
+        return;
+      }
+
+      var msgResult = validateString(body.message, MAX_MESSAGE_LEN, '消息内容');
+      if (!msgResult.ok) { sendStreamError('INVALID_MESSAGE', msgResult.error, 'validation'); return; }
+      if (!msgResult.value) { sendStreamError('EMPTY_MESSAGE', '消息内容不能为空', 'validation'); return; }
+      var message = msgResult.value;
+
+      var wsResult = validateString(body.workspace_name, 200, '工作区名称');
+      if (!wsResult.ok) { sendStreamError('INVALID_WORKSPACE', wsResult.error, 'validation'); return; }
+      var workspaceName = wsResult.value || '';
+      var scopeResult = validateWorkspaceScope(req, body);
+      if (!scopeResult.ok) { sendStreamError('INVALID_WORKSPACE_SCOPE', scopeResult.error, 'validation'); return; }
+      var scope = scopeResult.value;
+
+      var apResult = validateString(body.active_path, 500, '当前路径');
+      if (!apResult.ok) { sendStreamError('INVALID_PATH', apResult.error, 'validation'); return; }
+      var activePath = apResult.value || '';
+      if (activePath && !validatePath(activePath)) { sendStreamError('INVALID_PATH', '当前路径无效', 'validation'); return; }
+
+      var histResult = validateHistory(body.history);
+      if (!histResult.ok) { sendStreamError('INVALID_HISTORY', histResult.error, 'validation'); return; }
+      var history = histResult.value;
+
+      var conversationId = String(body.conversation_id || '').trim();
+      var sessionData = null;
+      if (conversationId) {
+        sessionData = getSession(scope.userId, scope.workspaceId, scope.generation, conversationId);
+        if (!sessionData) {
+          sessionData = setSession(scope.userId, scope.workspaceId, scope.generation, conversationId, history);
+        } else {
+          touchSession(sessionData);
+        }
+      }
+      // P0 Fix: 前端 history 是当前请求的唯一历史快照。
+      var hasClientHistory2 = history.length > 0;
+      var currentHistory;
+      if (hasClientHistory2) {
+        currentHistory = history;
+        if (sessionData) { sessionData.history = history.slice(); sessionData.messageCount = history.length; touchSession(sessionData); }
+      } else {
+        currentHistory = sessionData ? sessionData.history : [];
+      }
+
+      var openResult = validateRequestFiles(body.open_files, MAX_OPEN_FILES, '打开文件');
+      if (!openResult.ok) { sendStreamError('OPEN_FILES_TOO_LARGE', openResult.error, 'validation'); return; }
+      var attachmentInput = Array.isArray(body.attachments) ? body.attachments : body.files;
+      var attachmentResult = validateRequestFiles(attachmentInput, MAX_ATTACHMENTS, '上传资料');
+      if (!attachmentResult.ok) { sendStreamError('ATTACHMENTS_TOO_LARGE', attachmentResult.error, 'validation'); return; }
+      var openFiles = openResult.value;
+      var attachments = attachmentResult.value.map(function(file) { file.source = 'attachment'; return file; });
+
+      var pinnedPaths = [];
+      if (Array.isArray(body.pinned_paths)) {
+        for (var p = 0; p < body.pinned_paths.length && pinnedPaths.length < 50; p++) {
+          if (validatePath(body.pinned_paths[p])) pinnedPaths.push(body.pinned_paths[p]);
+        }
+      }
+      openFiles.sort(function(a, b) {
+        var ap = a.path === activePath ? 2 : (pinnedPaths.indexOf(a.path) >= 0 ? 1 : 0);
+        var bp = b.path === activePath ? 2 : (pinnedPaths.indexOf(b.path) >= 0 ? 1 : 0);
+        return bp - ap || a.path.localeCompare(b.path);
+      });
+
+      var indexSummary = codeIndex.getIndexSummary(scope);
+      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 'validation');
+        return;
+      }
+
+      // Send accepted
+      sendSSE('accepted', {
+        mode: 'modify',
+        workspace_id: scope.workspaceId,
+        workspace_generation: scope.generation,
+        has_index: !!indexSummary,
+        open_files_count: openFiles.length,
+        attachments_count: attachments.length
+      });
+
+      // Send planning
+      sendSSE('planning', { message: '正在分析任务和相关项目结构' });
+
+      var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
+      var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
+      if (!apiKey) { sendStreamError('AI_NOT_CONFIGURED', 'AI 服务未配置', 'init'); return; }
+      if (!model) { sendStreamError('MODEL_NOT_CONFIGURED', 'Code AI 模型未配置', 'init'); return; }
+      if (typeof deps.callDeepSeek !== 'function') { sendStreamError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 'init'); return; }
+
+      var capabilities = buildCodeCapabilities(deps);
+      var thinkingMode = String(body.thinking_mode || 'high');
+      if (thinkingMode === 'auto') {
+        var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
+        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
+      } else {
+        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
+      }
+      var requestedThinkingMode = thinkingMode;
+      var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
+
+      var runtimeCapabilities = {
+        provider: capabilities.provider,
+        model: capabilities.model,
+        configured: capabilities.configured,
+        agentEnabled: capabilities.agentEnabled,
+        toolCallingEnabled: capabilities.toolCallingEnabled,
+        providerContextTokens: capabilities.providerContextTokens,
+        providerMaxOutputTokens: capabilities.providerMaxOutputTokens,
+        maxContextTokens: capabilities.maxContextTokens,
+        maxOutputTokens: capabilities.maxOutputTokens,
+        maxToolRounds: capabilities.maxToolRounds,
+        thinkingMode: thinkingMode,
+        currentPromptTokens: null,
+        cacheHitTokens: null,
+        cacheMissTokens: null
+      };
+
+      var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
+      var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
+      var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+
+      messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, inputBudget);
+      promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
+      inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+
+      runtimeCapabilities.inputBudgetTokens = inputBudget;
+      runtimeCapabilities.currentPromptTokens = promptTokens;
+
+      // Phase 2: Wrapped tool executor that emits SSE events
+      var rawExecutor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
+      var wrappedExecutor = function(toolCall) {
+        var toolCallId = toolCall.id || ('tool_' + (toolTrace.length + 1));
+        var toolName = toolCall.function ? toolCall.function.name : (toolCall.name || 'unknown');
+        var toolSummary = getToolSummary(toolName, toolCall);
+
+        sendSSE('tool_start', {
+          tool_call_id: toolCallId,
+          tool: toolName,
+          summary: toolSummary
+        });
+
+        var toolStart = Date.now();
+        return rawExecutor(toolCall).then(function(result) {
+          var duration = Date.now() - toolStart;
+          var ok = !(result && result.error);
+          sendSSE('tool_result', {
+            tool_call_id: toolCallId,
+            tool: toolName,
+            ok: ok,
+            duration_ms: duration,
+            summary: getToolResultSummary(toolName, result, ok)
+          });
+          return result;
+        }).catch(function(err) {
+          var duration = Date.now() - toolStart;
+          sendSSE('tool_result', {
+            tool_call_id: toolCallId,
+            tool: toolName,
+            ok: false,
+            duration_ms: duration,
+            summary: '工具执行失败: ' + (err && err.message ? err.message.slice(0, 100) : '未知错误')
+          });
+          throw err;
+        });
+      };
+
+      // Send answer_start
+      sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
+
+      var aiResult = await deps.callDeepSeek(messages, {
+        model: model,
+        thinking_mode: thinkingMode,
+        tools: CODE_AGENT_TOOLS,
+        tool_choice: 'auto',
+        first_tool_choice: firstToolChoice,
+        tool_executor: wrappedExecutor,
+        max_tool_rounds: CODE_AGENT_MAX_TOOL_ROUNDS,
+        max_tool_result_chars: Math.min(inputBudget * 4, 2000000),
+        max_tokens: CODE_AGENT_MAX_OUTPUT_TOKENS,
+        signal: requestController.signal,
+        onContentChunk: function(chunk) {
+          if (aborted || finalized) return;
+          sendSSE('answer_delta', { delta: String(chunk).slice(0, 4000) });
+        }
+      });
+      if (aborted || finalized) { cleanup(); return; }
+
+      var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
+      if (!rawContent) {
+        sendStreamError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 'provider');
+        return;
+      }
+
+      // Parse operations
+      var operations = [];
+      var reply = rawContent;
+      var parsed = extractJsonFromText(rawContent);
+      if (parsed && Array.isArray(parsed.operations)) {
+        operations = parseOperations(parsed.operations);
+        var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
+        if (jsonBlockMatch) reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
+      }
+
+      // Send operation_preview
+      if (operations.length > 0) {
+        sendSSE('operation_preview', {
+          operation_count: operations.length,
+          files: operations.map(function(op) { return op.path || ''; }).filter(Boolean).slice(0, 20)
+        });
+      }
+
+      // Update session
+      if (sessionData && aiResult.finalMessages && Array.isArray(aiResult.finalMessages)) {
+        var initialMsgsLen = messages.length;
+        var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
+        // P0 Fix: 使用稳定 message_id 去重
+        var seenIds = new Set();
+        for (var m = 0; m < sessionData.history.length; m++) {
+          var h = sessionData.history[m];
+          if (h.message_id) seenIds.add(h.message_id);
+        }
+        var userMsgId = body.client_request_id || ('umsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8));
+        if (!seenIds.has(userMsgId)) {
+          sessionData.history.push({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' });
+          seenIds.add(userMsgId);
+        }
+        for (var i = 0; i < newMsgs.length; i++) {
+          var msg = newMsgs[i];
+          if (!msg || typeof msg !== 'object') continue;
+          if (msg.reasoning_content) {
+            msg = Object.assign({}, msg);
+            delete msg.reasoning_content;
+          }
+          var msgId = msg.message_id || ('amsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8) + '_' + i);
+          if (!seenIds.has(msgId)) {
+            msg.message_id = msgId;
+            sessionData.history.push(msg);
+            seenIds.add(msgId);
+          }
+        }
+        if (sessionData.history.length > MAX_SESSION_MESSAGES) {
+          var keepHead = Math.floor(CHECKPOINT_KEEP / 2);
+          var keepTail = MAX_SESSION_MESSAGES - keepHead - 2;
+          var totalMsgs = sessionData.history.length;
+          if (totalMsgs > keepHead + keepTail + 2) {
+            var msgHead = sessionData.history.slice(0, keepHead);
+            var msgTail = sessionData.history.slice(totalMsgs - keepTail);
+            sessionData.history = msgHead.concat([
+              { role: 'user', content: '[早期对话已自动压缩，当前继续最近上下文。]' },
+              { role: 'assistant', content: '已理解，将继续基于当前上下文回复。' }
+            ]).concat(msgTail);
+          }
+        }
+        sessionData.messageCount = sessionData.history.length;
+        touchSession(sessionData);
+      }
+
+      // Build context info
+      var filesReadMap = {};
+      var readTokens = 0;
+      toolTrace.forEach(function(entry) {
+        readTokens += entry.context_tokens || 0;
+        if (entry.path) {
+          if (!filesReadMap[entry.path]) filesReadMap[entry.path] = [];
+          (entry.ranges || []).forEach(function(range) { filesReadMap[entry.path].push(range); });
+        }
+        (entry.files || []).forEach(function(file) {
+          if (!filesReadMap[file.path]) filesReadMap[file.path] = [];
+          (file.ranges || []).forEach(function(range) { filesReadMap[file.path].push(range); });
+        });
+      });
+      var filesRead = Object.keys(filesReadMap).sort().map(function(path) { return { path: path, ranges: filesReadMap[path] }; });
+      var usage = aiResult.usage || null;
+      if (usage && typeof usage.prompt_cache_hit_tokens === 'number') {
+        var cacheTotal = usage.prompt_cache_hit_tokens + (Number(usage.prompt_cache_miss_tokens) || 0);
+        usage.prompt_cache_hit_ratio = cacheTotal > 0 ? usage.prompt_cache_hit_tokens / cacheTotal : 0;
+      }
+
+      // Send usage
+      sendSSE('usage', {
+        model: aiResult.model || model,
+        input_tokens: usage ? usage.prompt_tokens : null,
+        output_tokens: usage ? usage.completion_tokens : null,
+        cache_hit_tokens: usage ? usage.prompt_cache_hit_tokens : null,
+        cache_miss_tokens: usage ? usage.prompt_cache_miss_tokens : null,
+        tool_read_tokens: readTokens,
+        tool_calls: toolTrace.length,
+        total_duration_ms: Date.now() - requestStartTime
+      });
+
+      // Send done
+      sendSSE('done', {
+        reply: reply.trim(),
+        operations: operations,
+        context_info: {
+          indexed: !!indexSummary,
+          active_file: activePath || null,
+          open_files: openFiles.map(function(file) { return file.path; }),
+          files_read: filesRead,
+          total_files_read: filesRead.length,
+          total_tool_calls: toolTrace.length,
+          total_tokens: readTokens
+        },
+        tool_trace: toolTrace.map(function(t) {
+          return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms, summary: t.summary || '' };
+        }),
+        runtime: {
+          model: aiResult.model || model,
+          thinking_mode: thinkingMode,
+          requestedThinkingMode: requestedThinkingMode,
+          effectiveThinkingMode: aiResult && aiResult.thinking_mode ? aiResult.thinking_mode : thinkingMode,
+          thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
+          reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
+          thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
+          prompt_tokens: promptTokens,
+          completion_tokens: usage ? usage.completion_tokens : null,
+          total_duration_ms: Date.now() - requestStartTime
+        },
+        usage: usage
+      });
+
+      // Phase 3: Flush pending deltas and mark session as completed
+      eventLogger.flush().catch(function() {});
+      if (streamSession.isResumeEnabled() && supabase) {
+        streamSession.updateStreamSession(supabase, streamId, {
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        }).catch(function() {});
+      }
+
+      cleanup();
+    } catch (err) {
+      if (aborted || (err && err.name === 'AbortError')) {
+        if (!finalized) {
+          sendSSE('error', { code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
+        }
+        // Phase 3: Mark session as cancelled
+        if (streamSession.isResumeEnabled() && supabase) {
+          eventLogger.flush().catch(function() {});
+          streamSession.updateStreamSession(supabase, streamId, {
+            status: 'cancelled',
+            completed_at: new Date().toISOString()
+          }).catch(function() {});
+        }
+        cleanup();
+        return;
+      }
+      var errMsg = err && err.message ? err.message : String(err);
+      console.error('[code-agent-stream] Error:', errMsg, 'phase:', finalized ? 'finalized' : 'active');
+      var structured = aiCoreErrorMapper.classifyError(err, { requestId: requestId, phase: 'stream' });
+      sendStreamError(structured.code, structured.error, structured.phase);
+    }
+  });
+
+  // ── Phase 3: Stream resume endpoint ────────────────────────────────────
+  app.get('/api/code/chat/stream/resume', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.status(503).json({ ok: false, code: 'RESUME_DISABLED', error: '流式恢复功能未启用' });
+    }
+
+    var streamId = String(req.query.stream_id || '');
+    var afterEventId = parseInt(req.query.after_event_id, 10) || 0;
+    var userId = String(req.userName || '');
+    var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
+    var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
+    var clientRequestId = String(req.query.client_request_id || '');
+
+    if (!streamId) {
+      return res.status(400).json({ ok: false, code: 'INVALID_STREAM_ID', error: '缺少 stream_id' });
+    }
+
+    try {
+      // Validate session
+      var session = await streamSession.getStreamSession(supabase, streamId);
+      if (!session) {
+        return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
+      }
+
+      // Ownership check
+      if (session.user_id !== userId) {
+        return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权访问该流式会话' });
+      }
+
+      // Workspace match
+      if (workspaceId && session.workspace_id && workspaceId !== session.workspace_id) {
+        return res.status(409).json({ ok: false, code: 'WORKSPACE_MISMATCH', error: '工作区不匹配' });
+      }
+
+      // Expired check
+      if (session.status === 'expired' || (session.expires_at && new Date(session.expires_at) < new Date())) {
+        return res.status(410).json({ ok: false, code: 'STREAM_EXPIRED', error: '流式会话已过期' });
+      }
+
+      // Get events after the given event_id
+      var events = await streamSession.getEventsAfter(supabase, streamId, afterEventId);
+
+      // Determine response based on session status
+      var response = {
+        ok: true,
+        stream_id: streamId,
+        request_id: session.request_id,
+        client_request_id: session.client_request_id,
+        status: session.status,
+        last_event_id: session.last_event_id,
+        events: events,
+        started_at: session.started_at,
+        completed_at: session.completed_at
+      };
+
+      if (session.status === 'completed') {
+        response.message = '流式会话已完成';
+      } else if (session.status === 'running') {
+        response.message = '流式会话仍在进行中';
+      } else if (session.status === 'failed') {
+        response.message = '流式会话已失败';
+      } else if (session.status === 'cancelled') {
+        response.message = '流式会话已取消';
+      }
+
+      return res.json(response);
+    } catch (err) {
+      console.error('[code-agent-resume] Error:', err.message);
+      return res.status(500).json({ ok: false, code: 'RESUME_ERROR', error: '恢复失败: ' + (err.message || '') });
+    }
+  });
+
+  // ── Phase 3: Stream cancel endpoint ────────────────────────────────────
+  app.post('/api/code/chat/stream/cancel', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.status(503).json({ ok: false, code: 'CANCEL_DISABLED', error: '取消功能未启用' });
+    }
+
+    var streamId = String(req.body.stream_id || '');
+    var userId = String(req.userName || '');
+
+    if (!streamId) {
+      return res.status(400).json({ ok: false, code: 'INVALID_STREAM_ID', error: '缺少 stream_id' });
+    }
+
+    try {
+      var session = await streamSession.getStreamSession(supabase, streamId);
+      if (!session) {
+        return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
+      }
+      if (session.user_id !== userId) {
+        return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权操作该流式会话' });
+      }
+
+      await streamSession.updateStreamSession(supabase, streamId, {
+        status: 'cancelled',
+        completed_at: new Date().toISOString()
+      });
+
+      return res.json({ ok: true, stream_id: streamId, status: 'cancelled', message: '流式会话已取消' });
+    } catch (err) {
+      console.error('[code-agent-cancel] Error:', err.message);
+      return res.status(500).json({ ok: false, code: 'CANCEL_ERROR', error: '取消失败: ' + (err.message || '') });
+    }
+  });
+
+  // ── Phase 3: Stream status check (for page-refresh recovery) ───────────
+  app.get('/api/code/chat/stream/status', rateLimit(60000, 30), authenticateUser, async function(req, res) {
+    var resumeEnabled = streamSession.isResumeEnabled();
+    if (!resumeEnabled) {
+      return res.json({ ok: true, has_running: false, sessions: [] });
+    }
+
+    var userId = String(req.userName || '');
+    var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
+    var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
+
+    try {
+      var query = supabase.from('ai_stream_sessions').select('*')
+        .eq('user_id', userId)
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(5);
+
+      if (workspaceId) {
+        query = query.eq('workspace_id', workspaceId);
+      }
+
+      var result = await query;
+      if (result.error) {
+        return res.json({ ok: true, has_running: false, sessions: [] });
+      }
+
+      var sessions = (result.data || []).map(function(s) {
+        return {
+          stream_id: s.stream_id,
+          request_id: s.request_id,
+          client_request_id: s.client_request_id,
+          conversation_id: s.conversation_id,
+          workspace_id: s.workspace_id,
+          workspace_generation: s.workspace_generation,
+          status: s.status,
+          last_event_id: s.last_event_id,
+          started_at: s.started_at,
+          expires_at: s.expires_at
+        };
+      });
+
+      return res.json({ ok: true, has_running: sessions.length > 0, sessions: sessions });
+    } catch (err) {
+      return res.json({ ok: true, has_running: false, sessions: [] });
+    }
+  });
+
 };
