@@ -2222,7 +2222,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         thinkingEnabled: !!(aiResult && aiResult.reasoning && aiResult.reasoning.length > 0),
         reasoningTokens: aiResult && typeof aiResult.reasoning_tokens === 'number' ? aiResult.reasoning_tokens : (aiResult && aiResult.reasoning ? '供应商未返回' : null),
         thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
-        thinkingFallbackReason: aiResult && aiResult.thinkingFallbackReason ? aiResult.thinkingFallbackReason : null
+        thinkingFallbackReason: aiResult && aiResult.thinkingFallbackReason ? aiResult.thinkingFallbackReason : null,
+        // AI 文档能力
+        canReadDocx: caps.canReadDocx === true,
+        canWriteDocx: caps.canWriteDocx === true,
+        canReadXlsx: caps.canReadXlsx === true,
+        canWriteXlsx: caps.canWriteXlsx === true,
+        canReadPdf: caps.canReadPdf === true,
+        canWritePdf: caps.canWritePdf === true
       };
       return res.json({
         ok: true,
@@ -2906,7 +2913,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           thinkingFallback: (aiResult && aiResult.thinking_fallback === true) ? true : false,
           prompt_tokens: promptTokens,
           completion_tokens: usage ? usage.completion_tokens : null,
-          total_duration_ms: Date.now() - requestStartTime
+          total_duration_ms: Date.now() - requestStartTime,
+          // AI 文档能力
+          canReadDocx: caps.canReadDocx === true,
+          canWriteDocx: caps.canWriteDocx === true,
+          canReadXlsx: caps.canReadXlsx === true,
+          canWriteXlsx: caps.canWriteXlsx === true,
+          canReadPdf: caps.canReadPdf === true,
+          canWritePdf: caps.canWritePdf === true
         },
         usage: usage
       });

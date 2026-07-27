@@ -12,9 +12,12 @@ test('code-workspace renderProjectStatus shows document status and permissions',
   assert.match(codeWorkspace, /文档已就绪/);
   assert.match(codeWorkspace, /文档解析失败/);
   assert.match(codeWorkspace, /文档正在解析/);
-  assert.match(codeWorkspace, /当前权限：/);
+  assert.match(codeWorkspace, /文件系统权限：/);
+  assert.match(codeWorkspace, /AI 文档能力：/);
   assert.match(codeWorkspace, /只读/);
-  assert.match(codeWorkspace, /可编辑/);
+  assert.match(codeWorkspace, /可写/);
+  assert.match(codeWorkspace, /仅支持读取和分析/);
+  assert.match(codeWorkspace, /支持读取和单元格修改/);
 });
 
 test('code-workspace showError catches PROVIDER_ errors with details element', () => {
