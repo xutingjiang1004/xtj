@@ -36,12 +36,11 @@ const CODE_AGENT_MAX_OUTPUT_TOKENS = Math.min(
 );
 const MAX_OPEN_FILES = 12;
 const MAX_ATTACHMENTS = 8;
-// Phase 2: Checkpointing — when history exceeds MAX_HISTORY_ITEMS,
-// keep first CHECKPOINT_KEEP and last CHECKPOINT_KEEP rounds.
-// This preserves the Longest Common Prefix for KV Cache, unlike
-// the old slice(-N) sliding window which shifted every round.
 const CHECKPOINT_KEEP = 12;
 const MAX_HISTORY_CHECKPOINT = 50;
+const MAX_SESSIONS = 200;
+const MAX_SESSION_MESSAGES = 200;
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
 const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
 const WEB_MAX_BYTES = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_MAX_BYTES) || 2 * 1024 * 1024, 32 * 1024), 8 * 1024 * 1024);
@@ -61,17 +60,83 @@ const SHA256_HEX_RE = /^[a-fA-F0-9]{64}$/;
 const JSON_BLOCK_RE = /```json\s*([\s\S]*?)\s*```/i;
 const JSON_OBJECT_RE = /"operations"\s*:/;
 
-// ── Session Cache (Phase 1) ────────────────────────────────────────────
+// ── Session Cache (isolated by user + workspace + generation + conversationId) ──
 const agentSessionCache = new Map();
-setInterval(function() {
+
+function getSessionKey(userId, workspaceId, generation, conversationId) {
+  return [
+    String(userId || '').slice(0, 100),
+    String(workspaceId || 'default').slice(0, 200),
+    String(generation == null ? '0' : generation),
+    String(conversationId || '').slice(0, 100)
+  ].join(':');
+}
+
+function evictOldSessions() {
   var now = Date.now();
-  for (var _i = 0, _a = Array.from(agentSessionCache.entries()); _i < _a.length; _i++) {
-    var entry = _a[_i];
-    var id = entry[0], data = entry[1];
-    if (now - data.lastActive > 2 * 60 * 60 * 1000) { // 2 hours TTL
-      agentSessionCache.delete(id);
+  var entries = Array.from(agentSessionCache.entries());
+  // First pass: remove expired sessions
+  for (var i = 0; i < entries.length; i++) {
+    var key = entries[i][0], data = entries[i][1];
+    if (now - data.lastActive > SESSION_TTL_MS) {
+      agentSessionCache.delete(key);
     }
   }
+  // Second pass: if still over capacity, remove oldest by lastActive (LRU)
+  if (agentSessionCache.size > MAX_SESSIONS) {
+    var remaining = Array.from(agentSessionCache.entries()).sort(function(a, b) {
+      return a[1].lastActive - b[1].lastActive;
+    });
+    var toRemove = remaining.slice(0, remaining.length - MAX_SESSIONS);
+    for (var j = 0; j < toRemove.length; j++) {
+      agentSessionCache.delete(toRemove[j][0]);
+    }
+  }
+}
+
+function getSession(userId, workspaceId, generation, conversationId) {
+  var key = getSessionKey(userId, workspaceId, generation, conversationId);
+  var sessionData = agentSessionCache.get(key);
+  if (!sessionData) return null;
+  // Ownership validation
+  if (sessionData.userId !== userId ||
+      sessionData.workspaceId !== workspaceId ||
+      sessionData.generation !== generation) {
+    agentSessionCache.delete(key);
+    return null;
+  }
+  // TTL check
+  if (Date.now() - sessionData.lastActive > SESSION_TTL_MS) {
+    agentSessionCache.delete(key);
+    return null;
+  }
+  return sessionData;
+}
+
+function setSession(userId, workspaceId, generation, conversationId, history) {
+  evictOldSessions();
+  var key = getSessionKey(userId, workspaceId, generation, conversationId);
+  var sessionData = {
+    history: history || [],
+    lastActive: Date.now(),
+    userId: userId,
+    workspaceId: workspaceId,
+    generation: generation,
+    createdAt: Date.now(),
+    messageCount: Array.isArray(history) ? history.length : 0
+  };
+  agentSessionCache.set(key, sessionData);
+  return sessionData;
+}
+
+function touchSession(sessionData) {
+  if (sessionData) {
+    sessionData.lastActive = Date.now();
+  }
+}
+
+setInterval(function() {
+  evictOldSessions();
 }, 15 * 60 * 1000).unref();
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -217,33 +282,81 @@ function parseOperations(raw) {
     if (!isValidOperationType(type)) continue;
     if (!validatePath(op.path)) continue;
 
+    // summary is required for all operation types
+    if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
+    var summary = op.summary.trim().slice(0, 200);
+
     if (type === 'document') {
       var docType = (typeof op.document_type === 'string' ? op.document_type.trim().toLowerCase() : '');
       if (docType !== 'xlsx') continue;
       var docOps = op.document_operations;
       if (!Array.isArray(docOps) || docOps.length === 0) continue;
-      if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
       ops.push({
         type: 'document',
         path: op.path.trim(),
-        summary: op.summary.trim().slice(0, 200),
+        summary: summary,
         document_type: docType,
         document_operations: docOps.slice(0, 20)
       });
       continue;
     }
 
+    if (type === 'create') {
+      if (typeof op.new_content !== 'string') continue;
+      if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
+      ops.push({
+        type: 'create',
+        path: op.path.trim(),
+        summary: summary,
+        new_content: op.new_content
+      });
+      continue;
+    }
+
+    // update (legacy): full-file replacement, requires expected_sha256 for safety
     if (type === 'update' && !isValidSha256(op.expected_sha256)) continue;
-    if (typeof op.new_content !== 'string' || op.new_content === '') continue;
-    if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
-    if (typeof op.summary !== 'string' || !op.summary.trim()) continue;
-    ops.push({
-      type: type,
-      path: op.path.trim(),
-      summary: op.summary.trim().slice(0, 200),
-      new_content: op.new_content,
-      expected_sha256: type === 'update' ? op.expected_sha256.toLowerCase() : undefined
-    });
+    if (type === 'update' && typeof op.new_content !== 'string') continue;
+    if (type === 'update' && Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
+    if (type === 'update') {
+      ops.push({
+        type: 'update',
+        path: op.path.trim(),
+        summary: summary,
+        new_content: op.new_content,
+        expected_sha256: op.expected_sha256.toLowerCase()
+      });
+      continue;
+    }
+
+    // replace_range: strict validation - ALL fields required, no fallback to full file overwrite
+    if (type === 'replace_range') {
+      // Validate expected_sha256: required, must be 64-char hex
+      if (!isValidSha256(op.expected_sha256)) continue;
+      var expectedSha256 = op.expected_sha256.toLowerCase();
+
+      // Validate start_line: required, must be safe integer >= 1
+      if (!Number.isSafeInteger(op.start_line) || op.start_line < 1) continue;
+      var startLine = op.start_line;
+
+      // Validate end_line: required, must be safe integer >= start_line
+      if (!Number.isSafeInteger(op.end_line) || op.end_line < startLine) continue;
+      var endLine = op.end_line;
+
+      // Validate new_content: required, non-empty string
+      if (typeof op.new_content !== 'string') continue;
+      if (Buffer.byteLength(op.new_content, 'utf8') > MAX_NEW_CONTENT_LEN) continue;
+
+      ops.push({
+        type: 'replace_range',
+        path: op.path.trim(),
+        summary: summary,
+        new_content: op.new_content,
+        expected_sha256: expectedSha256,
+        start_line: startLine,
+        end_line: endLine
+      });
+      continue;
+    }
   }
   return ops;
 }
@@ -1662,12 +1775,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var conversationId = String(body.conversation_id || '').trim();
       var sessionData = null;
       if (conversationId) {
-        sessionData = agentSessionCache.get(conversationId);
+        sessionData = getSession(scope.userId, scope.workspaceId, scope.generation, conversationId);
         if (!sessionData) {
-          sessionData = { history: history, lastActive: Date.now() };
-          agentSessionCache.set(conversationId, sessionData);
+          sessionData = setSession(scope.userId, scope.workspaceId, scope.generation, conversationId, history);
         } else {
-          sessionData.lastActive = Date.now();
+          touchSession(sessionData);
         }
       }
       var currentHistory = sessionData ? sessionData.history : history;
@@ -1739,18 +1851,21 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         cacheMissTokens: null
       };
 
+      // Step 1: Build messages with initial estimate to get stable inputBudget
       var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
       var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
       var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
-      var toolTrace = [];
-      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
 
-      // Rebuild messages with the now-known inputBudget
+      // Step 2: Rebuild messages with the now-known inputBudget for final calculation
       messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, inputBudget);
       promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
       inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
+
+      // Step 3: Finalize runtime capabilities and create executor with CORRECT inputBudget
       runtimeCapabilities.inputBudgetTokens = inputBudget;
       runtimeCapabilities.currentPromptTokens = promptTokens;
+      var toolTrace = [];
+      var executor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
 
       logPhase('ai_request_start', { model: model, thinkingMode: thinkingMode, firstToolChoice: firstToolChoice ? firstToolChoice.function.name : 'none', promptTokens: promptTokens, inputBudget: inputBudget });
 
@@ -1776,34 +1891,59 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
       var rawReasoning = aiResult && typeof aiResult.reasoning === 'string' ? aiResult.reasoning : '';
 
-      if (sessionData && aiResult.finalMessages) {
-        sessionData.history.push({ role: 'user', content: message });
-        var initialLen = messages.length;
-        if (aiResult.finalMessages.length > initialLen) {
-          for (var i = initialLen; i < aiResult.finalMessages.length; i++) {
-            sessionData.history.push(aiResult.finalMessages[i]);
+      // Transcript normalization: single source of truth from finalMessages
+      // Avoid duplicate assistant messages
+      if (sessionData && aiResult.finalMessages && Array.isArray(aiResult.finalMessages)) {
+        var initialMsgsLen = messages.length;
+        var newMsgs = aiResult.finalMessages.slice(initialMsgsLen);
+
+        // Deduplicate by content hash and role to avoid repeats on retry
+        var seen = new Set();
+        for (var m = 0; m < sessionData.history.length; m++) {
+          var h = sessionData.history[m];
+          seen.add(h.role + ':' + String(h.content).slice(0, 200));
+        }
+
+        // Add current user message first
+        var userKey = 'user:' + String(message).slice(0, 200);
+        if (!seen.has(userKey)) {
+          sessionData.history.push({ role: 'user', content: message });
+          seen.add(userKey);
+        }
+
+        // Add new messages from provider (tool calls, tool results, assistant)
+        for (var i = 0; i < newMsgs.length; i++) {
+          var msg = newMsgs[i];
+          if (!msg || typeof msg !== 'object') continue;
+          // Skip reasoning_content — keep only server-side
+          if (msg.reasoning_content) {
+            msg = Object.assign({}, msg);
+            delete msg.reasoning_content;
+          }
+          var msgKey = msg.role + ':' + String(msg.content || '').slice(0, 200);
+          if (!seen.has(msgKey)) {
+            sessionData.history.push(msg);
+            seen.add(msgKey);
           }
         }
-        sessionData.history.push({ role: 'assistant', content: rawContent, reasoning_content: rawReasoning });
 
-        // Phase 2: Checkpointing instead of sliding window.
-        // When history exceeds MAX_HISTORY_CHECKPOINT, keep first CHECKPOINT_KEEP
-        // and last CHECKPOINT_KEEP rounds, drop the middle.
-        // This preserves the Longest Common Prefix for KV Cache —
-        // the first N rounds never shift position across requests.
-        if (sessionData.history.length > MAX_HISTORY_CHECKPOINT) {
-          var keep = CHECKPOINT_KEEP;
-          var total = sessionData.history.length;
-          if (total > keep * 2) {
-            var head = sessionData.history.slice(0, keep);
-            var tail = sessionData.history.slice(total - keep);
-            sessionData.history = head.concat([
+        // Enforce max session messages
+        if (sessionData.history.length > MAX_SESSION_MESSAGES) {
+          var keepHead = Math.floor(CHECKPOINT_KEEP / 2);
+          var keepTail = MAX_SESSION_MESSAGES - keepHead - 2;
+          var totalMsgs = sessionData.history.length;
+          if (totalMsgs > keepHead + keepTail + 2) {
+            var msgHead = sessionData.history.slice(0, keepHead);
+            var msgTail = sessionData.history.slice(totalMsgs - keepTail);
+            sessionData.history = msgHead.concat([
               { role: 'user', content: '[早期对话已自动压缩，当前继续最近上下文。]' },
               { role: 'assistant', content: '已理解，将继续基于当前上下文回复。' }
-            ]).concat(tail);
-            console.log('[code-agent] History checkpointed: ' + total + ' rounds -> ' + sessionData.history.length + ' rounds (prefix preserved)');
+            ]).concat(msgTail);
+            console.log('[code-agent] History compressed: ' + totalMsgs + ' -> ' + sessionData.history.length + ' messages');
           }
         }
+        sessionData.messageCount = sessionData.history.length;
+        touchSession(sessionData);
       }
       var operations = [];
       var reply = rawContent;
