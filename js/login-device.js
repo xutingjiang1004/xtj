@@ -206,7 +206,12 @@
                 cookies_enabled: navigator.cookieEnabled === true,
                 online: navigator.onLine !== false,
                 max_touch_points: navigator.maxTouchPoints || 0,
-                touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+                touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0),
+                timezone_offset_min: new Date().getTimezoneOffset(),
+                languages: navigator.languages ? Array.prototype.slice.call(navigator.languages, 0, 5) : [navigator.language || ''],
+                do_not_track: navigator.doNotTrack === '1' || window.doNotTrack === '1',
+                pdf_viewer: !!(navigator.pdfViewerEnabled),
+                plugins_count: navigator.plugins ? navigator.plugins.length : 0
             };
             var connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
             if (connection) {
@@ -214,7 +219,8 @@
                     effective_type: String(connection.effectiveType || '').slice(0, 20),
                     downlink_mbps: Number.isFinite(Number(connection.downlink)) ? Number(connection.downlink) : null,
                     rtt_ms: Number.isFinite(Number(connection.rtt)) ? Number(connection.rtt) : null,
-                    save_data: connection.saveData === true
+                    save_data: connection.saveData === true,
+                    type: String(connection.type || '').slice(0, 20)
                 };
             }
             try {
@@ -228,6 +234,20 @@
                     landing_path: String(url.pathname || '/').slice(0, 160)
                 };
             } catch (e) {}
+            // WebGL GPU 渲染器（对设备型号识别极有价值）
+            try {
+                var cvs = document.createElement('canvas');
+                var wgl = cvs.getContext('webgl') || cvs.getContext('experimental-webgl');
+                if (wgl) {
+                    var dbg = wgl.getExtension('WEBGL_debug_renderer_info');
+                    if (dbg) {
+                        meta.gpu_vendor = String(wgl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || '').slice(0, 120);
+                        meta.gpu_renderer = String(wgl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200);
+                    }
+                    var ext = wgl.getExtension('WEBGL_lose_context');
+                    if (ext) ext.loseContext();
+                }
+            } catch(e) {}
             meta.possible_device_model = getPossibleDeviceModel({
                 screen_width: meta.screen_width,
                 screen_height: meta.screen_height,
