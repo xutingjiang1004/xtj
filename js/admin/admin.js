@@ -5568,6 +5568,10 @@ async function initAdminClient() {
             }
             if (dm.storage_estimate) h += '<div style="' + rowStyle + '"><span>存储 ' + adminIcons.disk + '</span><span style="' + valStyle + '">' + ((dm.storage_estimate.quota || 0) / 1073741824).toFixed(1) + 'GB</span></div>';
             if (dm.network) h += '<div style="' + rowStyle + '"><span>网络 ' + adminIcons.wifi + '</span><span style="' + valStyle + '">' + escapeHtml(dm.network.effective_type || '') + ' / ' + (dm.network.downlink_mbps || '?') + 'Mbps</span></div>';
+            if (dm.media_devices) {
+                var md = dm.media_devices;
+                h += '<div style="' + rowStyle + '"><span>媒体设备</span><span style="' + valStyle + '">\ud83c\udf99\ufe0f' + (md.audioinput || 0) + ' \ud83d\udd0a' + (md.audiooutput || 0) + ' \ud83d\udcf7' + (md.videoinput || 0) + '</span></div>';
+            }
         }
         h += '</div>';
 
