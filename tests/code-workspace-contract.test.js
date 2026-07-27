@@ -626,7 +626,9 @@ test('stale request responses are ignored', () => {
 // ============================================================
 test('server validates file paths in context', () => {
   var codeAgent = fs.readFileSync('render-api/code-agent.js', 'utf8');
-  assert.match(codeAgent, /validatePath\(f\.path\.trim\(\)\)/);
+  // P0 Fix: validateFiles now uses normalizeContextPath before validatePath
+  assert.match(codeAgent, /normalizeContextPath\(f\.path\)/);
+  assert.match(codeAgent, /validatePath\(normalizedPath\)/);
 });
 
 test('server validates active_path', () => {
