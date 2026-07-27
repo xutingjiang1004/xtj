@@ -55,7 +55,7 @@
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=bc7ef7cb72">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=1b1bd04bed">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=e56921b500">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=bd688664a5">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=62c7095411">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2583028a16">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=9879387659">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=98002d6509">
@@ -66,9 +66,16 @@
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=57708a55b3">
     <meta name="xtj-module-features" content="js/features.min.js?v=9a3afbd56b">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=ee8977b968">
+    <meta name="xtj-module-ai-core-errors" content="js/ai-core/errors.min.js?v=baf714fb08">
+    <meta name="xtj-module-ai-core-request" content="js/ai-core/request-controller.min.js?v=c41ecc922e">
+    <meta name="xtj-module-ai-core-transport" content="js/ai-core/transport.min.js?v=367017dd22">
+    <meta name="xtj-module-ai-core-markdown" content="js/ai-core/markdown-renderer.min.js?v=690bae7030">
+    <meta name="xtj-module-ai-core-scroll" content="js/ai-core/scroll-controller.min.js?v=743e0a0b6d">
+    <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
+    <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
     <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=ac2d1c4e2c">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=2827ec03b4">
-    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=a39dc170e8">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=31f9e080eb">
+    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=16c935cd52">
     </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1070,11 +1077,19 @@
             });
         })();
     </script>
+    <!-- AI Core shared modules (must load before ai-agent and code-workspace) -->
+    <script defer src="js/ai-core/errors.min.js?v=baf714fb08"></script>
+    <script defer src="js/ai-core/request-controller.min.js?v=c41ecc922e"></script>
+    <script defer src="js/ai-core/transport.min.js?v=367017dd22"></script>
+    <script defer src="js/ai-core/markdown-renderer.min.js?v=690bae7030"></script>
+    <script defer src="js/ai-core/scroll-controller.min.js?v=743e0a0b6d"></script>
+    <script defer src="js/ai-core/stream-renderer.min.js?v=22b2b02430"></script>
+    <script defer src="js/ai-core/telemetry.min.js?v=12407a1a7b"></script>
     <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
     <script defer src="js/core.min.js?v=07bbb7deb5"></script>
-    <script defer src="js/login-device.min.js?v=62e7fdc962"></script>
+    <script defer src="js/login-device.min.js?v=ca37c54bf8"></script>
     <script defer src="js/theme-toggle.min.js?v=a9201b15a8"></script>
     <script defer src="js/desktop-shell.min.js?v=57afa81ab3"></script>
 

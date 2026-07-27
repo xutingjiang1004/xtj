@@ -1270,6 +1270,153 @@ function resetRegistryForTests() {
   legacyWorkspaceId = 'default';
 }
 
+// ── Phase 4: Persistent Index Integration ───────────────────────────────
+// These functions bridge the in-memory registry with the Supabase-backed
+// persistent index. When CODE_PERSISTENT_INDEX_ENABLED is on, index builds
+// are persisted to the database and can be recovered after Render restarts.
+// The in-memory registry remains the primary hot cache; the DB is the
+// source of truth for recovery.
+
+var persistentIndex = null;
+
+// Expose internal resolveIndex for persistence (used by code-agent.js)
+function _resolveIndexForPersistence(scope) {
+  return resolveIndex(scope);
+}
+
+function _lazyPersistentIndex() {
+  if (!persistentIndex) {
+    try { persistentIndex = require('./ai-core/persistent-index'); } catch (e) {
+      persistentIndex = { isPersistEnabled: function() { return false; } };
+    }
+  }
+  return persistentIndex;
+}
+
+function persistIndexToDB(supabase, userId, identifier, projectIndex) {
+  var pi = _lazyPersistentIndex();
+  if (!pi.isPersistEnabled() || !supabase) return Promise.resolve(null);
+
+  return pi.upsertWorkspace(supabase, {
+    userId: userId,
+    sourceType: 'local_folder',
+    identifier: String(identifier || projectIndex.workspaceId),
+    workspaceName: String(identifier || projectIndex.workspaceId),
+    generation: projectIndex.generation,
+    indexStatus: 'ready',
+    totalFiles: projectIndex.totalFiles,
+    totalChunks: projectIndex.totalChunks,
+    totalBytes: projectIndex.totalBytes,
+    truncated: projectIndex.truncated === true
+  }).then(function(ws) {
+    if (!ws || !ws.id) return null;
+    var workspaceId = ws.id;
+
+    // Delete old files and chunks for this workspace, then insert new
+    return pi.deleteAllIndexFiles(supabase, workspaceId).then(function() {
+      var fileEntries = [];
+      projectIndex.files.forEach(function(entry, path) {
+        fileEntries.push({ path: path, entry: entry });
+      });
+
+      var uploadFile = function(index) {
+        if (index >= fileEntries.length) return Promise.resolve();
+        var fe = fileEntries[index];
+        var entry = fe.entry;
+
+        return pi.upsertIndexFile(supabase, userId, workspaceId, {
+          path: fe.path,
+          name: entry.name,
+          language: entry.language,
+          size: entry.size,
+          modifiedAt: entry.modifiedAt,
+          sha256: entry.sha256
+        }).then(function(fileRecord) {
+          if (!fileRecord || !fileRecord.id) return uploadFile(index + 1);
+
+          // Collect chunks for this file
+          var chunkRows = [];
+          for (var c = 0; c < entry.chunks.length; c++) {
+            var chunkId = entry.chunks[c];
+            var chunk = projectIndex.chunks.get(chunkId);
+            if (chunk) {
+              chunkRows.push({
+                chunkKey: chunk.id,
+                startLine: chunk.startLine,
+                endLine: chunk.endLine,
+                content: chunk.content,
+                tokenEstimate: chunk.tokenEstimate,
+                contentHash: ''
+              });
+            }
+          }
+          return pi.upsertChunks(supabase, userId, workspaceId, fileRecord.id, chunkRows).then(function() {
+            return uploadFile(index + 1);
+          });
+        });
+      };
+
+      return uploadFile(0).then(function() {
+        return workspaceId;
+      });
+    });
+  }).catch(function(e) {
+    console.error('[code-index] persistIndexToDB error:', e.message);
+    return null;
+  });
+}
+
+function recoverIndexFromDB(supabase, scope, identifier) {
+  var pi = _lazyPersistentIndex();
+  if (!pi.isPersistEnabled() || !supabase) return Promise.resolve(null);
+
+  var normalized = normalizeScope(scope, false);
+  if (!normalized.ok) return Promise.resolve(null);
+
+  var workspaceKey = pi.generateWorkspaceKey(normalized.userId, 'local_folder', String(identifier || normalized.workspaceId));
+  return pi.getWorkspace(supabase, normalized.userId, workspaceKey).then(function(ws) {
+    if (!ws) return null;
+    // Check index version
+    if (ws.index_version !== 1) {
+      return { ok: false, error: '索引版本不匹配，需要重建', code: 'NEEDS_UPGRADE', currentVersion: ws.index_version };
+    }
+    if (ws.index_status === 'stale' || ws.index_status === 'needs_upgrade') {
+      return { ok: false, error: '索引已过期，需要重建', code: 'NEEDS_UPGRADE', status: ws.index_status };
+    }
+    return pi.recoverIndex(supabase, ws.id).then(function(recovered) {
+      if (!recovered || !recovered.files || recovered.files.size === 0) return null;
+      // Load into in-memory registry
+      var now = Date.now();
+      var registryEntry = {
+        index: recovered,
+        estimatedBytes: estimateIndexBytes(recovered),
+        createdAt: now,
+        lastAccessedAt: now,
+        expiresAt: now + registryConfig.ttlMs
+      };
+      var key = JSON.stringify([recovered.userId, recovered.workspaceId, recovered.generation]);
+      indexRegistry.delete(key);
+      indexRegistry.set(key, registryEntry);
+      var baseKey = JSON.stringify([recovered.userId, recovered.workspaceId]);
+      var currentGen = latestGenerations.get(baseKey);
+      if (currentGen === undefined || recovered.generation >= currentGen) {
+        latestGenerations.set(baseKey, recovered.generation);
+      }
+      // Update workspace last_opened_at
+      pi.updateWorkspaceStats(supabase, ws.id, { indexStatus: 'ready' }).catch(function() {});
+      return {
+        ok: true,
+        recovered: true,
+        workspaceId: ws.id,
+        summary: getIndexSummary(scope)
+      };
+    });
+  }).catch(function(e) {
+    console.error('[code-index] recoverIndexFromDB error:', e.message);
+    return null;
+  });
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────
 module.exports = {
   // Token budget
@@ -1307,6 +1454,11 @@ module.exports = {
   chunkContent: chunkContent,
   extractSymbols: extractSymbols,
   scoreRelevance: scoreRelevance,
+
+  // Phase 4: Persistent index
+  persistIndexToDB: persistIndexToDB,
+  recoverIndexFromDB: recoverIndexFromDB,
+  _resolveIndexForPersistence: _resolveIndexForPersistence,
 
   // Constants
   DEFAULT_MAX_TOKENS: DEFAULT_MAX_TOKENS,
