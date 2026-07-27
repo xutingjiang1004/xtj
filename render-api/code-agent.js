@@ -175,7 +175,18 @@ function buildCodeCapabilities(deps, options) {
     maxContextTokens: Math.min(CODE_AGENT_CONTEXT_TOKENS, Number.isSafeInteger(Number(provider.providerContextTokens)) && Number(provider.providerContextTokens) > 0 ? Number(provider.providerContextTokens) : CODE_AGENT_CONTEXT_TOKENS),
     maxOutputTokens: Math.min(CODE_AGENT_MAX_OUTPUT_TOKENS, Number.isSafeInteger(Number(provider.providerMaxOutputTokens)) && Number(provider.providerMaxOutputTokens) > 0 ? Number(provider.providerMaxOutputTokens) : CODE_AGENT_MAX_OUTPUT_TOKENS),
     maxToolRounds: Math.min(CODE_AGENT_MAX_TOOL_ROUNDS, 8),
-    verifiedBy: succeeded ? 'chat_completion' : (available ? 'models_probe' : '')
+    verifiedBy: succeeded ? 'chat_completion' : (available ? 'models_probe' : ''),
+    
+    // Explicit Document Capabilities for System Prompt alignment
+    canReadCode: true,
+    canWriteCode: true,
+    canCreateFiles: true,
+    canReadDocx: true,
+    canWriteDocx: false,
+    canReadXlsx: true,
+    canWriteXlsx: true,
+    canReadPdf: true,
+    canWritePdf: false
   };
 }
 
@@ -251,14 +262,9 @@ function validateFiles(files) {
 
 function validatePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
+  // allow absolute paths, backslashes, etc. as they are just contextual indicators for AI.
+  // but prevent '..' to be safe.
   if (p.indexOf('..') >= 0) return false;
-  if (p.indexOf('\\') >= 0) return false;
-  if (p.charCodeAt(0) === 47) return false;
-  if (/^[A-Za-z]:/.test(p)) return false;
-  var parts = p.split('/');
-  for (var i = 0; i < parts.length; i++) {
-    if (!parts[i]) return false;
-  }
   return true;
 }
 
@@ -681,9 +687,12 @@ function needsProjectContext(message) {
   var noContextRE = /^(你好|你是谁|你能做什么|怎么使用|解释功能|介绍一下|hi|hello|who are you|what can you do)[\s\?\!\。，、]*$/i;
   if (noContextRE.test(msg)) return false;
   
+  // 能力咨询不需要项目上下文
+  var capabilityRE = /(你支持|你可以|你能|你会|你懂|你认识).*(修改|读取|写|文件|docx|pdf|项目)/i;
+  if (capabilityRE.test(msg)) return false;
+
   // 明确要求读取、检查、修改、分析项目、找bug、代码相关，需要项目上下文
-  var requiresContextRE = /(检查|分析|查找|bug|报错|整个项目|代码里|项目中|读取|这个文件|看看|有什么问题|重构|修改|写代码|阅读|解析|总结一下)/i;
-  // 如果明确提及了相关操作，就认为需要上下文
+  var requiresContextRE = /(分析.*项目|检查.*(整个项目|项目|bug)|修改.*(代码|文件)|总结.*文档|读取.*(项目|代码)|查找.*函数|修复.*报错|这个文件|看看|有什么问题|重构|解析|总结一下)/i;
   if (requiresContextRE.test(msg)) return true;
 
   // 如果不包含明确的项目操作词汇，就不强求重建索引（避免普通问题被拦截）
@@ -2006,7 +2015,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       logPhase('ai_request_start', { model: model, thinkingMode: thinkingMode, firstToolChoice: firstToolChoice ? firstToolChoice.function.name : 'none', promptTokens: promptTokens, inputBudget: inputBudget });
 
-      var aiResult = await deps.callDeepSeek(messages, {
+      var callArgs = {
         model: model,
         thinking_mode: thinkingMode,
         tools: CODE_AGENT_TOOLS,
@@ -2017,10 +2026,31 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         max_tool_result_chars: Math.min(inputBudget * 4, 2000000),
         max_tokens: CODE_AGENT_MAX_OUTPUT_TOKENS,
         signal: requestController.signal
-      });
+      };
+
+      var aiResult;
+      var thinkingFallback = false;
+      try {
+        aiResult = await deps.callDeepSeek(messages, callArgs);
+      } catch (err) {
+        var errMsg = err && err.message ? err.message : String(err);
+        if (/HTTP 400/.test(errMsg) && thinkingMode !== 'none' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
+          console.warn('[code-agent] HTTP 400 with thinking + tools. Retrying once with thinking disabled.');
+          thinkingFallback = true;
+          callArgs.thinking_mode = 'none';
+          // Record the fallback explicitly for frontend
+          logPhase('thinking_fallback', { reason: 'HTTP 400 incompatibility' });
+          aiResult = await deps.callDeepSeek(messages, callArgs);
+          aiResult.thinking_fallback = true;
+          aiResult.thinking_mode = 'none';
+        } else {
+          throw err;
+        }
+      }
+
       if (aborted) return;
 
-      logPhase('ai_request_done', { toolCalls: toolTrace.length, toolTrace: toolTrace.map(function(t) { return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms }; }), usage: aiResult.usage ? { prompt: aiResult.usage.prompt_tokens, completion: aiResult.usage.completion_tokens } : null });
+      logPhase('ai_request_done', { toolCalls: toolTrace.length, toolTrace: toolTrace.map(function(t) { return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms }; }), usage: aiResult.usage ? { prompt: aiResult.usage.prompt_tokens, completion: aiResult.usage.completion_tokens } : null, thinkingFallback: thinkingFallback });
 
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
       if (!rawContent) {
@@ -2627,7 +2657,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Send answer_start
       sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
 
-      var aiResult = await deps.callDeepSeek(messages, {
+      var hasStartedStreaming = false;
+      var callArgs = {
         model: model,
         thinking_mode: thinkingMode,
         tools: CODE_AGENT_TOOLS,
@@ -2640,9 +2671,33 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         signal: requestController.signal,
         onContentChunk: function(chunk) {
           if (aborted || finalized) return;
+          hasStartedStreaming = true;
           sendSSE('answer_delta', { delta: String(chunk).slice(0, 4000) });
         }
-      });
+      };
+
+      var aiResult;
+      var thinkingFallback = false;
+      try {
+        aiResult = await deps.callDeepSeek(messages, callArgs);
+      } catch (err) {
+        var errMsg = err && err.message ? err.message : String(err);
+        if (/HTTP 400/.test(errMsg) && !hasStartedStreaming && thinkingMode !== 'none' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
+          console.warn('[code-agent-stream] HTTP 400 with thinking + tools. Retrying once with thinking disabled.');
+          thinkingFallback = true;
+          callArgs.thinking_mode = 'none';
+          // Record the fallback explicitly for frontend
+          logPhase('thinking_fallback', { reason: 'HTTP 400 incompatibility' });
+          // Resend answer_start with updated thinking mode
+          sendSSE('answer_start', { model: model, thinking_mode: 'none' });
+          aiResult = await deps.callDeepSeek(messages, callArgs);
+          aiResult.thinking_fallback = true;
+          aiResult.thinking_mode = 'none';
+        } else {
+          throw err;
+        }
+      }
+      
       if (aborted || finalized) { cleanup(); return; }
 
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
