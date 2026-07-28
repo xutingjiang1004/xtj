@@ -46,6 +46,13 @@ test('server extracts structured attachments on normal, stream, and deep routes'
   assert.match(serverSource, /attachments\.length, 10/);
 });
 
+test('AI upload controls only advertise formats supported by the extractor', () => {
+  assert.match(source, /function isSupportedAiFile\(file\)/);
+  assert.match(source, /\\\.\(pdf\|docx\|txt\|csv\|xlsx\)\$/);
+  assert.doesNotMatch(source, /accept: ['"]image\/\*\.pdf/);
+  assert.doesNotMatch(source, /accept: ['"]image\/\*,\.pdf,\.doc,\.docx/);
+});
+
 test('deep research close invalidates callbacks, aborts streams, and clears transient files', () => {
   const closeStart = source.indexOf('function closeDeepThinkPage()');
   assert.notEqual(closeStart, -1);
