@@ -3803,10 +3803,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   var streamSession = require('./ai-core/stream-session');
 
   app.post('/api/code/chat/stream', rateLimit(60000, 20), authenticateUser, async function(req, res) {
-    var streamEnabled = String(process.env.CODE_STREAM_ENABLED || '0') === '1';
-    if (!streamEnabled) {
-      return res.status(503).json({ ok: false, code: 'STREAM_DISABLED', error: '流式接口未启用，请使用 /api/code/chat' });
-    }
 
     var aborted = false;
     var finalized = false;
