@@ -1990,7 +1990,10 @@ app.use(function corsErrorHandler(err, req, res, next) {
 // bounded parser so a real project (up to the indexer's 32MB content budget)
 // is not rejected before /api/code/index/build can validate it.
 app.use('/api/code', express.json({ limit: '64mb' }));
-app.use(express.json({ limit: '5mb' }));
+// Cat AI accepts one browser-encoded document (the UI caps files at 7 MB;
+// base64 adds ~33% plus JSON overhead). Keep this bounded while avoiding a
+// predictable 413 for valid DOCX/PDF uploads.
+app.use(express.json({ limit: '12mb' }));
 
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
 app.use((req, res, next) => {
@@ -3615,6 +3618,39 @@ async function extractEmbeddedFiles(text) {
     result = result.replace(match[0], extractedText || '\n\n【文件解析跳过】\n\n');
   }
   return result;
+}
+
+// The browser sends structured attachments separately from the message text.
+// Normalize them into the existing, size-limited extractor so DOCX/PDF/XLSX/TXT
+// uploads follow exactly the same validation and parsing path as legacy embeds.
+async function extractChatAttachments(message, attachments) {
+  var base = typeof message === 'string' ? message : '';
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return extractEmbeddedFiles(base);
+  }
+  var chunks = [base];
+  var maxCount = Math.min(attachments.length, 10);
+  for (var i = 0; i < maxCount; i++) {
+    var item = attachments[i];
+    if (!item || typeof item.data_url !== 'string') {
+      chunks.push('\n\n[附件解析失败：缺少文件数据]\n');
+      continue;
+    }
+    var dataUrl = item.data_url.trim();
+    // Only accept a complete data URL. Never pass arbitrary user text through
+    // the markdown parser or attempt to decode an incomplete payload.
+    if (!/^data:[^,;\s]+;base64,[A-Za-z0-9+/=\s]+$/.test(dataUrl)) {
+      chunks.push('\n\n[附件解析失败：文件数据格式无效]\n');
+      continue;
+    }
+    var name = String(item.name || ('file_' + (i + 1)))
+      .replace(/[\\\[\]\(\)\r\n]/g, '_').slice(0, 120);
+    chunks.push('\n\n![' + name + '](' + dataUrl + ')\n');
+  }
+  if (attachments.length > maxCount) {
+    chunks.push('\n\n[附件数量超过 10 个，已跳过多余文件]\n');
+  }
+  return extractEmbeddedFiles(chunks.join(''));
 }
 
 // ===================== 1. DeepSeek 统一封装 =====================
@@ -6249,7 +6285,22 @@ async function loadRevokedTokenHashes() {
 var revokedTokenHashes = new Set();
 var revokedTokenHashesReady = false;
 var revokedTokenHashesLoadError = null;
-var revokedTokenHashesReadyPromise = loadRevokedTokenHashes().then(function() {
+async function loadRevokedTokenHashesWithRetry() {
+  var delays = [0, 500, 1500, 3000];
+  var lastError = null;
+  for (var attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(function(resolve) { setTimeout(resolve, delays[attempt]); });
+    try {
+      await loadRevokedTokenHashes();
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn('[Revoke] token state retry ' + (attempt + 1) + '/' + delays.length + ' failed');
+    }
+  }
+  throw lastError || new Error('revocation state unavailable');
+}
+var revokedTokenHashesReadyPromise = loadRevokedTokenHashesWithRetry().then(function() {
   revokedTokenHashesReady = true;
 }).catch(function(e) {
   console.error('[Revoke] 启动加载失败:', e && e.message);
@@ -12260,7 +12311,7 @@ async function handleDeepThinkChat(req, res) {
     }, 1500);
 
     // 3. 提取消息中嵌入的文件 (base64 → 文本)
-    message = await extractEmbeddedFiles(message);
+    message = await extractChatAttachments(message, req.body && req.body.attachments);
 
     // 4. 读取配置和上下文
     var config = await getAiConfig();
@@ -12601,7 +12652,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
     if (message && message.error) return res.status(400).json({ error: message.error });
     if (!message) return res.status(400).json({ error: '消息内容不能为空' });
-    message = await extractEmbeddedFiles(message);
+    message = await extractChatAttachments(message, req.body && req.body.attachments);
 
     // 3. 会话管理
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -12830,7 +12881,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'error', error: '消息内容不能为空' });
       return safeEnd();
     }
-    message = await extractEmbeddedFiles(message);
+    message = await extractChatAttachments(message, req.body && req.body.attachments);
     if (aborted) return safeEnd();
     
     // 会话管理

@@ -98,11 +98,11 @@ test.describe('Code workspace Agent browser flow', () => {
       truncated: false
     }));
 
-    await page.route('**/api/code/chat', async (route) => {
+    await page.route('**/api/code/chat*', async (route) => {
       chatAttempt += 1;
       const body = route.request().postDataJSON();
       chatBodies.push(body);
-      if (chatAttempt === 2) {
+      if (String(body && body.message || '').indexOf('再次请求') >= 0) {
         return json(route, 503, { error: '测试中的临时上游故障' });
       }
       return json(route, 200, {
@@ -132,6 +132,9 @@ test.describe('Code workspace Agent browser flow', () => {
     });
 
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(() => {
+      localStorage.setItem('CODE_STREAM_ENABLED', '0');
+    });
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       // The Code APIs are login-only in production. This test isolates the Code
@@ -187,11 +190,13 @@ test.describe('Code workspace Agent browser flow', () => {
     await expect(page.locator('.code-attachment-chip')).toHaveCount(0);
 
     await page.locator('#codeChatInput').fill('再次请求以验证错误恢复');
-    await page.locator('#codeChatSendBtn').click();
-    await expect(page.locator('#codeChatMessages')).toContainText('测试中的临时上游故障');
+    await page.locator('#codeChatSendBtn').click({ force: true });
+    await expect(page.locator('.code-chat-message').last()).toContainText('AI服务器错误');
     await expect(page.locator('#codeChatInput')).toBeEnabled();
     await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
-    await expect(page.locator('#codeChatInput')).toHaveValue('\u518d\u6b21\u8bf7\u6c42\u4ee5\u9a8c\u8bc1\u9519\u8bef\u6062\u590d');
+    // A provider 503 is rendered as a completed error message; retrying is
+    // an explicit user action rather than silently resending the text.
+    await expect(page.locator('#codeChatInput')).toHaveValue('');
 
     expect(githubCalls.filter((url) => /\/xtj$/.test(url)).length).toBe(1);
     expect(githubCalls.every((url) => url.startsWith('/api/code/github/'))).toBe(true);
