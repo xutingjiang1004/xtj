@@ -69,6 +69,7 @@ test('search result links are restricted to http(s)', () => {
   assert.match(source, /parsed\.protocol !== 'http:' && parsed\.protocol !== 'https:'/);
   assert.match(source, /href:\s*safeSrUrl \|\| '#'/);
   assert.doesNotMatch(source, /href="' \+ escapeHtml\(sr\.url\)/);
+  assert.doesNotMatch(source, /href:\s*r2\.url\s*\|\|\s*'#'/);
 });
 
 test('api requests propagate caller abort signals', () => {

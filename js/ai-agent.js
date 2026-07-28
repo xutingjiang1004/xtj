@@ -5270,7 +5270,7 @@ window.throttleRAF = function(fn) {
               for (var ri2 = 0; ri2 < itemsArr.length; ri2++) {
                 var r2 = itemsArr[ri2];
                 var itemEl2 = el('div', { class: 'ai-search-detail-item' });
-                var linkEl2 = el('a', { class: 'ai-search-detail-title', href: r2.url || '#', target: '_blank', text: r2.title || '无标题' });
+                var linkEl2 = el('a', { class: 'ai-search-detail-title', href: safeSearchUrl(r2.url) || '#', target: '_blank', rel: 'noopener noreferrer', text: r2.title || '无标题' });
                 itemEl2.appendChild(linkEl2);
                 if (r2.snippet) {
                   itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
