@@ -1932,7 +1932,9 @@
 }
 
 /* ── 39. Responsive ───────────────────────────────────────── */
-@media (max-width: 900px) {
+/* Only phone-sized viewports use the drawer layout.  iPad portrait (768px
+   and wider) and all tablet/desktop widths keep the full Code workspace. */
+@media (max-width: 767px) {
   .code-sidebar {
     position: absolute;
     left: 0;
