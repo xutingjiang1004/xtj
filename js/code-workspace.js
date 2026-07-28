@@ -76,6 +76,9 @@
   var MAX_ATTACHMENT_FILE_BYTES = 20 * 1024 * 1024;
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
+  var CODE_PHONE_MAX_WIDTH = 767;
+  var DIFF_MAX_LINES = 2400;
+  var DIFF_MAX_CHARS = 180000;
 
   // Phase 2: Feature flag for streaming Code agent.  Keep streaming enabled
   // by default; a per-browser test/diagnostic override avoids requiring every
@@ -610,6 +613,12 @@
     if (!panelCode || !panelCode.offsetParent) {
       // P0: 面板不可见时返回明确状态
       return Promise.resolve({ status: 'hidden' });
+    }
+
+    if (window.innerWidth <= CODE_PHONE_MAX_WIDTH) {
+      _dom.panelCode = panelCode;
+      renderPhoneOnlyNotice();
+      return Promise.resolve({ status: 'phone-unsupported' });
     }
 
     state.active = true;
@@ -1709,6 +1718,19 @@
       }
       state._resizerCleanup = null;
     };
+  }
+
+  function renderPhoneOnlyNotice() {
+    if (!_dom.panelCode) return;
+    _dom.panelCode.replaceChildren();
+    var notice = document.createElement('section');
+    notice.className = 'code-phone-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    notice.innerHTML = '<div class="code-phone-notice-icon" aria-hidden="true">💻</div>' +
+      '<h2>请在桌面或平板使用 Code</h2>' +
+      '<p>Code 工作区需要更宽的编辑空间。请使用屏幕宽度至少 768px 的设备继续。</p>';
+    _dom.panelCode.appendChild(notice);
   }
 
 
@@ -2896,7 +2918,8 @@
   }
 
   // Phase 4: Helper to upload files in batches (used by both full and incremental upload)
-  function uploadFilesInBatches(files, scanResult, ctx, controller, workspaceId, wsGen) {
+  function uploadFilesInBatches(files, scanResult, ctx, controller, workspaceId, wsGen, indexOptions) {
+    indexOptions = indexOptions || {};
     if (files.length === 0) {
       return Promise.resolve({
         ok: true,
@@ -2926,6 +2949,14 @@
     if (currentBatch.length || !batches.length) batches.push(currentBatch);
     ctx.totalBatches = batches.length;
     var useBatches = batches.length > 1;
+    // The server merges an incremental request atomically, so do not split a
+    // delta into partial snapshots.  Oversized deltas deliberately fall back
+    // to the existing full/batched rebuild path at the caller.
+    if (indexOptions.incremental === true && useBatches) {
+      var tooLarge = new Error('INCREMENTAL_BATCH_TOO_LARGE');
+      tooLarge.code = 'INCREMENTAL_BATCH_TOO_LARGE';
+      return Promise.reject(tooLarge);
+    }
 
     return batches.reduce(function (chain, batch, index) {
       return chain.then(function () {
@@ -2939,7 +2970,10 @@
           workspaceId: workspaceId,
           workspaceGeneration: wsGen,
           files: batch,
-          truncated: scanResult.truncated === true
+          truncated: scanResult.truncated === true,
+          incremental: indexOptions.incremental === true,
+          manifest_paths: indexOptions.manifestPaths || undefined,
+          deleted_paths: indexOptions.deletedPaths || undefined
         };
         if (useBatches) {
           payload.append = true;
@@ -3118,7 +3152,21 @@
               ctx.phase = '正在上传索引...';
               syncBuildContextToUI(ctx);
 
-              return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen);
+                return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen, {
+                  incremental: true,
+                  manifestPaths: manifestFiles.map(function (f) { return f.path; }),
+                  deletedPaths: deletePaths
+                }).catch(function (incrementalErr) {
+                  if (!incrementalErr || incrementalErr.code !== 'INCREMENTAL_BATCH_TOO_LARGE') throw incrementalErr;
+                  // Preserve correctness over bandwidth: a delta too large for
+                  // one atomic request is rebuilt as the legacy full snapshot.
+                  return uploadFilesInBatches(manifestFiles.map(function(meta) {
+                    for (var fi = 0; fi < sourceFiles.length; fi++) if (sourceFiles[fi].path === meta.path) return sourceFiles[fi];
+                    return null;
+                  }).filter(function(f) { return f && f.type === 'text'; }).map(function(f) {
+                    return { path: f.path, name: f.name || f.path.split('/').pop(), language: f.language || getFileLanguage(f.name || f.path), size: f.size || 0, sha256: f.sha256 || '', modifiedAt: f.modifiedAt || null, content: f.content || '' };
+                  }), result, ctx, controller, workspaceId, wsGen);
+                });
             });
         }).catch(function (err) {
           if (err && err.name === 'AbortError') throw err;
@@ -5609,6 +5657,10 @@
     var m = oldLines.length;
     var n = newLines.length;
 
+    if (m + n > DIFF_MAX_LINES || oldText.length + newText.length > DIFF_MAX_CHARS) {
+      return [{ type: 'summary', text: '文件改动较大（原 ' + m + ' 行，新 ' + n + ' 行）。为保持页面流畅，已省略逐行 diff；可直接查看并应用修改。' }];
+    }
+
     // Build LCS table
     var dp = new Array(m + 1);
     for (var i = 0; i <= m; i++) {
@@ -6346,6 +6398,10 @@
   // ──────────────────────────────────────────────
   document.addEventListener('keydown', function (e) {
     if (!state.active) return;
+
+    var target = e.target;
+    var inCodeEditor = !!(target && target.closest && target.closest('#panelCode .code-editor-container, #panelCode .monaco-editor'));
+    if (!inCodeEditor) return;
 
     // Ctrl+S: save active file
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
