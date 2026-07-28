@@ -4779,14 +4779,52 @@ var CODE_STREAM_ENABLED = true;
       var reader = resp.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
+      var currentSseEventType = '';
+      var currentSseData = [];
 
       function isStreamStale() { return requestId !== state._requestId || wsGen !== state.workspaceGeneration; }
+
+      function dispatchSseEvent() {
+        if (currentSseData.length === 0) return;
+        var raw = currentSseData.join('\n');
+        currentSseData = [];
+        currentSseEventType = '';
+        try {
+          var event = JSON.parse(raw);
+          if (event && event.type) handleSSEEvent(event);
+        } catch (e) {
+          console.warn('[code-workspace] SSE parse error (requestId=' + requestId + '):', raw.slice(0, 80));
+        }
+      }
+
+      function processSseLine(line) {
+        // Comment lines (starting with :) - skip
+        if (line.charAt(0) === ':') return;
+        // Empty line - dispatch accumulated event
+        if (line === '') { dispatchSseEvent(); return; }
+        // Field: value parsing
+        var colonIdx = line.indexOf(':');
+        var field, value;
+        if (colonIdx >= 0) {
+          field = line.substring(0, colonIdx);
+          value = line.substring(colonIdx + 1);
+          if (value.charAt(0) === ' ') value = value.substring(1); // Strip optional leading space
+        } else {
+          field = line;
+          value = '';
+        }
+        if (field === 'event') { currentSseEventType = value; }
+        else if (field === 'data') { currentSseData.push(value); }
+        // 'id' and 'retry' fields are not used by this application
+      }
 
       function readStream() {
         if (streamCancelled || isStreamStale()) return;
         reader.read().then(function (result) {
           if (result.done) {
-            // Stream ended
+            // Process any remaining data
+            if (buffer.trim()) { var remaining = buffer.trim().split('\n'); for (var ri = 0; ri < remaining.length; ri++) processSseLine(remaining[ri].replace(/\r$/, '')); }
+            dispatchSseEvent();
             if (!streamDone) {
               finalizeNode();
               state.messages.push({
@@ -4806,25 +4844,12 @@ var CODE_STREAM_ENABLED = true;
           }
 
           buffer += decoder.decode(result.value, { stream: true });
+          // Handle both \r\n and \n line endings
           var lines = buffer.split('\n');
-          buffer = lines.pop(); // Keep incomplete line
-
+          // Keep incomplete chunk in buffer
+          buffer = lines.pop() || '';
           for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (!line) continue;
-      // SSE: accept both 'data:{...}' and 'data: {...}'
-      if (!line.startsWith('data:')) continue;
-      var jsonStr = line.substring(5);
-      if (jsonStr.charAt(0) === ' ') jsonStr = jsonStr.substring(1);
-      if (!jsonStr) continue;
-            var event;
-            try { event = JSON.parse(jsonStr); } catch (e) {
-              console.warn('[code-workspace] SSE parse error (requestId=' + requestId + '):', jsonStr.slice(0, 80));
-              continue;
-            }
-            if (!event || !event.type) continue;
-
-            handleSSEEvent(event);
+            processSseLine(lines[i].replace(/\r$/, ''));
           }
 
           readStream();
