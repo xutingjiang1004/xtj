@@ -3956,6 +3956,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       heartbeat.stop();
       writer.cleanup();
       streamAbortControllers.delete(streamId);
+      if (!res.writableEnded) res.end();
     }
 
     function sendStreamError(code, message, phase) {

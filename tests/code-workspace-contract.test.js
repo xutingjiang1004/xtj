@@ -987,7 +987,8 @@ test('AbortController is created with new AbortController()', () => {
 
 test('abort signal is passed to fetch', () => {
   // P0: signal 从 AbortController 派生并传递给 fetch
-  assert.match(codeWorkspace, /state\._abortController \? state\._abortController\.signal : undefined/);
+  // Each stream keeps its own immutable controller; shared requests remain supported.
+  assert.match(codeWorkspace, /var signal = ctx\.sharedCtrl \? ctx\.sharedCtrl\.signal : ctx\.abortController\.signal/);
   assert.match(codeWorkspace, /signal:\s*signal/);
 });
 
