@@ -1226,18 +1226,28 @@ async function queryWeather(query) {
 
 // 网页搜素函数 - 双引擎并行：Bing（全局可用）+ SearXNG（Render US 可用）
 // 无需 API Key，取最快返回有效结果的那一个
+const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 function writeSse(res, payload) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
       var data = 'data: ' + JSON.stringify(payload) + '\n\n';
-      if (!res._sseBuffer) res._sseBuffer = [];
+      if (!res._sseBuffer) { res._sseBuffer = []; res._sseBufferBytes = 0; }
+      // A slow/disconnected client must not turn one stream into an unbounded
+      // in-process queue.  Closing is safer than retaining generated content.
+      if ((res._sseBufferBytes || 0) + Buffer.byteLength(data, 'utf8') > MAX_SSE_BUFFER_BYTES) {
+        console.warn('[SSE] client backpressure limit exceeded; closing stream');
+        try { res.end(); } catch (_) {}
+        return false;
+      }
       if (res._sseBuffer.length > 0) {
         res._sseBuffer.push(data);
-        return;
+        res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
+        return true;
       }
       var ok = res.write(data);
       if (!ok) {
         res._sseBuffer.push(data);
+        res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
         if (!res._sseDrainQueued) {
           res._sseDrainQueued = true;
           res.once('drain', function() {
@@ -1245,15 +1255,32 @@ function writeSse(res, payload) {
             if (res._sseBuffer && res._sseBuffer.length > 0) {
               var buf = res._sseBuffer.slice();
               res._sseBuffer = [];
-              buf.forEach(function(d) { try { if (!res.writableEnded) res.write(d); } catch(e) {} });
+              res._sseBufferBytes = 0;
+              for (var i = 0; i < buf.length; i++) {
+                try {
+                  if (res.writableEnded || !res.write(buf[i])) {
+                    // Re-queue only the still-pending tail; do not recursively
+                    // write after backpressure returns.
+                    res._sseBuffer = buf.slice(i + 1);
+                    res._sseBufferBytes = res._sseBuffer.reduce(function(n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
+                    if (!res.writableEnded && res._sseBuffer.length) {
+                      res._sseDrainQueued = true;
+                      res.once('drain', arguments.callee);
+                    }
+                    break;
+                  }
+                } catch (_) { break; }
+              }
             }
           });
         }
       }
+      return true;
     }
   } catch (e) {
     console.error('[SSE] write error:', e && e.message);
   }
+  return false;
 }
 
 // 统一流结束收尾：保存消息 + 发送 done
@@ -3830,29 +3857,28 @@ function isValidCatTrigger(comment, authorRecord) {
 
 // 限流检查
 async function checkCatRateLimit(userName, postId) {
-  var oneHourAgo = new Date(Date.now() - 3600000).toISOString();
-  // 用户小时限流
-  var { count: userCount } = await supabase.from('ai_cat_rate_limits')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_name', userName).gte('created_at', oneHourAgo);
-  if (userCount >= CAT_AI_USER_HOURLY_LIMIT) return { allowed: false, reason: 'user_limit' };
-  // 帖子小时限流
-  if (postId) {
-    var { count: postCount } = await supabase.from('ai_cat_rate_limits')
-      .select('*', { count: 'exact', head: true })
-      .eq('post_id', postId).gte('created_at', oneHourAgo);
-    if (postCount >= CAT_AI_POST_HOURLY_LIMIT) return { allowed: false, reason: 'post_limit' };
+  try {
+    var result = await supabase.rpc('consume_cat_comment_quota', {
+      p_user_name: userName,
+      p_post_id: postId || null,
+      p_user_limit: CAT_AI_USER_HOURLY_LIMIT,
+      p_post_limit: CAT_AI_POST_HOURLY_LIMIT
+    });
+    if (result.error || !result.data) {
+      console.error('[CAT_AI] quota RPC unavailable:', result.error && result.error.message);
+      return { allowed: false, reason: 'quota_unavailable' };
+    }
+    return result.data;
+  } catch (e) {
+    console.error('[CAT_AI] quota RPC exception:', e && e.message);
+    return { allowed: false, reason: 'quota_unavailable' };
   }
-  return { allowed: true };
 }
 
 // 记录限流
 async function recordCatRateLimit(userName, postId) {
-  try {
-    await supabase.from('ai_cat_rate_limits').insert({
-      user_name: userName, post_id: postId, trigger_type: 'comment'
-    });
-  } catch (e) { /* non-critical */ }
+  // Kept as a compatibility no-op for callers predating consume_cat_comment_quota.
+  // The RPC has already atomically recorded the reservation.
 }
 
 // 创建小猫 AI 回复任务
@@ -4307,6 +4333,12 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
 
     // 9. failed 状态重置为 pending（仅临时可重试错误）
     if (existingJob && existingJob.status === 'failed') {
+      // A retry consumes the same atomic quota as the original mention.  This
+      // prevents provider failures from becoming an unbounded paid retry loop.
+      var retryQuota = await checkCatRateLimit(sourceComment.user_name, post.id);
+      if (!retryQuota.allowed) {
+        return res.status(429).json({ ok: false, code: retryQuota.reason || 'rate_limited', error: '小猫当前无法重试，请稍后再试', source_comment_id: commentId });
+      }
       var { error: updateErr } = await supabase.from('ai_comment_reply_jobs')
         .update({
           status: 'pending',
@@ -4314,7 +4346,6 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
           risk_type: null,
           started_at: null,
           completed_at: null,
-          attempts: 0,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingJob.id)
@@ -4409,19 +4440,13 @@ async function callDeepSeek(messages, options) {
     throw new Error('AI 调用参数无效');
   }
 
-  // 开发模式：API Key 未配置时返 mock 回复
+  // A production-shaped response must never masquerade as an AI answer when
+  // the provider is absent. Callers map this typed error to a clear 503.
   if (!DEEPSEEK_API_KEY) {
-    var lastUser = null;
-    for (var i = messages.length - 1; i >= 0; i--) {
-      if (messages[i] && messages[i].role === 'user') { lastUser = messages[i].content; break; }
-    }
-    return {
-      content: '[MOCK 回复 · DeepSeek API Key 未配置]\n' +
-             '我已收到你的消息：' + String(lastUser || '').slice(0, 80) + '\n\n' +
-             '请在 Render Dashboard 配置 DEEPSEEK_API_KEY 后重启服务即可使用真实模型。',
-      usage: null,
-      tool_calls_info: []
-    };
+    var missingKeyError = new Error('AI 服务未配置');
+    missingKeyError.code = 'AI_NOT_CONFIGURED';
+    missingKeyError.status = 503;
+    throw missingKeyError;
   }
 
   var thinkingLevel = (options && options.thinking_mode) || 'off';
@@ -6050,51 +6075,25 @@ async function runDeepThinkWorker(opts) {
 // ===================== AI 用户级限流（按 userName 而非 IP） =====================
 // ★ AI 智能体调用按 userName 限流，避免 IP 共享用户互相挤占额度
 // 限流维度：每用户每天 AI_AGENT_DAILY_LIMIT 次 / 每小时 AI_AGENT_HOURLY_LIMIT 次
-var aiUserRateStore = new Map(); // userName -> { hourly: {count, resetAt}, daily: {count, resetAt} }
-// 限流防竞态锁
-var aiRateLimitMutex = new Map();
-function checkAiUserRateLimit(userName) {
+// Quotas are consumed by a database RPC so limits survive restarts and are
+// shared by all Render instances.  The old in-memory counter was race-safe
+// only within one process and therefore was not an enforcement boundary.
+async function checkAiUserRateLimit(userName) {
   if (!userName) return { allowed: false, reason: 'no_user' };
-  // 串行化同用户限流检查，防并发竞态
-  if (aiRateLimitMutex.get(userName)) {
-    return { allowed: false, reason: 'concurrent' };
-  }
-  aiRateLimitMutex.set(userName, true);
   try {
-    var now = Date.now();
-    var record = aiUserRateStore.get(userName);
-    if (!record) {
-      record = {
-        hourly: { count: 0, resetAt: now + 3600000 },
-        daily:  { count: 0, resetAt: now + 86400000 }
-      };
-      aiUserRateStore.set(userName, record);
+    var result = await supabase.rpc('consume_ai_chat_quota', {
+      p_user_name: userName,
+      p_hourly_limit: AI_AGENT_HOURLY_LIMIT,
+      p_daily_limit: AI_AGENT_DAILY_LIMIT
+    });
+    if (result.error || !result.data) {
+      console.error('[AI-RATE] persistent quota unavailable:', result.error && result.error.message);
+      return { allowed: false, reason: 'quota_unavailable' };
     }
-
-    if (now > record.hourly.resetAt) {
-      record.hourly = { count: 0, resetAt: now + 3600000 };
-    }
-    if (now > record.daily.resetAt) {
-      record.daily = { count: 0, resetAt: now + 86400000 };
-    }
-
-    if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
-      return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
-    }
-    if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
-      return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
-    }
-
-    record.hourly.count++;
-    record.daily.count++;
-
-    return {
-      allowed: true,
-      remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
-      remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - record.daily.count)
-    };
-  } finally {
-    aiRateLimitMutex.delete(userName);
+    return result.data;
+  } catch (e) {
+    console.error('[AI-RATE] persistent quota exception:', e && e.message);
+    return { allowed: false, reason: 'quota_unavailable' };
   }
 }
 
@@ -6109,10 +6108,6 @@ setInterval(function() {
   });
   revokedTokens.forEach(function(expiry, token) {
     if (now > expiry) revokedTokens.delete(token);
-  });
-  // 清理过期的限流记录（超过上次重置后 48h 的肯定用不上了）
-  aiUserRateStore.forEach(function(record, name) {
-    if (now > record.daily.resetAt + 86400000) aiUserRateStore.delete(name);
   });
   // 清理过期 revokedTokenHashes（异步）
   loadRevokedTokenHashes().catch(function(){});
@@ -12263,7 +12258,7 @@ async function handleDeepThinkChat(req, res) {
 
   try {
     // 1. 用户级限流
-    var rl = checkAiUserRateLimit(userName);
+    var rl = await checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -12639,7 +12634,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var userName = req.userName;
 
     // 1. 用户级限流
-    var rl = checkAiUserRateLimit(userName);
+    var rl = await checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       return res.status(429).json({
         error: rl.reason === 'hourly_limit' ? '小猫太忙了，休息一下' : (rl.reason === 'concurrent' ? '请等待上一个请求完成' : '今日小猫聊天次数已达上限'),
@@ -12853,7 +12848,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   
   try {
     // 限流
-    var rl = checkAiUserRateLimit(userName);
+    var rl = await checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -13890,8 +13885,11 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
 });
 
 // GET /api/agent/search-health - 搜索健康检查（验证搜索 Provider 可用性）
-app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
+app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async (req, res) => {
   try {
+    if (req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ ok: false, code: 'admin_required', error: '仅管理员可检查联网搜索状态' });
+    }
     var q = String(req.query.q || '济州岛最新新闻').trim().slice(0, 100);
     var result = await searchWeb(q, 3);
     var diagnostics = result && result.diagnostics ? result.diagnostics : {};

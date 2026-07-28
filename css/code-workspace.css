@@ -1935,6 +1935,20 @@
 /* Only phone-sized viewports use the drawer layout.  iPad portrait (768px
    and wider) and all tablet/desktop widths keep the full Code workspace. */
 @media (max-width: 767px) {
+  .code-phone-notice {
+    display: grid;
+    place-items: center;
+    align-content: center;
+    min-height: 100%;
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--cw-text);
+  }
+
+  .code-phone-notice-icon { font-size: 38px; margin-bottom: 12px; }
+  .code-phone-notice h2 { margin: 0 0 10px; font-size: 18px; }
+  .code-phone-notice p { max-width: 310px; margin: 0; color: var(--cw-text-secondary); line-height: 1.65; }
+
   .code-sidebar {
     position: absolute;
     left: 0;
