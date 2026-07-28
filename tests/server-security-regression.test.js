@@ -55,6 +55,8 @@ test('access tokens have jti and logout persistently revokes the presented token
 
 test('admin and user auth wait for persistent revocation state before accepting requests', () => {
   assert.match(source, /revokedTokenHashesReadyPromise/);
+  assert.match(source, /async function loadRevokedTokenHashesWithRetry\(\)/);
+  assert.match(source, /token state retry/);
   assert.match(source, /async function waitForRevocationState/);
   assert.match(source, /async function verifyToken[\s\S]*?await waitForRevocationState/);
   assert.match(source, /async function authenticateUser[\s\S]*?await waitForRevocationState/);
