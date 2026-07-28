@@ -1248,6 +1248,24 @@ async function validateOfficeArchive(buffer, kind) {
   return zip;
 }
 
+async function validateOfficeApplyInput(buffer, documentType, mimeType, fileName) {
+  var expected = String(documentType || '').toLowerCase();
+  var byName = detectMimeFromFileName(fileName);
+  var expectedMime = expected === 'docx'
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : (expected === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : (expected === 'pptx' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : ''));
+  if (!expectedMime || (byName !== 'application/octet-stream' && byName !== expectedMime) ||
+      (mimeType && mimeType !== expectedMime)) {
+    throw new Error('文档类型与文件名或 MIME 类型不一致');
+  }
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4 || buffer.subarray(0, 2).toString('ascii') !== 'PK') {
+    throw new Error('Office 文件签名无效');
+  }
+  await validateOfficeArchive(buffer, expected);
+  return expectedMime;
+}
+
 async function extractDocumentText(buffer, mimeType, fileName) {
   var text = '';
   var metadata = {};
@@ -2872,7 +2890,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var buffer = req.file.buffer;
       var mimeType = req.body.mimeType || req.file.mimetype || '';
       var fileName = req.body.fileName || req.file.originalname || '';
-      var documentType = req.body.documentType || '';
+      var documentType = String(req.body.documentType || '').toLowerCase();
 
       var operations;
       try {
@@ -2887,6 +2905,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       if (buffer.length > MAX_DOCUMENT_UPLOAD_BYTES) {
         return res.status(413).json({ ok: false, error: '文件过大，最大支持 20MB' });
+      }
+      try {
+        mimeType = await validateOfficeApplyInput(buffer, documentType, mimeType, fileName);
+      } catch (validationError) {
+        return res.status(400).json({ ok: false, code: 'INVALID_OFFICE_DOCUMENT', error: sanitizeError ? sanitizeError(validationError) : 'Office 文档校验失败' });
       }
 
       var result;
@@ -2907,6 +2930,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var newBuffer = result.newBuffer;
       if (!newBuffer || !Buffer.isBuffer(newBuffer)) {
         return res.status(500).json({ ok: false, error: '生成文件失败' });
+      }
+      if (newBuffer.length > MAX_DOCUMENT_UPLOAD_BYTES * 2) {
+        return res.status(413).json({ ok: false, code: 'DOCUMENT_OUTPUT_TOO_LARGE', error: '生成的文档过大，已拒绝下载' });
       }
 
       var extMap = { xlsx: '.xlsx', docx: '.docx', pptx: '.pptx' };
@@ -2937,17 +2963,38 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         workspace_generation: body.workspaceGeneration === undefined ? body.workspace_generation : body.workspaceGeneration
       });
       if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
+      var isIncremental = body.incremental === true;
+      var manifestPaths = Array.isArray(body.manifest_paths) ? body.manifest_paths : [];
+      var deletedPaths = Array.isArray(body.deleted_paths) ? body.deleted_paths : [];
+      if (isIncremental && manifestPaths.length === 0) {
+        return res.status(400).json({ ok: false, code: 'INVALID_INCREMENTAL_INDEX', error: '增量索引需要完整文件清单' });
+      }
       var useBatches = body.append === true || body.batch === true || body.finalize === true;
-      var result = useBatches
+      // Batches are intentionally a full-build protocol.  Incremental uploads
+      // must be merged atomically against a complete base index.
+      if (isIncremental && useBatches) {
+        return res.status(400).json({ ok: false, code: 'INVALID_INCREMENTAL_INDEX', error: '增量索引不支持分批提交' });
+      }
+      if (isIncremental && !codeIndex.getIndexSummary(scopeResult.value) && supabase) {
+        try { await codeIndex.recoverIndexFromDB(supabase, scopeResult.value, scopeResult.value.workspaceId); } catch (_) {}
+      }
+      var result = isIncremental
+        ? codeIndex.applyIncrementalIndex(scopeResult.value, body.files, {
+          manifestPaths: manifestPaths,
+          deletedPaths: deletedPaths,
+          truncated: body.truncated === true
+        })
+        : (useBatches
         ? codeIndex.appendIndexBatch(scopeResult.value, body.files, {
           finalize: body.finalize === true,
           reset: body.reset === true || body.batchIndex === 0,
           truncated: body.truncated === true
         })
-        : codeIndex.buildIndex(scopeResult.value, body.files, { truncated: body.truncated === true });
+        : codeIndex.buildIndex(scopeResult.value, body.files, { truncated: body.truncated === true }));
 
       if (!result.ok) {
-        return res.status(400).json({ ok: false, error: result.error });
+        var indexStatus = result.code === 'INDEX_REBUILD_REQUIRED' ? 409 : 400;
+        return res.status(indexStatus).json({ ok: false, code: result.code || 'INDEX_BUILD_FAILED', error: result.error, retryable: result.code === 'INDEX_REBUILD_REQUIRED' });
       }
 
       if (result.status !== 'building') {
@@ -2956,7 +3003,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         if (result.status === 'ready' && supabase) {
           var resolved = codeIndex._resolveIndexForPersistence(scopeResult.value);
           if (resolved && resolved.ok && resolved.index) {
-            codeIndex.persistIndexToDB(supabase, scopeResult.value.userId, scopeResult.value.workspaceId, resolved.index)
+            codeIndex.persistIndexToDB(supabase, scopeResult.value.userId, scopeResult.value.workspaceId, resolved.index, {
+              incremental: isIncremental,
+              deletedPaths: deletedPaths
+            })
               .catch(function(e) { console.error('[code-agent] DB persist failed (non-blocking):', e.message); });
           }
         }
@@ -3311,7 +3361,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // P0 Fix: 当有打开文档或附件时，即使索引未建立也不拦截请求
       // 文档正文已通过 open_files/attachments 传入，Agent 可以直接使用
       var hasDocumentContent = openFiles.length > 0 || attachments.length > 0;
-      if (!indexSummary && !hasDocumentContent && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && !hasDocumentContent && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
         return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 409, { retryable: true, hasDocumentContent: false });
       }
 
@@ -3815,7 +3865,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var clientRequestId = String(req.body.client_request_id || '');
 
     // Phase 3: Register controller for external cancellation
-    streamAbortControllers.set(streamId, requestController);
 
     // Phase 3: Stream resume — check idempotency for same client_request_id
     if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
@@ -3851,6 +3900,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     // Setup SSE
     aiCoreSSE.setupSSE(res, req);
     var writer = aiCoreSSE.createSSEWriter(res, req);
+    // Duplicate client_request_id requests return above; only real streams own
+    // a cancellation controller.
+    streamAbortControllers.set(streamId, requestController);
     var nextEventId = aiCoreRequestId.generateEventId();
 
     var baseEvent = {
@@ -4000,7 +4052,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var indexSummary = codeIndex.getIndexSummary(scope);
       var hasDocumentContent2 = openFiles.length > 0 || attachments.length > 0;
-      if (!indexSummary && !hasDocumentContent2 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && !hasDocumentContent2 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
         sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 'validation');
         return;
       }
