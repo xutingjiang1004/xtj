@@ -77,8 +77,12 @@
   var MAX_ATTACHMENT_TOTAL_CHARS = 1600000;
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
-  // Phase 2: Feature flag for streaming Code agent
-var CODE_STREAM_ENABLED = true;
+  // Phase 2: Feature flag for streaming Code agent.  Keep streaming enabled
+  // by default; a per-browser test/diagnostic override avoids requiring every
+  // fixture to emulate SSE when it is testing the JSON contract.
+  var CODE_STREAM_ENABLED = (function () {
+    try { return localStorage.getItem('CODE_STREAM_ENABLED') !== '0'; } catch (e) { return true; }
+  })();
 
   // Phase 3: Feature flag for stream resume
   var CODE_STREAM_RESUME_ENABLED = (function () {
@@ -2222,8 +2226,12 @@ var CODE_STREAM_ENABLED = true;
         var inContext = state.pinnedFiles.indexOf(tab.path) !== -1;
         var contextDot = inContext ? '<span class="code-tab-context"></span>' : '';
 
+        var failedBadge = tab._extractError
+          ? '<span class="tab-failed" title="文档提取失败" aria-label="文档提取失败">!</span>'
+          : '';
         el.innerHTML =
           contextDot +
+          failedBadge +
           '<span class="tab-name">' + escapeHTML(tab.name) + '</span>' +
           '<span class="tab-close" title="关闭">✕</span>';
 
@@ -6363,6 +6371,7 @@ var CODE_STREAM_ENABLED = true;
     init: init,
     cleanup: cleanup,
     openFile: openFile,
+    renderTabs: renderTabs,
     closeTab: closeTab,
     saveFile: saveFile,
     pinFile: pinFile,
@@ -6390,6 +6399,7 @@ var CODE_STREAM_ENABLED = true;
       selectAndOpenFile: selectAndOpenFile,
       loadProjectIndexStatus: loadProjectIndexStatus,
       openFile: openFile,
+      renderTabs: renderTabs,
       restoreTabs: restoreTabs,
       getWorkspaceId: getWorkspaceId,
       getState: function () { return state; }

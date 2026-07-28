@@ -3,6 +3,11 @@ const fs = require('fs');
 
 test.describe('Code Workspace', () => {
   test.beforeEach(async ({ page }) => {
+    // The production default is SSE. These tests exercise the JSON error and
+    // request-body contract, so opt into the explicit non-stream fixture.
+    await page.addInitScript(() => {
+      localStorage.setItem('CODE_STREAM_ENABLED', '0');
+    });
     await page.goto('/');
     await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
     await page.click('button[data-desktop-tab="code"]');
@@ -57,7 +62,7 @@ test.describe('Code Workspace', () => {
 
   test('should intercept 500 API errors and show toast', async ({ page }, testInfo) => {
     // 1. Intercept API
-    await page.route('/api/code/chat', async route => {
+    await page.route('**/api/code/chat*', async route => {
       await route.fulfill({
         status: 502,
         contentType: 'text/html',
@@ -110,6 +115,9 @@ test.describe('Code Workspace', () => {
 
 
 test('Code workspace does not block AI requests if background document extraction fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('CODE_STREAM_ENABLED', '0');
+  });
   let extractCallCount = 0;
   await page.route('**/api/code/document/extract', async (route) => {
     extractCallCount++;
@@ -131,7 +139,7 @@ test('Code workspace does not block AI requests if background document extractio
   });
 
   let chatBody = null;
-  await page.route('**/api/code/chat', async (route) => {
+  await page.route('**/api/code/chat*', async (route) => {
     chatBody = route.request().postDataJSON();
     return route.fulfill({
       status: 200,
@@ -161,7 +169,8 @@ test('Code workspace does not block AI requests if background document extractio
   await page.evaluate(() => {
     window.__xtjCodeFS.readDocumentContent = function() { return Promise.reject(new Error('Extract error test')); };
     // Trigger opening a file that fails extraction
-    var state = window.__xtjGetCodeState ? window.__xtjGetCodeState() : null;
+    var api = window.__xtjCodeWorkspaceAPI;
+    var state = api && api.getState ? api.getState() : null;
     if (state) {
       state.openTabs.push({ path: 'broken.pdf', name: 'broken.pdf', type: 'document', _extractPromise: Promise.resolve(), _extractError: 'Cannot parse PDF' });
       state.activePath = 'broken.pdf';
@@ -170,10 +179,12 @@ test('Code workspace does not block AI requests if background document extractio
 
   // Open normal JS file
   await page.evaluate(() => {
-    var state = window.__xtjGetCodeState();
+    var api = window.__xtjCodeWorkspaceAPI;
+    var state = api.getState();
     state.openTabs.push({ path: 'normal.js', name: 'normal.js', type: 'code', _currentContent: 'console.log("ok");' });
     state.activePath = 'normal.js';
-    if (window.__xtjRenderCodeEditorTabs) window.__xtjRenderCodeEditorTabs();
+    state.sending = false;
+    api.renderTabs();
   });
 
   // Check that the failed tab has the warning icon
@@ -190,10 +201,10 @@ test('Code workspace does not block AI requests if background document extractio
 
   // Send message
   await page.fill('#codeChatInput', 'What is in normal.js?');
-  await page.click('#codeChatSend');
-  
   // Wait for network request to chat
-  await page.waitForResponse(response => response.url().includes('/api/code/chat'));
+  const chatResponse = page.waitForResponse(response => response.url().includes('/api/code/chat'));
+  await page.click('#codeChatSendBtn', { force: true });
+  await chatResponse;
 
   // Ensure request was sent and broken.pdf content is NOT in open_files
   expect(chatBody).not.toBeNull();

@@ -55,7 +55,7 @@ test('AI tools prewarm, render immediately, and bound history requests', () => {
 test('AI history prioritizes a small first payload, cache paint, and indexed queries', () => {
   const historyRoute = between(server, "app.get('/api/agent/chat/history'", '// =====================');
   assert.match(aiAgent, /var HISTORY_PAGE_SIZE = 10/);
-  assert.match(aiAgent, /var latestKey = getAiHistoryCacheKey\(null\)/);
+  assert.match(aiAgent, /var latestKey = getAiHistoryCacheKey\(null(?:, mode)?\)/);
   assert.match(historyRoute, /\.limit\(AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT\)/);
   assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ AI_CHAT_HISTORY_FETCH_BUFFER, 100\)\)/);
   assert.match(aiHistoryIndexes, /posts_ai_agent_history_user_created_idx/);

@@ -60,6 +60,15 @@ test('Requirement 9: Cache key includes user key from readUserName()', () => {
   assert.match(aiSource, /'xtj_ai_history:' \+ uk \+ ':'/);
 });
 
+// 9b. 普通聊天与研究模式不能共享同一条会话缓存
+test('Requirement 9b: History cache key is isolated by chat mode', () => {
+  assert.match(aiSource, /function getAiHistoryCacheKey\(cid, mode\)/);
+  assert.match(aiSource, /mode = mode \|\| 'normal'/);
+  assert.match(aiSource, /encodeURIComponent\(mode\)/);
+  assert.match(aiSource, /getLegacyAiHistoryCacheKey\(cid\)/);
+  assert.match(aiSource, /if \(!str && mode === 'normal'\)/);
+});
+
 // 10. 登出后当前用户缓存被清理
 test('Requirement 10: Logout invokes clearAiHistoryCacheForUser to purge user cache', () => {
   assert.match(aiSource, /function clearAiHistoryCacheForUser\(\)/);
