@@ -646,10 +646,9 @@ var CODE_STREAM_ENABLED = true;
         return false; // Signal cancellation to caller
       }
     }
-    // Cancel any in-flight request
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (e) { /* ignore */ }
-      state._abortController = null;
+    // Cancel any in-flight request via activeRequest context
+    if (state.activeRequest) {
+      finalizeRequest(state.activeRequest, { cancelReason: 'cleanup', done: false });
     }
     abortController(state._attachmentController);
     abortController(state._githubController);
@@ -4311,11 +4310,9 @@ var CODE_STREAM_ENABLED = true;
       });
       ctx.sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight(ctx.unregisterKey, ctx.sharedCtrl);
-      state._sharedCtrl = ctx.sharedCtrl;
       if (window.XtjAiCore.Telemetry) {
         ctx.telemetry = window.XtjAiCore.Telemetry.create();
         ctx.telemetry.start('code_req_' + requestId, clientRequestId);
-        state._telemetry = ctx.telemetry;
       }
     }
 
@@ -4366,9 +4363,9 @@ var CODE_STREAM_ENABLED = true;
       var body = buildChatRequestBody(message, historyMsgs);
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
-        return sendStreamingRequest(body, requestId, timeStr, wsGen);
+        return sendStreamingRequest(ctx, body, timeStr);
       }
-      return sendApiRequest(body, requestId, timeStr, wsGen);
+      return sendApiRequest(ctx, body, timeStr);
     }).catch(function (err) {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       if (err && err.name === 'AbortError') {
@@ -4426,20 +4423,13 @@ var CODE_STREAM_ENABLED = true;
   }
 
   function cancelCurrentRequest() {
-    if (!state.sending || !state._abortController) return false;
+    var ctx = state.activeRequest;
+    if (!ctx) return false;
     state._requestId++;
-    // Phase 1: Cancel shared controller
-    if (state._sharedCtrl && state._sharedCtrl.isActive()) {
-      try { state._sharedCtrl.cancel('user_cancelled'); } catch (e) {}
-      if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: '用户取消' }); }
-    }
-    try { state._abortController.abort(); } catch (e) { /* ignore */ }
-    state._abortController = null;
-    state._sharedCtrl = null;
-    state._telemetry = null;
-    state.sending = false;
+    ctx.cancelled = true;
+    ctx.cancelReason = 'user_cancelled';
+    finalizeRequest(ctx, { cancelReason: 'user_cancelled', done: false });
     removeTypingIndicator();
-    // P0 Fix: 用户主动取消不恢复消息到输入框
     updateChatRequestControls();
     return true;
   }
@@ -4464,7 +4454,9 @@ var CODE_STREAM_ENABLED = true;
   }
 
   // ── Phase 2: Streaming SSE request handler ──────────────────────────────
-  function sendStreamingRequest(body, requestId, timeStr, wsGen) {
+  function sendStreamingRequest(ctx, body, timeStr) {
+    var requestId = ctx.requestId;
+    var wsGen = ctx.workspaceGeneration;
     var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
     var controller = state._abortController;
     var timeoutId;
@@ -4775,8 +4767,7 @@ var CODE_STREAM_ENABLED = true;
           if (resp.status === 503 && errCode === 'STREAM_DISABLED') {
             console.log('[code-workspace] Streaming not available, falling back to standard API');
             cleanupStream();
-            state.messages.pop();
-            return sendApiRequest(body, requestId, timeStr, wsGen);
+            return sendApiRequest(ctx, body, timeStr);
           }
           showError(errCode, errMsg, json && json.retryable);
           state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
@@ -5163,14 +5154,16 @@ var CODE_STREAM_ENABLED = true;
     }
   }
 
-  function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
+  function sendApiRequest(ctx, body, timeStr, indexRetry) {
+    var requestId = ctx.requestId;
+    var wsGen = ctx.workspaceGeneration;
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
-    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
+    var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : (ctx.abortController ? ctx.abortController.signal : undefined);
 
     // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
-    var controller = state._abortController;
+    var controller = ctx.abortController;
     var timeoutId;
     var timeoutPromise = new Promise(function (_, reject) {
       timeoutId = setTimeout(function () {
