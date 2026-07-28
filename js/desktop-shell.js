@@ -352,8 +352,28 @@
   }
 
   function ensureCodeModulesLoaded() {
-    // P0: 确保错误监听器已安装（兜底）
     _installCodeErrorListeners();
+
+    // Asset injection, timeout cleanup, retry and export validation are shared
+    // with 小猫 AI. The fallback below only supports stale cached core bundles.
+    if (window.XTJModuleLoader && typeof window.XTJModuleLoader.load === 'function') {
+      if (codeModuleState.status === 'loading' && codeModuleState.promise) return codeModuleState.promise;
+      codeModuleState.status = 'loading';
+      codeModuleState.error = null;
+      codeModuleState.promise = window.XTJModuleLoader.load('code-workspace').then(function () {
+        if (!recoverCodeInitAlias()) throw new Error('module_export_missing:code-workspace');
+        codeModuleState.status = 'ready';
+        codeModuleState.promise = null;
+      }).catch(function (error) {
+        codeModuleState.status = 'error';
+        codeModuleState.error = error;
+        codeModuleState.promise = null;
+        console.error('[CODE-LOADER] Shared module load failed:', error);
+        renderErrorPage('Code 工作区暂时无法加载，请点击重试。', false);
+        throw error;
+      });
+      return codeModuleState.promise;
+    }
 
     // P0: 检查 ready 状态时验证完整成功条件
     if (codeModuleState.status === 'ready') {

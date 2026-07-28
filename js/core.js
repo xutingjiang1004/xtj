@@ -1223,6 +1223,13 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
+            // Code must load its filesystem bridge before evaluating the workspace.
+            'code-fs': { scripts: ['xtj-module-code-fs'] },
+            'code-workspace': {
+                dependencies: ['code-fs'],
+                styles: ['xtj-module-code-style'],
+                scripts: ['xtj-module-code-workspace']
+            },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
@@ -1336,14 +1343,32 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
                     }, Promise.resolve())
                     : Promise.resolve();
-                return Promise.all([cssPromise, jsPromise]);
+                return Promise.all([cssPromise, jsPromise]).then(function() {
+                    var valid = true;
+                    if (moduleName === 'ai-agent') valid = !!(window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function');
+                    if (moduleName === 'code-fs') valid = !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
+                    if (moduleName === 'code-workspace') valid = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
+                    if (!valid) throw new Error('module_export_missing:' + moduleName);
+                    return { name: moduleName, loadedAt: Date.now() };
+                });
             }).catch(function(error) {
                 delete xtjModulePromises[moduleName];
                 throw error;
             });
             return xtjModulePromises[moduleName];
         }
-        window.XTJModuleLoader = { load: loadXtjModule };
+        window.XTJModuleLoader = {
+            load: loadXtjModule,
+            diagnose: function(name) {
+                var definition = xtjModuleDefinitions[String(name || '')] || {};
+                return {
+                    name: String(name || ''),
+                    scripts: (definition.scripts || []).map(moduleAssetUrl),
+                    styles: (definition.styles || []).map(moduleAssetUrl),
+                    state: xtjModulePromises[String(name || '')] ? 'loading-or-ready' : 'idle'
+                };
+            }
+        };
 
         function ensureGsap() {
             if (window.gsap) return Promise.resolve(window.gsap);
