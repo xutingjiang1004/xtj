@@ -214,6 +214,13 @@ window.throttleRAF = function(fn) {
     }
   }
 
+  function isSupportedAiFile(file) {
+    if (!file) return false;
+    var name = String(file.name || '').toLowerCase();
+    if (String(file.type || '').indexOf('image/') === 0) return true;
+    return /\.(pdf|docx|txt|csv|xlsx)$/.test(name);
+  }
+
   function renderMarkdown(txt) {
     if (!txt) return '';
     var s = String(txt);
@@ -4176,6 +4183,7 @@ window.throttleRAF = function(fn) {
       fileInput.addEventListener('change', function() {
         var f = this.files && this.files[0];
         if (!f) return;
+        if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
         if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB（data URL 编码后）?'); return; }
         var reader = new FileReader();
         reader.onload = function(e) {
@@ -5971,7 +5979,7 @@ function showChatMessages() {
       title: '上传图片或文件'
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
-    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx', style: 'display:none' });
+    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.docx,.txt,.csv,.xlsx', style: 'display:none' });
     // 文件预览区域
     var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
@@ -6057,6 +6065,7 @@ function showChatMessages() {
     fileInput.addEventListener('change', function() {
       var f = this.files && this.files[0];
       if (!f) return;
+      if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
       if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB'); return; }
       var reader = new FileReader();
       reader.onload = function(e) {
