@@ -46,11 +46,12 @@ test('retry completed status returns full cat_ai comment data structure', () => 
 });
 
 // 5: failed transient error can retry
-test('failed status resets transient errors to pending', () => {
+test('failed status retries transient errors without resetting cumulative attempts', () => {
   const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
   assert.match(retrySource, /status: 'pending'/);
   assert.match(retrySource, /error_message: null/);
-  assert.match(retrySource, /attempts: 0/);
+  assert.doesNotMatch(retrySource, /attempts:\s*0/);
+  assert.match(retrySource, /checkCatRateLimit\(sourceComment\.user_name, post\.id\)/);
 });
 
 // 6: safety blocked is non-retryable
