@@ -4739,6 +4739,7 @@ window.throttleRAF = function(fn) {
         var dots = assistantBubble.querySelectorAll('span');
         for (var hi = 0; hi < dots.length; hi++) dots[hi].style.display = 'none';
         assistantBubble.classList.remove('ai-typing-bubble');
+        assistantBubble.classList.add('ai-reply-pending');
       } catch (e) {}
     }
 
@@ -5058,6 +5059,9 @@ window.throttleRAF = function(fn) {
 
       function ensureAssistantBubbleReady() {
         hideAssistantTyping();
+        assistantBubble.classList.remove('ai-reply-pending');
+        assistantBubble.style.display = 'block';
+        assistantBubble.style.visibility = 'visible';
         if (!assistantBubble.classList.contains('ai-typing')) {
           assistantBubble.classList.add('ai-typing');
         }
@@ -5400,9 +5404,11 @@ window.throttleRAF = function(fn) {
           }
           
           if (evt.type === 'content') {
-            aiContent += evt.text || '';
+            var contentChunk = evt.text || '';
+            if (!contentChunk) continue;
+            aiContent += contentChunk;
             ensureAssistantBubbleReady();
-            if (contentRenderer) contentRenderer.append(evt.text || '');
+            if (contentRenderer) contentRenderer.append(contentChunk);
             continue;
           }
           
