@@ -261,6 +261,13 @@ test('Monaco failure falls back to textarea', () => {
   assert.match(codeWorkspace, /textarea/);
 });
 
+test('Monaco loading is single-flight and stale editor callbacks are ignored', () => {
+  assert.match(codeWorkspace, /_monacoLoadPromise/);
+  assert.match(codeWorkspace, /data-xtj-monaco-loader/);
+  assert.match(codeWorkspace, /_editorRenderId/);
+  assert.match(codeWorkspace, /container\.parentNode !== _dom\.editorArea/);
+});
+
 // ============================================================
 // Additional: IndexedDB storage
 // ============================================================
@@ -540,7 +547,13 @@ test('Code chat rebuilds a lost server index and retries the original message on
   assert.match(codeWorkspace, /索引已丢失，正在自动重建/);
   assert.match(codeWorkspace, /return buildProjectIndex\(\)\.then/);
   assert.match(codeWorkspace, /state\.projectIndexStatus\.indexed !== true/);
-  assert.match(codeWorkspace, /sendApiRequest\(body, requestId, timeStr, wsGen, true\)/);
+  assert.match(codeWorkspace, /sendApiRequest\(ctx, body, timeStr, true\)/);
+});
+
+test('index rebuild retry keeps request context and refresh is the only forced rebuild', () => {
+  assert.match(codeWorkspace, /function buildProjectIndex\(options\)/);
+  assert.match(codeWorkspace, /state\._indexBuildPromise && !force/);
+  assert.match(codeWorkspace, /buildProjectIndex\(\{ force: true \}\)/);
 });
 
 // ============================================================
@@ -697,6 +710,19 @@ test('AI chat exposes a real cancel control and abort path', () => {
   assert.match(codeWorkspace, /function cancelCurrentRequest\(\)/);
   assert.match(codeWorkspace, /_abortController\.abort\(\)/);
   assert.match(codeWorkspace, /removeTypingIndicator\(\)/);
+  assert.match(codeWorkspace, /if \(ctx\.abortController\) \{ try \{ ctx\.abortController\.abort\(\)/);
+});
+
+test('resizer listeners and pointer capture have an idempotent cleanup path', () => {
+  assert.match(codeWorkspace, /state\._resizerCleanup/);
+  assert.match(codeWorkspace, /releasePointerCapture/);
+  assert.match(codeWorkspace, /hasPointerCapture/);
+});
+
+test('tablet widths retain the desktop Code layout', () => {
+  var css = fs.readFileSync('css/code-workspace.css', 'utf8');
+  assert.match(css, /@media \(max-width:\s*767px\)/);
+  assert.doesNotMatch(css, /@media \(max-width:\s*900px\)/);
 });
 
 test('AI chat preserves a failed message for retry', () => {
