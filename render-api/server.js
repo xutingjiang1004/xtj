@@ -4390,6 +4390,8 @@ async function callDeepSeek(messages, options) {
 
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
+  // CODE_DEBUG_PROVIDER: 脱敏打印完整请求细节
+  var DEBUG_PROVIDER = process.env.CODE_DEBUG_PROVIDER === 'true';
   var model = getPreferredDeepSeekModel((options && options.model) || DEEPSEEK_MODEL_REASONER);
   var reasoningEffort = useThinking ? thinkingLevel : '';
   var useTools = !!(options && options.tools && Array.isArray(options.tools) && options.tools.length > 0);
@@ -4743,6 +4745,24 @@ async function callDeepSeek(messages, options) {
         apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
       }
 
+      // === CODE_DEBUG_PROVIDER: 脱敏打印请求细节 ===
+      if (DEBUG_PROVIDER) {
+        var debugInfo = {
+          model: apiBody.model,
+          messages_count: apiBody.messages ? apiBody.messages.length : 0,
+          system_prompt_length: (apiBody.messages && apiBody.messages[0] && apiBody.messages[0].content) ? apiBody.messages[0].content.length : 0,
+          tools_count: apiBody.tools ? apiBody.tools.length : 0,
+          tool_names: apiBody.tools ? apiBody.tools.map(function(t) { return t.function ? t.function.name : '?'; }) : [],
+          tool_choice: apiBody.tool_choice,
+          thinking: apiBody.thinking,
+          reasoning_effort: apiBody.reasoning_effort || '',
+          max_tokens: apiBody.max_tokens,
+          stream: apiBody.stream,
+          estimated_tokens: JSON.stringify(apiBody.messages).length / 3.5
+        };
+        console.log('[DEEPSEEK-DEBUG] request:', JSON.stringify(debugInfo));
+      }
+
       var resp = await fetch(DEEPSEEK_API_URL, {
         method: 'POST',
         headers: {
@@ -4756,16 +4776,53 @@ async function callDeepSeek(messages, options) {
       if (!resp.ok) {
         var errTxt = '';
         var errCode = '';
-        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; } catch (e) {}
+        var errType = '';
+        var errRequestId = '';
+        var fullErrorBody = null;
+        try { var ej = await resp.json().catch(function() { return {}; }); fullErrorBody = ej; errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 500) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; errType = (ej && ej.error && ej.error.type) ? String(ej.error.type) : ''; errRequestId = (ej && ej.request_id) ? String(ej.request_id) : ''; } catch (e) {}
+
+        // === CODE_DEBUG_PROVIDER: 打印完整错误响应 ===
+        if (DEBUG_PROVIDER) {
+          console.error('[DEEPSEEK-DEBUG] error_response:', JSON.stringify({
+            status: resp.status,
+            error_code: errCode,
+            error_type: errType,
+            error_message: errTxt,
+            request_id: errRequestId
+          }));
+        }
+
         console.error('[DEEPSEEK] API error', resp.status, errTxt, 'round', round);
-        if (useThinking && (errTxt.indexOf('thinking') >= 0 || errTxt.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
+
+        // P0 Fix: 精细判断 thinking 不兼容 — 仅当错误明确与 thinking 相关时才触发回退
+        var isThinkingError = useThinking && (
+          errTxt.indexOf('thinking') >= 0 ||
+          errTxt.indexOf('reasoning_effort') >= 0 ||
+          errCode === 'invalid_request_error' && errTxt.indexOf('reasoning') >= 0
+        );
+
+        if (isThinkingError) {
           var thinkErr = new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
-          thinkErr.code = 'PROVIDER_HTTP_400';
+          thinkErr.code = 'PROVIDER_INVALID_THINKING_MODE';
+          thinkErr.status = resp.status;
+          thinkErr.providerStatus = resp.status;
+          thinkErr.providerCode = errCode;
+          thinkErr.providerType = errType;
+          thinkErr.providerMessage = errTxt;
+          thinkErr.providerRequestId = errRequestId;
+          thinkErr.response = { data: fullErrorBody };
           throw thinkErr;
         }
+
         var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
         apiErr.code = 'PROVIDER_HTTP_' + resp.status;
-        if (errTxt) apiErr.providerMessage = errTxt;
+        apiErr.status = resp.status;
+        apiErr.providerStatus = resp.status;
+        apiErr.providerCode = errCode;
+        apiErr.providerType = errType;
+        apiErr.providerMessage = errTxt;
+        apiErr.providerRequestId = errRequestId;
+        apiErr.response = { data: fullErrorBody };
         throw apiErr;
       }
 
