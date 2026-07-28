@@ -230,7 +230,7 @@ test('core has no legacy loaders for static entry modules', function(){
 test('feature modules have one retryable CSS-first loader', function(){
   var html = read('index.html');
   var core = read('js/core.js');
-  assert.ok(core.indexOf('window.XTJModuleLoader = { load: loadXtjModule }') >= 0, 'public module loader missing');
+  assert.match(core, /window\.XTJModuleLoader\s*=\s*\{\s*load:\s*loadXtjModule/, 'public module loader missing');
   assert.ok(core.indexOf('if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName]') >= 0, 'module promise dedupe missing');
   assert.ok(core.indexOf('delete xtjModulePromises[moduleName]') >= 0, 'failed module cannot retry');
   assert.ok(core.indexOf('definition.styles') < core.indexOf('definition.scripts'), 'CSS is not loaded before scripts');
