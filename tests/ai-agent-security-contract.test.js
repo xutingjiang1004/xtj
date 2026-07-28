@@ -30,6 +30,51 @@ test('AI close clears recurring status and configuration timers', () => {
   assert.match(closeBody, /clearInterval\(S\._configRefreshTimer\)/);
 });
 
+test('AI attachments are sent as structured payloads and consumed only after success', () => {
+  assert.match(source, /attachments:\s*attachmentPayload/);
+  assert.match(source, /data_url:\s*fileData\.dataUrl/);
+  assert.match(source, /consumeAiAttachment\(fileData\)/);
+  assert.match(source, /onSuccess:\s*function\(\)/);
+  assert.doesNotMatch(source, /attachments:\s*attachmentPayload \|\| \[\]/);
+});
+
+test('server extracts structured attachments on normal, stream, and deep routes', () => {
+  assert.match(serverSource, /async function extractChatAttachments\(message, attachments\)/);
+  assert.equal((serverSource.match(/extractChatAttachments\(message, req\.body && req\.body\.attachments\)/g) || []).length, 3);
+  assert.match(serverSource, /缺少文件数据/);
+  assert.match(serverSource, /文件数据格式无效/);
+  assert.match(serverSource, /attachments\.length, 10/);
+});
+
+test('deep research close invalidates callbacks, aborts streams, and clears transient files', () => {
+  const closeStart = source.indexOf('function closeDeepThinkPage()');
+  assert.notEqual(closeStart, -1);
+  const closeBody = source.slice(closeStart, source.indexOf('var _dtFileData', closeStart));
+  assert.match(closeBody, /S\.lifecycleId\+\+/);
+  assert.match(closeBody, /S\.clientRequestId\+\+/);
+  assert.match(closeBody, /S\.abortController\.abort/);
+  assert.match(closeBody, /S\.deepThinkJob\.abort/);
+  assert.match(closeBody, /_dtFileData\s*=\s*null/);
+});
+
+test('search result links are restricted to http(s)', () => {
+  assert.match(source, /function safeSearchUrl\(value\)/);
+  assert.match(source, /parsed\.protocol !== 'http:' && parsed\.protocol !== 'https:'/);
+  assert.match(source, /href:\s*safeSrUrl \|\| '#'/);
+});
+
+test('api requests propagate caller abort signals', () => {
+  assert.match(source, /options\.signal \|\| \(options\.abortController && options\.abortController\.signal\)/);
+  assert.match(source, /externalSignal\.addEventListener\('abort'/);
+});
+
+test('chat send locks before awaiting authentication', () => {
+  const sendStart = source.indexOf('async function handleSendMessage');
+  const sendBody = source.slice(sendStart, source.indexOf('async function ', sendStart + 30));
+  assert.match(sendBody, /S\.sending\s*=\s*true/);
+  assert.ok(sendBody.indexOf('S.sending = true') < sendBody.indexOf('await ensureUserAuthOrNotify'));
+});
+
 test('AI routes do not treat a normally completed request body as a disconnect', () => {
   const aiRouteStart = serverSource.indexOf("app.post('/api/agent/chat'");
   const aiRouteEnd = serverSource.indexOf("app.post('/api/agent/chat/stream'", aiRouteStart);
