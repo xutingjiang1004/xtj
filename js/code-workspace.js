@@ -4789,8 +4789,10 @@ var CODE_STREAM_ENABLED = true;
       var decoder = new TextDecoder();
       var buffer = '';
 
+      function isStreamStale() { return requestId !== state._requestId || wsGen !== state.workspaceGeneration; }
+
       function readStream() {
-        if (streamCancelled) return;
+        if (streamCancelled || isStreamStale()) return;
         reader.read().then(function (result) {
           if (result.done) {
             // Stream ended
@@ -5025,6 +5027,13 @@ var CODE_STREAM_ENABLED = true;
 
     function finalizeRequestState() {
       clearTimeout(timeoutId);
+      // Stale guard: if request is no longer current, clean only local resources
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        if (state._sharedCtrl) {
+          try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
+        }
+        return;
+      }
       if (state._sharedCtrl && state._sharedCtrl.isActive()) {
         try { state._sharedCtrl.done(); } catch (e) {}
         if (state._telemetry) {
@@ -5033,10 +5042,11 @@ var CODE_STREAM_ENABLED = true;
         }
       }
       if (state._sharedCtrl) {
-        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
         state._sharedCtrl = null;
       }
       state._telemetry = null;
+      clearSendingWatchdog();
       state.sending = false;
       state._abortController = null;
       var inp = document.getElementById('codeChatInput');
@@ -5584,7 +5594,7 @@ var CODE_STREAM_ENABLED = true;
         docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
           escapeHTML(docType + ' 修改') + '</div>' +
           '<div style="margin-bottom:6px;">' +
-          '  将另存为: <strong>' + escapeHTML(op.path.replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
+          '  将另存为: <strong>' + escapeHTML((op.path || '').replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
           '</div>';
 
         if (op.document_operations && op.document_operations.length > 0) {
@@ -5751,7 +5761,8 @@ var CODE_STREAM_ENABLED = true;
           });
         }
         
-        var newMimeType = resp.headers.get('Content-Type') || '';
+        var rawMime = resp.headers.get('Content-Type') || '';
+        var newMimeType = rawMime.split(';')[0].trim().toLowerCase();
         var disposition = resp.headers.get('Content-Disposition') || '';
         
         // Extract filename from disposition if present
