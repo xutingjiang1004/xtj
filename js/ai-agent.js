@@ -4732,6 +4732,16 @@ window.throttleRAF = function(fn) {
     messagesEl.appendChild(assistantNode);
     scrollToBottom(messagesEl, true);
 
+    // Available before fetch() returns an HTTP error, so a rejected request
+    // cannot leave the temporary typing bubble on screen.
+    function hideAssistantTyping() {
+      try {
+        var dots = assistantBubble.querySelectorAll('span');
+        for (var hi = 0; hi < dots.length; hi++) dots[hi].style.display = 'none';
+        assistantBubble.classList.remove('ai-typing-bubble');
+      } catch (e) {}
+    }
+
     // 清空输入框
     input.value = '';
     input.style.height = 'auto';
@@ -4830,6 +4840,7 @@ window.throttleRAF = function(fn) {
           if (telemetry) { telemetry.finalize('error', { code: errorCode, phase: 'http_response', message: responseMessage }); }
         }
         hideAssistantTyping();
+        try { assistantNode.remove(); } catch (e) {}
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         restoreInputText();
@@ -4840,6 +4851,10 @@ window.throttleRAF = function(fn) {
       
       if (!resp.body) {
         hideAssistantTyping();
+        try { assistantNode.remove(); } catch (e) {}
+        S.messages.pop();
+        removeLastUserMessage(messagesEl);
+        restoreInputText();
         notify('AI 没有响应');
         resetSendingIfCurrent();
         return;
@@ -4867,17 +4882,6 @@ window.throttleRAF = function(fn) {
       var doneReceived = false;
       var evtHandled = false;
       var _finalized = false;
-
-      // P5 修复: 隐藏 typing dots 的辅助函数
-      function hideAssistantTyping() {
-        try {
-          var dots = assistantBubble.querySelectorAll('span');
-          for (var hi = 0; hi < dots.length; hi++) {
-            try { dots[hi].style.display = 'none'; } catch (e) {}
-          }
-          assistantBubble.classList.remove('ai-typing-bubble');
-        } catch (e) {}
-      }
 
       function finishAiMessage(node, content, thinking, evt) {
         // P4 修复: 防止重复 finalize
@@ -5080,7 +5084,7 @@ window.throttleRAF = function(fn) {
         }
         
         var readResult;
-        try { readResult = await reader.read(); } catch (e) { break; }
+        try { readResult = await reader.read(); } catch (e) { throw e; }
         if (readResult.done) break;
         if (!S.active) { reader.cancel().catch(function(){}); break; }
         
@@ -5327,6 +5331,7 @@ window.throttleRAF = function(fn) {
             } else {
               // 娌℃湁鍐呭锛屽洖婊?
               notify(errMsg);
+              try { assistantNode.remove(); } catch (e) {}
               S.messages.pop();
               removeLastUserMessage(messagesEl);
               restoreInputText();
@@ -5349,6 +5354,9 @@ window.throttleRAF = function(fn) {
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
             } else {
               notify(errMsg2);
+              try { assistantNode.remove(); } catch (e) {}
+              S.messages.pop();
+              removeLastUserMessage(messagesEl);
               restoreInputText();
             }
             
@@ -5511,6 +5519,7 @@ window.throttleRAF = function(fn) {
         cleanupRenderers();
       } else if (!doneReceived) {
         cleanupRenderers();
+        try { assistantNode.remove(); } catch (e) {}
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         notify('AI 暂时没有回应，请稍后再试');
@@ -5526,6 +5535,7 @@ window.throttleRAF = function(fn) {
           try { assistantNode.appendChild(connNote); } catch (e) {}
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
         } else {
+          try { assistantNode.remove(); } catch (e) {}
           S.messages.pop();
           removeLastUserMessage(messagesEl);
           restoreInputText();

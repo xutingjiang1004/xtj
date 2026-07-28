@@ -6097,6 +6097,13 @@ async function checkAiUserRateLimit(userName) {
   }
 }
 
+function getAiQuotaErrorMessage(reason) {
+  if (reason === 'hourly_limit') return '小猫太忙了，休息一下';
+  if (reason === 'concurrent') return '请等待上一个请求完成';
+  if (reason === 'quota_unavailable') return '小猫服务配额暂不可用，请稍后重试';
+  return '今日小猫聊天次数已达上限';
+}
+
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
 const adminTokens = new Map(); // token -> { expiresAt }（仅用于延长有效期跟踪）
 const revokedTokens = new Map(); // token -> expiry（主动退出的令牌，过期前拒绝使用）
@@ -12264,7 +12271,7 @@ async function handleDeepThinkChat(req, res) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      sseSend({ type: 'error', error: rl.reason === 'hourly_limit' ? '小猫太忙了，休息一下' : (rl.reason === 'concurrent' ? '请等待上一个请求完成' : '今日小猫聊天次数已达上限') });
+      sseSend({ type: 'error', error: getAiQuotaErrorMessage(rl.reason), code: rl.reason || 'rate_limited' });
       activeDeepThinkJobs.delete(convId);
       return safeEnd();
     }
@@ -12637,7 +12644,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var rl = await checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       return res.status(429).json({
-        error: rl.reason === 'hourly_limit' ? '小猫太忙了，休息一下' : (rl.reason === 'concurrent' ? '请等待上一个请求完成' : '今日小猫聊天次数已达上限'),
+        error: getAiQuotaErrorMessage(rl.reason),
+        code: rl.reason || 'rate_limited',
         remainingHour: rl.remainingHour,
         remainingDay: rl.remainingDay
       });
@@ -12854,7 +12862,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      writeSse(res, { type: 'error', error: rl.reason === 'hourly_limit' ? '小猫太忙了，休息一下' : '今日小猫聊天次数已达上限' });
+      writeSse(res, { type: 'error', error: getAiQuotaErrorMessage(rl.reason), code: rl.reason || 'rate_limited' });
       return safeEnd();
     }
     
