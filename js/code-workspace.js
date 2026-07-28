@@ -75,9 +75,7 @@
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
   // Phase 2: Feature flag for streaming Code agent
-  var CODE_STREAM_ENABLED = (function () {
-    try { return localStorage.getItem('CODE_STREAM_ENABLED') === '1'; } catch (e) { return false; }
-  })();
+var CODE_STREAM_ENABLED = true;
 
   // Phase 3: Feature flag for stream resume
   var CODE_STREAM_RESUME_ENABLED = (function () {
@@ -4197,8 +4195,21 @@
     };
   }
 
+  var _sendingWatchdog = null;
+  function clearSendingWatchdog() {
+    if (_sendingWatchdog) { clearTimeout(_sendingWatchdog); _sendingWatchdog = null; }
+  }
+  function resetSendingState() {
+    state.sending = false;
+    state._abortController = null;
+    updateChatRequestControls();
+  }
+
   function sendMessage() {
-    if (state.sending) return;
+    if (state.sending) {
+      console.log('[code-workspace] sendMessage blocked: state.sending is true');
+      return;
+    }
 
     var input = document.getElementById('codeChatInput');
     if (!input) return;
@@ -4213,6 +4224,18 @@
     state.sending = true;
     // 不禁用输入框，只切换按钮
     updateChatRequestControls();
+    // Watchdog: 如果 120 秒后 sending 仍 true，强制恢复（不伪造成功）
+    clearSendingWatchdog();
+    _sendingWatchdog = setTimeout(function() {
+      if (state.sending) {
+        console.warn('[code-workspace] Watchdog: state.sending stuck true, resetting');
+        state.sending = false;
+        state._abortController = null;
+        updateChatRequestControls();
+        removeTypingIndicator();
+      }
+      _sendingWatchdog = null;
+    }, 120000);
 
     // Cancel previous request
     if (state._abortController) {
@@ -4691,6 +4714,13 @@
           try { json = JSON.parse(text); } catch (e) {}
           var errMsg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
           var errCode = (json && json.code) ? json.code : '';
+          // Auto-fallback to non-streaming if streaming is not available
+          if (resp.status === 503 && errCode === 'STREAM_DISABLED') {
+            console.log('[code-workspace] Streaming not available, falling back to standard API');
+            cleanupStream();
+            state.messages.pop();
+            return sendApiRequest(body, requestId, timeStr, wsGen);
+          }
           showError(errCode, errMsg, json && json.retryable);
           state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
           finalizeRequestState();
@@ -5319,6 +5349,7 @@
       state._telemetry = null;
       if (requestId !== state._requestId) return;
       if (wsGen !== state.workspaceGeneration) return;
+      clearSendingWatchdog();
       state.sending = false;
       state._abortController = null;
       // P0 Fix: 不重新禁用输入框
