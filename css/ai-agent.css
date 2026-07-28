@@ -421,6 +421,12 @@
   transition: opacity 120ms ease, filter 160ms ease;
 }
 
+/* Reasoning has its own status card. Do not leave an empty assistant bubble
+ * beneath it until the first real answer token arrives. */
+.ai-msg.assistant.generating .ai-msg-bubble.ai-reply-pending {
+  display: none;
+}
+
 .ai-msg-footer {
   max-width: min(82%, 680px);
   padding: 0 6px;
