@@ -31,6 +31,24 @@ test('code-workspace showError catches PROVIDER_ errors with details element', (
   assert.match(codeWorkspace, /查看错误详情/);
 });
 
+test('Code streaming timeout exits the pending state and reports an error', () => {
+  assert.match(codeWorkspace, /function showError\(code, message, retryable, force\)/);
+  assert.match(codeWorkspace, /if \(streamCancelled && !force\) return;/);
+  assert.match(codeWorkspace, /showError\('PROVIDER_TIMEOUT',[\s\S]{0,160}true, true\)/);
+  assert.match(codeWorkspace, /assistantNode\.classList\.remove\('streaming'\)/);
+  assert.match(codeWorkspace, /var signal = ctx\.sharedCtrl \? ctx\.sharedCtrl\.signal : ctx\.abortController\.signal/);
+});
+
+test('Code SSE writer does not mistake a completed request body for a disconnected client', () => {
+  const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
+  assert.match(sse, /req\.on\('aborted', markClosed\)/);
+  assert.doesNotMatch(sse, /req\.on\('close', markClosed\)/);
+  const codeAgent = fs.readFileSync(__dirname + '/../render-api/code-agent.js', 'utf8');
+  const streamStart = codeAgent.indexOf("app.post('/api/code/chat/stream'");
+  const streamSource = codeAgent.slice(streamStart);
+  assert.match(streamSource, /function cleanup\(\) \{[\s\S]*?if \(!res\.writableEnded\) res\.end\(\)/);
+});
+
 test('code-workspace non-stream error handler restores message on HTTP 400', () => {
   assert.match(codeWorkspace, /PROVIDER_HTTP_400/);
   assert.match(codeWorkspace, /PROVIDER_INVALID_REQUEST/);

@@ -4616,8 +4616,8 @@
   function sendStreamingRequest(ctx, body, timeStr) {
     var requestId = ctx.requestId;
     var wsGen = ctx.workspaceGeneration;
-    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
-    var controller = state._abortController;
+    var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : ctx.abortController.signal;
+    var controller = ctx.abortController;
     var timeoutId;
     var streamDone = false;
     var lastEventId = 0;
@@ -4767,10 +4767,11 @@
       if (statusText) statusText.textContent = '已完成 ' + toolCount + ' 个工具调用';
     }
 
-    function showError(code, message, retryable) {
-      if (streamCancelled) return;
+    function showError(code, message, retryable, force) {
+      if (streamCancelled && !force) return;
       if (statusEl) statusEl.style.display = 'none';
       if (spinner) spinner.style.display = 'none';
+      assistantNode.classList.remove('streaming');
       if (errorEl) {
         errorEl.style.display = '';
         
@@ -4884,11 +4885,13 @@
     // Timeout
     timeoutId = setTimeout(function () {
       if (streamDone) return;
+      showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true, true);
+      assistantNode.classList.remove('streaming');
+      cleanupStream();
       streamCancelled = true;
       if (controller) {
         try { controller.abort(); } catch (e) {}
       }
-      showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true);
       state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true });
       finalizeRequestState();
     }, 120000);

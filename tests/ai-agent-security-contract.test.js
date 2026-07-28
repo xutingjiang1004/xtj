@@ -100,6 +100,14 @@ test('failed AI requests remove the temporary typing bubble and reveal quota out
   assert.match(serverSource, /reason === 'quota_unavailable'/);
 });
 
+test('reasoning hides the empty reply bubble until an answer token arrives', () => {
+  assert.match(source, /assistantBubble\.classList\.add\('ai-reply-pending'\)/);
+  assert.match(source, /function ensureAssistantBubbleReady\(\) \{[\s\S]{0,180}assistantBubble\.classList\.remove\('ai-reply-pending'\)/);
+  assert.match(source, /var contentChunk = evt\.text \|\| '';[\s\S]{0,120}if \(!contentChunk\) continue;/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'ai-agent.css'), 'utf8');
+  assert.match(css, /\.ai-msg\.assistant\.generating \.ai-msg-bubble\.ai-reply-pending\s*\{\s*display:\s*none;/);
+});
+
 test('AI routes do not treat a normally completed request body as a disconnect', () => {
   const aiRouteStart = serverSource.indexOf("app.post('/api/agent/chat'");
   const aiRouteEnd = serverSource.indexOf("app.post('/api/agent/chat/stream'", aiRouteStart);
