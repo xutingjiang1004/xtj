@@ -4205,6 +4205,49 @@ var CODE_STREAM_ENABLED = true;
     updateChatRequestControls();
   }
 
+  // ── Request Context Pattern ──
+  // Every async request creates an immutable requestContext that captures all
+  // resources (AbortController, sharedCtrl, telemetry, watchdog, etc.).
+  // Async callbacks close over THEIR OWN context, not over state.xxx.
+  // Before any mutation, call isCurrentRequest(ctx) to verify this context is
+  // still the active request. Stale callbacks clean up only their OWN resources
+  // and never touch state that belongs to a newer request.
+  function isCurrentRequest(ctx) {
+    return ctx && state.activeRequest === ctx && ctx.requestId === state._requestId;
+  }
+  function finalizeRequest(ctx, options) {
+    if (!ctx) return;
+    options = options || {};
+    // Always clean up own resources (idempotent via _finalized flag)
+    if (ctx._finalized) return;
+    ctx._finalized = true;
+    if (ctx.watchdogTimer !== undefined) { clearTimeout(ctx.watchdogTimer); ctx.watchdogTimer = undefined; }
+    if (ctx.timeoutTimer !== undefined) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = undefined; }
+    if (ctx.abortController && !ctx.cancelled) { try { ctx.abortController.abort(); } catch(_) {} }
+    if (ctx.sharedCtrl && ctx.sharedCtrl.isActive) {
+      try {
+        if (options.done) ctx.sharedCtrl.done();
+        else ctx.sharedCtrl.cancel(options.cancelReason || 'finalized');
+      } catch(_) {}
+    }
+    if (ctx.unregisterKey && window.XtjAiCore && window.XtjAiCore.RequestController) {
+      try { window.XtjAiCore.RequestController.unregisterInFlight(ctx.unregisterKey); } catch(_) {}
+    }
+    if (ctx.telemetry) {
+      try { ctx.telemetry.finalize('done'); } catch(_) {}
+    }
+    // Only modify state if this context is still the active request
+    if (isCurrentRequest(ctx)) {
+      state.sending = false;
+      state.activeRequest = null;
+      state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      updateChatRequestControls();
+      removeTypingIndicator();
+    }
+  }
+
   function sendMessage() {
     if (state.sending) {
       console.log('[code-workspace] sendMessage blocked: state.sending is true');
@@ -4220,45 +4263,59 @@ var CODE_STREAM_ENABLED = true;
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
 
-    // P0 Fix: 不完全禁用输入框，用户可以输入下一条草稿
+    // Create request context BEFORE any async work
+    var requestId = ++state._requestId;
+    var abortCtrl = new AbortController();
+    var clientRequestId = 'code_cr_' + requestId + '_' + Date.now();
+    var ctx = {
+      requestId: requestId,
+      workspaceGeneration: wsGen,
+      clientRequestId: clientRequestId,
+      abortController: abortCtrl,
+      sharedCtrl: null,
+      telemetry: null,
+      unregisterKey: 'code_ai_' + requestId,
+      watchdogTimer: null,
+      timeoutTimer: undefined,
+      streamId: null,
+      cancelled: false,
+      cancelReason: '',
+      _finalized: false
+    };
+    // Register as active request
     state.sending = true;
-    // 不禁用输入框，只切换按钮
+    state.activeRequest = ctx;
+    state._abortController = abortCtrl;
+    state._sharedCtrl = null;
+    state._telemetry = null;
     updateChatRequestControls();
-    // Watchdog: 如果 120 秒后 sending 仍 true，强制恢复（不伪造成功）
+
+    // Watchdog: 120s timeout for stuck sending
     clearSendingWatchdog();
     _sendingWatchdog = setTimeout(function() {
-      if (state.sending) {
+      if (state.sending && isCurrentRequest(ctx)) {
         console.warn('[code-workspace] Watchdog: state.sending stuck true, resetting');
-        state.sending = false;
-        state._abortController = null;
-        updateChatRequestControls();
-        removeTypingIndicator();
+        finalizeRequest(ctx, { cancelReason: 'watchdog', done: false });
       }
       _sendingWatchdog = null;
     }, 120000);
+    ctx.watchdogTimer = _sendingWatchdog;
 
-    // Cancel previous request
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (e) { /* ignore */ }
-    }
-    state._abortController = new AbortController();
-    var requestId = ++state._requestId;
-
-    // Phase 1: Shared request controller + telemetry (feature-flagged)
-    state._sharedCtrl = null;
-    state._telemetry = null;
+    // Shared request controller + telemetry (feature-flagged)
     if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
-      state._sharedCtrl = window.XtjAiCore.RequestController.create({
+      ctx.sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: 'code_req_' + requestId,
-        clientRequestId: 'code_cr_' + requestId + '_' + Date.now(),
+        clientRequestId: clientRequestId,
         timeoutMs: 120000,
         workspaceGeneration: wsGen
       });
-      state._sharedCtrl.start();
-      window.XtjAiCore.RequestController.registerInFlight('code_ai', state._sharedCtrl);
+      ctx.sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight(ctx.unregisterKey, ctx.sharedCtrl);
+      state._sharedCtrl = ctx.sharedCtrl;
       if (window.XtjAiCore.Telemetry) {
-        state._telemetry = window.XtjAiCore.Telemetry.create();
-        state._telemetry.start('code_req_' + requestId, 'code_cr_' + requestId);
+        ctx.telemetry = window.XtjAiCore.Telemetry.create();
+        ctx.telemetry.start('code_req_' + requestId, clientRequestId);
+        state._telemetry = ctx.telemetry;
       }
     }
 
@@ -4761,10 +4818,17 @@ var CODE_STREAM_ENABLED = true;
 
           for (var i = 0; i < lines.length; i++) {
             var line = lines[i].trim();
-            if (!line || !line.startsWith('data: ')) continue;
-            var jsonStr = line.slice(6);
+            if (!line) continue;
+      // SSE: accept both 'data:{...}' and 'data: {...}'
+      if (!line.startsWith('data:')) continue;
+      var jsonStr = line.substring(5);
+      if (jsonStr.charAt(0) === ' ') jsonStr = jsonStr.substring(1);
+      if (!jsonStr) continue;
             var event;
-            try { event = JSON.parse(jsonStr); } catch (e) { continue; }
+            try { event = JSON.parse(jsonStr); } catch (e) {
+              console.warn('[code-workspace] SSE parse error (requestId=' + requestId + '):', jsonStr.slice(0, 80));
+              continue;
+            }
             if (!event || !event.type) continue;
 
             handleSSEEvent(event);
@@ -5341,14 +5405,19 @@ var CODE_STREAM_ENABLED = true;
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
-      // Phase 1: Cleanup shared controller
+      // Guard: if request is stale, only clean local resources, not state
+      var isStale = (requestId !== state._requestId || wsGen !== state.workspaceGeneration);
+      if (isStale) {
+        // Stale request: only clean up the captured controller, not state._sharedCtrl
+        return;
+      }
+      // Phase 1: Cleanup shared controller (only when request is current)
+      var sharedCtrlKey = 'code_ai_' + requestId;
       if (state._sharedCtrl) {
-        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        try { window.XtjAiCore.RequestController.unregisterInFlight(sharedCtrlKey); } catch(e) {}
         state._sharedCtrl = null;
       }
       state._telemetry = null;
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
       clearSendingWatchdog();
       state.sending = false;
       state._abortController = null;
