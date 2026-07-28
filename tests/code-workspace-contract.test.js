@@ -740,10 +740,10 @@ test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
 });
 
-test('static Code welcome icon is bounded like the runtime welcome icon', () => {
-  const css = fs.readFileSync('css/code-workspace.css', 'utf8');
-  assert.match(css, /\.code-welcome \.code-welcome-icon\s*\{[\s\S]*?width:\s*80px;[\s\S]*?height:\s*80px;/);
-  assert.match(css, /\.code-welcome \.code-welcome-icon svg\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;/);
+test('static Code welcome has no decorative icon before the module loads', () => {
+  const staticWelcome = indexHtml.match(/<div class="code-welcome" id="codeWelcome">([\s\S]*?)<\/div>\s*<\/div>/);
+  assert.ok(staticWelcome, 'static Code welcome markup is missing');
+  assert.doesNotMatch(staticWelcome[1], /code-welcome-icon|<svg\b/);
 });
 
 test('read-only Code workspaces do not expose write controls', () => {

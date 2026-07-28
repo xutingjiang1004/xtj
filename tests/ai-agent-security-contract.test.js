@@ -84,6 +84,22 @@ test('chat send locks before awaiting authentication', () => {
   assert.ok(sendBody.indexOf('S.sending = true') < sendBody.indexOf('await ensureUserAuthOrNotify'));
 });
 
+test('failed AI requests remove the temporary typing bubble and reveal quota outages', () => {
+  const sendStart = source.indexOf('async function handleSendMessage');
+  const sendBody = source.slice(sendStart, source.indexOf('async function ', sendStart + 30));
+  const typingStart = sendBody.indexOf("var assistantBubble = el('div', { class: 'ai-msg-bubble ai-typing-bubble' })");
+  const fetchStart = sendBody.indexOf('var resp = await fetch(url');
+  assert.ok(typingStart >= 0 && fetchStart > typingStart);
+  assert.ok(sendBody.indexOf('function hideAssistantTyping()', typingStart) < fetchStart);
+  const httpErrorBody = sendBody.slice(sendBody.indexOf('if (!resp.ok)'), sendBody.indexOf('if (!resp.body)'));
+  const bodylessError = sendBody.slice(sendBody.indexOf('if (!resp.body)'), sendBody.indexOf('var reader = resp.body.getReader()'));
+  assert.match(httpErrorBody, /assistantNode\.remove\(\)/);
+  assert.match(bodylessError, /assistantNode\.remove\(\)/);
+  assert.match(sendBody, /catch \(e\) \{ throw e; \}/);
+  assert.match(serverSource, /function getAiQuotaErrorMessage\(reason\)/);
+  assert.match(serverSource, /reason === 'quota_unavailable'/);
+});
+
 test('AI routes do not treat a normally completed request body as a disconnect', () => {
   const aiRouteStart = serverSource.indexOf("app.post('/api/agent/chat'");
   const aiRouteEnd = serverSource.indexOf("app.post('/api/agent/chat/stream'", aiRouteStart);
