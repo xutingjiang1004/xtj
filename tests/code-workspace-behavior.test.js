@@ -10,11 +10,13 @@ test('code-workspace buildOpenFilesContext uses extracted text for documents', (
 });
 
 test('code-workspace renderProjectStatus shows document status and permissions', () => {
-  assert.match(codeWorkspace, /文档已就绪/);
+  assert.match(codeWorkspace, /文本已解析/);
   assert.match(codeWorkspace, /文档解析失败/);
   assert.match(codeWorkspace, /文档正在解析/);
-  assert.match(codeWorkspace, /文件系统权限：/);
-  assert.match(codeWorkspace, /格式能力：/);
+  assert.match(codeWorkspace, /文件系统权限/);
+  assert.match(codeWorkspace, /格式修改能力/);
+  assert.match(codeWorkspace, /文本解析状态/);
+  assert.match(codeWorkspace, /保存验证状态/);
   assert.match(codeWorkspace, /只读/);
   assert.match(codeWorkspace, /可写/);
   assert.match(codeWorkspace, /可读取/);
