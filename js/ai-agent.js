@@ -3386,10 +3386,11 @@ window.throttleRAF = function(fn) {
           var shownResults = searchResults.slice(0, 5);
           for (var si = 0; si < shownResults.length; si++) {
             var sr = shownResults[si];
-            if (sr.title && sr.url) {
-              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
-            } else if (sr.url) {
-              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.url) + '</a><br>';
+            var safeSrUrl = safeSearchUrl(sr.url);
+            if (safeSrUrl && sr.title) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
+            } else if (safeSrUrl) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(safeSrUrl) + '</a><br>';
             }
           }
           if (searchResults.length > 5) {
@@ -3989,8 +3990,9 @@ window.throttleRAF = function(fn) {
           var shownResults = searchResults.slice(0, 5);
           for (var si = 0; si < shownResults.length; si++) {
             var sr = shownResults[si];
-            if (sr.title && sr.url) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
-            else if (sr.url) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.url) + '</a><br>';
+            var safeSrUrl2 = safeSearchUrl(sr.url);
+            if (safeSrUrl2 && sr.title) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl2) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
+            else if (safeSrUrl2) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl2) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(safeSrUrl2) + '</a><br>';
           }
           if (searchResults.length > 5) searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
           searchBox.innerHTML = searchHtml;
@@ -5154,7 +5156,7 @@ window.throttleRAF = function(fn) {
               for (var ri = 0; ri < resultsArr.length; ri++) {
                 var r = resultsArr[ri];
                 var itemEl = el('div', { class: 'ai-search-detail-item' });
-                var linkEl = el('a', { class: 'ai-search-detail-title', href: r.url || '#', target: '_blank', rel: 'noopener noreferrer', text: r.title || '无标题' });
+                var linkEl = el('a', { class: 'ai-search-detail-title', href: safeSearchUrl(r.url) || '#', target: '_blank', rel: 'noopener noreferrer', text: r.title || '无标题' });
                 itemEl.appendChild(linkEl);
                 if (r.snippet) {
                   itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
