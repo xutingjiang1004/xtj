@@ -93,6 +93,8 @@ window.throttleRAF = function(fn) {
     _lastMsgDedupKey: '',
     _lastDtDedupKey: '',
     _lastConfigVersion: 0,
+    serviceStatus: 'checking',
+    serviceStatusDetail: '',
     resizeTimer: null,
     _configRefreshTimer: null,
     historyRequestId: 0,
@@ -103,7 +105,10 @@ window.throttleRAF = function(fn) {
   };
 
   function getAiStatusText() {
-    return '在线';
+    if (S.serviceStatus === 'ready') return '在线';
+    if (S.serviceStatus === 'degraded') return '服务暂不可用';
+    if (S.serviceStatus === 'offline') return '服务离线';
+    return '正在检查服务…';
   }
 
   function updateAiStatus() {
@@ -1056,16 +1061,21 @@ window.throttleRAF = function(fn) {
     var r = await apiRequest('GET', '/config');
     if (r.ok && r.data && r.data.config) {
       S.config = r.data.config;
+      S.serviceStatus = 'ready';
+      S.serviceStatusDetail = '';
       S.configFetchedAt = now;
       S._lastConfigVersion = r.data.config.config_version || 0;
       return S.config;
     }
+    S.serviceStatus = r && (r.status === 0 || r.error_code === 'timeout') ? 'offline' : 'degraded';
+    S.serviceStatusDetail = describeError(r, 'AI 配置暂不可用');
     S.config = S.config || {
       name: '小猫',
       avatar: '🐈',
-      description: '在线',
+      description: '服务暂不可用，请稍后重试',
       welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
     };
+    updateAiStatus();
     return S.config;
   }
 

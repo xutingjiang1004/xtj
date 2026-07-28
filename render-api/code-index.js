@@ -668,6 +668,67 @@ function buildIndex(scope, files, options) {
   };
 }
 
+// Apply a delta to an already complete in-memory index.  Incremental clients
+// deliberately upload only changed file bodies, so treating that payload as a
+// new snapshot would silently drop every unchanged file.  The complete
+// manifest is used as a guard: a stale or partial delta must trigger a full
+// rebuild instead of corrupting the index.
+function applyIncrementalIndex(scope, changedFiles, options) {
+  options = options || {};
+  var normalized = normalizeScope(scope, true);
+  if (!normalized.ok) return normalized;
+  if (!Array.isArray(changedFiles)) return { ok: false, error: 'files must be an array', code: 'INVALID_FILES' };
+  if (!Array.isArray(options.manifestPaths) || options.manifestPaths.length === 0) {
+    return { ok: false, error: 'A complete manifest is required for incremental indexing', code: 'INDEX_REBUILD_REQUIRED' };
+  }
+  var resolved = resolveIndex(normalized);
+  if (!resolved.ok) {
+    return { ok: false, error: 'No complete base index is available', code: 'INDEX_REBUILD_REQUIRED' };
+  }
+  var manifest = new Set();
+  for (var m = 0; m < options.manifestPaths.length; m++) {
+    if (!validatePath(options.manifestPaths[m]) || manifest.has(options.manifestPaths[m])) {
+      return { ok: false, error: 'Invalid manifest path', code: 'INVALID_PATH' };
+    }
+    manifest.add(options.manifestPaths[m]);
+  }
+  var deleted = new Set(Array.isArray(options.deletedPaths) ? options.deletedPaths : []);
+  deleted.forEach(function(path) {
+    if (!validatePath(path)) deleted.delete(path);
+  });
+  var snapshot = [];
+  resolved.index.files.forEach(function(entry, path) {
+    if (!manifest.has(path) || deleted.has(path)) return;
+    var content = '';
+    for (var i = 0; i < entry.chunks.length; i++) {
+      var chunk = resolved.index.chunks.get(entry.chunks[i]);
+      if (chunk) content += (content ? '\n' : '') + chunk.content;
+    }
+    snapshot.push({ path: path, language: entry.language, modifiedAt: entry.modifiedAt, sha256: entry.sha256, content: content });
+  });
+  var changedByPath = new Map();
+  for (var c = 0; c < changedFiles.length; c++) {
+    var changed = changedFiles[c];
+    if (!changed || !validatePath(changed.path) || !manifest.has(changed.path) || deleted.has(changed.path)) {
+      return { ok: false, error: 'Changed file is absent from the complete manifest', code: 'INVALID_INCREMENTAL_INDEX' };
+    }
+    if (changedByPath.has(changed.path)) return { ok: false, error: 'Duplicate changed file path', code: 'DUPLICATE_PATH' };
+    changedByPath.set(changed.path, changed);
+  }
+  var merged = [];
+  var seen = new Set();
+  for (var s = 0; s < snapshot.length; s++) {
+    var existing = snapshot[s];
+    merged.push(changedByPath.get(existing.path) || existing);
+    seen.add(existing.path);
+  }
+  changedByPath.forEach(function(file, path) { if (!seen.has(path)) merged.push(file); });
+  if (merged.length !== manifest.size) {
+    return { ok: false, error: 'Base index does not match the complete manifest', code: 'INDEX_REBUILD_REQUIRED' };
+  }
+  return buildIndex(normalized, merged, { truncated: options.truncated === true });
+}
+
 // Build an index from bounded client batches. Each batch is validated before
 // being retained, while the real project index remains unavailable until the
 // final batch is received. This keeps request/body memory bounded and prevents
@@ -1293,7 +1354,8 @@ function _lazyPersistentIndex() {
   return persistentIndex;
 }
 
-function persistIndexToDB(supabase, userId, identifier, projectIndex) {
+function persistIndexToDB(supabase, userId, identifier, projectIndex, options) {
+  options = options || {};
   var pi = _lazyPersistentIndex();
   if (!pi.isPersistEnabled() || !supabase) return Promise.resolve(null);
 
@@ -1320,10 +1382,12 @@ function persistIndexToDB(supabase, userId, identifier, projectIndex) {
         currentPaths.add(path);
       });
 
-      // Delete only files that exist in DB but not in current projectIndex
-      var toDelete = existingFiles.filter(function(f) {
-        return !currentPaths.has(f.path);
-      });
+      // A normal build is a complete snapshot.  An incremental build is not:
+      // only its explicit deleted_paths may be removed from persistence.
+      var explicitDeletes = new Set(Array.isArray(options.deletedPaths) ? options.deletedPaths : []);
+      var toDelete = options.incremental === true
+        ? existingFiles.filter(function(f) { return explicitDeletes.has(f.path); })
+        : existingFiles.filter(function(f) { return !currentPaths.has(f.path); });
 
       var deletePromise = Promise.resolve();
       if (toDelete.length > 0) {
@@ -1446,6 +1510,7 @@ module.exports = {
 
   // Index operations
   buildIndex: buildIndex,
+  applyIncrementalIndex: applyIncrementalIndex,
   appendIndexBatch: appendIndexBatch,
   clearIndex: clearIndex,
   getIndexSummary: getIndexSummary,
