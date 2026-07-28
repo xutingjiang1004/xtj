@@ -6285,7 +6285,22 @@ async function loadRevokedTokenHashes() {
 var revokedTokenHashes = new Set();
 var revokedTokenHashesReady = false;
 var revokedTokenHashesLoadError = null;
-var revokedTokenHashesReadyPromise = loadRevokedTokenHashes().then(function() {
+async function loadRevokedTokenHashesWithRetry() {
+  var delays = [0, 500, 1500, 3000];
+  var lastError = null;
+  for (var attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(function(resolve) { setTimeout(resolve, delays[attempt]); });
+    try {
+      await loadRevokedTokenHashes();
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn('[Revoke] token state retry ' + (attempt + 1) + '/' + delays.length + ' failed');
+    }
+  }
+  throw lastError || new Error('revocation state unavailable');
+}
+var revokedTokenHashesReadyPromise = loadRevokedTokenHashesWithRetry().then(function() {
   revokedTokenHashesReady = true;
 }).catch(function(e) {
   console.error('[Revoke] 启动加载失败:', e && e.message);
