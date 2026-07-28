@@ -332,7 +332,8 @@
       cap.writable = true;
       cap.savable = true;
       cap.exportable = true;
-      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+      cap.experimental = true; // P1-5: 标记为实验性修改，直到可靠性验证完成
+      cap.label = '可读取 · 可分析 · 实验性修改 · 另存副本';
     } else if (ext === 'xlsx' || ext === 'xls') {
       cap.writable = true;
       cap.savable = true;
@@ -347,7 +348,8 @@
       cap.writable = true;
       cap.savable = true;
       cap.exportable = true;
-      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+      cap.experimental = true; // P1-5: 标记为实验性修改，直到可靠性验证完成
+      cap.label = '可读取 · 可分析 · 实验性修改 · 另存副本';
     } else if (ext === 'txt' || ext === 'csv' || ext === 'md' || ext === 'markdown') {
       cap.writable = true;
       cap.savable = true;
@@ -1507,7 +1509,7 @@
     var chatHeader = document.createElement('div');
     chatHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--cw-border);min-height:44px;flex-shrink:0;';
     chatHeader.innerHTML = 
-      '<div style="font-weight:600;font-size:13px;">AI 助手</div>' +
+      '<div style="font-weight:600;font-size:13px;"></div>' +
       '<div class="code-panel-actions">' +
         '<button class="code-panel-action-btn max-chat-btn" title="最大化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>' +
         '<button class="code-panel-action-btn fold-chat-btn" title="折叠"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>' +
@@ -3123,42 +3125,81 @@
     var isDocWorkspace = (state.projectIndexStatus && state.projectIndexStatus.totalFiles === 0) && (kindStr === '本地单文件' || (state.projectIndexStatus && state.projectIndexStatus.scannedFiles > 0) || docTab);
 
     if (isDocWorkspace && docTab) {
+      // P7-UI: 区分四种状态：文件系统权限、文本解析状态、格式修改能力、保存验证状态
       var docStatus = '文档正在打开';
       var docStatusClass = '';
-      if (docTab._extractError) { docStatus = '文档解析失败'; docStatusClass = 'color:var(--cw-error);'; }
-      else if (docTab._parseReady === true && docTab._extractedText) { docStatus = '文档已就绪'; docStatusClass = 'color:var(--cw-success,#10b981);'; }
-      else if (docTab._extractedText) { docStatus = '文档已解析（索引构建中）'; docStatusClass = 'color:var(--cw-accent,#3b82f6);'; }
-      else if (docTab._extractPromise) { docStatus = '文档正在解析'; docStatusClass = ''; }
+      var parseStatus = '等待解析';
+      var parseStatusClass = '';
+      if (docTab._extractError) {
+        docStatus = '文档解析失败';
+        docStatusClass = 'color:var(--cw-error);';
+        parseStatus = '失败';
+        parseStatusClass = 'color:var(--cw-error);';
+      } else if (docTab._parseReady === true && docTab._extractedText) {
+        docStatus = '文本已解析';
+        docStatusClass = 'color:var(--cw-success,#10b981);';
+        parseStatus = '已就绪';
+        parseStatusClass = 'color:var(--cw-success,#10b981);';
+      } else if (docTab._extractedText) {
+        docStatus = '文本已提取（索引构建中）';
+        docStatusClass = 'color:var(--cw-accent,#3b82f6);';
+        parseStatus = '索引构建中';
+        parseStatusClass = 'color:var(--cw-accent,#3b82f6);';
+      } else if (docTab._extractPromise) {
+        docStatus = '文档正在解析';
+        docStatusClass = '';
+        parseStatus = '正在解析';
+        parseStatusClass = '';
+      }
 
       var charCount = docTab._extractedText ? docTab._extractedText.length : 0;
       var ext = (docTab.name || '').toLowerCase().split('.').pop();
       var permStr = state._isReadOnly ? '只读' : '可写';
+      var permClass = state._isReadOnly ? 'color:var(--cw-warning,#f59e0b);' : 'color:var(--cw-success,#10b981);';
       
       // 当前格式能力区分
       var formatCap = getDocumentFormatCapability(ext);
       var formatCapParts = [];
       if (formatCap.readable) formatCapParts.push('可读取');
       if (formatCap.analyzable) formatCapParts.push('可分析');
-      if (formatCap.writable) formatCapParts.push('可修改');
-      else formatCapParts.push('只读');
-      if (formatCap.savable) formatCapParts.push('可保存');
+      // P1-5: 实验性修改标记
+      if (formatCap.experimental) {
+        formatCapParts.push('实验性修改');
+        formatCapParts.push('另存副本');
+      } else {
+        if (formatCap.writable) formatCapParts.push('可修改');
+        else formatCapParts.push('只读');
+        if (formatCap.savable) formatCapParts.push('可保存');
+      }
       if (formatCap.exportable) formatCapParts.push('可导出');
       var formatCapStr = formatCapParts.join(' · ');
-      
-      // 当前处理阶段
-      var processStage = '等待解析';
-      if (docTab._extractError) processStage = '失败';
-      else if (docTab._parseReady === true) processStage = '已准备';
-      else if (docTab._extractPromise) processStage = '正在解析';
+
+      // P7-UI: 保存验证状态
+      var saveStatus = '未保存';
+      var saveStatusClass = 'color:var(--cw-text-muted);';
+      if (docTab._saveError) {
+        saveStatus = '保存失败';
+        saveStatusClass = 'color:var(--cw-error);';
+      } else if (docTab._saveVerified === true) {
+        saveStatus = '已保存验证通过';
+        saveStatusClass = 'color:var(--cw-success,#10b981);';
+      } else if (docTab._savePending === true) {
+        saveStatus = '保存待验证';
+        saveStatusClass = 'color:var(--cw-accent,#3b82f6);';
+      }
       
       indexDiv.innerHTML =
-        '<div style="' + docStatusClass + 'font-weight:600;margin-bottom:4px;">' + docStatus + '</div>' +
-        '<div style="color:var(--cw-text-muted);">' + escapeHTML(docTab.name) + '</div>' +
-        (charCount > 0 ? '<div style="color:var(--cw-text-muted);">已解析文本：' + charCount + ' 字符</div>' : '') +
-        '<div style="color:var(--cw-text-muted);">文件系统权限：' + permStr + '</div>' +
-        '<div style="color:var(--cw-text-muted);">格式能力：' + formatCapStr + '</div>' +
-        '<div style="color:var(--cw-text-muted);">处理阶段：' + processStage + '</div>' +
-        (docTab._extractError ? '<div style="color:var(--cw-error);font-size:10px;">错误：' + escapeHTML(docTab._extractError) + '</div>' : '');
+        '<div style="' + docStatusClass + 'font-weight:600;margin-bottom:6px;">' + docStatus + '</div>' +
+        '<div style="color:var(--cw-text-muted);margin-bottom:2px;">' + escapeHTML(docTab.name) + '</div>' +
+        (charCount > 0 ? '<div style="color:var(--cw-text-muted);margin-bottom:2px;">已解析文本：' + charCount.toLocaleString() + ' 字符</div>' : '') +
+        '<div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;line-height:1.8;">' +
+        '  <div style="color:var(--cw-text-muted);">文件系统权限</div><div style="' + permClass + '">' + permStr + '</div>' +
+        '  <div style="color:var(--cw-text-muted);">文本解析状态</div><div style="' + parseStatusClass + '">' + parseStatus + '</div>' +
+        '  <div style="color:var(--cw-text-muted);">格式修改能力</div><div style="color:var(--cw-text);">' + formatCapStr + '</div>' +
+        '  <div style="color:var(--cw-text-muted);">保存验证状态</div><div style="' + saveStatusClass + '">' + saveStatus + '</div>' +
+        '</div>' +
+        (docTab._extractError ? '<div style="color:var(--cw-error);font-size:10px;margin-top:4px;">错误：' + escapeHTML(docTab._extractError) + '</div>' : '') +
+        (docTab._saveError ? '<div style="color:var(--cw-error);font-size:10px;margin-top:2px;">保存错误：' + escapeHTML(docTab._saveError) + '</div>' : '');
     } else if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
       var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
