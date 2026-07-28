@@ -34,7 +34,9 @@
     applying: false,
     _applyLock: false,
     _monacoLoaded: false,
+    _monacoLoadPromise: null,
     _monacoEditor: null,
+    _editorRenderId: 0,
     _objectUrls: [],
     _abortController: null,
     _attachmentController: null,
@@ -53,6 +55,7 @@
     _undoLock: false,
     _requestId: 0,
     _themeObserver: null,
+    _resizerCleanup: null,
     _isReadOnly: false,
     _persistenceFailed: false, // P0-9: 标记 IndexedDB 持久化是否失败
     workspaceGeneration: 0,
@@ -485,25 +488,42 @@ var CODE_STREAM_ENABLED = true;
       callback(null);
       return;
     }
-    var script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js';
-    script.onload = function () {
-      try {
-        require.config({
-          paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }
-        });
-        require(['vs/editor/editor.main'], function () {
-          state._monacoLoaded = true;
-          callback(null);
-        });
-      } catch (e) {
-        callback(e);
-      }
-    };
-    script.onerror = function () {
-      callback(new Error('Failed to load Monaco loader'));
-    };
-    document.head.appendChild(script);
+    // Share one loader promise.  Opening files quickly must not inject a
+    // second AMD loader (which can race and overwrite the first editor).
+    if (!state._monacoLoadPromise) {
+      state._monacoLoadPromise = new Promise(function (resolve, reject) {
+        var existing = document.querySelector('script[data-xtj-monaco-loader="1"]');
+        var script = existing || document.createElement('script');
+        function loadEditor() {
+          try {
+            require.config({
+              paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }
+            });
+            require(['vs/editor/editor.main'], function () {
+              state._monacoLoaded = true;
+              resolve();
+            }, reject);
+          } catch (e) {
+            reject(e);
+          }
+        }
+        if (existing) {
+          if (typeof require === 'function') loadEditor();
+          else existing.addEventListener('load', loadEditor, { once: true });
+          return;
+        }
+        script.src = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js';
+        script.setAttribute('data-xtj-monaco-loader', '1');
+        script.onload = loadEditor;
+        script.onerror = function () { reject(new Error('Failed to load Monaco loader')); };
+        document.head.appendChild(script);
+      }).catch(function (error) {
+        // Allow a later file open to retry after a transient CDN failure.
+        state._monacoLoadPromise = null;
+        throw error;
+      });
+    }
+    state._monacoLoadPromise.then(function () { callback(null); }, callback);
   }
 
   function disposeMonaco() {
@@ -646,6 +666,11 @@ var CODE_STREAM_ENABLED = true;
         return false; // Signal cancellation to caller
       }
     }
+    // Keep a direct abort fallback for requests created before the request
+    // context was installed (and make cleanup's cancellation observable).
+    if (state._abortController) {
+      try { state._abortController.abort(); } catch (_) {}
+    }
     // Cancel any in-flight request via activeRequest context
     if (state.activeRequest) {
       finalizeRequest(state.activeRequest, { cancelReason: 'cleanup', done: false });
@@ -663,6 +688,7 @@ var CODE_STREAM_ENABLED = true;
     state._openFilePromises = {};
     state._savePromises = {};
     state._requestId++;
+    if (state._resizerCleanup) state._resizerCleanup();
     revokeAllUrls();
     disposeMonaco();
     state.sending = false;
@@ -1555,12 +1581,15 @@ var CODE_STREAM_ENABLED = true;
 
   function initResizerDragLogic() {
     if (!_dom.resizerLeft || !_dom.resizerRight || !_dom.resizerContext) return;
+    if (state._resizerCleanup) state._resizerCleanup();
     
     function onPointerDown(e, type) {
       if (e.button !== 0) return; // only left click
       e.preventDefault();
       var target = e.currentTarget;
-      target.setPointerCapture(e.pointerId);
+      try {
+        if (target.setPointerCapture && e.pointerId !== undefined) target.setPointerCapture(e.pointerId);
+      } catch (_) { /* pointer capture can be lost between events */ }
       
       var wsWidth = _dom.panelCode.offsetWidth || window.innerWidth;
       var sbHeight = _dom.sidebar.offsetHeight || window.innerHeight;
@@ -1568,6 +1597,7 @@ var CODE_STREAM_ENABLED = true;
       _dragState = {
         type: type,
         target: target,
+        pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
         startSidebarWidth: _layoutState.sidebarWidth,
@@ -1621,7 +1651,12 @@ var CODE_STREAM_ENABLED = true;
     function onPointerUp(e) {
       if (!_dragState) return;
       var target = _dragState.target;
-      target.releasePointerCapture(e.pointerId);
+      try {
+        if (target.releasePointerCapture && e.pointerId !== undefined &&
+            (!target.hasPointerCapture || target.hasPointerCapture(e.pointerId))) {
+          target.releasePointerCapture(e.pointerId);
+        }
+      } catch (_) { /* capture may already have been released */ }
       target.removeEventListener('pointermove', onPointerMove);
       target.removeEventListener('pointerup', onPointerUp);
       target.removeEventListener('pointercancel', onPointerUp);
@@ -1634,16 +1669,42 @@ var CODE_STREAM_ENABLED = true;
       _dragState = null;
     }
 
-    _dom.resizerLeft.addEventListener('pointerdown', function(e) { onPointerDown(e, 'left'); });
-    _dom.resizerRight.addEventListener('pointerdown', function(e) { onPointerDown(e, 'right'); });
-    _dom.resizerContext.addEventListener('pointerdown', function(e) { onPointerDown(e, 'context'); });
+    var onLeftDown = function(e) { onPointerDown(e, 'left'); };
+    var onRightDown = function(e) { onPointerDown(e, 'right'); };
+    var onContextDown = function(e) { onPointerDown(e, 'context'); };
+    _dom.resizerLeft.addEventListener('pointerdown', onLeftDown);
+    _dom.resizerRight.addEventListener('pointerdown', onRightDown);
+    _dom.resizerContext.addEventListener('pointerdown', onContextDown);
     
     // Listen for resize to re-clamp
-    window.addEventListener('resize', function() {
+    var onWindowResize = function() {
       if (_dom.panelCode && _dom.panelCode.offsetParent !== null) {
         applyLayoutToDOM();
       }
-    });
+    };
+    window.addEventListener('resize', onWindowResize);
+    state._resizerCleanup = function () {
+      _dom.resizerLeft && _dom.resizerLeft.removeEventListener('pointerdown', onLeftDown);
+      _dom.resizerRight && _dom.resizerRight.removeEventListener('pointerdown', onRightDown);
+      _dom.resizerContext && _dom.resizerContext.removeEventListener('pointerdown', onContextDown);
+      window.removeEventListener('resize', onWindowResize);
+      if (_dragState) {
+        var dragTarget = _dragState.target;
+        dragTarget && dragTarget.removeEventListener('pointermove', onPointerMove);
+        dragTarget && dragTarget.removeEventListener('pointerup', onPointerUp);
+        dragTarget && dragTarget.removeEventListener('pointercancel', onPointerUp);
+        try {
+          if (dragTarget && dragTarget.releasePointerCapture && _dragState.pointerId !== undefined &&
+              (!dragTarget.hasPointerCapture || dragTarget.hasPointerCapture(_dragState.pointerId))) {
+            dragTarget.releasePointerCapture(_dragState.pointerId);
+          }
+        } catch (_) {}
+        dragTarget && dragTarget.classList.remove('is-resizing');
+        document.body.classList.remove('code-is-resizing', 'code-is-resizing-row');
+        _dragState = null;
+      }
+      state._resizerCleanup = null;
+    };
   }
 
 
@@ -2276,6 +2337,7 @@ var CODE_STREAM_ENABLED = true;
   function renderTextEditor(tab) {
     if (!_dom.editorArea) return;
 
+    var renderId = ++state._editorRenderId;
     disposeMonaco();
 
     var container = document.createElement('div');
@@ -2289,6 +2351,11 @@ var CODE_STREAM_ENABLED = true;
 
     // Try Monaco
     loadMonaco(function (err) {
+      // The tab may have changed while the lazy loader was in flight.  Never
+      // mount a late editor into the current tab's container.
+      if (renderId !== state._editorRenderId || container.parentNode !== _dom.editorArea || state.activePath !== tab.path) {
+        return;
+      }
       if (err || !state._monacoLoaded || typeof monaco === 'undefined') {
         // Fallback to textarea
         renderTextareaEditor(tab, container);
@@ -2320,6 +2387,12 @@ var CODE_STREAM_ENABLED = true;
           readOnly: !!state._isReadOnly
         });
 
+        if (renderId !== state._editorRenderId || container.parentNode !== _dom.editorArea || state.activePath !== tab.path) {
+          try { editor.dispose(); } catch (_) {}
+          try { model.dispose(); } catch (_) {}
+          return;
+        }
+
         state._monacoEditor = editor;
 
         if (!state._themeObserver) {
@@ -2346,6 +2419,7 @@ var CODE_STREAM_ENABLED = true;
           saveFile(tab.path);
         });
       } catch (e) {
+        if (renderId !== state._editorRenderId || container.parentNode !== _dom.editorArea || state.activePath !== tab.path) return;
         renderTextareaEditor(tab, container);
       }
     });
@@ -2872,7 +2946,9 @@ var CODE_STREAM_ENABLED = true;
     }, Promise.resolve());
   }
 
-  function buildProjectIndex() {
+  function buildProjectIndex(options) {
+    options = options || {};
+    var force = options.force === true;
     var fs = window.__xtjCodeFS;
     if (!fs || (!fs.listAllFilesWithMetadata && !fs.listAllFiles)) {
       var noFsCtx = createBuildContext(getWorkspaceId(), state.workspaceGeneration, new AbortController());
@@ -2883,9 +2959,15 @@ var CODE_STREAM_ENABLED = true;
       return Promise.resolve(state.projectIndexStatus);
     }
 
-    // Cancel any in-flight build before starting a new one
-    abortController(state._indexController);
-    if (state._indexBuildPromise) {
+    // Calls from status checks and automatic retries share the in-flight build.
+    // Only an explicit refresh is allowed to cancel and replace it.
+    if (state._indexBuildPromise && !force) {
+      return state._indexBuildPromise;
+    }
+    if (force) {
+      abortController(state._indexController);
+    }
+    if (state._indexBuildPromise && force) {
       state._indexBuildKey = '';
       state._indexBuildPromise = null;
     }
@@ -3398,7 +3480,7 @@ var CODE_STREAM_ENABLED = true;
       refreshBtn.addEventListener('click', function () {
         // Phase 2: Let buildProjectIndex() cancel old task and create new one.
         // Never set projectIndexStatus to null while async tasks are pending.
-        buildProjectIndex();
+        buildProjectIndex({ force: true });
       });
     }
     var switchBtn = document.getElementById('codeSwitchWorkspace');
@@ -3411,7 +3493,7 @@ var CODE_STREAM_ENABLED = true;
     if (retryBtn) {
       retryBtn.addEventListener('click', function () {
         // Phase 2: Let buildProjectIndex() cancel old task and create new one.
-        buildProjectIndex();
+        buildProjectIndex({ force: true });
       });
     }
   }
@@ -4128,6 +4210,13 @@ var CODE_STREAM_ENABLED = true;
           relevantPaths.add(tab.path);
         }
       });
+    } else {
+      // Callers that are preparing a context without a message (restore,
+      // tests, and integrations) need every open document settled; otherwise
+      // a failed extraction could be silently ignored.
+      state.openTabs.forEach(function(tab) {
+        if (tab.type === 'document' && tab.path) relevantPaths.add(tab.path);
+      });
     }
 
     // Only wait for relevant documents that are still extracting
@@ -4153,7 +4242,7 @@ var CODE_STREAM_ENABLED = true;
           var isCurrent = (tab.path === state.activePath);
           var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
           var isAttachment = state.attachments.some(function(a) { return a.path === tab.path; });
-          if (isCurrent || isPinned || isAttachment) {
+          if (!message || isCurrent || isPinned || isAttachment) {
             throw new Error('文档提取失败：' + tab._extractError);
           }
         }
@@ -4222,7 +4311,9 @@ var CODE_STREAM_ENABLED = true;
     ctx._finalized = true;
     if (ctx.watchdogTimer !== undefined) { clearTimeout(ctx.watchdogTimer); ctx.watchdogTimer = undefined; }
     if (ctx.timeoutTimer !== undefined) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = undefined; }
-    if (ctx.abortController && !ctx.cancelled) { try { ctx.abortController.abort(); } catch(_) {} }
+    // Always abort the request owned by this context.  `cancelled` is a
+    // reason flag, not permission to leave the underlying fetch alive.
+    if (ctx.abortController) { try { ctx.abortController.abort(); } catch(_) {} }
     if (ctx.sharedCtrl && ctx.sharedCtrl.isActive) {
       try {
         if (options.done) ctx.sharedCtrl.done();
@@ -4424,11 +4515,23 @@ var CODE_STREAM_ENABLED = true;
 
   function cancelCurrentRequest() {
     var ctx = state.activeRequest;
-    if (!ctx) return false;
-    state._requestId++;
+    if (!ctx) {
+      // Defensive compatibility for an older caller that only populated the
+      // shared controller.  New requests always use the context path above.
+      if (!state.sending || !state._abortController) return false;
+      try { state._abortController.abort(); } catch (_) {}
+      state._requestId++;
+      state.sending = false;
+      state._abortController = null;
+      removeTypingIndicator();
+      updateChatRequestControls();
+      return true;
+    }
     ctx.cancelled = true;
     ctx.cancelReason = 'user_cancelled';
     finalizeRequest(ctx, { cancelReason: 'user_cancelled', done: false });
+    // Invalidate callbacks after finalize has cleared the active request.
+    state._requestId++;
     removeTypingIndicator();
     updateChatRequestControls();
     return true;
@@ -5339,7 +5442,7 @@ var CODE_STREAM_ENABLED = true;
           }
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
           // P0 Fix: 自动重试不再添加第二次用户消息
-          return sendApiRequest(body, requestId, timeStr, wsGen, true);
+          return sendApiRequest(ctx, body, timeStr, true);
         }).catch(function (rebuildError) {
           if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
           removeTypingIndicator();

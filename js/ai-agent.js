@@ -97,7 +97,9 @@ window.throttleRAF = function(fn) {
     _configRefreshTimer: null,
     historyRequestId: 0,
     conversationRequestId: 0,
-    lifecycleId: 0
+    lifecycleId: 0,
+    lastSendFingerprint: '',
+    lastSendAt: 0
   };
 
   function getAiStatusText() {
@@ -194,6 +196,22 @@ window.throttleRAF = function(fn) {
   function escapeAttr(val) {
     if (!val) return '';
     return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Search results are supplied by the server, but are still untrusted data.
+  // Keep navigation on web URLs only; never let a malformed result become a
+  // javascript:, data:, blob:, or relative navigation target.
+  function safeSearchUrl(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    if (!/^https?:\/\//i.test(raw)) return '';
+    try {
+      var parsed = new URL(raw, window.location.origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      return parsed.href;
+    } catch (e) {
+      return '';
+    }
   }
 
   function renderMarkdown(txt) {
@@ -854,8 +872,21 @@ window.throttleRAF = function(fn) {
       var opts = { method: method, headers: headers };
       var requestController = typeof AbortController === 'function' ? new AbortController() : null;
       var requestTimer = null;
+      var externalSignal = options.signal || (options.abortController && options.abortController.signal) || null;
+      var externalAbortHandler = null;
       if (requestController) {
         opts.signal = requestController.signal;
+        if (externalSignal) {
+          externalAbortHandler = function() {
+            try {
+              requestController._abortReason = 'aborted';
+              try { requestController.abort(requestController._abortReason); }
+              catch (eAbortReason) { requestController.abort(); }
+            } catch (eExternalAbort) {}
+          };
+          if (externalSignal.aborted) externalAbortHandler();
+          else if (typeof externalSignal.addEventListener === 'function') externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+        }
         requestTimer = setTimeout(function() {
           try {
             requestController._abortReason = 'timeout';
@@ -889,6 +920,9 @@ window.throttleRAF = function(fn) {
         resp = await fetch(url, opts);
       } finally {
         if (requestTimer) clearTimeout(requestTimer);
+        if (externalSignal && externalAbortHandler && typeof externalSignal.removeEventListener === 'function') {
+          try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (eRemoveAbort) {}
+        }
       }
       var rawText = '';
       try { rawText = await resp.text(); } catch (e2) {}
@@ -1340,9 +1374,10 @@ window.throttleRAF = function(fn) {
           var listEl = el('div', { class: 'ai-search-detail', style: 'display:none;' });
           for (var si = 0; si < msg.search_results.length; si++) {
             var sr = msg.search_results[si] || {};
+            var safeSrUrl = safeSearchUrl(sr.url);
             var item = el('a', {
               class: 'ai-search-detail-item',
-              href: sr.url || '#',
+              href: safeSrUrl || '#',
               target: '_blank',
               rel: 'noopener noreferrer'
             });
@@ -2804,7 +2839,8 @@ window.throttleRAF = function(fn) {
         searchBox.className = 'ai-search-supplement';
         var searchHtml = '研究来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
         searchResults.slice(0, 5).forEach(function(sr, si) {
-          if (sr.url) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title || sr.url) + '</a><br>';
+          var safeSrUrl = safeSearchUrl(sr.url);
+          if (safeSrUrl) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title || safeSrUrl) + '</a><br>';
         });
         if (searchResults.length > 5) searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
         searchBox.innerHTML = searchHtml;
@@ -3024,6 +3060,7 @@ window.throttleRAF = function(fn) {
           if (!aiNodeRef.value) ensureThinkCardNode();
           if (!aiContentRef.value || !String(aiContentRef.value).trim()) aiContentRef.value = 'AI 只返回了思考过程，没有生成正文回复。';
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+          if (typeof opts.onSuccess === 'function') { try { opts.onSuccess(evt); } catch (eSuccess) {} }
           if (doneReceivedRef) doneReceivedRef.value = true;
           if (evtHandledRef) evtHandledRef.value = true;
           try { clearInterval(_idleCheckTimer); } catch (e) {}
@@ -3482,6 +3519,12 @@ window.throttleRAF = function(fn) {
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
 
+    // A reopened panel belongs to a new lifecycle.  This prevents a late
+    // history/SSE callback from writing into the next session's DOM.
+    panel._dtClosed = false;
+    S.lifecycleId++;
+    var pageLifecycle = S.lifecycleId;
+
     // Enter the research surface immediately; auth and history can complete in the background.
     panel.classList.remove('hidden');
     panel.classList.add('active');
@@ -3489,6 +3532,7 @@ window.throttleRAF = function(fn) {
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
+    if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
 
     // 先从 localStorage 恢复会话 ID锛堝埛鏂伴〉闈㈠悗涔熻兘鎭㈠锛?
     if (!S.dtConversationId) {
@@ -3504,6 +3548,7 @@ window.throttleRAF = function(fn) {
       msgs.appendChild(loadHint);
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
+        if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
           S.dtConversationId = null;
@@ -3539,6 +3584,7 @@ window.throttleRAF = function(fn) {
       resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
+        if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.dtConversationId = r.data.conversation_id;
           saveDtConvId();
@@ -3574,6 +3620,33 @@ window.throttleRAF = function(fn) {
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
     try {
+      // Invalidate every callback first, then abort the actual network
+      // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
+      S.lifecycleId++;
+      S.clientRequestId++;
+      S._currentReqId = null;
+      if (S.abortController) {
+        try {
+          S.abortController._abortReason = 'aborted';
+          try { S.abortController.abort('aborted'); } catch (eAbortReason) { S.abortController.abort(); }
+        } catch (eAbort) {}
+      }
+      if (S.deepThinkJob && S.deepThinkJob !== S.abortController) {
+        try {
+          S.deepThinkJob._abortReason = 'aborted';
+          try { S.deepThinkJob.abort('aborted'); } catch (eJobAbortReason) { S.deepThinkJob.abort(); }
+        } catch (eJobAbort) {}
+      }
+      S.abortController = null;
+      S.deepThinkJob = null;
+      S.sending = false;
+      // A file selected in the research composer is session-scoped.  Never
+      // carry it into a later conversation after the page is closed.
+      _dtFileData = null;
+      var closedFileInput = document.getElementById('dtFileInp');
+      if (closedFileInput) closedFileInput.value = '';
+      var closedFilePreview = document.getElementById('dtFilePreview');
+      if (closedFilePreview) { closedFilePreview.style.display = 'none'; closedFilePreview.innerHTML = ''; }
       resetResearchCardDisclosure(document.getElementById('dtMessages'));
       if (panel) {
         panel.classList.add('hidden');
@@ -3593,6 +3666,11 @@ window.throttleRAF = function(fn) {
   // 鏂囦欢涓婁紶鐘舵€?(dt 页面)
   var _dtFileData = null;
 
+  function consumeAiAttachment(fileData) {
+    if (!fileData || typeof fileData.onSuccess !== 'function') return;
+    try { fileData.onSuccess(); } catch (e) {}
+  }
+
   async function handleDeepThinkPageSend(text, fileData) {
     var dtMessagesEl = document.getElementById('dtMessages');
     var input = document.getElementById('dtInput');
@@ -3600,6 +3678,7 @@ window.throttleRAF = function(fn) {
 
     var originalUserText = text || '';
     var displayText = text;
+    var attachmentPayload = null;
 
     // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
     if (fileData) {
@@ -3617,6 +3696,7 @@ window.throttleRAF = function(fn) {
         ? '[图片: ' + safeName + ' · ' + sizeKB2 + 'KB]'
         : '[文件: ' + safeName + ' · ' + sizeKB2 + 'KB]';
       text = text ? text + '\n' + serverTag2 : serverTag2;
+      attachmentPayload = [{ name: safeName, type: fileData.type || 'application/octet-stream', data_url: fileData.dataUrl }];
     }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); S.sending = false; return; }
 
@@ -3635,11 +3715,15 @@ window.throttleRAF = function(fn) {
       return;
     }
     S._lastDtDedupKey = dedupKey;
+    var hadActiveRequest = S.sending;
+    // Lock before awaiting auth so a rapid double click cannot launch a pair
+    // of deep-research jobs.
+    S.sending = true;
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
 
-    if (S.sending) {
+    if (hadActiveRequest) {
       if (S.deepThinkJob) {
         try { S.deepThinkJob.abort(); } catch (e) {}
       }
@@ -3713,7 +3797,10 @@ window.throttleRAF = function(fn) {
       client_request_id: reqId,
       deep_think: true,
       chat_mode: 'deep_think',
-      thinking_mode: S.deepThinkEffort || 'max'
+      thinking_mode: S.deepThinkEffort || 'max',
+      // Omit the field for ordinary messages so the server's response cache
+      // remains eligible; an empty attachments array is truthy in JS.
+      attachments: attachmentPayload || undefined
     });
 
     var aborted = false;
@@ -3957,6 +4044,7 @@ window.throttleRAF = function(fn) {
           });
         },
         onErrorNoContent: function() { removeLastDtUserMessage(); restoreInputText(); },
+        onSuccess: function() { consumeAiAttachment(fileData); },
         onResetSending: resetSendingIfCurrent
       });
       if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
@@ -4049,9 +4137,14 @@ window.throttleRAF = function(fn) {
       if (!text && !fData) return;
       var totalLen = text.length + (fData ? (fData.type.startsWith('image/') ? 0 : fData.dataUrl.length) : 0);
       if (totalLen > 50000) { notify('消息过长，最多 50000 字符'); return; }
-      _dtFileData = null;
-      if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
-      if (fileInput) fileInput.value = '';
+      if (fData) {
+        fData.onSuccess = function() {
+          if (_dtFileData !== fData) return;
+          _dtFileData = null;
+          if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+          if (fileInput) fileInput.value = '';
+        };
+      }
       handleDeepThinkPageSend(text, fData);
     }
 
@@ -4100,6 +4193,11 @@ window.throttleRAF = function(fn) {
       if (S.sending) return;
       newBtn.disabled = true;
       try {
+        // A new research conversation must not inherit a pending attachment
+        // from the previous one.
+        _dtFileData = null;
+        if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+        if (fileInput) fileInput.value = '';
         resetResearchCardDisclosure(document.getElementById('dtMessages'));
         resetDeepThinkPageEmpty();
         var r = await apiRequest('POST', '/chat/new', null);
@@ -4483,8 +4581,20 @@ window.throttleRAF = function(fn) {
 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
+    var originalUserText = text;
+    var sendFingerprint = originalUserText + '\u0000' + (fileData ? String(fileData.name || '') + ':' + String(fileData.dataUrl || '').length : '');
+    if (S.sending && S.lastSendFingerprint === sendFingerprint && Date.now() - S.lastSendAt < 1500) {
+      try { notify('已发送，请勿重复点击'); } catch (eDuplicate) {}
+      return;
+    }
+    S.lastSendFingerprint = sendFingerprint;
+    S.lastSendAt = Date.now();
+    // Lock synchronously before the first await (auth/token acquisition), so
+    // two clicks in the same event loop cannot create two streams.
+    S.sending = true;
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息: ' + text.slice(0, 30)); } catch(e) {}
     var displayText = text;
+    var attachmentPayload = null;
     // 濡傛灉鏈夋枃浠? 鍖哄垎: UI 鏄剧ず鐢ㄥ畬鏁?data URL 鎴栨枃浠跺崰浣嶏紝鍙戦€佺粰鏈嶅姟鍣ㄧ敤绠€鐭爣璁?
     if (fileData) {
       var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
@@ -4502,6 +4612,7 @@ window.throttleRAF = function(fn) {
         ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]'
         : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]';
       text = text ? text + '\n' + serverTag : serverTag;
+      attachmentPayload = [{ name: safeName, type: fileData.type || 'application/octet-stream', data_url: fileData.dataUrl }];
     }
     if (!text) { S.sending = false; return; }
     if (text.length > 50000) {
@@ -4535,7 +4646,7 @@ window.throttleRAF = function(fn) {
       }
     }
 
-    var originalText = text;
+    var originalText = originalUserText;
     function restoreInputText() {
       input.value = originalText;
       input.style.height = 'auto';
@@ -4622,7 +4733,8 @@ window.throttleRAF = function(fn) {
       message: text,
       conversation_id: S.conversationId,
       client_request_id: reqId,
-      thinking_mode: S.thinkingMode || 'max'
+      thinking_mode: S.thinkingMode || 'max',
+      attachments: attachmentPayload || undefined
     });
     
     try {
@@ -5281,13 +5393,16 @@ window.throttleRAF = function(fn) {
             var streamComplete = evt.complete === true;
             var streamSaved = evt.saved === true;
             
-            if (!_sanitizedRendered && aiContent) {
+            if (aiContent) {
               ensureAssistantBubbleReady();
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
-            } else if (!_sanitizedRendered && aiReasoning) {
+            } else if (aiReasoning) {
               if (!assistantNode) ensureReasoningNode();
               finishAiMessage(assistantNode, '', aiReasoning, evt);
             }
+            // Attachments are single-use: remove the preview only after a
+            // successful terminal event; errors and aborts remain retryable.
+            consumeAiAttachment(fileData);
             
             // 涓柇/鏈繚瀛樻彁绀?
             if (streamInterrupted && aiContent) {
@@ -5770,6 +5885,10 @@ function showChatMessages() {
       if (S.sending) return;
       newBtn.disabled = true;
       try {
+        // Pending attachments belong to the current conversation only.
+        _aiChatFileData = null;
+        if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+        if (fileInput) fileInput.value = '';
         var r = await apiRequest('POST', '/chat/new', null);
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.conversationId = r.data.conversation_id;
@@ -5872,10 +5991,15 @@ function showChatMessages() {
       var text = String(input.value || '').trim();
       if (!text && !_aiChatFileData) return;
       var fileData = _aiChatFileData;
-      _aiChatFileData = null;
-      filePreview.style.display = 'none';
-      filePreview.innerHTML = '';
-      fileInput.value = '';
+      if (fileData) {
+        fileData.onSuccess = function() {
+          if (_aiChatFileData !== fileData) return;
+          _aiChatFileData = null;
+          filePreview.style.display = 'none';
+          filePreview.innerHTML = '';
+          fileInput.value = '';
+        };
+      }
       handleSendMessage(input, sendBtn, messagesEl, fileData);
     }
 
