@@ -32,7 +32,6 @@ function createSSEWriter(res, req) {
   }
   if (req && req.on) {
     req.on('aborted', markClosed);
-    req.on('close', markClosed);
   }
 
   function write(data) {
