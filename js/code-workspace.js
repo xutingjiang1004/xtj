@@ -75,9 +75,7 @@
   var ATTACHMENT_ACCEPT = '.docx,.pdf,.xlsx,.xls,.pptx,.txt,.csv,.md,.markdown,.json';
 
   // Phase 2: Feature flag for streaming Code agent
-  var CODE_STREAM_ENABLED = (function () {
-    try { return localStorage.getItem('CODE_STREAM_ENABLED') === '1'; } catch (e) { return false; }
-  })();
+var CODE_STREAM_ENABLED = true;
 
   // Phase 3: Feature flag for stream resume
   var CODE_STREAM_RESUME_ENABLED = (function () {
@@ -648,10 +646,9 @@
         return false; // Signal cancellation to caller
       }
     }
-    // Cancel any in-flight request
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (e) { /* ignore */ }
-      state._abortController = null;
+    // Cancel any in-flight request via activeRequest context
+    if (state.activeRequest) {
+      finalizeRequest(state.activeRequest, { cancelReason: 'cleanup', done: false });
     }
     abortController(state._attachmentController);
     abortController(state._githubController);
@@ -4197,8 +4194,64 @@
     };
   }
 
+  var _sendingWatchdog = null;
+  function clearSendingWatchdog() {
+    if (_sendingWatchdog) { clearTimeout(_sendingWatchdog); _sendingWatchdog = null; }
+  }
+  function resetSendingState() {
+    state.sending = false;
+    state._abortController = null;
+    updateChatRequestControls();
+  }
+
+  // ── Request Context Pattern ──
+  // Every async request creates an immutable requestContext that captures all
+  // resources (AbortController, sharedCtrl, telemetry, watchdog, etc.).
+  // Async callbacks close over THEIR OWN context, not over state.xxx.
+  // Before any mutation, call isCurrentRequest(ctx) to verify this context is
+  // still the active request. Stale callbacks clean up only their OWN resources
+  // and never touch state that belongs to a newer request.
+  function isCurrentRequest(ctx) {
+    return ctx && state.activeRequest === ctx && ctx.requestId === state._requestId;
+  }
+  function finalizeRequest(ctx, options) {
+    if (!ctx) return;
+    options = options || {};
+    // Always clean up own resources (idempotent via _finalized flag)
+    if (ctx._finalized) return;
+    ctx._finalized = true;
+    if (ctx.watchdogTimer !== undefined) { clearTimeout(ctx.watchdogTimer); ctx.watchdogTimer = undefined; }
+    if (ctx.timeoutTimer !== undefined) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = undefined; }
+    if (ctx.abortController && !ctx.cancelled) { try { ctx.abortController.abort(); } catch(_) {} }
+    if (ctx.sharedCtrl && ctx.sharedCtrl.isActive) {
+      try {
+        if (options.done) ctx.sharedCtrl.done();
+        else ctx.sharedCtrl.cancel(options.cancelReason || 'finalized');
+      } catch(_) {}
+    }
+    if (ctx.unregisterKey && window.XtjAiCore && window.XtjAiCore.RequestController) {
+      try { window.XtjAiCore.RequestController.unregisterInFlight(ctx.unregisterKey); } catch(_) {}
+    }
+    if (ctx.telemetry) {
+      try { ctx.telemetry.finalize('done'); } catch(_) {}
+    }
+    // Only modify state if this context is still the active request
+    if (isCurrentRequest(ctx)) {
+      state.sending = false;
+      state.activeRequest = null;
+      state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      updateChatRequestControls();
+      removeTypingIndicator();
+    }
+  }
+
   function sendMessage() {
-    if (state.sending) return;
+    if (state.sending) {
+      console.log('[code-workspace] sendMessage blocked: state.sending is true');
+      return;
+    }
 
     var input = document.getElementById('codeChatInput');
     if (!input) return;
@@ -4209,33 +4262,57 @@
     // P0: 保存当前 workspace generation 用于隔离
     var wsGen = state.workspaceGeneration;
 
-    // P0 Fix: 不完全禁用输入框，用户可以输入下一条草稿
-    state.sending = true;
-    // 不禁用输入框，只切换按钮
-    updateChatRequestControls();
-
-    // Cancel previous request
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (e) { /* ignore */ }
-    }
-    state._abortController = new AbortController();
+    // Create request context BEFORE any async work
     var requestId = ++state._requestId;
-
-    // Phase 1: Shared request controller + telemetry (feature-flagged)
+    var abortCtrl = new AbortController();
+    var clientRequestId = 'code_cr_' + requestId + '_' + Date.now();
+    var ctx = {
+      requestId: requestId,
+      workspaceGeneration: wsGen,
+      clientRequestId: clientRequestId,
+      abortController: abortCtrl,
+      sharedCtrl: null,
+      telemetry: null,
+      unregisterKey: 'code_ai_' + requestId,
+      watchdogTimer: null,
+      timeoutTimer: undefined,
+      streamId: null,
+      cancelled: false,
+      cancelReason: '',
+      _finalized: false
+    };
+    // Register as active request
+    state.sending = true;
+    state.activeRequest = ctx;
+    state._abortController = abortCtrl;
     state._sharedCtrl = null;
     state._telemetry = null;
+    updateChatRequestControls();
+
+    // Watchdog: 120s timeout for stuck sending
+    clearSendingWatchdog();
+    _sendingWatchdog = setTimeout(function() {
+      if (state.sending && isCurrentRequest(ctx)) {
+        console.warn('[code-workspace] Watchdog: state.sending stuck true, resetting');
+        finalizeRequest(ctx, { cancelReason: 'watchdog', done: false });
+      }
+      _sendingWatchdog = null;
+    }, 120000);
+    ctx.watchdogTimer = _sendingWatchdog;
+
+    // Shared request controller + telemetry (feature-flagged)
     if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
-      state._sharedCtrl = window.XtjAiCore.RequestController.create({
+      ctx.sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: 'code_req_' + requestId,
-        clientRequestId: 'code_cr_' + requestId + '_' + Date.now(),
+        clientRequestId: clientRequestId,
         timeoutMs: 120000,
         workspaceGeneration: wsGen
       });
-      state._sharedCtrl.start();
-      window.XtjAiCore.RequestController.registerInFlight('code_ai', state._sharedCtrl);
+      ctx.sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight(ctx.unregisterKey, ctx.sharedCtrl);
       if (window.XtjAiCore.Telemetry) {
-        state._telemetry = window.XtjAiCore.Telemetry.create();
-        state._telemetry.start('code_req_' + requestId, 'code_cr_' + requestId);
+        ctx.telemetry = window.XtjAiCore.Telemetry.create();
+        ctx.telemetry.start('code_req_' + requestId, clientRequestId);
       }
     }
 
@@ -4286,9 +4363,9 @@
       var body = buildChatRequestBody(message, historyMsgs);
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
-        return sendStreamingRequest(body, requestId, timeStr, wsGen);
+        return sendStreamingRequest(ctx, body, timeStr);
       }
-      return sendApiRequest(body, requestId, timeStr, wsGen);
+      return sendApiRequest(ctx, body, timeStr);
     }).catch(function (err) {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
       if (err && err.name === 'AbortError') {
@@ -4346,20 +4423,13 @@
   }
 
   function cancelCurrentRequest() {
-    if (!state.sending || !state._abortController) return false;
+    var ctx = state.activeRequest;
+    if (!ctx) return false;
     state._requestId++;
-    // Phase 1: Cancel shared controller
-    if (state._sharedCtrl && state._sharedCtrl.isActive()) {
-      try { state._sharedCtrl.cancel('user_cancelled'); } catch (e) {}
-      if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: '用户取消' }); }
-    }
-    try { state._abortController.abort(); } catch (e) { /* ignore */ }
-    state._abortController = null;
-    state._sharedCtrl = null;
-    state._telemetry = null;
-    state.sending = false;
+    ctx.cancelled = true;
+    ctx.cancelReason = 'user_cancelled';
+    finalizeRequest(ctx, { cancelReason: 'user_cancelled', done: false });
     removeTypingIndicator();
-    // P0 Fix: 用户主动取消不恢复消息到输入框
     updateChatRequestControls();
     return true;
   }
@@ -4384,7 +4454,9 @@
   }
 
   // ── Phase 2: Streaming SSE request handler ──────────────────────────────
-  function sendStreamingRequest(body, requestId, timeStr, wsGen) {
+  function sendStreamingRequest(ctx, body, timeStr) {
+    var requestId = ctx.requestId;
+    var wsGen = ctx.workspaceGeneration;
     var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
     var controller = state._abortController;
     var timeoutId;
@@ -4691,6 +4763,12 @@
           try { json = JSON.parse(text); } catch (e) {}
           var errMsg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
           var errCode = (json && json.code) ? json.code : '';
+          // Auto-fallback to non-streaming if streaming is not available
+          if (resp.status === 503 && errCode === 'STREAM_DISABLED') {
+            console.log('[code-workspace] Streaming not available, falling back to standard API');
+            cleanupStream();
+            return sendApiRequest(ctx, body, timeStr);
+          }
           showError(errCode, errMsg, json && json.retryable);
           state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
           finalizeRequestState();
@@ -4701,12 +4779,52 @@
       var reader = resp.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
+      var currentSseEventType = '';
+      var currentSseData = [];
+
+      function isStreamStale() { return requestId !== state._requestId || wsGen !== state.workspaceGeneration; }
+
+      function dispatchSseEvent() {
+        if (currentSseData.length === 0) return;
+        var raw = currentSseData.join('\n');
+        currentSseData = [];
+        currentSseEventType = '';
+        try {
+          var event = JSON.parse(raw);
+          if (event && event.type) handleSSEEvent(event);
+        } catch (e) {
+          console.warn('[code-workspace] SSE parse error (requestId=' + requestId + '):', raw.slice(0, 80));
+        }
+      }
+
+      function processSseLine(line) {
+        // Comment lines (starting with :) - skip
+        if (line.charAt(0) === ':') return;
+        // Empty line - dispatch accumulated event
+        if (line === '') { dispatchSseEvent(); return; }
+        // Field: value parsing
+        var colonIdx = line.indexOf(':');
+        var field, value;
+        if (colonIdx >= 0) {
+          field = line.substring(0, colonIdx);
+          value = line.substring(colonIdx + 1);
+          if (value.charAt(0) === ' ') value = value.substring(1); // Strip optional leading space
+        } else {
+          field = line;
+          value = '';
+        }
+        if (field === 'event') { currentSseEventType = value; }
+        else if (field === 'data') { currentSseData.push(value); }
+        // 'id' and 'retry' fields are not used by this application
+      }
 
       function readStream() {
-        if (streamCancelled) return;
+        if (streamCancelled || isStreamStale()) return;
         reader.read().then(function (result) {
           if (result.done) {
-            // Stream ended
+            // Process any remaining data
+            if (buffer.trim()) { var remaining = buffer.trim().split('\n'); for (var ri = 0; ri < remaining.length; ri++) processSseLine(remaining[ri].replace(/\r$/, '')); }
+            dispatchSseEvent();
             if (!streamDone) {
               finalizeNode();
               state.messages.push({
@@ -4726,18 +4844,12 @@
           }
 
           buffer += decoder.decode(result.value, { stream: true });
+          // Handle both \r\n and \n line endings
           var lines = buffer.split('\n');
-          buffer = lines.pop(); // Keep incomplete line
-
+          // Keep incomplete chunk in buffer
+          buffer = lines.pop() || '';
           for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (!line || !line.startsWith('data: ')) continue;
-            var jsonStr = line.slice(6);
-            var event;
-            try { event = JSON.parse(jsonStr); } catch (e) { continue; }
-            if (!event || !event.type) continue;
-
-            handleSSEEvent(event);
+            processSseLine(lines[i].replace(/\r$/, ''));
           }
 
           readStream();
@@ -4931,6 +5043,13 @@
 
     function finalizeRequestState() {
       clearTimeout(timeoutId);
+      // Stale guard: if request is no longer current, clean only local resources
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        if (state._sharedCtrl) {
+          try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
+        }
+        return;
+      }
       if (state._sharedCtrl && state._sharedCtrl.isActive()) {
         try { state._sharedCtrl.done(); } catch (e) {}
         if (state._telemetry) {
@@ -4939,10 +5058,11 @@
         }
       }
       if (state._sharedCtrl) {
-        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
         state._sharedCtrl = null;
       }
       state._telemetry = null;
+      clearSendingWatchdog();
       state.sending = false;
       state._abortController = null;
       var inp = document.getElementById('codeChatInput');
@@ -5059,14 +5179,16 @@
     }
   }
 
-  function sendApiRequest(body, requestId, timeStr, wsGen, indexRetry) {
+  function sendApiRequest(ctx, body, timeStr, indexRetry) {
+    var requestId = ctx.requestId;
+    var wsGen = ctx.workspaceGeneration;
     var sendBtn = document.getElementById('codeChatSendBtn');
     var input = document.getElementById('codeChatInput');
 
-    var signal = state._sharedCtrl ? state._sharedCtrl.signal : (state._abortController ? state._abortController.signal : undefined);
+    var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : (ctx.abortController ? ctx.abortController.signal : undefined);
 
     // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
-    var controller = state._abortController;
+    var controller = ctx.abortController;
     var timeoutId;
     var timeoutPromise = new Promise(function (_, reject) {
       timeoutId = setTimeout(function () {
@@ -5311,14 +5433,20 @@
     }).then(function () {
       // P0: finally — 统一恢复 UI 状态
       clearTimeout(timeoutId);
-      // Phase 1: Cleanup shared controller
+      // Guard: if request is stale, only clean local resources, not state
+      var isStale = (requestId !== state._requestId || wsGen !== state.workspaceGeneration);
+      if (isStale) {
+        // Stale request: only clean up the captured controller, not state._sharedCtrl
+        return;
+      }
+      // Phase 1: Cleanup shared controller (only when request is current)
+      var sharedCtrlKey = 'code_ai_' + requestId;
       if (state._sharedCtrl) {
-        window.XtjAiCore.RequestController.unregisterInFlight('code_ai');
+        try { window.XtjAiCore.RequestController.unregisterInFlight(sharedCtrlKey); } catch(e) {}
         state._sharedCtrl = null;
       }
       state._telemetry = null;
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
+      clearSendingWatchdog();
       state.sending = false;
       state._abortController = null;
       // P0 Fix: 不重新禁用输入框
@@ -5484,7 +5612,7 @@
         docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
           escapeHTML(docType + ' 修改') + '</div>' +
           '<div style="margin-bottom:6px;">' +
-          '  将另存为: <strong>' + escapeHTML(op.path.replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
+          '  将另存为: <strong>' + escapeHTML((op.path || '').replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
           '</div>';
 
         if (op.document_operations && op.document_operations.length > 0) {
@@ -5651,7 +5779,8 @@
           });
         }
         
-        var newMimeType = resp.headers.get('Content-Type') || '';
+        var rawMime = resp.headers.get('Content-Type') || '';
+        var newMimeType = rawMime.split(';')[0].trim().toLowerCase();
         var disposition = resp.headers.get('Content-Disposition') || '';
         
         // Extract filename from disposition if present
