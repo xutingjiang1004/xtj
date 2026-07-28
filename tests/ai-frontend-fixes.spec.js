@@ -35,3 +35,11 @@ test('markdown code blocks are restored after HTML escaping', () => {
   assert.match(aiAgent, /%%%CODEBLOCK\(\\d\+\)%%%/);
   assert.match(aiAgent, /codeBlocks\[parseInt\(idx\)\]/);
 });
+
+test('markdown tables render as safe table markup', () => {
+  const renderMarkdown = aiAgent.match(/function renderMarkdown[\s\S]*?(?=\n  function|\nfunction)/);
+  assert.ok(renderMarkdown);
+  assert.match(renderMarkdown[0], /<table><thead><tr>/);
+  assert.match(renderMarkdown[0], /separator = \/\^\\\|\?/);
+  assert.match(renderMarkdown[0], /<tbody>/);
+});
