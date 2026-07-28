@@ -260,6 +260,28 @@ window.throttleRAF = function(fn) {
     s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // Markdown tables: convert only blocks with a real separator row. The
+    // text has already been HTML-escaped above, so cell contents are safe to
+    // place in the generated table markup.
+    s = s.replace(/(?:^|\n)((?:\s*\|?[^\n]*\|[^\n]*(?:\n|$)){2,})/g, function (whole, block) {
+      var lines = block.trim().split(/\n/).map(function (line) { return line.trim(); });
+      if (lines.length < 2) return whole;
+      var separator = /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/;
+      if (!separator.test(lines[1])) return whole;
+      function cells(line) {
+        var value = line.replace(/^\|\s*/, '').replace(/\s*\|$/, '');
+        return value.split('|').map(function (cell) { return cell.trim(); });
+      }
+      var header = cells(lines[0]);
+      var rows = lines.slice(2).map(cells);
+      var html = '<table><thead><tr>' + header.map(function (cell) { return '<th>' + cell + '</th>'; }).join('') + '</tr></thead>';
+      if (rows.length) {
+        html += '<tbody>' + rows.map(function (row) {
+          return '<tr>' + header.map(function (_, index) { return '<td>' + (row[index] || '') + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody>';
+      }
+      return (whole.charAt(0) === '\n' ? '\n' : '') + html;
+    });
     s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
     s = s.replace(/(<li class="ul-item">.*<\/li>\n?)+/g, function(m) {
       return '<ul>' + m.replace(/ class="ul-item"/g, '') + '</ul>';
