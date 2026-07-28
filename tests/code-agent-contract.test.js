@@ -50,7 +50,7 @@ test('server.js requires and registers code-agent', () => {
 
 test('Code Agent JSON payload has a scoped large-body parser', () => {
   const codeParser = server.indexOf("app.use('/api/code', express.json({ limit: '64mb' }));");
-  const defaultParser = server.indexOf("app.use(express.json({ limit: '5mb' }));");
+  const defaultParser = server.indexOf("app.use(express.json({ limit: '12mb' }));");
   assert.ok(codeParser >= 0, 'missing /api/code JSON parser');
   assert.ok(defaultParser > codeParser, 'default parser must remain after scoped Code parser');
 });
