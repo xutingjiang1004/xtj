@@ -137,19 +137,26 @@ test('Code agent document API test suite', async (t) => {
     assert.equal(res.body.ok, false);
   });
 
-  await t.test('Apply DOCX operation should be rejected', async () => {
-    const buffer = Buffer.from('dummy docx');
+  await t.test('Apply DOCX operation succeeds', async () => {
+    // Create a real DOCX with word/document.xml
+    const JSZip = require('jszip');
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    zip.file('word/_rels/document.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
+    zip.file('word/document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello World</w:t></w:r></w:p></w:body></w:document>');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
     const res = await request(app)
       .post('/api/code/document/apply')
       .field('fileName', 'test.docx')
       .field('mimeType', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
       .field('documentType', 'docx')
-      .field('operations', JSON.stringify([{type: 'text_replace', find: 'a', replace: 'b'}]))
+      .field('operations', JSON.stringify([{type: 'replace_text', old_text: 'Hello', new_text: 'Hi'}]))
       .attach('file', buffer, 'test.docx');
 
-    assert.equal(res.status, 400);
-    assert.equal(res.body.ok, false);
-    assert.match(res.body.error, /不支持修改此类型文档/);
+    // DOCX modification is now supported
+    assert.equal(res.status, 200);
+    assert.ok(res.body);
   });
 
   await t.test('Apply XLSX operation', async () => {
