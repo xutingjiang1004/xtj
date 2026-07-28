@@ -138,10 +138,29 @@
     formatUserMessage: function (err) {
       var classified = classifyError(err, {});
       if (classified.code === ERROR_CODES.INDEX_REBUILD_REQUIRED) {
-        return '当前项目内容尚未准备完成，请等待文档解析或刷新索引。';
+        return '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
       }
       if (classified.code && classified.code.indexOf('PROVIDER_') === 0) {
         return 'AI 服务暂时无法处理该请求，请稍后重试。';
+      }
+      // P0: 区分文档相关错误
+      if (classified.code === 'DOCUMENT_NOT_PARSED') {
+        return '文档正在解析中，请等待解析完成后重试。';
+      }
+      if (classified.code === 'NO_WRITE_PERMISSION') {
+        return '没有文件写入权限，请重新授权写入权限后再试。';
+      }
+      if (classified.code === 'FORMAT_NOT_EDITABLE') {
+        return '该文件格式暂不支持修改。PDF 可读取和分析，DOCX/PPTX/XLSX 可修改。';
+      }
+      if (classified.code === 'DOCUMENT_WRITE_FAILED') {
+        return '文档写入失败：' + (classified.message || '未知错误');
+      }
+      if (classified.code === 'SAVE_VERIFICATION_FAILED') {
+        return '保存验证失败，文件可能已损坏，请重试。';
+      }
+      if (classified.code === 'AMBIGUOUS_REQUEST') {
+        return '请明确说明要修改什么内容，例如："将标题改为XXX"或"在第三段后插入XXX"。';
       }
       return classified.message;
     },

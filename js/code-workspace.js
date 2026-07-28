@@ -54,6 +54,7 @@
     _requestId: 0,
     _themeObserver: null,
     _isReadOnly: false,
+    _persistenceFailed: false, // P0-9: 标记 IndexedDB 持久化是否失败
     workspaceGeneration: 0,
     restoreGeneration: 0
   };
@@ -130,12 +131,16 @@
   function idbGet(storeName, key) {
     return openIndexedDB().then(function (db) {
       if (!db) return null;
-      return new Promise(function (resolve) {
+      return new Promise(function (resolve, reject) {
         var tx = db.transaction(storeName, 'readonly');
         var store = tx.objectStore(storeName);
         var req = store.get(key);
         req.onsuccess = function () { resolve(req.result || null); };
-        req.onerror = function () { resolve(null); };
+        req.onerror = function (e) {
+          var err = e.target.error || new Error('IndexedDB get failed');
+          console.warn('[CODE-INDEXEDDB] idbGet error:', storeName, key, err && err.name);
+          reject(err);
+        };
       });
     });
   }
@@ -143,12 +148,21 @@
   function idbPut(storeName, value) {
     return openIndexedDB().then(function (db) {
       if (!db) return;
-      return new Promise(function (resolve) {
+      return new Promise(function (resolve, reject) {
         var tx = db.transaction(storeName, 'readwrite');
         var store = tx.objectStore(storeName);
         store.put(value);
         tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { resolve(); };
+        tx.onerror = function (e) {
+          var err = e.target.error || new Error('IndexedDB put failed');
+          console.warn('[CODE-INDEXEDDB] idbPut error:', storeName, err && err.name);
+          reject(err);
+        };
+        tx.onabort = function (e) {
+          var err = e.target.error || new Error('IndexedDB put aborted');
+          console.warn('[CODE-INDEXEDDB] idbPut abort:', storeName, err && err.name);
+          reject(err);
+        };
       });
     });
   }
@@ -156,12 +170,16 @@
   function idbGetAll(storeName) {
     return openIndexedDB().then(function (db) {
       if (!db) return [];
-      return new Promise(function (resolve) {
+      return new Promise(function (resolve, reject) {
         var tx = db.transaction(storeName, 'readonly');
         var store = tx.objectStore(storeName);
         var req = store.getAll();
         req.onsuccess = function () { resolve(req.result || []); };
-        req.onerror = function () { resolve([]); };
+        req.onerror = function (e) {
+          var err = e.target.error || new Error('IndexedDB getAll failed');
+          console.warn('[CODE-INDEXEDDB] idbGetAll error:', storeName, err && err.name);
+          reject(err);
+        };
       });
     });
   }
@@ -169,12 +187,21 @@
   function idbDelete(storeName, key) {
     return openIndexedDB().then(function (db) {
       if (!db) return;
-      return new Promise(function (resolve) {
+      return new Promise(function (resolve, reject) {
         var tx = db.transaction(storeName, 'readwrite');
         var store = tx.objectStore(storeName);
         store.delete(key);
         tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { resolve(); };
+        tx.onerror = function (e) {
+          var err = e.target.error || new Error('IndexedDB delete failed');
+          console.warn('[CODE-INDEXEDDB] idbDelete error:', storeName, key, err && err.name);
+          reject(err);
+        };
+        tx.onabort = function (e) {
+          var err = e.target.error || new Error('IndexedDB delete aborted');
+          console.warn('[CODE-INDEXEDDB] idbDelete abort:', storeName, key, err && err.name);
+          reject(err);
+        };
       });
     });
   }
@@ -182,12 +209,21 @@
   function idbClear(storeName) {
     return openIndexedDB().then(function (db) {
       if (!db) return;
-      return new Promise(function (resolve) {
+      return new Promise(function (resolve, reject) {
         var tx = db.transaction(storeName, 'readwrite');
         var store = tx.objectStore(storeName);
         store.clear();
         tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { resolve(); };
+        tx.onerror = function (e) {
+          var err = e.target.error || new Error('IndexedDB clear failed');
+          console.warn('[CODE-INDEXEDDB] idbClear error:', storeName, err && err.name);
+          reject(err);
+        };
+        tx.onabort = function (e) {
+          var err = e.target.error || new Error('IndexedDB clear aborted');
+          console.warn('[CODE-INDEXEDDB] idbClear abort:', storeName, err && err.name);
+          reject(err);
+        };
       });
     });
   }
@@ -263,6 +299,10 @@
           sha256: r.lastIndexedSha256 || r.sha256 || ''
         };
       });
+    }).catch(function (err) {
+      // P0-9: IndexedDB 读取失败时降级为会话内索引，不阻塞构建
+      console.warn('[CODE-INDEXEDDB] getStoredManifest failed, falling back to session-only index:', err && err.name);
+      return [];
     });
   }
 
@@ -281,6 +321,45 @@
 
   function getMonacoTheme() {
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs';
+  }
+
+  // P0: 文档格式能力定义 — 拆分文件系统权限与 AI 文档能力
+  function getDocumentFormatCapability(ext) {
+    if (!ext) ext = '';
+    ext = ext.toLowerCase();
+    var cap = { readable: true, analyzable: true, writable: false, savable: false, exportable: false, label: '只读' };
+    if (ext === 'docx') {
+      cap.writable = true;
+      cap.savable = true;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      cap.writable = true;
+      cap.savable = true;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+    } else if (ext === 'pdf') {
+      cap.writable = false;
+      cap.savable = false;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可导出（PDF 原位编辑不支持，可生成新文档）';
+    } else if (ext === 'pptx') {
+      cap.writable = true;
+      cap.savable = true;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+    } else if (ext === 'txt' || ext === 'csv' || ext === 'md' || ext === 'markdown') {
+      cap.writable = true;
+      cap.savable = true;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+    } else if (ext === 'json') {
+      cap.writable = true;
+      cap.savable = true;
+      cap.exportable = true;
+      cap.label = '可读取 · 可分析 · 可修改 · 可保存';
+    }
+    return cap;
   }
 
   function getFileLanguage(fileName) {
@@ -964,6 +1043,7 @@
     state.conversationId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     state.lastFailedMessage = '';
     state._isReadOnly = false;
+    state._persistenceFailed = false;
     // Clear backend index
     try {
       postJson('/api/code/agent/clear_index', getWorkspaceScope(previousWorkspaceId, previousGeneration)).catch(function () {});
@@ -2502,15 +2582,22 @@
         metadata: tab._extractedMetadata,
         ext: tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : ''
       });
+      // P0 Fix: 缓存命中时也要同步更新项目状态面板（修复正文已显示但状态仍为"正在解析"）
+      renderProjectStatus();
+      updateChatRequestControls();
       return;
     }
     
     if (tab._extractError) {
       preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML(tab._extractError) + '</p></div>';
+      // P0 Fix: 解析失败时也要同步更新状态面板
+      renderProjectStatus();
+      updateChatRequestControls();
       return;
     }
 
     if (!tab._extractPromise) {
+      tab._parseReady = false;
       tab._extractPromise = fs.readFileByPath(tab.path).then(function (result) {
         if (!result || result.type !== 'document') {
           throw new Error('无法读取文档文件');
@@ -2521,18 +2608,28 @@
         tab._extractedText = docData.text;
         tab._extractedTruncated = docData.truncated;
         tab._extractedMetadata = docData.metadata;
+        tab._parseReady = true;
+        tab._extractError = null;
         docData.ext = tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : '';
         return docData;
       }).catch(function (err) {
         tab._extractError = err && err.message ? err.message : '文档提取失败';
+        tab._parseReady = false;
         throw err;
       });
     }
 
     tab._extractPromise.then(function (docData) {
       renderDocData(docData);
+      // P0: 文档提取完成后同步更新项目状态面板
+      renderProjectStatus();
+      // 同步更新打开文件按钮状态
+      updateChatRequestControls();
     }).catch(function (err) {
       preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML((err && err.message) || '未知错误') + '</p></div>';
+      // P0: 提取失败也更新状态
+      renderProjectStatus();
+      updateChatRequestControls();
     });
   }
 
@@ -2876,8 +2973,14 @@
                   ctx.builtAt = new Date().toISOString();
                   syncBuildContextToUI(ctx);
                   // Save current manifest to IDB
-                  saveFileManifestToIDB(files).catch(function () {});
-                  saveWorkspaceToIDB(workspaceId).catch(function () {});
+                  saveFileManifestToIDB(files).catch(function (err) {
+                    state._persistenceFailed = true;
+                    console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
+                  });
+                  saveWorkspaceToIDB(workspaceId).catch(function (err) {
+                    state._persistenceFailed = true;
+                    console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
+                  });
                   return {
                     ok: true,
                     totalFiles: files.length,
@@ -2959,7 +3062,10 @@
       if (CODE_PERSISTENT_INDEX_ENABLED && !buildResult.unchanged) {
         // Re-get the files list from the scan result to save to IDB
         // (The files variable is already filtered, so we save from the original scan)
-        saveWorkspaceToIDB(workspaceId).catch(function () {});
+        saveWorkspaceToIDB(workspaceId).catch(function (err) {
+          state._persistenceFailed = true;
+          console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
+        });
       }
 
       return buildResult;
@@ -3018,41 +3124,41 @@
 
     if (isDocWorkspace && docTab) {
       var docStatus = '文档正在打开';
-      if (docTab._extractError) docStatus = '文档解析失败';
-      else if (docTab._extractedText) docStatus = '文档已就绪';
-      else if (docTab._extractPromise) docStatus = '文档正在解析';
+      var docStatusClass = '';
+      if (docTab._extractError) { docStatus = '文档解析失败'; docStatusClass = 'color:var(--cw-error);'; }
+      else if (docTab._parseReady === true && docTab._extractedText) { docStatus = '文档已就绪'; docStatusClass = 'color:var(--cw-success,#10b981);'; }
+      else if (docTab._extractedText) { docStatus = '文档已解析（索引构建中）'; docStatusClass = 'color:var(--cw-accent,#3b82f6);'; }
+      else if (docTab._extractPromise) { docStatus = '文档正在解析'; docStatusClass = ''; }
 
       var charCount = docTab._extractedText ? docTab._extractedText.length : 0;
+      var ext = (docTab.name || '').toLowerCase().split('.').pop();
       var permStr = state._isReadOnly ? '只读' : '可写';
       
-      // AI 文档能力：优先使用服务端运行时能力，否则按扩展名推断
-      var runtime = state.lastRuntime;
-      var ext = (docTab.name || '').toLowerCase().split('.').pop();
-      var aiCapability = '仅支持读取和分析';
-      if (runtime && (typeof runtime.canReadXlsx !== 'undefined' || typeof runtime.canReadDocx !== 'undefined')) {
-        if (['xlsx', 'xls'].includes(ext)) {
-          aiCapability = runtime.canWriteXlsx ? '支持读取和单元格修改' : '仅支持读取和分析';
-        } else if (['docx', 'doc'].includes(ext)) {
-          aiCapability = runtime.canWriteDocx ? '支持读取和编辑' : '仅支持读取和分析，暂不支持修改';
-        } else if (['pdf'].includes(ext)) {
-          aiCapability = runtime.canWritePdf ? '支持读取和编辑' : '仅支持读取和分析，暂不支持修改';
-        } else {
-          aiCapability = '仅支持读取和分析';
-        }
-      } else {
-        if (['xlsx', 'xls'].includes(ext)) {
-          aiCapability = '支持读取和单元格修改';
-        } else if (['docx', 'pdf', 'pptx', 'txt', 'csv', 'md'].includes(ext)) {
-          aiCapability = '仅支持读取和分析，暂不支持修改';
-        }
-      }
+      // 当前格式能力区分
+      var formatCap = getDocumentFormatCapability(ext);
+      var formatCapParts = [];
+      if (formatCap.readable) formatCapParts.push('可读取');
+      if (formatCap.analyzable) formatCapParts.push('可分析');
+      if (formatCap.writable) formatCapParts.push('可修改');
+      else formatCapParts.push('只读');
+      if (formatCap.savable) formatCapParts.push('可保存');
+      if (formatCap.exportable) formatCapParts.push('可导出');
+      var formatCapStr = formatCapParts.join(' · ');
+      
+      // 当前处理阶段
+      var processStage = '等待解析';
+      if (docTab._extractError) processStage = '失败';
+      else if (docTab._parseReady === true) processStage = '已准备';
+      else if (docTab._extractPromise) processStage = '正在解析';
       
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + docStatus + '</div>' +
+        '<div style="' + docStatusClass + 'font-weight:600;margin-bottom:4px;">' + docStatus + '</div>' +
         '<div style="color:var(--cw-text-muted);">' + escapeHTML(docTab.name) + '</div>' +
         (charCount > 0 ? '<div style="color:var(--cw-text-muted);">已解析文本：' + charCount + ' 字符</div>' : '') +
         '<div style="color:var(--cw-text-muted);">文件系统权限：' + permStr + '</div>' +
-        '<div style="color:var(--cw-text-muted);">AI 文档能力：' + aiCapability + '</div>';
+        '<div style="color:var(--cw-text-muted);">格式能力：' + formatCapStr + '</div>' +
+        '<div style="color:var(--cw-text-muted);">处理阶段：' + processStage + '</div>' +
+        (docTab._extractError ? '<div style="color:var(--cw-error);font-size:10px;">错误：' + escapeHTML(docTab._extractError) + '</div>' : '');
     } else if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
       var idx = state.projectIndexStatus;
       var statusLabel = (idx.recovered || state.projectIndexStatus.recovered) ? '索引已恢复' : '项目已索引';
@@ -4397,8 +4503,33 @@
         errorEl.style.display = '';
         
         var friendlyMessage = message || '请求失败';
+        // P0 Fix: 区分不同错误类型，提供具体说明和操作建议
         if (code === 'INDEX_REBUILD_REQUIRED') {
-          friendlyMessage = '当前项目内容尚未准备完成，请等待文档解析或刷新索引。';
+          friendlyMessage = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
+        } else if (code === 'DOCUMENT_NOT_PARSED') {
+          friendlyMessage = '文档正在解析中，请等待解析完成后重试。';
+        } else if (code === 'NO_WRITE_PERMISSION') {
+          friendlyMessage = '没有文件写入权限，请重新授权写入权限后再试。';
+        } else if (code === 'FORMAT_NOT_EDITABLE') {
+          friendlyMessage = '该文件格式暂不支持修改。PDF 可读取和分析，DOCX/PPTX/XLSX 可修改。';
+        } else if (code === 'PROVIDER_TIMEOUT') {
+          friendlyMessage = 'AI 请求超时，请重试或简化问题。';
+        } else if (code === 'PROVIDER_HTTP_401') {
+          friendlyMessage = 'API 密钥无效，请检查 AI 服务配置。';
+        } else if (code === 'PROVIDER_HTTP_403') {
+          friendlyMessage = 'API 访问被拒绝，请检查权限配置。';
+        } else if (code === 'PROVIDER_HTTP_429') {
+          friendlyMessage = '请求过于频繁，请稍后重试。';
+        } else if (code === 'STREAM_INTERRUPTED') {
+          friendlyMessage = '连接中断，请检查网络后重试。';
+        } else if (code === 'TOOL_CALL_FAILED') {
+          friendlyMessage = '工具调用失败：' + (message || '未知错误');
+        } else if (code === 'DOCUMENT_WRITE_FAILED') {
+          friendlyMessage = '文档写入失败：' + (message || '未知错误');
+        } else if (code === 'SAVE_VERIFICATION_FAILED') {
+          friendlyMessage = '保存验证失败，文件可能已损坏，请重试。';
+        } else if (code === 'AMBIGUOUS_REQUEST') {
+          friendlyMessage = '请明确说明要修改什么内容，例如："将标题改为XXX"或"在第三段后插入XXX"。';
         } else if (code && code.indexOf('PROVIDER_') === 0) {
           friendlyMessage = 'AI 服务暂时无法处理该请求，请稍后重试。';
         }
@@ -5076,7 +5207,7 @@
       }
 
       if (errCode === 'INDEX_REBUILD_REQUIRED') {
-        errMsg = '当前项目需要构建索引才能处理该问题，系统正在后台为您自动处理，请稍后再试。';
+        errMsg = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
       }
 
       console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
@@ -5096,7 +5227,25 @@
       if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.Errors.formatUserMessage) {
         userFriendlyMsg = window.XtjAiCore.Errors.formatUserMessage(err);
       } else if (errCode === 'INDEX_REBUILD_REQUIRED') {
-        userFriendlyMsg = '当前项目需要构建索引才能处理该问题，系统正在后台为您自动处理，请稍后再试。';
+        userFriendlyMsg = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
+      } else if (errCode === 'DOCUMENT_NOT_PARSED') {
+        userFriendlyMsg = '文档正在解析中，请等待解析完成后重试。';
+      } else if (errCode === 'NO_WRITE_PERMISSION') {
+        userFriendlyMsg = '没有文件写入权限，请重新授权写入权限后再试。';
+      } else if (errCode === 'FORMAT_NOT_EDITABLE') {
+        userFriendlyMsg = '该文件格式暂不支持修改。PDF 可读取和分析，DOCX/PPTX/XLSX 可修改。';
+      } else if (errCode === 'PROVIDER_TIMEOUT') {
+        userFriendlyMsg = 'AI 请求超时，请重试或简化问题。';
+      } else if (errCode === 'PROVIDER_HTTP_401') {
+        userFriendlyMsg = 'API 密钥无效，请检查 AI 服务配置。';
+      } else if (errCode === 'PROVIDER_HTTP_403') {
+        userFriendlyMsg = 'API 访问被拒绝，请检查权限配置。';
+      } else if (errCode === 'PROVIDER_HTTP_429') {
+        userFriendlyMsg = '请求过于频繁，请稍后重试。';
+      } else if (errCode === 'STREAM_INTERRUPTED') {
+        userFriendlyMsg = '连接中断，请检查网络后重试。';
+      } else if (errCode === 'AMBIGUOUS_REQUEST') {
+        userFriendlyMsg = '请明确说明要修改什么内容，例如："将标题改为XXX"或"在第三段后插入XXX"。';
       } else if (errCode && errCode.indexOf('PROVIDER_') === 0) {
         userFriendlyMsg = 'AI 服务暂时无法处理该请求，请稍后重试。';
       }
@@ -5426,6 +5575,7 @@
       var ext = op.path.split('.').pop().toLowerCase();
       var mimeType = ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
                      ext === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+                     ext === 'pptx' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' :
                      'application/octet-stream';
 
       // Create FormData
@@ -5490,14 +5640,18 @@
         if (newExt === 'xlsx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
           throw new Error('XLSX 文件格式无效');
         }
+        if (newExt === 'pptx' && newMimeType !== 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+          throw new Error('PPTX 文件格式无效');
+        }
         if (newMimeType === 'text/plain' && newExt !== 'txt') {
           throw new Error('text/plain 只能保存为 .txt 文件');
         }
 
-        // DOCX is read-only for now
+        // P0 Fix: DOCX and PPTX are now writable via backend document operations.
+        // PDF is genuinely read-only for in-place editing.
         var origExt = op.path.split('.').pop().toLowerCase();
-        if (origExt === 'docx') {
-          throw new Error('DOCX 暂仅支持读取，真实 DOCX 写入功能尚未完成');
+        if (origExt === 'pdf') {
+          throw new Error('PDF 不支持原位编辑，可通过提取文本后生成新文档');
         }
 
         // Save as new file (don't overwrite original)
@@ -5509,6 +5663,12 @@
           return fs.createBinaryFileByPath(availablePath, data.newFileBuffer).then(function () {
             // Remove operation from pending
             state.pendingOperations.splice(index, 1);
+
+            // P0 Fix: Invalidate old index after document modification
+            // The document content has changed, so the old index is stale.
+            state.projectIndexStatus = null;
+            state._indexBuildPromise = null;
+            state._indexBuildKey = '';
 
             // Refresh file tree
             refreshFileTree();
