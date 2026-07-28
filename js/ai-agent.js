@@ -670,7 +670,14 @@ window.throttleRAF = function(fn) {
     return encodeURIComponent(un);
   }
 
-  function getAiHistoryCacheKey(cid) {
+  function getAiHistoryCacheKey(cid, mode) {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return null;
+    mode = mode || 'normal';
+    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(mode) + ':' + encodeURIComponent(cid || 'default');
+  }
+
+  function getLegacyAiHistoryCacheKey(cid) {
     var uk = getAiHistoryCacheUserKey();
     if (!uk) return null;
     return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(cid || 'default');
@@ -709,7 +716,8 @@ window.throttleRAF = function(fn) {
   }
 
   function setAiHistoryCache(cid, msgs) {
-    var key = getAiHistoryCacheKey(cid);
+    var mode = arguments.length > 2 && arguments[2] ? String(arguments[2]) : 'normal';
+    var key = getAiHistoryCacheKey(cid, mode);
     if (!key) return;
     try {
       var completeMsgs = extractCompleteTurns(msgs, 6);
@@ -727,17 +735,22 @@ window.throttleRAF = function(fn) {
       // The first open after a reload has not resolved a conversation id yet.
       // Keep a per-user latest alias so it can paint immediately while the server refreshes it.
       if (cid) {
-        var latestKey = getAiHistoryCacheKey(null);
+        var latestKey = getAiHistoryCacheKey(null, mode);
         if (latestKey && latestKey !== key) sessionStorage.setItem(latestKey, JSON.stringify(cacheObj));
       }
     } catch (e) {}
   }
 
   function getAiHistoryCache(cid) {
-    var key = getAiHistoryCacheKey(cid);
+    var mode = arguments.length > 1 && arguments[1] ? String(arguments[1]) : 'normal';
+    var key = getAiHistoryCacheKey(cid, mode);
     if (!key) return null;
     try {
       var str = sessionStorage.getItem(key);
+      // Read legacy normal-chat entries once for backwards compatibility, but
+      // never write them again; deep/research mode can no longer collide with
+      // normal history in the new key space.
+      if (!str && mode === 'normal') str = sessionStorage.getItem(getLegacyAiHistoryCacheKey(cid));
       if (!str) return null;
       var obj = JSON.parse(str);
       if (!obj) return null;
