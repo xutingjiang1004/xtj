@@ -182,13 +182,13 @@ function buildCodeCapabilities(deps, options) {
     canWriteCode: true,
     canCreateFiles: true,
     canReadDocx: true,
-    canWriteDocx: false,
+    canWriteDocx: true,
     canReadXlsx: true,
     canWriteXlsx: true,
     canReadPdf: true,
     canWritePdf: false,
     canReadPptx: true,
-    canWritePptx: false,
+    canWritePptx: true,
     workspaceReadOnly: false
   };
 }
@@ -328,15 +328,16 @@ function parseOperations(raw) {
 
     if (type === 'document') {
       var docType = (typeof op.document_type === 'string' ? op.document_type.trim().toLowerCase() : '');
-      if (docType !== 'xlsx') continue;
+      if (docType !== 'xlsx' && docType !== 'docx' && docType !== 'pptx') continue;
       var docOps = op.document_operations;
       if (!Array.isArray(docOps) || docOps.length === 0) continue;
+      var docOpsLimit = docType === 'docx' ? 30 : (docType === 'pptx' ? 20 : 20);
       ops.push({
         type: 'document',
         path: op.path.trim(),
         summary: summary,
         document_type: docType,
-        document_operations: docOps.slice(0, 20)
+        document_operations: docOps.slice(0, docOpsLimit)
       });
       continue;
     }
@@ -476,7 +477,10 @@ function buildSystemPrompt() {
     'IMPORTANT RULES:',
     '- Only return replace_range, create, or document operations.',
     '- Return at most 10 file operations.',
-    '- DOCX files are read-only. Do not return document operations for DOCX. For DOCX modification requests, explain that the file can currently be analyzed but cannot be safely rewritten while preserving the DOCX format.',
+    '- DOCX files can be modified. Use "document" type with document_type "docx" for DOCX text modifications. For modification requests, first confirm the target file and changes, then generate a document operation plan.',
+    '- DOCX document operations: replace_text (replace specific text), insert_text (insert text at position), delete_text (delete specific text range), modify_paragraph (adjust paragraph content), modify_heading (change heading level=1-9 and/or text), modify_list (add/modify/remove list items with list_marker, action, item_text, item_index), modify_table_cell (change cell at row/col with table_marker).',
+    '- PDF files are read-only for content analysis. Do not return document operations for PDF. For PDF modification requests, explain that PDF can be analyzed and you can generate a new markdown/text document based on the extracted content. PDF supports: text extraction, page analysis, and content summarization only.',
+    '- PPTX files can be modified. Use "document" type with document_type "pptx" for slide text modifications. PPTX operations: replace_text (replace text on a slide), insert_text (add text box to a slide), delete_text (remove text from a slide). Each operation should specify the target slide number (1-indexed).',
     '- For "replace_range" operations, new_content must ONLY contain the replacement snippet, NOT the entire file. You MUST specify start_line and end_line accurately.',
     '- For "create" operations, new_content must contain the complete new file.',
     '- For "document" operations, include document_operations array with the specific changes.',
@@ -514,7 +518,7 @@ function buildSystemPrompt() {
     '- 不要根据训练知识猜测当前模型规格或上下文窗口大小。',
     '- 如果你从工具获取的数据中某个字段为 null 或不存在，诚实说明"服务器未提供该数据"，不得编造。',
     '- 必须根据 runtime capability 返回的字段来回答你的真实能力。',
-    '- 不得声称支持实际没有实现的文件修改能力。目前 DOCX 和 PDF 只能读取和分析，XLSX 才支持文件内容级别的修改（生成 document operation）。',
+    '- 不得声称支持实际没有实现的文件修改能力。目前 DOCX 可读取、分析和修改；PDF 可读取和分析（不支持原位编辑，可生成新文档）；PPTX 可读取、分析和修改；XLSX 可读取、分析和修改。',
     '- 文件系统级的权限（如句柄可写）不代表你具备修改该格式的能力。如果文件格式不在支持修改的列表中，请明确告知仅支持读取。',
     '- 项目索引中的"文件数"和"代码块数"只表示索引规模，不代表这些内容已进入当前上下文。用户询问上下文使用时，必须区分索引规模和实际读取量。',
     '- 前端徽章、API capabilities 和你的自述必须使用同一数据源，不得矛盾。',
@@ -681,6 +685,29 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
     '- 打开文件: ' + openFiles.map(function(file) { return file.path; }).join(', '),
     '- 已上传资料: ' + attachments.map(function(file) { return file.path; }).join(', ')
   ];
+
+  // P0 Fix: 注入打开文档的正文内容到消息中
+  var hasOpenFileContent = false;
+  for (var ofi = 0; ofi < openFiles.length; ofi++) {
+    var of = openFiles[ofi];
+    if (of.content && of.content.trim()) {
+      hasOpenFileContent = true;
+      break;
+    }
+  }
+  if (hasOpenFileContent) {
+    stateLines.push('');
+    stateLines.push('【打开文档正文】');
+    for (var ofj = 0; ofj < openFiles.length; ofj++) {
+      var of2 = openFiles[ofj];
+      if (of2.content && of2.content.trim()) {
+        stateLines.push('--- ' + of2.path + ' ---');
+        // 限制单文档在状态块中的注入长度，避免撑爆上下文
+        stateLines.push(of2.content.slice(0, 32000));
+      }
+    }
+    stateLines.push('--- 文档正文结束 ---');
+  }
   // Partial index note — placed in user message, not system prompt
   if (indexSummary && indexSummary.truncated === true) {
     stateLines.push('');
@@ -727,8 +754,24 @@ function needsProjectContext(message) {
   if (noContextRE.test(msg)) return false;
   
   // 能力咨询不需要项目上下文
-  var capabilityRE = /(你支持|你可以|你能|你会|你懂|你认识).*(修改|读取|写|文件|docx|pdf|项目)/i;
+  var capabilityRE = /(你支持|你可以|你能|你会|你懂|你认识|你能做|能不能|可否|是否可以|是否支持).*(修改|读取|写|文件|docx|pdf|pptx|xlsx|文档|项目|word|excel|ppt|格式|能力|编辑|更改|变更)/i;
   if (capabilityRE.test(msg)) return false;
+
+  // 简短的不明确问题不需要项目上下文（如 "？", "修改一下", "这个", "改"）
+  // P0 Fix: 扩展模糊请求检测，避免误触发文档修改
+  if (msg.length <= 10 && !/(代码|bug|报错|错误|修复|项目|文件|代码|函数|重构|检查|查看|分析|找到|定位|追踪|为什么|怎么|如何)/i.test(msg)) return false;
+
+  // 不明确的修改请求 — 缺少修改目标和内容
+  var ambiguousModifyRE = /^(修改一下|改一下|改改|帮我改|修改这个|改这个|改|修改)$/i;
+  if (ambiguousModifyRE.test(msg)) return false;
+
+  // 文档内容提问 — 如果用户是针对已打开的文档内容提问，不需要项目索引
+  var docContentRE = /(这个文档|这篇文章|这段内容|总结|概括|分析一下|帮我看看|内容|说了什么|讲什么|什么意思|帮我总结|概述)/i;
+  if (docContentRE.test(msg) && msg.length < 200) return false;
+
+  // 导出请求 — 不需要项目索引
+  var exportRE = /(导出|下载|保存为|另存为|生成.*(pdf|文档|报告))/i;
+  if (exportRE.test(msg)) return false;
 
   // 明确要求读取、检查、修改、分析项目、找bug、代码相关，需要项目上下文
   var requiresContextRE = /(分析.*项目|检查.*(整个项目|项目|bug)|修改.*(代码|文件)|总结.*文档|读取.*(项目|代码)|查找.*函数|修复.*报错|这个文件|看看|有什么问题|重构|解析|总结一下)/i;
@@ -1488,6 +1531,521 @@ async function applyXlsxOperations(buffer, operations, fileName) {
   }
 }
 
+// ── DOCX modification operations ──────────────────────────────────────
+var MAX_DOCX_OPS = 30;
+var MAX_DOCX_TEXT_LEN = 50000;
+
+async function applyDocxOperations(buffer, operations, fileName) {
+  var JSZip = require('jszip');
+  if (operations.length > MAX_DOCX_OPS) {
+    return { ok: false, error: '单次最多支持 ' + MAX_DOCX_OPS + ' 个 DOCX 修改操作' };
+  }
+
+  try {
+    var zip = await JSZip.loadAsync(buffer);
+    var documentXml = zip.file('word/document.xml');
+    if (!documentXml) {
+      return { ok: false, error: 'DOCX 文件结构无效：缺少 word/document.xml' };
+    }
+
+    var xml = await documentXml.async('string');
+    var originalXml = xml;
+    var appliedOps = [];
+    var changes = [];
+
+    for (var i = 0; i < operations.length; i++) {
+      var op = operations[i];
+      if (!op || typeof op !== 'object') continue;
+
+      try {
+        if (op.type === 'replace_text') {
+          var oldText = String(op.old_text || '');
+          var newText = String(op.new_text || '');
+          if (!oldText) { changes.push({ type: 'replace_text', error: '缺少要替换的文本' }); continue; }
+          if (xml.indexOf(escapeXml(oldText)) === -1 && xml.indexOf(oldText) === -1) {
+            changes.push({ type: 'replace_text', oldText: oldText, newText: newText, error: '在文档中未找到指定文本' });
+            continue;
+          }
+          // Replace in XML, handling both escaped and unescaped versions
+          var escapedOld = escapeXml(oldText);
+          var escapedNew = escapeXml(newText);
+          if (xml.indexOf(escapedOld) !== -1) {
+            xml = xml.split(escapedOld).join(escapedNew);
+          } else {
+            xml = xml.split(oldText).join(escapedNew);
+          }
+          appliedOps.push({ type: 'replace_text', oldText: oldText, newText: newText });
+          changes.push({ type: 'replace_text', oldText: oldText.slice(0, 100), newText: newText.slice(0, 100) });
+        } else if (op.type === 'insert_text') {
+          var markerText = String(op.marker_text || '');
+          var insertText = String(op.insert_text || '');
+          if (!insertText) { changes.push({ type: 'insert_text', error: '缺少要插入的文本' }); continue; }
+          if (!markerText) {
+            // Insert at end of body
+            var bodyCloseIdx = xml.lastIndexOf('</w:body>');
+            if (bodyCloseIdx === -1) { changes.push({ type: 'insert_text', error: 'DOCX 结构无效' }); continue; }
+            var paraXml = '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(insertText) + '</w:t></w:r></w:p>';
+            xml = xml.slice(0, bodyCloseIdx) + paraXml + xml.slice(bodyCloseIdx);
+          } else {
+            var escapedMarker = escapeXml(markerText);
+            var markerIdx = xml.indexOf(escapedMarker);
+            if (markerIdx === -1) markerIdx = xml.indexOf(markerText);
+            if (markerIdx === -1) { changes.push({ type: 'insert_text', error: '未找到标记文本"' + markerText.slice(0, 50) + '"' }); continue; }
+            var insertXml = escapeXml(insertText);
+            xml = xml.slice(0, markerIdx + (xml.indexOf(escapedMarker) !== -1 ? escapedMarker.length : markerText.length)) + insertXml + xml.slice(markerIdx + (xml.indexOf(escapedMarker) !== -1 ? escapedMarker.length : markerText.length));
+          }
+          appliedOps.push({ type: 'insert_text', markerText: markerText, insertText: insertText });
+          changes.push({ type: 'insert_text', insertText: insertText.slice(0, 100) });
+        } else if (op.type === 'delete_text') {
+          var delText = String(op.text || '');
+          if (!delText) { changes.push({ type: 'delete_text', error: '缺少要删除的文本' }); continue; }
+          var escapedDel = escapeXml(delText);
+          if (xml.indexOf(escapedDel) === -1 && xml.indexOf(delText) === -1) {
+            changes.push({ type: 'delete_text', text: delText.slice(0, 50), error: '未找到指定文本' });
+            continue;
+          }
+          if (xml.indexOf(escapedDel) !== -1) {
+            xml = xml.split(escapedDel).join('');
+          } else {
+            xml = xml.split(delText).join('');
+          }
+          appliedOps.push({ type: 'delete_text', text: delText });
+          changes.push({ type: 'delete_text', text: delText.slice(0, 100) });
+        } else if (op.type === 'modify_paragraph') {
+          // Find paragraph containing the marker text and wrap/modify
+          var paraMarker = String(op.paragraph_marker || '');
+          var newParaText = String(op.new_text || '');
+          if (!paraMarker || !newParaText) {
+            changes.push({ type: 'modify_paragraph', error: '缺少段落标记或新文本' });
+            continue;
+          }
+          var escapedPM = escapeXml(paraMarker);
+          var pmIdx = xml.indexOf(escapedPM);
+          if (pmIdx === -1) pmIdx = xml.indexOf(paraMarker);
+          if (pmIdx === -1) {
+            changes.push({ type: 'modify_paragraph', error: '未找到段落标记"' + paraMarker.slice(0, 50) + '"' });
+            continue;
+          }
+          // Find enclosing <w:p>...</w:p>
+          var pStart = xml.lastIndexOf('<w:p', pmIdx);
+          var pEnd = xml.indexOf('</w:p>', pmIdx);
+          if (pStart === -1 || pEnd === -1) {
+            changes.push({ type: 'modify_paragraph', error: '无法定位段落边界' });
+            continue;
+          }
+          // Replace text runs within the paragraph
+          var innerXml = xml.slice(pStart, pEnd);
+          var newInnerXml = innerXml.replace(/<w:r[^>]*>[\s\S]*?<\/w:r>/g, function(match) {
+            if (match.indexOf('<w:t') !== -1) {
+              return '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + escapeXml(newParaText) + '</w:t></w:r>';
+            }
+            return match;
+          });
+          xml = xml.slice(0, pStart) + newInnerXml + xml.slice(pEnd);
+          appliedOps.push({ type: 'modify_paragraph', paragraphMarker: paraMarker, newText: newParaText });
+          changes.push({ type: 'modify_paragraph', newText: newParaText.slice(0, 100) });
+        } else if (op.type === 'modify_heading') {
+          // Find heading by text and modify its level or content
+          var headingMarker = String(op.heading_marker || '');
+          var newHeadingText = String(op.new_text || '');
+          var newLevel = typeof op.level === 'number' ? Math.max(1, Math.min(9, op.level)) : 0;
+          if (!headingMarker || (!newHeadingText && !newLevel)) {
+            changes.push({ type: 'modify_heading', error: '缺少标题标记或修改内容' });
+            continue;
+          }
+          var escapedHM = escapeXml(headingMarker);
+          var hmIdx = xml.indexOf(escapedHM);
+          if (hmIdx === -1) hmIdx = xml.indexOf(headingMarker);
+          if (hmIdx === -1) {
+            changes.push({ type: 'modify_heading', error: '未找到标题"' + headingMarker.slice(0, 50) + '"' });
+            continue;
+          }
+          // Find enclosing <w:p>...</w:p>
+          var hpStart = xml.lastIndexOf('<w:p', hmIdx);
+          var hpEnd = xml.indexOf('</w:p>', hmIdx);
+          if (hpStart === -1 || hpEnd === -1) {
+            changes.push({ type: 'modify_heading', error: '无法定位标题段落边界' });
+            continue;
+          }
+          var headingXml = xml.slice(hpStart, hpEnd + '</w:p>'.length);
+          var newHeadingXml = headingXml;
+          // Change heading level
+          if (newLevel > 0) {
+            newHeadingXml = newHeadingXml.replace(/<w:pStyle[^>]*w:val="[^"]*Heading[^"]*"[^>]*\/>/g, '');
+            newHeadingXml = newHeadingXml.replace(/<w:pStyle[^>]*w:val="[^"]*"[^>]*\/>/g, '');
+            newHeadingXml = newHeadingXml.replace(/<w:pPr>/g, '<w:pPr><w:pStyle w:val="' + newLevel + '"/>');
+            newHeadingXml = newHeadingXml.replace(/<w:pPr[^>]*>/g, '<w:pPr><w:pStyle w:val="' + newLevel + '"/>');
+          }
+          // Change heading text
+          if (newHeadingText) {
+            newHeadingXml = newHeadingXml.replace(/<w:r[^>]*>[\s\S]*?<\/w:r>/g, function(match) {
+              if (match.indexOf('<w:t') !== -1) {
+                return '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + escapeXml(newHeadingText) + '</w:t></w:r>';
+              }
+              return match;
+            });
+          }
+          xml = xml.slice(0, hpStart) + newHeadingXml + xml.slice(hpEnd + '</w:p>'.length);
+          appliedOps.push({ type: 'modify_heading', headingMarker: headingMarker, newText: newHeadingText, level: newLevel });
+          changes.push({ type: 'modify_heading', newText: (newHeadingText || headingMarker).slice(0, 100), level: newLevel });
+        } else if (op.type === 'modify_list') {
+          // Add, remove, or modify list items
+          var listMarker = String(op.list_marker || '');
+          var listAction = String(op.action || 'modify');
+          var listItemText = String(op.item_text || '');
+          var listItemIndex = typeof op.item_index === 'number' ? op.item_index : -1;
+          if (!listMarker) {
+            changes.push({ type: 'modify_list', error: '缺少列表标记' });
+            continue;
+          }
+          var escapedLM = escapeXml(listMarker);
+          var lmIdx = xml.indexOf(escapedLM);
+          if (lmIdx === -1) lmIdx = xml.indexOf(listMarker);
+          if (lmIdx === -1) {
+            changes.push({ type: 'modify_list', error: '未找到列表标记"' + listMarker.slice(0, 50) + '"' });
+            continue;
+          }
+          // Find list paragraph boundaries
+          var lpStart = xml.lastIndexOf('<w:p', lmIdx);
+          var lpEnd = xml.indexOf('</w:p>', lmIdx);
+          if (lpStart === -1 || lpEnd === -1) {
+            changes.push({ type: 'modify_list', error: '无法定位列表段落边界' });
+            continue;
+          }
+          if (listAction === 'add') {
+            if (!listItemText) {
+              changes.push({ type: 'modify_list', error: '缺少要添加的列表项文本' });
+              continue;
+            }
+            var newItemXml = '<w:p><w:pPr><w:pStyle w:val="ListParagraph"/></w:pPr><w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + escapeXml(listItemText) + '</w:t></w:r></w:p>';
+            var insertPoint = lpEnd + '</w:p>'.length;
+            xml = xml.slice(0, insertPoint) + newItemXml + xml.slice(insertPoint);
+            appliedOps.push({ type: 'modify_list', action: 'add', itemText: listItemText });
+            changes.push({ type: 'modify_list', action: 'add', itemText: listItemText.slice(0, 100) });
+          } else if (listAction === 'modify') {
+            if (!listItemText || listItemIndex < 0) {
+              changes.push({ type: 'modify_list', error: '缺少列表项文本或索引' });
+              continue;
+            }
+            // Find the nth list item after the marker
+            var searchFrom = lpEnd + '</w:p>'.length;
+            var foundCount = 0;
+            var targetStart = -1, targetEnd = -1;
+            var tempIdx = searchFrom;
+            while (foundCount <= listItemIndex && tempIdx < xml.length) {
+              var nextP = xml.indexOf('<w:p', tempIdx);
+              if (nextP === -1) break;
+              var nextPEnd = xml.indexOf('</w:p>', nextP);
+              if (nextPEnd === -1) break;
+              if (foundCount === listItemIndex) {
+                targetStart = nextP;
+                targetEnd = nextPEnd + '</w:p>'.length;
+                break;
+              }
+              foundCount++;
+              tempIdx = nextPEnd + '</w:p>'.length;
+            }
+            if (targetStart === -1) {
+              changes.push({ type: 'modify_list', error: '未找到第' + (listItemIndex + 1) + '个列表项' });
+              continue;
+            }
+            var itemXml = xml.slice(targetStart, targetEnd);
+            var modifiedItemXml = itemXml.replace(/<w:r[^>]*>[\s\S]*?<\/w:r>/g, function(match) {
+              if (match.indexOf('<w:t') !== -1) {
+                return '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + escapeXml(listItemText) + '</w:t></w:r>';
+              }
+              return match;
+            });
+            xml = xml.slice(0, targetStart) + modifiedItemXml + xml.slice(targetEnd);
+            appliedOps.push({ type: 'modify_list', action: 'modify', itemText: listItemText, itemIndex: listItemIndex });
+            changes.push({ type: 'modify_list', action: 'modify', itemText: listItemText.slice(0, 100), itemIndex: listItemIndex });
+          } else if (listAction === 'remove') {
+            if (listItemIndex < 0) {
+              changes.push({ type: 'modify_list', error: '缺少要删除的列表项索引' });
+              continue;
+            }
+            var searchFrom2 = lpEnd + '</w:p>'.length;
+            var foundCount2 = 0;
+            var targetStart2 = -1, targetEnd2 = -1;
+            var tempIdx2 = searchFrom2;
+            while (foundCount2 <= listItemIndex && tempIdx2 < xml.length) {
+              var nextP2 = xml.indexOf('<w:p', tempIdx2);
+              if (nextP2 === -1) break;
+              var nextPEnd2 = xml.indexOf('</w:p>', nextP2);
+              if (nextPEnd2 === -1) break;
+              if (foundCount2 === listItemIndex) {
+                targetStart2 = nextP2;
+                targetEnd2 = nextPEnd2 + '</w:p>'.length;
+                break;
+              }
+              foundCount2++;
+              tempIdx2 = nextPEnd2 + '</w:p>'.length;
+            }
+            if (targetStart2 === -1) {
+              changes.push({ type: 'modify_list', error: '未找到第' + (listItemIndex + 1) + '个列表项' });
+              continue;
+            }
+            xml = xml.slice(0, targetStart2) + xml.slice(targetEnd2);
+            appliedOps.push({ type: 'modify_list', action: 'remove', itemIndex: listItemIndex });
+            changes.push({ type: 'modify_list', action: 'remove', itemIndex: listItemIndex });
+          } else {
+            changes.push({ type: 'modify_list', error: '不支持的操作: ' + listAction });
+          }
+        } else if (op.type === 'modify_table_cell') {
+          // Find table by marker text and modify a specific cell
+          var tableMarker = String(op.table_marker || '');
+          var cellRow = typeof op.row === 'number' ? op.row : -1;
+          var cellCol = typeof op.col === 'number' ? op.col : -1;
+          var cellValue = String(op.value || '');
+          if (!tableMarker || cellRow < 0 || cellCol < 0) {
+            changes.push({ type: 'modify_table_cell', error: '缺少表格标记、行号或列号' });
+            continue;
+          }
+          var escapedTM = escapeXml(tableMarker);
+          var tmIdx = xml.indexOf(escapedTM);
+          if (tmIdx === -1) tmIdx = xml.indexOf(tableMarker);
+          if (tmIdx === -1) {
+            changes.push({ type: 'modify_table_cell', error: '未找到表格标记"' + tableMarker.slice(0, 50) + '"' });
+            continue;
+          }
+          // Find enclosing <w:tbl>...</w:tbl>
+          var tblStart = xml.lastIndexOf('<w:tbl', tmIdx);
+          var tblEnd = xml.indexOf('</w:tbl>', tmIdx);
+          if (tblStart === -1 || tblEnd === -1) {
+            changes.push({ type: 'modify_table_cell', error: '无法定位表格边界' });
+            continue;
+          }
+          var tblXml = xml.slice(tblStart, tblEnd + '</w:tbl>'.length);
+          // Find rows
+          var rowMatches = [];
+          var rowRE = /<w:tr[\s\S]*?<\/w:tr>/g;
+          var rowMatch;
+          while ((rowMatch = rowRE.exec(tblXml)) !== null) {
+            rowMatches.push({ index: rowMatch.index, text: rowMatch[0] });
+          }
+          if (cellRow >= rowMatches.length) {
+            changes.push({ type: 'modify_table_cell', error: '行号超出表格范围（共' + rowMatches.length + '行）' });
+            continue;
+          }
+          var targetRow = rowMatches[cellRow].text;
+          // Find cells in the row
+          var cellMatches = [];
+          var cellRE = /<w:tc[\s\S]*?<\/w:tc>/g;
+          var cellMatch;
+          while ((cellMatch = cellRE.exec(targetRow)) !== null) {
+            cellMatches.push({ index: cellMatch.index, text: cellMatch[0] });
+          }
+          if (cellCol >= cellMatches.length) {
+            changes.push({ type: 'modify_table_cell', error: '列号超出表格范围（共' + cellMatches.length + '列）' });
+            continue;
+          }
+          var targetCell = cellMatches[cellCol].text;
+          var newCell = targetCell.replace(/<w:r[^>]*>[\s\S]*?<\/w:r>/g, function(match) {
+            if (match.indexOf('<w:t') !== -1) {
+              return '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + escapeXml(cellValue) + '</w:t></w:r>';
+            }
+            return match;
+          });
+          if (newCell === targetCell) {
+            // No text runs found, add one
+            newCell = targetCell.replace(/<w:tcPr>[\s\S]*?<\/w:tcPr>/, function(m) {
+              return m + '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(cellValue) + '</w:t></w:r></w:p>';
+            });
+          }
+          var newRow = targetRow.replace(targetCell, newCell);
+          var newTblXml = tblXml.replace(targetRow, newRow);
+          xml = xml.slice(0, tblStart) + newTblXml + xml.slice(tblEnd + '</w:tbl>'.length);
+          appliedOps.push({ type: 'modify_table_cell', tableMarker: tableMarker, row: cellRow, col: cellCol, value: cellValue });
+          changes.push({ type: 'modify_table_cell', row: cellRow, col: cellCol, value: cellValue.slice(0, 100) });
+        } else {
+          changes.push({ type: op.type || 'unknown', error: '不支持的 DOCX 操作类型: ' + (op.type || 'unknown') });
+        }
+      } catch (opErr) {
+        changes.push({ type: op.type || 'unknown', error: opErr.message || '操作失败' });
+      }
+    }
+
+    if (appliedOps.length === 0 && operations.length > 0) {
+      var errMsgs = changes.map(function(c) { return c.error || '未生效'; }).join('; ');
+      return { ok: false, error: 'DOCX 修改失败，无任何操作生效: ' + errMsgs };
+    }
+
+    // Update the document.xml in the zip
+    zip.file('word/document.xml', xml);
+
+    var newBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    });
+
+    // Verify the new buffer can be re-opened
+    try {
+      var verifyZip = await JSZip.loadAsync(newBuffer);
+      if (!verifyZip.file('word/document.xml')) {
+        return { ok: false, error: 'DOCX 生成验证失败：无法重新打开文件' };
+      }
+    } catch (ve) {
+      return { ok: false, error: 'DOCX 生成验证失败: ' + (ve.message || '') };
+    }
+
+    return {
+      ok: true,
+      newBuffer: newBuffer,
+      changes: changes,
+      newMimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileName: fileName,
+      appliedOps: appliedOps
+    };
+  } catch (e) {
+    return { ok: false, error: 'DOCX 修改失败: ' + (e.message || '') };
+  }
+}
+
+function escapeXml(str) {
+  if (typeof str !== 'string') str = String(str);
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+function unescapeXml(str) {
+  if (typeof str !== 'string') str = String(str);
+  return str.replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+}
+
+// ── PPTX modification operations ──────────────────────────────────────
+var MAX_PPTX_OPS = 20;
+
+async function applyPptxOperations(buffer, operations, fileName) {
+  var JSZip = require('jszip');
+  if (operations.length > MAX_PPTX_OPS) {
+    return { ok: false, error: '单次最多支持 ' + MAX_PPTX_OPS + ' 个 PPTX 修改操作' };
+  }
+
+  try {
+    var zip = await JSZip.loadAsync(buffer);
+    var appliedOps = [];
+    var changes = [];
+
+    // Find all slide XML files
+    var slideFiles = [];
+    zip.folder('ppt/slides').forEach(function (relativePath, file) {
+      if (relativePath.match(/^slide\d+\.xml$/i)) {
+        slideFiles.push({ name: relativePath, file: file });
+      }
+    });
+    slideFiles.sort(function(a, b) {
+      var na = parseInt((a.name.match(/\d+/) || [0])[0], 10);
+      var nb = parseInt((b.name.match(/\d+/) || [0])[0], 10);
+      return na - nb;
+    });
+
+    for (var i = 0; i < operations.length; i++) {
+      var op = operations[i];
+      if (!op || typeof op !== 'object') continue;
+
+      try {
+        var targetSlide = op.slide;
+        var slideIdx = -1;
+        if (typeof targetSlide === 'number' && targetSlide >= 1 && targetSlide <= slideFiles.length) {
+          slideIdx = targetSlide - 1;
+        } else if (typeof targetSlide === 'string') {
+          slideIdx = slideFiles.findIndex(function(sf) { return sf.name === targetSlide; });
+        }
+        if (slideIdx === -1 && slideFiles.length > 0) slideIdx = 0;
+
+        if (slideIdx < 0 || slideIdx >= slideFiles.length) {
+          changes.push({ type: op.type || 'unknown', error: '无效的幻灯片编号' });
+          continue;
+        }
+
+        var slideFile = slideFiles[slideIdx].file;
+        var slideXml = await slideFile.async('string');
+
+        if (op.type === 'replace_text') {
+          var oldText = String(op.old_text || '');
+          var newText = String(op.new_text || '');
+          if (!oldText) { changes.push({ type: 'replace_text', error: '缺少要替换的文本' }); continue; }
+          var escapedOld = escapeXml(oldText);
+          var escapedNew = escapeXml(newText);
+          if (slideXml.indexOf(escapedOld) !== -1) {
+            slideXml = slideXml.split(escapedOld).join(escapedNew);
+          } else if (slideXml.indexOf(oldText) !== -1) {
+            slideXml = slideXml.split(oldText).join(escapedNew);
+          } else {
+            changes.push({ type: 'replace_text', slide: slideIdx + 1, oldText: oldText.slice(0, 50), error: '未找到指定文本' });
+            continue;
+          }
+          appliedOps.push({ type: 'replace_text', slide: slideIdx + 1, oldText: oldText, newText: newText });
+          changes.push({ type: 'replace_text', slide: slideIdx + 1, oldText: oldText.slice(0, 50), newText: newText.slice(0, 50) });
+        } else if (op.type === 'insert_text') {
+          var insertText = String(op.insert_text || '');
+          if (!insertText) { changes.push({ type: 'insert_text', error: '缺少要插入的文本' }); continue; }
+          // Insert text at end of slide
+          var spCloseIdx = slideXml.lastIndexOf('</p:spTree>');
+          if (spCloseIdx === -1) { changes.push({ type: 'insert_text', error: 'PPTX 幻灯片结构无效' }); continue; }
+          var textBoxXml = '<p:sp><p:nvSpPr><p:cNvPr id="' + (9000 + i) + '" name="AI Text"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="' + (914400 + i * 457200) + '"/><a:ext cx="8229600" cy="914400"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="zh-CN"/><a:t>' + escapeXml(insertText) + '</a:t></a:r></a:p></p:txBody></p:sp>';
+          slideXml = slideXml.slice(0, spCloseIdx) + textBoxXml + slideXml.slice(spCloseIdx);
+          appliedOps.push({ type: 'insert_text', slide: slideIdx + 1, insertText: insertText });
+          changes.push({ type: 'insert_text', slide: slideIdx + 1, insertText: insertText.slice(0, 100) });
+        } else if (op.type === 'delete_text') {
+          var delText = String(op.text || '');
+          if (!delText) { changes.push({ type: 'delete_text', error: '缺少要删除的文本' }); continue; }
+          var escapedDel = escapeXml(delText);
+          if (slideXml.indexOf(escapedDel) !== -1) {
+            slideXml = slideXml.split(escapedDel).join('');
+          } else if (slideXml.indexOf(delText) !== -1) {
+            slideXml = slideXml.split(delText).join('');
+          } else {
+            changes.push({ type: 'delete_text', slide: slideIdx + 1, text: delText.slice(0, 50), error: '未找到指定文本' });
+            continue;
+          }
+          appliedOps.push({ type: 'delete_text', slide: slideIdx + 1, text: delText });
+          changes.push({ type: 'delete_text', slide: slideIdx + 1, text: delText.slice(0, 50) });
+        } else {
+          changes.push({ type: op.type || 'unknown', error: '不支持的 PPTX 操作类型: ' + (op.type || 'unknown') });
+        }
+
+        zip.file('ppt/slides/' + slideFiles[slideIdx].name, slideXml);
+      } catch (opErr) {
+        changes.push({ type: op.type || 'unknown', error: opErr.message || '操作失败' });
+      }
+    }
+
+    if (appliedOps.length === 0 && operations.length > 0) {
+      var errMsgs = changes.map(function(c) { return c.error || '未生效'; }).join('; ');
+      return { ok: false, error: 'PPTX 修改失败，无任何操作生效: ' + errMsgs };
+    }
+
+    var newBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    });
+
+    try {
+      var verifyZip = await JSZip.loadAsync(newBuffer);
+      if (!verifyZip.folder('ppt/slides')) {
+        return { ok: false, error: 'PPTX 生成验证失败：无法重新打开文件' };
+      }
+    } catch (ve) {
+      return { ok: false, error: 'PPTX 生成验证失败: ' + (ve.message || '') };
+    }
+
+    return {
+      ok: true,
+      newBuffer: newBuffer,
+      changes: changes,
+      newMimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      fileName: fileName,
+      appliedOps: appliedOps
+    };
+  } catch (e) {
+    return { ok: false, error: 'PPTX 修改失败: ' + (e.message || '') };
+  }
+}
+
 // ── Main route registration ────────────────────────────────────────────
 
 module.exports = function registerCodeAgentRoutes(app, deps) {
@@ -1595,8 +2153,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var result;
       if (documentType === 'xlsx' || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mimeType === 'application/vnd.ms-excel') {
         result = await applyXlsxOperations(buffer, operations, fileName);
+      } else if (documentType === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        result = await applyDocxOperations(buffer, operations, fileName);
+      } else if (documentType === 'pptx' || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+        result = await applyPptxOperations(buffer, operations, fileName);
       } else {
-        return res.status(400).json({ ok: false, error: '不支持修改此类型文档 (' + (documentType || mimeType) + ')' });
+        return res.status(400).json({ ok: false, error: '不支持修改此类型文档 (' + (documentType || mimeType) + ')。支持的类型：DOCX、XLSX、PPTX' });
       }
 
       if (!result.ok) {
@@ -1608,7 +2170,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return res.status(500).json({ ok: false, error: '生成文件失败' });
       }
 
-      var outFileName = fileName.replace(/\.[^.]+$/, '') + '_AI修改版.xlsx';
+      var extMap = { xlsx: '.xlsx', docx: '.docx', pptx: '.pptx' };
+      var docExt = extMap[documentType] || (fileName.match(/\.[^.]+$/) || ['.docx'])[0];
+      var outFileName = fileName.replace(/\.[^.]+$/, '') + '_AI修改版' + docExt;
 
       res.setHeader('Content-Type', result.newMimeType);
       res.setHeader('Content-Disposition', 'attachment; filename="' + encodeURIComponent(outFileName) + '"');
@@ -2005,8 +2569,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var indexSummary = codeIndex.getIndexSummary(scope);
       logPhase('validated', { workspaceId: scope.workspaceId, workspaceGeneration: scope.generation, hasIndex: !!indexSummary, hasOpenFiles: openFiles.length > 0, hasAttachments: attachments.length > 0, thinkingMode: String(body.thinking_mode || 'auto') });
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
-        return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 409, { retryable: true });
+      // P0 Fix: 当有打开文档或附件时，即使索引未建立也不拦截请求
+      // 文档正文已通过 open_files/attachments 传入，Agent 可以直接使用
+      var hasDocumentContent = openFiles.length > 0 || attachments.length > 0;
+      if (!indexSummary && !hasDocumentContent && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 409, { retryable: true, hasDocumentContent: false });
       }
 
       var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
@@ -2110,38 +2677,64 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       try {
         aiResult = await deps.callDeepSeek(messages, callArgs);
       } catch (err) {
+        // P0 Fix: 使用 callDeepSeek 现在保留的 status/response/providerCode 等字段
+        var errCode = err && err.code ? err.code : 'UNKNOWN';
+        var errStatus = err && typeof err.status === 'number' ? err.status : 500;
         var errMsg = err && err.message ? err.message : String(err);
-        var errStatus = err && err.status ? err.status : (errMsg.indexOf('400') >= 0 ? 400 : 500);
-        var providerCode = err && err.response && err.response.data && err.response.data.error && err.response.data.error.code ? err.response.data.error.code : 'unknown';
-        var providerType = err && err.response && err.response.data && err.response.data.error && err.response.data.error.type ? err.response.data.error.type : 'unknown';
-        var providerMsg = err && err.response && err.response.data && err.response.data.error && err.response.data.error.message ? err.response.data.error.message : errMsg;
-        
-        var parsedError = 'PROVIDER_HTTP_400';
-        if (providerCode === 'context_length_exceeded' || providerMsg.indexOf('context_length') >= 0 || providerMsg.indexOf('maximum context length') >= 0) {
-          parsedError = 'PROVIDER_CONTEXT_TOO_LARGE';
-        } else if (providerCode === 'invalid_request_error' && providerMsg.indexOf('messages') >= 0) {
-          parsedError = 'PROVIDER_INVALID_MESSAGES';
-        } else if (providerMsg.indexOf('model not found') >= 0 || providerCode === 'model_not_found') {
-          parsedError = 'PROVIDER_INVALID_MODEL';
-        } else if (providerMsg.indexOf('tool') >= 0 || providerMsg.indexOf('function') >= 0 || providerCode === 'tool_calls_unsupported') {
-          parsedError = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
-        } else if (providerMsg.indexOf('thinking') >= 0 || providerMsg.indexOf('reasoning') >= 0) {
-          parsedError = 'PROVIDER_INVALID_THINKING_MODE';
+        var providerCode = (err && err.providerCode) || (err && err.response && err.response.data && err.response.data.error && err.response.data.error.code) || '';
+        var providerType = (err && err.providerType) || (err && err.response && err.response.data && err.response.data.error && err.response.data.error.type) || '';
+        var providerMsg = (err && err.providerMessage) || (err && err.response && err.response.data && err.response.data.error && err.response.data.error.message) || errMsg;
+        var providerRequestId = (err && err.providerRequestId) || (err && err.response && err.response.data && err.response.data.request_id) || '';
+
+        // 诊断日志
+        console.error('[code-agent] callDeepSeek failed:', JSON.stringify({
+          requestId: requestId,
+          errCode: errCode,
+          errStatus: errStatus,
+          providerCode: providerCode,
+          providerType: providerType,
+          providerMsg: (providerMsg || '').slice(0, 200),
+          providerRequestId: providerRequestId,
+          thinkingMode: thinkingMode,
+          hasTools: !!(Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0),
+          code: errCode
+        }));
+
+        // 分类错误
+        var parsedError = errCode;
+        if (parsedError === 'UNKNOWN' || parsedError.indexOf('PROVIDER_HTTP_') === 0) {
+          if (providerCode === 'context_length_exceeded' || providerMsg.indexOf('context_length') >= 0 || providerMsg.indexOf('maximum context length') >= 0) {
+            parsedError = 'PROVIDER_CONTEXT_TOO_LARGE';
+          } else if (providerCode === 'invalid_request_error' && providerMsg.indexOf('messages') >= 0) {
+            parsedError = 'PROVIDER_INVALID_MESSAGES';
+          } else if (providerMsg.indexOf('model not found') >= 0 || providerCode === 'model_not_found') {
+            parsedError = 'PROVIDER_INVALID_MODEL';
+          } else if (providerMsg.indexOf('tool') >= 0 || providerMsg.indexOf('function') >= 0 || providerCode === 'tool_calls_unsupported') {
+            parsedError = 'PROVIDER_TOOL_CALL_UNSUPPORTED';
+          } else if (providerMsg.indexOf('thinking') >= 0 || providerMsg.indexOf('reasoning') >= 0) {
+            parsedError = 'PROVIDER_INVALID_THINKING_MODE';
+          }
         }
 
-        var isThinkingIncompatible = parsedError === 'PROVIDER_INVALID_THINKING_MODE' || 
-                                     (parsedError === 'PROVIDER_TOOL_CALL_UNSUPPORTED' && thinkingMode !== 'off') ||
-                                     (errStatus === 400 && providerMsg.indexOf('thinking') >= 0);
+        // P0 Fix: 仅当错误明确是 thinking 不兼容时才回退
+        var isThinkingError = errCode === 'PROVIDER_INVALID_THINKING_MODE' || parsedError === 'PROVIDER_INVALID_THINKING_MODE';
+        var shouldFallback = isThinkingError && thinkingMode !== 'off' && Array.isArray(CODE_AGENT_TOOLS) && CODE_AGENT_TOOLS.length > 0;
 
-        if (errStatus === 400 && isThinkingIncompatible && thinkingMode !== 'off' && CODE_AGENT_TOOLS && CODE_AGENT_TOOLS.length > 0) {
-          console.warn('[code-agent] HTTP 400 explicitly incompatible with thinking + tools. Retrying once with thinking=off.');
+        if (shouldFallback) {
+          console.warn('[code-agent] Thinking incompatible with current model. Retrying once with thinking=off. Reason:', parsedError);
           thinkingFallback = true;
           callArgs.thinking_mode = 'off';
-          logPhase('thinking_fallback', { reason: parsedError });
-          aiResult = await deps.callDeepSeek(messages, callArgs);
-          aiResult.thinking_fallback = true;
-          aiResult.thinking_mode = 'off';
-          aiResult.thinkingFallbackReason = parsedError;
+          logPhase('thinking_fallback', { reason: parsedError, providerCode: providerCode });
+          try {
+            aiResult = await deps.callDeepSeek(messages, callArgs);
+            aiResult.thinking_fallback = true;
+            aiResult.thinking_mode = 'off';
+            aiResult.thinkingFallbackReason = parsedError;
+          } catch (fallbackErr) {
+            console.error('[code-agent] Thinking fallback also failed:', fallbackErr && fallbackErr.message);
+            fallbackErr.parsedCode = parsedError;
+            throw fallbackErr;
+          }
         } else {
           err.parsedCode = parsedError;
           throw err;
@@ -2671,8 +3264,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       var indexSummary = codeIndex.getIndexSummary(scope);
-      if (!indexSummary && openFiles.length === 0 && attachments.length === 0 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
-        sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立', 'validation');
+      var hasDocumentContent2 = openFiles.length > 0 || attachments.length > 0;
+      if (!indexSummary && !hasDocumentContent2 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 'validation');
         return;
       }
 
