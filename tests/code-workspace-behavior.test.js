@@ -14,11 +14,12 @@ test('code-workspace renderProjectStatus shows document status and permissions',
   assert.match(codeWorkspace, /文档解析失败/);
   assert.match(codeWorkspace, /文档正在解析/);
   assert.match(codeWorkspace, /文件系统权限：/);
-  assert.match(codeWorkspace, /AI 文档能力：/);
+  assert.match(codeWorkspace, /格式能力：/);
   assert.match(codeWorkspace, /只读/);
   assert.match(codeWorkspace, /可写/);
-  assert.match(codeWorkspace, /仅支持读取和分析/);
-  assert.match(codeWorkspace, /支持读取和单元格修改/);
+  assert.match(codeWorkspace, /可读取/);
+  assert.match(codeWorkspace, /可修改/);
+  assert.match(codeWorkspace, /可保存/);
 });
 
 test('code-workspace showError catches PROVIDER_ errors with details element', () => {
@@ -36,7 +37,7 @@ test('code-workspace non-stream error handler restores message on HTTP 400', () 
 
 test('code-workspace shows INDEX_REBUILD_REQUIRED friendly message', () => {
   assert.match(codeWorkspace, /INDEX_REBUILD_REQUIRED/);
-  assert.match(codeWorkspace, /当前项目内容尚未准备完成/);
+  assert.match(codeWorkspace, /项目索引尚未建立，但文档内容已可用/);
 });
 
 // 新增真实行为测试：非流式错误不显示 [PROVIDER_HTTP_400] 在正文中
