@@ -4167,7 +4167,14 @@
   function appendChatMessage(msg, container) {
     if (!container) return;
     var el = document.createElement('div');
-    el.className = 'code-chat-message ' + (msg.role === 'user' ? 'user' : 'assistant');
+    var isAssistant = msg.role !== 'user';
+    var isError = isAssistant && !!msg.errorCode;
+    var isCancelled = isAssistant && msg.stopped === true;
+    el.className = 'code-chat-message ' + (isAssistant ? 'assistant' : 'user') +
+      (isError ? ' error-state' : '') + (isCancelled ? ' cancelled' : '');
+    if (isError) el.setAttribute('data-state', 'error');
+    else if (isCancelled) el.setAttribute('data-state', 'cancelled');
+    else if (isAssistant) el.setAttribute('data-state', 'complete');
 
     var avatarText = msg.role === 'user' ? '你' : 'AI';
     var avatar = '<div class="msg-avatar">' + escapeHTML(avatarText) + '</div>';
@@ -4179,6 +4186,12 @@
       visibleContent = '工具调用未生成可显示答案，请重试。';
     }
     var body = '<div class="msg-body">';
+    if (isError) {
+      body += '<div class="code-stream-status" data-state="error" role="status" aria-live="polite" aria-busy="false">' +
+        '<span class="code-stream-status-text">生成失败</span></div>';
+      body += '<div class="code-stream-error-heading"><span>生成失败</span>' +
+        '<code>' + escapeHTML(msg.errorCode) + '</code></div>';
+    }
     body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(visibleContent) + '</div>';
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
@@ -4724,15 +4737,15 @@
     assistantNode.innerHTML =
       '<div class="msg-avatar">AI</div>' +
       '<div class="msg-body">' +
-        '<div class="code-stream-status">' +
+        '<div class="code-stream-status" data-state="connecting" role="status" aria-live="polite" aria-busy="true">' +
           '<span class="code-stream-status-text">正在分析任务...</span>' +
           '<span class="code-stream-spinner"></span>' +
         '</div>' +
         '<div class="code-stream-tools" style="display:none">' +
-          '<div class="code-stream-tools-header">' +
+          '<div class="code-stream-tools-header" role="button" tabindex="0" aria-expanded="false">' +
             '<span class="code-stream-tools-toggle">&#9654; 工具执行记录</span>' +
           '</div>' +
-          '<div class="code-stream-tools-list"></div>' +
+          '<div class="code-stream-tools-list" role="list"></div>' +
         '</div>' +
         '<div class="msg-content markdown-body code-stream-content"></div>' +
         '<div class="code-stream-usage" style="display:none"></div>' +
@@ -4765,15 +4778,43 @@
     var finalToolTrace = null;
     var finalRuntime = null;
     var streamCancelled = false;
+    var toolItems = Object.create(null);
+
+    function setStreamStatus(text, stateName, busy) {
+      if (!statusEl) return;
+      statusEl.style.display = '';
+      statusEl.setAttribute('data-state', stateName || 'working');
+      statusEl.setAttribute('aria-busy', busy === false ? 'false' : 'true');
+      if (statusText && text) statusText.textContent = text;
+      if (spinner) {
+        spinner.style.display = busy === false ? 'none' : '';
+        spinner.setAttribute('aria-hidden', busy === false ? 'true' : 'false');
+      }
+    }
+
+    function updateToolsHeader() {
+      if (!toolsHeader) return;
+      toolsHeader.setAttribute('aria-expanded', toolsExpanded ? 'true' : 'false');
+      var toggle = toolsHeader.querySelector('.code-stream-tools-toggle');
+      if (toggle) toggle.innerHTML = (toolsExpanded ? '&#9660;' : '&#9654;') +
+        ' 工具执行记录 (' + toolCount + ')';
+    }
 
     // Toggle tools section
     if (toolsHeader) {
+      toolsList.style.display = 'none';
       toolsHeader.addEventListener('click', function () {
         toolsExpanded = !toolsExpanded;
         toolsList.style.display = toolsExpanded ? '' : 'none';
-        var toggle = toolsHeader.querySelector('.code-stream-tools-toggle');
-        if (toggle) toggle.innerHTML = (toolsExpanded ? '&#9660;' : '&#9654;') + ' 工具执行记录';
+        updateToolsHeader();
       });
+      toolsHeader.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toolsHeader.click();
+        }
+      });
+      updateToolsHeader();
     }
 
     // Scroll handler
@@ -4786,7 +4827,7 @@
       if (streamCancelled) return;
       answerStarted = true;
       answerBuffer += String(delta);
-      if (statusEl) statusEl.style.display = 'none';
+      setStreamStatus('正在生成回答…', 'answer', true);
       // Use StreamRenderer for smooth text output
       if (!contentEl._streamRenderer && window.XtjAiCore && window.XtjAiCore.StreamRenderer) {
         contentEl._streamRenderer = window.XtjAiCore.StreamRenderer.create(contentEl, { plainStream: true });
@@ -4804,41 +4845,62 @@
       if (streamCancelled) return;
       toolCount++;
       if (toolsContainer) toolsContainer.style.display = '';
+      toolsExpanded = true;
+      if (toolsList) toolsList.style.display = '';
+      updateToolsHeader();
       if (statusText) statusText.textContent = data.summary || ('执行工具: ' + (data.tool || ''));
+      setStreamStatus(data.summary || ('执行工具: ' + (data.tool || '工具调用')), 'tool', true);
       var item = document.createElement('div');
       item.className = 'code-stream-tool-item';
-      item.id = 'tool-item-' + (data.tool_call_id || toolCount);
+      var toolKey = String(data.tool_call_id || ('tool-' + toolCount));
+      item.id = 'tool-item-' + toolCount;
+      item.setAttribute('data-tool-call-id', toolKey);
+      item.setAttribute('role', 'listitem');
       item.innerHTML = '<span class="code-stream-tool-icon spinner"></span>' +
-        '<span class="code-stream-tool-name">' + escapeHTML(data.tool || '') + '</span>' +
-        '<span class="code-stream-tool-summary">' + escapeHTML(data.summary || '') + '</span>';
+        '<div class="code-stream-tool-main">' +
+          '<div class="code-stream-tool-name">' + escapeHTML(data.tool || '工具调用') + '</div>' +
+          '<div class="code-stream-tool-summary">' + escapeHTML(data.summary || data.description || data.command || data.path || '等待工具返回结果…') + '</div>' +
+        '</div>' +
+        '<span class="code-stream-tool-state">执行中</span>';
+      toolItems[toolKey] = item;
       toolsList.appendChild(item);
     }
 
     function updateToolResult(data) {
       if (streamCancelled) return;
-      var itemId = 'tool-item-' + (data.tool_call_id || toolCount);
-      var item = document.getElementById(itemId);
+      var toolKey = String(data.tool_call_id || ('tool-' + toolCount));
+      var item = toolItems[toolKey];
       if (!item) {
         // Item may have been created after tool_start, try finding by tool name
         var items = toolsList.querySelectorAll('.code-stream-tool-item');
         if (items.length > 0) item = items[items.length - 1];
       }
+      var succeeded = data.ok !== false;
+      var resultMessage = String(succeeded
+        ? (data.summary || data.result || '工具已完成')
+        : (data.error || data.message || data.summary || '工具调用失败'));
       if (item) {
         var icon = item.querySelector('.code-stream-tool-icon');
         if (icon) {
-          icon.className = 'code-stream-tool-icon ' + (data.ok ? 'success' : 'error');
+          icon.className = 'code-stream-tool-icon ' + (succeeded ? 'success' : 'error');
         }
         var summary = item.querySelector('.code-stream-tool-summary');
-        if (summary) summary.textContent = data.summary || '';
+        if (summary) summary.textContent = resultMessage;
+        var stateLabel = item.querySelector('.code-stream-tool-state');
+        if (stateLabel) stateLabel.textContent = succeeded ? '已完成' : '失败';
+        item.classList.toggle('failed', !succeeded);
       }
+      setStreamStatus((succeeded ? '已完成 ' : '工具失败 · ') + toolCount + ' 个工具调用', succeeded ? 'tool-complete' : 'tool-error', false);
       if (statusText) statusText.textContent = '已完成 ' + toolCount + ' 个工具调用';
     }
 
     function showError(code, message, retryable, force) {
       if (streamCancelled && !force) return;
-      if (statusEl) statusEl.style.display = 'none';
+      setStreamStatus('生成失败', 'error', false);
       if (spinner) spinner.style.display = 'none';
       assistantNode.classList.remove('streaming');
+      assistantNode.classList.add('error-state');
+      assistantNode.setAttribute('data-state', 'error');
       if (errorEl) {
         errorEl.style.display = '';
         
@@ -4876,7 +4938,9 @@
           friendlyMessage = 'AI 服务暂时无法处理该请求，请稍后重试。';
         }
 
-        var errorHtml = '<div class="code-stream-error-msg">';
+        var errorHtml = '<div class="code-stream-error-heading"><span>生成失败</span>' +
+          (code ? '<code>' + escapeHTML(code) + '</code>' : '') + '</div>' +
+          '<div class="code-stream-error-msg">';
         errorHtml += escapeHTML(friendlyMessage);
         
         if (code) {
@@ -4923,7 +4987,7 @@
         try { contentEl._streamRenderer.finish(finalReply || answerBuffer); } catch (e) {}
         contentEl._streamRenderer = null;
       } else {
-        var finalContent = finalReply || answerBuffer || '（无响应）';
+        var finalContent = finalReply || answerBuffer || '未收到可显示回复，请重试。';
         contentEl.innerHTML = parseSimpleMarkdown(finalContent);
       }
 
@@ -4943,7 +5007,9 @@
       var now = new Date();
       if (timeEl) timeEl.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
 
-      assistantNode.classList.remove('streaming');
+      assistantNode.classList.remove('streaming', 'error-state', 'cancelled');
+      assistantNode.classList.add('completed');
+      assistantNode.setAttribute('data-state', 'complete');
     }
 
     function cleanupStream() {
@@ -5203,10 +5269,10 @@
 
         switch (event.type) {
           case 'accepted':
-            if (statusText) statusText.textContent = '请求已接受，正在处理...';
+            setStreamStatus('请求已接受，正在处理…', 'working', true);
             break;
           case 'planning':
-            if (statusText) statusText.textContent = (event.data && event.data.message) || '正在分析任务...';
+            setStreamStatus((event.data && event.data.message) || '正在分析任务…', 'working', true);
             break;
           case 'tool_start':
             addToolStart(event.data || {});
@@ -5215,7 +5281,7 @@
             updateToolResult(event.data || {});
             break;
           case 'answer_start':
-            if (statusText) statusText.textContent = '正在生成回答...';
+            setStreamStatus('正在生成回答…', 'answer', true);
             break;
           case 'answer_delta':
             var delta = (event.data && event.data.delta) ? event.data.delta : '';
@@ -5223,7 +5289,7 @@
             break;
           case 'operation_preview':
             if (event.data && event.data.files) {
-              if (statusText) statusText.textContent = '生成修改操作: ' + (event.data.files.length || 0) + ' 个文件';
+              setStreamStatus('正在准备 ' + (event.data.files.length || 0) + ' 个文件修改…', 'working', true);
             }
             break;
           case 'usage':
@@ -5356,10 +5422,8 @@
         assistantNode.classList.remove('streaming');
         assistantNode.classList.add('cancelled');
         answerBuffer = '';
-        if (statusText) {
-          statusText.textContent = '已停止';
-          statusEl.style.display = '';
-        }
+        setStreamStatus('已停止生成', 'cancelled', false);
+        assistantNode.setAttribute('data-state', 'cancelled');
         if (contentEl && !String(answerBuffer || '').trim()) contentEl.textContent = '（已停止）';
         state.messages.push({
           role: 'assistant',
