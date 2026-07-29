@@ -150,6 +150,44 @@ test.describe('Code workspace stream state regressions', () => {
     ]);
   });
 
+  test('empty done response renders one retryable assistant error', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: { reply: '' } }])
+    });
+
+    await send(page, 'empty response fixture');
+    await expect(page.locator('.code-chat-message.assistant')).toHaveCount(1);
+    await expect(page.locator('.code-chat-message.assistant').first()).toContainText('未返回有效内容');
+
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(snapshot.messages.find((message) => message.role === 'assistant').errorCode).toBe('EMPTY_RESPONSE');
+    expect(snapshot.sending).toBe(false);
+  });
+
+  test('unknown stream errors stay out of the visible assistant reply', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{
+        type: 'error',
+        data: { code: 'UNKNOWN', message: 'logPhase is not defined', retryable: true }
+      }])
+    });
+
+    await send(page, 'unknown error fixture');
+    await expect(page.locator('.code-chat-message.assistant')).toHaveCount(1);
+    const visible = await page.locator('.code-chat-message.assistant').first().innerText();
+    expect(visible).toContain('AI 请求失败');
+    expect(visible).not.toContain('logPhase is not defined');
+    expect(visible).not.toContain('[UNKNOWN]');
+
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(snapshot.messages.find((message) => message.role === 'assistant').errorCode).toBe('UNKNOWN');
+    expect(snapshot.sending).toBe(false);
+  });
+
   test('stream ending without done reports STREAM_ENDED_WITHOUT_DONE and keeps a non-empty UI result', async ({ page }) => {
     await openCodeWorkspace(page);
     await enqueue(page, {
