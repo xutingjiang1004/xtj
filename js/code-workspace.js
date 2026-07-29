@@ -4370,17 +4370,33 @@
     // Always abort the request owned by this context.  `cancelled` is a
     // reason flag, not permission to leave the underlying fetch alive.
     if (ctx.abortController) { try { ctx.abortController.abort(); } catch(_) {} }
-    if (ctx.sharedCtrl && ctx.sharedCtrl.isActive) {
+    if (ctx.sharedCtrl) {
       try {
-        if (options.done) ctx.sharedCtrl.done();
-        else ctx.sharedCtrl.cancel(options.cancelReason || 'finalized');
+        if (typeof ctx.sharedCtrl.isActive === 'function' && ctx.sharedCtrl.isActive()) {
+          if (options.done) {
+            ctx.sharedCtrl.done();
+          } else if (options.error || options.errorCode) {
+            try { ctx.sharedCtrl.error(options.errorCode || options.error || 'error'); } catch(_) {}
+          } else {
+            ctx.sharedCtrl.cancel(options.cancelReason || 'finalized');
+          }
+        }
       } catch(_) {}
     }
     if (ctx.unregisterKey && window.XtjAiCore && window.XtjAiCore.RequestController) {
       try { window.XtjAiCore.RequestController.unregisterInFlight(ctx.unregisterKey); } catch(_) {}
     }
+    var telemetryState = 'done';
+    if (options.cancelled || options.cancelReason === 'user_cancelled' || options.cancelReason === 'aborted' || options.cancelReason === 'cleanup' || options.cancelReason === 'watchdog') {
+      telemetryState = 'cancelled';
+    } else if (options.error || options.errorCode) {
+      telemetryState = 'error';
+    }
     if (ctx.telemetry) {
-      try { ctx.telemetry.finalize('done'); } catch(_) {}
+      try {
+        if (options.usage) { try { ctx.telemetry.recordUsage(options.usage); } catch(_) {} }
+        ctx.telemetry.finalize(telemetryState, options.error ? { code: options.errorCode || '', message: options.error } : undefined);
+      } catch(_) {}
     }
     // Only modify state if this context is still the active request
     if (isCurrentRequest(ctx)) {
@@ -4389,8 +4405,10 @@
       state._abortController = null;
       state._sharedCtrl = null;
       state._telemetry = null;
+      clearSendingWatchdog();
       updateChatRequestControls();
       removeTypingIndicator();
+      renderProjectStatus();
     }
   }
 
@@ -4483,11 +4501,14 @@
       showTypingIndicator();
       scrollChatToBottom();
     } catch (e) {
-      state.sending = false;
-      var curInput = document.getElementById('codeChatInput');
-      if (curInput) curInput.disabled = false;
-      var curSendBtn = document.getElementById('codeChatSendBtn');
-      if (curSendBtn) curSendBtn.disabled = false;
+      console.error('[code-workspace] Initial DOM render failed:', e);
+      // Restore the message to input so user can retry
+      input.value = message;
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
+      // Remove the user message we just pushed (since it wasn't rendered)
+      state.messages.pop();
+      finalizeRequest(ctx, { error: 'DOM render failed', errorCode: 'DOM_ERROR' });
       return;
     }
 
@@ -4514,31 +4535,23 @@
       }
       return sendApiRequest(ctx, body, timeStr);
     }).catch(function (err) {
-      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
-      if (err && err.name === 'AbortError') {
-        removeTypingIndicator();
-        if (state._sharedCtrl) {
-          try { state._sharedCtrl.cancel('aborted'); } catch (e) {}
-          if (state._telemetry) { state._telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', message: 'aborted' }); }
-        }
-        state.sending = false;
-        state._abortController = null;
-        state._sharedCtrl = null;
-        state._telemetry = null;
-        updateChatRequestControls();
+      // Stale request: only clean own resources via finalizeRequest, don't touch UI/state
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
         return null;
       }
+      if (err && err.name === 'AbortError') {
+        // Aborted — unified finalizer handles everything
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'aborted' });
+        return null;
+      }
+      // Real error: show assistant error message, then finalize
       removeTypingIndicator();
-      // P0 Fix: 失败时不重复恢复消息到输入框
-      // 只在真正发送失败时恢复一次（即网络层失败，消息未离开客户端）
-      // 如果已经收到错误响应（后端返回了错误），不恢复消息到输入框
-      state.messages.push({ role: 'assistant', content: 'Request failed: ' + ((err && err.message) || String(err)), time: timeStr });
+      var errMsg = (err && err.message) ? err.message : String(err);
+      var errCode = (err && err.code) ? err.code : 'CONTEXT_ERROR';
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: errCode });
       renderChatPanel();
-      state.sending = false;
-      state._abortController = null;
-      state._sharedCtrl = null;
-      state._telemetry = null;
-      updateChatRequestControls();
+      finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       return null;
     });
   }
@@ -4618,21 +4631,31 @@
     var wsGen = ctx.workspaceGeneration;
     var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : ctx.abortController.signal;
     var controller = ctx.abortController;
-    var timeoutId;
     var streamDone = false;
     var lastEventId = 0;
     var streamId = null;
     var resumeRetryCount = 0;
+    var _doneHandled = false;
 
-    // Phase 3: Save stream state for resume
+    // Persist stream metadata on ctx for recovery and stale cleanup
+    ctx.timeStr = timeStr;
+    ctx.originalMessage = body.message || '';
+    ctx.streamId = null;
+    ctx.lastEventId = 0;
+    ctx.assistantNodeId = 'codeStreamingNode_' + requestId;
+
+    // Phase 3: Save stream state for resume (with full session matching data)
     if (CODE_STREAM_RESUME_ENABLED) {
       saveStreamState({
+        originalMessage: body.message || '',
         requestId: requestId,
+        clientRequestId: body.client_request_id || ctx.clientRequestId || '',
+        streamId: null,
+        lastEventId: 0,
         workspaceGeneration: wsGen,
         conversationId: state.conversationId,
         workspaceId: getWorkspaceScope().workspace_id,
         timeStr: timeStr,
-        clientRequestId: body.client_request_id || '',
         startedAt: Date.now()
       });
     }
@@ -4643,11 +4666,7 @@
     // Create the single assistant node immediately
     var messagesContainer = document.getElementById('codeChatMessages');
     if (!messagesContainer) {
-      state.sending = false;
-      state._abortController = null;
-      state._sharedCtrl = null;
-      state._telemetry = null;
-      updateChatRequestControls();
+      finalizeRequest(ctx, { error: 'Messages container not found', errorCode: 'DOM_ERROR' });
       return;
     }
 
@@ -4871,8 +4890,8 @@
     }
 
     function cleanupStream() {
-      clearTimeout(timeoutId);
-      if (contentEl._streamRenderer) {
+      if (ctx.timeoutTimer) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = null; }
+      if (contentEl && contentEl._streamRenderer) {
         try { contentEl._streamRenderer.stop(); } catch (e) {}
         contentEl._streamRenderer = null;
       }
@@ -4883,17 +4902,14 @@
     }
 
     // Timeout
-    timeoutId = setTimeout(function () {
-      if (streamDone) return;
+    ctx.timeoutTimer = setTimeout(function () {
+      if (streamDone || ctx._finalized) return;
       showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true, true);
       assistantNode.classList.remove('streaming');
-      cleanupStream();
       streamCancelled = true;
-      if (controller) {
-        try { controller.abort(); } catch (e) {}
-      }
       state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true });
-      finalizeRequestState();
+      cleanupStream();
+      finalizeRequest(ctx, { cancelled: true, cancelReason: 'timeout', errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
     }, 120000);
 
     // Send the SSE request
@@ -4916,7 +4932,12 @@
 
     apiCall.then(function (resp) {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        // Stale request: clean own stream resources + abort fetch, don't touch global state
         cleanupStream();
+        if (assistantNode && assistantNode.parentNode) {
+          try { assistantNode.remove(); } catch(_) {}
+        }
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
         return;
       }
       if (!resp.ok) {
@@ -4929,11 +4950,16 @@
           if (resp.status === 503 && errCode === 'STREAM_DISABLED') {
             console.log('[code-workspace] Streaming not available, falling back to standard API');
             cleanupStream();
+            // Remove the streaming assistant node; sendApiRequest will render fresh
+            if (assistantNode && assistantNode.parentNode) {
+              try { assistantNode.remove(); } catch(_) {}
+            }
             return sendApiRequest(ctx, body, timeStr);
           }
           showError(errCode, errMsg, json && json.retryable);
-          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode });
-          finalizeRequestState();
+          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable });
+          cleanupStream();
+          finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
         });
       }
 
@@ -4981,13 +5007,26 @@
       }
 
       function readStream() {
-        if (streamCancelled || isStreamStale()) return;
+        if (streamCancelled || ctx._finalized) return;
+        if (isStreamStale()) {
+          // Stale: stop reading, clean up own resources, abort fetch
+          cleanupStream();
+          finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
+          return;
+        }
         reader.read().then(function (result) {
+          if (streamCancelled || ctx._finalized) return;
+          if (isStreamStale()) {
+            cleanupStream();
+            finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
+            return;
+          }
           if (result.done) {
             // Process any remaining data
             if (buffer.trim()) { var remaining = buffer.trim().split('\n'); for (var ri = 0; ri < remaining.length; ri++) processSseLine(remaining[ri].replace(/\r$/, '')); }
             dispatchSseEvent();
-            if (!streamDone) {
+            if (!streamDone && !_doneHandled) {
+              _doneHandled = true;
               finalizeNode();
               state.messages.push({
                 role: 'assistant',
@@ -4999,8 +5038,12 @@
                 runtime: finalRuntime,
                 usage: finalUsage
               });
-              finalizeRequestState();
               cleanupStream();
+              finalizeRequest(ctx, { done: true, usage: finalUsage });
+              clearStreamState();
+              if (finalOperations.length > 0) {
+                renderDiffView();
+              }
             }
             return;
           }
@@ -5032,31 +5075,49 @@
               }, delay);
             } else {
               showError('STREAM_INTERRUPTED', '流式连接中断', true);
-              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED' });
-              finalizeRequestState();
+              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true });
               cleanupStream();
+              finalizeRequest(ctx, { error: '流式连接中断', errorCode: 'STREAM_INTERRUPTED' });
             }
           }
         });
       }
 
       function handleSSEEvent(event) {
-        if (streamCancelled || streamDone) return;
+        if (streamCancelled || streamDone || ctx._finalized) return;
+        if (isStreamStale()) return;
         // Phase 3: Event deduplication by event_id
         if (event.event_id && event.event_id <= lastEventId) return;
-        if (event.event_id) lastEventId = event.event_id;
+        if (event.event_id) {
+          lastEventId = event.event_id;
+          ctx.lastEventId = event.event_id;
+        }
         // Capture stream_id from any event
-        if (event.stream_id) streamId = event.stream_id;
+        if (event.stream_id) {
+          streamId = event.stream_id;
+          ctx.streamId = event.stream_id;
+        }
+
+        // Persist updated stream state for recovery
+        if (CODE_STREAM_RESUME_ENABLED && (event.stream_id || event.event_id)) {
+          var saved = getStreamState() || {};
+          saveStreamState(Object.assign(saved, {
+            streamId: streamId,
+            lastEventId: lastEventId,
+            originalMessage: ctx.originalMessage || saved.originalMessage || '',
+            requestId: requestId,
+            conversationId: state.conversationId,
+            workspaceId: getWorkspaceScope().workspace_id,
+            workspaceGeneration: wsGen,
+            clientRequestId: ctx.clientRequestId || '',
+            timeStr: timeStr,
+            startedAt: saved.startedAt || Date.now()
+          }));
+        }
 
         switch (event.type) {
           case 'accepted':
             if (statusText) statusText.textContent = '请求已接受，正在处理...';
-            // Phase 3: Update stream state
-            if (CODE_STREAM_RESUME_ENABLED && streamId) {
-              saveStreamState(Object.assign(getStreamState() || {}, {
-                streamId: streamId, lastEventId: lastEventId
-              }));
-            }
             break;
           case 'planning':
             if (statusText) statusText.textContent = (event.data && event.data.message) || '正在分析任务...';
@@ -5089,6 +5150,9 @@
             // Keep-alive, do nothing
             break;
           case 'done':
+            if (_doneHandled) return; // done must be processed only once
+            _doneHandled = true;
+            streamDone = true;
             finalReply = (event.data && event.data.reply) ? event.data.reply : '';
             finalOperations = (event.data && Array.isArray(event.data.operations)) ? event.data.operations : [];
             finalContextInfo = (event.data && event.data.context_info) || null;
@@ -5124,17 +5188,18 @@
             }
             state.lastToolTrace = finalToolTrace || [];
 
-            finalizeRequestState();
             cleanupStream();
+            finalizeRequest(ctx, { done: true, usage: finalUsage });
 
             // Show diff if operations
             if (finalOperations.length > 0) {
               renderDiffView();
             }
-            // Phase 3: Clear stream state on done
             clearStreamState();
             break;
           case 'error':
+            if (_doneHandled) return;
+            _doneHandled = true;
             var errCode = (event.data && event.data.code) || 'INTERNAL_ERROR';
             var errMsg = (event.data && event.data.message) || '请求失败';
             var retryable = (event.data && event.data.retryable) === true;
@@ -5146,8 +5211,8 @@
               errorCode: errCode,
               retryable: retryable
             });
-            finalizeRequestState();
             cleanupStream();
+            finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
             break;
         }
       }
@@ -5702,145 +5767,182 @@
   // ──────────────────────────────────────────────
   function renderDiffView() {
     if (!_dom.editorArea) return;
-    if (state.pendingOperations.length === 0) {
-      // Remove existing diff view
-      var existingDiff = document.getElementById('codeDiffView');
-      if (existingDiff) existingDiff.remove();
-      var existingApplyBar = document.getElementById('codeApplyBar');
-      if (existingApplyBar) existingApplyBar.remove();
-      return;
-    }
 
-    // Remove existing diff view
+    var hasPending = state.pendingOperations.length > 0;
+    var hasApplied = Object.keys(state.snapshots).length > 0;
+
+    // Remove existing diff view and apply bar
     var existingDiff = document.getElementById('codeDiffView');
     if (existingDiff) existingDiff.remove();
     var existingApplyBar = document.getElementById('codeApplyBar');
     if (existingApplyBar) existingApplyBar.remove();
 
-    // Hide editor area current content, show diff
     var editorContainer = document.getElementById('codeEditorContainer');
     var previewArea = document.getElementById('codePreviewArea');
+
+    if (!hasPending && !hasApplied) {
+      // Nothing to show: restore editor view
+      if (editorContainer) editorContainer.style.display = '';
+      if (previewArea) previewArea.style.display = '';
+      return;
+    }
+
+    // We have something to show: hide editor
     if (editorContainer) editorContainer.style.display = 'none';
     if (previewArea) previewArea.style.display = 'none';
 
-    var diffView = document.createElement('div');
-    diffView.className = 'code-diff-view';
-    diffView.id = 'codeDiffView';
+    // Only render diff content if there are pending operations
+    if (hasPending) {
+      var diffView = document.createElement('div');
+      diffView.className = 'code-diff-view';
+      diffView.id = 'codeDiffView';
 
-    var diffBody = document.createElement('div');
-    diffBody.className = 'code-diff-body stacked';
+      var diffBody = document.createElement('div');
+      diffBody.className = 'code-diff-body stacked';
 
-    for (var i = 0; i < state.pendingOperations.length; i++) {
-      var op = state.pendingOperations[i];
+      for (var i = 0; i < state.pendingOperations.length; i++) {
+        var op = state.pendingOperations[i];
 
-      // Header for this operation
-      var header = document.createElement('div');
-      header.className = 'code-diff-header';
-      header.innerHTML =
-        '<span class="diff-file-path">' + escapeHTML(op.path || '') + '</span>' +
-        (op.summary ? '<span class="diff-stats">' + escapeHTML(op.summary) + '</span>' : '');
-      diffBody.appendChild(header);
+        // Header for this operation
+        var header = document.createElement('div');
+        header.className = 'code-diff-header';
+        header.innerHTML =
+          '<span class="diff-file-path">' + escapeHTML(op.path || '') + '</span>' +
+          (op.summary ? '<span class="diff-stats">' + escapeHTML(op.summary) + '</span>' : '');
+        diffBody.appendChild(header);
 
-      // Before (original)
-      var before = document.createElement('div');
-      before.className = 'code-diff-before';
-      before.style.overflow = 'auto';
-      before.style.maxHeight = '200px';
-      before.style.padding = '8px 0';
-      before.style.borderBottom = '1px solid var(--cw-border)';
+        // Before (original)
+        var before = document.createElement('div');
+        before.className = 'code-diff-before';
+        before.style.overflow = 'auto';
+        before.style.maxHeight = '200px';
+        before.style.padding = '8px 0';
+        before.style.borderBottom = '1px solid var(--cw-border)';
 
-      var beforeLabel = document.createElement('div');
-      beforeLabel.style.cssText = 'padding:2px 14px;font-size:11px;color:var(--cw-text-muted);font-weight:600;';
-      beforeLabel.textContent = '当前内容';
-      before.appendChild(beforeLabel);
+        var beforeLabel = document.createElement('div');
+        beforeLabel.style.cssText = 'padding:2px 14px;font-size:11px;color:var(--cw-text-muted);font-weight:600;';
+        beforeLabel.textContent = '当前内容';
+        before.appendChild(beforeLabel);
 
-      // Get original content from snapshot or tab
-      var originalContent = '';
-      if (state.snapshots[op.path] && state.snapshots[op.path].beforeContent !== undefined) {
-        originalContent = state.snapshots[op.path].beforeContent;
-      } else {
-        for (var j = 0; j < state.openTabs.length; j++) {
-          if (state.openTabs[j].path === op.path) {
-            originalContent = state.openTabs[j].content || '';
-            break;
-          }
-        }
-      }
-
-      if (op.type === 'document') {
-        // Document operation: show operations list instead of text diff
-        var docInfo = document.createElement('div');
-        docInfo.style.padding = '12px 14px';
-        docInfo.style.cssText = 'padding:12px 14px;color:var(--cw-text);font-size:13px;';
-
-        var ext = (op.path || '').split('.').pop().toLowerCase();
-        var docType = ext === 'docx' ? 'Word' : ext === 'xlsx' ? 'Excel' : '文档';
-        docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
-          escapeHTML(docType + ' 修改') + '</div>' +
-          '<div style="margin-bottom:6px;">' +
-          '  将另存为: <strong>' + escapeHTML((op.path || '').replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
-          '</div>';
-
-        if (op.document_operations && op.document_operations.length > 0) {
-          var opsList = document.createElement('ul');
-          opsList.style.cssText = 'margin:8px 0;padding-left:20px;list-style:disc;';
-          for (var di = 0; di < op.document_operations.length; di++) {
-            var dop = op.document_operations[di];
-            var li = document.createElement('li');
-            li.style.cssText = 'margin:4px 0;line-height:1.5;';
-            li.textContent = (dop.type || '修改') + ': ' + (dop.description || JSON.stringify(dop));
-            opsList.appendChild(li);
-          }
-          docInfo.appendChild(opsList);
+        // Get original content from snapshot or tab
+        var originalContent = '';
+        if (state.snapshots[op.path] && state.snapshots[op.path].beforeContent !== undefined) {
+          originalContent = state.snapshots[op.path].beforeContent;
         } else {
-          docInfo.innerHTML += '<div style="color:var(--cw-text-muted);">无详细操作描述</div>';
+          for (var j = 0; j < state.openTabs.length; j++) {
+            if (state.openTabs[j].path === op.path) {
+              originalContent = state.openTabs[j].content || '';
+              break;
+            }
+          }
         }
 
-        before.appendChild(docInfo);
-      } else {
-        var newContent = op.new_content || '';
-        if (op.type === 'replace_range' && op.start_line && op.end_line) {
-          var lines = originalContent.split('\n');
-          var startIdx = Math.max(0, op.start_line - 1);
-          var endIdx = Math.max(0, op.end_line);
-          var prefix = lines.slice(0, startIdx).join('\n');
-          var suffix = lines.slice(endIdx).join('\n');
-          newContent = (prefix ? prefix + '\n' : '') + newContent + (suffix ? '\n' + suffix : '');
-        }
-        var diffLines = computeDiff(originalContent, newContent);
+        if (op.type === 'document') {
+          // Document operation: show operations list instead of text diff
+          var docInfo = document.createElement('div');
+          docInfo.style.padding = '12px 14px';
+          docInfo.style.cssText = 'padding:12px 14px;color:var(--cw-text);font-size:13px;';
 
-        for (var k = 0; k < diffLines.length; k++) {
-          var line = diffLines[k];
-          var lineEl = document.createElement('div');
-          lineEl.className = 'code-diff-line ' + line.type;
-          lineEl.innerHTML =
-            '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
-            '<span class="line-content">' + escapeHTML(line.text) + '</span>';
-          before.appendChild(lineEl);
+          var ext = (op.path || '').split('.').pop().toLowerCase();
+          var docType = ext === 'docx' ? 'Word' : ext === 'xlsx' ? 'Excel' : '文档';
+          docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
+            escapeHTML(docType + ' 修改') + '</div>' +
+            '<div style="margin-bottom:6px;">' +
+            '  将另存为: <strong>' + escapeHTML((op.path || '').replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
+            '</div>';
+
+          if (op.document_operations && op.document_operations.length > 0) {
+            var opsList = document.createElement('ul');
+            opsList.style.cssText = 'margin:8px 0;padding-left:20px;list-style:disc;';
+            for (var di = 0; di < op.document_operations.length; di++) {
+              var dop = op.document_operations[di];
+              var li = document.createElement('li');
+              li.style.cssText = 'margin:4px 0;line-height:1.5;';
+              li.textContent = (dop.type || '修改') + ': ' + (dop.description || JSON.stringify(dop));
+              opsList.appendChild(li);
+            }
+            docInfo.appendChild(opsList);
+          } else {
+            docInfo.innerHTML += '<div style="color:var(--cw-text-muted);">无详细操作描述</div>';
+          }
+
+          before.appendChild(docInfo);
+        } else {
+          var newContent = op.new_content || '';
+          if (op.type === 'replace_range' && op.start_line && op.end_line) {
+            var lines = originalContent.split('\n');
+            var startIdx = Math.max(0, op.start_line - 1);
+            var endIdx = Math.max(0, op.end_line);
+            var prefix = lines.slice(0, startIdx).join('\n');
+            var suffix = lines.slice(endIdx).join('\n');
+            newContent = (prefix ? prefix + '\n' : '') + newContent + (suffix ? '\n' + suffix : '');
+          }
+          var diffLines = computeDiff(originalContent, newContent);
+
+          for (var k = 0; k < diffLines.length; k++) {
+            var line = diffLines[k];
+            var lineEl = document.createElement('div');
+            lineEl.className = 'code-diff-line ' + line.type;
+            lineEl.innerHTML =
+              '<span class="line-num">' + (line.lineNum ? line.lineNum : '') + '</span>' +
+              '<span class="line-content">' + escapeHTML(line.text) + '</span>';
+            before.appendChild(lineEl);
+          }
         }
+
+        diffBody.appendChild(before);
       }
 
-      diffBody.appendChild(before);
+      diffView.appendChild(diffBody);
+      _dom.editorArea.appendChild(diffView);
+    } else {
+      // Only applied changes (no pending): show a simple info panel
+      var appliedPanel = document.createElement('div');
+      appliedPanel.className = 'code-diff-view';
+      appliedPanel.id = 'codeDiffView';
+      appliedPanel.innerHTML =
+        '<div style="padding:40px 20px;text-align:center;color:var(--cw-text-muted);">' +
+        '<div style="font-size:14px;margin-bottom:8px;">已应用 ' + Object.keys(state.snapshots).length + ' 个文件修改</div>' +
+        '<div style="font-size:12px;">可使用下方"回滚修改"按钮撤销</div>' +
+        '</div>';
+      _dom.editorArea.appendChild(appliedPanel);
     }
 
-    diffView.appendChild(diffBody);
-    _dom.editorArea.appendChild(diffView);
-
-    // Apply bar
+    // Apply bar - dynamically build based on state (hasPending/hasApplied already declared above)
     var applyBar = document.createElement('div');
     applyBar.className = 'code-apply-bar';
     applyBar.id = 'codeApplyBar';
+
+    // Build info text
+    var infoParts = [];
+    if (hasPending) {
+      infoParts.push(state.pendingOperations.length + ' 个文件待应用');
+    }
+    if (hasApplied) {
+      infoParts.push(Object.keys(state.snapshots).length + ' 个文件已修改');
+    }
+    var infoText = infoParts.join(' · ');
+
+    // Build actions (always include buttons, replaceChildren for read-only)
+    var actionsHtml = '<div class="apply-actions">';
+    if (hasPending) {
+      actionsHtml += '<button class="code-btn code-btn-ghost" id="codeDiscardBtn">放弃建议</button>';
+    }
+    if (hasApplied) {
+      actionsHtml += '<button class="code-btn code-btn-ghost" id="codeUndoBtn">回滚修改</button>';
+    }
+    if (hasPending) {
+      actionsHtml += '<button class="code-btn code-btn-primary" id="codeApplyAllBtn">全部应用</button>';
+    }
+    actionsHtml += '</div>';
+
     applyBar.innerHTML =
-      '<span class="apply-info">' + state.pendingOperations.length + ' 个文件待应用' + '</span>' +
-      '<div class="apply-actions">' +
-        '<button class="code-btn code-btn-ghost" id="codeUndoBtn">撤销</button>' +
-        '<button class="code-btn code-btn-primary" id="codeApplyAllBtn">全部应用</button>' +
-      '</div>';
+      '<span class="apply-info">' + escapeHTML(infoText) + '</span>' +
+      actionsHtml;
 
     _dom.editorArea.appendChild(applyBar);
 
-    // GitHub and browser-fallback workspaces are read-only. Do not expose
-    // controls that can only fail with a misleading error toast.
+    // Read-only workspaces: replace write controls with read-only label
     if (state._isReadOnly) {
       var readOnlyApplyActions = applyBar.querySelector('.apply-actions');
       if (readOnlyApplyActions) {
@@ -5854,10 +5956,16 @@
 
     // Bind buttons (use _bound flag to avoid duplicate listeners on re-render)
     var applyBtn = document.getElementById('codeApplyAllBtn');
+    var discardBtn = document.getElementById('codeDiscardBtn');
     var undoBtn = document.getElementById('codeUndoBtn');
+
     if (applyBtn && !applyBtn._diffBound) {
       applyBtn._diffBound = true;
       applyBtn.addEventListener('click', applyAllOperations);
+    }
+    if (discardBtn && !discardBtn._diffBound) {
+      discardBtn._diffBound = true;
+      discardBtn.addEventListener('click', discardPendingOperations);
     }
     if (undoBtn && !undoBtn._diffBound) {
       undoBtn._diffBound = true;
@@ -6241,7 +6349,27 @@
   }
 
   // ──────────────────────────────────────────────
+  // discardPendingOperations()
+  // 放弃所有未应用的 AI 建议（pendingOperations），不影响已应用的修改
+  // ──────────────────────────────────────────────
+  function discardPendingOperations() {
+    if (state.pendingOperations.length === 0) {
+      showToast('没有待放弃的建议', 'info');
+      return;
+    }
+    var count = state.pendingOperations.length;
+    state.pendingOperations = [];
+    renderDiffView();
+    renderTabs();
+    if (state.activePath) {
+      renderEditor();
+    }
+    showToast('已放弃 ' + count + ' 个待应用的修改建议', 'info');
+  }
+
+  // ──────────────────────────────────────────────
   // undoOperations()
+  // 回滚所有已应用的修改（基于 snapshots），不影响未应用的建议
   // ──────────────────────────────────────────────
   function undoOperations() {
     if (state._undoLock) return Promise.resolve(false);
