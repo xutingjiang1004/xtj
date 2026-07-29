@@ -109,6 +109,19 @@ function createEventLogger(supabase, streamId, userId) {
   var lastFlushTime = 0;
   var flushTimer = null;
   var flushed = false;
+  var pendingWrites = new Set();
+
+  function trackWrite(promise) {
+    var tracked = Promise.resolve(promise);
+    pendingWrites.add(tracked);
+    tracked.then(function() { pendingWrites.delete(tracked); }, function() { pendingWrites.delete(tracked); });
+    return tracked;
+  }
+
+  function waitForWrites() {
+    if (pendingWrites.size === 0) return Promise.resolve();
+    return Promise.all(Array.from(pendingWrites)).then(waitForWrites);
+  }
 
   function doFlushDeltas() {
     if (flushed) return Promise.resolve();
@@ -137,10 +150,10 @@ function createEventLogger(supabase, streamId, userId) {
 
       if (pendingDeltas.join('').length >= DELTA_FLUSH_MIN_CHARS ||
           (now - lastFlushTime) >= DELTA_FLUSH_INTERVAL_MS) {
-        return doFlushDeltas().then(function(combined) {
+        return trackWrite(doFlushDeltas().then(function(combined) {
           if (!combined) return;
           return insertEvent(supabase, streamId, userId, eventId, 'answer_delta', { delta: combined.slice(0, 10000) });
-        });
+        }));
       }
       return Promise.resolve();
     }
@@ -152,19 +165,19 @@ function createEventLogger(supabase, streamId, userId) {
       }
     });
 
-    return flushPromise.then(function() {
+    return trackWrite(flushPromise.then(function() {
       return insertEvent(supabase, streamId, userId, eventId, type, sanitizeEventData(type, data));
-    });
+    }));
   }
 
   function flush() {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    return doFlushDeltas().then(function(combined) {
+    return waitForWrites().then(function() { return doFlushDeltas(); }).then(function(combined) {
       flushed = true;
       if (combined) {
-        return insertEvent(supabase, streamId, userId, 0, 'answer_delta', { delta: combined.slice(0, 10000) });
+        return trackWrite(insertEvent(supabase, streamId, userId, 0, 'answer_delta', { delta: combined.slice(0, 10000) }));
       }
-    });
+    }).then(waitForWrites);
   }
 
   return {

@@ -5,7 +5,7 @@
 // ── SSE Response Setup ───────────────────────────────────────────────────
 function setupSSE(res, req) {
   res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
+    'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no'
@@ -65,11 +65,17 @@ function createSSEWriter(res, req) {
 // ── SSE Event Formatting ─────────────────────────────────────────────────
 function formatSSEEvent(event) {
   var lines = [];
-  if (event.id) lines.push('id: ' + event.id);
-  if (event.event) lines.push('event: ' + event.event);
+  if (event.id !== undefined && event.id !== null) lines.push('id: ' + event.id);
+  var eventName = event.event || event.type;
+  if (eventName) lines.push('event: ' + eventName);
   if (event.data !== undefined) {
-    var data = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
-    lines.push('data: ' + data);
+    // Structured AI events are consumed from data.type/data.data by the Code
+    // client. Keep the legacy { event, data } shape as a payload-only event.
+    var payload = event.type && !event.event ? event : event.data;
+    var data = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    String(data).split(/\r?\n/).forEach(function(line) {
+      lines.push('data: ' + line);
+    });
   }
   return lines.join('\n') + '\n\n';
 }
