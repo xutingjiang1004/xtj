@@ -232,6 +232,12 @@ test('code-agent prioritizes open documents when the project index is missing', 
   assert.match(codeAgent, /未建立（当前打开文件和上传资料仍可读取）/);
 });
 
+test('streaming code chat defines its phase logger and does not gate simple chat on an index', () => {
+  assert.match(codeAgent, /app\.post\('\/api\/code\/chat\/stream'/);
+  assert.match(codeAgent, /function logPhase\(phase, extra\)/);
+  assert.match(codeAgent, /needsProjectContext\(message\) && !isFreshnessQuery\(message\)/);
+});
+
 // ============================================================
 // 16. 操作解析
 // ============================================================
