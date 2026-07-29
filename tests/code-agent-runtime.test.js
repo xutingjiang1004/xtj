@@ -405,6 +405,111 @@ test('uploaded travel documents are available to tools without a project index',
 
 // ── Runtime identity & capabilities tests ─────────────────────────────
 
+test('open file overlay provides safe list and search fallbacks without a project index', async () => {
+  let listed;
+  let searched;
+  const app = createApp(async (_messages, options) => {
+    listed = await options.tool_executor({
+      id: 'list-open',
+      function: { name: 'list_files', arguments: JSON.stringify({ directory: 'src', depth: 2, pattern: '*.js' }) }
+    });
+    searched = await options.tool_executor({
+      id: 'search-open',
+      function: { name: 'search_code', arguments: JSON.stringify({ query: 'render', path: 'src/main.js' }) }
+    });
+    return { content: 'open context inspected', model: 'deepseek-v4-flash' };
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_id: 'overlay-only', workspace_generation: 1, active_path: 'src/main.js',
+    message: '检查当前打开文件',
+    open_files: [{ path: 'src\\main.js', content: 'function render() { return true; }\nconst ready = true;' }],
+    attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.source, 'open_files');
+  assert.equal(listed.files[0].path, 'src/main.js');
+  assert.equal(searched.ok, true);
+  assert.equal(searched.source, 'open_files');
+  assert.equal(searched.results[0].path, 'src/main.js');
+  assert.equal(searched.results[0].startLine, 1);
+  assert.equal(response.body.tool_trace.every(item => item.ok), true);
+});
+
+test('open-file overlays normalize paths and safely back tools without a project index', async () => {
+  let toolResults;
+  const app = createApp(async (_messages, options) => {
+    const listed = await options.tool_executor({
+      id: 'overlay-list',
+      function: { name: 'list_files', arguments: JSON.stringify({ directory: 'src', depth: 2 }) }
+    });
+    const searched = await options.tool_executor({
+      id: 'overlay-search',
+      function: { name: 'search_code', arguments: JSON.stringify({ query: 'needle', path: 'src\\app.js' }) }
+    });
+    const read = await options.tool_executor({
+      id: 'overlay-read',
+      function: { name: 'read_file', arguments: JSON.stringify({ path: 'src\\app.js' }) }
+    });
+    toolResults = { listed, searched, read };
+    return { content: 'overlay inspected', model: 'deepseek-v4-flash', usage: {} };
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'overlay', workspace_id: 'local:overlay', workspace_generation: 1,
+    message: 'read the open file', history: [], active_path: 'src/app.js',
+    open_files: [{ path: 'src\\app.js', content: 'const needle = true;\nconst other = false;', language: 'javascript' }],
+    attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(toolResults.listed.ok, true);
+  assert.equal(toolResults.listed.source, 'open_files');
+  assert.equal(toolResults.listed.indexed, false);
+  assert.equal(toolResults.listed.files[0].path, 'src/app.js');
+  assert.equal(toolResults.searched.ok, true);
+  assert.equal(toolResults.searched.source, 'open_files');
+  assert.equal(toolResults.searched.results[0].path, 'src/app.js');
+  assert.equal(toolResults.read.ok, true);
+  assert.equal(toolResults.read.source, 'open');
+  assert.match(toolResults.read.content, /needle/);
+});
+
+test('tools return explicit index and unsupported-tool errors when no safe fallback exists', async () => {
+  let indexError;
+  let unsupportedError;
+  let malformedError;
+  const app = createApp(async (_messages, options) => {
+    indexError = await options.tool_executor({
+      id: 'missing-index',
+      function: { name: 'search_code', arguments: JSON.stringify({ query: 'needle' }) }
+    });
+    unsupportedError = await options.tool_executor({
+      id: 'unknown-tool',
+      function: { name: 'unknown_tool', arguments: '{}' }
+    });
+    malformedError = await options.tool_executor({
+      id: 'malformed-json',
+      function: { name: 'list_files', arguments: '{"directory":' }
+    });
+    return { content: 'tool errors handled', model: 'deepseek-v4-flash', usage: {} };
+  });
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'no-index', workspace_id: 'local:no-index', workspace_generation: 1,
+    message: 'hello', history: [], open_files: [], attachments: []
+  });
+  assert.equal(response.status, 200);
+  assert.equal(indexError.ok, false);
+  assert.equal(indexError.code, 'INDEX_NOT_FOUND');
+  assert.match(indexError.error, /No project index built/);
+  assert.equal(unsupportedError.ok, false);
+  assert.equal(unsupportedError.code, 'UNSUPPORTED_TOOL');
+  assert.equal(malformedError.ok, false);
+  assert.equal(malformedError.code, 'INVALID_TOOL_ARGUMENTS');
+  assert.equal(response.body.tool_trace[0].code, 'INDEX_NOT_FOUND');
+  assert.equal(response.body.tool_trace[1].code, 'UNSUPPORTED_TOOL');
+  assert.equal(response.body.tool_trace[2].code, 'INVALID_TOOL_ARGUMENTS');
+  assert.equal(response.body.tool_trace[0].ok, false);
+});
+
 test('response includes runtime identity with provider=deepseek and model', async () => {
   const app = createApp(async (_messages, _options) => {
     return { content: '我是 XTJ Code Agent，运行在 DeepSeek 平台上。', model: 'deepseek-v4-flash', usage: { prompt_tokens: 100, completion_tokens: 50 } };

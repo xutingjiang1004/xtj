@@ -293,6 +293,12 @@ function normalizeContextPath(p) {
   return s;
 }
 
+function normalizeToolPath(p) {
+  if (typeof p !== 'string' || !p.trim()) return '';
+  var normalized = normalizeContextPath(p);
+  return validatePath(normalized) ? normalized : '';
+}
+
 function validatePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
   var s = p.trim();
@@ -1022,9 +1028,9 @@ function parseToolArguments(toolCall) {
   if (typeof raw === 'object') return raw;
   try {
     var parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { __parseError: true };
   } catch (_) {
-    return {};
+    return { __parseError: true };
   }
 }
 
@@ -1032,8 +1038,127 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   deps = deps || {};
   runtimeCapabilities = runtimeCapabilities || {};
   var overlay = new Map();
-  openFiles.concat(attachments).forEach(function(file) { overlay.set(file.path, file); });
+  var overlayFiles = openFiles.concat(attachments);
+  var overlayBasenames = new Map();
+  overlayFiles.forEach(function(file) {
+    if (!overlay.has(file.path)) overlay.set(file.path, file);
+    var basename = file.path.split('/').pop();
+    if (!basename) return;
+    if (overlayBasenames.has(basename)) overlayBasenames.set(basename, null);
+    else overlayBasenames.set(basename, file);
+  });
   var remainingTokens = Math.max(0, maxInputTokens);
+
+  function resolveOverlayFile(path) {
+    var normalized = normalizeToolPath(path);
+    if (!normalized) return null;
+    if (overlay.has(normalized)) return overlay.get(normalized);
+    var basename = normalized.split('/').pop();
+    return overlayBasenames.get(basename) || null;
+  }
+
+  function wildcardMatch(value, pattern) {
+    if (!pattern) return true;
+    try {
+      var escaped = String(pattern).slice(0, 120).replace(/[.+^${}()|[\]\\]/g, '\\$&');
+      return new RegExp('^' + escaped.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i').test(value);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function listOverlayFiles(directory, depth, pattern) {
+    var normalizedDirectory = directory ? normalizeToolPath(directory) : '';
+    if (directory && !normalizedDirectory) return { ok: false, code: 'INVALID_PATH', error: '目录路径无效' };
+    var maxDepth = Number.isSafeInteger(depth) ? Math.min(Math.max(depth, 0), 8) : 3;
+    var prefix = normalizedDirectory ? normalizedDirectory.replace(/\/$/, '') + '/' : '';
+    var files = [];
+    var directories = {};
+    overlayFiles.forEach(function(file) {
+      var path = file.path;
+      if (prefix && path.indexOf(prefix) !== 0) return;
+      var relative = prefix ? path.slice(prefix.length) : path;
+      var parts = relative.split('/');
+      if (parts.length - 1 > maxDepth || !wildcardMatch(parts[parts.length - 1], pattern)) return;
+      files.push({
+        path: path,
+        name: parts[parts.length - 1],
+        language: file.language || '',
+        size: Buffer.byteLength(file.content || '', 'utf8'),
+        symbols: [],
+        chunkCount: 0
+      });
+      for (var i = 0; i < parts.length - 1; i++) {
+        var dirPath = prefix + parts.slice(0, i + 1).join('/');
+        if (!directories[dirPath]) directories[dirPath] = 0;
+        directories[dirPath]++;
+      }
+    });
+    files.sort(function(a, b) { return a.path.localeCompare(b.path); });
+    var totalFiles = files.length;
+    var truncated = totalFiles > 200;
+    if (truncated) files = files.slice(0, 200);
+    return {
+      ok: true,
+      source: 'open_files',
+      indexed: false,
+      directory: normalizedDirectory || '/',
+      directories: Object.keys(directories).sort().map(function(path) { return { path: path, fileCount: directories[path] }; }),
+      files: files,
+      totalFiles: totalFiles,
+      returnedFiles: files.length,
+      truncated: truncated,
+      totalCount: totalFiles
+    };
+  }
+
+  function searchOverlay(query, options) {
+    var text = String(query || '').trim();
+    if (!text) return { ok: false, code: 'QUERY_REQUIRED', error: 'Query is required' };
+    options = options || {};
+    var pathFilter = options.path ? normalizeToolPath(options.path) : '';
+    if (options.path && !pathFilter) return { ok: false, code: 'INVALID_PATH', error: '文件路径无效' };
+    var extensions = Array.isArray(options.extensions) ? options.extensions.slice(0, 20).map(function(ext) {
+      ext = String(ext || '').toLowerCase();
+      return ext.charAt(0) === '.' ? ext : '.' + ext;
+    }) : null;
+    var terms = text.split(/[\s,，。；;:：]+/).filter(Boolean).slice(0, 20);
+    if (!terms.length) terms = [text];
+    var maxResults = Math.min(Math.max(Number(options.maxResults) || 20, 1), 40);
+    var allResults = [];
+    overlayFiles.forEach(function(file) {
+      if (pathFilter && file.path.indexOf(pathFilter) === -1) return;
+      if (extensions && extensions.length && extensions.indexOf(file.path.slice(file.path.lastIndexOf('.')).toLowerCase()) === -1) return;
+      var lines = String(file.content || '').split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var lower = line.toLowerCase();
+        var matched = terms.some(function(term) { return lower.indexOf(String(term).toLowerCase()) >= 0; });
+        if (!matched) continue;
+        allResults.push({
+          path: file.path,
+          name: file.path.split('/').pop(),
+          language: file.language || '',
+          chunkId: 'overlay_' + file.path + '_' + (i + 1),
+          startLine: i + 1,
+          endLine: i + 1,
+          content: line,
+          score: 1,
+          tokenEstimate: codeIndex.estimateTokens(line)
+        });
+      }
+    });
+    return {
+      ok: true,
+      source: 'open_files',
+      indexed: false,
+      query: text,
+      results: allResults.slice(0, maxResults),
+      totalHits: allResults.length,
+      truncated: allResults.length > maxResults,
+      keywords: terms
+    };
+  }
 
   function record(name, args, startedAt, result) {
     var content = result && typeof result.content === 'string' ? result.content : '';
@@ -1053,6 +1178,7 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
       result_estimated_tokens: estimatedTokens
     };
     if (result && result.path) entry.path = result.path;
+    if (result && result.code) entry.code = String(result.code).slice(0, 80);
     if (result && (result.startLine || result.endLine)) entry.ranges = [[result.startLine || 1, result.endLine || result.startLine || 1]];
     if (result && Array.isArray(result.results)) {
       entry.files = result.results.map(function(item) { return { path: item.path, ranges: [[item.startLine || 1, item.endLine || item.startLine || 1]] }; });
@@ -1066,15 +1192,17 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   }
 
   function readPath(path, startLine, endLine) {
-    if (!validatePath(path)) return { ok: false, error: '文件路径无效' };
-    if (overlay.has(path)) return fileToToolResult(overlay.get(path), startLine, endLine);
-    var range = codeIndex.readFileRange(scope, path, startLine || 1, endLine || 1000000);
+    var normalizedPath = normalizeToolPath(path);
+    if (!normalizedPath) return { ok: false, code: 'INVALID_PATH', error: '文件路径无效' };
+    var overlayFile = resolveOverlayFile(normalizedPath);
+    if (overlayFile) return fileToToolResult(overlayFile, startLine, endLine);
+    var range = codeIndex.readFileRange(scope, normalizedPath, startLine || 1, endLine || 1000000);
     if (!range || !range.ok) return range;
     var actualStart = Array.isArray(range.lines) && range.lines.length ? range.lines[0].lineNum : range.startLine;
     var actualEnd = Array.isArray(range.lines) && range.lines.length ? range.lines[range.lines.length - 1].lineNum : actualStart;
     return {
       ok: true,
-      path: path,
+      path: normalizedPath,
       sha256: range.sha256 || '',
       startLine: actualStart,
       endLine: actualEnd,
@@ -1089,22 +1217,26 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
     var name = toolCall && toolCall.function ? String(toolCall.function.name || '') : '';
     var args = parseToolArguments(toolCall);
     var result;
+    if (args && args.__parseError) return record(name, {}, startedAt, { ok: false, code: 'INVALID_TOOL_ARGUMENTS', error: '工具参数 JSON 无效' });
     if (remainingTokens < 1024 && name !== 'get_open_files') return record(name, args, startedAt, { ok: false, error: '本轮上下文预算已用完，请基于已读取内容回答' });
-    if (name === 'list_files') {
-      result = codeIndex.listFiles(scope, args.directory || '', Math.min(Math.max(Number(args.depth) || 3, 0), 8), args.pattern || '');
-    } else if (name === 'search_code') {
-      result = codeIndex.searchCode(scope, String(args.query || ''), { path: args.path || null, extensions: Array.isArray(args.extensions) ? args.extensions.slice(0, 20) : null, maxResults: Math.min(Math.max(Number(args.max_results) || 20, 1), 40) });
-    } else if (name === 'read_file') {
-      result = readPath(String(args.path || ''), 1, 1000000);
-    } else if (name === 'read_file_range') {
-      result = readPath(String(args.path || ''), Math.max(Number(args.start_line) || 1, 1), Math.min(Math.max(Number(args.end_line) || Number(args.start_line) || 1, 1), 1000000));
-    } else if (name === 'get_symbols') {
-      result = codeIndex.getFileSymbols(scope, String(args.path || ''));
-    } else if (name === 'get_active_file') {
-      result = activePath ? readPath(activePath, 1, 1000000) : { ok: false, error: '当前没有打开文件' };
-    } else if (name === 'get_open_files') {
-      result = { ok: true, activePath: activePath || '', files: openFiles.concat(attachments).map(function(file) { return { path: file.path, name: file.name, sha256: file.sha256, source: file.source, size: Buffer.byteLength(file.content || '', 'utf8') }; }) };
-    } else if (name === 'get_runtime_capabilities') {
+    try {
+      if (name === 'list_files') {
+        result = codeIndex.listFiles(scope, args.directory || '', Math.min(Math.max(Number(args.depth) || 3, 0), 8), args.pattern || '');
+        if (result && result.code === 'INDEX_NOT_FOUND' && overlayFiles.length) result = listOverlayFiles(args.directory || '', Number(args.depth) || 3, args.pattern || '');
+      } else if (name === 'search_code') {
+        result = codeIndex.searchCode(scope, String(args.query || ''), { path: args.path || null, extensions: Array.isArray(args.extensions) ? args.extensions.slice(0, 20) : null, maxResults: Math.min(Math.max(Number(args.max_results) || 20, 1), 40) });
+        if (result && result.code === 'INDEX_NOT_FOUND' && overlayFiles.length) result = searchOverlay(String(args.query || ''), { path: args.path || null, extensions: args.extensions, maxResults: args.max_results });
+      } else if (name === 'read_file') {
+        result = readPath(String(args.path || ''), 1, 1000000);
+      } else if (name === 'read_file_range') {
+        result = readPath(String(args.path || ''), Math.max(Number(args.start_line) || 1, 1), Math.min(Math.max(Number(args.end_line) || Number(args.start_line) || 1, 1), 1000000));
+      } else if (name === 'get_symbols') {
+        result = codeIndex.getFileSymbols(scope, normalizeToolPath(String(args.path || '')));
+      } else if (name === 'get_active_file') {
+        result = activePath ? readPath(activePath, 1, 1000000) : { ok: false, code: 'ACTIVE_FILE_MISSING', error: '当前没有打开文件' };
+      } else if (name === 'get_open_files') {
+        result = { ok: true, source: 'open_files', indexed: false, activePath: activePath || '', files: openFiles.concat(attachments).map(function(file) { return { path: file.path, name: file.name, sha256: file.sha256, source: file.source, size: Buffer.byteLength(file.content || '', 'utf8') }; }) };
+      } else if (name === 'get_runtime_capabilities') {
       result = {
         ok: true,
         provider: runtimeCapabilities.provider || 'deepseek',
@@ -1135,20 +1267,23 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
         canWritePptx: runtimeCapabilities.canWritePptx === true,
         workspaceReadOnly: runtimeCapabilities.workspaceReadOnly === true
       };
-    } else if (name === 'web_search') {
+      } else if (name === 'web_search') {
       result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
         webSearch: deps.webSearch,
         fetchImpl: deps.fetchImpl,
         lookupImpl: deps.lookupImpl
       });
-    } else if (name === 'fetch_web_page') {
+      } else if (name === 'fetch_web_page') {
       try {
         result = await fetchSafeWebPage(String(args.url || ''), { fetchImpl: deps.fetchImpl, lookupImpl: deps.lookupImpl });
       } catch (error) {
         result = { ok: false, code: 'WEB_FETCH_FAILED', error: error && error.message ? error.message : '网页抓取失败' };
       }
-    } else {
-      result = { ok: false, error: '不支持的工具: ' + name };
+      } else {
+        result = { ok: false, code: 'UNSUPPORTED_TOOL', error: '不支持的工具: ' + name };
+      }
+    } catch (error) {
+      result = { ok: false, code: 'TOOL_EXECUTION_FAILED', error: error && error.message ? error.message : '工具执行失败' };
     }
     return record(name, args, startedAt, result || { ok: false, error: '工具无响应' });
   };
@@ -3312,7 +3447,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var apResult = validateString(body.active_path, 500, '当前路径');
       if (!apResult.ok) return sendError('INVALID_PATH', apResult.error, 400);
-      var activePath = apResult.value || '';
+      var activePath = apResult.value ? normalizeContextPath(apResult.value) : '';
       if (activePath && !validatePath(activePath)) return sendError('INVALID_PATH', '当前路径无效', 400);
       var activeDocumentHint = /\.(docx?|pdf|pptx?|xlsx?)$/i.test(activePath);
 
@@ -4041,7 +4176,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var apResult = validateString(body.active_path, 500, '当前路径');
       if (!apResult.ok) { sendStreamError('INVALID_PATH', apResult.error, 'validation'); return; }
-      var activePath = apResult.value || '';
+      var activePath = apResult.value ? normalizeContextPath(apResult.value) : '';
       if (activePath && !validatePath(activePath)) { sendStreamError('INVALID_PATH', '当前路径无效', 'validation'); return; }
       var activeDocumentHint2 = /\.(docx?|pdf|pptx?|xlsx?)$/i.test(activePath);
 
