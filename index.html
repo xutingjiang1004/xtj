@@ -11,8 +11,6 @@
     <title>xtj</title>
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
     <link rel="apple-touch-icon" href="icon.svg" />
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <script>
@@ -1078,9 +1076,11 @@
     <script defer src="js/ai-core/scroll-controller.min.js?v=743e0a0b6d"></script>
     <script defer src="js/ai-core/stream-renderer.min.js?v=22b2b02430"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=12407a1a7b"></script>
-    <!-- Third-party SDK must never block the local app bootstrap. Code and the
-         shell can start offline; auth/feed attach when the SDK becomes ready. -->
-    <script async crossorigin="anonymous" onload="window.dispatchEvent(new Event('xtj:supabase-ready'))" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <!-- Keep the database SDK on the same origin. The former public-CDN request
+         was a single point of failure on restricted/mobile networks and could
+         leave the feed permanently unavailable. `defer` preserves script order
+         so the client exists before core.js starts, without blocking HTML parsing. -->
+    <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
     <script defer src="js/core.min.js?v=242b6fa2ee"></script>
