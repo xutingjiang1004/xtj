@@ -354,6 +354,18 @@
   function ensureCodeModulesLoaded() {
     _installCodeErrorListeners();
 
+    // Detect a partially executed/corrupted workspace before consulting the
+    // shared loader cache. A resolved cached promise must not hide a missing
+    // workspace API or leave the panel in a non-actionable state.
+    if (window.__xtjCodeWorkspace === true &&
+        (!window.__xtjCodeWorkspaceAPI || typeof window.__xtjCodeWorkspaceAPI.init !== 'function')) {
+      codeModuleState.status = 'error';
+      codeModuleState.error = new Error('Code 工作区脚本初始化不完整，请刷新页面后重试');
+      codeModuleState.promise = null;
+      renderErrorPage('Code 工作区脚本初始化不完整，请刷新页面后重试', true);
+      return Promise.reject(codeModuleState.error);
+    }
+
     // Asset injection, timeout cleanup, retry and export validation are shared
     // with 小猫 AI. The fallback below only supports stale cached core bundles.
     if (window.XTJModuleLoader && typeof window.XTJModuleLoader.load === 'function') {
@@ -390,14 +402,6 @@
     }
 
     // P0: 检查损坏状态 — 脚本已执行但 API 不完整
-    if (window.__xtjCodeWorkspace === true && (!window.__xtjCodeWorkspaceAPI || typeof window.__xtjCodeWorkspaceAPI.init !== 'function')) {
-      codeModuleState.status = 'error';
-      codeModuleState.error = new Error('Code 工作区脚本初始化不完整，请刷新页面后重试');
-      codeModuleState.promise = null;
-      renderErrorPage('Code 工作区脚本初始化不完整，请刷新页面后重试', true);
-      return Promise.reject(codeModuleState.error);
-    }
-
     if (codeModuleState.status === 'loading' && codeModuleState.promise) {
       return codeModuleState.promise;
     }
@@ -531,11 +535,12 @@
     var pc = document.getElementById('panelCode');
     if (!pc) return;
     var escapedMsg = String(message || '未知错误').replace(/</g, '&lt;');
-    var html = '<div class="code-loading-state"><p>Code 工作区加载失败: ' + escapedMsg + '</p>';
+    var state = showRefresh ? 'damaged' : 'error';
+    var html = '<div class="code-loading-state" data-code-loader-state="' + state + '"><p>Code 工作区加载失败: ' + escapedMsg + '</p>';
     if (showRefresh) {
-      html += '<button class="code-retry-btn" id="codeRefreshBtn">刷新页面</button>';
+      html += '<button class="code-retry-btn" id="codeRefreshBtn" data-code-loader-action="refresh">刷新页面</button>';
     } else {
-      html += '<button class="code-retry-btn" id="codeRetryBtn">重试</button>';
+      html += '<button class="code-retry-btn" id="codeRetryBtn" data-code-loader-action="retry">重试</button>';
     }
     html += '</div>';
     pc.innerHTML = html;

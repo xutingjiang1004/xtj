@@ -3856,7 +3856,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     var aborted = false;
     var finalized = false;
+    var timedOut = false;
     var requestController = new AbortController();
+    var timeoutTimer = null;
     var requestId = aiCoreRequestId.generateRequestId('code');
     var streamId = aiCoreRequestId.generateStreamId();
     var requestStartTime = Date.now();
@@ -3869,26 +3871,32 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     // Phase 3: Stream resume — check idempotency for same client_request_id
     if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
       var existingSession = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
-      if (existingSession && existingSession.status === 'completed') {
+      var duplicateStatuses = ['completed', 'running', 'failed', 'cancelled'];
+      if (existingSession && duplicateStatuses.indexOf(existingSession.status) >= 0) {
+        var duplicateStatus = existingSession.status;
+        var resumePath = '/api/code/chat/stream/resume?stream_id=' + encodeURIComponent(String(existingSession.stream_id || '')) +
+          '&client_request_id=' + encodeURIComponent(clientRequestId);
         return res.json({
           ok: true,
           stream_id: existingSession.stream_id,
-          status: 'completed',
+          request_id: existingSession.request_id,
+          client_request_id: existingSession.client_request_id,
+          status: duplicateStatus,
+          result_status: duplicateStatus,
+          terminal: duplicateStatus !== 'running',
           duplicate: true,
-          message: '请求已完成，请通过恢复接口获取结果'
-        });
-      }
-      if (existingSession && existingSession.status === 'running') {
-        // Return existing stream_id so client can resume
-        return res.json({
-          ok: true,
-          stream_id: existingSession.stream_id,
-          status: 'running',
-          duplicate: true,
-          message: '请求正在处理中，请使用 stream_id 恢复'
+          resume: { method: 'GET', path: resumePath, after_event_id: Number(existingSession.last_event_id) || 0 },
+          message: duplicateStatus === 'running' ? '请求正在处理中，请使用恢复接口继续接收结果' :
+            (duplicateStatus === 'completed' ? '请求已完成，请通过恢复接口获取结果' :
+              (duplicateStatus === 'cancelled' ? '请求已取消，可通过恢复接口获取最终状态' : '请求已失败，可通过恢复接口获取错误结果'))
         });
       }
     }
+
+    function onControllerAbort() {
+      if (!timedOut) aborted = true;
+    }
+    requestController.signal.addEventListener('abort', onControllerAbort);
 
     function abortRequest() {
       aborted = true;
@@ -3903,6 +3911,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     // Duplicate client_request_id requests return above; only real streams own
     // a cancellation controller.
     streamAbortControllers.set(streamId, requestController);
+    timeoutTimer = setTimeout(function() {
+      if (finalized || aborted) return;
+      timedOut = true;
+      try { requestController.abort(); } catch (_) {}
+    }, DEEPSEEK_TIMEOUT_MS);
+    if (timeoutTimer && timeoutTimer.unref) timeoutTimer.unref();
     var nextEventId = aiCoreRequestId.generateEventId();
 
     var baseEvent = {
@@ -3929,8 +3943,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     }
 
     function sendSSE(type, data) {
-      if (finalized || aborted) return false;
-      if (type === 'done' || type === 'error') finalized = true;
+      if (finalized || (aborted && type !== 'cancelled')) return false;
+      if (type === 'done' || type === 'error' || type === 'cancelled') finalized = true;
       var eventId = nextEventId();
       var event = aiCoreSSE.buildSSEEvent(
         Object.assign({}, baseEvent, { event_id: eventId }),
@@ -3954,6 +3968,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     function cleanup() {
       heartbeat.stop();
+      if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+      requestController.signal.removeEventListener('abort', onControllerAbort);
       writer.cleanup();
       streamAbortControllers.delete(streamId);
       if (!res.writableEnded) res.end();
@@ -3964,9 +3980,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var structured = aiCoreErrorMapper.buildErrorResponse(code, message, {
         requestId: requestId,
         phase: phase || 'stream',
-        retryable: (code === 'PROVIDER_TIMEOUT' || code === 'RATE_LIMITED')
+        retryable: (code === 'PROVIDER_TIMEOUT' || code === 'RATE_LIMITED' ||
+          code === 'PROVIDER_EMPTY_RESPONSE' || code === 'STREAM_INTERRUPTED')
       });
       sendSSE('error', {
+        status: 'failed',
         code: structured.code,
         message: structured.error,
         retryable: structured.retryable,
@@ -4250,7 +4268,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (aborted || finalized) { cleanup(); return; }
 
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
-      if (!rawContent) {
+      if (!rawContent.trim()) {
         sendStreamError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 'provider');
         return;
       }
@@ -4263,6 +4281,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         operations = parseOperations(parsed.operations);
         var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
         if (jsonBlockMatch) reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
+      }
+      reply = reply.trim();
+      if (!reply && operations.length > 0) reply = '已生成可应用的修改建议。';
+      if (!reply) {
+        sendStreamError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 'provider');
+        return;
       }
 
       // Send operation_preview
@@ -4354,7 +4378,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       // Send done
       sendSSE('done', {
-        reply: reply.trim(),
+        status: 'completed',
+        reply: reply,
         operations: operations,
         context_info: {
           indexed: !!indexSummary,
@@ -4391,9 +4416,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       // Phase 3: Flush pending deltas and mark session as completed
-      eventLogger.flush().catch(function() {});
+      await eventLogger.flush();
       if (streamSession.isResumeEnabled() && supabase) {
-        streamSession.updateStreamSession(supabase, streamId, {
+        await streamSession.updateStreamSession(supabase, streamId, {
           status: 'completed',
           completed_at: new Date().toISOString()
         }).catch(function() {});
@@ -4401,14 +4426,18 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       cleanup();
     } catch (err) {
+      if (timedOut) {
+        sendStreamError('PROVIDER_TIMEOUT', 'AI 请求超时，服务端任务已停止', 'provider');
+        return;
+      }
       if (aborted || (err && err.name === 'AbortError')) {
         if (!finalized) {
-          sendSSE('error', { code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
+          sendSSE('cancelled', { status: 'cancelled', code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
         }
         // Phase 3: Mark session as cancelled
         if (streamSession.isResumeEnabled() && supabase) {
-          eventLogger.flush().catch(function() {});
-          streamSession.updateStreamSession(supabase, streamId, {
+          await eventLogger.flush();
+          await streamSession.updateStreamSession(supabase, streamId, {
             status: 'cancelled',
             completed_at: new Date().toISOString()
           }).catch(function() {});
@@ -4484,6 +4513,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         request_id: session.request_id,
         client_request_id: session.client_request_id,
         status: session.status,
+        result_status: session.status,
+        terminal: session.status !== 'running',
         last_event_id: session.last_event_id,
         events: events,
         started_at: session.started_at,
@@ -4498,12 +4529,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         response.message = '流式会话已失败';
       } else if (session.status === 'cancelled') {
         response.message = '流式会话已取消';
+      } else {
+        response.message = '流式会话状态未知';
       }
 
       return res.json(response);
     } catch (err) {
       console.error('[code-agent-resume] Error:', err.message);
-      return res.status(500).json({ ok: false, code: 'RESUME_ERROR', error: '恢复失败: ' + (err.message || '') });
+      return res.status(500).json({ ok: false, code: 'RESUME_ERROR', error: '恢复失败，请稍后重试' });
     }
   });
 
@@ -4530,6 +4563,19 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return res.status(403).json({ ok: false, code: 'STREAM_NOT_OWNED', error: '无权操作该流式会话' });
       }
 
+      if (session.status !== 'running') {
+        return res.json({
+          ok: true,
+          stream_id: streamId,
+          status: session.status,
+          result_status: session.status,
+          terminal: true,
+          already_terminal: true,
+          message: session.status === 'completed' ? '流式会话已完成' :
+            (session.status === 'cancelled' ? '流式会话已取消' : '流式会话已失败')
+        });
+      }
+
       // Phase 3-P0-3: Actually abort the running request
       var controller = streamAbortControllers.get(streamId);
       if (controller) {
@@ -4545,7 +4591,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       return res.json({ ok: true, stream_id: streamId, status: 'cancelled', message: '流式会话已取消' });
     } catch (err) {
       console.error('[code-agent-cancel] Error:', err.message);
-      return res.status(500).json({ ok: false, code: 'CANCEL_ERROR', error: '取消失败: ' + (err.message || '') });
+      return res.status(500).json({ ok: false, code: 'CANCEL_ERROR', error: '取消失败，请稍后重试' });
     }
   });
 
