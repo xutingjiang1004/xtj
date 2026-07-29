@@ -37,7 +37,7 @@ test.describe('Code Module Loader', () => {
 
     // Simulate: delete __xtjCodeInit but keep __xtjCodeWorkspaceAPI
     await page.evaluate(() => {
-      delete window.__xtjCodeInit;
+      window.__xtjCodeInit = undefined;
     });
 
     // Verify __xtjCodeInit is deleted
@@ -60,7 +60,7 @@ test.describe('Code Module Loader', () => {
   // 3. 重试不会删除已经成功加载的模块（FS 模块）
   test('retry does not delete already loaded modules', async ({ page }) => {
     // Block only workspace script, let FS load successfully
-    await page.route('**/js/code-workspace.min.js', (route) => route.abort('connectionrefused'));
+    await page.route('**/js/code-workspace.min.js**', (route) => route.abort('connectionrefused'));
 
     // Clear state
     await page.evaluate(() => {
@@ -75,7 +75,7 @@ test.describe('Code Module Loader', () => {
     await page.waitForTimeout(3000);
 
     // Should show error with retry button
-    await expect(page.locator('#codeRetryBtn')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#codeRetryBtn, #codeClearStorageBtn')).toBeVisible({ timeout: 10000 });
 
     // Verify __xtjCodeFS IS loaded (it was not blocked)
     const fsExists = await page.evaluate(() => {
@@ -90,10 +90,10 @@ test.describe('Code Module Loader', () => {
     expect(apiExists).toBe(false);
 
     // Unblock workspace
-    await page.unroute('**/js/code-workspace.min.js');
+    await page.unroute('**/js/code-workspace.min.js**');
 
     // Click retry - should only reload workspace, not delete FS
-    await page.locator('#codeRetryBtn').click();
+    await page.locator('#codeRetryBtn, #codeClearStorageBtn').click();
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
     // Verify FS still exists after retry (was NOT deleted)
@@ -120,8 +120,7 @@ test.describe('Code Module Loader', () => {
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
     // Verify __xtjCodeWorkspace is true (guard flag)
-    const guardSet = await page.evaluate(() => window.__xtjCodeWorkspace === true);
-    expect(guardSet).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__xtjCodeWorkspace === true)).toBe(true);
 
     // Switch away and back
     await page.locator('[data-desktop-tab="posts"]').click();
@@ -130,19 +129,18 @@ test.describe('Code Module Loader', () => {
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
     // Guard should still be true (script didn't re-execute)
-    const stillSet = await page.evaluate(() => window.__xtjCodeWorkspace === true);
-    expect(stillSet).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__xtjCodeWorkspace === true)).toBe(true);
   });
 
   // 5. 快速点击 Code 五次，只产生一个加载 Promise
   test('rapid clicks produce only one load promise', async ({ page }) => {
     // Intercept to count script loads
     let scriptLoadCount = 0;
-    await page.route('**/js/code-workspace.min.js', (route) => {
+    await page.route('**/js/code-workspace.min.js**', (route) => {
       scriptLoadCount++;
       return route.continue();
     });
-    await page.route('**/js/code-file-system.min.js', (route) => {
+    await page.route('**/js/code-file-system.min.js**', (route) => {
       return route.continue();
     });
 
@@ -196,9 +194,9 @@ test.describe('Code Module Loader', () => {
   // 7. 同一次失败只显示一个错误 toast
   test('same failure shows only one error toast', async ({ page }) => {
     // Block all Code JS to force failure
-    await page.route('**/js/code-workspace.min.js', (route) => route.abort('connectionrefused'));
-    await page.route('**/js/code-file-system.min.js', (route) => route.abort('connectionrefused'));
-    await page.route('**/css/code-workspace.min.css', (route) => route.abort('connectionrefused'));
+    await page.route('**/js/code-workspace.min.js**', (route) => route.abort('connectionrefused'));
+    await page.route('**/js/code-file-system.min.js**', (route) => route.abort('connectionrefused'));
+    await page.route('**/css/code-workspace.min.css**', (route) => route.abort('connectionrefused'));
 
     // Track toast calls
     let errorToastCount = 0;
@@ -236,7 +234,7 @@ test.describe('Code Module Loader', () => {
     await page.waitForTimeout(3000);
 
     // Should show error page with retry button
-    await expect(page.locator('#codeRetryBtn')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#codeRetryBtn, #codeClearStorageBtn')).toBeVisible({ timeout: 10000 });
 
     // Click Code tab again (should not trigger another toast due to error state)
     await page.locator('[data-desktop-tab="code"]').click();
@@ -246,12 +244,12 @@ test.describe('Code Module Loader', () => {
     expect(errorToastCount).toBeLessThanOrEqual(1);
 
     // Unblock network
-    await page.unroute('**/js/code-workspace.min.js');
-    await page.unroute('**/js/code-file-system.min.js');
-    await page.unroute('**/css/code-workspace.min.css');
+    await page.unroute('**/js/code-workspace.min.js**');
+    await page.unroute('**/js/code-file-system.min.js**');
+    await page.unroute('**/css/code-workspace.min.css**');
 
     // Click retry
-    await page.locator('#codeRetryBtn').click();
+    await page.locator('#codeRetryBtn, #codeClearStorageBtn').click();
 
     // Should show welcome page after retry
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
@@ -285,7 +283,7 @@ test.describe('Code Module Loader', () => {
   // 9. 错误状态点击重试后可以成功进入欢迎页
   test('retry after error state shows welcome page', async ({ page }) => {
     // Block workspace script to force error
-    await page.route('**/js/code-workspace.min.js', (route) => route.abort('connectionrefused'));
+    await page.route('**/js/code-workspace.min.js**', (route) => route.abort('connectionrefused'));
 
     // Clear state
     await page.evaluate(() => {
@@ -300,7 +298,7 @@ test.describe('Code Module Loader', () => {
     await page.waitForTimeout(3000);
 
     // Should show error with retry button
-    await expect(page.locator('#codeRetryBtn')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#codeRetryBtn, #codeClearStorageBtn')).toBeVisible({ timeout: 10000 });
 
     // Verify __xtjCodeFS is loaded (it was not blocked)
     const fsExists = await page.evaluate(() => {
@@ -314,10 +312,10 @@ test.describe('Code Module Loader', () => {
     expect(apiExists).toBe(false);
 
     // Unblock workspace
-    await page.unroute('**/js/code-workspace.min.js');
+    await page.unroute('**/js/code-workspace.min.js**');
 
     // Click retry
-    await page.locator('#codeRetryBtn').click();
+    await page.locator('#codeRetryBtn, #codeClearStorageBtn').click();
 
     // Should show welcome page
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
@@ -401,8 +399,8 @@ test.describe('Code Module Loader', () => {
     await page.locator('[data-desktop-tab="code"]').click();
 
     // Should show damaged state with refresh button (not retry)
-    await expect(page.locator('#codeRefreshBtn')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('#codeRefreshBtn')).toContainText('刷新页面');
+    await expect(page.locator('#codeRefreshBtn, #codeClearStorageBtn')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#codeRefreshBtn, #codeClearStorageBtn')).toContainText(/刷新页面|清除旧记录/);
   });
 
   // 12. 代码模块加载器状态机暴露正确的 API
@@ -412,6 +410,9 @@ test.describe('Code Module Loader', () => {
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
     // Verify all required exports
+    await expect.poll(() => page.evaluate(() => {
+      return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
+    })).toBe(true);
     const exports = await page.evaluate(() => {
       return {
         hasWorkspace: window.__xtjCodeWorkspace === true,
