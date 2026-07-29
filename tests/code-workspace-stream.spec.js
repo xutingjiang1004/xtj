@@ -1,0 +1,401 @@
+const { test, expect } = require('@playwright/test');
+function sse(events) {
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
+}
+
+async function openCodeWorkspace(page, options = {}) {
+  await page.addInitScript(({ resume, shared }) => {
+    localStorage.setItem('CODE_STREAM_ENABLED', '1');
+    localStorage.setItem('CODE_STREAM_RESUME_ENABLED', resume ? '1' : '0');
+    localStorage.setItem('AI_SHARED_CORE_ENABLED', shared ? '1' : '0');
+    window.showOpenFilePicker = async () => [{
+      kind: 'file',
+      name: 'stream-fixture.js',
+      getFile: async () => new File(['export const fixture = true;'], 'stream-fixture.js', {
+        type: 'text/javascript'
+      })
+    }];
+
+    const nativeFetch = window.fetch.bind(window);
+    const mock = {
+      calls: [],
+      queue: [],
+      aborts: 0,
+      signals: [],
+      resumeCalls: []
+    };
+    window.__codeStreamMock = mock;
+    window.fetch = (input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (!String(url).includes('/api/code/chat')) return nativeFetch(input, init);
+
+      let requestBody = null;
+      try { requestBody = init.body ? JSON.parse(init.body) : null; } catch (_) {}
+      const isResume = String(url).includes('/stream/resume');
+      mock.calls.push({ url: String(url), body: requestBody });
+      if (isResume) mock.resumeCalls.push(String(url));
+
+      const fixture = mock.queue.shift() || {
+        type: 'stream',
+        body: sse([{ type: 'done', data: { reply: 'default fixture' } }])
+      };
+      if (init.signal) mock.signals.push(init.signal);
+
+      if (fixture.type === 'pending') {
+        return new Promise((resolve, reject) => {
+          const onAbort = () => {
+            mock.aborts += 1;
+            const error = new Error('The operation was aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (init.signal && init.signal.aborted) return onAbort();
+          if (init.signal) init.signal.addEventListener('abort', onAbort, { once: true });
+        });
+      }
+
+      const contentType = fixture.contentType || 'text/event-stream';
+      const body = typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
+      return Promise.resolve(new Response(body, {
+        status: fixture.status || 200,
+        headers: { 'content-type': contentType }
+      }));
+    };
+  }, { resume: options.resume === true, shared: options.shared === true });
+
+  await page.route('**/api/code/capabilities', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      configured: true,
+      agentEnabled: true,
+      toolCallingEnabled: true,
+      provider: 'fixture',
+      model: 'fixture-model'
+    })
+  }));
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-desktop-tab="code"]').click();
+  await page.locator('#codeWelcomeFileBtn').click();
+  await expect(page.locator('#codeChatInput')).toBeVisible({ timeout: 15000 });
+  // The application may install its authenticated wrapper after the module
+  // loads. Route the Code request through the deterministic fetch mock before
+  // the first user action.
+  await page.evaluate(() => {
+    window.xtjProtectedFetch = (url, init) => window.fetch(url, init || {});
+  });
+}
+
+async function enqueue(page, fixture) {
+  await page.evaluate((next) => window.__codeStreamMock.queue.push(next), fixture);
+}
+
+async function send(page, message) {
+  await page.locator('#codeChatInput').fill(message);
+  await page.locator('#codeChatSendBtn').click();
+}
+
+async function getSnapshot(page) {
+  return page.evaluate(() => {
+    const state = window.__xtjCodeWorkspaceAPI.getState();
+    return {
+      messages: state.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        stopped: message.stopped === true,
+        errorCode: message.errorCode || ''
+      })),
+      sending: state.sending,
+      pendingOperations: state.pendingOperations,
+      calls: window.__codeStreamMock.calls,
+      aborts: window.__codeStreamMock.aborts
+    };
+  });
+}
+
+test.describe('Code workspace stream state regressions', () => {
+  test('SSE answer_delta plus done renders one non-empty assistant and clears sending', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([
+        { type: 'answer_delta', data: { delta: '真实流式回复' } },
+        { type: 'done', data: { reply: '' } }
+      ])
+    });
+
+    await send(page, '流式问题');
+    await expect(page.locator('#codeChatMessages')).toContainText('真实流式回复');
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+
+    const snapshot = await getSnapshot(page);
+    const assistants = snapshot.messages.filter((message) => message.role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].content).toBe('真实流式回复');
+    await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(0);
+    await expect(page.locator('#codeTypingIndicator')).toHaveCount(0);
+  });
+
+  test('done.reply is rendered when no answer_delta was received', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: { reply: '只有 done.reply 的回复' } }])
+    });
+
+    await send(page, '没有 delta 的问题');
+    await expect(page.locator('#codeChatMessages')).toContainText('只有 done.reply 的回复');
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toEqual([
+      expect.objectContaining({ content: '只有 done.reply 的回复' })
+    ]);
+  });
+
+  test('stream ending without done reports STREAM_ENDED_WITHOUT_DONE and keeps a non-empty UI result', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'answer_delta', data: { delta: '服务端提前结束' } }])
+    });
+
+    await send(page, '没有 done 的问题');
+    await expect(page.locator('.code-chat-message.assistant').last()).toContainText('响应不完整');
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+    const snapshot = await getSnapshot(page);
+    const assistant = snapshot.messages.find((message) => message.role === 'assistant');
+    expect(assistant).toBeTruthy();
+    expect(assistant.content).toContain('响应不完整');
+    expect(assistant.errorCode).toBe('STREAM_ENDED_WITHOUT_DONE');
+    expect(snapshot.sending).toBe(false);
+  });
+
+  test('application/json duplicate completed is not parsed as SSE whitespace', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      contentType: 'application/json',
+      body: {
+        ok: true,
+        duplicate: true,
+        status: 'completed',
+        reply: 'duplicate 已完成的最终回复'
+      }
+    });
+
+    await send(page, '重复完成请求');
+    await expect(page.locator('#codeChatMessages')).toContainText('duplicate 已完成的最终回复');
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toEqual([
+      expect.objectContaining({ content: 'duplicate 已完成的最终回复' })
+    ]);
+  });
+
+  test('application/json duplicate running resumes without creating a blank assistant', async ({ page }) => {
+    await openCodeWorkspace(page, { resume: true });
+    await enqueue(page, {
+      contentType: 'application/json',
+      body: {
+        ok: true,
+        duplicate: true,
+        status: 'running',
+        stream_id: 'duplicate-running'
+      }
+    });
+    await enqueue(page, {
+      contentType: 'application/json',
+      body: {
+        ok: true,
+        status: 'completed',
+        events: [{ type: 'done', data: { reply: 'resume 后的回复' } }]
+      }
+    });
+
+    await send(page, '重复运行请求');
+    await expect(page.locator('#codeChatMessages')).toContainText('resume 后的回复');
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toEqual([
+      expect.objectContaining({ content: 'resume 后的回复' })
+    ]);
+    expect(snapshot.calls.some((call) => call.url.includes('/stream/resume'))).toBe(true);
+  });
+
+  for (const status of ['failed', 'cancelled']) {
+    test(`resumeStream ${status} produces an explicit terminal state`, async ({ page }) => {
+      await openCodeWorkspace(page, { resume: true });
+      await enqueue(page, {
+        contentType: 'application/json',
+        body: {
+          ok: true,
+          duplicate: true,
+          status: 'running',
+          stream_id: `resume-${status}`
+        }
+      });
+      await enqueue(page, {
+        contentType: 'application/json',
+        body: { ok: true, status }
+      });
+
+      await send(page, `resume ${status}`);
+      await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+      const snapshot = await getSnapshot(page);
+      expect(snapshot.calls.some((call) => call.url.includes('/stream/resume'))).toBe(true);
+      const assistants = snapshot.messages.filter((message) => message.role === 'assistant');
+      expect(assistants).toHaveLength(1);
+      if (status === 'cancelled') {
+        expect(assistants[0].stopped).toBe(true);
+        expect(assistants[0].content).toBe('（已停止）');
+      } else {
+        expect(assistants[0].errorCode).toBe('STREAM_FAILED');
+        expect(assistants[0].content.trim()).toBeTruthy();
+      }
+    });
+  }
+
+  test('stop aborts the real request, does not reference timeoutId, and finalizes once', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, { type: 'pending' });
+
+    await send(page, '需要停止的问题');
+    await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(1);
+    await expect.poll(async () => (await getSnapshot(page)).calls.length).toBe(1);
+    await page.locator('#codeChatCancelBtn').click();
+
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.aborts).toBe(1);
+    expect(snapshot.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(snapshot.messages.find((message) => message.role === 'assistant').stopped).toBe(true);
+    expect(await page.locator('.code-stream-error').count()).toBe(0);
+    await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(0);
+  });
+
+  test('AbortError finalizes once and does not duplicate the stopped assistant', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, { type: 'pending' });
+
+    await send(page, 'AbortError 问题');
+    await expect.poll(async () => (await getSnapshot(page)).calls.length).toBe(1);
+    await page.locator('#codeChatCancelBtn').click();
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+    await page.waitForTimeout(50);
+
+    const snapshot = await getSnapshot(page);
+    const assistants = snapshot.messages.filter((message) => message.role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].stopped).toBe(true);
+    expect(assistants.some((message) => message.content === '（已停止）')).toBe(true);
+  });
+
+  for (const shared of [false, true]) {
+    test(`${shared ? 'shared' : 'local'} controller aborts its own signal without stale cleanup`, async ({ page }) => {
+      await openCodeWorkspace(page, { shared });
+      await enqueue(page, { type: 'pending' });
+      await send(page, `${shared ? 'shared' : 'local'} controller`);
+      await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(1);
+      await expect.poll(async () => (await getSnapshot(page)).calls.length).toBe(1);
+
+      const beforeCancel = await page.evaluate(() => {
+        const state = window.__xtjCodeWorkspaceAPI.getState();
+        return {
+          hasShared: !!(state.activeRequest && state.activeRequest.sharedCtrl),
+          signalAborted: !!(state.activeRequest && state.activeRequest.abortController.signal.aborted)
+        };
+      });
+      expect(beforeCancel.hasShared).toBe(shared);
+      expect(beforeCancel.signalAborted).toBe(false);
+
+      await page.locator('#codeChatCancelBtn').click();
+      await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+      expect((await getSnapshot(page)).aborts).toBe(1);
+    });
+  }
+
+  test('retry uses the original message once and does not depend on the cleared input', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'error', data: { code: 'TEMPORARY', message: '暂时失败', retryable: true } }])
+    });
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: { reply: '重试成功' } }])
+    });
+
+    await send(page, '原始失败消息');
+    const retryButton = page.locator('.code-stream-retry-btn, .code-chat-retry-btn').last();
+    await expect(retryButton).toBeVisible();
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+    await retryButton.dblclick();
+    await expect.poll(async () => (await getSnapshot(page)).calls.length).toBe(2);
+    await expect(page.locator('#codeChatMessages')).toContainText('重试成功');
+
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.calls.filter((call) => call.body && call.body.message === '原始失败消息')).toHaveLength(2);
+    expect(snapshot.messages.filter((message) => message.role === 'user' && message.content === '原始失败消息')).toHaveLength(1);
+  });
+
+  test('a new done with no operations clears stale pendingOperations and diff UI', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: {
+        reply: '带操作的回复',
+        operations: [{ path: 'stream-fixture.js', type: 'replace', new_content: 'changed' }]
+      } }])
+    });
+    await send(page, '先生成操作');
+    await expect.poll(async () => (await getSnapshot(page)).pendingOperations.length).toBe(1);
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: { reply: '普通回复' } }])
+    });
+    await send(page, '再问普通问题');
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+
+    const snapshot = await getSnapshot(page);
+    expect(snapshot.pendingOperations).toEqual([]);
+    await expect(page.locator('.code-diff-panel, .code-diff-view')).toHaveCount(0);
+  });
+
+  test('rapid send/cancel leaves no ghost or blank assistant and keeps DOM/state aligned', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, { type: 'pending' });
+    await enqueue(page, { body: sse([{ type: 'done', data: { reply: '第二次真实回复' } }]) });
+
+    await send(page, '第一次问题');
+    await page.locator('#codeChatCancelBtn').click();
+    await expect.poll(async () => (await getSnapshot(page)).sending).toBe(false);
+    await send(page, '第二次问题');
+    await expect(page.locator('#codeChatMessages')).toContainText('第二次真实回复');
+
+    const snapshot = await getSnapshot(page);
+    const domAssistants = await page.locator('.code-chat-message.assistant').evaluateAll((nodes) => nodes.map((node) => ({
+      content: node.querySelector('.msg-content, .code-stream-content')?.textContent.trim() || '',
+      streaming: node.classList.contains('streaming')
+    })));
+    const stateAssistants = snapshot.messages.filter((message) => message.role === 'assistant');
+    expect(stateAssistants.every((message) => message.content.trim())).toBe(true);
+    expect(domAssistants.every((message) => message.content && !message.streaming)).toBe(true);
+    expect(stateAssistants).toHaveLength(2);
+    expect(snapshot.sending).toBe(false);
+  });
+
+  test('DOM and state contain the same single assistant after a completed stream', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([
+        { type: 'answer_delta', data: { delta: 'DOM 与 state 一致' } },
+        { type: 'done', data: { reply: '' } }
+      ])
+    });
+    await send(page, '一致性问题');
+
+    await expect(page.locator('#codeChatMessages')).toContainText('DOM 与 state 一致');
+    const snapshot = await getSnapshot(page);
+    const domContents = await page.locator('.code-chat-message.assistant .msg-content').evaluateAll((nodes) => nodes
+      .map((node) => node.textContent.trim())
+      .filter(Boolean));
+    const stateContents = snapshot.messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => message.content.trim());
+    expect(stateContents).toEqual(['DOM 与 state 一致']);
+    expect(domContents).toContain('DOM 与 state 一致');
+    expect(snapshot.sending).toBe(false);
+  });
+});
