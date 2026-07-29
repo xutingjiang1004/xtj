@@ -1,4 +1,9 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
+
+const codeWorkspaceSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'code-workspace.js'), 'utf8');
+const codeWorkspaceCss = fs.readFileSync(path.join(__dirname, '..', 'css', 'code-workspace.css'), 'utf8');
 function sse(events) {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
 }
@@ -54,6 +59,26 @@ async function openCodeWorkspace(page, options = {}) {
         });
       }
 
+      if (Array.isArray(fixture.streamChunks)) {
+        const chunks = fixture.streamChunks.slice();
+        const stream = new ReadableStream({
+          start(controller) {
+            let index = 0;
+            const push = () => {
+              if (index >= chunks.length) return;
+              const chunk = chunks[index++];
+              if (chunk.body) controller.enqueue(new TextEncoder().encode(chunk.body));
+              if (index < chunks.length) setTimeout(push, chunk.delay || 0);
+            };
+            push();
+          }
+        });
+        return Promise.resolve(new Response(stream, {
+          status: fixture.status || 200,
+          headers: { 'content-type': 'text/event-stream' }
+        }));
+      }
+
       const contentType = fixture.contentType || 'text/event-stream';
       const body = typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
       return Promise.resolve(new Response(body, {
@@ -74,6 +99,16 @@ async function openCodeWorkspace(page, options = {}) {
       provider: 'fixture',
       model: 'fixture-model'
     })
+  }));
+  await page.route('**/js/code-workspace.min.js*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: codeWorkspaceSource
+  }));
+  await page.route('**/css/code-workspace.min.css*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/css',
+    body: codeWorkspaceCss
   }));
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.locator('[data-desktop-tab="code"]').click();
@@ -115,6 +150,47 @@ async function getSnapshot(page) {
 }
 
 test.describe('Code workspace stream state regressions', () => {
+  test('streaming bubble is visibly waiting before the first answer token', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, { type: 'pending' });
+
+    await send(page, '等待生成状态');
+    await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(1);
+    const ui = await page.locator('.code-stream-content').evaluate((content) => ({
+      empty: content.textContent.trim() === '',
+      placeholder: getComputedStyle(content, '::before').content,
+      visible: getComputedStyle(content).display !== 'none'
+    }));
+    expect(ui.empty).toBe(true);
+    expect(ui.placeholder).toContain('等待 AI');
+    expect(ui.visible).toBe(true);
+    await expect(page.locator('.code-stream-status')).toHaveAttribute('data-state', 'connecting');
+    await page.locator('#codeChatCancelBtn').click();
+  });
+
+  test('tool failure remains readable in the live tool list', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      streamChunks: [{
+        body: sse([
+          { type: 'tool_start', data: { tool_call_id: 'tool-1', tool: 'read_file', summary: '读取非常长的文件路径/src/example.js' } },
+          { type: 'tool_result', data: { tool_call_id: 'tool-1', ok: false, error: '权限不足，无法读取该文件' } }
+        ]),
+        delay: 0
+      }]
+    });
+
+    await send(page, '展示工具失败');
+    const tool = page.locator('.code-stream-tool-item').first();
+    await expect(tool).toBeVisible();
+    await expect(tool.locator('.code-stream-tool-name')).toHaveText('read_file');
+    await expect(tool.locator('.code-stream-tool-summary')).toContainText('权限不足');
+    await expect(tool.locator('.code-stream-tool-state')).toHaveText('失败');
+    await expect(tool).toHaveClass(/failed/);
+    await expect(page.locator('.code-stream-status')).toHaveAttribute('data-state', 'tool-error');
+    await page.locator('#codeChatCancelBtn').click();
+  });
+
   test('SSE answer_delta plus done renders one non-empty assistant and clears sending', async ({ page }) => {
     await openCodeWorkspace(page);
     await enqueue(page, {
@@ -179,6 +255,8 @@ test.describe('Code workspace stream state regressions', () => {
     await expect(page.locator('.code-chat-message.assistant')).toHaveCount(1);
     const visible = await page.locator('.code-chat-message.assistant').first().innerText();
     expect(visible).toContain('AI 请求失败');
+    await expect(page.locator('.code-stream-error-heading')).toContainText('生成失败');
+    await expect(page.locator('.code-stream-status')).toHaveAttribute('data-state', 'error');
     expect(visible).not.toContain('logPhase is not defined');
     expect(visible).not.toContain('[UNKNOWN]');
 
