@@ -246,6 +246,7 @@ test('Code agent document API test suite', async (t) => {
     assert.equal(res.status, 200);
     const newText = await extractTextFromDocxResponse(res);
     assert.match(newText, /Bonjour Monde/);
+    assert.equal((newText.match(/Bonjour Monde/g) || []).length, 1, 'replacement text must be inserted once across runs');
     assert.doesNotMatch(newText, /Hello World/);
   });
 

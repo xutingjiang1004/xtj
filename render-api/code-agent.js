@@ -411,6 +411,67 @@ function parseOperations(raw) {
   return ops;
 }
 
+// The model can return syntactically valid line numbers that do not exist in
+// the file it was actually given. Do this final context-aware check before an
+// operation reaches the browser; otherwise the user only discovers the
+// problem after clicking Apply. Truncated context is deliberately skipped so
+// a partial preview never becomes a false rejection.
+function validateOperationsAgainstContext(operations, files) {
+  var byPath = new Map();
+  (Array.isArray(files) ? files : []).forEach(function (file) {
+    if (!file || typeof file.path !== 'string') return;
+    byPath.set(normalizeContextPath(file.path), file);
+  });
+
+  var accepted = [];
+  var rejected = [];
+  (Array.isArray(operations) ? operations : []).forEach(function (op) {
+    if (!op || op.type !== 'replace_range') {
+      accepted.push(op);
+      return;
+    }
+
+    var ext = String(op.path || '').split('.').pop().toLowerCase();
+    if (ext === 'docx' || ext === 'xlsx' || ext === 'pptx' || ext === 'pdf') {
+      rejected.push({ path: op.path, code: 'DOCUMENT_OPERATION_REQUIRED' });
+      return;
+    }
+
+    var file = byPath.get(normalizeContextPath(op.path));
+    var content = file && typeof file.content === 'string' ? file.content : '';
+    var isTruncated = content.indexOf('[Content truncated due to size limits]') >= 0;
+    if (content && !isTruncated) {
+      var totalLines = content.split('\n').length;
+      if (op.start_line > totalLines || op.end_line > totalLines + 1) {
+        rejected.push({
+          path: op.path,
+          code: 'LINE_RANGE_OUT_OF_BOUNDS',
+          start_line: op.start_line,
+          end_line: op.end_line,
+          total_lines: totalLines
+        });
+        return;
+      }
+    }
+    accepted.push(op);
+  });
+
+  return { operations: accepted, rejected: rejected };
+}
+
+function appendOperationWarnings(reply, rejected) {
+  if (!Array.isArray(rejected) || rejected.length === 0) return reply;
+  var details = rejected.slice(0, 5).map(function (item) {
+    if (item.code === 'DOCUMENT_OPERATION_REQUIRED') {
+      return item.path + ' requires a document operation';
+    }
+    return item.path + ' line range ' + item.start_line + '-' + item.end_line +
+      ' is outside the supplied file (' + item.total_lines + ' lines)';
+  });
+  var warning = 'Some generated edits were skipped because they could not be safely applied: ' + details.join('; ') + '.';
+  return reply ? reply + '\n\n' + warning : warning;
+}
+
 function extractJsonFromText(text) {
   var match = text.match(JSON_BLOCK_RE);
   if (match) {
@@ -1941,6 +2002,7 @@ function replaceTextInParsedDoc(parsedDoc, startCharIdx, endCharIdx, newText) {
   
   // 对每个受影响的 run，重新构建其文本
   var runModifications = []; // [{ pIdx, rIdx, oldXml, newXml }]
+  var replacementInserted = false;
   
   affectedRuns.forEach(function(runInfo) {
     var pIdx = runInfo.pIdx;
@@ -1991,9 +2053,9 @@ function replaceTextInParsedDoc(parsedDoc, startCharIdx, endCharIdx, newText) {
       for (var ci2 = tnStart; ci2 < tnEnd; ci2++) {
         if (ci2 >= startCharIdx && ci2 < endCharIdx) {
           // 在替换范围内：使用新文本中的对应字符
-          var offsetInNew = ci2 - startCharIdx;
-          if (offsetInNew < newText.length) {
-            newTnText += newText[offsetInNew];
+          if (!replacementInserted && ci2 === Math.max(tnStart, startCharIdx)) {
+            newTnText += newText;
+            replacementInserted = true;
           }
           // 如果新文本比旧文本短，跳过
         } else {
@@ -2007,15 +2069,6 @@ function replaceTextInParsedDoc(parsedDoc, startCharIdx, endCharIdx, newText) {
       
       // 确保不会因多个 run 导致重复写入
       // 如果该 text node 完全在替换范围内，且是第一个 text node，替换整个内容
-      if (tnStart >= startCharIdx && tnEnd <= endCharIdx) {
-        // 完全在替换范围内
-        if (ti === 0) {
-          newTnText = newText; // 第一个 text node 承载全部新文本
-        } else {
-          newTnText = ''; // 后续 text node 清空
-        }
-      }
-      
       // 替换该 text node
       var escapedNew = escapeXml(newTnText);
       var newTXml = tn.fullMatch.replace(/>([\s\S]*?)<\/w:t>/, '>' + (newTnText.match(/^\s|[\s\xA0]$/) ? ' xml:space="preserve"' : '') + escapedNew.replace(/^xml:space="preserve"/, '') + '</w:t>');
@@ -3743,8 +3796,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var parsed = extractJsonFromText(rawContent);
       if (parsed && Array.isArray(parsed.operations)) {
         operations = parseOperations(parsed.operations);
+        var checkedOperations = validateOperationsAgainstContext(operations, openFiles.concat(attachments));
+        operations = checkedOperations.operations;
         var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
         if (jsonBlockMatch) reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
+        reply = appendOperationWarnings(reply, checkedOperations.rejected);
       }
 
       var filesReadMap = {};
@@ -4438,8 +4494,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var parsed = extractJsonFromText(rawContent);
       if (parsed && Array.isArray(parsed.operations)) {
         operations = parseOperations(parsed.operations);
+        var checkedOperations = validateOperationsAgainstContext(operations, openFiles.concat(attachments));
+        operations = checkedOperations.operations;
         var jsonBlockMatch = rawContent.match(JSON_BLOCK_RE);
         if (jsonBlockMatch) reply = (rawContent.slice(0, jsonBlockMatch.index) + rawContent.slice(jsonBlockMatch.index + jsonBlockMatch[0].length)).trim();
+        reply = appendOperationWarnings(reply, checkedOperations.rejected);
       }
       reply = reply.trim();
       if (!reply && operations.length > 0) reply = '已生成可应用的修改建议。';
