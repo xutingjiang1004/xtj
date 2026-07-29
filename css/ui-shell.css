@@ -1480,9 +1480,12 @@ html.xtj-ios-viewport .dock-panel {
     --wb-hover: rgba(38, 139, 106, 0.08);
     display: grid !important;
     grid-template-columns: var(--wb-sidebar-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     width: min(100%, 1536px) !important;
     max-width: 1536px !important;
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    box-sizing: border-box;
     margin-inline: auto;
     border-inline: 1px solid var(--wb-border);
     background: var(--wb-canvas);
@@ -1509,11 +1512,21 @@ html.xtj-ios-viewport .dock-panel {
     position: relative;
     z-index: 50;
     min-width: 0;
-    min-height: 100dvh;
+    height: 100%;
+    min-height: 0;
     padding: 26px 18px 22px;
     flex-direction: column;
     border-inline-end: 1px solid var(--wb-border);
     background: color-mix(in srgb, var(--wb-pane) 96%, transparent);
+  }
+
+  /* The workbench is inset by the app shell padding. Keep the content area
+     inside the viewport instead of giving the panels a second full-viewport
+     height that clips the bottom of Code and AI. */
+  #dockPanels {
+    min-height: 0;
+    height: 100% !important;
+    overflow: hidden;
   }
 
   .desktop-workbench-brand {
@@ -1622,7 +1635,7 @@ html.xtj-ios-viewport .dock-panel {
     min-width: 0;
     width: 100% !important;
     max-width: none !important;
-    height: 100dvh;
+    height: 100%;
     border: 0 !important;
     border-radius: 0 !important;
     background: var(--wb-canvas) !important;

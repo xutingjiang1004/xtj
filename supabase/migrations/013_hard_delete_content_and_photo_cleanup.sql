@@ -122,7 +122,7 @@ SELECT
     NULLIF(xtj_private.safe_jsonb(p.content)->>'storagePath', ''),
     NULLIF(xtj_private.safe_jsonb(p.content)->>'thumb', ''),
     NULLIF(split_part(substring(COALESCE(p.media_url, '') from '/uploads/(.*)$'), '?', 1), ''),
-    NULLIF(regexp_replace(split_part(substring(COALESCE(p.media_url, '') from '/uploads/(.*)$'), '?', 1), '(\.[^.]+)$', '_thumb\1'), '')
+    NULLIF('photos/thumbs/' || encode(digest(split_part(substring(COALESCE(p.media_url, '') from '/uploads/(.*)$'), '?', 1), 'sha256'), 'hex') || '.webp', '')
   ]::TEXT[], NULL))
 FROM public.posts p
 WHERE p.media_type = '__photo_wall__'

@@ -427,6 +427,14 @@
   display: none;
 }
 
+/* A failed, cancelled, or auth-blocked request can briefly keep the
+ * assistant node while its renderers unwind. Never paint an empty outlined
+ * reply bubble in that interval; the status/typing indicator is the only
+ * visible loading affordance until the first real token arrives. */
+.ai-msg.assistant .ai-msg-bubble.ai-reply-pending:empty {
+  display: none;
+}
+
 .ai-msg-footer {
   max-width: min(82%, 680px);
   padding: 0 6px;

@@ -480,6 +480,13 @@
   flex-direction: column;
 }
 
+/* A pending/apply surface contains two stacked regions: the preview and the
+   action bar. Keeping this state explicit prevents the action bar from being
+   laid out beside the preview and collapsing the preview to its text width. */
+.code-editor-area.has-diff-view {
+  flex-direction: column;
+}
+
 /* ── 16. Editor Container ─────────────────────────────────── */
 .code-editor-container {
   flex: 1;
@@ -1423,8 +1430,56 @@
   flex-shrink: 0;
 }
 
+.code-chat-attachments {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.code-chat-attachments:empty {
+  display: none;
+}
+
+.code-attachment-btn {
+  flex: 0 0 auto;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: var(--cw-bg-tertiary);
+  color: var(--cw-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.code-attachment-btn:hover:not(:disabled) {
+  border-color: var(--cw-accent);
+  color: var(--cw-accent);
+}
+
+.code-attachment-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.code-attachment-chip,
+.code-attachment-status,
+.code-attachment-error {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .code-chat-input-area textarea {
   flex: 1;
+  min-width: 0;
   min-height: 36px;
   max-height: 120px;
   padding: 8px 12px;
@@ -1488,6 +1543,8 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--cw-bg);
@@ -1543,10 +1600,11 @@
 /* ── 29. Diff Panels ──────────────────────────────────────── */
 .code-diff-body {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-}
 }
 
 .code-diff-body.side-by-side {
@@ -1556,6 +1614,7 @@
 .code-diff-before,
 .code-diff-after {
   flex: 1;
+  width: 100%;
   min-width: 0;
   overflow: auto;
   font-family: var(--cw-font-mono);
@@ -1576,6 +1635,11 @@
   border-right: none;
   border-bottom: 1px solid var(--cw-border);
   max-height: 50%;
+}
+
+.code-diff-document {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── 30. Diff Line ────────────────────────────────────────── */
@@ -1656,6 +1720,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 14px;
   flex-shrink: 0;
   border-top: 1px solid var(--cw-border);
@@ -2421,7 +2487,7 @@
 
 /* ── Resizers (Pointer Events) ────────────────────────────── */
 .code-resizer {
-  background: var(--cw-border);
+  background: transparent;
   transition: background var(--cw-dur-fast) var(--cw-ease);
   z-index: 50;
   position: relative;
@@ -2447,31 +2513,104 @@
 /* Vertical resizers (left and right) */
 .code-resizer-left,
 .code-resizer-right {
-  width: 4px;
+  width: 8px;
   cursor: col-resize;
-  margin: 0 -2px; /* Visual overlap for continuous layout */
+  margin: 0 -4px; /* Keep the larger hit target over the visual boundary. */
 }
 
 .code-resizer-left::after,
 .code-resizer-right::after {
   top: 0;
   bottom: 0;
-  left: -4px;
-  right: -4px;
+  left: -6px;
+  right: -6px;
 }
 
 /* Horizontal resizer (context panel) */
 .code-resizer-context {
-  height: 4px;
+  height: 8px;
   cursor: row-resize;
-  margin: -2px 0;
+  margin: -4px 0;
 }
 
 .code-resizer-context::after {
   left: 0;
   right: 0;
-  top: -4px;
-  bottom: -4px;
+  top: -6px;
+  bottom: -6px;
+}
+
+/* Make the grab affordance visible without sacrificing the larger hit area. */
+.code-resizer-left::before,
+.code-resizer-right::before {
+  content: '';
+  width: 2px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--cw-border-strong);
+  transition: background var(--cw-dur-fast) var(--cw-ease);
+}
+.code-resizer-context::before {
+  content: '';
+  width: 34px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--cw-border-strong);
+  transition: background var(--cw-dur-fast) var(--cw-ease);
+}
+.code-resizer:hover::before,
+.code-resizer.is-resizing::before {
+  background: #fff;
+}
+
+.code-resizer:focus-visible {
+  outline: 2px solid var(--cw-accent);
+  outline-offset: 2px;
+}
+
+.code-resizer-left::before,
+.code-resizer-right::before {
+  width: 3px;
+  height: 48px;
+  box-shadow: 0 -10px 0 -1px var(--cw-accent-soft), 0 10px 0 -1px var(--cw-accent-soft);
+}
+
+.code-resizer-context::before {
+  width: 48px;
+  height: 3px;
+  box-shadow: -10px 0 0 -1px var(--cw-accent-soft), 10px 0 0 -1px var(--cw-accent-soft);
+}
+
+@media (max-width: 1199px) and (min-width: 768px) {
+  .code-sidebar { width: var(--cw-sidebar-width, 220px); }
+  .code-chat-panel { width: var(--cw-chat-width, 300px); }
+
+  .code-chat-input-area {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .code-chat-input-area textarea {
+    order: 0;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .code-chat-attachments {
+    order: -1;
+  }
+
+  .code-chat-input-area .code-attachment-btn,
+  .code-chat-input-area .send-btn {
+    order: 1;
+  }
+
+  .code-chat-input-area .send-btn {
+    width: 32px;
+    height: 32px;
+  }
 }
 
 /* ── Collapsed / Maximized States ──────────────────────────── */

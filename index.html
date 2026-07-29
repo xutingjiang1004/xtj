@@ -50,11 +50,11 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=6b64527bac" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=6b64527bac" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c7eb02abe9" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=6b64527bac" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" /><link rel="stylesheet" href="css/ai-agent.min.css?v=4211272ae5" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=0a04a2b98e" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=bc7ef7cb72">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=1b1bd04bed">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=c7eb02abe9">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=5b846a64d6">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4211272ae5">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=3512a22e0a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2583028a16">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=9879387659">
@@ -74,8 +74,8 @@
     <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
     <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
     <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=ac2d1c4e2c">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=4d3cc27022">
-    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=c6250ee5f7">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=ed8c597f5b">
+    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=c62bfe48c8">
     </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1078,13 +1078,15 @@
     <script defer src="js/ai-core/scroll-controller.min.js?v=743e0a0b6d"></script>
     <script defer src="js/ai-core/stream-renderer.min.js?v=22b2b02430"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=12407a1a7b"></script>
-    <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <!-- Third-party SDK must never block the local app bootstrap. Code and the
+         shell can start offline; auth/feed attach when the SDK becomes ready. -->
+    <script async crossorigin="anonymous" onload="window.dispatchEvent(new Event('xtj:supabase-ready'))" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
-    <script defer src="js/core.min.js?v=80683e925f"></script>
+    <script defer src="js/core.min.js?v=242b6fa2ee"></script>
     <script defer src="js/login-device.min.js?v=ca37c54bf8"></script>
     <script defer src="js/theme-toggle.min.js?v=a9201b15a8"></script>
-    <script defer src="js/desktop-shell.min.js?v=87ea3d0535"></script>
+    <script defer src="js/desktop-shell.min.js?v=aa5441eb35"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
