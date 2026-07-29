@@ -36,6 +36,51 @@ test.afterEach(() => {
   codeIndex._resetRegistryForTests();
 });
 
+test('generated edits are preflighted against supplied files before they reach Apply', async () => {
+  const source = 'one line';
+  const app = createApp(async () => ({
+    content: JSON.stringify({ operations: [
+      {
+        type: 'replace_range',
+        path: 'src/one.js',
+        summary: 'invalid line range',
+        expected_sha256: sha(source),
+        start_line: 21,
+        end_line: 21,
+        new_content: 'replacement'
+      },
+      {
+        type: 'replace_range',
+        path: 'report.docx',
+        summary: 'wrong document operation type',
+        expected_sha256: sha(source),
+        start_line: 1,
+        end_line: 1,
+        new_content: 'replacement'
+      }
+    ]
+    }),
+    model: 'deepseek-v4-flash',
+    usage: {}
+  }));
+
+  const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
+    workspace_name: 'test', workspace_id: 'local:test', workspace_generation: 1,
+    message: 'modify the supplied files', history: [],
+    open_files: [
+      { path: 'src/one.js', content: source, sha256: sha(source), mimeType: 'text/javascript' },
+      { path: 'report.docx', content: 'document text', sha256: sha('document text'), mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+    ],
+    attachments: []
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.operations, []);
+  assert.match(response.body.reply, /Some generated edits were skipped/);
+  assert.match(response.body.reply, /line range 21-21/);
+  assert.match(response.body.reply, /report\.docx requires a document operation/);
+});
+
 test('freshness questions select web_search and return structured server results', async () => {
   let toolResult;
   const app = createApp(async (_messages, options) => {
