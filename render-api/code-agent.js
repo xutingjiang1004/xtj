@@ -541,8 +541,14 @@ function buildSystemPrompt() {
 }
 
 function inferInitialToolChoice(message, indexSummary, openFiles, activePath) {
-  var text = String(message || '').toLowerCase();
+  var text = String(message || '').trim().toLowerCase();
   var hasOpenFiles = Array.isArray(openFiles) && openFiles.length > 0;
+
+  // Identity questions must use server-provided runtime data. Relying only
+  // on the prompt lets the provider guess its model or claim a wrong vendor.
+  if (/^(你是谁|你叫什么|你是什么模型|who are you|what are you|what model are you)[\s\?\!\.,，。！？、]*$/i.test(text)) {
+    return { type: 'function', function: { name: 'get_runtime_capabilities' } };
+  }
   
   if (isExplicitSearch(text)) {
     return { type: 'function', function: { name: 'web_search' } };
@@ -808,7 +814,7 @@ function needsProjectContext(message) {
   if (exportRE.test(msg)) return false;
 
   // 明确要求读取、检查、修改、分析项目、找bug、代码相关，需要项目上下文
-  var requiresContextRE = /(分析.*项目|检查.*(整个项目|项目|bug)|修改.*(代码|文件)|总结.*文档|读取.*(项目|代码)|查找.*函数|修复.*报错|这个文件|看看|有什么问题|重构|解析|总结一下)/i;
+  var requiresContextRE = /(分析.*项目|检查.*(整个项目|项目|bug)|修改.*(代码|文件)|总结.*文档|读取.*(项目|代码|文件|\.(js|ts|jsx|tsx|py|java|go|rs|html|css|json|md|docx?|pdf|xlsx?|pptx?)\b)|查找.*函数|修复.*报错|这个文件|看看|有什么问题|重构|解析|总结一下)/i;
   if (requiresContextRE.test(msg)) return true;
 
   // 如果不包含明确的项目操作词汇，就不强求重建索引（避免普通问题被拦截）
@@ -3308,6 +3314,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!apResult.ok) return sendError('INVALID_PATH', apResult.error, 400);
       var activePath = apResult.value || '';
       if (activePath && !validatePath(activePath)) return sendError('INVALID_PATH', '当前路径无效', 400);
+      var activeDocumentHint = /\.(docx?|pdf|pptx?|xlsx?)$/i.test(activePath);
 
       var histResult = validateHistory(body.history);
       if (!histResult.ok) return sendError('INVALID_HISTORY', histResult.error, 400);
@@ -3361,7 +3368,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // P0 Fix: 当有打开文档或附件时，即使索引未建立也不拦截请求
       // 文档正文已通过 open_files/attachments 传入，Agent 可以直接使用
       var hasDocumentContent = openFiles.length > 0 || attachments.length > 0;
-      if (!indexSummary && !hasDocumentContent && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && !hasDocumentContent && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        if (activeDocumentHint) return sendError('DOCUMENT_CONTEXT_MISSING', '当前文档内容未随请求发送，请重新打开文档后重试', 409, { retryable: true });
         return sendError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 409, { retryable: true, hasDocumentContent: false });
       }
 
@@ -3866,6 +3874,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var userId = String(req.userName || '');
     var clientRequestId = String(req.body.client_request_id || '');
 
+    function logPhase(phase, extra) {
+      var logObj = {
+        requestId: requestId,
+        streamId: streamId,
+        phase: phase,
+        elapsedMs: Date.now() - requestStartTime
+      };
+      if (extra) Object.keys(extra).forEach(function(k) { logObj[k] = extra[k]; });
+      console.log('[code-agent-stream] ' + JSON.stringify(logObj));
+    }
+
     // Phase 3: Register controller for external cancellation
 
     // Phase 3: Stream resume — check idempotency for same client_request_id
@@ -4024,6 +4043,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!apResult.ok) { sendStreamError('INVALID_PATH', apResult.error, 'validation'); return; }
       var activePath = apResult.value || '';
       if (activePath && !validatePath(activePath)) { sendStreamError('INVALID_PATH', '当前路径无效', 'validation'); return; }
+      var activeDocumentHint2 = /\.(docx?|pdf|pptx?|xlsx?)$/i.test(activePath);
 
       var histResult = validateHistory(body.history);
       if (!histResult.ok) { sendStreamError('INVALID_HISTORY', histResult.error, 'validation'); return; }
@@ -4071,7 +4091,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var indexSummary = codeIndex.getIndexSummary(scope);
       var hasDocumentContent2 = openFiles.length > 0 || attachments.length > 0;
-      if (!indexSummary && !hasDocumentContent2 && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+      if (!indexSummary && !hasDocumentContent2 && needsProjectContext(message) && !isFreshnessQuery(message) && !isExplicitSearch(message)) {
+        if (activeDocumentHint2) {
+          sendStreamError('DOCUMENT_CONTEXT_MISSING', '当前文档内容未随请求发送，请重新打开文档后重试', 'validation');
+          return;
+        }
         sendStreamError('INDEX_REBUILD_REQUIRED', '项目索引需要重新建立，但当前文档内容已可用，您可以继续提问', 'validation');
         return;
       }
