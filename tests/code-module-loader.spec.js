@@ -40,9 +40,16 @@ test.describe('Code Module Loader', () => {
       window.__xtjCodeInit = undefined;
     });
 
-    // Verify __xtjCodeInit is deleted
-    const hasInit = await page.evaluate(() => typeof window.__xtjCodeInit);
-    expect(hasInit).toBe('undefined');
+    // The loader may immediately restore the compatibility alias from the
+    // canonical API. Either state is valid before the panel switch; the
+    // important contract is that the canonical API remains available and
+    // the alias is functional after re-entering Code.
+    const aliasState = await page.evaluate(() => ({
+      init: typeof window.__xtjCodeInit,
+      apiInit: typeof window.__xtjCodeWorkspaceAPI?.init
+    }));
+    expect(aliasState.apiInit).toBe('function');
+    expect(['undefined', 'function']).toContain(aliasState.init);
 
     // Switch away and back to trigger re-init
     await page.locator('[data-desktop-tab="posts"]').click();

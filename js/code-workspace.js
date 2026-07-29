@@ -4844,7 +4844,9 @@
         
         var friendlyMessage = message || '请求失败';
         // P0 Fix: 区分不同错误类型，提供具体说明和操作建议
-        if (code === 'INDEX_REBUILD_REQUIRED') {
+        if (code === 'DOCUMENT_CONTEXT_MISSING') {
+          friendlyMessage = '当前文档内容没有成功发送给 AI，请重新打开文档后重试。';
+        } else if (code === 'INDEX_REBUILD_REQUIRED') {
           friendlyMessage = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
         } else if (code === 'DOCUMENT_NOT_PARSED') {
           friendlyMessage = '文档正在解析中，请等待解析完成后重试。';
@@ -5252,6 +5254,12 @@
               state.pendingOperations = [];
               cleanupStream();
               finalizeRequest(ctx, { error: emptyReplyError, errorCode: 'EMPTY_RESPONSE' });
+              // showError rendered the terminal state into the streaming node.
+              // Remove that transient node before rebuilding from state, or
+              // an empty provider response produces duplicate assistant cards.
+              if (assistantNode && assistantNode.parentNode) {
+                try { assistantNode.remove(); } catch (_) {}
+              }
               renderChatPanel();
               clearStreamState();
               break;
@@ -5301,6 +5309,16 @@
             var retryable = (event.data && event.data.retryable) === true;
             showError(errCode, errMsg, retryable);
               answerBuffer = '';
+              var streamErrorContent = 'AI 请求失败，请稍后重试。';
+              if (errCode === 'DOCUMENT_CONTEXT_MISSING') {
+                streamErrorContent = '当前文档内容没有成功发送给 AI，请重新打开文档后重试。';
+              } else if (errCode === 'INDEX_REBUILD_REQUIRED') {
+                streamErrorContent = '项目索引尚未建立，但当前文档内容可用，您可以继续提问。';
+              } else if (errCode === 'PROVIDER_TIMEOUT') {
+                streamErrorContent = 'AI 请求超时，请稍后重试或简化问题。';
+              } else if (errCode === 'STREAM_INTERRUPTED') {
+                streamErrorContent = '连接中断，请检查网络后重试。';
+              }
               state.messages.push({
                 role: 'assistant',
                 content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
@@ -5310,8 +5328,16 @@
                 retryMessage: ctx.originalMessage,
                 retryBody: Object.assign({}, ctx.originalBody || body)
               });
+              // Keep provider codes and raw diagnostics out of the visible
+              // message; they remain available through errorCode/details.
+              state.messages[state.messages.length - 1].content = streamErrorContent;
               cleanupStream();
               finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
+              // The streaming node already contains the error UI. Reconcile
+              // from state with exactly one assistant message.
+              if (assistantNode && assistantNode.parentNode) {
+                try { assistantNode.remove(); } catch (_) {}
+              }
               renderChatPanel();
             break;
         }
@@ -5647,7 +5673,10 @@
         friendly = window.XtjAiCore.Errors.formatUserMessage(err);
       }
       var userFriendlyMsg = friendly;
-      if (errCode === 'INDEX_REBUILD_REQUIRED') {
+      if (errCode === 'DOCUMENT_CONTEXT_MISSING') {
+        friendly = '当前文档内容没有成功发送给 AI，请重新打开文档后重试。';
+        userFriendlyMsg = friendly;
+      } else if (errCode === 'INDEX_REBUILD_REQUIRED') {
         friendly = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
         userFriendlyMsg = friendly;
       }
