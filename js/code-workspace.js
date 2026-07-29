@@ -499,6 +499,22 @@
     // second AMD loader (which can race and overwrite the first editor).
     if (!state._monacoLoadPromise) {
       state._monacoLoadPromise = new Promise(function (resolve, reject) {
+        var settled = false;
+        var timeoutId = setTimeout(function () {
+          rejectMonaco(new Error('Monaco 加载超时，已切换到基础编辑器'));
+        }, 2500);
+        function resolveMonaco() {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve();
+        }
+        function rejectMonaco(error) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(error);
+        }
         var existing = document.querySelector('script[data-xtj-monaco-loader="1"]');
         var script = existing || document.createElement('script');
         function loadEditor() {
@@ -508,10 +524,10 @@
             });
             require(['vs/editor/editor.main'], function () {
               state._monacoLoaded = true;
-              resolve();
-            }, reject);
+              resolveMonaco();
+            }, rejectMonaco);
           } catch (e) {
-            reject(e);
+            rejectMonaco(e);
           }
         }
         if (existing) {
@@ -522,7 +538,7 @@
         script.src = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js';
         script.setAttribute('data-xtj-monaco-loader', '1');
         script.onload = loadEditor;
-        script.onerror = function () { reject(new Error('Failed to load Monaco loader')); };
+        script.onerror = function () { rejectMonaco(new Error('Failed to load Monaco loader')); };
         document.head.appendChild(script);
       }).catch(function (error) {
         // Allow a later file open to retry after a transient CDN failure.
@@ -1328,6 +1344,40 @@
 
   function applyLayoutToDOM() {
     if (!_dom.panelCode) return;
+
+    // Keep all three panes usable when the host window is smaller than the
+    // desktop default. Without this fit pass, the fixed 260px + 360px panes
+    // can squeeze the editor down to an unusable sliver before the user gets
+    // a chance to drag the dividers. Keep 180px as the desktop floor so a
+    // sidebar resize does not make the opposite (chat) divider appear stuck.
+    var layoutRoot = _dom.sidebar && _dom.sidebar.parentElement;
+    var availableWidth = (layoutRoot && layoutRoot.clientWidth) || _dom.panelCode.clientWidth || window.innerWidth;
+    if (availableWidth > 0) {
+      var compact = availableWidth < 900;
+      var minSidebar = compact ? 188 : 220;
+      var minChat = compact ? 240 : 280;
+      var minEditor = compact
+        ? Math.max(150, Math.min(220, availableWidth - minSidebar - minChat - 8))
+        : 180;
+      var maxSidebar = Math.min(560, Math.max(minSidebar, availableWidth * 0.45));
+      var maxChat = Math.min(760, Math.max(minChat, availableWidth * 0.55));
+      _layoutState.sidebarWidth = Math.max(minSidebar, Math.min(_layoutState.sidebarWidth, maxSidebar));
+      _layoutState.chatWidth = Math.max(minChat, Math.min(_layoutState.chatWidth, maxChat));
+      var dividerBudget = 8;
+      var overflow = _layoutState.sidebarWidth + _layoutState.chatWidth + minEditor + dividerBudget - availableWidth;
+      if (overflow > 0) {
+        var chatReduction = Math.min(overflow, _layoutState.chatWidth - minChat);
+        _layoutState.chatWidth -= Math.max(0, chatReduction);
+        overflow -= Math.max(0, chatReduction);
+        if (overflow > 0) {
+          var sidebarReduction = Math.min(overflow, _layoutState.sidebarWidth - minSidebar);
+          _layoutState.sidebarWidth -= Math.max(0, sidebarReduction);
+        }
+      }
+      var availableHeight = (layoutRoot && layoutRoot.clientHeight) || _dom.panelCode.clientHeight || window.innerHeight;
+      var maxContextHeight = Math.max(80, Math.floor(availableHeight * 0.65));
+      _layoutState.contextHeight = Math.max(80, Math.min(_layoutState.contextHeight, maxContextHeight));
+    }
     
     // Apply inline vars
     _dom.panelCode.style.setProperty('--cw-sidebar-width', _layoutState.sidebarWidth + 'px');
@@ -1481,6 +1531,8 @@
     resizerContext.setAttribute('role', 'separator');
     resizerContext.setAttribute('tabindex', '0');
     resizerContext.setAttribute('aria-orientation', 'horizontal');
+    resizerContext.setAttribute('aria-label', '调整项目状态区域高度');
+    resizerContext.setAttribute('title', '拖动调整项目状态区域高度，双击恢复默认');
     sidebar.appendChild(resizerContext);
 
     var contextPanel = document.createElement('div');
@@ -1496,6 +1548,8 @@
     resizerLeft.setAttribute('role', 'separator');
     resizerLeft.setAttribute('tabindex', '0');
     resizerLeft.setAttribute('aria-orientation', 'vertical');
+    resizerLeft.setAttribute('aria-label', '调整文件树宽度');
+    resizerLeft.setAttribute('title', '拖动调整文件树宽度，双击恢复默认');
     resizerLeft.addEventListener('dblclick', resetLayout);
     workspace.appendChild(resizerLeft);
 
@@ -1535,6 +1589,8 @@
     resizerRight.setAttribute('role', 'separator');
     resizerRight.setAttribute('tabindex', '0');
     resizerRight.setAttribute('aria-orientation', 'vertical');
+    resizerRight.setAttribute('aria-label', '调整编辑器与 AI 面板宽度');
+    resizerRight.setAttribute('title', '拖动调整编辑器与 AI 面板宽度，双击恢复默认');
     resizerRight.addEventListener('dblclick', resetLayout);
     workspace.appendChild(resizerRight);
 
@@ -1606,7 +1662,8 @@
         if (target.setPointerCapture && e.pointerId !== undefined) target.setPointerCapture(e.pointerId);
       } catch (_) { /* pointer capture can be lost between events */ }
       
-      var wsWidth = _dom.panelCode.offsetWidth || window.innerWidth;
+      var layoutRoot = _dom.sidebar && _dom.sidebar.parentElement;
+      var wsWidth = (layoutRoot && layoutRoot.clientWidth) || _dom.panelCode.offsetWidth || window.innerWidth;
       var sbHeight = _dom.sidebar.offsetHeight || window.innerHeight;
       
       _dragState = {
@@ -1625,29 +1682,37 @@
       target.classList.add('is-resizing');
       document.body.classList.add(type === 'context' ? 'code-is-resizing-row' : 'code-is-resizing');
       
-      target.addEventListener('pointermove', onPointerMove);
-      target.addEventListener('pointerup', onPointerUp);
-      target.addEventListener('pointercancel', onPointerUp);
+      // Listen on the document as well as using pointer capture. This keeps a
+      // drag alive when the pointer leaves the narrow divider or crosses a
+      // child iframe/editor surface.
+      document.addEventListener('pointermove', onPointerMove, { passive: false });
+      document.addEventListener('pointerup', onPointerUp);
+      document.addEventListener('pointercancel', onPointerUp);
     }
 
     function onPointerMove(e) {
       if (!_dragState) return;
+      if (_dragState.pointerId !== undefined && e.pointerId !== undefined && e.pointerId !== _dragState.pointerId) return;
       e.preventDefault();
       var dx = e.clientX - _dragState.startX;
       var dy = e.clientY - _dragState.startY;
       
       if (_dragState.type === 'left') {
         var newWidth = _dragState.startSidebarWidth + dx;
-        // Clamp: min 180, max 45% or 560
+        var compact = _dragState.wsWidth < 900;
+        var minSidebar = compact ? 188 : 220;
+        // Clamp to the same bounds used by applyLayoutToDOM.
         var maxW = Math.min(560, _dragState.wsWidth * 0.45);
-        newWidth = Math.max(180, Math.min(newWidth, maxW));
+        newWidth = Math.max(minSidebar, Math.min(newWidth, maxW));
         _layoutState.sidebarWidth = newWidth;
       } else if (_dragState.type === 'right') {
         // Dragging right resizer leftwards INCREASES chat width
         var newWidth = _dragState.startChatWidth - dx;
-        // Clamp: min 280, max 55% or 760
+        var compactChat = _dragState.wsWidth < 900;
+        var minChat = compactChat ? 240 : 280;
+        // Clamp to the same bounds used by applyLayoutToDOM.
         var maxW = Math.min(760, _dragState.wsWidth * 0.55);
-        newWidth = Math.max(280, Math.min(newWidth, maxW));
+        newWidth = Math.max(minChat, Math.min(newWidth, maxW));
         _layoutState.chatWidth = newWidth;
       } else if (_dragState.type === 'context') {
         // Dragging context resizer upwards INCREASES context height (wait, context is at bottom)
@@ -1665,6 +1730,7 @@
 
     function onPointerUp(e) {
       if (!_dragState) return;
+      if (_dragState.pointerId !== undefined && e.pointerId !== undefined && e.pointerId !== _dragState.pointerId) return;
       var target = _dragState.target;
       try {
         if (target.releasePointerCapture && e.pointerId !== undefined &&
@@ -1672,9 +1738,9 @@
           target.releasePointerCapture(e.pointerId);
         }
       } catch (_) { /* capture may already have been released */ }
-      target.removeEventListener('pointermove', onPointerMove);
-      target.removeEventListener('pointerup', onPointerUp);
-      target.removeEventListener('pointercancel', onPointerUp);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
       
       target.classList.remove('is-resizing');
       document.body.classList.remove('code-is-resizing');
@@ -1687,9 +1753,38 @@
     var onLeftDown = function(e) { onPointerDown(e, 'left'); };
     var onRightDown = function(e) { onPointerDown(e, 'right'); };
     var onContextDown = function(e) { onPointerDown(e, 'context'); };
+
+    function onKeyDown(e, type) {
+      var key = e.key;
+      var step = e.shiftKey ? 32 : 8;
+      var delta = 0;
+      if (type === 'context') {
+        if (key === 'ArrowUp') delta = step;
+        else if (key === 'ArrowDown') delta = -step;
+      } else if (type === 'left') {
+        if (key === 'ArrowLeft') delta = -step;
+        else if (key === 'ArrowRight') delta = step;
+      } else {
+        if (key === 'ArrowLeft') delta = step;
+        else if (key === 'ArrowRight') delta = -step;
+      }
+      if (!delta) return;
+      e.preventDefault();
+      if (type === 'left') _layoutState.sidebarWidth += delta;
+      else if (type === 'right') _layoutState.chatWidth += delta;
+      else _layoutState.contextHeight += delta;
+      applyLayoutToDOM();
+      triggerLayoutSave();
+    }
+    var onLeftKeyDown = function(e) { onKeyDown(e, 'left'); };
+    var onRightKeyDown = function(e) { onKeyDown(e, 'right'); };
+    var onContextKeyDown = function(e) { onKeyDown(e, 'context'); };
     _dom.resizerLeft.addEventListener('pointerdown', onLeftDown);
     _dom.resizerRight.addEventListener('pointerdown', onRightDown);
     _dom.resizerContext.addEventListener('pointerdown', onContextDown);
+    _dom.resizerLeft.addEventListener('keydown', onLeftKeyDown);
+    _dom.resizerRight.addEventListener('keydown', onRightKeyDown);
+    _dom.resizerContext.addEventListener('keydown', onContextKeyDown);
     
     // Listen for resize to re-clamp
     var onWindowResize = function() {
@@ -1702,12 +1797,15 @@
       _dom.resizerLeft && _dom.resizerLeft.removeEventListener('pointerdown', onLeftDown);
       _dom.resizerRight && _dom.resizerRight.removeEventListener('pointerdown', onRightDown);
       _dom.resizerContext && _dom.resizerContext.removeEventListener('pointerdown', onContextDown);
+      _dom.resizerLeft && _dom.resizerLeft.removeEventListener('keydown', onLeftKeyDown);
+      _dom.resizerRight && _dom.resizerRight.removeEventListener('keydown', onRightKeyDown);
+      _dom.resizerContext && _dom.resizerContext.removeEventListener('keydown', onContextKeyDown);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onWindowResize);
       if (_dragState) {
         var dragTarget = _dragState.target;
-        dragTarget && dragTarget.removeEventListener('pointermove', onPointerMove);
-        dragTarget && dragTarget.removeEventListener('pointerup', onPointerUp);
-        dragTarget && dragTarget.removeEventListener('pointercancel', onPointerUp);
         try {
           if (dragTarget && dragTarget.releasePointerCapture && _dragState.pointerId !== undefined &&
               (!dragTarget.hasPointerCapture || dragTarget.hasPointerCapture(_dragState.pointerId))) {
@@ -5673,6 +5771,10 @@
     });
 
     return Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
+      if (ctx.timeoutTimer) {
+        clearTimeout(ctx.timeoutTimer);
+        ctx.timeoutTimer = null;
+      }
       if (!isCurrentRequest(ctx) || ctx._finalized) return null;
       var replyContent = String(data && data.reply || '').trim();
       if (!replyContent) {
@@ -5707,6 +5809,10 @@
       renderDiffView();
       return data;
     }).catch(function (err) {
+      if (ctx.timeoutTimer) {
+        clearTimeout(ctx.timeoutTimer);
+        ctx.timeoutTimer = null;
+      }
       if (!isCurrentRequest(ctx) || ctx._finalized) return null;
       if (ctx._timedOut) {
         err = Object.assign(new Error('AI 请求超时，请重试'), { code: 'PROVIDER_TIMEOUT', retryable: true });
@@ -5845,6 +5951,8 @@
 
     var hasPending = state.pendingOperations.length > 0;
     var hasApplied = Object.keys(state.snapshots).length > 0;
+    var hasDiffSurface = hasPending || hasApplied;
+    _dom.editorArea.classList.toggle('has-diff-view', hasDiffSurface);
 
     // Remove existing diff view and apply bar
     var existingDiff = document.getElementById('codeDiffView');
@@ -5888,9 +5996,9 @@
 
         // Before (original)
         var before = document.createElement('div');
-        before.className = 'code-diff-before';
+        before.className = 'code-diff-before' + (op.type === 'document' ? ' code-diff-document' : '');
         before.style.overflow = 'auto';
-        before.style.maxHeight = '200px';
+        before.style.maxHeight = op.type === 'document' ? 'none' : '200px';
         before.style.padding = '8px 0';
         before.style.borderBottom = '1px solid var(--cw-border)';
 
@@ -6083,6 +6191,7 @@
     }
 
     // Read original file as ArrayBuffer
+    var createdSnapshotForApply = false;
     return fs.readFileByPath(op.path).then(function (result) {
       if (!result || !result.content) {
         throw new Error('无法读取文件');
@@ -6293,6 +6402,7 @@
       // Take snapshot of current content BEFORE writing
       var currentText = result.type === 'text' ? result.content : '';
       if (!state.snapshots[op.path]) {
+        createdSnapshotForApply = true;
         state.snapshots[op.path] = {
           existed: true,
           beforeContent: currentText,
@@ -6366,6 +6476,11 @@
       showToast('已应用: ' + op.path, 'success');
       return true;
     }).catch(function (err) {
+      // Do not leave an undo snapshot behind when validation or writing fails.
+      // A snapshot is only meaningful after the write has completed.
+      if (createdSnapshotForApply) {
+        delete state.snapshots[op.path];
+      }
       showToast('应用失败: ' + (err && err.message ? err.message : String(err)), 'error');
       throw err;
     });

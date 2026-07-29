@@ -8,6 +8,16 @@ test.describe('Code Workspace', () => {
     await page.addInitScript(() => {
       localStorage.setItem('CODE_STREAM_ENABLED', '0');
     });
+    // Keep offline UI tests independent from third-party SDK/font requests.
+    // This must be installed before navigation so a pending external request
+    // cannot delay the local app bootstrap or page teardown.
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+      if (url.includes('jsdelivr.net') || /fonts\.googleapis\.com|fonts\.gstatic\.com|\.(?:woff2?|ttf|otf)(?:\?|$)/i.test(url)) {
+        return route.abort();
+      }
+      return route.continue();
+    });
     await page.goto('/');
     await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
     await page.click('button[data-desktop-tab="code"]');
@@ -58,6 +68,57 @@ test.describe('Code Workspace', () => {
     ]);
     
     expect(fileChooser.isMultiple()).toBe(true);
+  });
+
+  test('offline Code keeps the editor usable and resizers change pane proportions', async ({ page }) => {
+    await page.evaluate(() => {
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'offline.js',
+        getFile: async () => new File(['export const offline = true;'], 'offline.js', { type: 'text/javascript' })
+      }];
+    });
+    await page.click('#codeWelcomeFileBtn');
+    await page.waitForSelector('.code-textarea', { state: 'visible', timeout: 7000 });
+    await expect(page.locator('.code-textarea')).toHaveValue('export const offline = true;');
+
+    const before = await page.evaluate(() => ({
+      sidebar: document.querySelector('.code-sidebar').getBoundingClientRect().width,
+      editor: document.querySelector('.code-editor-column').getBoundingClientRect().width,
+      chat: document.querySelector('.code-chat-panel').getBoundingClientRect().width
+    }));
+    const divider = await page.locator('.code-resizer-left').boundingBox();
+    await page.mouse.move(divider.x + divider.width / 2, divider.y + 260);
+    await page.mouse.down();
+    await page.mouse.move(divider.x + divider.width / 2 + 72, divider.y + 260, { steps: 6 });
+    await page.mouse.up();
+    const after = await page.evaluate(() => ({
+      sidebar: document.querySelector('.code-sidebar').getBoundingClientRect().width,
+      editor: document.querySelector('.code-editor-column').getBoundingClientRect().width,
+      chat: document.querySelector('.code-chat-panel').getBoundingClientRect().width,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }));
+    expect(after.sidebar).toBeGreaterThan(before.sidebar + 40);
+    expect(after.editor).toBeGreaterThan(180);
+    expect(after.chat).toBeGreaterThan(240);
+    expect(after.overflow).toBeLessThanOrEqual(1);
+
+    // Width transitions finish before measuring the next divider. Otherwise
+    // the old hit target can be sampled while the editor is still moving.
+    await page.waitForTimeout(350);
+    const rightDivider = await page.locator('.code-resizer-right').boundingBox();
+    await page.mouse.move(rightDivider.x + rightDivider.width / 2, rightDivider.y + 260);
+    await page.mouse.down();
+    await page.mouse.move(rightDivider.x + rightDivider.width / 2 - 72, rightDivider.y + 260, { steps: 6 });
+    await page.mouse.up();
+    const afterRight = await page.evaluate(() => ({
+      editor: document.querySelector('.code-editor-column').getBoundingClientRect().width,
+      chat: document.querySelector('.code-chat-panel').getBoundingClientRect().width,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }));
+    expect(afterRight.chat).toBeGreaterThan(after.chat + 40);
+    expect(afterRight.editor).toBeGreaterThan(180);
+    expect(afterRight.overflow).toBeLessThanOrEqual(1);
   });
 
   test('should intercept 500 API errors and show toast', async ({ page }, testInfo) => {
@@ -274,4 +335,86 @@ test('Code workspace layout can be resized and collapsed', async ({ page }) => {
   await page.click('.restore-layout-btn');
   await expect(page.locator('.code-sidebar')).toBeVisible();
   await expect(page.locator('.code-chat-panel')).toBeVisible();
+});
+
+test('Code keeps an usable editor column at compact desktop widths', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.addInitScript(() => {
+    window.showOpenFilePicker = async () => [{
+      kind: 'file',
+      name: 'compact.js',
+      getFile: async () => new File(['export const compact = true;'], 'compact.js', { type: 'text/javascript' })
+    }];
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.click('button[data-desktop-tab="code"]');
+  await page.waitForSelector('#codeWelcomeFileBtn', { state: 'visible', timeout: 10000 });
+  await page.click('#codeWelcomeFileBtn');
+  await page.waitForSelector('.code-workspace', { state: 'visible', timeout: 10000 });
+  await page.waitForTimeout(400);
+
+  const editorWidth = await page.locator('.code-editor-column').evaluate((el) => el.getBoundingClientRect().width);
+  expect(editorWidth).toBeGreaterThanOrEqual(150);
+  const panel = await page.locator('#panelCode').boundingBox();
+  expect(panel).not.toBeNull();
+  expect(panel.y + panel.height).toBeLessThanOrEqual(768);
+});
+
+test('built Code bundle keeps the modification preview and action bar full width', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 768 });
+  await page.addInitScript(() => {
+    localStorage.setItem('CODE_STREAM_ENABLED', '0');
+    window.showOpenFilePicker = async () => [{
+      kind: 'file',
+      name: 'built-preview.js',
+      getFile: async () => new File(['export const built = true;'], 'built-preview.js', { type: 'text/javascript' })
+    }];
+  });
+  await page.route('**/api/code/chat*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        reply: '已生成修改预览',
+        operations: [{
+          path: 'built-preview.js',
+          type: 'replace_range',
+          start_line: 1,
+          end_line: 1,
+          new_content: 'export const built = false;',
+          summary: '更新示例值'
+        }]
+      })
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.click('button[data-desktop-tab="code"]');
+  await page.waitForSelector('#codeWelcomeFileBtn', { state: 'visible', timeout: 10000 });
+  await page.click('#codeWelcomeFileBtn');
+  await page.waitForSelector('#codeChatInput', { state: 'visible', timeout: 10000 });
+  await page.evaluate(() => {
+    window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options || {}));
+  });
+  await page.fill('#codeChatInput', '修改这个文件');
+  await page.click('#codeChatSendBtn');
+  await page.waitForSelector('#codeDiffView', { state: 'visible', timeout: 10000 });
+
+  const metrics = await page.evaluate(() => {
+    const rect = (selector) => {
+      const box = document.querySelector(selector).getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    };
+    return {
+      editorArea: rect('#codeEditorArea'),
+      diffView: rect('#codeDiffView'),
+      applyBar: rect('#codeApplyBar')
+    };
+  });
+  expect(metrics.diffView.width).toBeGreaterThan(metrics.editorArea.width * 0.95);
+  expect(metrics.applyBar.width).toBeGreaterThan(metrics.editorArea.width * 0.95);
+  expect(metrics.applyBar.y + metrics.applyBar.height).toBeLessThanOrEqual(metrics.editorArea.y + metrics.editorArea.height + 1);
+  await page.screenshot({ path: testInfo.outputPath('built-operation-preview-layout.png'), fullPage: false });
 });

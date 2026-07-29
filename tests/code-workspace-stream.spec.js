@@ -88,6 +88,17 @@ async function openCodeWorkspace(page, options = {}) {
     };
   }, { resume: options.resume === true, shared: options.shared === true });
 
+  // External font faces are not part of the Code flow and can remain pending
+  // in an offline browser, which makes screenshot-based layout assertions
+  // hang after the UI itself has already settled.
+  await page.route('**/*', (route) => {
+    const url = route.request().url();
+    if (/fonts\.googleapis\.com|fonts\.gstatic\.com|\.(?:woff2?|ttf|otf)(?:\?|$)/i.test(url)) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+
   await page.route('**/api/code/capabilities', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -467,6 +478,50 @@ test.describe('Code workspace stream state regressions', () => {
     const snapshot = await getSnapshot(page);
     expect(snapshot.pendingOperations).toEqual([]);
     await expect(page.locator('.code-diff-panel, .code-diff-view')).toHaveCount(0);
+  });
+
+  test('operation preview fills the editor column instead of collapsing to its content width', async ({ page }) => {
+    await openCodeWorkspace(page);
+    await enqueue(page, {
+      body: sse([{ type: 'done', data: {
+        reply: '已生成修改预览',
+        operations: [{
+          path: 'stream-fixture.js',
+          type: 'replace_range',
+          start_line: 1,
+          end_line: 1,
+          new_content: 'export const fixture = false;'
+        }]
+      } }])
+    });
+    await send(page, '请修改文件');
+    await expect(page.locator('#codeDiffView')).toBeVisible();
+    await expect.poll(async () => page.locator('#codeApplyBar').count()).toBe(1);
+
+    const metrics = await page.evaluate(() => {
+      const rect = (selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const box = el.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      };
+      return {
+        editorArea: rect('#codeEditorArea'),
+        diffView: rect('#codeDiffView'),
+        diffBody: rect('.code-diff-body'),
+        diffBefore: rect('.code-diff-before'),
+        applyBar: rect('#codeApplyBar'),
+        panel: rect('#panelCode')
+      };
+    });
+    expect(metrics.diffView.width).toBeGreaterThan(metrics.editorArea.width * 0.95);
+    expect(metrics.diffBody.width).toBeGreaterThan(metrics.editorArea.width * 0.95);
+    expect(metrics.diffBefore.width).toBeGreaterThan(metrics.editorArea.width * 0.85);
+    expect(metrics.applyBar.width).toBeGreaterThan(metrics.editorArea.width * 0.95);
+    expect(metrics.applyBar.y + metrics.applyBar.height).toBeLessThanOrEqual(metrics.editorArea.y + metrics.editorArea.height + 1);
+    // The geometry assertions above are the regression contract. Avoid making
+    // the test depend on Playwright waiting forever for document.fonts.ready
+    // when external font requests are unavailable in an offline run.
   });
 
   test('rapid send/cancel leaves no ghost or blank assistant and keeps DOM/state aligned', async ({ page }) => {

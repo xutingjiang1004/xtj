@@ -83,14 +83,34 @@ window.safeParseDate = function(val) {
             const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
+            function initSupabaseClient() {
+                if (sb) return true;
+                if (!window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                try {
+                    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                    window.sb = sb;
+                    return true;
+                } catch (e) {
+                    console.error('[XTJ] Supabase client initialization failed:', e && e.message);
+                    return false;
+                }
+            }
             // ★ 修复 M6：检查配置完整性，避免静默失败
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
                 console.error('[XTJ] Supabase 配置缺失，请检查 config.js 或环境变量');
                 sb = null;
             } else if (typeof window.supabase !== 'undefined') {
-                sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                initSupabaseClient();
             } else {
                 console.error('Supabase SDK not loaded');
+                window.addEventListener('xtj:supabase-ready', function () {
+                    if (!initSupabaseClient()) return;
+                    if (typeof window.initialLoad === 'function') {
+                        window.initialLoad(true).catch(function (e) {
+                            console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
+                        });
+                    }
+                }, { once: true });
                 document.addEventListener('DOMContentLoaded', function() {
                     var feedEl = document.getElementById('feed');
                     if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';

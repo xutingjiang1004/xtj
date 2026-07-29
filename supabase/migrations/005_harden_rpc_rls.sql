@@ -3,7 +3,9 @@
 CREATE OR REPLACE FUNCTION claim_pro_gift(
   p_user_name TEXT,
   p_gift_id TEXT
-) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER AS $$
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
   v_gift RECORD;
   v_info JSONB;

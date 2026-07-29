@@ -1622,11 +1622,13 @@ const ERROR_LOG_RETENTION_DAYS = 30;
 // 与前端 applyVisiblePostQueryFilters 保持一致（22 个 marker）
 // 必须放在所有 marker 常量定义之后、路由定义之前
 // 正常帖子白名单：只允许这些 media_type 作为帖子出现在搜索结果中
-var NORMAL_POST_MEDIA_TYPES = ['', 'text', 'image', 'video', 'audio', 'photo', 'album'];
+var NORMAL_POST_MEDIA_TYPES = ['text', 'image', 'video', 'audio', 'photo', 'album'];
+var NORMAL_POST_EMPTY_MEDIA_FILTER = 'media_type.eq.""';
 function isNormalPost(row) {
   if (!row) return false;
   var mt = row.media_type;
   if (mt === null || mt === undefined) return true;
+  if (String(mt).trim() === '') return true;
   return NORMAL_POST_MEDIA_TYPES.indexOf(String(mt).toLowerCase()) >= 0;
 }
 
@@ -1636,7 +1638,8 @@ function applyNormalPostAllowlist(query) {
   // 注意：PostgREST 连续 .or() 可能覆盖，所以只用 .or() 一次
   return query.or(
     'media_type.is.null,' +
-    NORMAL_POST_MEDIA_TYPES.map(function(t) { return t === '' ? 'media_type.eq.' : 'media_type.eq.' + t; }).join(',')
+    NORMAL_POST_EMPTY_MEDIA_FILTER + ',' +
+    NORMAL_POST_MEDIA_TYPES.map(function(t) { return 'media_type.eq.' + t; }).join(',')
   );
 }
 
@@ -8140,7 +8143,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     // 注意：不要用 neq/not.in，它们会误杀 media_type IS NULL 的行
     // Legacy text posts stored an empty string instead of NULL. Keep them in
     // the normal feed so a refresh cannot make cached posts disappear.
-    query = query.or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
+    query = query.or('media_type.is.null,media_type.eq."",media_type.in.(text,image,video,audio,photo,album)');
 
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
@@ -13973,7 +13976,7 @@ app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res
   try {
     var isAdmin = req.userName === ADMIN_USERNAME;
     var query = supabase.from('posts').select('user_name,created_at')
-      .or('media_type.is.null,media_type.eq.,media_type.in.(text,image,video,audio,photo,album)');
+      .or('media_type.is.null,media_type.eq."",media_type.in.(text,image,video,audio,photo,album)');
     if (!isAdmin) {
       query = req.userName
         ? query.or('visibility.eq.public,user_name.eq.' + req.userName)
