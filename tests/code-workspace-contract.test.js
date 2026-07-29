@@ -3,9 +3,24 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const indexHtml = fs.readFileSync('index.html', 'utf8');
+const coreSource = fs.readFileSync('js/core.js', 'utf8');
 const desktopShell = fs.readFileSync('js/desktop-shell.js', 'utf8');
 const codeFS = fs.readFileSync('js/code-file-system.js', 'utf8');
 const codeWorkspace = fs.readFileSync('js/code-workspace.js', 'utf8');
+
+test('third-party Supabase SDK cannot block local app bootstrap', () => {
+  assert.match(indexHtml, /<script async[^>]+supabase\.js/);
+  assert.doesNotMatch(indexHtml, /<script defer[^>]+supabase\.js/);
+  assert.match(indexHtml, /xtj:supabase-ready/);
+  assert.match(coreSource, /initSupabaseClient/);
+  assert.match(coreSource, /addEventListener\('xtj:supabase-ready'/);
+});
+
+test('Monaco loading has a bounded fallback path', () => {
+  assert.match(codeWorkspace, /Monaco 加载超时/);
+  assert.match(codeWorkspace, /setTimeout\(function \(\) \{[\s\S]*?rejectMonaco/);
+  assert.match(codeWorkspace, /renderTextareaEditor\(tab, container\)/);
+});
 
 // ============================================================
 // 1. 电脑端存在 Code 导航
@@ -542,6 +557,11 @@ test('Code chat timeout covers response-body decoding, not only fetch headers', 
   assert.match(codeWorkspace, /return Promise\.race\(\[apiCall\.then\(decodeCodeChatResponse\), timeoutPromise\]\)/);
 });
 
+test('Code chat clears the timeout after either race branch settles', () => {
+  assert.ok((codeWorkspace.match(/clearTimeout\(ctx\.timeoutTimer\)/g) || []).length >= 2);
+  assert.match(codeWorkspace, /ctx\.timeoutTimer = null/);
+});
+
 test('Code chat rebuilds a lost server index and retries the original message once', () => {
   assert.match(codeWorkspace, /INDEX_REBUILD_REQUIRED/);
   assert.match(codeWorkspace, /索引已丢失，正在自动重建/);
@@ -600,6 +620,12 @@ test('undo uses IIFE closure for each snapshot', () => {
 
 test('undo only removes successful snapshots', () => {
   assert.match(codeWorkspace, /delete state\.snapshots\[successPaths\[k\]\]/);
+});
+
+test('failed apply removes a snapshot created for that attempt', () => {
+  assert.match(codeWorkspace, /var createdSnapshotForApply = false/);
+  assert.match(codeWorkspace, /createdSnapshotForApply = true/);
+  assert.match(codeWorkspace, /if \(createdSnapshotForApply\) \{\s*delete state\.snapshots\[op\.path\];/s);
 });
 
 test('undo reports failed paths', () => {

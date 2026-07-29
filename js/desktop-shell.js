@@ -23,6 +23,12 @@
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
     }
+    if (tab === 'code') {
+      // The canonical API survives tab cleanup; restore the legacy alias
+      // synchronously when returning to Code so core.js and integrations do
+      // not observe a half-recovered workspace.
+      recoverCodeInitAlias();
+    }
   }
 
   function openAiChat() {
@@ -817,6 +823,12 @@
           // P0: 先打开面板，再用 requestAnimationFrame 延迟加载模块
           // 确保面板可见后再开始加载，避免 offsetParent 检查失败
           openTab(tab);
+          // Do not let the static welcome markup look like a ready workspace
+          // while the asynchronously injected modules are still loading.
+          var codePanel = document.getElementById('panelCode');
+          if (codePanel && (!window.__xtjCodeWorkspaceAPI || typeof window.__xtjCodeWorkspaceAPI.init !== 'function')) {
+            codePanel.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+          }
           window.requestAnimationFrame(function () {
             window.requestAnimationFrame(function () {
               ensureCodeModulesLoaded().then(function () {
