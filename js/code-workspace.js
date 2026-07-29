@@ -646,6 +646,7 @@
         state.workspaceMode = 'local';
         state._isReadOnly = false;
         renderWorkspace();
+        checkStreamRecovery();
         if (result.kind === 'file') {
           window.setTimeout(function () { openFile(state.workspaceName); }, 0);
         }
@@ -679,14 +680,14 @@
         return false; // Signal cancellation to caller
       }
     }
-    // Keep a direct abort fallback for requests created before the request
-    // context was installed (and make cleanup's cancellation observable).
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (_) {}
-    }
     // Cancel any in-flight request via activeRequest context
     if (state.activeRequest) {
-      finalizeRequest(state.activeRequest, { cancelReason: 'cleanup', done: false });
+      state.activeRequest.cancelled = true;
+      state.activeRequest.cancelReason = 'cleanup';
+      finalizeRequest(state.activeRequest, { cancelled: true, cancelReason: 'cleanup' });
+    } else if (state._abortController) {
+      // Compatibility fallback for a request created before ctx registration.
+      try { state._abortController.abort(); } catch (_) {}
     }
     abortController(state._attachmentController);
     abortController(state._githubController);
@@ -1039,10 +1040,11 @@
   function resetWorkspaceState() {
     var previousWorkspaceId = getWorkspaceId();
     var previousGeneration = state.workspaceGeneration;
-    // P0: 中止所有进行中的 AI 请求
-    if (state._abortController) {
-      try { state._abortController.abort(); } catch (e) { /* ignore */ }
-      state._abortController = null;
+    // P0: 中止所有进行中的 AI 请求 through the owning context.
+    if (state.activeRequest) {
+      state.activeRequest.cancelled = true;
+      state.activeRequest.cancelReason = 'workspace_reset';
+      finalizeRequest(state.activeRequest, { cancelled: true, cancelReason: 'workspace_reset' });
     }
     abortController(state._attachmentController);
     abortController(state._githubController);
@@ -4181,10 +4183,24 @@
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
+    if (msg.role === 'assistant' && msg.retryable) {
+      body += '<button class="code-chat-retry-btn" type="button">重新生成</button>';
+    }
     body += '</div>';
 
     el.innerHTML = avatar + body;
     container.appendChild(el);
+    if (msg.role === 'assistant' && msg.retryable) {
+      var retryBtn = el.querySelector('.code-chat-retry-btn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', function () {
+          if (retryBtn.disabled || state.sending || msg._retryStarted) return;
+          msg._retryStarted = true;
+          retryBtn.disabled = true;
+          sendMessage(msg.retryMessage || state.lastFailedMessage, msg.retryBody || null, { retry: true });
+        });
+      }
+    }
   }
 
   function scrollChatToBottom() {
@@ -4343,10 +4359,26 @@
   function clearSendingWatchdog() {
     if (_sendingWatchdog) { clearTimeout(_sendingWatchdog); _sendingWatchdog = null; }
   }
-  function resetSendingState() {
-    state.sending = false;
-    state._abortController = null;
-    updateChatRequestControls();
+  function abortRequestTransport(ctx, reason) {
+    if (!ctx) return;
+    if (ctx.reader && typeof ctx.reader.cancel === 'function') {
+      try { ctx.reader.cancel(reason || 'cancelled'); } catch (_) {}
+    }
+    if (ctx.sharedCtrl) {
+      try {
+        if (typeof ctx.sharedCtrl._abort === 'function') ctx.sharedCtrl._abort(reason || 'cancelled');
+        else if (typeof ctx.sharedCtrl.cancel === 'function' && !ctx.sharedCtrl.isFinalized()) ctx.sharedCtrl.cancel(reason || 'cancelled');
+      } catch (_) {}
+    }
+    if (ctx.abortController) { try { ctx.abortController.abort(); } catch (_) {} }
+  }
+
+  function clearRequestWatchdog(ctx) {
+    if (!ctx || ctx.watchdogTimer === undefined || ctx.watchdogTimer === null) return;
+    var timer = ctx.watchdogTimer;
+    clearTimeout(ctx.watchdogTimer);
+    ctx.watchdogTimer = undefined;
+    if (_sendingWatchdog === timer) _sendingWatchdog = null;
   }
 
   // ── Request Context Pattern ──
@@ -4365,16 +4397,19 @@
     // Always clean up own resources (idempotent via _finalized flag)
     if (ctx._finalized) return;
     ctx._finalized = true;
-    if (ctx.watchdogTimer !== undefined) { clearTimeout(ctx.watchdogTimer); ctx.watchdogTimer = undefined; }
+    clearRequestWatchdog(ctx);
     if (ctx.timeoutTimer !== undefined) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = undefined; }
-    // Always abort the request owned by this context.  `cancelled` is a
-    // reason flag, not permission to leave the underlying fetch alive.
-    if (ctx.abortController) { try { ctx.abortController.abort(); } catch(_) {} }
+    // Always abort the transport owned by this context. This covers the
+    // shared-controller signal as well as the local fallback controller.
+    var transportReason = options.cancelReason || options.errorCode || 'finalized';
+    if (!options.done || options.cancelled) abortRequestTransport(ctx, transportReason);
     if (ctx.sharedCtrl) {
       try {
         if (typeof ctx.sharedCtrl.isActive === 'function' && ctx.sharedCtrl.isActive()) {
           if (options.done) {
             ctx.sharedCtrl.done();
+          } else if (options.cancelled || options.cancelReason) {
+            try { ctx.sharedCtrl.cancel(options.cancelReason || 'cancelled'); } catch(_) {}
           } else if (options.error || options.errorCode) {
             try { ctx.sharedCtrl.error(options.errorCode || options.error || 'error'); } catch(_) {}
           } else {
@@ -4405,22 +4440,24 @@
       state._abortController = null;
       state._sharedCtrl = null;
       state._telemetry = null;
-      clearSendingWatchdog();
+      clearRequestWatchdog(ctx);
       updateChatRequestControls();
       removeTypingIndicator();
       renderProjectStatus();
     }
   }
 
-  function sendMessage() {
+  function sendMessage(retryMessage, retryBody, sendOptions) {
+    sendOptions = sendOptions || {};
+    var isRetry = sendOptions.retry === true;
     if (state.sending) {
       console.log('[code-workspace] sendMessage blocked: state.sending is true');
       return;
     }
 
     var input = document.getElementById('codeChatInput');
-    if (!input) return;
-    var message = input.value.trim();
+    if (!input && !isRetry) return;
+    var message = isRetry ? String(retryMessage || '').trim() : input.value.trim();
     if (!message) return;
     state.lastFailedMessage = message;
 
@@ -4444,6 +4481,8 @@
       streamId: null,
       cancelled: false,
       cancelReason: '',
+      originalMessage: message,
+      originalBody: retryBody ? Object.assign({}, retryBody) : null,
       _finalized: false
     };
     // Register as active request
@@ -4484,18 +4523,20 @@
     var now = new Date();
     var timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
 
-    // Add user message to state
-    state.messages.push({ role: 'user', content: message, time: timeStr });
-
-    input.value = '';
-    input.style.height = 'auto';
+    // A retry reuses the already-rendered user message and must not insert a
+    // duplicate. Normal sends append exactly one user message.
+    if (!isRetry) {
+      state.messages.push({ role: 'user', content: message, time: timeStr });
+      input.value = '';
+      input.style.height = 'auto';
+    }
 
     // P0: 追加用户消息到聊天，而不是重建整个面板
     // renderChatPanel() 会重建 input/button，新建的 DOM 是启用状态，
     // 但 state.sending 仍为 true → 导致点击发送被 guard 拦截，用户无法发送
     try {
       var messagesContainer = document.getElementById('codeChatMessages');
-      if (messagesContainer) {
+      if (messagesContainer && !isRetry) {
         appendChatMessage(state.messages[state.messages.length - 1], messagesContainer);
       }
       showTypingIndicator();
@@ -4503,11 +4544,13 @@
     } catch (e) {
       console.error('[code-workspace] Initial DOM render failed:', e);
       // Restore the message to input so user can retry
-      input.value = message;
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
-      // Remove the user message we just pushed (since it wasn't rendered)
-      state.messages.pop();
+      if (input) {
+        input.value = message;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
+      }
+      // Remove the user message we just pushed (since it wasn't rendered).
+      if (!isRetry) state.messages.pop();
       finalizeRequest(ctx, { error: 'DOM render failed', errorCode: 'DOM_ERROR' });
       return;
     }
@@ -4527,8 +4570,16 @@
     // result before building the request, otherwise a fast send would omit
     // the document and the backend would incorrectly ask for an index.
     return ensureOpenFileContexts(message).then(function () {
-      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
-      var body = buildChatRequestBody(message, historyMsgs);
+      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
+        return null;
+      }
+      var body = retryBody ? Object.assign({}, retryBody, {
+        client_request_id: 'code_cr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        conversation_id: state.conversationId,
+        workspace_generation: getWorkspaceScope().workspace_generation
+      }) : buildChatRequestBody(message, historyMsgs);
+      ctx.originalBody = Object.assign({}, body);
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
         return sendStreamingRequest(ctx, body, timeStr);
@@ -4549,7 +4600,7 @@
       removeTypingIndicator();
       var errMsg = (err && err.message) ? err.message : String(err);
       var errCode = (err && err.code) ? err.code : 'CONTEXT_ERROR';
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: errCode });
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: errCode, retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
       renderChatPanel();
       finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       return null;
@@ -4584,21 +4635,17 @@
 
   function cancelCurrentRequest() {
     var ctx = state.activeRequest;
-    if (!ctx) {
-      // Defensive compatibility for an older caller that only populated the
-      // shared controller.  New requests always use the context path above.
-      if (!state.sending || !state._abortController) return false;
-      try { state._abortController.abort(); } catch (_) {}
-      state._requestId++;
-      state.sending = false;
-      state._abortController = null;
-      removeTypingIndicator();
-      updateChatRequestControls();
-      return true;
-    }
+    if (!ctx) return false;
     ctx.cancelled = true;
     ctx.cancelReason = 'user_cancelled';
-    finalizeRequest(ctx, { cancelReason: 'user_cancelled', done: false });
+    if (ctx.streamState && typeof ctx.streamState.cancel === 'function') {
+      ctx.streamState.cancel();
+    } else {
+      removeTypingIndicator();
+      state.messages.push({ role: 'assistant', content: '（已停止）', time: ctx.timeStr || '', stopped: true });
+      finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
+      renderChatPanel();
+    }
     // Invalidate callbacks after finalize has cleared the active request.
     state._requestId++;
     removeTypingIndicator();
@@ -4630,6 +4677,7 @@
     var requestId = ctx.requestId;
     var wsGen = ctx.workspaceGeneration;
     var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : ctx.abortController.signal;
+    ctx.fetchSignal = signal;
     var controller = ctx.abortController;
     var streamDone = false;
     var lastEventId = 0;
@@ -4847,9 +4895,15 @@
         var retryBtn = errorEl.querySelector('.code-stream-retry-btn');
         if (retryBtn) {
           retryBtn.addEventListener('click', function () {
-            sendMessage();
+            if (retryBtn.disabled || state.sending || ctx._retryStarted) return;
+            ctx._retryStarted = true;
+            retryBtn.disabled = true;
+            sendMessage(ctx.originalMessage, ctx.originalBody, { retry: true });
           });
         }
+      }
+      if (contentEl && !String(contentEl.textContent || '').trim() && !String(answerBuffer || '').trim()) {
+        contentEl.textContent = friendlyMessage;
       }
       // Keep partial content
       if (contentEl._streamRenderer) {
@@ -4866,8 +4920,9 @@
       if (contentEl._streamRenderer) {
         try { contentEl._streamRenderer.finish(finalReply || answerBuffer); } catch (e) {}
         contentEl._streamRenderer = null;
-      } else if (finalReply || answerBuffer) {
-        contentEl.innerHTML = parseSimpleMarkdown(finalReply || answerBuffer);
+      } else {
+        var finalContent = finalReply || answerBuffer || '（无响应）';
+        contentEl.innerHTML = parseSimpleMarkdown(finalContent);
       }
 
       // Show usage
@@ -4907,9 +4962,13 @@
       showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true, true);
       assistantNode.classList.remove('streaming');
       streamCancelled = true;
-      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true });
+      // Replace any partial stream with an explicit terminal error in the
+      // canonical state so the subsequent render cannot leave a blank/ambiguous bubble.
+      answerBuffer = '';
+      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
       cleanupStream();
-      finalizeRequest(ctx, { cancelled: true, cancelReason: 'timeout', errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
+      finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
+      renderChatPanel();
     }, 120000);
 
     // Send the SSE request
@@ -4957,14 +5016,32 @@
             return sendApiRequest(ctx, body, timeStr);
           }
           showError(errCode, errMsg, json && json.retryable);
-          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable });
+          answerBuffer = '';
+          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable !== false, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
           cleanupStream();
           finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
+          renderChatPanel();
         });
       }
 
-      // Read SSE stream
-      var reader = resp.body.getReader();
+      var contentType = (resp.headers && resp.headers.get('content-type')) || '';
+      var responseJsonPromise = null;
+      var isSseResponse = contentType.toLowerCase().indexOf('text/event-stream') >= 0;
+      if (!resp.body || !isSseResponse) {
+        // JSON responses are used by duplicate-request recovery and must not
+        // be fed into the SSE line parser.
+        if (contentType.toLowerCase().indexOf('application/json') < 0) {
+          throw Object.assign(new Error('AI 流响应格式无效'), { code: 'INVALID_STREAM_RESPONSE', retryable: true });
+        }
+        responseJsonPromise = resp.json();
+      }
+
+      // Read SSE stream only after the response type has been validated.
+      var reader = null;
+      if (!responseJsonPromise) {
+        reader = resp.body.getReader();
+        ctx.reader = reader;
+      }
       var decoder = new TextDecoder();
       var buffer = '';
       var currentSseEventType = '';
@@ -5027,23 +5104,28 @@
             dispatchSseEvent();
             if (!streamDone && !_doneHandled) {
               _doneHandled = true;
-              finalizeNode();
+              var eofError = 'AI 响应不完整，请重新生成';
+              showError('STREAM_ENDED_WITHOUT_DONE', eofError, true, true);
               state.messages.push({
                 role: 'assistant',
-                content: finalReply || answerBuffer || '（无响应）',
+                content: eofError,
                 time: timeStr,
+                errorCode: 'STREAM_ENDED_WITHOUT_DONE',
+                retryable: true,
+                retryMessage: ctx.originalMessage,
+                retryBody: Object.assign({}, ctx.originalBody || body),
                 toolTrace: finalToolTrace,
                 operations: finalOperations,
                 contextInfo: finalContextInfo,
                 runtime: finalRuntime,
                 usage: finalUsage
               });
+              state.pendingOperations = [];
               cleanupStream();
-              finalizeRequest(ctx, { done: true, usage: finalUsage });
+              finalizeRequest(ctx, { error: eofError, errorCode: 'STREAM_ENDED_WITHOUT_DONE' });
               clearStreamState();
-              if (finalOperations.length > 0) {
-                renderDiffView();
-              }
+              renderChatPanel();
+              renderDiffView();
             }
             return;
           }
@@ -5069,15 +5151,17 @@
               resumeRetryCount++;
               if (statusText) statusText.textContent = '连接中断，正在恢复 (' + resumeRetryCount + '/' + STREAM_RESUME_MAX_RETRIES + ')...';
               console.log('[CODE-STREAM] Reconnecting in ' + delay + 'ms, attempt ' + resumeRetryCount);
-              setTimeout(function() {
-                if (streamCancelled || streamDone) return;
-                resumeStream(streamId, lastEventId, requestId, wsGen);
-              }, delay);
+               setTimeout(function() {
+                 if (streamCancelled || streamDone) return;
+                 resumeStream(ctx, streamId, lastEventId);
+               }, delay);
             } else {
               showError('STREAM_INTERRUPTED', '流式连接中断', true);
-              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true });
+              answerBuffer = '';
+              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
               cleanupStream();
               finalizeRequest(ctx, { error: '流式连接中断', errorCode: 'STREAM_INTERRUPTED' });
+              renderChatPanel();
             }
           }
         });
@@ -5160,6 +5244,19 @@
             finalRuntime = (event.data && event.data.runtime) || null;
             if (!finalUsage && event.data && event.data.usage) finalUsage = event.data.usage;
 
+            var completedReply = String(finalReply || answerBuffer || '').trim();
+            if (!completedReply) {
+              var emptyReplyError = 'AI 未返回有效内容，请重新生成';
+              showError('EMPTY_RESPONSE', emptyReplyError, true, true);
+              state.messages.push({ role: 'assistant', content: emptyReplyError, time: timeStr, errorCode: 'EMPTY_RESPONSE', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+              state.pendingOperations = [];
+              cleanupStream();
+              finalizeRequest(ctx, { error: emptyReplyError, errorCode: 'EMPTY_RESPONSE' });
+              renderChatPanel();
+              clearStreamState();
+              break;
+            }
+
             finalizeNode();
 
             // Update state
@@ -5168,7 +5265,7 @@
             state.lastFailedMessage = '';
             state.messages.push({
               role: 'assistant',
-              content: finalReply || answerBuffer || '（无响应）',
+              content: completedReply,
               time: timeStr,
               operations: finalOperations,
               toolTrace: finalToolTrace,
@@ -5177,9 +5274,7 @@
               usage: finalUsage
             });
 
-            if (finalOperations.length > 0) {
-              state.pendingOperations = finalOperations;
-            }
+            state.pendingOperations = finalOperations;
             if (finalContextInfo) {
               state.lastReadContext = finalContextInfo;
             }
@@ -5191,10 +5286,11 @@
             cleanupStream();
             finalizeRequest(ctx, { done: true, usage: finalUsage });
 
-            // Show diff if operations
-            if (finalOperations.length > 0) {
-              renderDiffView();
-            }
+            renderChatPanel();
+
+            // Always reconcile the Diff surface, including the empty-array
+            // case so a previous turn's operations cannot remain visible.
+            renderDiffView();
             clearStreamState();
             break;
           case 'error':
@@ -5204,20 +5300,26 @@
             var errMsg = (event.data && event.data.message) || '请求失败';
             var retryable = (event.data && event.data.retryable) === true;
             showError(errCode, errMsg, retryable);
-            state.messages.push({
-              role: 'assistant',
-              content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
-              time: timeStr,
-              errorCode: errCode,
-              retryable: retryable
-            });
-            cleanupStream();
-            finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
+              answerBuffer = '';
+              state.messages.push({
+                role: 'assistant',
+                content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
+                time: timeStr,
+                errorCode: errCode,
+                retryable: retryable,
+                retryMessage: ctx.originalMessage,
+                retryBody: Object.assign({}, ctx.originalBody || body)
+              });
+              cleanupStream();
+              finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
+              renderChatPanel();
             break;
         }
       }
 
       function handleStreamCancelled() {
+        if (ctx._finalized || streamCancelled) return;
+        _doneHandled = true;
         streamCancelled = true;
         if (spinner) spinner.style.display = 'none';
         if (statusEl) statusEl.style.display = 'none';
@@ -5227,10 +5329,12 @@
         // Mark as stopped
         assistantNode.classList.remove('streaming');
         assistantNode.classList.add('cancelled');
+        answerBuffer = '';
         if (statusText) {
           statusText.textContent = '已停止';
           statusEl.style.display = '';
         }
+        if (contentEl && !String(answerBuffer || '').trim()) contentEl.textContent = '（已停止）';
         state.messages.push({
           role: 'assistant',
           content: answerBuffer || '（已停止）',
@@ -5239,8 +5343,61 @@
         });
         // Phase 3: Clear stream state on cancel — prevent auto-reconnect
         clearStreamState();
-        finalizeRequestState();
         cleanupStream();
+        finalizeRequest(ctx, { cancelled: true, cancelReason: ctx.cancelReason || 'aborted' });
+        renderChatPanel();
+      }
+
+      ctx.streamState = {
+        getStreamId: function () { return streamId; },
+        getLastEventId: function () { return lastEventId; },
+        setStreamId: function (value) { streamId = value || null; ctx.streamId = streamId; },
+        setLastEventId: function (value) { lastEventId = Number(value) || 0; ctx.lastEventId = lastEventId; },
+        isDone: function () { return streamDone || ctx._finalized; },
+        handleEvent: handleSSEEvent,
+        fail: function (code, message, retryable) {
+          handleSSEEvent({ type: 'error', data: { code: code, message: message, retryable: retryable !== false } });
+        },
+        cancel: handleStreamCancelled,
+        setStatus: function (message) { if (statusText) statusText.textContent = message; }
+      };
+
+      if (responseJsonPromise) {
+        return responseJsonPromise.then(function (data) {
+          if (!isCurrentRequest(ctx) || ctx._finalized) return null;
+          var jsonData = data || {};
+          if (jsonData.stream_id) ctx.streamState.setStreamId(jsonData.stream_id);
+          if (jsonData.last_event_id !== undefined) ctx.streamState.setLastEventId(jsonData.last_event_id);
+          var replayEvents = Array.isArray(jsonData.events) ? jsonData.events : [];
+          for (var eventIndex = 0; eventIndex < replayEvents.length; eventIndex++) {
+            ctx.streamState.handleEvent(replayEvents[eventIndex]);
+          }
+          if (jsonData.status === 'completed' && !ctx.streamState.isDone()) {
+            var replayReply = jsonData.reply || (jsonData.result && jsonData.result.reply) || '';
+            if (String(replayReply || '').trim()) {
+              ctx.streamState.handleEvent({ type: 'done', data: {
+                reply: replayReply,
+                operations: Array.isArray(jsonData.operations) ? jsonData.operations : [],
+                usage: jsonData.usage || null
+              } });
+            } else {
+              ctx.streamState.fail('RESUME_EMPTY', '恢复完成但没有可显示的 AI 回复', true);
+            }
+          } else if (jsonData.status === 'running' || jsonData.duplicate === true && jsonData.status === 'running') {
+            if (jsonData.stream_id) {
+              resumeStream(ctx, jsonData.stream_id, jsonData.last_event_id || ctx.streamState.getLastEventId());
+            } else {
+              ctx.streamState.fail('INVALID_STREAM_RESPONSE', 'AI 返回了无法恢复的流标识', true);
+            }
+          } else if (jsonData.status === 'failed') {
+            ctx.streamState.fail('STREAM_FAILED', jsonData.error || '流式处理失败', true);
+          } else if (jsonData.status === 'cancelled') {
+            ctx.streamState.cancel();
+          } else if (!ctx.streamState.isDone()) {
+            ctx.streamState.fail('INVALID_STREAM_RESPONSE', 'AI 返回了无法恢复的响应', true);
+          }
+          return null;
+        });
       }
 
       readStream();
@@ -5251,121 +5408,84 @@
       }
       cleanupStream();
       if (err && err.name === 'AbortError') {
-        if (!streamDone) {
-          streamCancelled = true;
-          if (spinner) spinner.style.display = 'none';
-          if (statusEl) statusEl.style.display = 'none';
-          assistantNode.classList.remove('streaming');
-          assistantNode.classList.add('cancelled');
-          state.messages.push({ role: 'assistant', content: answerBuffer || '（已停止）', time: timeStr, stopped: true });
-        }
-        finalizeRequestState();
+        handleStreamCancelled();
         return;
       }
       var errMsg = (err && err.message) ? err.message : String(err);
       showError('NETWORK_ERROR', errMsg, true);
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true });
-      finalizeRequestState();
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+      finalizeRequest(ctx, { error: errMsg, errorCode: 'NETWORK_ERROR' });
+      renderChatPanel();
     });
-
-    function finalizeRequestState() {
-      clearTimeout(timeoutId);
-      // Stale guard: if request is no longer current, clean only local resources
-      if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
-        if (state._sharedCtrl) {
-          try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
-        }
-        return;
-      }
-      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
-        try { state._sharedCtrl.done(); } catch (e) {}
-        if (state._telemetry) {
-          if (finalUsage) state._telemetry.recordUsage(finalUsage);
-          state._telemetry.finalize(streamCancelled ? 'cancelled' : 'done');
-        }
-      }
-      if (state._sharedCtrl) {
-        try { window.XtjAiCore.RequestController.unregisterInFlight('code_ai_' + requestId); } catch(e) {}
-        state._sharedCtrl = null;
-      }
-      state._telemetry = null;
-      clearSendingWatchdog();
-      state.sending = false;
-      state._abortController = null;
-      var inp = document.getElementById('codeChatInput');
-      if (inp) inp.disabled = false;
-      var sb = document.getElementById('codeChatSendBtn');
-      if (sb) sb.disabled = false;
-      updateChatRequestControls();
-      renderProjectStatus();
-    }
   }
 
   // ── Phase 3: Stream resume function ────────────────────────────────────
-  function resumeStream(streamId, afterEventId, requestId, wsGen) {
-    if (!streamId) return;
-    if (requestId !== state._requestId) return;
-    if (wsGen !== state.workspaceGeneration) return;
+  function resumeStream(ctx, streamId, afterEventId) {
+    if (!ctx || !streamId || !isCurrentRequest(ctx)) return;
+    var streamState = ctx.streamState;
+    if (!streamState || typeof streamState.handleEvent !== 'function') {
+      finalizeRequest(ctx, { error: '流恢复上下文不可用', errorCode: 'RESUME_CONTEXT_MISSING' });
+      return;
+    }
 
     var scope = getWorkspaceScope();
     var params = 'stream_id=' + encodeURIComponent(streamId) +
       '&after_event_id=' + afterEventId +
       '&workspace_id=' + encodeURIComponent(scope.workspace_id || '') +
-      '&workspace_generation=' + (scope.workspace_generation || 0);
+      '&workspace_generation=' + (scope.workspace_generation || 0) +
+      '&client_request_id=' + encodeURIComponent(ctx.clientRequestId || '');
 
     var resumeUrl = '/api/code/chat/stream/resume?' + params;
 
     var fetchFn = window.xtjProtectedFetch || fetch;
-    fetchFn(resumeUrl, { credentials: 'include' })
+    fetchFn(resumeUrl, { credentials: 'include', signal: ctx.fetchSignal })
       .then(function(resp) { return resp.json(); })
       .then(function(data) {
-        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
-        if (!data || !data.ok) {
+        if (!isCurrentRequest(ctx) || ctx._finalized) return;
+        if (!data || data.ok === false) {
           console.error('[CODE-STREAM] Resume failed:', data);
-          showError('RESUME_FAILED', '流恢复失败', true);
+          streamState.handleEvent({ type: 'error', data: { code: 'RESUME_FAILED', message: '流恢复失败', retryable: true } });
           return;
         }
 
         // Replay events
         var events = data.events || [];
         for (var i = 0; i < events.length; i++) {
-          handleSSEEvent(events[i]);
+          streamState.handleEvent(events[i]);
         }
 
-        if (data.status === 'completed') {
-          // Already done
-          if (!streamDone) {
-            finalizeNode();
-            state.messages.push({
-              role: 'assistant',
-              content: finalReply || answerBuffer || '（无响应）',
-              time: timeStr,
-              toolTrace: finalToolTrace,
-              operations: finalOperations,
-              contextInfo: finalContextInfo,
-              runtime: finalRuntime,
-              usage: finalUsage
-            });
-            finalizeRequestState();
-            cleanupStream();
+        if (data.status === 'completed' && !streamState.isDone()) {
+          var resumedReply = data.reply || (data.result && data.result.reply) || '';
+          if (String(resumedReply || '').trim()) {
+            streamState.handleEvent({ type: 'done', data: {
+              reply: resumedReply,
+              operations: Array.isArray(data.operations) ? data.operations : [],
+              usage: data.usage || null
+            }});
+          } else {
+            streamState.handleEvent({ type: 'error', data: {
+              code: 'RESUME_EMPTY', message: '流恢复完成但没有有效回复', retryable: true
+            }});
           }
         } else if (data.status === 'running') {
-          // Still running — reconnect to SSE
-          // We can't reconnect to the same SSE, but we can poll resume
-          if (statusText) statusText.textContent = '正在恢复中...';
+          // Still running — poll the same session without relying on the
+          // original sendStreamingRequest lexical scope.
+          streamState.setStatus('正在恢复中...');
           setTimeout(function() {
-            if (requestId !== state._requestId || streamDone) return;
-            resumeStream(streamId, lastEventId, requestId, wsGen);
+            if (!isCurrentRequest(ctx) || streamState.isDone()) return;
+            resumeStream(ctx, streamId, streamState.getLastEventId());
           }, 2000);
         } else if (data.status === 'failed') {
-          showError('STREAM_FAILED', '流式处理失败', false);
+          streamState.handleEvent({ type: 'error', data: { code: 'STREAM_FAILED', message: '流式处理失败', retryable: false } });
         } else if (data.status === 'cancelled') {
-          handleStreamCancelled();
+          streamState.cancel();
         }
       }).catch(function(err) {
         console.error('[CODE-STREAM] Resume error:', err);
-        if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return;
-        showError('RESUME_ERROR', '流恢复请求失败', true);
+        if (!isCurrentRequest(ctx) || ctx._finalized) return;
+        streamState.handleEvent({ type: 'error', data: {
+          code: 'RESUME_ERROR', message: (err && err.message) || '流恢复请求失败', retryable: true
+        }});
       });
   }
 
@@ -5386,10 +5506,23 @@
     }
     if (streamState.streamId) {
       console.log('[CODE-STREAM] Recovering stream:', streamState.streamId);
-      // We need to create a partial assistant node and resume
-      // For now, we just check if there's a running session
       var fetchFn = window.xtjProtectedFetch || fetch;
       var statusUrl = '/api/code/chat/stream/status?workspace_id=' + encodeURIComponent(scope.workspace_id || '');
+      function reportRecoveryFailure(message) {
+        var originalMessage = String(streamState.originalMessage || '').trim();
+        state.lastFailedMessage = originalMessage;
+        state.messages.push({
+          role: 'assistant',
+          content: message || '上一次流式请求未能恢复，请重新生成。',
+          time: '',
+          errorCode: 'STREAM_RECOVERY_UNAVAILABLE',
+          retryable: true,
+          retryMessage: originalMessage,
+          retryBody: null
+        });
+        clearStreamState();
+        if (_dom.chatPanel) renderChatPanel();
+      }
       fetchFn(statusUrl, { credentials: 'include' })
         .then(function(resp) { return resp.json(); })
         .then(function(data) {
@@ -5397,287 +5530,136 @@
             var session = data.sessions[0];
             if (session) {
               console.log('[CODE-STREAM] Found running session:', session.stream_id);
-              // If the stream was in this conversation, we could show a "recovering" indicator
-              // For now, we just clear the state since we don't have the UI context
-              clearStreamState();
+              reportRecoveryFailure('检测到上一次未完成的请求，但当前页面无法安全恢复其上下文，请重新生成。');
+              return;
             }
           }
-        }).catch(function() { clearStreamState(); });
+          reportRecoveryFailure('上一次流式请求已中断，请重新生成。');
+        }).catch(function() {
+          reportRecoveryFailure('无法检查上一次流式请求的状态，请重新生成。');
+        });
     }
   }
 
   function sendApiRequest(ctx, body, timeStr, indexRetry) {
-    var requestId = ctx.requestId;
-    var wsGen = ctx.workspaceGeneration;
-    var sendBtn = document.getElementById('codeChatSendBtn');
-    var input = document.getElementById('codeChatInput');
+    var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : ctx.abortController.signal;
+    ctx.fetchSignal = signal;
+    var fetchFn = window.xtjProtectedFetch || fetch;
 
-    var signal = ctx.sharedCtrl ? ctx.sharedCtrl.signal : (ctx.abortController ? ctx.abortController.signal : undefined);
+    function decodeCodeChatResponse(resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (text) {
+          var json = null;
+          try { json = JSON.parse(text); } catch (_) {}
+          var error = new Error((json && json.error) || ('API 请求失败: ' + resp.status));
+          error.code = (json && json.code) || (resp.status === 400 ? 'PROVIDER_HTTP_400' : (resp.status === 401 ? 'AUTH_REQUIRED' : 'CODE_REQUEST_FAILED'));
+          if (resp.status === 400 && json && json.validation) error.code = 'VALIDATION_FAILED';
+          error.retryable = json && json.retryable === true;
+          error.requestId = json && json.requestId || '';
+          error.toolTrace = json && json.tool_trace || null;
+          throw error;
+        });
+      }
+      return resp.json();
+    }
 
-    // P0: AI 请求超时 (90 秒)，超时时真正中止网络请求
-    var controller = ctx.abortController;
-    var timeoutId;
     var timeoutPromise = new Promise(function (_, reject) {
-      timeoutId = setTimeout(function () {
-        // P1: 超时时真正中止网络请求，不只是 reject
-        if (controller) {
-          try { controller.abort(); } catch (e) { /* ignore */ }
-        }
-        reject(new Error('AI 响应超时，请稍后重试'));
+      ctx.timeoutTimer = setTimeout(function () {
+        if (ctx._finalized) return;
+        ctx._timedOut = true;
+        abortRequestTransport(ctx, 'timeout');
+        reject(Object.assign(new Error('AI 请求超时，请重试'), { code: 'PROVIDER_TIMEOUT', retryable: true }));
       }, 90000);
     });
 
-    var apiCall;
-    if (window.xtjProtectedFetch) {
-      apiCall = window.xtjProtectedFetch('/api/code/chat', {
-        method: 'POST',
-        body: JSON.stringify(body),
-        signal: signal
-      });
-    } else {
-      apiCall = fetch('/api/code/chat', {
+    var apiCall = Promise.resolve().then(function () {
+      return fetchFn('/api/code/chat', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: signal
       });
-    }
+    });
 
-    function decodeCodeChatResponse(resp) {
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
-      if (!resp.ok) {
-        return resp.text().then(function(text) {
-          var errMsg;
-          var json = null;
-          try { json = JSON.parse(text); } catch(e) {}
-          if (resp.status === 409 && json && json.code === 'INDEX_REBUILD_REQUIRED') {
-            var rebuildError = new Error('项目需要构建索引，正在自动为您准备数据...');
-            rebuildError.code = 'INDEX_REBUILD_REQUIRED';
-            throw rebuildError;
-          }
-          // Phase 2: Preserve structured error from backend
-          if (json && json.code && json.error) {
-            var codeError = new Error(json.error);
-            codeError.code = json.code;
-            codeError.requestId = json.requestId || '';
-            codeError.phase = json.phase || '';
-            codeError.retryable = json.retryable === true;
-            // Preserve tool trace if tools succeeded
-            if (Array.isArray(json.tool_trace) && json.tool_trace.length > 0) {
-              codeError.toolTrace = json.tool_trace;
-            }
-            throw codeError;
-          }
-          // P0: 根据状态码显示具体错误
-          if (resp.status === 401) {
-            errMsg = '登录已失效，请重新登录';
-          } else if (resp.status === 403) {
-            errMsg = (json && json.error) ? json.error : '权限不足';
-          } else if (resp.status === 413) {
-            errMsg = '请求内容过大';
-          } else if (resp.status === 429) {
-            errMsg = (json && json.error) ? json.error : '请求过于频繁，请稍后重试';
-          } else if (resp.status >= 500) {
-            errMsg = (json && json.error) ? '服务器错误: ' + json.error : '服务器错误: ' + resp.status;
-          } else {
-            errMsg = (json && json.error) ? json.error : ('API 请求失败: ' + resp.status);
-          }
-          throw new Error(errMsg);
-        });
-      }
-      return resp.json();
-    }
-
-    // Keep the timeout active through response-body decoding as well as the
-    // network request. A fetch can resolve with headers while text()/json()
-    // hangs, which otherwise leaves the typing indicator stuck forever.
     return Promise.race([apiCall.then(decodeCodeChatResponse), timeoutPromise]).then(function (data) {
-      clearTimeout(timeoutId);
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
-
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
-
-      // Remove typing indicator
-      removeTypingIndicator();
-
-      // Phase 1: Shared controller done lifecycle
-      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
-        try { state._sharedCtrl.done(); } catch (e) {}
-        if (state._telemetry) {
-          if (data && data.usage) state._telemetry.recordUsage(data.usage);
-          if (data && data.runtime) state._telemetry.recordToolCall(data.runtime.tool_calls || 0);
-          state._telemetry.finalize('done');
-        }
+      if (!isCurrentRequest(ctx) || ctx._finalized) return null;
+      var replyContent = String(data && data.reply || '').trim();
+      if (!replyContent) {
+        var emptyError = new Error('AI 未返回有效内容，请重新生成');
+        emptyError.code = 'EMPTY_RESPONSE';
+        emptyError.retryable = true;
+        throw emptyError;
       }
-
-      var replyContent = (data && data.reply) ? data.reply : '（无响应）';
-      var now2 = new Date();
-      var timeStr2 = now2.getHours().toString().padStart(2, '0') + ':' + now2.getMinutes().toString().padStart(2, '0');
-
-      state.lastSentAttachmentPaths = state.attachments.filter(function (attachment) { return !attachment.pinned; }).map(function (attachment) { return attachment.path; });
+      state.lastSentAttachmentPaths = state.attachments.filter(function (a) { return !a.pinned; }).map(function (a) { return a.path; });
       consumeTransientAttachments();
       state.lastFailedMessage = '';
-      state.messages.push({ role: 'assistant', content: replyContent, time: timeStr2 });
-
-      // Store operations
-      if (data && data.operations && Array.isArray(data.operations)) {
+      if (Array.isArray(data && data.operations)) {
         state.pendingOperations = data.operations;
+      } else {
+        state.pendingOperations = [];
       }
-
-      // Update last read context for display
-      if (data && data.context_info) {
-        state.lastReadContext = data.context_info;
-      }
-      if (data && data.runtime) {
-        state.lastRuntime = data.runtime;
-      }
+      if (data && data.context_info) state.lastReadContext = data.context_info;
+      if (data && data.runtime) state.lastRuntime = data.runtime;
       state.lastToolTrace = data && Array.isArray(data.tool_trace) ? data.tool_trace : [];
       if (data && data.capabilities) state.capabilities = data.capabilities;
+      state.messages.push({
+        role: 'assistant', content: replyContent, time: timeStr,
+        operations: state.pendingOperations,
+        contextInfo: data && data.context_info || null,
+        runtime: data && data.runtime || null,
+        usage: data && data.usage || null
+      });
+      removeTypingIndicator();
+      finalizeRequest(ctx, { done: true, usage: data && data.usage || null });
       renderProjectStatus();
-
       renderChatPanel();
-
-      // Show diff view if operations exist
-      if (state.pendingOperations.length > 0) {
-        renderDiffView();
-      }
+      renderDiffView();
+      return data;
     }).catch(function (err) {
-      clearTimeout(timeoutId);
-      if (requestId !== state._requestId) return;
-      if (wsGen !== state.workspaceGeneration) return;
-      // AbortError is not a real failure
-      if (err && err.name === 'AbortError') return;
-
-      // A Render restart or eviction can invalidate the server-side index
-      // between the status check and chat request. Rebuild once automatically
-      // and retry the same message instead of making the user resend it.
+      if (!isCurrentRequest(ctx) || ctx._finalized) return null;
+      if (ctx._timedOut) {
+        err = Object.assign(new Error('AI 请求超时，请重试'), { code: 'PROVIDER_TIMEOUT', retryable: true });
+      }
+      if (err && err.name === 'AbortError') {
+        removeTypingIndicator();
+        state.messages.push({ role: 'assistant', content: '（已停止）', time: timeStr, stopped: true });
+        finalizeRequest(ctx, { cancelled: true, cancelReason: ctx.cancelReason || 'aborted' });
+        renderChatPanel();
+        return null;
+      }
       if (err && err.code === 'INDEX_REBUILD_REQUIRED' && !indexRetry) {
         state.projectIndexStatus = { indexed: false, building: true, phase: '索引已丢失，正在自动重建...' };
         renderProjectStatus();
         return buildProjectIndex().then(function (result) {
           if (!result || !state.projectIndexStatus || state.projectIndexStatus.indexed !== true) {
-            var rebuildFailed = new Error('索引重建失败，请点击“刷新索引”后重试');
-            rebuildFailed.code = 'INDEX_REBUILD_FAILED';
-            throw rebuildFailed;
+            throw Object.assign(new Error('索引重建失败，请点击“刷新索引”后重试'), { code: 'INDEX_REBUILD_FAILED' });
           }
-          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
-          // P0 Fix: 自动重试不再添加第二次用户消息
+          if (!isCurrentRequest(ctx)) return null;
           return sendApiRequest(ctx, body, timeStr, true);
-        }).catch(function (rebuildError) {
-          if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) return null;
-          removeTypingIndicator();
-          // P0 Fix: 索引重建失败，不重复恢复消息
-          state.messages.push({ role: 'assistant', content: '索引重建失败：' + ((rebuildError && rebuildError.message) || '请稍后重试'), time: timeStr });
-          renderChatPanel();
-          return null;
         });
       }
-
       removeTypingIndicator();
-
-      var errMsg = (err && err.message) ? err.message : String(err);
-      var errCode = (err && err.code) ? err.code : '';
-      var errRequestId = (err && err.requestId) ? err.requestId : '';
-
-      // Phase 3: Use shared error classification when enabled
-      var classified = null;
-      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
-        classified = window.XtjAiCore.Errors.classify(err, {
-          requestId: errRequestId,
-          phase: 'code_request',
-          toolTrace: (err && err.toolTrace) || null
-        });
-        errCode = classified.code;
-        errMsg = classified.message;
-        errRequestId = classified.request_id || errRequestId;
+      var errCode = err && err.code || 'CODE_REQUEST_FAILED';
+      var errMsg = err && err.message || '抱歉，操作失败，请重试';
+      var friendly = errMsg;
+      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.Errors.formatUserMessage) {
+        friendly = window.XtjAiCore.Errors.formatUserMessage(err);
       }
-
+      var userFriendlyMsg = friendly;
       if (errCode === 'INDEX_REBUILD_REQUIRED') {
-        errMsg = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
+        friendly = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
+        userFriendlyMsg = friendly;
       }
-
-      console.error('[CODE-AI] Request failed:', errMsg, errCode || '', errRequestId || '');
-      // Phase 1: Shared controller error lifecycle
-      if (state._sharedCtrl && state._sharedCtrl.isActive()) {
-        try { state._sharedCtrl.error(errCode || 'code_request_error'); } catch (e) {}
-        if (state._telemetry) { state._telemetry.finalize('error', { code: errCode, phase: 'code_request', message: errMsg }); }
-      }
-      // P0 Fix: 只在 400 类错误（客户端验证失败）时恢复消息到输入框
       if (errCode === 'PROVIDER_HTTP_400' || errCode === 'PROVIDER_INVALID_REQUEST' || errCode === 'VALIDATION_FAILED') {
         restoreFailedMessage(body && body.message);
       }
-
-      // Phase 2: Build enhanced error message — 用户可见消息不显示错误码
-      var displayMsg = errMsg;
-      var userFriendlyMsg = '抱歉，操作失败';
-      if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.Errors.formatUserMessage) {
-        userFriendlyMsg = window.XtjAiCore.Errors.formatUserMessage(err);
-      } else if (errCode === 'INDEX_REBUILD_REQUIRED') {
-        userFriendlyMsg = '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
-      } else if (errCode === 'DOCUMENT_NOT_PARSED') {
-        userFriendlyMsg = '文档正在解析中，请等待解析完成后重试。';
-      } else if (errCode === 'NO_WRITE_PERMISSION') {
-        userFriendlyMsg = '没有文件写入权限，请重新授权写入权限后再试。';
-      } else if (errCode === 'FORMAT_NOT_EDITABLE') {
-        userFriendlyMsg = '该文件格式暂不支持修改。PDF 可读取和分析，DOCX/PPTX/XLSX 可修改。';
-      } else if (errCode === 'PROVIDER_TIMEOUT') {
-        userFriendlyMsg = 'AI 请求超时，请重试或简化问题。';
-      } else if (errCode === 'PROVIDER_HTTP_401') {
-        userFriendlyMsg = 'API 密钥无效，请检查 AI 服务配置。';
-      } else if (errCode === 'PROVIDER_HTTP_403') {
-        userFriendlyMsg = 'API 访问被拒绝，请检查权限配置。';
-      } else if (errCode === 'PROVIDER_HTTP_429') {
-        userFriendlyMsg = '请求过于频繁，请稍后重试。';
-      } else if (errCode === 'STREAM_INTERRUPTED') {
-        userFriendlyMsg = '连接中断，请检查网络后重试。';
-      } else if (errCode === 'AMBIGUOUS_REQUEST') {
-        userFriendlyMsg = '请明确说明要修改什么内容，例如："将标题改为XXX"或"在第三段后插入XXX"。';
-      } else if (errCode && errCode.indexOf('PROVIDER_') === 0) {
-        userFriendlyMsg = 'AI 服务暂时无法处理该请求，请稍后重试。';
-      }
-      var assistantMsg = { role: 'assistant', content: userFriendlyMsg, time: timeStr, errorCode: errCode, requestId: errRequestId };
-
-      // Phase 3: Add retryable hint from shared error classification
-      if (classified && classified.retryable) {
-        assistantMsg.retryable = true;
-      }
-
-      // Phase 2: Preserve tool trace when tools succeeded but final answer failed
-      if (err && Array.isArray(err.toolTrace) && err.toolTrace.length > 0) {
-        assistantMsg.toolTrace = err.toolTrace;
-        assistantMsg.toolTraceNote = '工具执行成功，模型总结失败';
-        state.lastToolTrace = err.toolTrace;
-      }
-
+      var assistantMsg = { role: 'assistant', content: userFriendlyMsg, time: timeStr, errorCode: errCode, retryable: err.retryable !== false, retryMessage: ctx.originalMessage || body.message || '', retryBody: Object.assign({}, ctx.originalBody || body || {}), requestId: err.requestId || '' };
+      if (err && Array.isArray(err.toolTrace) && err.toolTrace.length) assistantMsg.toolTrace = err.toolTrace;
       state.messages.push(assistantMsg);
-
+      finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       renderChatPanel();
-      // P0 Fix: 只恢复一次消息到输入框，不重复调用 restoreFailedMessage
-    }).then(function () {
-      // P0: finally — 统一恢复 UI 状态
-      clearTimeout(timeoutId);
-      // Guard: if request is stale, only clean local resources, not state
-      var isStale = (requestId !== state._requestId || wsGen !== state.workspaceGeneration);
-      if (isStale) {
-        // Stale request: only clean up the captured controller, not state._sharedCtrl
-        return;
-      }
-      // Phase 1: Cleanup shared controller (only when request is current)
-      var sharedCtrlKey = 'code_ai_' + requestId;
-      if (state._sharedCtrl) {
-        try { window.XtjAiCore.RequestController.unregisterInFlight(sharedCtrlKey); } catch(e) {}
-        state._sharedCtrl = null;
-      }
-      state._telemetry = null;
-      clearSendingWatchdog();
-      state.sending = false;
-      state._abortController = null;
-      // P0 Fix: 不重新禁用输入框
-      updateChatRequestControls();
+      return null;
     });
   }
 
