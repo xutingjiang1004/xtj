@@ -707,6 +707,7 @@
   // cleanup() — called when leaving Code tab
   // ──────────────────────────────────────────────
   function cleanup() {
+    persistOpenTabs();
     var hasUnsaved = state.openTabs.some(function(t) { return t.modified && t._currentContent !== undefined; });
     if (hasUnsaved) {
       if (!window.confirm('文件存在未保存修改，是否继续？')) {
@@ -830,6 +831,9 @@
       var statusText = document.createElement('span');
       statusText.className = 'welcome-status';
       statusText.id = 'codeWelcomeStatus';
+      // Keep the status slot out of the layout until restore produces
+      // feedback; an empty bordered span looks like a broken control.
+      statusText.style.display = 'none';
 
       recentEl.appendChild(restoreBtn);
       recentEl.appendChild(statusText);
@@ -840,6 +844,7 @@
         restoreBtn.innerHTML = '<span class="folder-icon">⏳</span> 正在恢复...';
         statusText.textContent = '';
         statusText.className = 'welcome-status';
+        statusText.style.display = 'block';
 
         if (!window.__xtjCodeFS || !window.__xtjCodeFS.restoreWorkspace) {
           statusText.textContent = '文件系统 API 不可用';
@@ -959,13 +964,39 @@
       state.workspaceName = handle.name || '单个文件';
       state.workspaceMode = 'local';
       state._isReadOnly = !!readOnly;
+      if (fs.setDirHandle) fs.setDirHandle(handle);
       try { localStorage.setItem('xtj_code_workspace_name', state.workspaceName); } catch (e) { /* ignore */ }
       renderWorkspace();
       if (handle && handle._isSingleFileRoot) {
         window.setTimeout(function () {
-          openFile(handle.name);
+          openFile(handle.name).then(function (tab) {
+            if (!tab && _dom.editorArea) renderEmptyState();
+          });
         }, 0);
       }
+    }
+
+    function openWithInputFallback() {
+      // Some embedded browsers expose showOpenFilePicker but reject it at
+      // runtime. Fall back to the ordinary file input instead of leaving the
+      // Code panel on a blank welcome state.
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = false;
+      input.accept = '*/*';
+      input.onchange = function () {
+        if (!state.active || selectionGeneration !== state.restoreGeneration) return;
+        var file = input.files && input.files[0];
+        if (!file) return;
+        var mockFileHandle = {
+          kind: 'file',
+          name: file.name,
+          getFile: function () { return Promise.resolve(file); }
+        };
+        if (fs.setDirHandle) fs.setDirHandle(mockFileHandle);
+        openSelectedHandle(fs.getDirHandle ? fs.getDirHandle() : mockFileHandle, true);
+      };
+      input.click();
     }
 
     if (typeof fs.selectFile === 'function' && window.showOpenFilePicker && window.isSecureContext) {
@@ -988,31 +1019,12 @@
       }).catch(function (err) {
         if (fileBtn) { fileBtn.disabled = false; fileBtn.innerHTML = originalText; }
         if (err && err.name === 'AbortError') return;
-        showToast('打开文件失败：' + (err && err.message ? err.message : String(err)), 'error');
+        openWithInputFallback();
       });
       return;
     }
 
-    // Compatibility fallback for Firefox, HTTP development pages, and older
-    // Chromium: this remains read-only because a File object has no writable
-    // FileSystemFileHandle behind it.
-    var input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = false;
-    input.accept = '*/*';
-    input.onchange = function () {
-      if (!state.active || selectionGeneration !== state.restoreGeneration) return;
-      var file = input.files && input.files[0];
-      if (!file) return;
-      var mockFileHandle = {
-        kind: 'file',
-        name: file.name,
-        getFile: function () { return Promise.resolve(file); }
-      };
-      if (fs.setDirHandle) fs.setDirHandle(mockFileHandle);
-      openSelectedHandle(fs.getDirHandle ? fs.getDirHandle() : mockFileHandle, true);
-    };
-    input.click();
+    openWithInputFallback();
   }
 
   function apiFetch(url, options) {
@@ -1063,6 +1075,60 @@
     };
   }
 
+  function openTabsStorageKey(workspaceId) {
+    return 'xtj_code_open_tabs:' + encodeURIComponent(workspaceId || getWorkspaceId());
+  }
+
+  function persistOpenTabs() {
+    if (!state.directoryHandle || !state.workspaceName) return;
+    var paths = [];
+    for (var i = 0; i < state.openTabs.length; i++) {
+      var path = String(state.openTabs[i] && state.openTabs[i].path || '').trim();
+      if (!path || paths.indexOf(path) !== -1) continue;
+      try { validatePath(path); } catch (e) { continue; }
+      paths.push(path);
+    }
+    try {
+      localStorage.setItem(openTabsStorageKey(getWorkspaceId()), JSON.stringify({
+        version: 1,
+        paths: paths.slice(0, 40),
+        activePath: paths.indexOf(state.activePath) !== -1 ? state.activePath : (paths[0] || '')
+      }));
+    } catch (e) { /* local preferences are optional */ }
+  }
+
+  function restorePersistedTabs() {
+    if (!state.directoryHandle || !state.workspaceName || state.openTabs.length) return;
+    var saved = null;
+    try {
+      var raw = localStorage.getItem(openTabsStorageKey(getWorkspaceId()));
+      saved = raw ? JSON.parse(raw) : null;
+    } catch (e) { saved = null; }
+    if (!saved || !Array.isArray(saved.paths)) return;
+    var paths = [];
+    for (var i = 0; i < saved.paths.length; i++) {
+      var path = String(saved.paths[i] || '').trim();
+      if (!path || paths.indexOf(path) !== -1) continue;
+      try { validatePath(path); } catch (e) { continue; }
+      paths.push(path);
+    }
+    state.openTabs = paths.map(function (path) {
+      return {
+        path: path,
+        name: fileNameFromPath(path),
+        modified: false,
+        content: null,
+        sha256: '',
+        type: 'text',
+        mimeType: '',
+        blobUrl: null,
+        size: 0
+      };
+    });
+    state.activePath = paths.indexOf(saved.activePath) !== -1 ? saved.activePath : (paths[0] || '');
+    renderProjectStatus();
+  }
+
   // P2: bind client metadata to each pending operation so we can detect stale
   // diffs that belong to a different request / workspace / conversation /
   // generation. Without this, applyOperation can only verify file content SHA
@@ -1104,6 +1170,7 @@
   }
 
   function resetWorkspaceState() {
+    persistOpenTabs();
     var previousWorkspaceId = getWorkspaceId();
     var previousGeneration = state.workspaceGeneration;
     // P0: 中止所有进行中的 AI 请求 through the owning context.
@@ -1556,7 +1623,9 @@
       reset: '<path d="M4 7V3m0 4h4"/><path d="M4.7 7A8 8 0 1 1 4 12"/><path d="M12 8v4l3 2"/>',
       collapseLeft: '<path d="m15 6-6 6 6 6"/>',
       collapseRight: '<path d="m9 6 6 6-6 6"/>',
-      maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>'
+      maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>',
+      plus: '<path d="M12 5v14M5 12h14"/>',
+      refresh: '<path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 5v6h-6"/>'
     };
     return '<svg class="code-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[name] || paths.reset) + '</svg>';
   }
@@ -1593,6 +1662,8 @@
       '<span class="code-panel-actions">' +
         '<button class="folder-picker-btn" title="更换文件夹">📁</button>' +
         '<button class="folder-picker-btn file-picker-btn" title="直接打开文件">📄</button>' +
+        '<button class="folder-picker-btn new-file-btn" title="新建文件" aria-label="新建文件"></button>' +
+        '<button class="folder-picker-btn refresh-tree-btn" title="刷新文件树" aria-label="刷新文件树"></button>' +
         '<button class="code-panel-action-btn fold-sidebar-btn" title="折叠侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>' +
       '</span>';
     
@@ -1602,6 +1673,20 @@
     var directFileBtn = sidebarHeader.querySelector('.file-picker-btn');
     if (directFileBtn) { directFileBtn.innerHTML = codeWorkspaceIcon('file'); directFileBtn.setAttribute('aria-label', '直接打开文件'); }
     if (directFileBtn) directFileBtn.addEventListener('click', selectAndOpenFile);
+    var newFileBtn = sidebarHeader.querySelector('.new-file-btn');
+    if (newFileBtn) {
+      newFileBtn.innerHTML = codeWorkspaceIcon('plus');
+      newFileBtn.disabled = !!state._isReadOnly || state.workspaceMode === 'github';
+      newFileBtn.addEventListener('click', createNewWorkspaceFile);
+    }
+    var refreshTreeBtn = sidebarHeader.querySelector('.refresh-tree-btn');
+    if (refreshTreeBtn) {
+      refreshTreeBtn.innerHTML = codeWorkspaceIcon('refresh');
+      refreshTreeBtn.addEventListener('click', function () {
+        refreshFileTree();
+        showToast('文件树已刷新', 'success');
+      });
+    }
     var foldSidebarBtn = sidebarHeader.querySelector('.fold-sidebar-btn');
     if (foldSidebarBtn) foldSidebarBtn.addEventListener('click', toggleSidebar);
 
@@ -1766,6 +1851,7 @@
 
     loadProjectIndexStatus();
     loadCodeModels();
+    restorePersistedTabs();
     restoreTabs();
   }
 
@@ -2002,6 +2088,22 @@
                 resolve({ tab: tab, deleted: !tab.modified, failed: !!tab.modified });
                 return;
               }
+              // Persisted tabs start as lightweight placeholders.  Refresh all
+              // type metadata before rendering so DOCX/PDF/image tabs do not
+              // come back as blank text editors after a page reload.
+              tab.type = result.type || tab.type || 'text';
+              tab.mimeType = result.mimeType || tab.mimeType || '';
+              tab.size = result.size || tab.size || 0;
+              tab.name = result.name || tab.name;
+              if (result.type === 'document') {
+                tab.content = result.content;
+                tab._arrayBuffer = result._arrayBuffer || result.content;
+                tab._extractPromise = null;
+                tab._extractError = null;
+                tab._parseReady = false;
+              } else if (result.type === 'binary') {
+                tab.content = result.content || null;
+              }
               // Update content for text files
               if (result.type === 'text') {
                 if (tab.modified && tab._currentContent !== undefined) {
@@ -2085,6 +2187,7 @@
       if (failedPaths.length > 0) {
         showToast('部分文件暂时无法重新读取，已保留标签和未保存内容', 'warning');
       }
+      persistOpenTabs();
       return results;
     });
   }
@@ -2259,8 +2362,14 @@
         '<span>' + (inContext ? '🔽' : '🔼') + '</span>' +
         '<span>' + contextLabel + '</span>' +
       '</div>' +
+      '<div class="menu-item" data-action="rename" role="button" tabindex="0">' +
+        '<span>✎</span><span>\u91cd\u547d\u540d\u6587\u4ef6</span>' +
+      '</div>' +
+      '<div class="menu-item danger" data-action="delete" role="button" tabindex="0">' +
+        '<span>⌫</span><span>\u5220\u9664\u6587\u4ef6</span>' +
+      '</div>' +
       '<div class="menu-separator"></div>' +
-      '<div class="menu-item" data-action="open">' +
+      '<div class="menu-item" data-action="open" role="button" tabindex="0">' +
         '<span>📄</span><span>打开文件</span>' +
       '</div>';
 
@@ -2276,15 +2385,132 @@
       closeMenu();
     });
 
+    menu.querySelector('[data-action="rename"]').addEventListener('click', function () {
+      renameWorkspaceFile(path);
+      closeMenu();
+    });
+
+    menu.querySelector('[data-action="delete"]').addEventListener('click', function () {
+      deleteWorkspaceFile(path);
+      closeMenu();
+    });
+
     menu.querySelector('[data-action="open"]').addEventListener('click', function () {
       openFile(path);
       closeMenu();
+    });
+
+    Array.prototype.forEach.call(menu.querySelectorAll('[role="button"]'), function (item) {
+      item.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          item.click();
+        }
+      });
     });
 
     // Close on click outside
     setTimeout(function () {
       document.addEventListener('click', closeMenu);
     }, 0);
+  }
+
+  function createNewWorkspaceFile() {
+    if (state._isReadOnly || state.workspaceMode === 'github') {
+      showToast('\u5f53\u524d\u5de5\u4f5c\u533a\u4e0d\u53ef\u5199\uff0c\u8bf7\u6253\u5f00\u672c\u5730\u6587\u4ef6\u5939\u540e\u518d\u8bd5', 'warning');
+      return;
+    }
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.createFileByPath) {
+      showToast('\u6587\u4ef6\u521b\u5efa\u80fd\u529b\u4e0d\u53ef\u7528\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5', 'error');
+      return;
+    }
+    var requestedPath = window.prompt('\u8f93\u5165\u65b0\u6587\u4ef6\u8def\u5f84\uff08\u4f8b\u5982 src/index.js\uff09', state.activePath ? state.activePath.replace(/[^/]+$/, '') : '');
+    if (requestedPath === null) return;
+    requestedPath = String(requestedPath).trim().replace(/\\/g, '/');
+    if (!requestedPath) return;
+    try { validatePath(requestedPath); } catch (err) {
+      showToast('\u6587\u4ef6\u8def\u5f84\u65e0\u6548\uff1a' + (err.message || '\u8bf7\u68c0\u67e5\u8def\u5f84'), 'error');
+      return;
+    }
+    fs.createFileByPath(requestedPath, '').then(function () {
+      refreshFileTree();
+      return openFile(requestedPath);
+    }).then(function () {
+      showToast('\u6587\u4ef6\u5df2\u521b\u5efa', 'success');
+    }).catch(function (err) {
+      showToast('\u521b\u5efa\u6587\u4ef6\u5931\u8d25\uff1a' + (err.message || String(err)), 'error');
+    });
+  }
+
+  function renameWorkspaceFile(path) {
+    if (state._isReadOnly || state.workspaceMode === 'github') {
+      showToast('\u5f53\u524d\u5de5\u4f5c\u533a\u4e0d\u53ef\u5199\uff0c\u8bf7\u6253\u5f00\u672c\u5730\u6587\u4ef6\u5939\u540e\u518d\u8bd5', 'warning');
+      return;
+    }
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.renameFileByPath) {
+      showToast('\u6587\u4ef6\u91cd\u547d\u540d\u80fd\u529b\u4e0d\u53ef\u7528\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5', 'error');
+      return;
+    }
+    var nextPath = window.prompt('\u8f93\u5165\u65b0\u7684\u6587\u4ef6\u8def\u5f84', path);
+    if (nextPath === null) return;
+    nextPath = String(nextPath).trim().replace(/\\/g, '/');
+    if (!nextPath || nextPath === path) return;
+    try { validatePath(nextPath); } catch (err) {
+      showToast('\u6587\u4ef6\u8def\u5f84\u65e0\u6548\uff1a' + (err.message || '\u8bf7\u68c0\u67e5\u8def\u5f84'), 'error');
+      return;
+    }
+    fs.renameFileByPath(path, nextPath).then(function () {
+      var tab = state.openTabs.filter(function (item) { return item.path === path; })[0];
+      if (tab) {
+        tab.path = nextPath;
+        tab.name = fileNameFromPath(nextPath);
+      }
+      state.pinnedFiles = state.pinnedFiles.map(function (item) { return item === path ? nextPath : item; });
+      if (state.activePath === path) state.activePath = nextPath;
+      persistOpenTabs();
+      refreshFileTree();
+      renderTabs();
+      renderEditor();
+      renderProjectStatus();
+      showToast('\u6587\u4ef6\u5df2\u91cd\u547d\u540d', 'success');
+    }).catch(function (err) {
+      showToast('\u91cd\u547d\u540d\u6587\u4ef6\u5931\u8d25\uff1a' + (err.message || String(err)), 'error');
+    });
+  }
+
+  function deleteWorkspaceFile(path) {
+    if (state._isReadOnly || state.workspaceMode === 'github') {
+      showToast('\u5f53\u524d\u5de5\u4f5c\u533a\u4e0d\u53ef\u5199\uff0c\u8bf7\u6253\u5f00\u672c\u5730\u6587\u4ef6\u5939\u540e\u518d\u8bd5', 'warning');
+      return;
+    }
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.deleteFileByPath) {
+      showToast('\u6587\u4ef6\u5220\u9664\u80fd\u529b\u4e0d\u53ef\u7528\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5', 'error');
+      return;
+    }
+    if (!window.confirm('\u786e\u5b9a\u5220\u9664\u6587\u4ef6\u201c' + path + '\u201d\u5417\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002')) return;
+    fs.deleteFileByPath(path).then(function () {
+      var tabIndex = state.openTabs.findIndex(function (item) { return item.path === path; });
+      if (tabIndex >= 0) {
+        var tab = state.openTabs[tabIndex];
+        if (tab.blobUrl) revokeUrl(tab.blobUrl);
+        state.openTabs.splice(tabIndex, 1);
+        if (state.activePath === path) {
+          state.activePath = (state.openTabs[Math.max(0, tabIndex - 1)] || state.openTabs[0] || {}).path || '';
+        }
+      }
+      state.pinnedFiles = state.pinnedFiles.filter(function (item) { return item !== path; });
+      persistOpenTabs();
+      refreshFileTree();
+      renderTabs();
+      renderEditor();
+      renderProjectStatus();
+      showToast('\u6587\u4ef6\u5df2\u5220\u9664', 'success');
+    }).catch(function (err) {
+      showToast('\u5220\u9664\u6587\u4ef6\u5931\u8d25\uff1a' + (err.message || String(err)), 'error');
+    });
   }
 
   function refreshFileTree() {
@@ -2379,6 +2605,7 @@
       
       state.openTabs.push(tab);
       state.activePath = path;
+      persistOpenTabs();
 
       // Cache file handle
       if (result.handle) {
@@ -2447,6 +2674,7 @@
     }
 
     renderTabs();
+    persistOpenTabs();
     if (state.activePath) {
       renderEditor();
     } else {
@@ -2483,6 +2711,7 @@
         el.addEventListener('click', function (e) {
           if (e.target.classList.contains('tab-close')) return;
           state.activePath = tab.path;
+          persistOpenTabs();
           renderTabs();
           renderEditor();
         });
