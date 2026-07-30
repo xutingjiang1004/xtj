@@ -12,9 +12,9 @@
     function T(e) {
         return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
     }
-    function N(e) {
-        e && ("function" == typeof window.showToast ? window.showToast(e) : console.warn("[photo-preview]", e));
-    }
+    // P4: removed duplicate function N for toast — it was shadowed by the
+    // index setter declared at line ~159 and never reachable. window.showToast
+    // is already defined independently below.
     "function" != typeof window.showToast && (window.showToast = function(e) {
         e && console.warn("[photo-preview]", e);
     });
@@ -56,13 +56,21 @@
         if (_[e]) return _[e];
         var t = new Promise(function(t) {
             var o = new Image;
+            function safeCacheAndResolve() {
+                // P4: only cache images that truly loaded (naturalWidth > 0).
+                // Broken images have naturalWidth === 0; caching them wastes a
+                // cache slot and permanently blocks retry (U returns early on C[e]).
+                o.naturalWidth > 0 && cachePreviewImage(e, o);
+                delete _[e], delete H[e], t();
+            }
             function n() {
-                o.complete ? (cachePreviewImage(e, o), delete _[e], delete H[e], t()) : o.onload = o.onerror = function() {
-                    cachePreviewImage(e, o), delete _[e], delete H[e], t();
-                };
+                o.complete ? safeCacheAndResolve() : (o.onload = safeCacheAndResolve, o.onerror = function() {
+                    // P4: onerror — do NOT cache the broken image, just resolve
+                    delete _[e], delete H[e], t();
+                });
             }
             o.src = e, "decode" in o ? o.decode().then(function() {
-                cachePreviewImage(e, o), delete _[e], delete H[e], t();
+                safeCacheAndResolve();
             }).catch(function() {
                 n();
             }) : n();
@@ -282,6 +290,12 @@
         return i && (a += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + i + "</div>"),
         a;
     }
+    // P4: known duplicate — this function Q declaration is hoisted and later
+    // overwritten by `Q = function() { ... }` in the assignment chain (~line 655).
+    // The hoisted function is also used as a truthy flag in re() (~line 651:
+    // `Q || (Q = !0, ...)`). Removing the declaration would change re()'s
+    // behavior, so we keep it but document that the function body below is
+    // dead code — the active version is the assignment at line ~655.
     function Q() {
         var e = t;
         if (e) {
@@ -419,13 +433,15 @@
             d || (!function(d) {
                 var b, L;
                 d.querySelector(".photo-preview-image-wrapper");
-                function T() {
+                // P4: renamed from T to _ppCleanupFn to avoid shadowing the
+                // outer-scope icon generator T(e) defined at line 12.
+                function _ppCleanupFn() {
                     P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h),
                     h = null), m.clear(), v = null, y = null, B.isActive = !1;
                     // 移除 resize 监听器，防止内存泄漏
                     if (d._ppResizeHandler) { window.removeEventListener("resize", d._ppResizeHandler); d._ppResizeHandler = null; }
                 }
-                d._cleanupPreview = T, d.addEventListener("pointerdown", function(e) {
+                d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
                     var n = e.target, i = n.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
                     if (I && (clearTimeout(I), I = null), P && (clearTimeout(P), P = null), i || l) e.stopPropagation(); else if (a) e.stopPropagation(); else {
                         r && e.stopPropagation(), Date.now(), b = e.clientX, L = e.clientY, x = 0;

@@ -4823,21 +4823,39 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var userId = String(req.userName || '');
     var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
     var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
+    var conversationId = String(req.query.conversation_id || '').slice(0, 200);
+    var clientRequestId = String(req.query.client_request_id || '').slice(0, 200);
 
     try {
       var query = supabase.from('ai_stream_sessions').select('*')
         .eq('user_id', userId)
-        .eq('status', 'running')
         .order('started_at', { ascending: false })
-        .limit(5);
+        .limit(10);
 
       if (workspaceId) {
         query = query.eq('workspace_id', workspaceId);
       }
+      if (workspaceGeneration) {
+        query = query.eq('workspace_generation', workspaceGeneration);
+      }
+      if (conversationId) {
+        query = query.eq('conversation_id', conversationId);
+      }
+      if (clientRequestId) {
+        query = query.eq('client_request_id', clientRequestId);
+      }
 
       var result = await query;
+      // Phase 1-P0-8: Database errors must not be disguised as empty results.
       if (result.error) {
-        return res.json({ ok: true, has_running: false, sessions: [] });
+        return res.status(500).json({
+          ok: false,
+          code: 'DB_ERROR',
+          error: '查询流式会话失败',
+          retryable: true,
+          has_running: false,
+          sessions: []
+        });
       }
 
       var sessions = (result.data || []).map(function(s) {
@@ -4857,7 +4875,15 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       return res.json({ ok: true, has_running: sessions.length > 0, sessions: sessions });
     } catch (err) {
-      return res.json({ ok: true, has_running: false, sessions: [] });
+      // Phase 1-P0-8: Surface unexpected errors instead of hiding them.
+      return res.status(500).json({
+        ok: false,
+        code: 'STATUS_ERROR',
+        error: '检查流式状态时发生异常',
+        retryable: true,
+        has_running: false,
+        sessions: []
+      });
     }
   });
 
