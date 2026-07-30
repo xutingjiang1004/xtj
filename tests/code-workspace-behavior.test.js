@@ -4,6 +4,7 @@ const { test } = require('node:test');
 
 // Read code-workspace.js to analyze its functions via string matching (since it's meant for browser)
 const codeWorkspace = fs.readFileSync(__dirname + '/../js/code-workspace.js', 'utf8');
+const codeAgentSource = fs.readFileSync(__dirname + '/../render-api/code-agent.js', 'utf8');
 
 test('code-workspace buildOpenFilesContext uses extracted text for documents', () => {
   assert.match(codeWorkspace, /typeof tab\._extractedText === 'string'/);
@@ -49,6 +50,56 @@ test('Code SSE writer does not mistake a completed request body for a disconnect
   assert.match(streamSource, /function cleanup\(\) \{[\s\S]*?if \(!res\.writableEnded\) res\.end\(\)/);
 });
 
+test('Code composer sends real model and thinking selections instead of hard-coding high', () => {
+  assert.match(codeWorkspace, /model_id:\s*state\.selectedModelId \|\| ''/);
+  assert.match(codeWorkspace, /thinking_mode:\s*state\.thinkingMode \|\| 'auto'/);
+  assert.match(codeWorkspace, /function loadCodeModels\(\)/);
+  assert.match(codeWorkspace, /apiFetch\('\/api\/code\/models'/);
+  assert.match(codeAgentSource, /function resolveCodeModel\(deps, requestedModelId\)/);
+  assert.match(codeAgentSource, /function resolveThinkingMode\(requestedMode, message\)/);
+  assert.doesNotMatch(codeWorkspace, /thinking_mode:\s*'high'/);
+});
+
+test('Code chat panel mounts once and keeps draft/input updates local', () => {
+  assert.match(codeWorkspace, /if \(state\.composerMounted\) \{[\s\S]{0,180}syncChatMessages\(\)/);
+  assert.match(codeWorkspace, /function renderComposerAttachments\(\)/);
+  assert.match(codeWorkspace, /function saveComposerDraft\(\)/);
+  assert.match(codeWorkspace, /compositionstart/);
+  assert.match(codeWorkspace, /!e\.isComposing && !state\.composerIsComposing/);
+  assert.match(codeWorkspace, /data-code-message-index/);
+  assert.doesNotMatch(codeWorkspace, /var rendered = messages\.querySelectorAll\('\.code-chat-message'\)\.length/);
+  assert.match(codeWorkspace, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
+  assert.match(codeWorkspace, /state\.composerMenu = opening \? 'context' : null/);
+});
+
+test('Code Composer keeps models, drafts and scroll behavior isolated and recoverable', () => {
+  assert.match(codeWorkspace, /function readComposerUserScope\(\)/);
+  assert.match(codeWorkspace, /xtj_code_draft:/);
+  assert.match(codeWorkspace, /function normalizeThinkingModeForSelectedModel\(\)/);
+  assert.match(codeWorkspace, /function updateChatScrollControl\(\)/);
+  assert.match(codeWorkspace, /codeChatBackToBottom/);
+  assert.match(codeWorkspace, /state\.autoScrollPinned = remaining <= 48/);
+  assert.match(codeWorkspace, /restoreFailedMessage\(ctx\.originalMessage\)/);
+  assert.match(codeWorkspace, /xtj_code_composer:' \+ encodeURIComponent\(readComposerUserScope\(\)\)/);
+  assert.match(codeWorkspace, /xtj_code_draft:' \+ encodeURIComponent\(readComposerUserScope\(\)\)/);
+  assert.match(codeWorkspace, /function attachmentTypeIcon\(attachment\)/);
+  assert.match(codeWorkspace, /请分析我附上的资料/);
+  assert.match(codeWorkspace, /codeContextDetails/);
+});
+
+test('Code stream watchdog terminalizes its own assistant node and duplicates replay persisted events', () => {
+  assert.match(codeWorkspace, /ctx\.streamState\.fail\('PROVIDER_TIMEOUT'/);
+  assert.match(codeWorkspace, /jsonData\.duplicate === true[\s\S]{0,220}resumeStream\(ctx, jsonData\.stream_id, 0\)/);
+  assert.match(codeWorkspace, /A resumed stream has no original request context/);
+});
+
+test('Code SSE backpressure and malformed stream requests are guarded', () => {
+  const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
+  assert.match(sse, /return res\.write\(data\) !== false/);
+  assert.match(codeAgentSource, /String\(\(req\.body && req\.body\.client_request_id\) \|\| ''\)/);
+  assert.match(codeAgentSource, /if \(!wrote && type !== 'done'/);
+});
+
 test('code-workspace non-stream error handler restores message on HTTP 400', () => {
   assert.match(codeWorkspace, /PROVIDER_HTTP_400/);
   assert.match(codeWorkspace, /PROVIDER_INVALID_REQUEST/);
@@ -58,6 +109,14 @@ test('code-workspace non-stream error handler restores message on HTTP 400', () 
 test('code-workspace shows INDEX_REBUILD_REQUIRED friendly message', () => {
   assert.match(codeWorkspace, /INDEX_REBUILD_REQUIRED/);
   assert.match(codeWorkspace, /项目索引尚未建立，但文档内容已可用/);
+});
+
+test('Code context details disclose truncation and a near-limit recommendation', () => {
+  const codeWorkspaceCss = fs.readFileSync(__dirname + '/../css/code-workspace.css', 'utf8');
+  assert.match(codeWorkspace, /readContext\.truncated/);
+  assert.match(codeWorkspace, /contextPercent >= 85/);
+  assert.match(codeWorkspace, /code-context-warning/);
+  assert.match(codeWorkspaceCss, /\.code-context-details \.code-context-warning/);
 });
 
 // 新增真实行为测试：非流式错误不显示 [PROVIDER_HTTP_400] 在正文中

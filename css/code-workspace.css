@@ -1151,6 +1151,30 @@
   border-left: 2px solid var(--cw-accent);
 }
 
+.code-chat-back-to-bottom {
+  position: absolute;
+  right: 16px;
+  bottom: 88px;
+  z-index: 4;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-pill);
+  background: var(--cw-bg-secondary);
+  box-shadow: 0 6px 18px rgba(20, 51, 66, 0.14);
+  color: var(--cw-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.code-chat-back-to-bottom:hover,
+.code-chat-back-to-bottom:focus-visible {
+  border-color: var(--cw-accent);
+  color: var(--cw-accent);
+  outline: none;
+}
+
 .code-chat-message[data-state="complete"] .msg-content {
   border-color: var(--cw-border);
 }
@@ -1422,12 +1446,190 @@
 /* ── 26. Chat Input Area ──────────────────────────────────── */
 .code-chat-input-area {
   display: flex;
+  flex-wrap: wrap;
+  position: relative;
   align-items: flex-end;
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--cw-border);
   background: var(--cw-bg-secondary);
   flex-shrink: 0;
+}
+
+/* Stable Code Composer: its message list and textarea are mounted once; only
+   the tray, selectors and request controls receive incremental updates. */
+.code-composer-toolbar {
+  order: 4;
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.code-composer-menu {
+  position: absolute;
+  z-index: 20;
+  left: 12px;
+  bottom: calc(100% + 6px);
+  width: min(232px, calc(100% - 24px));
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: color-mix(in srgb, var(--cw-bg-secondary) 92%, transparent);
+  box-shadow: 0 10px 26px rgba(20, 51, 66, 0.13);
+  backdrop-filter: blur(12px);
+}
+
+.code-composer-menu[hidden] { display: none; }
+
+.code-context-details {
+  position: absolute;
+  z-index: 20;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  display: grid;
+  gap: 4px;
+  width: min(292px, calc(100% - 24px));
+  padding: 9px 10px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: color-mix(in srgb, var(--cw-bg-secondary) 94%, transparent);
+  box-shadow: 0 10px 26px rgba(20, 51, 66, 0.13);
+  color: var(--cw-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  backdrop-filter: blur(12px);
+}
+
+.code-context-details .code-context-warning {
+  color: var(--cw-text-secondary);
+  border-inline-start: 2px solid var(--cw-accent);
+  padding-inline-start: 8px;
+}
+
+.code-context-details[hidden] { display: none; }
+.code-context-details strong { color: var(--cw-text); font-size: 12px; }
+
+.code-composer-menu button {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--cw-radius-sm) - 2px);
+  background: transparent;
+  color: var(--cw-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.code-composer-menu button:hover,
+.code-composer-menu button:focus-visible {
+  background: var(--cw-accent-soft);
+  color: var(--cw-accent);
+  outline: none;
+}
+
+.code-composer-context-btn,
+.code-composer-select,
+.code-context-usage {
+  min-height: 30px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: color-mix(in srgb, var(--cw-bg-tertiary) 82%, transparent);
+  color: var(--cw-text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.code-composer-context-btn {
+  width: 30px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.code-composer-select {
+  max-width: 132px;
+  min-width: 0;
+  padding: 0 7px;
+  cursor: pointer;
+}
+
+.code-context-usage {
+  margin-left: auto;
+  max-width: 104px;
+  padding: 0 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.code-composer-runtime-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cw-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-composer-context-btn:hover:not(:disabled),
+.code-composer-select:hover:not(:disabled) {
+  border-color: var(--cw-accent);
+  color: var(--cw-accent);
+}
+
+.code-composer-context-btn:focus-visible,
+.code-composer-select:focus-visible,
+.code-context-usage:focus-visible {
+  outline: 2px solid var(--cw-accent);
+  outline-offset: 2px;
+}
+
+.code-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: var(--cw-bg-tertiary);
+}
+
+.code-attachment-kind {
+  flex: 0 0 auto;
+  min-width: 24px;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--cw-accent-soft);
+  color: var(--cw-accent);
+  font-family: var(--cw-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.code-attachment-name {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-attachment-meta { color: var(--cw-text-muted); }
+
+@media (max-width: 420px) {
+  .code-composer-select { max-width: 104px; }
+  .code-context-usage { max-width: 74px; }
 }
 
 .code-chat-attachments {
@@ -1513,7 +1715,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: var(--cw-radius-sm);
   border: none;
   background: var(--cw-accent);
   color: #fff;
@@ -2611,6 +2813,23 @@
     width: 32px;
     height: 32px;
   }
+
+  .code-composer-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .code-composer-select {
+    flex: 1 1 112px;
+    max-width: none;
+  }
+
+  .code-context-usage {
+    margin-left: 0;
+  }
+
+  .code-composer-runtime-status {
+    flex-basis: 100%;
+  }
 }
 
 /* ── Collapsed / Maximized States ──────────────────────────── */
@@ -2626,6 +2845,37 @@
 }
 .code-panel.is-chat-collapsed .code-resizer-right {
   display: none !important;
+}
+
+/* Code focus controls: keep the AI panel usable while independently hiding
+   the global workbench rail, file directory, or file viewer. */
+.code-panel.is-editor-collapsed .code-editor-column,
+.code-panel.is-editor-collapsed .code-resizer-right {
+  display: none !important;
+}
+
+.code-panel.is-editor-collapsed .code-chat-panel {
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  html.code-workbench-nav-collapsed .app-container {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  html.code-workbench-nav-collapsed .desktop-workbench-sidebar {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-sidebar,
+  .code-editor-column,
+  .code-chat-panel {
+    transition: none !important;
+  }
 }
 
 .code-sidebar.is-context-collapsed .code-context-panel {

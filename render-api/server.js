@@ -169,8 +169,11 @@ async function refreshDeepSeekModelCatalog(force) {
       fetchedAt: Date.now(),
       status: 'skipped',
       error: 'missing_api_key',
-      models: [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO],
-      availableSet: new Set([DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO])
+      // Never advertise provider models when this deployment cannot call the
+      // provider. The configured preferred name remains visible to diagnostics
+      // only; /api/code/models must return an empty usable catalog.
+      models: [],
+      availableSet: new Set()
     };
     return deepseekModelCatalog;
   }
@@ -15468,6 +15471,7 @@ registerCodeAgentRoutes(app, {
     return DEEPSEEK_API_KEY;
   },
   getDeepSeekCapabilities: getDeepSeekCapabilitySnapshot,
+  getDeepSeekModelCatalog: getDeepSeekProbeSnapshot,
   callDeepSeek: callDeepSeek,
   // Code Agent 复用小猫 AI 已使用的联网搜索管线（同一组后端 provider、缓存和密钥）。
   // 不把搜索密钥或 provider 配置暴露给浏览器，也不要求 Code 单独配置一套搜索服务。
