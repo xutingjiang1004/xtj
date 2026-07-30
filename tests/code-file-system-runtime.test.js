@@ -146,6 +146,54 @@ test('single-file workspace exposes one readable and writable file through the n
   await assert.rejects(root.getFileHandle('other.md'), /File not found/);
 });
 
+test('renameFileByPath verifies the copied file and removes the old entry', async () => {
+  const files = new Map();
+  function makeFile(name, content) {
+    let bytes = Buffer.from(content);
+    return {
+      kind: 'file',
+      name,
+      async getFile() {
+        return {
+          name,
+          size: bytes.length,
+          text: async () => bytes.toString(),
+          arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+        };
+      },
+      async createWritable() {
+        return {
+          async write(value) { bytes = Buffer.from(value instanceof ArrayBuffer ? new Uint8Array(value) : value); },
+          async close() {}
+        };
+      }
+    };
+  }
+  const root = {
+    kind: 'directory',
+    name: 'workspace',
+    async getFileHandle(name, options) {
+      if (files.has(name)) return files.get(name);
+      if (options && options.create) {
+        const handle = makeFile(name, '');
+        files.set(name, handle);
+        return handle;
+      }
+      throw Object.assign(new Error('File not found'), { name: 'NotFoundError' });
+    },
+    async getDirectoryHandle() { throw Object.assign(new Error('Directory not found'), { name: 'NotFoundError' }); },
+    async removeEntry(name) { if (!files.delete(name)) throw new Error('File not found'); }
+  };
+  files.set('before.js', makeFile('before.js', 'const value = 1;'));
+  const codeFS = loadCodeFileSystem();
+  codeFS.setDirHandle(root);
+
+  const result = await codeFS.renameFileByPath('before.js', 'after.js');
+  assert.equal(result.oldPath, 'before.js');
+  assert.equal((await codeFS.readFileByPath('after.js')).content, 'const value = 1;');
+  await assert.rejects(codeFS.readFileByPath('before.js'));
+});
+
 function jsonResponse(status, payload) {
   return {
     ok: status >= 200 && status < 300,

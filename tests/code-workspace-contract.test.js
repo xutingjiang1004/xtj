@@ -779,6 +779,33 @@ test('Code welcome screen supports direct single-file opening', () => {
   assert.match(codeWorkspace, /fs\.selectFile/);
   assert.match(codeWorkspace, /openFile\(handle\.name\)/);
   assert.match(codeWorkspace, /var fileBtn = document\.getElementById\('codeWelcomeFileBtn'\);[\s\S]{0,240}fileBtn\.addEventListener\('click', function \(\) \{[\s\S]{0,120}selectAndOpenFile\(\)/);
+  assert.match(codeWorkspace, /function openWithInputFallback\(\)/);
+  assert.match(codeWorkspace, /openWithInputFallback\(\);/);
+});
+
+test('Code persists and restores open tab paths per workspace', () => {
+  assert.match(codeWorkspace, /function openTabsStorageKey\(workspaceId\)/);
+  assert.match(codeWorkspace, /function persistOpenTabs\(\)/);
+  assert.match(codeWorkspace, /function restorePersistedTabs\(\)/);
+  assert.match(codeWorkspace, /restorePersistedTabs\(\);[\s\S]*restoreTabs\(\);/);
+  assert.match(codeWorkspace, /localStorage\.setItem\(openTabsStorageKey\(getWorkspaceId\(\)\)/);
+});
+
+test('Code welcome restore status is hidden until feedback exists', () => {
+  assert.match(codeWorkspace, /statusText\.id = 'codeWelcomeStatus';[\s\S]*statusText\.style\.display = 'none';/);
+  assert.match(codeWorkspace, /statusText\.textContent = ''[\s\S]*statusText\.style\.display = 'block';/);
+});
+
+test('Code file tree exposes safe local file actions', () => {
+  assert.match(codeWorkspace, /new-file-btn/);
+  assert.match(codeWorkspace, /refresh-tree-btn/);
+  assert.match(codeWorkspace, /data-action="rename"/);
+  assert.match(codeWorkspace, /data-action="delete"/);
+  assert.match(codeWorkspace, /function createNewWorkspaceFile\(\)/);
+  assert.match(codeWorkspace, /function renameWorkspaceFile\(path\)/);
+  assert.match(codeWorkspace, /function deleteWorkspaceFile\(path\)/);
+  assert.match(codeFS, /function renameFileByPath\(oldPathParts, newPathParts\)/);
+  assert.match(codeFS, /renameFileByPath: renameFileByPath/);
 });
 
 test('static Code welcome has no decorative icon before the module loads', () => {
