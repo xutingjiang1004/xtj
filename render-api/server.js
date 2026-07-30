@@ -2132,6 +2132,17 @@ app.use(function(req, res, next) {
   next();
 });
 
+// Opt-in local AI runtime only. Do not expose node_modules: the browser fetches
+// and caches model weights directly on the user's first explicit use.
+app.use('/vendor/webllm', express.static(path.join(__dirname, '..', 'node_modules', '@mlc-ai', 'web-llm', 'lib'), {
+  maxAge: '1h',
+  fallthrough: false,
+  setHeaders: function(res) {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  }
+}));
+
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {
