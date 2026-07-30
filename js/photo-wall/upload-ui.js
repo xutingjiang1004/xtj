@@ -113,7 +113,11 @@
           fileName: info.fileName,
           fileSize: info.fileSize,
           mimeType: info.mimeType,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          // P4: track retry state for real expiry, backoff, and stale detection
+          retryCount: 0,
+          lastQueriedAt: 0,
+          stale: false
         });
       }
       // 保留最近 50 条
@@ -132,13 +136,39 @@
       var remaining = [];
       var reconciled = 0;
 
+      var maxRetryCount = 10; // P4: 最大重试次数
+      var minRetryInterval = 30 * 1000; // P4: 最小重试间隔 30 秒
+
       for (var i = 0; i < pending.length; i++) {
         var entry = pending[i];
         if (!entry.uploadId) continue;
-        // 过期但先查询服务端确认
+        // P4: 真正的过期处理 — 超过 7 天直接标记 stale 并丢弃
         if ((now - entry.createdAt) > maxAge) {
-          // 先查询再决定是否丢弃
+          entry.stale = true;
+          // 过期记录不查询服务端，直接丢弃并尝试清理 Storage
+          if (entry.path) {
+            try {
+              fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: entry.path })
+              }).catch(function() {});
+            } catch (e) {}
+          }
+          continue; // 不加入 remaining
         }
+        // P4: 退避 — 距离上次查询不足最小间隔则跳过
+        if (entry.lastQueriedAt && (now - entry.lastQueriedAt) < minRetryInterval) {
+          remaining.push(entry);
+          continue;
+        }
+        // P4: 超过最大重试次数则标记 stale 并丢弃
+        if ((entry.retryCount || 0) >= maxRetryCount) {
+          entry.stale = true;
+          continue; // 不加入 remaining
+        }
+        entry.lastQueriedAt = now;
+        entry.retryCount = (entry.retryCount || 0) + 1;
         // 每个 uploadId 同时只能有一个 reconcile 请求
         if (_reconcileLocks[entry.uploadId]) continue;
         _reconcileLocks[entry.uploadId] = true;
@@ -304,7 +334,7 @@
       var title = byId('pwUploadTitle');
       if (title) title.textContent = '选择照片';
       var subtitle = byId('pwUploadSubtitle');
-      if (subtitle) subtitle.textContent = '最多 9 张图片，单张不超过 50MB';
+      if (subtitle) subtitle.textContent = '最多 ' + MAX_BATCH_COUNT + ' 张图片，单张不超过 50MB';
       setUploadResult('', false);
     }
     
@@ -494,7 +524,11 @@
     var upload;
     try {
       upload = await window.sb.storage.from('uploads').upload(path, file, {
-        contentType: type, cacheControl: '31536000', upsert: false
+        contentType: type, cacheControl: '31536000', upsert: false,
+        // P4: pass the AbortController signal so that cancelCurrentUpload()
+        // truly aborts the in-flight Storage network request, instead of
+        // letting it run to completion and then deleting the uploaded file.
+        signal: signal || undefined
       });
     } catch (storageError) {
       storageError.photoUploadStage = 'storage';

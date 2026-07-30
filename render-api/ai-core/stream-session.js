@@ -110,6 +110,9 @@ function createEventLogger(supabase, streamId, userId) {
   var flushTimer = null;
   var flushed = false;
   var pendingWrites = new Set();
+  // Phase 1-P0-3/4: Track the last delta event_id so flush() never uses 0.
+  // All persisted event_ids must be > 0, unique, and monotonically increasing.
+  var _lastDeltaEventId = 0;
 
   function trackWrite(promise) {
     var tracked = Promise.resolve(promise);
@@ -144,6 +147,8 @@ function createEventLogger(supabase, streamId, userId) {
       var delta = (data && data.delta) ? String(data.delta) : '';
       if (!delta) return Promise.resolve();
       pendingDeltas.push(delta);
+      // Phase 1-P0-4: Track the event_id of the latest batched delta
+      _lastDeltaEventId = eventId;
 
       var now = Date.now();
       if (lastFlushTime === 0) lastFlushTime = now;
@@ -152,16 +157,18 @@ function createEventLogger(supabase, streamId, userId) {
           (now - lastFlushTime) >= DELTA_FLUSH_INTERVAL_MS) {
         return trackWrite(doFlushDeltas().then(function(combined) {
           if (!combined) return;
-          return insertEvent(supabase, streamId, userId, eventId, 'answer_delta', { delta: combined.slice(0, 10000) });
+          // Phase 1-P0-3: Use the last delta's event_id (always > 0)
+          return insertEvent(supabase, streamId, userId, _lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
         }));
       }
       return Promise.resolve();
     }
 
     // Flush pending deltas before logging other event types
+    // Phase 1-P0-3: Use _lastDeltaEventId instead of eventId - 1 (which could be 0)
     var flushPromise = doFlushDeltas().then(function(combined) {
       if (combined) {
-        return insertEvent(supabase, streamId, userId, eventId - 1, 'answer_delta', { delta: combined.slice(0, 10000) });
+        return insertEvent(supabase, streamId, userId, _lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
       }
     });
 
@@ -175,7 +182,11 @@ function createEventLogger(supabase, streamId, userId) {
     return waitForWrites().then(function() { return doFlushDeltas(); }).then(function(combined) {
       flushed = true;
       if (combined) {
-        return trackWrite(insertEvent(supabase, streamId, userId, 0, 'answer_delta', { delta: combined.slice(0, 10000) }));
+        // Phase 1-P0-3: Never use event_id=0. Use _lastDeltaEventId + 1
+        // (or 1 if no deltas were seen, which is still > 0).
+        var flushEventId = _lastDeltaEventId > 0 ? _lastDeltaEventId + 1 : 1;
+        _lastDeltaEventId = flushEventId;
+        return trackWrite(insertEvent(supabase, streamId, userId, flushEventId, 'answer_delta', { delta: combined.slice(0, 10000) }));
       }
     }).then(waitForWrites);
   }
