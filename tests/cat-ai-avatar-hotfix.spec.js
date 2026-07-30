@@ -5,13 +5,20 @@ const { test, expect } = require('@playwright/test');
 // ============================================================
 
 test.describe('Cat AI Reply - BigInt Comment ID', () => {
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+  });
+});
+
   test('A1: ai-reply-status must not return 400 for numeric comment_id', async ({ page }) => {
     let statusCalled = false;
-    await page.route('**/api/comments/ai-reply-status**', route => {
+    await page.route('**/api/comments/ai-reply-status**', async route => {
       statusCalled = true;
       const url = new URL(route.request().url());
       const commentId = url.searchParams.get('comment_id');
       // Verify comment_id is a numeric string
+      expect(commentId).toBe('123');
       expect(commentId).toMatch(/^\d+$/);
       return route.fulfill({
         status: 200,
@@ -29,17 +36,24 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     // Simulate pollCatAiReply being called with a numeric comment ID
     const result = await page.evaluate(async () => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
       if (typeof window.pollCatAiReply !== 'function') return 'pollCatAiReply not found';
       try {
         // Call with a numeric string comment ID
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
         window.pollCatAiReply('123', 'test-post-id');
         return 'called';
       } catch (e) {
         return 'error: ' + e.message;
       }
     });
-    // Wait for the fetch to complete
-    await page.waitForTimeout(500);
+    // Wait for the fetch to complete, longer timeout in case of setTimeout
+    await page.waitForTimeout(3500);
+    console.log('Test A1 evaluate result:', result);
     expect(statusCalled).toBe(true);
   });
 
@@ -83,6 +97,10 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
     // Simulate pollCatAiReply
     await page.evaluate(() => {
       if (typeof window.pollCatAiReply === 'function') {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
         window.pollCatAiReply('123', 'test-post');
       }
     });
@@ -94,6 +112,14 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
   });
 
   test('A3: AI reply appears inside .comment-replies container of source comment', async ({ page }) => {
+      await page.route('**/api/feed**', route => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, posts: [{
+          id: 'test-post', user_name: 'test', content: 'test', created_at: new Date().toISOString()
+        }], comments: [{
+          id: '34001', post_id: 'test-post', content: 'test', user_name: 'test', created_at: new Date().toISOString()
+        }], likes: [], next_offset: 0, endReached: true, total_post_count: 1 })
+      }));
     const aiReply = {
       id: 789,
       post_id: 'test-post-2',
@@ -126,6 +152,8 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       if (typeof window.pollCatAiReply === 'function') {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
         window.pollCatAiReply('100', 'test-post-2');
       }
     });
@@ -175,11 +203,15 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       if (typeof window.pollCatAiReply === 'function') {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
         window.pollCatAiReply('200', 'test-post-3');
       }
     });
     // Wait for multiple poll cycles
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
     // Should have polled more than once (not_triggered should not terminate immediately)
     expect(pollCount).toBeGreaterThanOrEqual(2);
   });
@@ -205,6 +237,8 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       if (typeof window.pollCatAiReply === 'function') {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
         window.pollCatAiReply('999', 'test-post');
       }
     });
@@ -220,6 +254,12 @@ test.describe('Cat AI Reply - BigInt Comment ID', () => {
 // ============================================================
 
 test.describe('Avatar CSS and Rendering', () => {
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));
+  });
+});
+
   const mockPost = {
     id: 'avatar-test-post',
     user_name: 'TestUser',
@@ -412,6 +452,7 @@ test.describe('Avatar CSS and Rendering', () => {
     await page.waitForTimeout(500);
 
     const img = page.locator('.post[data-post-id="avatar-test-post"] .avatar .avatar-image');
+    await img.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
     const box = await img.boundingBox();
     expect(box).not.toBeNull();
     expect(Math.round(box.width)).toBe(40);
@@ -437,6 +478,7 @@ test.describe('Avatar CSS and Rendering', () => {
     await page.waitForTimeout(500);
 
     const img = page.locator('.post[data-post-id="avatar-test-post"] .avatar .avatar-image');
+    await img.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
     const box = await img.boundingBox();
     expect(box).not.toBeNull();
     expect(Math.round(box.width)).toBe(40);
