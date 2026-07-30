@@ -1676,7 +1676,7 @@
     var newFileBtn = sidebarHeader.querySelector('.new-file-btn');
     if (newFileBtn) {
       newFileBtn.innerHTML = codeWorkspaceIcon('plus');
-      newFileBtn.disabled = !!state._isReadOnly || state.workspaceMode === 'github';
+      newFileBtn.disabled = !!state._isReadOnly || state.workspaceMode === 'github' || (state.directoryHandle && state.directoryHandle._isSingleFileRoot);
       newFileBtn.addEventListener('click', createNewWorkspaceFile);
     }
     var refreshTreeBtn = sidebarHeader.querySelector('.refresh-tree-btn');
@@ -2225,7 +2225,7 @@
     // Create root tree node
     var rootNode = createTreeItem({
       name: state.workspaceName || 'Root',
-      kind: 'directory',
+      kind: state.directoryHandle && state.directoryHandle._isSingleFileRoot ? 'file' : 'directory',
       handle: state.directoryHandle,
       depth: 0,
       isRoot: true
@@ -2416,8 +2416,8 @@
   }
 
   function createNewWorkspaceFile() {
-    if (state._isReadOnly || state.workspaceMode === 'github') {
-      showToast('\u5f53\u524d\u5de5\u4f5c\u533a\u4e0d\u53ef\u5199\uff0c\u8bf7\u6253\u5f00\u672c\u5730\u6587\u4ef6\u5939\u540e\u518d\u8bd5', 'warning');
+    if (state._isReadOnly || state.workspaceMode === 'github' || (state.directoryHandle && state.directoryHandle._isSingleFileRoot)) {
+      showToast('\u5f53\u524d\u5de5\u4f5c\u533a\u4e0d\u53ef\u5199\u6216\u4ec5\u5305\u542b\u5355\u4e2a\u6587\u4ef6\uff0c\u8bf7\u6253\u5f00\u672c\u5730\u6587\u4ef6\u5939\u540e\u518d\u8bd5', 'warning');
       return;
     }
     var fs = window.__xtjCodeFS;
