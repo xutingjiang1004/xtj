@@ -41,8 +41,10 @@ function createSSEWriter(res, req) {
       return false;
     }
     try {
-      res.write(data);
-      return true;
+      // Node returns false when its output buffer reaches the high-water
+      // mark. Propagate that signal so callers stop heartbeats/writes instead
+      // of endlessly buffering a disconnected or very slow client.
+      return res.write(data) !== false;
     } catch (e) {
       markClosed();
       return false;
