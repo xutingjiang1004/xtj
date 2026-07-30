@@ -26,6 +26,11 @@ test.describe('Code workspace Agent browser flow', () => {
       maxContextTokens: 1000000,
       supportedDocuments: ['docx', 'pdf', 'xlsx', 'pptx', 'txt', 'csv', 'md', 'json']
     }));
+    await page.route('**/api/code/models', (route) => json(route, 200, {
+      ok: true,
+      default_model: 'deepseek-v4-flash',
+      models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+    }));
 
     await page.route('**/api/code/github/repos/xutingjiang1004/xtj**', async (route) => {
       const url = new URL(route.request().url());
@@ -191,7 +196,8 @@ test.describe('Code workspace Agent browser flow', () => {
 
     await page.locator('#codeChatInput').fill('再次请求以验证错误恢复');
     await page.locator('#codeChatSendBtn').click({ force: true });
-    await expect(page.locator('.code-chat-message').last()).toContainText('AI服务器错误');
+    await expect(page.locator('.code-chat-message').last()).toContainText('AI 服务暂时无法处理');
+    await expect(page.locator('.code-chat-message').last()).not.toContainText('PROVIDER_HTTP_503');
     await expect(page.locator('#codeChatInput')).toBeEnabled();
     await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
     // A provider 503 is rendered as a completed error message; retrying is

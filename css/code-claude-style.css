@@ -1,0 +1,629 @@
+/* ============================================================
+   code-claude-style.css — Claude 风格 AI 回复动画与过程 v2
+   精确匹配 Claude 设计系统 token (dl_builtin_claude)
+   零侵入覆盖层：只改视觉，不动 JS 逻辑
+   ============================================================ */
+
+/* 引入 Claude 设计系统字体 — Lora(阅读) + Newsreader(标题) + Geist Mono(代码) */
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:opsz,wght@18..72,300;18..72,400;18..72,500&family=Geist+Mono:wght@400;500&display=swap');
+
+/* ══════════════════════════════════════════════════════════
+   0. Claude Token — 精确匹配设计库 colors_and_type.css
+   ══════════════════════════════════════════════════════════ */
+
+/* 字体族 */
+.code-panel {
+  --cw-font-display: 'Newsreader', Georgia, ui-serif, serif;
+  --cw-font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --cw-font-serif: 'Lora', Georgia, ui-serif, serif;          /* 阅读面 */
+  --cw-font-mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+
+/* 暗色模式 — 匹配设计库 .dark 选择器下的 token */
+[data-theme="dark"] .code-panel {
+  --cw-bg:           #262624;  /* --bg-100 */
+  --cw-card:         #2c2c2b;  /* --bg-200 / --card */
+  --cw-muted-bg:     #30302e;  /* --bg-300 / --muted */
+  --cw-popover:      #1b1b19;  /* --bg-50  / --popover */
+  --cw-bg-hover:     rgba(255,255,255,0.04);
+  --cw-border:       #3e3e38;  /* --border-300 */
+  --cw-border-strong:#4a4a43;  /* --border-400 */
+  --cw-text:         #f1f1ef;  /* --text-800 / --foreground */
+  --cw-text-secondary:#b7b5a9; /* --text-500 / --muted-foreground */
+  --cw-text-muted:   #6e6d68;  /* --text-400 */
+  --cw-accent:       #d97757;  /* --brand-500 (dark) */
+  --cw-accent-soft:  rgba(217,119,87,0.10);
+  --cw-accent-glow:  rgba(217,119,87,0.16);
+  --cw-danger:       #ef4444;  /* --error-500 */
+  --cw-success:      #8ca06f;  /* --success-500 */
+  /* semantic aliases */
+  --cw-user-bubble:  #30302e;      /* 用户消息: muted 背景 */
+  --cw-ai-bubble:    #1b1b19;      /* AI 消息: popover 背景 */
+}
+
+/* 浅色模式 — 匹配设计库 :root 选择器下的 token */
+[data-theme="light"] .code-panel,
+.code-panel {
+  --cw-bg:           #faf9f5;  /* --bg-100 */
+  --cw-card:         #f5f4ef;  /* --bg-200 / --card */
+  --cw-muted-bg:     #ede9de;  /* --bg-300 / --muted */
+  --cw-popover:      #ffffff;  /* --bg-50  / --popover */
+  --cw-bg-hover:     rgba(0,0,0,0.03);
+  --cw-border:       #dad9d4;  /* --border-300 */
+  --cw-border-strong:#cdcabf;  /* --border-400 */
+  --cw-text:         #3d3929;  /* --text-800 / --foreground */
+  --cw-text-secondary:#6e6d68; /* --text-500 / --muted-foreground */
+  --cw-text-muted:   #9b988c;  /* --text-400 */
+  --cw-accent:       #c96442;  /* --brand-500 (light) */
+  --cw-accent-soft:  rgba(201,100,66,0.08);
+  --cw-accent-glow:  rgba(201,100,66,0.14);
+  --cw-danger:       #d64545;  /* --error-500 */
+  --cw-success:      #788c5d;  /* --success-500 */
+  /* semantic aliases */
+  --cw-user-bubble:  #ede9de;      /* 用户消息: muted 背景 */
+  --cw-ai-bubble:    #ffffff;      /* AI 消息: popover 白底 */
+}
+
+/* 面板背景 — 移除原有蓝绿渐变 */
+.code-panel,
+.code-workspace {
+  background: var(--cw-bg) !important;
+  background-image: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   1. 消息气泡 — Claude.ai 风格
+   用户: muted 背景 + 右对齐 (非橙色强色块)
+   AI: popover 白底 + 细边框 + 左对齐
+   ══════════════════════════════════════════════════════════ */
+
+/* 消息容器间距 — 更多留白 */
+.code-chat-message {
+  padding: 6px 0;
+  animation: claude-message-in 0.35s ease-out;
+}
+
+/* 消息正文字体 — Lora 阅读面 */
+.code-chat-message .msg-content {
+  font-family: var(--cw-font-serif);
+  font-size: 14.5px;
+  line-height: 1.65;
+  border-radius: calc(var(--radius, 1rem) + 2px);  /* 18px — 设计库标准 */
+  padding: calc(0.25rem * 3.5) calc(0.25rem * 4);   /* 14px 16px — 设计库标准 */
+  min-width: 0;
+}
+
+/* 用户消息 — muted 背景，非橙色（Claude.ai 风格） */
+.code-chat-message.user .msg-content {
+  background: var(--cw-user-bubble);
+  color: var(--cw-text);
+  border: 1px solid var(--cw-border);
+  border-bottom-right-radius: 4px;  /* 不对称圆角 — Claude 风格 */
+  box-shadow: none;
+}
+
+/* AI 消息 — popover 白底 + 细边框 */
+.code-chat-message.assistant .msg-content {
+  background: var(--cw-ai-bubble);
+  color: var(--cw-text);
+  border: 1px solid var(--cw-border);
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 3px 0 rgba(0,0,0,0.05);  /* --shadow-xs */
+}
+
+/* 头像 — 圆角方块，更 Claude */
+.code-chat-message .msg-avatar {
+  border-radius: var(--radius-sm, 8px);
+  flex-shrink: 0;
+}
+
+.code-chat-message.user .msg-avatar {
+  background: var(--cw-muted-bg);
+  color: var(--cw-text-secondary);
+  border: 1px solid var(--cw-border);
+}
+
+.code-chat-message.assistant .msg-avatar {
+  background: var(--cw-accent);
+  color: #fff;
+  border: none;
+}
+
+/* 代码块 — Claude 风格 */
+.code-chat-message .msg-content pre {
+  background: var(--cw-bg);
+  border: 1px solid var(--cw-border);
+  border-radius: var(--radius-sm, 8px);
+  font-family: var(--cw-font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 10px 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+.code-chat-message .msg-content code {
+  font-family: var(--cw-font-mono);
+  font-size: 12.5px;
+  background: var(--cw-muted-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--cw-text);
+}
+
+.code-chat-message .msg-content pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* 行内元素 */
+.code-chat-message .msg-content a {
+  color: var(--cw-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--cw-accent-soft);
+  text-underline-offset: 2px;
+}
+
+.code-chat-message .msg-content a:hover {
+  text-decoration-color: var(--cw-accent);
+}
+
+.code-chat-message .msg-content blockquote {
+  border-left: 2px solid var(--cw-accent);
+  padding-left: 14px;
+  margin: 10px 0;
+  color: var(--cw-text-secondary);
+  font-style: italic;
+}
+
+.code-chat-message .msg-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.code-chat-message .msg-content th,
+.code-chat-message .msg-content td {
+  border: 1px solid var(--cw-border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.code-chat-message .msg-content th {
+  background: var(--cw-muted-bg);
+  font-weight: 600;
+}
+
+/* ══════════════════════════════════════════════════════════
+   2. 流式状态条 — Claude 极简风格
+   无边框、无背景、文字 + 小灰点
+   ══════════════════════════════════════════════════════════ */
+
+.code-stream-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  margin-bottom: 6px;
+  background: transparent;
+  border: none;
+  border-left: none;       /* 移除左侧橙色边框 */
+  border-radius: 0;
+  font-family: var(--cw-font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--cw-text-secondary);
+  letter-spacing: 0;
+}
+
+/* 活跃状态文字色 — 保持 muted，不用强橙 */
+.code-stream-status[data-state="connecting"],
+.code-stream-status[data-state="working"],
+.code-stream-status[data-state="answer"],
+.code-stream-status[data-state="tool"],
+.code-stream-status[data-state="tool-complete"] {
+  color: var(--cw-text-secondary);
+}
+
+/* 错误状态 */
+.code-stream-status[data-state="error"],
+.code-stream-status[data-state="tool-error"] {
+  color: var(--cw-danger);
+}
+
+.code-stream-status[data-state="cancelled"] {
+  color: var(--cw-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════
+   3. 加载指示器 — Claude 风格三点跳动
+   替代原有旋转 spinner 和呼吸点
+   ══════════════════════════════════════════════════════════ */
+
+/* 隐藏原有旋转 spinner */
+.code-stream-spinner {
+  display: none !important;
+}
+
+/* 用 ::before 生成三个小灰点 — Claude typing indicator */
+.code-stream-status[data-state="connecting"]::before,
+.code-stream-status[data-state="working"]::before,
+.code-stream-status[data-state="answer"]::before,
+.code-stream-status[data-state="tool"]::before,
+.code-stream-status[data-state="tool-complete"]::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 6px;
+  flex-shrink: 0;
+  /*
+   * 三个 4px 圆点，间距 5px
+   * 用 radial-gradient repeating 实现
+   */
+  background-image:
+    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px),
+    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px),
+    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px);
+  background-position: 0 center, 7px center, 14px center;
+  background-repeat: no-repeat;
+  background-size: 4px 6px;
+  /* 整体柔和脉冲 — 无 scale 变化 */
+  animation: claude-dots-pulse 1.5s ease-in-out infinite;
+}
+
+/*
+ * 逐点 stagger 闪烁 — 用单点脉冲模拟
+ * 通过改变 background-position 的 opacity 层实现
+ * 使用 keyframes 控制 opacity 整体变化，营造"思考"感
+ */
+@keyframes claude-dots-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 0.65; }
+}
+
+/* 错误状态 — 静态红点 */
+.code-stream-status[data-state="error"]::before,
+.code-stream-status[data-state="tool-error"]::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cw-danger);
+  flex-shrink: 0;
+  animation: none;
+  opacity: 0.7;
+}
+
+/* 取消状态 — 静态灰点 */
+.code-stream-status[data-state="cancelled"]::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cw-text-muted);
+  flex-shrink: 0;
+  animation: none;
+  opacity: 0.5;
+}
+
+/* ══════════════════════════════════════════════════════════
+   4. 流式内容 — Claude 风格
+   无光标闪烁，文字直接流式出现
+   ══════════════════════════════════════════════════════════ */
+
+/* 隐藏原有三点跳动指示器 */
+.code-chat-typing {
+  display: none !important;
+}
+
+/* 流式内容为空时 — 不显示光标，保持空白 */
+.code-chat-message.streaming .code-stream-content:empty::before {
+  content: none;
+  display: none;
+}
+
+/* 流式进行中 — 不追加光标，Claude 风格纯文字流 */
+.code-chat-message.streaming .code-stream-content::after {
+  content: none;
+  display: none;
+}
+
+/* 流式进行中 — 消息卡片极轻左边线 */
+.code-chat-message.streaming .msg-content {
+  border-color: var(--cw-border);
+  position: relative;
+}
+
+/* 流式进行中 — 极淡的左边线提示 */
+.code-chat-message.streaming .msg-content::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--cw-accent);
+  opacity: 0.35;
+  border-radius: 2px 0 0 2px;
+  animation: claude-line-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes claude-line-pulse {
+  0%, 100% { opacity: 0.2; }
+  50%      { opacity: 0.5; }
+}
+
+/* 完成状态 */
+.code-chat-message[data-state="complete"] .msg-content::before,
+.code-chat-message[data-state="error"] .msg-content::before,
+.code-chat-message[data-state="cancelled"] .msg-content::before,
+.code-chat-message:not(.streaming) .msg-content::before {
+  display: none;
+}
+
+/* 错误状态边框 */
+.code-chat-message[data-state="error"] .msg-content,
+.code-chat-message.cancelled .msg-content {
+  border-color: rgba(214, 69, 69, 0.3);
+}
+
+/* ══════════════════════════════════════════════════════════
+   5. 工具执行面板 — Claude 折叠卡片
+   ══════════════════════════════════════════════════════════ */
+
+.code-stream-tools {
+  margin-bottom: 8px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--radius-sm, 8px);
+  overflow: hidden;
+  background: var(--cw-card);
+}
+
+.code-stream-tools-header {
+  padding: 8px 12px;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--cw-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cw-text-secondary);
+  transition: background 0.15s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.code-stream-tools-header:hover {
+  background: var(--cw-bg-hover);
+}
+
+.code-stream-tools[data-expanded="true"] .code-stream-tools-header,
+.code-stream-tools-header[aria-expanded="true"] {
+  border-bottom-color: var(--cw-border);
+}
+
+.code-stream-tools-list {
+  padding: 4px 0;
+}
+
+.code-stream-tool-item {
+  padding: 6px 12px;
+  font-family: var(--cw-font-sans);
+  font-size: 12px;
+  color: var(--cw-text-secondary);
+  border-bottom: 1px solid var(--cw-border);
+}
+
+.code-stream-tool-item:last-child {
+  border-bottom: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   6. Usage / Token 统计
+   ══════════════════════════════════════════════════════════ */
+
+.code-stream-usage {
+  margin-top: 8px;
+  padding: 6px 0;
+  font-family: var(--cw-font-sans);
+  font-size: 11px;
+  color: var(--cw-text-muted);
+  opacity: 0.7;
+  border-top: 1px solid var(--cw-border);
+  letter-spacing: 0.01em;
+}
+
+/* ══════════════════════════════════════════════════════════
+   7. 错误提示 — Claude 风格
+   ══════════════════════════════════════════════════════════ */
+
+.code-stream-error {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: rgba(214, 69, 69, 0.05);
+  border: 1px solid rgba(214, 69, 69, 0.18);
+  border-radius: var(--radius-sm, 8px);
+  font-family: var(--cw-font-sans);
+  font-size: 12.5px;
+  color: var(--cw-danger);
+  line-height: 1.5;
+}
+
+/* ══════════════════════════════════════════════════════════
+   8. 消息入场动画 — Claude 轻柔淡入
+   ══════════════════════════════════════════════════════════ */
+
+@keyframes claude-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   9. 模型选择器 / 下拉框
+   ══════════════════════════════════════════════════════════ */
+
+.code-panel select,
+.code-panel .code-model-select,
+.code-panel #codeModelSelect {
+  font-family: var(--cw-font-sans);
+  font-size: 12px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--cw-card);
+  color: var(--cw-text);
+  padding: 4px 8px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   10. 输入框 — Claude 风格
+   ══════════════════════════════════════════════════════════ */
+
+.code-panel .code-chat-input,
+.code-panel .code-composer,
+.code-panel .code-composer-input,
+.code-panel textarea.code-composer-textarea {
+  font-family: var(--cw-font-sans);
+  border: 1px solid var(--cw-border);
+  border-radius: var(--radius-md, 12px);
+  background: var(--cw-card);
+  color: var(--cw-text);
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.code-panel .code-chat-input:focus,
+.code-panel .code-composer:focus,
+.code-panel textarea.code-composer-textarea:focus {
+  border-color: var(--cw-accent);
+  box-shadow: 0 0 0 3px var(--cw-accent-soft);
+  outline: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   11. 滚动条 — Claude 极细风格
+   ══════════════════════════════════════════════════════════ */
+
+.code-panel ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.code-panel ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.code-panel ::-webkit-scrollbar-thumb {
+  background: var(--cw-border-strong);
+  border-radius: 3px;
+  border: none;
+}
+
+.code-panel ::-webkit-scrollbar-thumb:hover {
+  background: var(--cw-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════
+   12. 欢迎页 — Claude 风格
+   ══════════════════════════════════════════════════════════ */
+
+.code-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  height: 100%;
+  padding: 32px;
+  text-align: center;
+  background: var(--cw-bg);
+}
+
+.code-welcome h2 {
+  font-family: var(--cw-font-display);   /* Newsreader — Claude 标题字体 */
+  font-size: 30px;
+  font-weight: 400;
+  color: var(--cw-text);
+  margin: 0 0 10px 0;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.code-welcome p {
+  font-family: var(--cw-font-sans);
+  font-size: 14.5px;
+  color: var(--cw-text-secondary);
+  margin: 0 0 28px 0;
+  line-height: 1.6;
+}
+
+.code-welcome .code-btn,
+.code-welcome .code-btn-primary {
+  font-family: var(--cw-font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px 28px;
+  border-radius: var(--radius, 1rem);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.code-welcome .code-btn-primary {
+  background: var(--cw-accent);
+  color: #fff;
+  box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1);
+}
+
+.code-welcome .code-btn-primary:hover {
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+}
+
+/* ══════════════════════════════════════════════════════════
+   13. Tab Bar — Claude pill 式
+   ══════════════════════════════════════════════════════════ */
+
+.code-tab {
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid transparent;
+  background: transparent;
+  font-family: var(--cw-font-sans);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.code-tab:hover {
+  background: var(--cw-bg-hover);
+}
+
+.code-tab.active {
+  background: var(--cw-popover);
+  border-color: var(--cw-border);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* 移除原有底部下划线 */
+.code-tab.active::after {
+  display: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   14. meta 信息文字 — Claude 风格
+   ══════════════════════════════════════════════════════════ */
+
+/* 消息时间戳 / meta */
+.code-chat-message .msg-meta,
+.code-chat-message .message-meta {
+  font-family: var(--cw-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cw-text-muted);
+  letter-spacing: 0.01em;
+}

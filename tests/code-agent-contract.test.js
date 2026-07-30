@@ -409,3 +409,15 @@ test('code-agent falls back to off for thinking mode incompatibility', () => {
   assert.match(codeAgent, /thinking_mode\s*=\s*'off'/);
   assert.match(codeAgent, /isThinkingIncompatible/);
 });
+
+test('Code model catalog is server-derived and chat routes validate selections', () => {
+  assert.match(codeAgent, /app\.get\('\/api\/code\/models'/);
+  assert.match(codeAgent, /function getCodeModels\(deps\)/);
+  assert.match(codeAgent, /function resolveCodeModel\(deps, requestedModelId\)/);
+  assert.match(codeAgent, /MODEL_NOT_AVAILABLE/);
+  assert.match(codeAgent, /function resolveThinkingMode\(requestedMode, message\)/);
+  assert.match(codeAgent, /INVALID_THINKING_MODE/);
+  assert.match(codeAgent, /CODE_THINKING_MODES = \['auto', 'off', 'low', 'medium', 'high', 'max'\]/);
+  assert.match(codeAgent, /resolveCodeModel\(deps, body\.model_id\)/);
+  assert.match(codeAgent, /resolveThinkingMode\(body\.thinking_mode, message\)/);
+});
