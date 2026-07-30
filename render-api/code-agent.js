@@ -3641,6 +3641,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Phase 3: Compute capabilities and thinkingMode BEFORE building messages
       // so that runtime identity and limits can be injected into the user message.
       var capabilities = buildCodeCapabilities(deps);
+      // The catalog/config model is only the default. Once the request has
+      // passed resolveCodeModel(), every runtime identity surface must use the
+      // model the client actually selected.
+      capabilities.model = model;
       var thinkingMode = thinkingSelection.effective;
       // P0 Fix: 前端明确发送的 thinking_mode 直接使用，不再用 auto 正则覆盖
       // 只有当前端发送 'auto' 时才做推断
@@ -4392,6 +4396,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var thinkingSelection = resolveThinkingMode(body.thinking_mode, message);
       if (!thinkingSelection.ok) { sendStreamError('INVALID_THINKING_MODE', 'INVALID_THINKING_MODE', 'validated'); return; }
       var capabilities = buildCodeCapabilities(deps);
+      // Keep the runtime identity aligned with the validated per-request
+      // selection instead of falling back to the deployment default model.
+      capabilities.model = model;
       var thinkingMode = thinkingSelection.effective;
       if (thinkingMode === 'auto') {
         var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
