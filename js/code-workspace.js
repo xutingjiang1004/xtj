@@ -768,7 +768,7 @@
 
     welcome.innerHTML =
       '<div class="welcome-icon">📁</div>' +
-      '<h2 class="welcome-title">打开工作区开始</h2>' +
+      '<h2 class="welcome-title">Code</h2>' +
       '<p class="welcome-desc">选择 GitHub 仓库、本地文件夹或单个文件，浏览和编辑内容，或使用 AI 助手进行代码操作。</p>' +
       '<div class="welcome-actions">' +
         '<button class="folder-picker-btn-large primary" id="codeWelcomeGitHubBtn">' +
@@ -1549,6 +1549,18 @@
     triggerLayoutSave();
   }
 
+  function codeWorkspaceIcon(name) {
+    var paths = {
+      folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+      file: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6"/>',
+      reset: '<path d="M4 7V3m0 4h4"/><path d="M4.7 7A8 8 0 1 1 4 12"/><path d="M12 8v4l3 2"/>',
+      collapseLeft: '<path d="m15 6-6 6 6 6"/>',
+      collapseRight: '<path d="m9 6 6 6-6 6"/>',
+      maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>'
+    };
+    return '<svg class="code-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[name] || paths.reset) + '</svg>';
+  }
+
   function renderWorkspace() {
     if (!_dom.panelCode) return;
     state.composerMounted = false;
@@ -1585,8 +1597,10 @@
       '</span>';
     
     var changeBtn = sidebarHeader.querySelector('.folder-picker-btn');
+    if (changeBtn) { changeBtn.innerHTML = codeWorkspaceIcon('folder'); changeBtn.setAttribute('aria-label', '更换文件夹'); }
     if (changeBtn) changeBtn.addEventListener('click', selectAndOpenWorkspace);
     var directFileBtn = sidebarHeader.querySelector('.file-picker-btn');
+    if (directFileBtn) { directFileBtn.innerHTML = codeWorkspaceIcon('file'); directFileBtn.setAttribute('aria-label', '直接打开文件'); }
     if (directFileBtn) directFileBtn.addEventListener('click', selectAndOpenFile);
     var foldSidebarBtn = sidebarHeader.querySelector('.fold-sidebar-btn');
     if (foldSidebarBtn) foldSidebarBtn.addEventListener('click', toggleSidebar);
@@ -1641,20 +1655,25 @@
     // Add maximize button to tabBar
     var tabBarActions = document.createElement('div');
     tabBarActions.style.cssText = 'display:flex;align-items:center;padding:0 8px;border-left:1px solid var(--cw-border);';
-    tabBarActions.innerHTML = 
-      '<button class="code-panel-action-btn restore-layout-btn" title="恢复默认布局" style="margin-right:4px;">🪟</button>' +
-      '<button class="code-panel-action-btn max-editor-btn" title="最大化编辑器"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
+    tabBarActions.innerHTML =
+      '<button class="code-panel-action-btn restore-layout-btn" title="恢复默认布局" style="margin-right:4px;"></button>' +
+      '<button class="code-panel-action-btn max-editor-btn" title="最大化编辑器"></button>';
     tabBar.appendChild(tabBarActions);
     tabBarActions.querySelector('.restore-layout-btn').addEventListener('click', resetLayout);
+    tabBarActions.querySelector('.restore-layout-btn').innerHTML = codeWorkspaceIcon('reset');
+    tabBarActions.querySelector('.restore-layout-btn').setAttribute('aria-label', '恢复默认布局');
     var foldEditorBtn = document.createElement('button');
     foldEditorBtn.type = 'button';
     foldEditorBtn.className = 'code-panel-action-btn fold-editor-btn';
     foldEditorBtn.title = '折叠文件查看区';
     foldEditorBtn.setAttribute('aria-label', '折叠文件查看区');
-    foldEditorBtn.textContent = '▣';
+    foldEditorBtn.innerHTML = codeWorkspaceIcon('collapseLeft');
     foldEditorBtn.addEventListener('click', toggleEditor);
     tabBarActions.insertBefore(foldEditorBtn, tabBarActions.querySelector('.max-editor-btn'));
-    tabBarActions.querySelector('.max-editor-btn').addEventListener('click', toggleMaximizeEditor);
+    var maxEditorBtn = tabBarActions.querySelector('.max-editor-btn');
+    maxEditorBtn.innerHTML = codeWorkspaceIcon('maximize');
+    maxEditorBtn.setAttribute('aria-label', '最大化编辑器');
+    maxEditorBtn.addEventListener('click', toggleMaximizeEditor);
     editorColumn.appendChild(tabBar);
 
     var editorArea = document.createElement('div');
@@ -1686,25 +1705,31 @@
     chatHeader.innerHTML = 
       '<div style="font-weight:600;font-size:13px;"></div>' +
       '<div class="code-panel-actions">' +
-        '<button class="code-panel-action-btn max-chat-btn" title="最大化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>' +
-        '<button class="code-panel-action-btn fold-chat-btn" title="折叠"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>' +
+        '<button class="code-panel-action-btn max-chat-btn" title="最大化"></button>' +
+        '<button class="code-panel-action-btn fold-chat-btn" title="折叠"></button>' +
       '</div>';
     var chatActions = chatHeader.querySelector('.code-panel-actions');
-    function addChatPanelToggle(className, label, glyph, handler) {
+    var maxChatBtn = chatHeader.querySelector('.max-chat-btn');
+    maxChatBtn.innerHTML = codeWorkspaceIcon('maximize');
+    maxChatBtn.setAttribute('aria-label', '最大化 AI 面板');
+    var foldChatBtn = chatHeader.querySelector('.fold-chat-btn');
+    foldChatBtn.innerHTML = codeWorkspaceIcon('collapseRight');
+    foldChatBtn.setAttribute('aria-label', '折叠 AI 面板');
+    function addChatPanelToggle(className, label, handler) {
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'code-panel-action-btn ' + className;
       button.title = label;
       button.setAttribute('aria-label', label);
-      button.textContent = glyph;
+      button.innerHTML = codeWorkspaceIcon(className === 'fold-workbench-nav-btn' ? 'collapseLeft' : (className === 'fold-editor-from-chat-btn' ? 'collapseLeft' : 'collapseRight'));
       button.addEventListener('click', handler);
       chatActions.insertBefore(button, chatActions.firstChild);
     }
-    addChatPanelToggle('fold-workbench-nav-btn', '折叠左侧导航栏', '☰', toggleWorkbenchNav);
-    addChatPanelToggle('fold-editor-from-chat-btn', '折叠文件查看区', '▣', toggleEditor);
-    addChatPanelToggle('fold-directory-from-chat-btn', '折叠文件目录', '◧', toggleSidebar);
-    chatHeader.querySelector('.max-chat-btn').addEventListener('click', toggleMaximizeChat);
-    chatHeader.querySelector('.fold-chat-btn').addEventListener('click', toggleChat);
+    addChatPanelToggle('fold-workbench-nav-btn', '折叠左侧导航栏', toggleWorkbenchNav);
+    addChatPanelToggle('fold-editor-from-chat-btn', '折叠文件查看区', toggleEditor);
+    addChatPanelToggle('fold-directory-from-chat-btn', '折叠文件目录', toggleSidebar);
+    maxChatBtn.addEventListener('click', toggleMaximizeChat);
+    foldChatBtn.addEventListener('click', toggleChat);
     chatPanel.appendChild(chatHeader);
     
     // Container for original chat app
@@ -4013,12 +4038,14 @@
         normalizeThinkingModeForSelectedModel();
         state._modelsPromise = null;
         updateComposerControls();
+        updateCapabilitiesBadge();
         return models;
       }).catch(function(error) {
         state._modelsPromise = null;
         state.models = [];
         state.modelLoadError = '模型列表加载失败，可重试';
         updateComposerControls();
+        updateCapabilitiesBadge();
         return [];
       });
     return state._modelsPromise;
@@ -4059,7 +4086,8 @@
     var element = _dom.chatPanel.querySelector('.chat-model-badge');
     if (!element) return;
     var badge = capabilitiesLabel();
-    element.textContent = badge.text;
+    var selected = selectedCodeModel();
+    element.textContent = selected ? ((selected.provider || 'AI') + ' · ' + (selected.name || selected.id) + ' · Agent') : badge.text;
     element.title = badge.title;
   }
 
@@ -4356,6 +4384,20 @@
         '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
         '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
       '</div>';
+    var thinkingLabels = {
+      auto: String.fromCharCode(0x81ea, 0x52a8),
+      off: String.fromCharCode(0x5173),
+      low: String.fromCharCode(0x4f4e),
+      medium: String.fromCharCode(0x4e2d),
+      high: String.fromCharCode(0x9ad8),
+      max: String.fromCharCode(0x6781, 0x9ad8)
+    };
+    var thinkingSelectEl = inputArea.querySelector('#codeThinkingSelect');
+    if (thinkingSelectEl) {
+      Array.prototype.forEach.call(thinkingSelectEl.options, function (option) {
+        if (thinkingLabels[option.value]) option.textContent = thinkingLabels[option.value];
+      });
+    }
     _dom.chatPanel.appendChild(inputArea);
 
     // Auto-resize textarea
@@ -4624,7 +4666,7 @@
     var contextDetails = document.getElementById('codeContextDetails');
     if (modelSelect && !modelSelect.dataset.bound) {
       modelSelect.dataset.bound = '1';
-      modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); });
+      modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); updateCapabilitiesBadge(); });
     }
     if (thinkingSelect && !thinkingSelect.dataset.bound) {
       thinkingSelect.dataset.bound = '1';
@@ -4848,6 +4890,8 @@
     }
     var body = '<div class="msg-body">';
     if (isError) {
+      body += '<div class="code-stream-error-heading"><span>生成失败</span>' +
+        (msg.errorCode ? '<code>' + escapeHTML(msg.errorCode) + '</code>' : '') + '</div>';
       body += '<div class="code-stream-status" data-state="error" role="status" aria-live="polite" aria-busy="false">' +
         '<span class="code-stream-status-text">生成失败</span></div>';
     }
@@ -5463,6 +5507,7 @@
       '<div class="msg-avatar">AI</div>' +
       '<div class="msg-body">' +
         '<div class="code-stream-status" data-state="connecting" role="status" aria-live="polite" aria-busy="true">' +
+          '<span class="code-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>' +
           '<span class="code-stream-status-text">正在分析任务...</span>' +
           '<span class="code-stream-spinner"></span>' +
         '</div>' +
@@ -5663,7 +5708,11 @@
           friendlyMessage = 'AI 服务暂时无法处理该请求，请稍后重试。';
         }
 
-        var errorHtml = '<div class="code-stream-error-msg">';
+        var errorHtml = '<div class="code-stream-error-heading"><span>生成失败</span>';
+        if (code) {
+          errorHtml += '<code>' + escapeHTML(code) + '</code>';
+        }
+        errorHtml += '</div><div class="code-stream-error-msg">';
         errorHtml += escapeHTML(friendlyMessage);
         
         if (code) {
@@ -6443,6 +6492,7 @@
       '<div class="msg-avatar">AI</div>' +
       '<div class="msg-body">' +
         '<div class="code-stream-status" data-state="connecting" role="status" aria-live="polite" aria-busy="true">' +
+          '<span class="code-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>' +
           '<span class="code-stream-status-text">正在恢复上一次会话...</span>' +
           '<span class="code-stream-spinner"></span>' +
         '</div>' +
