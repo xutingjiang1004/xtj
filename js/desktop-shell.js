@@ -49,7 +49,13 @@
     var activePanel = document.querySelector('.dock-panel.active');
     var tab = activePanel && activePanel.id ? activePanel.id.replace(/^panel/, '').toLowerCase() : 'posts';
     // P0: 跟踪当前 tab 用于 Code 模块可见性判断
+    var previousTab = codeModuleState.currentTab;
+    if (previousTab === 'code' && tab !== 'code' && window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.cleanup === 'function') {
+      try { window.__xtjCodeWorkspaceAPI.cleanup(); } catch (_) {}
+    }
     codeModuleState.currentTab = tab;
+    // Bootstrap a restored Code tab even when no click event fires.
+    if (tab === 'code') scheduleVisibleCodeWorkspaceLoad();
     document.querySelectorAll('.desktop-nav-item').forEach(function (button) {
       var active = aiActive
         ? button.getAttribute('data-desktop-action') === 'ai-chat'
@@ -538,6 +544,32 @@
     if (pc.offsetParent) return true;
     if (codeModuleState.currentTab === 'code' && pc.classList.contains('active') && !pc.classList.contains('hidden')) return true;
     return false;
+  }
+
+  function scheduleVisibleCodeWorkspaceLoad() {
+    if (!isCodePanelVisible()) return;
+      if (window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function') {
+        var codeState = typeof window.__xtjCodeWorkspaceAPI.getState === 'function' ? window.__xtjCodeWorkspaceAPI.getState() : null;
+        if (!codeState || codeState.active) return;
+      }
+    if (codeModuleState.status === 'loading') return;
+    var panelCode = document.getElementById('panelCode');
+    if (panelCode && codeModuleState.status === 'idle') {
+      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>姝ｅ湪鍔犺浇 Code 宸ヤ綔鍖?..</p></div>';
+    }
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        ensureCodeModulesLoaded().then(function () {
+          if (!isCodePanelVisible()) return;
+          recoverCodeInitAlias();
+          if (window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function') {
+            window.__xtjCodeWorkspaceAPI.init();
+          }
+        }).catch(function () {
+          // ensureCodeModulesLoaded renders its actionable retry state.
+        });
+      });
+    });
   }
 
   // P0: 渲染错误页面

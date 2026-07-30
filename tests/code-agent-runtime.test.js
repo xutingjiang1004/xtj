@@ -858,6 +858,25 @@ test('P0: thinking mode high is sent in request and verified in response', async
   assert.equal(response.body.runtime.reasoningTokens, 150);
 });
 
+test('selected pro model is injected into runtime identity, not the deployment default', async () => {
+  var receivedModel = null;
+  var receivedMessages = null;
+  const app = createApp(async (messages, options) => {
+    receivedMessages = messages;
+    receivedModel = options.model;
+    return { content: 'Response', model: 'deepseek-v4-pro', thinking_mode: 'high', usage: {} };
+  }, null, { getDeepSeekModel: () => 'deepseek-v4-pro' });
+  const response = await request(app).post('/api/code/chat').send({
+    workspace_id: 'p0-selected-model', workspace_generation: 1,
+    message: '你是什么模型', history: [],
+    model_id: 'deepseek-v4-pro', thinking_mode: 'high'
+  });
+  assert.equal(response.status, 200);
+  assert.equal(receivedModel, 'deepseek-v4-pro');
+  assert.ok(receivedMessages.some(message => String(message.content || '').includes('deepseek-v4-pro')));
+  assert.equal(response.body.runtime.model, 'deepseek-v4-pro');
+});
+
 test('P0: thinking mode off is respected', async () => {
   var receivedThinkingMode = null;
   const app = createApp(async (_messages, options) => {
