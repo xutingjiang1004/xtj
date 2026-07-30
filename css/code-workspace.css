@@ -2933,3 +2933,70 @@ body.code-is-resizing *, body.code-is-resizing-row * {
   width: 14px;
   height: 14px;
 }
+
+/* Final Code controls pass: this file is loaded after the shared Claude
+   overlay, so keep the actual workspace widgets compact and rectangular. */
+#panelCode.code-panel {
+  --cw-radius: 6px;
+  --cw-radius-sm: 4px;
+  --cw-radius-xs: 3px;
+  --cw-radius-pill: 5px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+}
+
+#panelCode .folder-picker-btn-large,
+#panelCode .code-composer-context-btn,
+#panelCode .code-composer-select,
+#panelCode .code-context-usage,
+#panelCode .code-attachment-btn,
+#panelCode .code-chat-back-to-bottom,
+#panelCode .code-stream-retry-btn,
+#panelCode .code-retry-btn,
+#panelCode .code-panel-action-btn,
+#panelCode .code-chat-input-area .send-btn {
+  border-radius: 5px !important;
+}
+
+#panelCode .folder-picker-btn-large {
+  min-height: 38px;
+  padding: 9px 16px;
+  border-style: solid;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#panelCode .folder-picker-btn-large .folder-icon { font-size: 17px; }
+
+#panelCode .code-panel-action-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--cw-border);
+  background: transparent;
+}
+
+#panelCode .code-panel-action-btn:hover,
+#panelCode .code-panel-action-btn:focus-visible {
+  border-color: var(--cw-border-strong);
+  background: var(--cw-bg-hover);
+  outline: none;
+}
+
+#panelCode .code-chat-input-area textarea { border-radius: 6px !important; }
+
+#panelCode .code-chat-message.user .msg-content {
+  background: var(--cw-user-bubble) !important;
+  border: 1px solid var(--cw-border) !important;
+  border-radius: 8px 8px 4px 8px !important;
+  box-shadow: none !important;
+}
+
+#panelCode .code-chat-message.assistant .msg-content {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding-left: 0;
+  padding-right: 0;
+}

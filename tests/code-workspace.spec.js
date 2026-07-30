@@ -18,7 +18,7 @@ test.describe('Code Workspace', () => {
       }
       return route.continue();
     });
-    await page.route('**/api/code/models', (route) => route.fulfill({
+    await page.route('**/api/code/models*', (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
@@ -161,7 +161,7 @@ test.describe('Code Workspace', () => {
     // The Composer intentionally refuses to send until it has a real,
     // server-provided model. Keep this error-path test focused on the chat
     // failure rather than depending on an authenticated deployment.
-    await page.route('**/api/code/models', async route => {
+    await page.route('**/api/code/models*', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -275,6 +275,13 @@ test('Code workspace does not block AI requests if background document extractio
   await page.waitForSelector('#codeWelcomeFileBtn', { state: 'visible', timeout: 10000 });
   await page.click('#codeWelcomeFileBtn');
   await page.waitForSelector('.code-workspace', { state: 'visible' });
+  // This regression targets context filtering, not authentication or model
+  // discovery. Seed the mocked catalog so the composer can send immediately.
+  await page.evaluate(() => {
+    var state = window.__xtjCodeWorkspaceAPI.getState();
+    state.models = [{ id: 'test-model', name: 'Test model', provider: 'Test', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off'] }];
+    state.selectedModelId = 'test-model';
+  });
 
   // Open broken PDF
   await page.evaluate(() => {
@@ -441,10 +448,29 @@ test('built Code bundle keeps the modification preview and action bar full width
   });
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // This layout test is intentionally unauthenticated; bypass the production
+  // auth wrapper before Code loads its model catalog so the send control can
+  // exercise the mocked chat response.
+  await page.evaluate(async () => {
+    window.ensureProtectedOperationAuth = async () => ({ ok: true, token: '' });
+    window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options || {}));
+    const api = window.__xtjCodeWorkspaceAPI;
+    if (api && api.getState && api.getState().active) {
+      api.cleanup();
+      await api.init();
+    }
+  });
   await page.click('button[data-desktop-tab="code"]');
   await page.waitForSelector('#codeWelcomeFileBtn', { state: 'visible', timeout: 10000 });
   await page.click('#codeWelcomeFileBtn');
   await page.waitForSelector('#codeChatInput', { state: 'visible', timeout: 10000 });
+  // The test is about the preview layout. Keep it deterministic even when
+  // the shell restored Code before the auth bypass was installed.
+  await page.evaluate(() => {
+    const state = window.__xtjCodeWorkspaceAPI.getState();
+    state.models = [{ id: 'test-model', name: 'Test model', provider: 'Test', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off'] }];
+    state.selectedModelId = 'test-model';
+  });
   await page.evaluate(() => {
     window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options || {}));
   });

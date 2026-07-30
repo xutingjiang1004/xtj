@@ -7,6 +7,7 @@ const coreSource = fs.readFileSync('js/core.js', 'utf8');
 const desktopShell = fs.readFileSync('js/desktop-shell.js', 'utf8');
 const codeFS = fs.readFileSync('js/code-file-system.js', 'utf8');
 const codeWorkspace = fs.readFileSync('js/code-workspace.js', 'utf8');
+const claudeStyle = fs.readFileSync('css/code-claude-style.css', 'utf8');
 
 test('third-party Supabase SDK cannot block local app bootstrap', () => {
   assert.match(indexHtml, /<script defer src="js\/vendor\/supabase\.min\.js\?v=[^"]+"><\/script>/);
@@ -20,6 +21,20 @@ test('Monaco loading has a bounded fallback path', () => {
   assert.match(codeWorkspace, /Monaco 加载超时/);
   assert.match(codeWorkspace, /setTimeout\(function \(\) \{[\s\S]*?rejectMonaco/);
   assert.match(codeWorkspace, /renderTextareaEditor\(tab, container\)/);
+});
+
+test('restored Code tabs bootstrap lazy modules without a click', () => {
+  assert.match(desktopShell, /codeModuleState\.currentTab = tab;[\s\S]*scheduleVisibleCodeWorkspaceLoad\(\)/);
+  assert.match(desktopShell, /function scheduleVisibleCodeWorkspaceLoad/);
+  assert.match(desktopShell, /ensureCodeModulesLoaded\(\)\.then/);
+});
+
+test('Claude Code tokens override legacy workspace tokens safely', () => {
+  assert.match(claudeStyle, /#panelCode\.code-panel/);
+  assert.match(claudeStyle, /--cw-bg-secondary:\s*var\(--cw-card\)/);
+  assert.match(claudeStyle, /\[data-theme="dark"\] #panelCode\.code-panel/);
+  assert.doesNotMatch(claudeStyle, /\[data-theme="light"\] #panelCode\.code-panel,\s*#panelCode\.code-panel/);
+  assert.match(claudeStyle, /family=Poppins/);
 });
 
 // ============================================================
