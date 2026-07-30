@@ -5583,6 +5583,66 @@ window.throttleRAF = function(fn) {
     scrollToBottom(messagesEl, true);
   }
 
+  async function handleLocalAiMessage(input, messagesEl) {
+    var runtime = window.__xtjLocalAI;
+    var text = String(input.value || '').trim();
+    if (!runtime || !text) return;
+    if (S.sending) return;
+    if (_aiChatFileData) {
+      notify('本地离线模式暂不支持附件，请移除附件后发送。', 'info');
+      return;
+    }
+    if (!runtime.isSupported()) {
+      notify('当前浏览器不支持本地模型：请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。', 'error');
+      return;
+    }
+    if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) return;
+
+    S.sending = true;
+    var controller = new AbortController();
+    S.abortController = controller;
+    var nowIso = new Date().toISOString();
+    var userMsg = { role: 'user', content: text, created_at: nowIso, local: true };
+    S.messages.push(userMsg);
+    appendMessage(messagesEl, userMsg);
+    input.value = '';
+    input.style.height = 'auto';
+    updateInputMetrics();
+
+    var assistantMsg = { role: 'assistant', content: '', created_at: nowIso, local: true };
+    var assistantNode = appendMessage(messagesEl, assistantMsg);
+    var bubble = assistantNode && assistantNode.querySelector('.ai-msg-bubble');
+    var answer = '';
+    try {
+      await runtime.streamChat(S.messages.slice(-9).map(function(message) {
+        return { role: message.role, content: message.content };
+      }), {
+        signal: controller.signal,
+        onProgress: function(progress) {
+          if (bubble && !answer) bubble.textContent = progress.text || '正在准备本地模型…';
+        },
+        onDelta: function(delta) {
+          answer += delta;
+          assistantMsg.content = answer;
+          if (bubble) bubble.innerHTML = renderMarkdown(answer);
+          scrollToBottom(messagesEl, true);
+        }
+      });
+      if (!answer) throw new Error('本地模型未返回内容，请重试。');
+      S.messages.push(assistantMsg);
+    } catch (error) {
+      if (assistantNode && assistantNode.parentNode) assistantNode.parentNode.removeChild(assistantNode);
+      var message = error && error.code === 'ABORTED' ? '已停止本地回答。' : ('本地模型不可用：' + (error && error.message || '请稍后重试。'));
+      var errorMsg = { role: 'assistant', content: message, created_at: new Date().toISOString(), error: true, local: true };
+      S.messages.push(errorMsg);
+      appendMessage(messagesEl, errorMsg);
+    } finally {
+      S.sending = false;
+      S.abortController = null;
+      scrollToBottom(messagesEl, true);
+    }
+  }
+
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;

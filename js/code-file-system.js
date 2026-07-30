@@ -1474,6 +1474,85 @@
     });
   }
 
+  // Rename a file without routing its bytes through the AI layer.  The
+  // browser file-system API has no native rename primitive, so copy the file
+  // into a new handle, verify the destination, then remove the old entry.
+  // Directories and single-file workspaces are intentionally excluded.
+  function renameFileByPath(oldPathParts, newPathParts) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('renameFileByPath: no workspace selected'));
+    }
+    if (_workspaceKind === 'file') {
+      return Promise.reject(new Error('renameFileByPath: single-file workspace cannot be renamed'));
+    }
+    var oldParts = Array.isArray(oldPathParts) ? oldPathParts : validatePath(oldPathParts);
+    var newParts = Array.isArray(newPathParts) ? newPathParts : validatePath(newPathParts);
+    if (!oldParts.length || !newParts.length) {
+      return Promise.reject(new Error('renameFileByPath: both paths must contain a file name'));
+    }
+    if (oldParts.join('/') === newParts.join('/')) return Promise.resolve({ unchanged: true });
+
+    function getParent(parts) {
+      var current = _dirHandle;
+      var index = 0;
+      function step() {
+        if (index >= parts.length - 1) return Promise.resolve(current);
+        return current.getDirectoryHandle(parts[index++]).then(function (next) {
+          current = next;
+          return step();
+        });
+      }
+      return step();
+    }
+
+    var sourceParent;
+    var destinationParent;
+    var destinationCreated = false;
+    return Promise.all([getParent(oldParts), getParent(newParts)]).then(function (parents) {
+      sourceParent = parents[0];
+      destinationParent = parents[1];
+      return sourceParent.getFileHandle(oldParts[oldParts.length - 1]);
+    }).then(function (sourceHandle) {
+      return sourceHandle.getFile().then(function (file) {
+        return file.arrayBuffer().then(function (buffer) {
+          return { sourceHandle: sourceHandle, buffer: buffer };
+        });
+      });
+    }).then(function (source) {
+      return destinationParent.getFileHandle(newParts[newParts.length - 1]).then(function () {
+        throw new Error('renameFileByPath: destination already exists');
+      }, function (err) {
+        if (!err || err.name !== 'NotFoundError') throw err;
+        return destinationParent.getFileHandle(newParts[newParts.length - 1], { create: true }).then(function (targetHandle) {
+          destinationCreated = true;
+          return targetHandle.createWritable().then(function (writable) {
+            return writable.write(source.buffer).then(function () {
+              return writable.close();
+            });
+          }).then(function () {
+            return targetHandle.getFile();
+          }).then(function (targetFile) {
+            return targetFile.arrayBuffer().then(function (targetBuffer) {
+              return Promise.all([getSHA256(source.buffer), getSHA256(targetBuffer)]).then(function (hashes) {
+                if (hashes[0] !== hashes[1]) throw new Error('renameFileByPath: destination verification failed');
+                return source;
+              });
+            });
+          });
+        });
+      });
+    }).then(function (source) {
+      return sourceParent.removeEntry(oldParts[oldParts.length - 1]).then(function () {
+        return { oldPath: oldParts.join('/'), newPath: newParts.join('/') };
+      });
+    }).catch(function (err) {
+      if (destinationCreated) {
+        destinationParent.removeEntry(newParts[newParts.length - 1]).catch(function () {});
+      }
+      return Promise.reject(wrapError(err, 'renameFileByPath'));
+    });
+  }
+
   function createAbortError() {
     var error = new Error('Index build aborted');
     error.name = 'AbortError';
@@ -1977,6 +2056,7 @@
 
     // File deletion
     deleteFileByPath: deleteFileByPath,
+    renameFileByPath: renameFileByPath,
 
     // Path utilities
     validatePath: validatePath,
