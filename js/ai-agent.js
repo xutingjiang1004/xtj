@@ -5596,7 +5596,12 @@ window.throttleRAF = function(fn) {
       notify('当前浏览器不支持本地模型：请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。', 'error');
       return;
     }
-    if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) return;
+    var confirmed = false;
+    try { confirmed = localStorage.getItem('xtj_local_model_confirmed') === '1'; } catch (e) {}
+    if (!confirmed) {
+      if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) return;
+      try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
+    }
 
     S.sending = true;
     var controller = new AbortController();
@@ -6069,6 +6074,35 @@ function showChatMessages() {
     root.appendChild(convList);
     S.conversationsEl = convList;
 
+    // 模型选择器 (小猫 AI)
+    var modelSelectorWrap = el('div', { class: 'ai-chat-model-selector-wrap', style: 'padding: 8px 12px 0 12px;' });
+    var modelSelector = el('select', { class: 'ai-chat-model-selector', style: 'padding: 4px; border: 1px solid var(--border, #ccc); border-radius: 4px; background: var(--bg, #fff); color: var(--text, #333);' });
+    modelSelector.appendChild(el('option', { value: 'online', text: '在线 DeepSeek' }));
+    if (window.__xtjLocalAI) {
+      modelSelector.appendChild(el('option', { value: window.__xtjLocalAI.LOCAL_MODEL_ID, text: window.__xtjLocalAI.getModelDescriptor().name }));
+    }
+    var savedAiModel = '';
+    try { savedAiModel = localStorage.getItem('xtj_ai_model'); } catch (e) {}
+    if (savedAiModel) {
+      modelSelector.value = savedAiModel;
+    }
+    var localBadge = el('span', { class: 'ai-chat-local-badge', style: 'display:none; font-size:11px; padding:2px 6px; background:#e0f2f1; color:#00695c; border-radius:4px; margin-left:8px; vertical-align:middle;', text: '本地离线' });
+    modelSelectorWrap.appendChild(modelSelector);
+    modelSelectorWrap.appendChild(localBadge);
+    
+    function updateLocalBadge() {
+      var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
+      localBadge.style.display = isLocal ? 'inline-block' : 'none';
+      if (isLocal && deepThinkBtn) deepThinkBtn.style.display = 'none';
+      else if (deepThinkBtn) deepThinkBtn.style.display = '';
+    }
+    modelSelector.addEventListener('change', function() {
+      try { localStorage.setItem('xtj_ai_model', modelSelector.value); } catch (e) {}
+      updateLocalBadge();
+    });
+    updateLocalBadge();
+    root.appendChild(modelSelectorWrap);
+
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
     // 文件上传按钮 (左边)
@@ -6131,7 +6165,12 @@ function showChatMessages() {
           fileInput.value = '';
         };
       }
-      handleSendMessage(input, sendBtn, messagesEl, fileData);
+      var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
+      if (isLocal) {
+        handleLocalAiMessage(input, messagesEl);
+      } else {
+        handleSendMessage(input, sendBtn, messagesEl, fileData);
+      }
     }
 
     sendBtn.addEventListener('click', doSend);
