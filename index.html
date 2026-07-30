@@ -72,8 +72,8 @@
     <meta name="xtj-module-ai-core-scroll" content="js/ai-core/scroll-controller.min.js?v=743e0a0b6d">
     <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
     <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
-    <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=ac2d1c4e2c">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=d1912e871a">
+    <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=614ef47aed">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=836dfb2189">
     <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=052d0122e0">
     </head>
 <body>
@@ -1069,6 +1069,8 @@
             });
         })();
     </script>
+    <!-- Local Qwen is opt-in: it loads a worker/model only after the user selects it. -->
+    <script defer src="js/local-ai-runtime.min.js?v=f9ccd693ce"></script>
     <!-- AI Core shared modules (must load before ai-agent and code-workspace) -->
     <script defer src="js/ai-core/errors.min.js?v=c3fc45343c"></script>
     <script defer src="js/ai-core/request-controller.min.js?v=c41ecc922e"></script>
