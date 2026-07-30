@@ -421,3 +421,8 @@ test('Code model catalog is server-derived and chat routes validate selections',
   assert.match(codeAgent, /resolveCodeModel\(deps, body\.model_id\)/);
   assert.match(codeAgent, /resolveThinkingMode\(body\.thinking_mode, message\)/);
 });
+
+test('selected Code model is the runtime identity used by tools and replies', () => {
+  assert.equal((codeAgent.match(/capabilities\.model\s*=\s*model/g) || []).length, 2);
+  assert.match(codeAgent, /capabilities\.model\s*=\s*model[\s\S]*?var thinkingMode/);
+});

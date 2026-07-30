@@ -5,22 +5,145 @@
    ============================================================ */
 
 /* 引入 Claude 设计系统字体 — Lora(阅读) + Newsreader(标题) + Geist Mono(代码) */
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:opsz,wght@18..72,300;18..72,400;18..72,500&family=Geist+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:opsz,wght@18..72,300;18..72,400;18..72,500&family=Poppins:wght@400;500;600&display=swap');
 
 /* ══════════════════════════════════════════════════════════
    0. Claude Token — 精确匹配设计库 colors_and_type.css
    ══════════════════════════════════════════════════════════ */
 
 /* 字体族 */
-.code-panel {
+#panelCode.code-panel {
   --cw-font-display: 'Newsreader', Georgia, ui-serif, serif;
   --cw-font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --cw-font-serif: 'Lora', Georgia, ui-serif, serif;          /* 阅读面 */
   --cw-font-mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 
+/* Prevent the chat bubble from collapsing into a one-character column when
+   a legacy flex rule wins after the editor split is restored. */
+#panelCode .code-chat-messages {
+  min-width: 0;
+  overflow-x: hidden;
+  padding-bottom: 56px;
+}
+#panelCode .code-chat-message {
+  width: min(92%, 780px);
+  max-width: 92%;
+  min-width: 0;
+  align-items: flex-start;
+}
+#panelCode .code-chat-message .msg-body {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+}
+#panelCode .code-chat-message .msg-content {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+#panelCode .code-chat-back-to-bottom {
+  right: 20px;
+  bottom: 112px;
+  max-width: calc(100% - 40px);
+  opacity: .86;
+}
+#panelCode .code-chat-back-to-bottom:hover,
+#panelCode .code-chat-back-to-bottom:focus-visible { opacity: 1; }
+
+#panelCode .code-action-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+#panelCode .folder-picker-btn .code-action-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Claude-style controls: compact rectangular actions instead of oversized
+   capsules. Keep the chat affordances easy to scan and give icon buttons a
+   quiet but visible hit target. */
+#panelCode.code-panel {
+  --cw-radius: 6px;
+  --cw-radius-sm: 4px;
+  --cw-radius-xs: 3px;
+  --cw-radius-pill: 5px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+}
+
+#panelCode .folder-picker-btn-large,
+#panelCode .code-composer-context-btn,
+#panelCode .code-composer-select,
+#panelCode .code-context-usage,
+#panelCode .code-attachment-btn,
+#panelCode .code-chat-back-to-bottom,
+#panelCode .code-stream-retry-btn,
+#panelCode .code-retry-btn,
+#panelCode .code-panel-action-btn,
+#panelCode .code-chat-input-area .send-btn {
+  border-radius: 5px !important;
+}
+
+#panelCode .folder-picker-btn-large {
+  min-height: 38px;
+  padding: 9px 16px;
+  border-style: solid;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#panelCode .folder-picker-btn-large .folder-icon {
+  font-size: 17px;
+}
+
+#panelCode .code-panel-action-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--cw-border);
+  background: transparent;
+}
+
+#panelCode .code-panel-action-btn:hover,
+#panelCode .code-panel-action-btn:focus-visible {
+  border-color: var(--cw-border-strong);
+  background: var(--cw-bg-hover);
+  outline: none;
+}
+
+#panelCode .code-chat-input-area textarea {
+  border-radius: 6px !important;
+}
+
+#panelCode .code-chat-back-to-bottom {
+  box-shadow: 0 2px 8px rgba(40, 35, 25, .08);
+}
+
+/* Reduce the strong green chat-card treatment so the conversation reads like
+   Claude: user messages are quiet beige blocks and assistant text is plain. */
+#panelCode .code-chat-message.user .msg-content {
+  background: var(--cw-user-bubble) !important;
+  border: 1px solid var(--cw-border) !important;
+  border-radius: 8px 8px 4px 8px !important;
+  box-shadow: none !important;
+}
+
+#panelCode .code-chat-message.assistant .msg-content {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 /* 暗色模式 — 匹配设计库 .dark 选择器下的 token */
-[data-theme="dark"] .code-panel {
+[data-theme="dark"] #panelCode.code-panel {
   --cw-bg:           #262624;  /* --bg-100 */
   --cw-card:         #2c2c2b;  /* --bg-200 / --card */
   --cw-muted-bg:     #30302e;  /* --bg-300 / --muted */
@@ -42,8 +165,7 @@
 }
 
 /* 浅色模式 — 匹配设计库 :root 选择器下的 token */
-[data-theme="light"] .code-panel,
-.code-panel {
+[data-theme="light"] #panelCode.code-panel {
   --cw-bg:           #faf9f5;  /* --bg-100 */
   --cw-card:         #f5f4ef;  /* --bg-200 / --card */
   --cw-muted-bg:     #ede9de;  /* --bg-300 / --muted */
@@ -246,40 +368,39 @@
   display: none !important;
 }
 
-/* 用 ::before 生成三个小灰点 — Claude typing indicator */
+/* 用三个独立小点做错峰动画，避免旧的单一旋转图标在流式回复中跳动 */
 .code-stream-status[data-state="connecting"]::before,
 .code-stream-status[data-state="working"]::before,
 .code-stream-status[data-state="answer"]::before,
 .code-stream-status[data-state="tool"]::before,
 .code-stream-status[data-state="tool-complete"]::before {
-  content: '';
-  display: inline-block;
-  width: 18px;
-  height: 6px;
-  flex-shrink: 0;
-  /*
-   * 三个 4px 圆点，间距 5px
-   * 用 radial-gradient repeating 实现
-   */
-  background-image:
-    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px),
-    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px),
-    radial-gradient(circle at 2px 3px, var(--cw-text-muted) 1.5px, transparent 2px);
-  background-position: 0 center, 7px center, 14px center;
-  background-repeat: no-repeat;
-  background-size: 4px 6px;
-  /* 整体柔和脉冲 — 无 scale 变化 */
-  animation: claude-dots-pulse 1.5s ease-in-out infinite;
+  display: none;
 }
 
-/*
- * 逐点 stagger 闪烁 — 用单点脉冲模拟
- * 通过改变 background-position 的 opacity 层实现
- * 使用 keyframes 控制 opacity 整体变化，营造"思考"感
- */
-@keyframes claude-dots-pulse {
-  0%, 100% { opacity: 0.25; }
-  50%      { opacity: 0.65; }
+.code-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 18px;
+  flex: 0 0 18px;
+}
+
+.code-thinking-dots i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--cw-text-muted);
+  opacity: .3;
+  animation: claude-thinking-dot 1.1s ease-in-out infinite;
+}
+
+.code-thinking-dots i:nth-child(2) { animation-delay: .16s; }
+.code-thinking-dots i:nth-child(3) { animation-delay: .32s; }
+
+@keyframes claude-thinking-dot {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30% { opacity: .95; transform: translateY(-2px); }
 }
 
 /* 错误状态 — 静态红点 */
@@ -294,6 +415,12 @@
   flex-shrink: 0;
   animation: none;
   opacity: 0.7;
+}
+
+.code-stream-status[data-state="error"] .code-thinking-dots,
+.code-stream-status[data-state="tool-error"] .code-thinking-dots,
+.code-stream-status[data-state="cancelled"] .code-thinking-dots {
+  display: none;
 }
 
 /* 取消状态 — 静态灰点 */
@@ -626,4 +753,20 @@
   font-weight: 500;
   color: var(--cw-text-muted);
   letter-spacing: 0.01em;
+}
+
+/* Bridge Claude tokens to the legacy Code workspace variables. The workspace
+   stylesheet is lazy-loaded after this file, so keep this selector specific
+   enough to win without using !important on every component rule. */
+#panelCode.code-panel {
+  --cw-bg-secondary: var(--cw-card);
+  --cw-bg-tertiary: var(--cw-muted-bg);
+  --cw-bg-active: var(--cw-muted-bg);
+  --cw-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 2px 5px -2px rgba(0,0,0,0.08);
+  --cw-shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+[data-theme="dark"] #panelCode.code-panel {
+  --cw-shadow: 0 1px 3px rgba(0,0,0,0.16), 0 2px 6px -2px rgba(0,0,0,0.16);
+  --cw-shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
 }
