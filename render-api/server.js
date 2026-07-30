@@ -54,7 +54,18 @@ const ADMIN_TOKEN_EXPIRY_HOURS = Math.min(
   168
 );
 const TOKEN_EXPIRY_MS = ADMIN_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
+// Phase 5-P0-1: Production must not silently fall back to a hard-coded URL.
+// Tests/dev keep the fallback so they can run without env configuration.
+const _IS_PRODUCTION = (
+  String(process.env.NODE_ENV || '').toLowerCase() === 'production' ||
+  String(process.env.RENDER || '').toLowerCase() === 'true' ||
+  Boolean(process.env.RENDER_EXTERNAL_HOSTNAME)
+);
+const SUPABASE_URL = process.env.SUPABASE_URL || (_IS_PRODUCTION ? null : 'https://ithowxqignlhkwaykglt.supabase.co');
+if (!SUPABASE_URL) {
+  console.error('[FATAL] 生产环境缺少 SUPABASE_URL 环境变量，拒绝启动。请在 Render Dashboard 中设置 SUPABASE_URL。');
+  process.exit(1);
+}
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 if (!SUPABASE_SERVICE_KEY) {
   console.error('[FATAL] SUPABASE_SERVICE_KEY 环境变量未设置，拒绝启动。');
@@ -2995,10 +3006,17 @@ app.post('/admin/ip-retry', verifyToken, rateLimit(60000, 20), async (req, res) 
 
 // ===================== 安全检测逻辑 =====================
 
+// Phase 5-P0-3: 统一数据库结果契约。
+// 所有写日志/清理日志的函数必须返回结构化结果，禁止用空值伪装失败。
+// 契约字段：ok / partial / operation / attempted / succeeded / failed / retryable / error
+// 实现位于 render-api/db-result.js，便于单元测试。
+const { dbResult: _dbResult, classifySupabaseError: _classifySupabaseError } = require('./db-result');
+
 // 写入安全提醒到 posts 表
 async function insertSecurityAlert(alert) {
+  var operation = 'insert_security_alert';
   try {
-    await supabase.from('posts').insert([{
+    var payload = {
       user_name: alert.user_name || 'system',
       media_type: SECURITY_ALERT_MARKER,
       media_url: alert.type || 'unknown',
@@ -3017,16 +3035,28 @@ async function insertSecurityAlert(alert) {
         reviewed_by: null
       }),
       actor_key: 'sec_alert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-    }]);
+    };
+    var r = await supabase.from('posts').insert([payload]).select('id').limit(1);
+    if (r.error) {
+      var cls = _classifySupabaseError(r.error);
+      console.warn('[Security] 写入安全提醒失败:', r.error.message);
+      return _dbResult(operation, 1, 0, 1, { retryable: cls.retryable, error: cls.error });
+    }
+    return _dbResult(operation, 1, 1, 0);
   } catch(e) {
-    console.warn('[Security] 写入安全提醒失败:', e.message || e);
+    console.warn('[Security] 写入安全提醒异常:', e.message || e);
+    return _dbResult(operation, 1, 0, 1, {
+      retryable: true,
+      error: { code: 'CATCH_ERROR', message: (e && e.message) ? e.message : String(e) }
+    });
   }
 }
 
 // 管理员审计日志
 async function logAdminAudit(action, operator, detail) {
+  var operation = 'log_admin_audit';
   try {
-    await supabase.from('posts').insert([{
+    var payload = {
       user_name: operator || 'system',
       media_type: AUDIT_LOG_MARKER,
       media_url: action,
@@ -3037,14 +3067,26 @@ async function logAdminAudit(action, operator, detail) {
         timestamp: new Date().toISOString()
       }),
       actor_key: 'audit_' + Date.now()
-    }]);
+    };
+    var r = await supabase.from('posts').insert([payload]).select('id').limit(1);
+    if (r.error) {
+      var cls = _classifySupabaseError(r.error);
+      console.warn('[Audit] 审计日志写入失败:', r.error.message);
+      return _dbResult(operation, 1, 0, 1, { retryable: cls.retryable, error: cls.error });
+    }
+    return _dbResult(operation, 1, 1, 0);
   } catch(e) {
-    console.warn('[Audit] 审计日志写入失败:', e.message);
+    console.warn('[Audit] 审计日志写入异常:', e.message);
+    return _dbResult(operation, 1, 0, 1, {
+      retryable: true,
+      error: { code: 'CATCH_ERROR', message: (e && e.message) ? e.message : String(e) }
+    });
   }
 }
 
 // 自动清理旧日志
 async function cleanupOldLogs(type) {
+  var operation = 'cleanup_old_logs:' + (type || 'unknown');
   try {
     var days = (type === 'error' || type === 'behavior') ? ERROR_LOG_RETENTION_DAYS : (type === 'login' || type === 'security' ? LOGIN_LOG_RETENTION_DAYS : 90);
     var cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -3053,26 +3095,61 @@ async function cleanupOldLogs(type) {
     else if (type === 'security') mediaType = SECURITY_ALERT_MARKER;
     else if (type === 'error') mediaType = CLIENT_ERROR_MARKER;
     else if (type === 'behavior') mediaType = USER_BEHAVIOR_MARKER;
-    else return { deleted: 0 };
+    else return _dbResult(operation, 0, 0, 0, {
+      retryable: false,
+      error: { code: 'INVALID_TYPE', message: '未知的日志类型: ' + String(type) }
+    });
 
-    var { data, error } = await supabase.from('posts')
+    // Phase 5-P0-3: 查询失败必须返回真实错误，不得伪装成 { deleted: 0 }
+    var selectRes = await supabase.from('posts')
       .select('id')
       .eq('media_type', mediaType)
       .lt('created_at', cutoff);
-    if (error || !data || !data.length) return { deleted: 0 };
+    if (selectRes.error) {
+      var cls1 = _classifySupabaseError(selectRes.error);
+      console.warn('[Cleanup] 清理 ' + type + ' 查询失败:', selectRes.error.message);
+      return _dbResult(operation, 0, 0, 0, { retryable: cls1.retryable, error: cls1.error });
+    }
+    var data = selectRes.data || [];
+    if (!data.length) {
+      // 真正的"无可清理"，不是 DB 错误
+      return _dbResult(operation, 0, 0, 0);
+    }
 
     var ids = data.map(function(r) { return r.id; });
-    // Delete in batches of 100
-    var deleted = 0;
+    var attempted = ids.length;
+    var succeeded = 0;
+    var failed = 0;
+    var lastError = null;
+    var anyRetryable = false;
+
+    // Delete in batches of 100 — chain .select() to receive deleted rows so we can count real successes
     for (var i = 0; i < ids.length; i += 100) {
       var batch = ids.slice(i, i + 100);
-      await supabase.from('posts').delete().in('id', batch);
-      deleted += batch.length;
+      var delRes = await supabase.from('posts').delete().in('id', batch).select('id');
+      if (delRes.error) {
+        var cls2 = _classifySupabaseError(delRes.error);
+        failed += batch.length;
+        lastError = cls2.error;
+        if (cls2.retryable) anyRetryable = true;
+        console.warn('[Cleanup] 清理 ' + type + ' 删除批次失败:', delRes.error.message);
+      } else {
+        // Use actual returned rows count (safer than batch.length which assumes all succeeded)
+        var actuallyDeleted = Array.isArray(delRes.data) ? delRes.data.length : 0;
+        succeeded += actuallyDeleted;
+        failed += (batch.length - actuallyDeleted);
+      }
     }
-    return { deleted: deleted };
+    return _dbResult(operation, attempted, succeeded, failed, {
+      retryable: anyRetryable,
+      error: lastError
+    });
   } catch(e) {
-    console.warn('[Cleanup] 清理 ' + type + ' 日志失败:', e.message);
-    return { deleted: 0, error: e.message };
+    console.warn('[Cleanup] 清理 ' + type + ' 异常:', e.message);
+    return _dbResult(operation, 0, 0, 0, {
+      retryable: true,
+      error: { code: 'CATCH_ERROR', message: (e && e.message) ? e.message : String(e) }
+    });
   }
 }
 
@@ -3794,7 +3871,9 @@ setInterval(function() { processNextJob().catch(function() {}); }, 5000);
 const CAT_AI_USERNAME = 'cat_ai';
 const CAT_AI_DISPLAY_NAME = '小猫';
 const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
-const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?=\s|$|[^\w\u4e00-\u9fa5])/;
+// Phase 3-P0-6: Fix regex — old lookahead rejected Chinese chars after 小猫,
+// so @小猫帮我看看 did not match. Now only exclude 猫 (to reject @小猫咪).
+const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫])/;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_MAX_CONCURRENT = 3;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
@@ -6366,13 +6445,81 @@ async function verifyToken(req, res, next) {
 }
 
 // ===================== 健康检查 ======================
-app.get('/health', (req, res) => {
-  res.json({
+// Phase 5-P0-2: /health 区分 Node 进程、配置完整性与数据库连通性三层。
+// 数据库探针带 8s 超时，结果缓存 15s 避免每次请求都打 DB。
+var _HEALTH_DB_CACHE = { ts: 0, status: 'unknown', error: null };
+var _HEALTH_DB_TTL_MS = 15000;
+function probeDatabaseConnectivity() {
+  var now = Date.now();
+  if (_HEALTH_DB_CACHE.ts && (now - _HEALTH_DB_CACHE.ts) < _HEALTH_DB_TTL_MS) {
+    return Promise.resolve(_HEALTH_DB_CACHE);
+  }
+  return new Promise(function(resolve) {
+    var settled = false;
+    var timer = setTimeout(function() {
+      if (settled) return;
+      settled = true;
+      _HEALTH_DB_CACHE = { ts: Date.now(), status: 'timeout', error: 'DB probe timed out after 8s' };
+      resolve(_HEALTH_DB_CACHE);
+    }, 8000);
+    try {
+      supabase.from('posts').select('id').limit(1).then(function(r) {
+        if (settled) return;
+        clearTimeout(timer);
+        settled = true;
+        if (r && r.error) {
+          _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: r.error.message || String(r.error.code || 'unknown') };
+        } else {
+          _HEALTH_DB_CACHE = { ts: Date.now(), status: 'ok', error: null };
+        }
+        resolve(_HEALTH_DB_CACHE);
+      }, function(err) {
+        if (settled) return;
+        clearTimeout(timer);
+        settled = true;
+        _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: (err && err.message) ? err.message : String(err) };
+        resolve(_HEALTH_DB_CACHE);
+      });
+    } catch (e) {
+      if (settled) return;
+      clearTimeout(timer);
+      settled = true;
+      _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: (e && e.message) ? e.message : String(e) };
+      resolve(_HEALTH_DB_CACHE);
+    }
+  });
+}
+
+app.get('/health', async (req, res) => {
+  var nodeStatus = {
     ok: true,
+    status: 'running',
     commit: COMMIT_SHA || 'unknown',
     started_at: STARTED_AT,
+    uptime_seconds: Math.floor((Date.now() - new Date(STARTED_AT).getTime()) / 1000),
+    env: _IS_PRODUCTION ? 'production' : (process.env.NODE_ENV || 'development')
+  };
+  var configStatus = {
     deepseek_configured: !!DEEPSEEK_API_KEY,
-    supabase_configured: !!(SUPABASE_URL && SUPABASE_SERVICE_KEY)
+    supabase_url_configured: !!SUPABASE_URL,
+    supabase_key_configured: !!SUPABASE_SERVICE_KEY,
+    admin_password_configured: !!ADMIN_PASSWORD,
+    api_secret_configured: !!API_SECRET
+  };
+  var dbProbe = await probeDatabaseConnectivity();
+  var allConfigOk = configStatus.deepseek_configured && configStatus.supabase_url_configured && configStatus.supabase_key_configured;
+  var dbOk = dbProbe.status === 'ok';
+  var overallOk = allConfigOk && dbOk;
+  return res.status(overallOk ? 200 : 503).json({
+    ok: overallOk,
+    node: nodeStatus,
+    config: Object.assign({ ok: allConfigOk }, configStatus),
+    database: {
+      ok: dbOk,
+      status: dbProbe.status,
+      checked_at: new Date().toISOString(),
+      error: dbProbe.error
+    }
   });
 });
 
@@ -7950,7 +8097,7 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
   try {
     var commentId = normalizeInteractionId(req.params.commentId);
     if (!commentId) return res.status(400).json({ error: 'Invalid comment id', code: 'invalid_comment_id' });
-    var existing = await supabase.from('comments').select('id, user_name').eq('id', commentId).maybeSingle();
+    var existing = await supabase.from('comments').select('id, user_name, generated_by_ai, parent_comment_id, post_id').eq('id', commentId).maybeSingle();
     if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'comment_lookup_failed' });
     if (!existing.data) return res.json({ ok: true, already_deleted: true });
     if (existing.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
@@ -7960,6 +8107,37 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
     if (deleted.error) return res.status(500).json({ error: sanitizeError(deleted.error), code: 'comment_delete_failed' });
     if (!(deleted.data || []).some(function(row) { return String(row && row.id) === String(commentId); })) {
       return res.status(500).json({ error: 'Comment delete was not confirmed', code: 'comment_delete_not_confirmed' });
+    }
+    // Phase 3-P0-7: AI 回复被删除后 job 不得保持假 completed。
+    // 同时处理两种情况：
+    //   1. 删除的是 AI 回复本身 → 标记对应 job 为 blocked (reply deleted by user)
+    //   2. 删除的是父评论 → DB CASCADE 已删除 AI 回复，但仍需把对应 job 标记为 blocked
+    //      (source comment deleted) 否则 status 端点会读到 stale 的 completed job
+    //      并返回 processing 状态（"回复记录正在同步"），让前端陷入死循环。
+    try {
+      if (existing.data.generated_by_ai === true) {
+        // Case 1: 删除的是 AI 回复 → 找到其源评论对应的 job
+        var parentId = existing.data.parent_comment_id;
+        if (parentId) {
+          await supabase.from('ai_comment_reply_jobs').update({
+            status: 'blocked',
+            error_message: 'reply deleted by user',
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq('source_comment_id', String(parentId)).in('status', ['completed', 'processing', 'pending']);
+        }
+      } else {
+        // Case 2: 删除的是父评论 → 标记其 job 为 blocked
+        await supabase.from('ai_comment_reply_jobs').update({
+          status: 'blocked',
+          error_message: 'source comment deleted',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq('source_comment_id', String(commentId)).in('status', ['completed', 'processing', 'pending']);
+      }
+    } catch (jobCleanupErr) {
+      // Job cleanup is best-effort — comment delete already succeeded.
+      console.warn('[CAT_AI] job cleanup after comment delete failed:', jobCleanupErr && jobCleanupErr.message);
     }
     return res.json({ ok: true, deleted_comment_id: commentId });
   } catch (e) {
@@ -8304,6 +8482,14 @@ app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
         result[row.user_name] = row.media_url;
       }
     });
+    // P6: 对请求中但无头像的用户返回 null，与单用户接口行为一致。
+    // 之前这些用户在 result 中没有键，前端无法区分"无头像"和"请求失败"，
+    // 也无法触发缓存清理（见 hydrateDockChatAvatars 中的 null 处理）。
+    names.forEach(function(name) {
+      if (!Object.prototype.hasOwnProperty.call(result, name)) {
+        result[name] = null;
+      }
+    });
     return res.json({ ok: true, avatars: result });
   } catch (e) { console.error('[API] batch avatar:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
@@ -8483,8 +8669,24 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var sender = req.userName;
     var targetUser = String(req.body && req.body.target_user || '').trim();
     var content = String(req.body && req.body.content || '').trim();
-    var mediaType = String(req.body && req.body.media_type || DM_MARKER);
+    // P6: 强制 media_type 为 DM_MARKER — 不信任客户端传入值。
+    // 之前接受客户端任意 media_type，攻击者可传 __avatar__、__auth__ 等
+    // 系统保留 marker 污染 posts 表，绕过空内容校验。
+    var mediaType = DM_MARKER;
     var actorKey = String(req.body && req.body.actor_key || '').slice(0, 500);
+
+    // P6: 校验 actor_key 格式 — 必须使用 DM 媒体前缀
+    var ALLOWED_DM_ACTOR_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__', DM_MARKER];
+    var actorKeyValid = !actorKey || ALLOWED_DM_ACTOR_PREFIXES.some(function(prefix) {
+      return actorKey.indexOf(prefix) === 0;
+    });
+    if (!actorKeyValid) {
+      return res.status(400).json({ error: '无效的媒体标识', code: 'invalid_actor_key' });
+    }
+    // P6: 防止路径遍历
+    if (actorKey && /\.\./.test(actorKey)) {
+      return res.status(400).json({ error: '无效的媒体路径', code: 'invalid_media_path' });
+    }
 
     // 验证接收用户
     if (!targetUser || targetUser.length > MAX_USERNAME_LEN) {
@@ -8495,7 +8697,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       return res.status(400).json({ error: '不能给自己发送消息', code: 'self_send' });
     }
     // 验证内容
-    if (!content && mediaType === DM_MARKER) {
+    if (!content) {
       return res.status(400).json({ error: '消息内容不能为空', code: 'empty_content' });
     }
     if (content.length > MAX_CONTENT_LEN) {
@@ -8519,6 +8721,23 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       var parsed = JSON.parse(content);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         if (!parsed.read_at) parsed.read_at = null;
+        // P6: 校验 mediaPayload 中的 URL — 必须指向 Supabase Storage
+        if (parsed.media && parsed.media.url) {
+          var mediaUrl = String(parsed.media.url);
+          if (!/^https?:\/\//i.test(mediaUrl)) {
+            return res.status(400).json({ error: '无效的媒体URL', code: 'invalid_media_url' });
+          }
+          // P6: MIME 类型白名单
+          var allowedMimeTypes = ['image/', 'video/', 'audio/'];
+          if (parsed.media.mimeType) {
+            var mimeOk = allowedMimeTypes.some(function(t) {
+              return String(parsed.media.mimeType).startsWith(t);
+            });
+            if (!mimeOk) {
+              return res.status(400).json({ error: '不支持的媒体类型', code: 'invalid_mime_type' });
+            }
+          }
+        }
         contentPayload = JSON.stringify(parsed);
       }
     } catch (_) {
@@ -8562,7 +8781,7 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     }
 
     var { data: msg, error: findErr } = await supabase.from('posts')
-      .select('id, user_name, created_at, content, media_type')
+      .select('id, user_name, created_at, content, media_type, actor_key')
       .eq('id', messageId)
       .eq('media_type', DM_MARKER)
       .maybeSingle();
@@ -8600,6 +8819,30 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     if (updateErr) {
       console.error('[API] dm withdraw update error:', updateErr);
       return res.status(500).json({ error: sanitizeError(updateErr), code: 'dm_withdraw_failed' });
+    }
+
+    // P6: 撤回媒体加入幂等 Storage cleanup — 之前撤回仅更新 content 为
+    // "[消息已撤回]"，完全忽略 Storage 层的媒体文件，导致撤回的图片/视频
+    // 文件成为 Storage 永久孤儿（仍可通过 Public URL 访问）。
+    var DM_MEDIA_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
+    var storagePath = null;
+    if (msg && msg.actor_key) {
+      for (var pi = 0; pi < DM_MEDIA_PREFIXES.length; pi++) {
+        if (msg.actor_key.indexOf(DM_MEDIA_PREFIXES[pi]) === 0) {
+          storagePath = msg.actor_key.substring(DM_MEDIA_PREFIXES[pi].length);
+          break;
+        }
+      }
+    }
+    if (storagePath) {
+      try {
+        var { error: removeErr } = await supabase.storage.from('uploads').remove([storagePath]);
+        if (removeErr) {
+          console.warn('[API] dm withdraw storage cleanup error:', removeErr.message || removeErr);
+        }
+      } catch (e) {
+        console.warn('[API] dm withdraw storage cleanup failed:', e && e.message);
+      }
     }
 
     return res.json({ ok: true, message: updated });
@@ -11015,28 +11258,59 @@ app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (r
 });
 
 // ===================== 日志清理 =====================
+// Phase 5-P0-3: 适配新的统一数据库结果契约。
+// 不再假定每批都全部成功，使用 succeeded/failed/partial 等真实字段。
 app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
   try {
     var types = req.body.types || ['login', 'security', 'error', 'behavior'];
     if (typeof types === 'string') types = [types];
     var VALID_TYPES = ['login', 'security', 'error', 'behavior', 'all'];
     var results = {};
-    var totalDeleted = 0;
+    var totalAttempted = 0;
+    var totalSucceeded = 0;
+    var totalFailed = 0;
+    var anyPartial = false;
+    var anyRetryable = false;
+    var aggregatedError = null;
 
     if (types.indexOf('all') >= 0) types = ['login', 'security', 'error', 'behavior'];
 
     for (var i = 0; i < types.length; i++) {
       var t = types[i];
       if (VALID_TYPES.indexOf(t) < 0 || t === 'all') continue;
-      results[t] = await cleanupOldLogs(t);
-      totalDeleted += results[t].deleted || 0;
+      var r = await cleanupOldLogs(t);
+      results[t] = r;
+      totalAttempted += r.attempted || 0;
+      totalSucceeded += r.succeeded || 0;
+      totalFailed += r.failed || 0;
+      if (r.partial) anyPartial = true;
+      if (r.retryable) anyRetryable = true;
+      if (r.error && !aggregatedError) aggregatedError = r.error;
     }
 
-    await logAdminAudit('cleanup_logs', ADMIN_USERNAME, 'types:' + types.join(',') + ' deleted:' + totalDeleted);
-    return res.json({ ok: true, results: results, total_deleted: totalDeleted });
+    var overallOk = totalFailed === 0 && !aggregatedError;
+    await logAdminAudit('cleanup_logs', ADMIN_USERNAME, 'types:' + types.join(',') +
+      ' attempted:' + totalAttempted +
+      ' succeeded:' + totalSucceeded +
+      ' failed:' + totalFailed);
+    return res.status(overallOk ? 200 : (anyPartial ? 207 : 500)).json({
+      ok: overallOk,
+      partial: anyPartial,
+      results: results,
+      total_attempted: totalAttempted,
+      total_succeeded: totalSucceeded,
+      total_failed: totalFailed,
+      retryable: anyRetryable,
+      error: aggregatedError
+    });
   } catch(e) {
     console.error('[API] 日志清理失败:', e.message);
-    return res.status(500).json({ error: '清理失败' });
+    return res.status(500).json({
+      ok: false,
+      partial: false,
+      error: { code: 'CLEANUP_ERROR', message: e.message || '清理失败' },
+      retryable: true
+    });
   }
 });
 

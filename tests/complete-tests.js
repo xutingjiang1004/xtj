@@ -13,7 +13,7 @@ function read(p){ return fs.readFileSync(p,'utf8'); }
 function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0,10); }
 
 console.log('\n=== Syntax Checks ===');
-['render-api/server.js','render-api/code-agent.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/code-file-system.js','js/code-workspace.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
+['render-api/server.js','render-api/db-result.js','render-api/code-agent.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/code-file-system.js','js/code-workspace.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
   test(f, function(){ cp.execSync('node --check '+f, {stdio:'pipe'}); });
 });
 
