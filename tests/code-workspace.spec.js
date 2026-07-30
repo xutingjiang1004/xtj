@@ -18,6 +18,15 @@ test.describe('Code Workspace', () => {
       }
       return route.continue();
     });
+    await page.route('**/api/code/models', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        default_model: 'test-model',
+        models: [{ id: 'test-model', name: 'Test model', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+      })
+    }));
     await page.goto('/');
     await page.waitForSelector('button[data-desktop-tab="code"]', { state: 'visible' });
     await page.click('button[data-desktop-tab="code"]');
@@ -121,7 +130,48 @@ test.describe('Code Workspace', () => {
     expect(afterRight.overflow).toBeLessThanOrEqual(1);
   });
 
+  test('Code focus controls independently collapse the navigation, directory, and file viewer', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'focus-layout.js',
+        getFile: async () => new File(['export const focus = true;'], 'focus-layout.js', { type: 'text/javascript' })
+      }];
+    });
+    await page.goto('/');
+    await page.locator('button[data-desktop-tab="code"]').click();
+    await page.locator('#codeWelcomeFileBtn').click();
+    await expect(page.locator('.code-chat-panel')).toBeVisible({ timeout: 10000 });
+
+    await page.locator('.fold-directory-from-chat-btn').click();
+    await expect(page.locator('.code-sidebar')).toBeHidden();
+
+    await page.locator('.fold-editor-from-chat-btn').click();
+    await expect(page.locator('.code-editor-column')).toBeHidden();
+    await expect(page.locator('.code-chat-panel')).toBeVisible();
+
+    await page.locator('.fold-workbench-nav-btn').click();
+    await expect(page.locator('html')).toHaveClass(/code-workbench-nav-collapsed/);
+    await expect(page.locator('#desktopWorkbenchSidebar')).toBeHidden();
+    await page.locator('.fold-workbench-nav-btn').click();
+    await expect(page.locator('#desktopWorkbenchSidebar')).toBeVisible();
+  });
+
   test('should intercept 500 API errors and show toast', async ({ page }, testInfo) => {
+    // The Composer intentionally refuses to send until it has a real,
+    // server-provided model. Keep this error-path test focused on the chat
+    // failure rather than depending on an authenticated deployment.
+    await page.route('**/api/code/models', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          default_model: 'test-model',
+          models: [{ id: 'test-model', name: 'Test model', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off'] }]
+        })
+      });
+    });
     // 1. Intercept API
     await page.route('**/api/code/chat*', async route => {
       await route.fulfill({

@@ -448,6 +448,30 @@ test('uploaded travel documents are available to tools without a project index',
   assert.equal(response.body.context_info.files_read[0].path, 'attachments/guangzhou.md');
 });
 
+test('Code models endpoint exposes only the deployment-configured model', async () => {
+  const app = createApp(async () => ({ content: 'unused' }));
+  const response = await request(app).get('/api/code/models').set('x-test-user', 'alice');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.default_model, 'deepseek-v4-flash');
+  assert.deepEqual(response.body.models.map(model => model.id), ['deepseek-v4-flash']);
+  assert.equal(response.body.models[0].supports_thinking, true);
+  assert.equal(response.body.models[0].availability, 'degraded');
+  assert.equal(response.body.models[0].probe_status, 'idle');
+});
+
+test('Code chat rejects an unknown model id and invalid thinking mode before provider use', async () => {
+  let calls = 0;
+  const app = createApp(async () => { calls++; return { content: 'unused' }; });
+  const base = { workspace_name: 'test', workspace_id: 'local:test', workspace_generation: 1, message: 'hello', history: [], open_files: [], attachments: [] };
+  const unknownModel = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send(Object.assign({}, base, { model_id: 'not-configured' }));
+  assert.equal(unknownModel.status, 400);
+  assert.equal(unknownModel.body.code, 'MODEL_NOT_AVAILABLE');
+  const invalidThinking = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send(Object.assign({}, base, { model_id: 'deepseek-v4-flash', thinking_mode: 'unsafe-value' }));
+  assert.equal(invalidThinking.status, 400);
+  assert.equal(invalidThinking.body.code, 'INVALID_THINKING_MODE');
+  assert.equal(calls, 0);
+});
+
 // ── Runtime identity & capabilities tests ─────────────────────────────
 
 test('open file overlay provides safe list and search fallbacks without a project index', async () => {
