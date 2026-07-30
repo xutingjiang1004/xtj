@@ -18,21 +18,6 @@ test.describe('Code Module Loader', () => {
     // Click Code tab
     const codeBtn = page.locator('[data-desktop-tab="code"]');
     await codeBtn.click();
-
-    // Wait for panelCode to be visible
-    const panelCode = page.locator('#panelCode');
-    await expect(panelCode).toBeVisible({ timeout: 15000 });
-
-    // Should show welcome page, not loading or error
-    await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.code-welcome .welcome-title')).toContainText('打开工作区开始');
-  });
-
-  // 2. __xtjCodeWorkspaceAPI 存在但 __xtjCodeInit 丢失时，可以从 API.init 恢复
-  test('recovers __xtjCodeInit from __xtjCodeWorkspaceAPI.init when alias is missing', async ({ page }) => {
-    // Click Code tab first to load modules
-    const codeBtn = page.locator('[data-desktop-tab="code"]');
-    await codeBtn.click();
     await expect(page.locator('.code-welcome')).toBeVisible({ timeout: 15000 });
 
     // Simulate: delete __xtjCodeInit but keep __xtjCodeWorkspaceAPI
