@@ -430,11 +430,9 @@ const ADMIN_NAME = "xxz";
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
                 } catch(e) {}
                 try {
-                    // 清理 cat AI polling
-                    var timers = window.__catAiPollTimers || {};
-                    Object.keys(timers).forEach(function(k) { clearTimeout(timers[k]); });
-                    window.__catAiPollTimers = {};
-                    window.__catAiPollStatus = {};
+                    // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
+                    // 统一清理 timer / AbortController / status DOM / cache 并设置迟到回调防护
+                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
                 } catch(e) {}
                 // Explicit logout revokes the refresh cookie. An expired session
                 // must not make another request just to report that it expired.
@@ -667,6 +665,9 @@ const ADMIN_NAME = "xxz";
             };
 
             let avatarCache = {};
+            // P6: track when each avatar was fetched, so fetchAvatarUrl can
+            // expire stale entries instead of permanently returning old URLs.
+            let avatarFetchedAt = {};
             let lastUserSessionWriteAt = 0;
 
             // ★ 头像缓存版本化读写（含 TTL 和 fetched_at）
@@ -740,16 +741,34 @@ const ADMIN_NAME = "xxz";
             // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
             async function fetchAvatarUrl(userName) {
                 if (!userName) return null;
-                if (avatarCache[userName]) return avatarCache[userName];
+                // P6: 检查缓存是否过期 — 不再无条件短路返回旧值。
+                // 如果缓存超过 5 分钟，重新查后端，以便在用户删除头像后能及时更新。
+                var FETCH_TTL = 5 * 60 * 1000; // 5 分钟
+                if (avatarCache[userName]) {
+                    var age = avatarFetchedAt[userName] ? (Date.now() - avatarFetchedAt[userName]) : FETCH_TTL + 1;
+                    if (age < FETCH_TTL) return avatarCache[userName];
+                }
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
-                    if (!resp.ok) return null;
+                    if (!resp.ok) {
+                        // P6: 网络失败时降级返回旧缓存
+                        return avatarCache[userName] || null;
+                    }
                     var result = await resp.json();
                     if (result.ok && result.avatar_url) {
                         avatarCache[userName] = result.avatar_url;
+                        avatarFetchedAt[userName] = Date.now();
                         return result.avatar_url;
                     }
-                } catch(e) {}
+                    // P6: 后端返回 null（用户无头像）— 清除内存中的旧缓存
+                    if (result.ok && result.avatar_url === null && avatarCache[userName]) {
+                        delete avatarCache[userName];
+                        delete avatarFetchedAt[userName];
+                    }
+                } catch(e) {
+                    // P6: 网络异常时降级返回旧缓存
+                    return avatarCache[userName] || null;
+                }
                 return null;
             }
 
@@ -3129,10 +3148,8 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
                 } catch (e) {}
                 try {
-                    var catTimers = window.__catAiPollTimers || {};
-                    Object.keys(catTimers).forEach(function(k) { clearTimeout(catTimers[k]); });
-                    window.__catAiPollTimers = {};
-                    window.__catAiPollStatus = {};
+                    // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
+                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
                 } catch (e) {}
                 try { stopRestrictionPolling(); } catch (e) {}
                 try { stopDMPolling(); } catch (e) {}
@@ -3907,6 +3924,38 @@ function renderProfileActivityList(kind) {
             window.__catAiPollStatus = window.__catAiPollStatus || {};
             window.__catAiPollControllers = window.__catAiPollControllers || {};
 
+            // Phase 3-P0-2: 统一小猫 AI 任务清理函数
+            // 集中清理 timer / AbortController / status DOM / cache，并通过 _catAiCancelled
+            // 纪元标志防止正在进行的 fetch 回调在清理后仍写入状态（迟到回调防护）。
+            // 替代各处分散的内联清理逻辑，避免遗漏 controller 或 status DOM。
+            function cancelCatAiTask() {
+                // 1. 递增取消纪元，让 pollCatAiReply 中正在进行的 fetch 回调检查后跳过
+                window._catAiCancelled = (window._catAiCancelled || 0) + 1;
+                // 2. 清理所有轮询 timer
+                try {
+                    var timers = window.__catAiPollTimers || {};
+                    Object.keys(timers).forEach(function(k) { clearTimeout(timers[k]); });
+                    window.__catAiPollTimers = {};
+                } catch(e) {}
+                // 3. abort 所有进行中的 AbortController
+                try {
+                    var controllers = window.__catAiPollControllers || {};
+                    Object.keys(controllers).forEach(function(k) {
+                        try { controllers[k].abort(); } catch(err) {}
+                    });
+                    window.__catAiPollControllers = {};
+                } catch(e) {}
+                // 4. 移除所有 .cat-ai-status 状态元素
+                try {
+                    var statusEls = document.querySelectorAll('.cat-ai-status');
+                    Array.prototype.forEach.call(statusEls, function(el) {
+                        if (el && el.parentNode) el.parentNode.removeChild(el);
+                    });
+                } catch(e) {}
+                // 5. 清空状态缓存
+                try { window.__catAiPollStatus = {}; } catch(e) {}
+            }
+
             function pollCatAiReply(commentId, postId) {
                 // 清理旧轮询
                 if (window.__catAiPollTimers[commentId]) {
@@ -3926,6 +3975,8 @@ function renderProfileActivityList(kind) {
                 var pausedAt = 0;
                 var notTriggeredCount = 0; // not_triggered 连续计数
                 var commentIdStr = String(commentId);
+                // Phase 3-P0-5: 记录 postId 以供 visibilitychange 恢复轮询使用
+                window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
                 // 显示临时状态
                 showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
@@ -3948,6 +3999,8 @@ function renderProfileActivityList(kind) {
                         delete window.__catAiPollControllers[commentIdStr];
                         return;
                     }
+                    // Phase 3-P0-2: 捕获取消纪元，用于迟到回调防护
+                    var myEpoch = window._catAiCancelled || 0;
                     lastPollStart = Date.now();
 
                     var controller = new AbortController();
@@ -3956,6 +4009,8 @@ function renderProfileActivityList(kind) {
 
                     window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentIdStr), { signal: controller.signal })
                         .then(function(r) {
+                            // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后仍写入状态
+                            if ((window._catAiCancelled || 0) !== myEpoch) { clearTimeout(timeoutId); return null; }
                             // ★ 计入实际运行时间（仅请求耗时）
                             accumulatedRunTime += Date.now() - lastPollStart;
                             // ★ 先检查 HTTP 状态码，400 不是网络错误
@@ -3975,6 +4030,8 @@ function renderProfileActivityList(kind) {
                         })
                         .then(function(data) {
                             if (!data) return;
+                            // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过
+                            if ((window._catAiCancelled || 0) !== myEpoch) { return; }
                             clearTimeout(timeoutId);
                             retryCount = 0; // 成功请求后重置重试计数
                             if (data.status === 'completed') {
@@ -4031,6 +4088,8 @@ function renderProfileActivityList(kind) {
                         })
                         .catch(function(err) {
                             clearTimeout(timeoutId);
+                            // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后重新调度轮询
+                            if ((window._catAiCancelled || 0) !== myEpoch) { return; }
                             accumulatedRunTime += Date.now() - lastPollStart;
                             // 指数退避重试，而不是永久终止
                             if (retryCount < maxRetries) {
@@ -4107,7 +4166,9 @@ function renderProfileActivityList(kind) {
                     return !(item && item.id != null && String(item.id) === aiIdStr);
                 });
                 feedAllComments.push(aiComment);
-                writeFeedCacheSnapshot();
+                // Phase 3-P0-3: 修复缓存写入顺序——先插入 DOM，成功后再写缓存。
+                // 原代码在 DOM 插入前写缓存，若 insertCatAiCommentIntoDOM 返回
+                // source_comment_missing，AI 回复已写入缓存却不在 DOM，产生孤儿缓存。
                 // 插入 DOM，返回结果
                 var result = insertCatAiCommentIntoDOM(aiComment, srcIdStr, postId);
                 if (!result.inserted) {
@@ -4137,7 +4198,11 @@ function renderProfileActivityList(kind) {
                         } catch (e) {
                             console.warn('[CatAI] upsert re-render failed:', e);
                         }
+                        // Phase 3-P0-3: source_comment_missing 时不写入缓存，避免孤儿缓存
                     }
+                } else {
+                    // Phase 3-P0-3: DOM 插入成功后再写缓存，保证缓存与 DOM 一致
+                    try { writeFeedCacheSnapshot(); } catch(e) {}
                 }
                 // 同步评论数量
                 if (typeof syncPostCommentCount === 'function') syncPostCommentCount(postId);
@@ -4183,6 +4248,22 @@ function renderProfileActivityList(kind) {
             }
 
             function showCatAiStatus(commentId, message, fadeOut) {
+                // Phase 3-P0-4: 当状态包含"重试"文字时不自动 fadeOut。
+                // retryBtnSetup 会在该元素内插入重试按钮，原逻辑 3 秒后移除整个元素导致
+                // 重试按钮不可用。包含"重试"时保持元素常驻，直到用户操作或新状态覆盖。
+                if (fadeOut && typeof message === 'string' && message.indexOf('重试') !== -1) {
+                    fadeOut = false;
+                }
+                // Phase 3-P0-5: retryable 状态持久化到 localStorage，避免评论重渲染后丢失。
+                // 仅对带"重试"的状态持久化（真正的 retryable 状态）。
+                if (typeof message === 'string' && message.indexOf('重试') !== -1) {
+                    try {
+                        var postId = (window.__catAiPollStatus && window.__catAiPollStatus[String(commentId)])
+                            ? window.__catAiPollStatus[String(commentId)].postId : null;
+                        var retryableEntry = { message: message, postId: postId, ts: Date.now() };
+                        localStorage.setItem('xtj_cat_ai_retryable_' + String(commentId), JSON.stringify(retryableEntry));
+                    } catch(e) {}
+                }
                 var existing = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
                 if (existing) {
                     existing.textContent = message;
@@ -4209,7 +4290,51 @@ function renderProfileActivityList(kind) {
             function removeCatAiStatus(commentId) {
                 var el = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
                 if (el && el.parentNode) el.parentNode.removeChild(el);
+                // Phase 3-P0-5: 状态被显式移除（completed/blocked）时也清除 retryable 缓存。
+                try { localStorage.removeItem('xtj_cat_ai_retryable_' + String(commentId)); } catch(e) {}
             }
+
+            // Phase 3-P0-5: 恢复持久化的 retryable 状态。
+            // 在评论重新渲染后调用，遍历 DOM 中的评论项，对仍有持久化 retryable 状态的
+            // 评论重新显示重试按钮。超过 1 小时的 retryable 状态视为过期并清除。
+            function restoreCatAiRetryableStatuses() {
+                var toRestore = [];
+                var now = Date.now();
+                var keysToRemove = [];
+                for (var i = 0; i < localStorage.length; i++) {
+                    var key = localStorage.key(i);
+                    if (!key || key.indexOf('xtj_cat_ai_retryable_') !== 0) continue;
+                    var commentId = key.substring('xtj_cat_ai_retryable_'.length);
+                    try {
+                        var entry = JSON.parse(localStorage.getItem(key) || '{}');
+                        if (!entry.ts || (now - entry.ts) > 60 * 60 * 1000) {
+                            keysToRemove.push(key);
+                            continue;
+                        }
+                        toRestore.push({ commentId: commentId, message: entry.message, postId: entry.postId });
+                    } catch(e) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch(e) {} });
+                toRestore.forEach(function(item) {
+                    var commentEl = document.querySelector('.comment-item[data-comment-id="' + item.commentId + '"]');
+                    if (!commentEl) return;
+                    var existingStatus = document.querySelector('.cat-ai-status[data-comment-id="' + item.commentId + '"]');
+                    if (existingStatus) return; // 状态已存在，不重复
+                    // 重新显示 retryable 状态和重试按钮
+                    var statusEl = document.createElement('div');
+                    statusEl.className = 'cat-ai-status';
+                    statusEl.setAttribute('data-comment-id', item.commentId);
+                    statusEl.textContent = item.message || '小猫暂时无法回复，点击重试';
+                    statusEl.style.cssText = 'font-size:12px;color:var(--text-muted);padding:4px 0 4px 8px;font-style:italic;margin-left:36px;';
+                    commentEl.parentNode.insertBefore(statusEl, commentEl.nextSibling);
+                    if (item.postId) {
+                        retryBtnSetup(item.commentId, item.postId);
+                    }
+                });
+            }
+            window.__xtjRestoreCatAiRetryable = restoreCatAiRetryableStatuses;
 
             // ===================== 小猫 AI 评论渲染 =====================
             function renderCatAiComment(comment) {
@@ -4916,7 +5041,10 @@ function renderProfileActivityList(kind) {
                         loadProfileActivity(true);
                         
                         // 小猫 AI 自动回复轮询
-                        if (content && /[@＠]小猫(?=\s|$|[^\w\u4e00-\u9fa5])/.test(content) && insertedComment) {
+                        // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
+                        // 小猫后跟非汉字字符，导致 @小猫帮我看看 不匹配（"帮"是汉字）。
+                        // 改为负向断言 (?![猫])：仅排除 小猫咪，@小猫帮我看看 可匹配。
+                        if (content && /[@＠]小猫(?![猫])/.test(content) && insertedComment) {
                             pollCatAiReply(insertedComment.id, targetPostId);
                         }
                     } catch (e) {
@@ -7487,6 +7615,9 @@ function renderProfileActivityList(kind) {
                     comments: feedAllComments || [],
                     likes: feedAllLikes || []
                 });
+                // Phase 3-P0-5: Feed 重渲染后恢复持久化的 retryable 状态，
+                // 避免评论重渲染导致小猫 AI 重试按钮丢失。
+                try { if (typeof restoreCatAiRetryableStatuses === 'function') restoreCatAiRetryableStatuses(); } catch(e) {}
             }
 
             async function rebuildFeedFromCurrentState() {
@@ -9001,6 +9132,13 @@ function renderProfileActivityList(kind) {
                     var videoSrc = /^https?:\/\//i.test(rawVideo) ? rawVideo : getMediaUrl('__dm_vid__', rawVideo);
                     return { kind: 'video', src: videoSrc, fullSrc: videoSrc };
                 }
+                // P6: support audio media — previously __dm_aud__ was never parsed,
+                // causing audio messages to render as plain text with no player.
+                if (actorKey.indexOf('__dm_aud__') === 0) {
+                    var rawAudio = actorKey.replace('__dm_aud__', '');
+                    var audioSrc = /^https?:\/\//i.test(rawAudio) ? rawAudio : getMediaUrl('__dm_aud__', rawAudio);
+                    return { kind: 'audio', src: audioSrc, fullSrc: audioSrc };
+                }
                 var text = getDMMessageText(message).trim();
                 if (/^https?:\/\/\S+$/i.test(text) && !/^data:/i.test(text)) {
                     if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(text)) {
@@ -9008,6 +9146,10 @@ function renderProfileActivityList(kind) {
                     }
                     if (/\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(text)) {
                         return { kind: 'video', src: text, fullSrc: text };
+                    }
+                    // P6: detect audio URLs in text messages
+                    if (/\.(mp3|wav|ogg|m4a|aac|flac)(\?.*)?$/i.test(text)) {
+                        return { kind: 'audio', src: text, fullSrc: text };
                     }
                 }
                 return null;
@@ -9018,7 +9160,10 @@ function renderProfileActivityList(kind) {
                 if (text) return text;
                 var media = resolveDockChatMedia(message);
                 if (!media) return '新消息';
-                return media.kind === 'video' ? '[视频]' : '[图片]';
+                // P6: support audio preview text
+                if (media.kind === 'audio') return '[音频]';
+                if (media.kind === 'video') return '[视频]';
+                return '[图片]';
             }
 
             window.handleDockChatImageError = function(img) {
@@ -9197,10 +9342,18 @@ function renderProfileActivityList(kind) {
                         subscribeToComments();
                     }
                     // ★ 恢复所有暂停的轮询
+                    // Phase 3-P0-5: 原循环体为空，页面恢复可见时未触发立即轮询。
+                    // 现遍历存活的轮询任务，从 __catAiPollStatus 取出 postId 后调用
+                    // pollCatAiReply 触发一次立即轮询，避免隐藏期间任务长时间停滞。
                     var timers = window.__catAiPollTimers || {};
+                    var statusMap = window.__catAiPollStatus || {};
                     Object.keys(timers).forEach(function(k) {
-                        // 如果 timer 存在但任务可能因页面隐藏而暂停，触发一次 poll
-                        // 实际 poll 函数内部会检查 document.hidden 并处理恢复
+                        try {
+                            var pid = (statusMap[k] && statusMap[k].postId) || null;
+                            if (pid) {
+                                pollCatAiReply(k, pid);
+                            }
+                        } catch(e) {}
                     });
                 }
             });
@@ -10155,6 +10308,11 @@ function renderProfileActivityList(kind) {
                                 if (v && avatarCache[k] !== v) {
                                     avatarCache[k] = v;
                                     changed = true;
+                                } else if (v === null && avatarCache[k]) {
+                                    // P6: null 表示用户已删除头像 — 清除内存中的旧缓存，
+                                    // 避免持续显示已不存在的头像 URL。
+                                    delete avatarCache[k];
+                                    changed = true;
                                 }
                             }
                             // 写入本地缓存
@@ -10162,7 +10320,12 @@ function renderProfileActivityList(kind) {
                                 var cachedAvatars = readAvatarCacheFromStorage();
                                 for (var ki2 = 0; ki2 < keys.length; ki2++) {
                                     var k2 = keys[ki2];
-                                    if (result.avatars[k2]) cachedAvatars[k2] = result.avatars[k2];
+                                    if (result.avatars[k2]) {
+                                        cachedAvatars[k2] = result.avatars[k2];
+                                    } else if (result.avatars[k2] === null) {
+                                        // P6: null — 清除 localStorage 旧缓存
+                                        delete cachedAvatars[k2];
+                                    }
                                 }
                                 writeAvatarCacheToStorage(cachedAvatars);
                             } catch(e) {}
@@ -10476,6 +10639,12 @@ function renderProfileActivityList(kind) {
                     if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return videoBody;
                 }
+                // P6: render audio messages with <audio> player
+                if (media && media.kind === 'audio') {
+                    var audioBody = '<audio class="msg-audio" src="' + escapeHtml(media.src) + '" controls preload="metadata" onclick="event.stopPropagation()" style="max-width:240px;cursor:default;"></audio>';
+                    if (messageText) audioBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
+                    return audioBody;
+                }
                 return '<span class="msg-text">' + escapeHtml(messageText || '') + '</span>';
             }
 
@@ -10680,17 +10849,32 @@ function renderProfileActivityList(kind) {
                     var mediaPayload = null;
                     if (file) {
                         const path = buildStorageUploadPath('chat', file.name);
-                        await sb.storage.from("uploads").upload(path, file, {
+                        // P6: 检查 Storage 上传返回的 error — Supabase JS 客户端在
+                        // Storage 业务错误（配额超限、权限拒绝、路径冲突）时返回
+                        // { data: null, error } 而非 throw。之前不检查 error，导致
+                        // 媒体文件实际不存在时仍继续发送私信。
+                        var uploadResult = await sb.storage.from("uploads").upload(path, file, {
                             cacheControl: '3600',
                             upsert: false,
                             contentType: file.type || 'application/octet-stream'
                         });
+                        if (uploadResult && uploadResult.error) {
+                            throw new Error('媒体上传失败: ' + (uploadResult.error.message || '未知错误'));
+                        }
                         if (file.type.startsWith('video/')) {
                             actorKey = '__dm_vid__' + path;
                             mediaPayload = { kind: 'video', url: getMediaUrl('__dm_vid__', path), mimeType: file.type || '' };
                         } else if (file.type.startsWith('image/')) {
                             actorKey = '__dm_img__' + path;
                             mediaPayload = { kind: 'image', url: getMediaUrl('__dm_img__', path), mimeType: file.type || '' };
+                        } else if (file.type.startsWith('audio/')) {
+                            // P6: 明确支持音频 — 之前校验允许 audio/ 但上传分支和解析/渲染
+                            // 全链路缺失，导致音频文件成为 Storage 孤儿。
+                            actorKey = '__dm_aud__' + path;
+                            mediaPayload = { kind: 'audio', url: getMediaUrl('__dm_aud__', path), mimeType: file.type || '' };
+                        } else {
+                            // P6: 不支持的类型 — 在上传前就应该被拦截，但作为最后一道防线
+                            throw new Error('不支持的媒体类型: ' + file.type);
                         }
                     }
                     var contentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
