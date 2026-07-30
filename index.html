@@ -55,10 +55,10 @@
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4211272ae5">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=3512a22e0a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2583028a16">
-    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=9879387659">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12ce06fd78">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=98002d6509">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=c8d8d99356">
-    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=8522ec25f0">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=01085f4ff8">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=3114b82ff1">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=c709cbd1fa">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=e2c12135f4">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=57708a55b3">
@@ -72,7 +72,7 @@
     <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
     <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
     <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=ac2d1c4e2c">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=ed8c597f5b">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=27e561ca80">
     <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=c62bfe48c8">
     </head>
 <body>
@@ -330,7 +330,7 @@
                             <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
-                    <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
+                    <input type="file" id="dockChatFileInp" accept="image/*,video/*,audio/*" style="display:none" />
                 </div>
             </div>
         </div>
@@ -1079,14 +1079,15 @@
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could
          leave the feed permanently unavailable. `defer` preserves script order
-         so the client exists before core.js starts, without blocking HTML parsing. -->
-    <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
+         so the client exists before core.js starts, without blocking HTML parsing.
+         core.js also listens for `xtj:supabase-ready` as a fallback. -->
+    <script defer src="js/vendor/supabase.min.js?v=e87e170609"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
-    <script defer src="js/core.min.js?v=242b6fa2ee"></script>
+    <script defer src="js/core.min.js?v=b9d197aa10"></script>
     <script defer src="js/login-device.min.js?v=ca37c54bf8"></script>
     <script defer src="js/theme-toggle.min.js?v=a9201b15a8"></script>
-    <script defer src="js/desktop-shell.min.js?v=aa5441eb35"></script>
+    <script defer src="js/desktop-shell.min.js?v=27c9a730fc"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
