@@ -9,10 +9,14 @@
     var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
     var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
     if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
-      // P0: increment generation to invalidate any in-flight Code module loads
-      codeModuleState.generation++;
-      // P0: check cleanup return value — cancel navigation if user declined
+      // P2: check cleanup return value FIRST — cancel navigation if user declined.
+      // Only increment generation after we know navigation will actually proceed,
+      // otherwise stale in-flight loads would be wrongly invalidated and the user
+      // would be left on the Code panel with a polluted generation counter.
       if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
+      // P2: now that navigation is confirmed, increment generation to invalidate
+      // any in-flight Code module loads belonging to the old Code session.
+      codeModuleState.generation++;
     }
 
     var aiPanel = document.getElementById('panelAiChat');
@@ -570,6 +574,15 @@
   function retryCodeModuleLoad() {
     // P0: 不要删除 __xtjCodeInit — 如果 API 已存在，从 API 恢复别名
     // P0: 只重试失败的模块，不删除已成功的
+
+    // P2: 重置 code-workspace 的 active 状态，确保半初始化后重试能真正重新执行 init()。
+    // init() 在 state.active === true 时会直接返回 already-active，跳过 renderWelcome()
+    // 和 tryRestoreWorkspace()。retryCodeModuleLoad 仅在面板处于错误状态（显示重试按钮）
+    // 时被调用，因此重置 active 是安全的，不会丢失正在使用的工作区。
+    if (window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.getState === 'function') {
+      var _wsState = window.__xtjCodeWorkspaceAPI.getState();
+      if (_wsState && _wsState.active) _wsState.active = false;
+    }
 
     // 确定哪些模块失败
     var failedModules = [];

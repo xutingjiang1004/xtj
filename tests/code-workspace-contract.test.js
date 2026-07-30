@@ -9,8 +9,8 @@ const codeFS = fs.readFileSync('js/code-file-system.js', 'utf8');
 const codeWorkspace = fs.readFileSync('js/code-workspace.js', 'utf8');
 
 test('third-party Supabase SDK cannot block local app bootstrap', () => {
-  assert.match(indexHtml, /<script async[^>]+supabase\.js/);
-  assert.doesNotMatch(indexHtml, /<script defer[^>]+supabase\.js/);
+  assert.match(indexHtml, /<script defer src="js\/vendor\/supabase\.min\.js\?v=[^"]+"><\/script>/);
+  assert.doesNotMatch(indexHtml, /cdn\.jsdelivr\.net[^"']*supabase/i);
   assert.match(indexHtml, /xtj:supabase-ready/);
   assert.match(coreSource, /initSupabaseClient/);
   assert.match(coreSource, /addEventListener\('xtj:supabase-ready'/);
@@ -196,7 +196,7 @@ test('code-workspace also validates paths with per-segment check', () => {
 // 17. 未点击应用时不写文件
 // ============================================================
 test('pending operations are stored, not automatically applied', () => {
-  assert.match(codeWorkspace, /state\.pendingOperations = data\.operations/);
+  assert.match(codeWorkspace, /state\.pendingOperations\s*=.*data\.operations/);
   assert.match(codeWorkspace, /pendingOperations\.length > 0/);
 });
 

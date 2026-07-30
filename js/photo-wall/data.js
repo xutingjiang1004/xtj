@@ -245,9 +245,11 @@
       
       more = rows.length >= PAGE_SIZE;
       if (!more && local.length) {
-        // 云端数据为空时，本地缓存可能过期，保留本地
+        // P4: 云端成功返回空数组 — 用户已在云端删除所有照片。
+        // 必须清除旧本地缓存，否则已删除的照片会持续显示在用户设备上。
+        // 之前这里保留旧缓存是错误的，导致数据永久不一致。
         if (rows.length === 0) {
-          window.photoWallData = local;
+          window.photoWallData = [];
           saveLocalPhotoWallData();
         } else {
           var cloudIds = new Set(rows.map(function(row){ return row && row.id != null ? String(row.id) : ''; }).filter(Boolean));
@@ -496,9 +498,23 @@
     var last = Number(window.safeStorage.get(key) || 0) || 0;
     if (last && now - last < 5 * 60 * 1000) return;
     try { window.safeStorage.set(key, String(now)); } catch (_) {}
-    item.views = Number(item.views || 0) + 1;
+    // P4: 保存原始 views 以便 RPC 失败时回滚乐观更新
+    var originalViews = Number(item.views || 0);
+    item.views = originalViews + 1;
     updatePhotoViewDisplays(item);
-    try { await window.sb.rpc('increment_post_views', { p_post_id: item.cloudId }); } catch (_) {}
+    try {
+      var result = await window.sb.rpc('increment_post_views', { p_post_id: item.cloudId });
+      // P4: Supabase rpc() 在数据库层失败时返回 { data: null, error } 而非 throw。
+      // 之前只 try/catch，从未检查 error，导致浏览量乐观更新无法回滚。
+      if (result && result.error) {
+        item.views = originalViews;
+        updatePhotoViewDisplays(item);
+      }
+    } catch (_) {
+      // P4: 网络层异常也回滚
+      item.views = originalViews;
+      updatePhotoViewDisplays(item);
+    }
   }
 
   function handleExternalSync(message){
