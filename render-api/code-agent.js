@@ -196,6 +196,67 @@ function buildCodeCapabilities(deps, options) {
   };
 }
 
+// Only expose the deployment's configured model plus models returned by the
+// authenticated provider probe. Never trust a client-supplied model string.
+var CODE_THINKING_MODES = ['auto', 'off', 'low', 'medium', 'high', 'max'];
+function getCodeModels(deps) {
+  var capabilities = buildCodeCapabilities(deps);
+  var configured = String(capabilities.model || '').trim();
+  if (!configured) return { default_model: '', models: [] };
+  var snapshot = {};
+  if (typeof deps.getDeepSeekModelCatalog === 'function') {
+    try { snapshot = deps.getDeepSeekModelCatalog() || {}; } catch (_) { snapshot = {}; }
+  }
+  var probed = Array.isArray(snapshot.models) ? snapshot.models : [];
+  var ids = [configured];
+  probed.forEach(function(entry) {
+    var id = typeof entry === 'string' ? entry.trim() : String(entry && (entry.id || entry.name) || '').trim();
+    if (id && ids.indexOf(id) < 0) ids.push(id);
+  });
+  var ready = snapshot.status === 'ready';
+  return {
+    default_model: configured,
+    models: ids.map(function(id) {
+      var entry = probed.filter(function(item) {
+        var candidate = typeof item === 'string' ? item : (item && (item.id || item.name));
+        return String(candidate || '').trim() === id;
+      })[0];
+      var modes = entry && Array.isArray(entry.supported_thinking_modes) ? entry.supported_thinking_modes.filter(function(mode) {
+        return CODE_THINKING_MODES.indexOf(mode) >= 0;
+      }) : CODE_THINKING_MODES.slice();
+      return {
+        id: id,
+        name: String(entry && entry.display_name || id),
+        provider: capabilities.provider || 'deepseek',
+        description: id === configured ? '当前部署首选模型' : '已通过提供商探测的模型',
+        supports_thinking: entry && typeof entry.supports_thinking === 'boolean' ? entry.supports_thinking : true,
+        supported_thinking_modes: modes.length ? modes : ['auto', 'off'],
+        supports_tools: capabilities.toolCallingEnabled === true,
+        supports_attachments: true,
+        supports_vision: !!(entry && entry.supports_vision === true),
+        enabled: capabilities.agentEnabled === true && (id === configured || ready),
+        availability: capabilities.agentEnabled !== true ? 'unavailable' :
+          (ready ? 'ready' : (id === configured ? 'degraded' : 'unavailable')),
+        probe_status: String(snapshot.status || 'idle'),
+        capability_verified: !!(entry && (typeof entry.supports_thinking === 'boolean' || Array.isArray(entry.supported_thinking_modes) || typeof entry.supports_tools === 'boolean'))
+      };
+    })
+  };
+}
+function resolveCodeModel(deps, requestedModelId) {
+  var catalog = getCodeModels(deps);
+  var requested = String(requestedModelId || catalog.default_model || '').trim();
+  var model = catalog.models.filter(function(item) { return item.id === requested && item.enabled; })[0];
+  return model ? { ok: true, model: model, catalog: catalog } : { ok: false, code: 'MODEL_NOT_AVAILABLE', model: null, catalog: catalog };
+}
+function resolveThinkingMode(requestedMode, message) {
+  var requested = String(requestedMode || 'auto').trim().toLowerCase();
+  if (CODE_THINKING_MODES.indexOf(requested) < 0) return { ok: false, requested: requested, effective: 'auto' };
+  if (requested !== 'auto') return { ok: true, requested: requested, effective: requested };
+  var simple = /^(列出|查看|打开|搜索|解释|有哪些|简单|怎么用|什么意思)/;
+  return { ok: true, requested: requested, effective: simple.test(String(message || '').trim()) ? 'off' : 'high' };
+}
+
 function hasOwn(obj, key) {
   return obj && Object.prototype.hasOwnProperty.call(obj, key);
 }
@@ -3442,6 +3503,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     return res.json(Object.assign({ ok: true }, buildCodeCapabilities(deps)));
   });
 
+  app.get('/api/code/models', rateLimit(60000, 60), authenticateUser, function(req, res) {
+    var catalog = getCodeModels(deps);
+    return res.json({ ok: true, default_model: catalog.default_model, models: catalog.models });
+  });
+
   // ── Code chat: a real DeepSeek tool-calling agent ───────────────────
   app.post('/api/code/chat', rateLimit(60000, 20), authenticateUser, async function(req, res) {
     var aborted = false;
@@ -3566,11 +3632,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!apiKey) return sendError('AI_NOT_CONFIGURED', 'AI 服务未配置', 503);
       if (!model) return sendError('MODEL_NOT_CONFIGURED', 'Code AI 模型未配置', 503);
       if (typeof deps.callDeepSeek !== 'function') return sendError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 503);
+      var modelSelection = resolveCodeModel(deps, body.model_id);
+      if (!modelSelection.ok) return sendError(modelSelection.code, '所选模型当前不可用', 400);
+      model = modelSelection.model.id;
+      var thinkingSelection = resolveThinkingMode(body.thinking_mode, message);
+      if (!thinkingSelection.ok) return sendError('INVALID_THINKING_MODE', '思考程度无效', 400);
 
       // Phase 3: Compute capabilities and thinkingMode BEFORE building messages
       // so that runtime identity and limits can be injected into the user message.
       var capabilities = buildCodeCapabilities(deps);
-      var thinkingMode = String(body.thinking_mode || 'high');
+      var thinkingMode = thinkingSelection.effective;
       // P0 Fix: 前端明确发送的 thinking_mode 直接使用，不再用 auto 正则覆盖
       // 只有当前端发送 'auto' 时才做推断
       if (thinkingMode === 'auto') {
@@ -4063,7 +4134,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var requestStartTime = Date.now();
     var toolTrace = [];
     var userId = String(req.userName || '');
-    var clientRequestId = String(req.body.client_request_id || '');
+    var clientRequestId = String((req.body && req.body.client_request_id) || '');
 
     function logPhase(phase, extra) {
       var logObj = {
@@ -4169,7 +4240,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           streamSession.updateStreamSession(supabase, streamId, { last_event_id: eventId }).catch(function() {});
         }
       }
-      return writer.write(aiCoreSSE.formatSSEEvent(event));
+      var wrote = writer.write(aiCoreSSE.formatSSEEvent(event));
+      if (!wrote && type !== 'done') {
+        aborted = true;
+        try { requestController.abort(); } catch (_) {}
+      }
+      return wrote;
     }
 
     // Heartbeat
@@ -4310,8 +4386,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!model) { sendStreamError('MODEL_NOT_CONFIGURED', 'Code AI 模型未配置', 'init'); return; }
       if (typeof deps.callDeepSeek !== 'function') { sendStreamError('AGENT_NOT_AVAILABLE', 'Code Agent 未启用', 'init'); return; }
 
+      var modelSelection = resolveCodeModel(deps, body.model_id);
+      if (!modelSelection.ok) { sendStreamError(modelSelection.code, 'MODEL_NOT_AVAILABLE', 'validated'); return; }
+      model = modelSelection.model.id;
+      var thinkingSelection = resolveThinkingMode(body.thinking_mode, message);
+      if (!thinkingSelection.ok) { sendStreamError('INVALID_THINKING_MODE', 'INVALID_THINKING_MODE', 'validated'); return; }
       var capabilities = buildCodeCapabilities(deps);
-      var thinkingMode = String(body.thinking_mode || 'high');
+      var thinkingMode = thinkingSelection.effective;
       if (thinkingMode === 'auto') {
         var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
         thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';

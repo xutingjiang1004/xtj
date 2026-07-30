@@ -21,6 +21,15 @@
     lastRuntime: null, // { provider, model, configuredContextTokens, promptTokens, toolReadTokens, cacheHitTokens, cacheMissTokens, completionTokens, remainingEstimatedTokens }
     lastToolTrace: [],
     capabilities: null,
+    models: [],
+    modelLoadError: '',
+    selectedModelId: '',
+    thinkingMode: 'auto',
+    composerDraft: '',
+    composerMenu: null,
+    composerIsComposing: false,
+    composerMounted: false,
+    autoScrollPinned: true,
     attachments: [],
     lastSentAttachmentPaths: [],
     attachmentProcessing: false,
@@ -56,6 +65,8 @@
     _indexStatusPromise: null,
     _indexBuildKey: '',
     _capabilitiesPromise: null,
+    _modelsPromise: null,
+    _composerGlobalCleanup: null,
     _openFilePromises: {},
     _savePromises: {},
     _undoLock: false,
@@ -725,18 +736,22 @@
     state._savePromises = {};
     state._requestId++;
     if (state._resizerCleanup) state._resizerCleanup();
+    if (state._composerGlobalCleanup) state._composerGlobalCleanup();
+    state._composerGlobalCleanup = null;
     revokeAllUrls();
     disposeMonaco();
     state.sending = false;
     clearAttachments();
     state.lastSentAttachmentPaths = [];
     state.active = false;
+    state.composerMounted = false;
     _dom = {};
     if (typeof _dragState !== 'undefined' && _dragState) {
       document.body.classList.remove('code-is-resizing');
       document.body.classList.remove('code-is-resizing-row');
       _dragState = null;
     }
+    document.documentElement.classList.remove('code-workbench-nav-collapsed');
     // Don't clear directoryHandle so workspace can be restored
     return true;
   }
@@ -1344,6 +1359,8 @@
     chatWidth: 360,
     contextHeight: 180,
     sidebarCollapsed: false,
+    editorCollapsed: false,
+    workbenchNavCollapsed: false,
     chatCollapsed: false,
     contextCollapsed: false,
     maximizedPanel: null // 'editor' | 'chat' | null
@@ -1358,6 +1375,8 @@
         if (typeof p.chatWidth === 'number') _layoutState.chatWidth = p.chatWidth;
         if (typeof p.contextHeight === 'number') _layoutState.contextHeight = p.contextHeight;
         if (typeof p.sidebarCollapsed === 'boolean') _layoutState.sidebarCollapsed = p.sidebarCollapsed;
+        if (typeof p.editorCollapsed === 'boolean') _layoutState.editorCollapsed = p.editorCollapsed;
+        if (typeof p.workbenchNavCollapsed === 'boolean') _layoutState.workbenchNavCollapsed = p.workbenchNavCollapsed;
         if (typeof p.chatCollapsed === 'boolean') _layoutState.chatCollapsed = p.chatCollapsed;
         if (typeof p.contextCollapsed === 'boolean') _layoutState.contextCollapsed = p.contextCollapsed;
         if (p.maximizedPanel === 'editor' || p.maximizedPanel === 'chat' || p.maximizedPanel === null) _layoutState.maximizedPanel = p.maximizedPanel;
@@ -1432,6 +1451,9 @@
       _dom.panelCode.classList.remove('is-chat-collapsed');
     }
 
+    _dom.panelCode.classList.toggle('is-editor-collapsed', _layoutState.editorCollapsed === true && _layoutState.maximizedPanel !== 'editor');
+    document.documentElement.classList.toggle('code-workbench-nav-collapsed', _layoutState.workbenchNavCollapsed === true);
+
     if (_layoutState.contextCollapsed && _dom.sidebar) {
       _dom.sidebar.classList.add('is-context-collapsed');
     } else if (_dom.sidebar) {
@@ -1439,7 +1461,7 @@
     }
     
     // Maximized chat handles hiding editor
-    if (_layoutState.maximizedPanel === 'chat' && _dom.editorColumn) {
+    if ((_layoutState.maximizedPanel === 'chat' || _layoutState.editorCollapsed) && _dom.editorColumn) {
       _dom.editorColumn.style.display = 'none';
       _dom.panelCode.style.setProperty('--cw-chat-width', '100%');
     } else if (_dom.editorColumn) {
@@ -1467,6 +1489,19 @@
   function toggleSidebar() {
     _layoutState.sidebarCollapsed = !_layoutState.sidebarCollapsed;
     _layoutState.maximizedPanel = null;
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function toggleEditor() {
+    _layoutState.editorCollapsed = !_layoutState.editorCollapsed;
+    _layoutState.maximizedPanel = null;
+    applyLayoutToDOM();
+    triggerLayoutSave();
+  }
+
+  function toggleWorkbenchNav() {
+    _layoutState.workbenchNavCollapsed = !_layoutState.workbenchNavCollapsed;
     applyLayoutToDOM();
     triggerLayoutSave();
   }
@@ -1504,6 +1539,8 @@
       chatWidth: 360,
       contextHeight: 180,
       sidebarCollapsed: false,
+      editorCollapsed: false,
+      workbenchNavCollapsed: false,
       chatCollapsed: false,
       contextCollapsed: false,
       maximizedPanel: null
@@ -1514,6 +1551,7 @@
 
   function renderWorkspace() {
     if (!_dom.panelCode) return;
+    state.composerMounted = false;
     _dom.panelCode.innerHTML = '';
     
     loadLayoutConfig();
@@ -1608,6 +1646,14 @@
       '<button class="code-panel-action-btn max-editor-btn" title="最大化编辑器"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>';
     tabBar.appendChild(tabBarActions);
     tabBarActions.querySelector('.restore-layout-btn').addEventListener('click', resetLayout);
+    var foldEditorBtn = document.createElement('button');
+    foldEditorBtn.type = 'button';
+    foldEditorBtn.className = 'code-panel-action-btn fold-editor-btn';
+    foldEditorBtn.title = '折叠文件查看区';
+    foldEditorBtn.setAttribute('aria-label', '折叠文件查看区');
+    foldEditorBtn.textContent = '▣';
+    foldEditorBtn.addEventListener('click', toggleEditor);
+    tabBarActions.insertBefore(foldEditorBtn, tabBarActions.querySelector('.max-editor-btn'));
     tabBarActions.querySelector('.max-editor-btn').addEventListener('click', toggleMaximizeEditor);
     editorColumn.appendChild(tabBar);
 
@@ -1643,6 +1689,20 @@
         '<button class="code-panel-action-btn max-chat-btn" title="最大化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>' +
         '<button class="code-panel-action-btn fold-chat-btn" title="折叠"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>' +
       '</div>';
+    var chatActions = chatHeader.querySelector('.code-panel-actions');
+    function addChatPanelToggle(className, label, glyph, handler) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'code-panel-action-btn ' + className;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.textContent = glyph;
+      button.addEventListener('click', handler);
+      chatActions.insertBefore(button, chatActions.firstChild);
+    }
+    addChatPanelToggle('fold-workbench-nav-btn', '折叠左侧导航栏', '☰', toggleWorkbenchNav);
+    addChatPanelToggle('fold-editor-from-chat-btn', '折叠文件查看区', '▣', toggleEditor);
+    addChatPanelToggle('fold-directory-from-chat-btn', '折叠文件目录', '◧', toggleSidebar);
     chatHeader.querySelector('.max-chat-btn').addEventListener('click', toggleMaximizeChat);
     chatHeader.querySelector('.fold-chat-btn').addEventListener('click', toggleChat);
     chatPanel.appendChild(chatHeader);
@@ -1673,12 +1733,14 @@
     renderFileTree();
     renderEmptyState();
     renderProjectStatus();
+    restoreComposerPreferences();
     renderChatPanel();
     
     initResizerDragLogic();
     applyLayoutToDOM();
 
     loadProjectIndexStatus();
+    loadCodeModels();
     restoreTabs();
   }
 
@@ -3910,6 +3972,71 @@
     return state._capabilitiesPromise;
   }
 
+  function composerPreferenceKey() {
+    // Preferences are user-scoped as well as workspace-scoped, so changing
+    // accounts in the same browser cannot inherit another user's model mode.
+    return 'xtj_code_composer:' + encodeURIComponent(readComposerUserScope()) + ':' + encodeURIComponent(getWorkspaceId());
+  }
+
+  function restoreComposerPreferences() {
+    try {
+      var raw = localStorage.getItem(composerPreferenceKey());
+      var saved = raw ? JSON.parse(raw) : null;
+      if (!saved || typeof saved !== 'object') return;
+      if (typeof saved.modelId === 'string') state.selectedModelId = saved.modelId;
+      if (/^(auto|off|low|medium|high|max)$/.test(saved.thinkingMode || '')) state.thinkingMode = saved.thinkingMode;
+    } catch (e) { /* local preferences are optional */ }
+  }
+
+  function saveComposerPreferences() {
+    try {
+      localStorage.setItem(composerPreferenceKey(), JSON.stringify({
+        modelId: state.selectedModelId || '',
+        thinkingMode: state.thinkingMode || 'auto'
+      }));
+    } catch (e) { /* storage may be unavailable */ }
+  }
+
+  function loadCodeModels() {
+    if (state.models.length) return Promise.resolve(state.models);
+    if (state._modelsPromise) return state._modelsPromise;
+    state._modelsPromise = apiFetch('/api/code/models', { method: 'GET' })
+      .then(function(response) { return responseJson(response, '模型列表加载失败'); })
+      .then(function(data) {
+        var models = Array.isArray(data.models) ? data.models.filter(function(model) {
+          return model && model.enabled === true && typeof model.id === 'string' && model.id;
+        }) : [];
+        state.models = models;
+        state.modelLoadError = '';
+        var selectedAvailable = models.some(function(model) { return model.id === state.selectedModelId; });
+        if (!selectedAvailable) state.selectedModelId = String(data.default_model || (models[0] && models[0].id) || '');
+        normalizeThinkingModeForSelectedModel();
+        state._modelsPromise = null;
+        updateComposerControls();
+        return models;
+      }).catch(function(error) {
+        state._modelsPromise = null;
+        state.models = [];
+        state.modelLoadError = '模型列表加载失败，可重试';
+        updateComposerControls();
+        return [];
+      });
+    return state._modelsPromise;
+  }
+
+  function selectedCodeModel() {
+    return state.models.filter(function(model) { return model.id === state.selectedModelId; })[0] || null;
+  }
+
+  function normalizeThinkingModeForSelectedModel() {
+    var model = selectedCodeModel();
+    var modes = model && Array.isArray(model.supported_thinking_modes) ? model.supported_thinking_modes : [];
+    if (!modes.length || modes.indexOf(state.thinkingMode) >= 0) return false;
+    state.thinkingMode = modes.indexOf('auto') >= 0 ? 'auto' : modes[0];
+    saveComposerPreferences();
+    return true;
+  }
+
   function capabilitiesLabel() {
     var capabilities = state.capabilities;
     if (!capabilities) return { text: '能力检测中', title: '正在读取服务端能力' };
@@ -3962,6 +4089,16 @@
     return String(fileName || 'attachment')
       .replace(/[\/\\\u0000-\u001f\u007f]/g, '_')
       .slice(0, 180);
+  }
+
+  function attachmentTypeIcon(attachment) {
+    var name = String((attachment && attachment.name) || '').toLowerCase();
+    if (/\.pdf$/.test(name)) return 'PDF';
+    if (/\.(docx|doc)$/.test(name)) return 'DOC';
+    if (/\.(xlsx|xls|csv)$/.test(name)) return 'XLS';
+    if (/\.pptx$/.test(name)) return 'PPT';
+    if (/\.(json|md|markdown|txt)$/.test(name)) return 'TXT';
+    return 'FILE';
   }
 
   function currentAttachmentChars() {
@@ -4069,6 +4206,7 @@
           source: 'attachment',
           pinned: false,
           truncated: !!data.truncated,
+          status: 'ready',
           metadata: data.metadata || {}
         });
         if (attachmentGeneration !== state.workspaceGeneration) {
@@ -4107,8 +4245,55 @@
     renderChatPanel();
   }
 
+  function addOpenTabAsAttachment(tab) {
+    if (!tab || !tab.path || isRestrictedContextFile(tab.path)) return false;
+    if (state.attachments.length >= MAX_ATTACHMENTS) {
+      state.attachmentError = '本轮附件数量已达上限';
+      return false;
+    }
+    var content = typeof tab._currentContent === 'string' ? tab._currentContent :
+      (typeof tab._extractedText === 'string' ? tab._extractedText : String(tab.content || ''));
+    if (!content.trim()) return false;
+    if (currentAttachmentChars() + content.length > MAX_ATTACHMENT_TOTAL_CHARS) {
+      state.attachmentError = '本轮附件内容已达上限';
+      return false;
+    }
+    if (state.attachments.some(function (item) { return item.path === tab.path || (tab.sha256 && item.sha256 === tab.sha256); })) return false;
+    var safeName = safeAttachmentName(tab.name || tab.path.split('/').pop() || 'file');
+    var pathName = safeName;
+    var count = 1;
+    while (state.attachments.some(function (item) { return item.path === 'attachments/' + pathName; })) {
+      count++;
+      var parts = safeName.split('.');
+      if (parts.length > 1) {
+        var ext = parts.pop();
+        pathName = parts.join('.') + '_' + count + '.' + ext;
+      } else pathName = safeName + '_' + count;
+    }
+    state.attachments.push({
+      name: tab.name || pathName,
+      path: 'attachments/' + pathName,
+      mimeType: tab.mimeType || attachmentMimeType(tab.name, ''),
+      content: content.slice(0, MAX_ATTACHMENT_TOTAL_CHARS),
+      sha256: tab.sha256 || '',
+      source: 'open-file',
+      pinned: false,
+      truncated: content.length > MAX_ATTACHMENT_TOTAL_CHARS,
+      status: 'ready'
+    });
+    return true;
+  }
+
   function renderChatPanel() {
     if (!_dom.chatPanel) return;
+    if (state.composerMounted) {
+      syncChatMessages();
+      renderComposerAttachments();
+      updateComposerControls();
+      updateChatRequestControls();
+      return;
+    }
+    state.composerMounted = true;
     _dom.chatPanel.innerHTML = '';
 
     var header = document.createElement('div');
@@ -4124,6 +4309,20 @@
     messages.id = 'codeChatMessages';
     _dom.chatPanel.appendChild(messages);
 
+    var backToBottom = document.createElement('button');
+    backToBottom.type = 'button';
+    backToBottom.className = 'code-chat-back-to-bottom';
+    backToBottom.id = 'codeChatBackToBottom';
+    backToBottom.textContent = '回到底部';
+    backToBottom.hidden = true;
+    backToBottom.addEventListener('click', function () { scrollChatToBottom(true); });
+    _dom.chatPanel.appendChild(backToBottom);
+    messages.addEventListener('scroll', function () {
+      var remaining = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+      state.autoScrollPinned = remaining <= 48;
+      updateChatScrollControl();
+    }, { passive: true });
+
     // Render existing messages
     for (var i = 0; i < state.messages.length; i++) {
       appendChatMessage(state.messages[i], messages);
@@ -4133,11 +4332,30 @@
     inputArea.className = 'code-chat-input-area';
     inputArea.innerHTML =
       '<div class="code-chat-attachments" id="codeChatAttachments"></div>' +
-      '<button type="button" class="code-attachment-btn" id="codeAttachmentBtn" title="支持 DOCX、PDF、XLSX、PPTX、TXT、CSV、MD、JSON">添加资料</button>' +
+      '<button type="button" class="code-attachment-btn" id="codeAttachmentBtn" title="支持 DOCX、PDF、XLSX、PPTX、TXT、CSV、MD、JSON" aria-label="添加资料">添加资料</button>' +
       '<input type="file" id="codeAttachmentInput" accept="' + ATTACHMENT_ACCEPT + '" multiple hidden>' +
-      '<textarea id="codeChatInput" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
-      '<button class="send-btn" id="codeChatSendBtn" title="发送">➤</button>';
+      '<textarea id="codeChatInput" aria-label="向 Code AI 发送消息" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
+      '<button class="send-btn" id="codeChatSendBtn" type="button" title="发送" aria-label="发送消息">➤</button>';
     inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="&#21462;&#28040;&#35831;&#27714;">&#21462;&#28040;</button>';
+    inputArea.innerHTML +=
+      '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
+        '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="添加上下文" aria-haspopup="menu" aria-expanded="false">＋</button>' +
+        '<select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select>' +
+        '<select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
+          '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
+        '</select>' +
+        '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
+        '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
+      '</div>' +
+      '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
+      '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu" hidden>' +
+        '<button type="button" role="menuitem" data-composer-action="upload">上传资料</button>' +
+        '<button type="button" role="menuitem" data-composer-action="current">添加当前文件</button>' +
+        '<button type="button" role="menuitem" data-composer-action="open">添加已打开文件</button>' +
+        '<button type="button" role="menuitem" data-composer-action="pin">固定/取消固定当前文件</button>' +
+        '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
+        '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
+      '</div>';
     _dom.chatPanel.appendChild(inputArea);
 
     // Auto-resize textarea
@@ -4198,12 +4416,18 @@
 
     if (input) {
       input.addEventListener('input', function () {
+        state.composerDraft = input.value;
+        saveComposerDraft();
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        updateChatRequestControls();
       });
 
+      input.addEventListener('compositionstart', function () { state.composerIsComposing = true; });
+      input.addEventListener('compositionend', function () { state.composerIsComposing = false; });
+
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !state.composerIsComposing) {
           e.preventDefault();
           sendMessage();
         }
@@ -4220,11 +4444,313 @@
         cancelCurrentRequest();
       });
     }
+    bindComposerControls();
+    restoreComposerDraft();
     updateChatRequestControls();
 
     // Scroll to bottom
     scrollChatToBottom();
     if (!state.capabilities && !state._capabilitiesPromise) loadCapabilities();
+    loadCodeModels();
+  }
+
+  function readComposerUserScope() {
+    var current = window.currentUser;
+    if (typeof current === 'string' && current && current.indexOf('[object Object]') < 0) return current;
+    if (current && typeof current === 'object') return current.user_name || current.name || current.id || '';
+    var keys = ['xtj_user', 'xtj_username', 'xtj_user_name'];
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var stored = localStorage.getItem(keys[i]) || sessionStorage.getItem(keys[i]);
+        if (stored) return stored;
+      } catch (e) {}
+    }
+    return 'anonymous';
+  }
+
+  function composerDraftKey() {
+    return 'xtj_code_draft:' + encodeURIComponent(readComposerUserScope()) + ':' + encodeURIComponent(getWorkspaceId()) + ':' + encodeURIComponent(state.conversationId || 'new');
+  }
+
+  function saveComposerDraft() {
+    try { sessionStorage.setItem(composerDraftKey(), state.composerDraft || ''); } catch (e) {}
+  }
+
+  function restoreComposerDraft() {
+    var input = document.getElementById('codeChatInput');
+    if (!input || input.value) return;
+    try { state.composerDraft = sessionStorage.getItem(composerDraftKey()) || ''; } catch (e) { state.composerDraft = ''; }
+    if (!state.composerDraft) return;
+    input.value = state.composerDraft;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  }
+
+  function clearComposerDraft() {
+    state.composerDraft = '';
+    try { sessionStorage.removeItem(composerDraftKey()); } catch (e) {}
+  }
+
+  function syncChatMessages() {
+    var messages = document.getElementById('codeChatMessages');
+    if (!messages) return;
+    for (var i = 0; i < state.messages.length; i++) {
+      if (!messages.querySelector('[data-code-message-index="' + i + '"]')) {
+        appendChatMessage(state.messages[i], messages);
+      }
+    }
+    // Once a request is terminal, only canonical state messages may remain.
+    // This removes any late transient/typing card that raced the terminal UI.
+    if (!state.sending) {
+      Array.prototype.forEach.call(messages.querySelectorAll('.code-chat-message.assistant:not([data-code-message-index])'), function(node) {
+        discardStreamingMessageNode(node);
+      });
+    }
+  }
+
+  // A stream paints into a transient node before its final message is written
+  // to state.  Mark that node as the canonical message once the stream
+  // succeeds, otherwise syncChatMessages would append the same reply again.
+  function retainStreamingMessageNode(node, message) {
+    if (!node || !message) return;
+    var messageIndex = state.messages.indexOf(message);
+    if (messageIndex >= 0) node.setAttribute('data-code-message-index', String(messageIndex));
+  }
+
+  // Error replies are rendered from canonical state so they retain retry
+  // controls.  Remove the transient node before that reconciliation.
+  function discardStreamingMessageNode(node) {
+    if (node && node.parentNode) {
+      try { node.remove(); } catch (_) { node.parentNode.removeChild(node); }
+    }
+    // A re-render can replace the element while an AbortError is queued.
+    // Remove the current DOM node by its stable stream id as well.
+    if (node && node.id) {
+      var currentNode = document.getElementById(node.id);
+      if (currentNode && currentNode.parentNode) {
+        try { currentNode.remove(); } catch (_) { currentNode.parentNode.removeChild(currentNode); }
+      }
+    }
+  }
+
+  function renderComposerAttachments() {
+    var container = document.getElementById('codeChatAttachments');
+    if (!container) return;
+    var html = '';
+    for (var i = 0; i < state.attachments.length; i++) {
+      var attachment = state.attachments[i];
+      var status = attachment.status === 'ready' ? '，已就绪' : '';
+      if (attachment.truncated) status += '，已截断';
+      html += '<span class="code-attachment-chip ' + (attachment.pinned ? 'is-pinned' : '') + '" title="' + escapeHTML(attachment.path) + '">' +
+        '<span class="code-attachment-kind" aria-hidden="true">' + attachmentTypeIcon(attachment) + '</span><span class="code-attachment-name">' + escapeHTML(attachment.name) + '</span>' +
+        '<span class="code-attachment-meta">' + (attachment.pinned ? '固定' : '本轮') + status + '</span>' +
+        '<button type="button" data-pin-attachment="' + i + '" aria-label="' + (attachment.pinned ? '取消固定 ' : '固定 ') + escapeHTML(attachment.name) + '">' + (attachment.pinned ? '取消固定' : '固定') + '</button>' +
+        '<button type="button" data-remove-attachment="' + i + '" aria-label="移除 ' + escapeHTML(attachment.name) + '">×</button></span>';
+    }
+    if (state.attachmentProcessing) html += '<span class="code-attachment-status" role="status">正在解析资料…</span>';
+    if (state.attachmentError) html += '<span class="code-attachment-error" role="alert">' + escapeHTML(state.attachmentError) + '</span>';
+    container.innerHTML = html;
+    Array.prototype.forEach.call(container.querySelectorAll('[data-pin-attachment]'), function(button) {
+      button.addEventListener('click', function() { toggleAttachmentPinned(parseInt(button.getAttribute('data-pin-attachment'), 10)); });
+    });
+    Array.prototype.forEach.call(container.querySelectorAll('[data-remove-attachment]'), function(button) {
+      button.addEventListener('click', function() { removeAttachment(parseInt(button.getAttribute('data-remove-attachment'), 10)); });
+    });
+  }
+
+  function updateComposerControls() {
+    var modelSelect = document.getElementById('codeModelSelect');
+    var thinkingSelect = document.getElementById('codeThinkingSelect');
+    var contextUsage = document.getElementById('codeContextUsage');
+    var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
+    if (modelSelect) {
+      var current = state.selectedModelId;
+      modelSelect.innerHTML = '';
+      if (!state.models.length) {
+        modelSelect.disabled = true;
+        modelSelect.innerHTML = '<option value="">模型不可用</option>';
+      } else {
+        state.models.forEach(function(model) {
+          var option = document.createElement('option');
+          option.value = model.id;
+          option.textContent = model.name + (model.supports_tools ? ' · 工具' : '');
+          option.selected = model.id === current;
+          modelSelect.appendChild(option);
+        });
+        modelSelect.disabled = false;
+      }
+      var selectedModel = selectedCodeModel();
+      modelSelect.title = selectedModel ? (selectedModel.description || ((selectedModel.supports_thinking ? '支持思考' : '不支持思考') + (selectedModel.supports_tools ? '；支持工具调用' : ''))) : '';
+    }
+    if (thinkingSelect) {
+      normalizeThinkingModeForSelectedModel();
+      thinkingSelect.value = state.thinkingMode || 'auto';
+      var model = selectedCodeModel();
+      Array.prototype.forEach.call(thinkingSelect.options, function(option) {
+        option.disabled = !!(model && Array.isArray(model.supported_thinking_modes) && model.supported_thinking_modes.indexOf(option.value) < 0);
+      });
+    }
+    if (contextUsage) {
+      var runtime = state.lastRuntime || {};
+      var used = Number(runtime.promptTokens || runtime.prompt_tokens || runtime.currentPromptTokens || 0);
+      var total = Number(runtime.configuredContextTokens || runtime.maxContextTokens || (state.capabilities && state.capabilities.maxContextTokens) || 0);
+      contextUsage.textContent = used > 0 && total > 0 ? '上下文 ' + Math.min(100, Math.round(used / total * 100)) + '%' : '上下文 未估算';
+      contextUsage.title = used > 0 && total > 0 ? ('约 ' + used + ' / ' + total + ' tokens') : '在收到首个模型运行数据后显示估算值';
+      if (runtime.thinkingFallback) contextUsage.title += '；思考模式已由 ' + (runtime.requestedThinkingMode || '请求值') + ' 降级为 ' + (runtime.effectiveThinkingMode || 'off');
+    }
+    if (runtimeStatus) {
+      var modelHint = selectedCodeModel();
+      if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
+        runtimeStatus.dataset.availability = 'degraded'; /*
+        runtimeStatus.title = '妯″瀷妫€娴嬫湭瀹屾垚锛屾湇鍔″櫒浼氬湪璇锋眰鏃跺啀娆℃牎楠?;
+      */ } else if (runtimeStatus.dataset.availability) {
+        delete runtimeStatus.dataset.availability;
+        runtimeStatus.removeAttribute('title');
+      }
+      runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError || (modelHint && modelHint.description) || '');
+      runtimeStatus.hidden = !runtime.thinkingFallback && !state.modelLoadError && !(modelHint && (modelHint.description || modelHint.availability === 'degraded'));
+      if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
+        runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
+      }
+    }
+  }
+
+  function bindComposerControls() {
+    var modelSelect = document.getElementById('codeModelSelect');
+    var thinkingSelect = document.getElementById('codeThinkingSelect');
+    var contextButton = document.getElementById('codeComposerContextBtn');
+    var contextMenu = document.getElementById('codeComposerContextMenu');
+    var contextUsage = document.getElementById('codeContextUsage');
+    var contextDetails = document.getElementById('codeContextDetails');
+    if (modelSelect && !modelSelect.dataset.bound) {
+      modelSelect.dataset.bound = '1';
+      modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); });
+    }
+    if (thinkingSelect && !thinkingSelect.dataset.bound) {
+      thinkingSelect.dataset.bound = '1';
+      thinkingSelect.addEventListener('change', function() { state.thinkingMode = thinkingSelect.value; saveComposerPreferences(); });
+    }
+    if (contextUsage && contextDetails && !contextUsage.dataset.bound) {
+      contextUsage.dataset.bound = '1';
+      contextUsage.addEventListener('click', function() {
+        var opening = contextDetails.hidden;
+        if (contextMenu) contextMenu.hidden = true;
+        if (contextButton) contextButton.setAttribute('aria-expanded', 'false');
+        if (opening) {
+          var runtime = state.lastRuntime || {};
+          var used = Number(runtime.promptTokens || runtime.prompt_tokens || runtime.currentPromptTokens || 0);
+          var total = Number(runtime.configuredContextTokens || runtime.maxContextTokens || (state.capabilities && state.capabilities.maxContextTokens) || 0);
+          contextDetails.innerHTML =
+            '<strong>本轮上下文</strong>' +
+            '<span>当前文件：' + escapeHTML(state.activePath || '无') + '</span>' +
+            '<span>固定文件：' + state.pinnedFiles.length + '，已打开：' + state.openTabs.length + '，附件：' + state.attachments.length + '</span>' +
+            '<span>历史消息：' + state.messages.length + '，估算：' + (used && total ? (used + ' / ' + total + ' tokens') : '未估算') + '</span>' +
+            (runtime.cacheHitTokens ? '<span>最近缓存命中：' + runtime.cacheHitTokens + ' tokens</span>' : '');
+          var readContext = state.lastReadContext || {};
+          var contextPercent = used && total ? Math.round(used / total * 100) : 0;
+          if (readContext.truncated) {
+            contextDetails.innerHTML += '<span class="code-context-warning">\u5df2\u622a\u65ad\u90e8\u5206\u4e0a\u4e0b\u6587\uff1a\u8bf7\u51cf\u5c11\u9644\u4ef6\u6216\u53d6\u6d88\u56fa\u5b9a\u6587\u4ef6\u540e\u518d\u8bd5\u3002</span>';
+          } else if (contextPercent >= 85) {
+            contextDetails.innerHTML += '<span class="code-context-warning">\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9650\u5236\uff0c\u5efa\u8bae\u51cf\u5c11\u9644\u4ef6\u6216\u53d6\u6d88\u56fa\u5b9a\u6587\u4ef6\u3002</span>';
+          }
+        }
+        contextDetails.hidden = !opening;
+        contextUsage.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      });
+    }
+    if (contextButton && contextMenu && !contextButton.dataset.bound) {
+      contextButton.dataset.bound = '1';
+      contextButton.addEventListener('click', function() {
+        var opening = contextMenu.hidden;
+        if (contextDetails) contextDetails.hidden = true;
+        if (contextUsage) contextUsage.setAttribute('aria-expanded', 'false');
+        contextMenu.hidden = !opening;
+        state.composerMenu = opening ? 'context' : null;
+        contextButton.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        if (opening) contextMenu.querySelector('button').focus();
+      });
+      contextMenu.addEventListener('click', function(event) {
+        var action = event.target && event.target.getAttribute('data-composer-action');
+        if (!action) return;
+        if (action === 'upload') document.getElementById('codeAttachmentInput').click();
+        if (action === 'current') {
+          var currentTab = state.openTabs.filter(function(tab) { return tab.path === state.activePath; })[0];
+          if (!currentTab) showToast('请先从左侧打开一个文件', 'info');
+          else if (!addOpenTabAsAttachment(currentTab)) showToast('当前文件没有可添加的内容，或已在本轮上下文中', 'info');
+        }
+        if (action === 'open') {
+          var addedOpenFiles = 0;
+          state.openTabs.forEach(function(tab) { if (addOpenTabAsAttachment(tab)) addedOpenFiles++; });
+          if (!addedOpenFiles) showToast('没有新的已打开文件可添加', 'info');
+        }
+        if (action === 'pin') {
+          if (!state.activePath) showToast('请先从左侧打开一个文件', 'info');
+          else if (state.pinnedFiles.indexOf(state.activePath) < 0) state.pinnedFiles.push(state.activePath);
+          else if (action === 'pin') state.pinnedFiles.splice(state.pinnedFiles.indexOf(state.activePath), 1);
+        }
+        if (false && action === 'open') {
+          state.openTabs.forEach(function(tab) { if (tab.path && state.pinnedFiles.indexOf(tab.path) < 0) state.pinnedFiles.push(tab.path); });
+        }
+        if (action === 'pinned') {
+          showToast(state.pinnedFiles.length ? ('已固定：' + state.pinnedFiles.map(function(path) { return path.split('/').pop(); }).join('、')) : '当前没有固定文件', 'info');
+        }
+        if (action === 'clear') consumeTransientAttachments();
+        contextMenu.hidden = true;
+        state.composerMenu = null;
+        contextButton.setAttribute('aria-expanded', 'false');
+        renderComposerAttachments();
+        renderProjectStatus();
+        contextButton.focus();
+      });
+      contextMenu.addEventListener('keydown', function(event) {
+        var items = Array.prototype.slice.call(contextMenu.querySelectorAll('[role="menuitem"]'));
+        var index = items.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (index < 0) index = 0;
+          else index = (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+          items[index].focus();
+        }
+        if (event.key === 'Home' && items.length) { event.preventDefault(); items[0].focus(); }
+        if (event.key === 'End' && items.length) { event.preventDefault(); items[items.length - 1].focus(); }
+        if (event.key === 'Tab') {
+          contextMenu.hidden = true;
+          state.composerMenu = null;
+          contextButton.setAttribute('aria-expanded', 'false');
+        }
+      });
+      if (state._composerGlobalCleanup) state._composerGlobalCleanup();
+      var onDocumentPointerDown = function(event) {
+        if (!contextMenu.hidden && !contextMenu.contains(event.target) && event.target !== contextButton) {
+          contextMenu.hidden = true;
+          state.composerMenu = null;
+          contextButton.setAttribute('aria-expanded', 'false');
+        }
+        if (contextDetails && !contextDetails.hidden && !contextDetails.contains(event.target) && event.target !== contextUsage) {
+          contextDetails.hidden = true;
+          contextUsage.setAttribute('aria-expanded', 'false');
+        }
+      };
+      var onDocumentKeyDown = function(event) {
+        if (event.key === 'Escape' && !contextMenu.hidden) {
+          contextMenu.hidden = true;
+          state.composerMenu = null;
+          contextButton.setAttribute('aria-expanded', 'false');
+          contextButton.focus();
+        }
+        if (event.key === 'Escape' && contextDetails && !contextDetails.hidden) {
+          contextDetails.hidden = true;
+          contextUsage.setAttribute('aria-expanded', 'false');
+          contextUsage.focus();
+        }
+      };
+      document.addEventListener('pointerdown', onDocumentPointerDown);
+      document.addEventListener('keydown', onDocumentKeyDown);
+      state._composerGlobalCleanup = function() {
+        document.removeEventListener('pointerdown', onDocumentPointerDown);
+        document.removeEventListener('keydown', onDocumentKeyDown);
+      };
+    }
   }
 
   function parseSimpleMarkdown(text) {
@@ -4308,6 +4834,8 @@
     if (isError) el.setAttribute('data-state', 'error');
     else if (isCancelled) el.setAttribute('data-state', 'cancelled');
     else if (isAssistant) el.setAttribute('data-state', 'complete');
+    var messageIndex = state.messages.indexOf(msg);
+    if (messageIndex >= 0) el.setAttribute('data-code-message-index', String(messageIndex));
 
     var avatarText = msg.role === 'user' ? '你' : 'AI';
     var avatar = '<div class="msg-avatar">' + escapeHTML(avatarText) + '</div>';
@@ -4322,8 +4850,6 @@
     if (isError) {
       body += '<div class="code-stream-status" data-state="error" role="status" aria-live="polite" aria-busy="false">' +
         '<span class="code-stream-status-text">生成失败</span></div>';
-      body += '<div class="code-stream-error-heading"><span>生成失败</span>' +
-        '<code>' + escapeHTML(msg.errorCode) + '</code></div>';
     }
     body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(visibleContent) + '</div>';
     if (msg.time) {
@@ -4349,11 +4875,18 @@
     }
   }
 
-  function scrollChatToBottom() {
+  function updateChatScrollControl() {
+    var button = document.getElementById('codeChatBackToBottom');
+    if (button) button.hidden = state.autoScrollPinned !== false;
+  }
+
+  function scrollChatToBottom(force) {
     var container = document.getElementById('codeChatMessages');
-    if (container) {
+    if (container && (force || state.autoScrollPinned !== false)) {
       setTimeout(function () {
         container.scrollTop = container.scrollHeight;
+        state.autoScrollPinned = true;
+        updateChatScrollControl();
       }, 50);
     }
   }
@@ -4484,7 +5017,8 @@
       client_request_id: clientRequestId || ('code_cr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)),
       message: message,
       active_path: state.activePath || '',
-      thinking_mode: 'high',
+      model_id: state.selectedModelId || '',
+      thinking_mode: state.thinkingMode || 'auto',
       history: historyMsgs,
       pinned_paths: state.pinnedFiles.slice(),
       open_files: buildOpenFilesContext(),
@@ -4615,7 +5149,22 @@
     var input = document.getElementById('codeChatInput');
     if (!input && !isRetry) return;
     var message = isRetry ? String(retryMessage || '').trim() : input.value.trim();
+    var hasAttachments = state.attachments.length > 0;
+    if (!isRetry && state.attachmentProcessing && hasAttachments) {
+      showToast('资料正在解析，请完成后再发送', 'info');
+      return;
+    }
+    if (!message && hasAttachments && !isRetry) {
+      // The server requires a non-empty instruction. Make attachment-only
+      // sends useful without fabricating a model-side prompt elsewhere.
+      message = '请分析我附上的资料。';
+    }
     if (!message) return;
+    if (!isRetry && !state.selectedModelId) {
+      loadCodeModels();
+      showToast('模型列表尚未准备好，请稍后重试', 'info');
+      return;
+    }
     state.lastFailedMessage = message;
 
     // P0: 保存当前 workspace generation 用于隔离
@@ -4655,8 +5204,23 @@
     clearSendingWatchdog();
     _sendingWatchdog = setTimeout(function() {
       if (state.sending && isCurrentRequest(ctx)) {
-        console.warn('[code-workspace] Watchdog: state.sending stuck true, resetting');
-        finalizeRequest(ctx, { cancelReason: 'watchdog', done: false });
+        console.warn('[code-workspace] Watchdog: request timed out');
+        // A stream owns a visible assistant node.  Finalizing it directly
+        // leaves that node in "thinking" forever, so route through its one
+        // terminal-error path instead.
+        if (ctx.streamState && typeof ctx.streamState.fail === 'function') {
+          ctx.streamState.fail('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true);
+        } else {
+          restoreFailedMessage(ctx.originalMessage);
+          state.messages.push({
+            role: 'assistant', content: 'AI 响应超时，请稍后重试',
+            time: '', errorCode: 'PROVIDER_TIMEOUT', retryable: true,
+            retryMessage: ctx.originalMessage,
+            retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null
+          });
+          finalizeRequest(ctx, { error: 'AI 响应超时', errorCode: 'PROVIDER_TIMEOUT' });
+          renderChatPanel();
+        }
       }
       _sendingWatchdog = null;
     }, 120000);
@@ -4687,6 +5251,7 @@
       state.messages.push({ role: 'user', content: message, time: timeStr });
       input.value = '';
       input.style.height = 'auto';
+      clearComposerDraft();
     }
 
     // P0: 追加用户消息到聊天，而不是重建整个面板
@@ -4697,13 +5262,16 @@
       if (messagesContainer && !isRetry) {
         appendChatMessage(state.messages[state.messages.length - 1], messagesContainer);
       }
-      showTypingIndicator();
+      // Request handlers own the sole assistant status card. A generic typing
+      // bubble here races with both SSE and JSON terminal rendering.
       scrollChatToBottom();
     } catch (e) {
       console.error('[code-workspace] Initial DOM render failed:', e);
       // Restore the message to input so user can retry
       if (input) {
         input.value = message;
+        state.composerDraft = message;
+        saveComposerDraft();
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
       }
@@ -4775,6 +5343,8 @@
     var input = document.getElementById('codeChatInput');
     if (input && !input.value) {
       input.value = message;
+      state.composerDraft = message;
+      saveComposerDraft();
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight || 0, 120) + 'px';
     }
@@ -4784,15 +5354,21 @@
     var input = document.getElementById('codeChatInput');
     var sendBtn = document.getElementById('codeChatSendBtn');
     var cancelBtn = document.getElementById('codeChatCancelBtn');
+    var inputArea = document.querySelector('.code-chat-input-area');
+    var hasSendableContent = !!((input && input.value.trim()) || state.attachments.length);
     // P0 Fix: 不禁止输入框，用户可以输入下一条草稿
     if (input) input.disabled = false;
     if (sendBtn) {
       sendBtn.style.display = state.sending ? 'none' : '';
+      sendBtn.disabled = !state.sending && (!hasSendableContent || state.attachmentProcessing || !state.selectedModelId);
+      sendBtn.setAttribute('aria-label', '发送消息');
     }
     if (cancelBtn) {
       cancelBtn.disabled = !state.sending;
       cancelBtn.style.display = state.sending ? '' : 'none';
+      cancelBtn.setAttribute('aria-label', '停止生成');
     }
+    if (inputArea) inputArea.setAttribute('aria-busy', state.sending || state.attachmentProcessing ? 'true' : 'false');
   }
 
   function cancelCurrentRequest() {
@@ -5087,18 +5663,13 @@
           friendlyMessage = 'AI 服务暂时无法处理该请求，请稍后重试。';
         }
 
-        var errorHtml = '<div class="code-stream-error-heading"><span>生成失败</span>' +
-          (code ? '<code>' + escapeHTML(code) + '</code>' : '') + '</div>' +
-          '<div class="code-stream-error-msg">';
+        var errorHtml = '<div class="code-stream-error-msg">';
         errorHtml += escapeHTML(friendlyMessage);
         
         if (code) {
           errorHtml += '<details style="margin-top: 8px; font-size: 11px; opacity: 0.7; cursor: pointer;">';
           errorHtml += '<summary>查看错误详情</summary>';
           errorHtml += '<div style="margin-top: 4px;">错误码: ' + escapeHTML(code) + '</div>';
-          if (friendlyMessage !== message) {
-             errorHtml += '<div>原始信息: ' + escapeHTML(message) + '</div>';
-          }
           errorHtml += '</details>';
         }
         
@@ -5120,6 +5691,9 @@
       if (contentEl && !String(contentEl.textContent || '').trim() && !String(answerBuffer || '').trim()) {
         contentEl.textContent = friendlyMessage;
       }
+      // A failed request must never discard the user's original prompt.  Do
+      // not overwrite a newer draft typed while this request was in flight.
+      restoreFailedMessage(ctx.originalMessage);
       // Keep partial content
       if (contentEl._streamRenderer) {
         try { contentEl._streamRenderer.stop(); } catch (e) {}
@@ -5183,6 +5757,7 @@
       // canonical state so the subsequent render cannot leave a blank/ambiguous bubble.
       answerBuffer = '';
       state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+      discardStreamingMessageNode(assistantNode);
       cleanupStream();
       finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
       renderChatPanel();
@@ -5235,6 +5810,7 @@
           showError(errCode, errMsg, json && json.retryable);
           answerBuffer = '';
           state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable !== false, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+          discardStreamingMessageNode(assistantNode);
           cleanupStream();
           finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
           renderChatPanel();
@@ -5338,6 +5914,7 @@
                 usage: finalUsage
               });
               state.pendingOperations = [];
+              discardStreamingMessageNode(assistantNode);
               cleanupStream();
               finalizeRequest(ctx, { error: eofError, errorCode: 'STREAM_ENDED_WITHOUT_DONE' });
               clearStreamState();
@@ -5376,6 +5953,7 @@
               showError('STREAM_INTERRUPTED', '流式连接中断', true);
               answerBuffer = '';
               state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+              discardStreamingMessageNode(assistantNode);
               cleanupStream();
               finalizeRequest(ctx, { error: '流式连接中断', errorCode: 'STREAM_INTERRUPTED' });
               renderChatPanel();
@@ -5472,9 +6050,7 @@
               // showError rendered the terminal state into the streaming node.
               // Remove that transient node before rebuilding from state, or
               // an empty provider response produces duplicate assistant cards.
-              if (assistantNode && assistantNode.parentNode) {
-                try { assistantNode.remove(); } catch (_) {}
-              }
+              discardStreamingMessageNode(assistantNode);
               renderChatPanel();
               clearStreamState();
               break;
@@ -5496,6 +6072,7 @@
               runtime: finalRuntime,
               usage: finalUsage
             });
+            retainStreamingMessageNode(assistantNode, state.messages[state.messages.length - 1]);
 
             state.pendingOperations = attachPendingOpMetadata(ctx, finalOperations);
             if (finalContextInfo) {
@@ -5550,9 +6127,7 @@
               finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
               // The streaming node already contains the error UI. Reconcile
               // from state with exactly one assistant message.
-              if (assistantNode && assistantNode.parentNode) {
-                try { assistantNode.remove(); } catch (_) {}
-              }
+              discardStreamingMessageNode(assistantNode);
               renderChatPanel();
             break;
         }
@@ -5580,6 +6155,7 @@
           time: timeStr,
           stopped: true
         });
+        discardStreamingMessageNode(assistantNode);
         // Phase 3: Clear stream state on cancel — prevent auto-reconnect
         clearStreamState();
         cleanupStream();
@@ -5610,6 +6186,14 @@
           var replayEvents = Array.isArray(jsonData.events) ? jsonData.events : [];
           for (var eventIndex = 0; eventIndex < replayEvents.length; eventIndex++) {
             ctx.streamState.handleEvent(replayEvents[eventIndex]);
+          }
+          // The idempotency endpoint deliberately returns a compact JSON
+          // envelope. Fetch the persisted event log from the beginning so a
+          // completed duplicate can replay its terminal `done` event.
+          if (jsonData.duplicate === true && jsonData.stream_id && !ctx.streamState.isDone()) {
+            ctx.streamState.setLastEventId(0);
+            resumeStream(ctx, jsonData.stream_id, 0);
+            return null;
           }
           if (jsonData.status === 'completed' && !ctx.streamState.isDone()) {
             var replayReply = jsonData.reply || (jsonData.result && jsonData.result.reply) || '';
@@ -5653,6 +6237,7 @@
       var errMsg = (err && err.message) ? err.message : String(err);
       showError('NETWORK_ERROR', errMsg, true);
       state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+      discardStreamingMessageNode(assistantNode);
       finalizeRequest(ctx, { error: errMsg, errorCode: 'NETWORK_ERROR' });
       renderChatPanel();
     });
@@ -5907,7 +6492,11 @@
         operations: operations || [],
         usage: usage || null
       });
-      state.pendingOperations = attachPendingOpMetadata(ctx, operations || []);
+      retainStreamingMessageNode(assistantNode, state.messages[state.messages.length - 1]);
+      // A resumed stream has no original request context to safely attach
+      // local file-operation metadata to. Keep the reply, but require a new
+      // request before offering any write operation.
+      state.pendingOperations = [];
       clearStreamState();
       renderChatPanel();
       renderDiffView();
@@ -5939,6 +6528,7 @@
         retryMessage: originalMessage,
         retryBody: null
       });
+      discardStreamingMessageNode(assistantNode);
       clearStreamState();
       renderChatPanel();
     }
@@ -5958,6 +6548,7 @@
         time: timeStr,
         errorCode: 'CANCELLED'
       });
+      discardStreamingMessageNode(assistantNode);
       clearStreamState();
       renderChatPanel();
     }
@@ -6075,7 +6666,7 @@
           var json = null;
           try { json = JSON.parse(text); } catch (_) {}
           var error = new Error((json && json.error) || ('API 请求失败: ' + resp.status));
-          error.code = (json && json.code) || (resp.status === 400 ? 'PROVIDER_HTTP_400' : (resp.status === 401 ? 'AUTH_REQUIRED' : 'CODE_REQUEST_FAILED'));
+          error.code = (json && json.code) || (resp.status === 400 ? 'PROVIDER_HTTP_400' : (resp.status === 401 ? 'AUTH_REQUIRED' : (resp.status >= 500 ? ('PROVIDER_HTTP_' + resp.status) : 'CODE_REQUEST_FAILED')));
           if (resp.status === 400 && json && json.validation) error.code = 'VALIDATION_FAILED';
           error.retryable = json && json.retryable === true;
           error.requestId = json && json.requestId || '';

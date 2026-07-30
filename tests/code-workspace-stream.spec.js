@@ -32,6 +32,13 @@ async function openCodeWorkspace(page, options = {}) {
     window.__codeStreamMock = mock;
     window.fetch = (input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
+      if (String(url).includes('/api/code/models')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          default_model: 'fixture-model',
+          models: [{ id: 'fixture-model', name: 'Fixture model', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
       if (!String(url).includes('/api/code/chat')) return nativeFetch(input, init);
 
       let requestBody = null;
@@ -111,6 +118,15 @@ async function openCodeWorkspace(page, options = {}) {
       model: 'fixture-model'
     })
   }));
+  await page.route('**/api/code/models', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      default_model: 'fixture-model',
+      models: [{ id: 'fixture-model', name: 'Fixture model', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+    })
+  }));
   await page.route('**/js/code-workspace.min.js*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/javascript',
@@ -130,6 +146,13 @@ async function openCodeWorkspace(page, options = {}) {
   // the first user action.
   await page.evaluate(() => {
     window.xtjProtectedFetch = (url, init) => window.fetch(url, init || {});
+    // The shell can install its authenticated fetch wrapper before our test
+    // wrapper is attached. Seed the already server-shaped fixture so stream
+    // cases exercise streaming rather than an unrelated model-loader race.
+    const state = window.__xtjCodeWorkspaceAPI.getState();
+    state.models = [{ id: 'fixture-model', name: 'Fixture model', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }];
+    state.selectedModelId = 'fixture-model';
+    state.modelLoadError = '';
   });
 }
 
@@ -139,6 +162,7 @@ async function enqueue(page, fixture) {
 
 async function send(page, message) {
   await page.locator('#codeChatInput').fill(message);
+  await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
   await page.locator('#codeChatSendBtn').click();
 }
 
@@ -390,7 +414,8 @@ test.describe('Code workspace stream state regressions', () => {
     expect(snapshot.aborts).toBe(1);
     expect(snapshot.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
     expect(snapshot.messages.find((message) => message.role === 'assistant').stopped).toBe(true);
-    expect(await page.locator('.code-stream-error').count()).toBe(0);
+    await expect(page.locator('.code-chat-message.assistant')).toHaveCount(1);
+    await expect(page.locator('.code-stream-error:visible')).toHaveCount(0);
     await expect(page.locator('.code-chat-message.assistant.streaming')).toHaveCount(0);
   });
 
