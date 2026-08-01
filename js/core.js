@@ -1282,7 +1282,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
         };
         var xtjModulePromises = Object.create(null);
-        var XTJ_MODULE_LOAD_TIMEOUT = 15000;
+        // Render can take longer than 15 seconds to cold-deliver the lazy Code bundle.
+        // Keep one bounded retry window instead of failing into an empty Code surface.
+        var XTJ_MODULE_LOAD_TIMEOUT = 45000;
 
         function moduleAssetUrl(metaName) {
             var meta = document.querySelector('meta[name="' + metaName + '"]');
