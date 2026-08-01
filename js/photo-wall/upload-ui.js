@@ -166,8 +166,8 @@
         }
         entry.lastQueriedAt = now;
         entry.retryCount = (entry.retryCount || 0) + 1;
-        // 每个 uploadId 同时只能有一个 reconcile 请求
-        if (_reconcileLocks[entry.uploadId]) continue;
+        // 每个 uploadId 同时只能有一个 reconcile 请求（有并发请求时保留记录，不丢弃）
+        if (_reconcileLocks[entry.uploadId]) { remaining.push(entry); continue; }
         _reconcileLocks[entry.uploadId] = true;
 
         try {
@@ -183,13 +183,21 @@
           clearTimeout(timeoutId);
           var data = await resp.json().catch(function(){ return {}; });
 
-          if (resp.ok && data.committed) {
+          if (resp.ok && data.status === 'committed') {
             // 已提交，加入照片墙
             reconciled++;
             // 删除 pending 记录（不删除 Storage，因为文件已提交）
             continue; // 不加入 remaining
           } else if (resp.ok && (data.status === 'failed' || data.status === 'not_found')) {
             // P5: 清理时必须等待结果，且使用 _cleanupInProgress 锁防止并发
+            var cleanupOk = !entry.path;
+            if (entry.path && _cleanupInProgress[entry.uploadId]) {
+              // Another reconcile invocation owns the cleanup request. Keep
+              // this entry so that the concurrent invocation cannot make it
+              // disappear from durable pending state.
+              remaining.push(entry);
+              continue;
+            }
             if (entry.path && !_cleanupInProgress[entry.uploadId]) {
               _cleanupInProgress[entry.uploadId] = true;
               try {
@@ -197,16 +205,22 @@
                 var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
                   method: 'POST',
                   headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
-                  body: JSON.stringify({ path: entry.path })
+                  body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId })
                 });
                 var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
                 if (!cleanupResp.ok || !cleanupData.ok) {
                   console.warn('[PhotoWall] cleanup failed for', entry.uploadId, cleanupData);
+                } else {
+                  cleanupOk = true;
                 }
               } catch (e) {
                 console.warn('[PhotoWall] cleanup error for', entry.uploadId, e);
               } finally {
                 delete _cleanupInProgress[entry.uploadId];
+                if (!cleanupOk) {
+                  entry.lastQueriedAt = now;
+                  remaining.push(entry);
+                }
               }
             }
             continue; // 不加入 remaining
@@ -261,7 +275,7 @@
           });
           if (resp.ok) {
             var data = await resp.json().catch(function(){ return {}; });
-            if (data && data.committed) {
+            if (data && data.status === 'committed') {
               // 已提交，触发刷新
               if (typeof window.initPhotoWall === 'function') {
                 window.initPhotoWall(true).catch(function() {});
@@ -334,7 +348,7 @@
     }
   }
 
-  function safeFileName(file, fallbackExt){
+  function safeFileName(file, fallbackExt, uploadId){
     var name = String(file && file.name || 'media');
     var extMatch = name.match(/\.[a-z0-9]{1,8}$/i);
     var ext = extMatch ? extMatch[0].toLowerCase() : (fallbackExt || '');
@@ -342,7 +356,8 @@
     if (base.normalize) base = base.normalize('NFKD');
     base = base.replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
     if (!base) base = 'media';
-    return Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + base + ext;
+    var ownerPrefix = String(uploadId || '').replace(/[^a-z0-9_\-]/gi, '').slice(0, 64);
+    return (ownerPrefix ? ownerPrefix + '_' : '') + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + base + ext;
   }
 
   function inferExt(file){
@@ -568,11 +583,14 @@
     openSheet(c.accepted, c.skipped);
   }
 
-  async function uploadOnePhotoWallFile(file, uploadId, signal){
+  async function uploadOnePhotoWallFile(job, signal){
+    var file = job.file;
+    var uploadId = job.uploadId;
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     if (!isPhotoWallImage(file)) throw createPhotoUploadError('unsupported_type');
     if (!Number.isFinite(Number(file.size)) || Number(file.size) > MAX_PHOTO_UPLOAD_BYTES) throw createPhotoUploadError('file_too_large');
-    var path = 'photos/' + safeFileName(file, inferExt(file));
+    var path = 'photos/' + safeFileName(file, inferExt(file), uploadId);
+    job.storagePath = path;
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
     var upload;
     try {
@@ -641,14 +659,15 @@
             // 服务端已提交，视为成功，不删除 Storage
             return statusData.data;
           }
-          if (statusData && statusData.status === 'not_found') {
-            // 明确未提交，清理 Storage
-            await cleanupStorage(path);
-            throw fetchError;
-          }
-          if (statusData && statusData.status === 'failed') {
-            // 服务端明确失败，清理 Storage
-            await cleanupStorage(path);
+          if (statusData && (statusData.status === 'not_found' || statusData.status === 'failed')) {
+            // A timeout can race the server's create transaction: "not_found"
+            // is not proof that the request will never commit. Keep the
+            // object and let the authoritative status reconciliation decide
+            // later; deleting here can create an orphaned committed record.
+            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+            fetchError.photoUploadStage = 'pending';
+            fetchError._pendingRetry = true;
+            fetchError._statusWasTerminal = true;
             throw fetchError;
           }
           // ★ 状态不确定（processing / 其他），不得删除 Storage
@@ -663,13 +682,23 @@
           if (statusErr !== fetchError) {
             fetchError._statusQueryError = statusErr;
           }
-          savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
-          fetchError.photoUploadStage = 'pending';
-          fetchError._pendingRetry = true;
+          if (!fetchError._pendingRetry) {
+            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+            fetchError.photoUploadStage = 'pending';
+            fetchError._pendingRetry = true;
+          }
           throw fetchError;
         }
       } else {
         fetchError.photoUploadCode = 'backend_unreachable';
+        // A connection failure is ambiguous: the server may have committed
+        // the row before the response was lost. Preserve the object and let
+        // status reconciliation decide; deleting here could destroy a valid
+        // photo record.
+        savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+        fetchError.photoUploadStage = 'pending';
+        fetchError._pendingRetry = true;
+        throw fetchError;
       }
       fetchError.photoUploadStage = 'network';
       await cleanupStorage(path);
@@ -721,7 +750,7 @@
         return runOne();
       }
       job.status = 'running';
-      return uploadOnePhotoWallFile(job.file, job.uploadId, signal).then(function(row){
+      return uploadOnePhotoWallFile(job, signal).then(function(row){
         processed += 1; ok += 1; job.status = 'success'; job.succeeded = true; job.result = row;
         onProgress && onProgress(processed, ok, fail);
       }, function(err){
@@ -831,8 +860,77 @@
     var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded; });
     if (!jobs.length) { toast('没有可重试的失败项'); return; }
     state.skippedFiles = [];
-    jobs.forEach(function(j){ j.status = 'pending'; j.error = null; });
-    await performUpload(jobs);
+    // H-30: 先查询服务端权威状态，再决定是否清理旧文件并重新上传。
+    // 网络超时后记录可能已经提交；状态为 committed/processing 时绝不能重复使用同一 uploadId。
+    var retryJobs = [];
+    var pendingJobs = [];
+    var settledJobs = [];
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      var statusData = null;
+      try {
+        var statusHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+        var statusResp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, statusHeaders || {}),
+          body: JSON.stringify({ upload_id: j.uploadId })
+        });
+        statusData = await statusResp.json().catch(function(){ return {}; });
+        if (!statusResp.ok) throw new Error(statusData.error || '照片状态查询失败');
+      } catch (statusError) {
+        j.status = 'pending';
+        j.error = statusError;
+        j.error.photoUploadStage = 'pending';
+        pendingJobs.push(j);
+        continue;
+      }
+      if (statusData.status === 'committed' && statusData.data) {
+        j.status = 'success';
+        j.succeeded = true;
+        j.result = statusData.data;
+        settledJobs.push(j);
+        continue;
+      }
+      if (statusData.status === 'processing') {
+        j.status = 'pending';
+        j.error = new Error('照片仍在服务端处理中');
+        j.error.photoUploadStage = 'pending';
+        pendingJobs.push(j);
+        continue;
+      }
+      if (statusData.status !== 'failed' && statusData.status !== 'not_found') {
+        j.status = 'pending';
+        j.error = new Error('照片状态暂不可确认');
+        j.error.photoUploadStage = 'pending';
+        pendingJobs.push(j);
+        continue;
+      }
+      if (j.storagePath) {
+        try {
+          var cleanupHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+          var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupHeaders || {}),
+            body: JSON.stringify({ path: j.storagePath, upload_id: j.uploadId })
+          });
+          var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
+          if (!cleanupResp.ok || !cleanupData.ok) throw new Error(cleanupData.error || '旧照片文件清理失败');
+        } catch (cleanupError) {
+          j.status = 'pending';
+          j.error = cleanupError;
+          j.error.photoUploadStage = 'pending';
+          pendingJobs.push(j);
+          continue;
+        }
+      }
+      j.status = 'pending';
+      j.error = null;
+      retryJobs.push(j);
+    }
+    var uploadJobs = settledJobs.concat(retryJobs);
+    if (uploadJobs.length) await performUpload(uploadJobs);
+    state.failedJobs = (state.failedJobs || []).concat(pendingJobs);
+    if (!uploadJobs.length && pendingJobs.length) toast('照片状态仍在确认中，请稍后重试');
   }
 
   function attachPhotoUploadUi(){

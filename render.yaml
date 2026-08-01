@@ -12,9 +12,13 @@ services:
     # 生产部署跟随受保护的 hotfix 分支，禁止从 main 直接部署未审计改动。
     branch: xtj-hotfix
     rootDir: .
+    # 构建阶段也执行测试，避免 hotfix 分支直接自动部署未经验证的提交。
     buildCommand: npm ci && npm run build && npm test
     startCommand: node render-api/server.js
     autoDeploy: true
+    # M-4: 声明健康检查路径，Render 不再 ping "/" 污染访问统计
+    #（server.js 已有 /health 端点并专门排除其访问记录）
+    healthCheckPath: /health
     
     # 安全环境变量（请在 Render Dashboard 中设置实际值）
     envVars:
@@ -56,7 +60,10 @@ services:
       - key: ADMIN_USERNAME
         value: xxz
       
-      # CORS 白名单（逗号分隔，留空则自动检测）
+      # CORS 白名单（逗号分隔）。留空则自动检测：
+      # 放行 Render 同域、localhost 及 *.vercel.app 前端（M-2）。
+      # 如实际 Vercel 域名固定，可显式填入，如：
+      #   value: "https://xtj.vercel.app"
       - key: ALLOWED_ORIGINS
         value: ""
       

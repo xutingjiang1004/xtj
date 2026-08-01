@@ -2322,6 +2322,12 @@ async function applyDocxOperations(buffer, operations, fileName) {
               var newRunXml2 = '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + insertXml2 + '</w:t></w:r>';
               xml = xml.slice(0, absPos) + newRunXml2 + xml.slice(absPos);
               parsedDoc = parseDocxDocumentXml(xml);
+            } else {
+              // H-6: 标记文本位于段落/run 边界时 charMap 无对应项，
+              // 旧逻辑静默跳过却仍上报"成功"。改为显式失败，避免用户收到
+              // 成功通知而文件实际未修改。
+              changes.push({ type: 'insert_text', markerText: markerText.slice(0, 50), error: '标记文本位于段落边界，无法安全插入' });
+              continue;
             }
           }
           appliedOps.push({ type: 'insert_text', markerText: markerText, insertText: insertText });
@@ -3180,6 +3186,21 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       if (!result.ok) {
         return res.status(500).json({ ok: false, error: result.error });
+      }
+      var documentErrors = (result.changes || []).filter(function(change) {
+        return change && change.error;
+      });
+      if (documentErrors.length > 0) {
+        // Do not return a binary that contains only a subset of the requested
+        // edits. The frontend cannot safely infer which operations succeeded
+        // from a 200 binary response, so make partial application explicit.
+        return res.status(422).json({
+          ok: false,
+          code: 'DOCUMENT_PARTIAL_FAILURE',
+          error: documentErrors.map(function(change) { return change.error; }).join('; '),
+          changes: result.changes || [],
+          appliedOps: result.appliedOps || []
+        });
       }
 
       var newBuffer = result.newBuffer;
@@ -4239,10 +4260,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Phase 3: Persist event (non-blocking, fire-and-forget)
       if (streamSession.isPersistableEvent(type)) {
         eventLogger.logEvent(type, data, eventId).catch(function() {});
-        // Update last_event_id in session
-        if (streamSession.isResumeEnabled() && supabase) {
-          streamSession.updateStreamSession(supabase, streamId, { last_event_id: eventId }).catch(function() {});
-        }
       }
       var wrote = writer.write(aiCoreSSE.formatSSEEvent(event));
       if (!wrote && type !== 'done') {
@@ -4281,12 +4298,23 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         request_id: structured.requestId,
         phase: structured.phase
       });
-      // Phase 3: Mark session as failed
+      // Phase 3: Flush the terminal error before marking the session failed.
+      // Otherwise a resume client can observe status=failed while the error
+      // event is still queued (or can lose the event if the process exits).
       if (streamSession.isResumeEnabled() && supabase) {
-        streamSession.updateStreamSession(supabase, streamId, {
-          status: 'failed',
-          completed_at: new Date().toISOString()
-        }).catch(function() {});
+        Promise.resolve(eventLogger.flush()).then(function(flushResult) {
+          return streamSession.updateStreamSession(supabase, streamId, {
+            last_event_id: flushResult && flushResult.lastPersistedEventId || 0,
+            status: 'failed',
+            completed_at: new Date().toISOString()
+          });
+        }).catch(function(error) {
+          console.error('[code-agent-stream] terminal error flush failed:', error && error.message ? error.message : error);
+          return streamSession.updateStreamSession(supabase, streamId, {
+            status: 'failed',
+            completed_at: new Date().toISOString()
+          }).catch(function() {});
+        });
       }
       cleanup();
     }
@@ -4520,7 +4548,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         onContentChunk: function(chunk) {
           if (aborted || finalized) return;
           hasStartedStreaming = true;
-          sendSSE('answer_delta', { delta: String(chunk).slice(0, 4000) });
+          // H-12: 单 chunk 超过 4000 字符时按 4000 拆分多条 answer_delta，
+          // 避免超出部分被静默丢弃导致客户端收到残缺回答。
+          var deltaText = String(chunk);
+          var MAX_DELTA_CHARS = 4000;
+          if (deltaText.length <= MAX_DELTA_CHARS) {
+            sendSSE('answer_delta', { delta: deltaText });
+          } else {
+            for (var di = 0; di < deltaText.length; di += MAX_DELTA_CHARS) {
+              sendSSE('answer_delta', { delta: deltaText.slice(di, di + MAX_DELTA_CHARS) });
+            }
+          }
         }
       };
 
@@ -4722,9 +4760,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       });
 
       // Phase 3: Flush pending deltas and mark session as completed
-      await eventLogger.flush();
+      var finalFlushResult = await eventLogger.flush();
       if (streamSession.isResumeEnabled() && supabase) {
         await streamSession.updateStreamSession(supabase, streamId, {
+          last_event_id: finalFlushResult && finalFlushResult.lastPersistedEventId || 0,
           status: 'completed',
           completed_at: new Date().toISOString()
         }).catch(function() {});
@@ -4742,8 +4781,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
         // Phase 3: Mark session as cancelled
         if (streamSession.isResumeEnabled() && supabase) {
-          await eventLogger.flush();
+          var cancelFlushResult = await eventLogger.flush();
           await streamSession.updateStreamSession(supabase, streamId, {
+            last_event_id: cancelFlushResult && cancelFlushResult.lastPersistedEventId || 0,
             status: 'cancelled',
             completed_at: new Date().toISOString()
           }).catch(function() {});
