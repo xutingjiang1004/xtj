@@ -218,10 +218,18 @@ function upsertChunks(supabase, userId, workspaceId, fileId, chunks) {
         return supabase.from('code_index_chunks').upsert(batch, {
           onConflict: 'file_id, chunk_key',
           ignoreDuplicates: false
-        }).then(function() { return insertBatch(index + batchSize); });
+        }).then(function(r) {
+          // H-14: 旧逻辑忽略 r.error，批次写入失败仍继续，导致文件记录标记
+          // active 但 chunks 缺失（静默损坏索引）。失败即抛错中止整个持久化。
+          if (r && r.error) throw new Error(r.error.message || 'chunk batch upsert failed');
+          return insertBatch(index + batchSize);
+        });
       };
       return insertBatch(0);
-    }).catch(function(e) { console.error('[persistent-index] upsertChunks error:', e.message); });
+    }).catch(function(e) {
+      console.error('[persistent-index] upsertChunks error:', e.message);
+      throw e;
+    });
 }
 
 function getChunksByFileId(supabase, fileId) {
@@ -346,7 +354,11 @@ function compareManifest(supabase, workspaceId, manifestFiles) {
       } else if (mf.sha256 && stored.sha256 && mf.sha256 === stored.sha256) {
         // SHA matches, unchanged
         unchangedPaths.push(mf.path);
-      } else if (mf.size === stored.size && mf.modifiedAt === stored.modifiedAt) {
+      } else if (mf.size != null && stored.size != null && Number(mf.size) === Number(stored.size) &&
+                 // H-13: 宽松比较 — 客户端 size 可能是字符串、modifiedAt 可能为 null。
+                 // 旧逻辑严格 === 会把未修改的文件误判为已更改，导致每次都全量上传。
+                 mf.modifiedAt != null && stored.modifiedAt != null &&
+                 String(mf.modifiedAt) === String(stored.modifiedAt)) {
         // Size and mtime match, likely unchanged
         unchangedPaths.push(mf.path);
       } else {
