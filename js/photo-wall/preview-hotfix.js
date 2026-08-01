@@ -48,6 +48,8 @@
     ignoreNativeDblClickUntil: 0,
     suppressTapUntil: 0,
     closeFallbackTimer: 0,
+    singleTapCloseTimer: 0,
+    longPressTimer: 0,
     forceClosing: false,
     callingOriginalClose: false,
     infoOpen: false,
@@ -362,6 +364,8 @@
       state.lastTapX = 0;
       state.lastTapY = 0;
     }
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
     clearDismissVisual(!!opts.animate);
     syncTrackTransform(0, !!opts.animate);
     applyImageTransform(!!opts.animate);
@@ -407,6 +411,8 @@
     var now = Date.now();
     if (now < state.suppressTapUntil) return;
     if (now - state.lastTapAt < 280 && Math.abs(point.x - state.lastTapX) < 24 && Math.abs(point.y - state.lastTapY) < 24) {
+      // H-32: 双击（缩放）取消单次单击的延迟关闭
+      if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
       state.ignoreNativeDblClickUntil = now + 520;
       state.lastTapAt = 0;
       toggleZoomAt(point);
@@ -415,6 +421,15 @@
     state.lastTapAt = now;
     state.lastTapX = point.x;
     state.lastTapY = point.y;
+    // H-32: 单击延迟关闭预览（与原 preview.js 的单击关闭一致）；
+    // 仅未缩放时生效，双击会在 280ms 内取消该定时器。
+    if (state.scale > 1.01 || isModalOpen()) return;
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    state.singleTapCloseTimer = setTimeout(function () {
+      state.singleTapCloseTimer = 0;
+      if (isModalOpen() || state.scale > 1.01) return;
+      window.closePhotoPreview();
+    }, 320);
   }
 
   function beginPan(point) {
@@ -899,6 +914,11 @@
       }
       clearInteractionState();
       clearImageError();
+    // H-32: 关闭预览时隐藏下载确认弹窗，防止全屏遮罩残留阻塞页面
+      try {
+        var dm = document.getElementById('ppDownloadConfirmModal');
+        if (dm) { dm.classList.remove('show'); dm.style.display = 'none'; }
+      } catch (_) {}
       delete window.__xtjPreviewExplicitPhotos;
       window.__xtjPhotoPreviewContext = null;
       window.photoPreviewCurrent = null;
@@ -965,6 +985,29 @@
     }
   }
 
+  function showDownloadConfirmModal() {
+    // H-32: hotfix 模式拦截指针事件后，原 preview.js 的长按下载不可达，
+    // 这里在 hotfix 内自建下载确认弹窗（复用原 ppCancelDownload/ppConfirmDownload）。
+    var root = overlay();
+    if (!root || isModalOpen()) return;
+    var photo = activePhoto();
+    if (!photo || !photo.imageUrl) {
+      if (window.showToast) window.showToast('没有可下载的照片');
+      return;
+    }
+    var modal = document.getElementById('ppDownloadConfirmModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'ppDownloadConfirmModal';
+      modal.className = 'pp-download-confirm-overlay';
+      modal.innerHTML = '<div class="pp-download-confirm-content"><div class="pp-download-confirm-title">是否要下载该图片？</div><div class="pp-download-confirm-buttons"><button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button><button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button></div></div>';
+      root.appendChild(modal);
+    }
+    modal.style.display = 'flex';
+    modal.offsetHeight;
+    modal.classList.add('show');
+  }
+
   function bindCloseButton(root) {
     root = root || overlay();
     if (!root) return;
@@ -1007,6 +1050,8 @@
 
     surface.addEventListener('pointerdown', function (event) {
       if (isControl(event.target)) return;
+      // H-32: 新的指针交互取消尚未触发的单击关闭定时器
+      if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
       if (isModalOpen()) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1031,11 +1076,20 @@
 
       if (isTouchLike) {
         if (state.pointers.size >= 2) {
+          // H-32: 双指缩放取消长按
+          if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
           beginPinch();
         } else if (state.scale > 1.01) {
           beginPanOrTap({ x: event.clientX, y: event.clientY });
         } else {
           beginSwipeDismiss({ x: event.clientX, y: event.clientY });
+          // H-32: 长按（550ms 未移动）触发下载确认弹窗，与原 preview.js 行为一致
+          if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+          state.longPressTimer = setTimeout(function () {
+            state.longPressTimer = 0;
+            if (state.moved || state.pointers.size !== 1 || isModalOpen() || state.scale > 1.01) return;
+            showDownloadConfirmModal();
+          }, 550);
         }
       } else {
         state.mouseDown = true;
@@ -1061,6 +1115,13 @@
       if (state.activePointerId == null && event.pointerType !== 'touch') return;
       if (event.pointerType === 'touch' && !state.pointers.has(event.pointerId)) return;
       if (event.pointerType !== 'touch' && !state.mouseDown) return;
+
+      // H-32: 移动超过阈值即取消长按下载
+      if (state.longPressTimer &&
+        Math.abs(event.clientX - state.startX) + Math.abs(event.clientY - state.startY) > 8) {
+        clearTimeout(state.longPressTimer);
+        state.longPressTimer = 0;
+      }
 
       if (event.pointerType === 'touch') {
         state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -1090,6 +1151,7 @@
 
     function finishPointer(event) {
       flushPendingMoveBeforePointerEnd();
+      if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
       if (event.pointerType === 'touch') {
         if (!state.pointers.has(event.pointerId)) return;
         state.pointers.delete(event.pointerId);
@@ -1135,6 +1197,10 @@
       if (state.mode === 'pan' && state.scale > 1.01) {
         state.suppressTapUntil = Date.now() + 350;
         reboundScaleIfNeeded(true);
+      } else if (!state.moved && state.scale <= 1.01 && !isModalOpen() && state.mode === 'mouse-idle') {
+        // H-32: 鼠标单击（无拖动、未缩放）关闭预览，双击缩放仍在
+        // maybeHandleTouchDoubleTap 的 280ms 窗口内优先生效。
+        maybeHandleTouchDoubleTap({ x: event.clientX, y: event.clientY });
       }
       clearInteractionState();
       event.preventDefault();
@@ -1246,6 +1312,8 @@
     state.lastTapX = 0;
     state.lastTapY = 0;
     state.ignoreNativeDblClickUntil = 0;
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
     clearInteractionState();
     cleanupLegacyControls();
     ensurePreviewToolbar();

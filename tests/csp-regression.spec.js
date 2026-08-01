@@ -1,4 +1,7 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
+const sharedSecurityHeaders = require('../render-api/security-headers.js');
 
 const CSP_VIOLATION_RE = /Refused to (load|execute|apply inline|apply)|Content Security Policy|violates the following Content Security Policy|strict-dynamic/;
 
@@ -33,7 +36,9 @@ async function gotoApp(page) {
   });
 
   const response = await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-  expect(response, 'Homepage must return 200').toBeOK();
+  expect(response, 'Homepage response must exist').not.toBeNull();
+  expect(response.status(), 'Homepage must return 200').toBe(200);
+  expect(response.ok(), 'Homepage response must be successful').toBeTruthy();
 
   return { cspViolations, pageErrors, failedRequests, apiRequests, response };
 }
@@ -49,6 +54,17 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     expect(csp).toContain("'self'");
     expect(csp).toContain("'unsafe-inline'");
     expect(csp).toContain("https://cdn.jsdelivr.net");
+  });
+
+  test('vercel.json CSP must not contain strict-dynamic and must match shared policy', async () => {
+    const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+    const cspHeader = vercel.headers.find(h => h.headers.some(x => x.key === 'Content-Security-Policy'));
+    expect(cspHeader, 'vercel.json must define a Content-Security-Policy').toBeTruthy();
+    const csp = cspHeader.headers.find(x => x.key === 'Content-Security-Policy').value;
+    expect(csp, "vercel.json CSP must NOT contain 'strict-dynamic'").not.toContain("'strict-dynamic'");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toBe(sharedSecurityHeaders.CSP);
   });
 
   test('CSP header includes style-src with jsDelivr', async ({ request }) => {
@@ -125,7 +141,12 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
 
     const tabs = ['chat', 'ai', 'profile', 'posts'];
     for (const tab of tabs) {
-      const btn = page.locator(`.dock-tab[data-tab="${tab}"]`);
+      // Desktop uses the persistent sidebar; coarse-pointer/mobile keeps the
+      // original bottom Dock. Test the active navigation surface at either
+      // breakpoint instead of requiring the hidden mobile Dock on desktop.
+      const btn = page.locator(
+        `.desktop-nav-item[data-desktop-tab="${tab}"]:visible, .dock-tab[data-tab="${tab}"]:visible`
+      ).first();
       await expect(btn, `${tab} tab button must exist`).toBeVisible({ timeout: 5000 });
       await btn.click({ timeout: 3000 });
       await page.waitForTimeout(250);
@@ -145,7 +166,7 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     await page.waitForTimeout(2000);
 
     const dataApis = apiRequests.filter(u =>
-      u.includes('/api/posts') || u.includes('/api/photos') || u.includes('/api/stats')
+      u.includes('/api/feed') || u.includes('/api/photos/public') || u.includes('/api/stats/snapshot')
     );
 
     expect(dataApis.length, 'At least one data API request must be made (posts/photos/stats)').toBeGreaterThan(0);

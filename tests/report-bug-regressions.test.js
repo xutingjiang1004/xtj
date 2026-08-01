@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const persistentIndex = require('../render-api/ai-core/persistent-index.js');
 
 const read = file => fs.readFileSync(file, 'utf8');
 
@@ -36,6 +37,22 @@ test('stream session RLS and legacy RPCs use safe identity/search paths', () => 
   assert.match(hardening, /increment_post_views\(p_post_id UUID\)/);
 });
 
+test('CORS supports the authenticated cross-origin browser requests', () => {
+  const server = read('render-api/server.js');
+  const headers = read('render-api/security-headers.js');
+  assert.match(server, /app\.use\(cors\(\{[\s\S]*?credentials:\s*true/);
+  assert.doesNotMatch(headers, /interest-cohort/);
+});
+
+test('persistent index RLS accepts both UUID and username JWT identities', () => {
+  const hardening = read('supabase/migrations/032_security_hardening_fixes.sql');
+  for (const table of ['code_workspaces', 'code_index_files', 'code_index_chunks', 'code_index_builds']) {
+    assert.match(hardening, new RegExp(`ON public\\.${table}[\\s\\S]*?auth\\.jwt\\(\\)`, 'm'));
+  }
+  assert.match(hardening, /user_id = auth\.uid\(\)::text/);
+  assert.match(hardening, /user_id = NULLIF\(auth\.jwt\(\) ->> 'user_name', ''\)/);
+});
+
 test('photo cleanup uses the generated webp thumbnail path', () => {
   const migration = read('supabase/migrations/013_hard_delete_content_and_photo_cleanup.sql');
   const repair = read('supabase/migrations/031_harden_stream_identity_and_photo_views.sql');
@@ -56,4 +73,38 @@ test('MCP admin server is intentionally launched as ESM', () => {
   assert.equal(pkg.type, 'module');
   assert.equal(pkg.main, 'server.js');
   assert.match(read('mcp-servers/xtj-admin/server.js'), /from "@modelcontextprotocol\/sdk/);
+});
+
+function queryBuilder(result) {
+  return {
+    delete() { return queryBuilder({ error: null }); },
+    upsert() { return queryBuilder(result); },
+    select() { return this; },
+    eq() { return this; },
+    limit() { return this; },
+    then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); }
+  };
+}
+
+test('persistent chunk failures reject and null mtimes do not suppress changed files', async () => {
+  persistentIndex.setPersistEnabledForTests(true);
+  try {
+    const failingSupabase = { from: () => queryBuilder({ error: { message: 'chunk write failed' } }) };
+    await assert.rejects(
+      persistentIndex.upsertChunks(failingSupabase, 'user', 'workspace', 'file', [{ chunkKey: 'c1', content: 'x' }]),
+      /chunk write failed/
+    );
+
+    const stored = [{ path: 'src/a.js', size_bytes: 10, modified_at: null, sha256: '' }];
+    const manifestSupabase = {
+      from: () => queryBuilder({ data: stored, error: null })
+    };
+    const comparison = await persistentIndex.compareManifest(manifestSupabase, 'workspace', [
+      { path: 'src/a.js', size: '10', modifiedAt: null, sha256: '' }
+    ]);
+    assert.deepEqual(comparison.unchangedPaths, []);
+    assert.deepEqual(comparison.uploadPaths, ['src/a.js']);
+  } finally {
+    persistentIndex.setPersistEnabledForTests(false);
+  }
 });
