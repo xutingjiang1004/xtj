@@ -34,7 +34,8 @@ CREATE POLICY "Users can view own workspaces"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 DROP POLICY IF EXISTS "Users can view own index files" ON public.code_index_files;
@@ -45,7 +46,8 @@ CREATE POLICY "Users can view own index files"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 DROP POLICY IF EXISTS "Users can view own index chunks" ON public.code_index_chunks;
@@ -56,7 +58,8 @@ CREATE POLICY "Users can view own index chunks"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 DROP POLICY IF EXISTS "Users can view own index builds" ON public.code_index_builds;
@@ -67,7 +70,8 @@ CREATE POLICY "Users can view own index builds"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 -- ============ 2. 头像写入收口（禁止 anon 直写） ============
