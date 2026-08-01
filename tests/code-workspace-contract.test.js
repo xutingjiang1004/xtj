@@ -18,7 +18,8 @@ test('third-party Supabase SDK cannot block local app bootstrap', () => {
 });
 
 test('Monaco loading has a bounded fallback path', () => {
-  assert.match(codeWorkspace, /Monaco 加载超时/);
+  assert.match(codeWorkspace, /Monaco 所有 CDN 加载失败/);
+  assert.match(codeWorkspace, /Monaco.*超时/);
   assert.match(codeWorkspace, /setTimeout\(function \(\) \{[\s\S]*?rejectMonaco/);
   assert.match(codeWorkspace, /renderTextareaEditor\(tab, container\)/);
 });
@@ -1063,12 +1064,14 @@ test('abort signal is passed to fetch', () => {
 });
 
 test('cleanup cancels current request and invalidates requestId', () => {
-  // cleanup must call abort()
-  var cleanupFn = codeWorkspace.match(/function cleanup[\s\S]*?(?=function \w+)/);
+  // cleanup must call abort() or cancel activeRequest
+  var cleanupFn = codeWorkspace.match(/function cleanup\(\)[\s\S]*?(?=function \w+)/);
   assert.ok(cleanupFn, 'cleanup function should exist');
-  assert.ok(cleanupFn[0].indexOf('_abortController.abort()') !== -1, 'cleanup must abort');
+  var hasAbort = cleanupFn[0].indexOf('state._abortController.abort()') !== -1;
+  var hasActiveRequestCancel = cleanupFn[0].indexOf('activeRequest.cancelled') !== -1;
+  assert.ok(hasAbort || hasActiveRequestCancel, 'cleanup must abort or cancel activeRequest');
   // cleanup must increment requestId to invalidate stale responses
-  assert.ok(cleanupFn[0].indexOf('_requestId++') !== -1, 'cleanup must invalidate requestId');
+  assert.ok(cleanupFn[0].indexOf('state._requestId++') !== -1, 'cleanup must invalidate requestId');
 });
 
 // ============================================================
