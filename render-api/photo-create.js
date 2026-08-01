@@ -81,13 +81,33 @@ async function createPhotoThumbnail(options) {
   var output = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
   var uploaded = await options.supabase.storage.from('uploads').upload(thumbnailPath, output, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
   if (uploaded && uploaded.error) throw new Error('thumbnail upload failed');
+
+  // Phase 5: 如果检测到 EXIF 方向且非标准方向，创建旋转后的原始尺寸 WebP 版本
+  var rotatedUrl = null;
+  var rotatedFileSize = null;
+  if (meta && meta.orientation && meta.orientation !== 1) {
+    try {
+      var rotatedImage = options.sharp(input, { animated: false }).rotate().webp({ quality: 85 });
+      var rotatedOutput = await rotatedImage.toBuffer();
+      var rotatedKey = crypto.createHash('sha256').update(storagePath + '_rotated').digest('hex');
+      var rotatedPath = 'photos/rotated/' + rotatedKey + '.webp';
+      var rotatedUpload = await options.supabase.storage.from('uploads').upload(rotatedPath, rotatedOutput, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
+      if (rotatedUpload && !rotatedUpload.error) {
+        rotatedUrl = publicStorageUrl(options.supabaseUrl, rotatedPath);
+        rotatedFileSize = rotatedOutput.length;
+      }
+    } catch (_) { /* 旋转文件创建失败，降级使用原始文件 */ }
+  }
+
   return {
     path: thumbnailPath,
     url: publicStorageUrl(options.supabaseUrl, thumbnailPath),
     fileSize: output.length,
     width: Number.isSafeInteger(meta.width) ? meta.width : null,
     height: Number.isSafeInteger(meta.height) ? meta.height : null,
-    exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null
+    exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null,
+    rotatedUrl: rotatedUrl,
+    rotatedFileSize: rotatedFileSize
   };
 }
 
@@ -166,7 +186,8 @@ async function createPhotoRecord(options) {
             }).eq('id', existing.data.id).select('id, media_url, content').maybeSingle();
             if (updateResult.error) {
               if (options.logger) options.logger.error('[PHOTO_REPAIR_UPDATE_FAILED]', updateResult.error);
-              // 更新失败，不能返回 repaired:true
+              // Phase 5: 修复失败不返回正常成功，也不删除新文件（唯一可用文件）
+              return { status: 500, body: { ok: false, error: '照片修复失败: 数据库更新错误', code: 'REPAIR_UPDATE_FAILED' } };
             } else if (updateResult.data) {
               // ★ 验证更新后的数据
               var updatedContent = {};
@@ -177,9 +198,14 @@ async function createPhotoRecord(options) {
                 existing.data._repaired = true;
                 return { status: 200, body: { ok: true, data: existing.data, idempotent: true, repaired: true } };
               }
+              // Phase 5: 验证失败（数据不一致），不删除新文件，返回错误
+              if (options.logger) options.logger.error('[PHOTO_REPAIR_VERIFY_FAILED]', { expected: { media_url: validated.mediaUrl, storagePath: storagePath }, got: { media_url: updateResult.data.media_url, content: updateResult.data.content } });
+              return { status: 500, body: { ok: false, error: '照片修复失败: 数据验证不一致', code: 'REPAIR_VERIFY_FAILED' } };
             }
-          } catch (_) {
-            // 异常时静默降级，继续使用旧记录
+          } catch (e) {
+            // Phase 5: 异常时返回错误，不删除新文件
+            if (options.logger) options.logger.error('[PHOTO_REPAIR_EXCEPTION]', e);
+            return { status: 500, body: { ok: false, error: '照片修复异常: ' + (e && e.message || '未知错误'), code: 'REPAIR_EXCEPTION' } };
           }
         }
       }
@@ -199,6 +225,12 @@ async function createPhotoRecord(options) {
       contentObj.width = thumbnail.width || null;
       contentObj.height = thumbnail.height || null;
       if (thumbnail.exif) contentObj.exif = thumbnail.exif;
+      // Phase 5: 如果创建了旋转版，更新 media_url 指向旋转后的文件
+      if (thumbnail.rotatedUrl) {
+        validated.mediaUrl = thumbnail.rotatedUrl;
+        contentObj.rotatedUrl = thumbnail.rotatedUrl;
+        contentObj.rotatedFileSize = thumbnail.rotatedFileSize;
+      }
       validated.content = JSON.stringify(contentObj);
     } catch (_) {
       await cleanupStorageFile(options.supabase, storagePath, options.logger);

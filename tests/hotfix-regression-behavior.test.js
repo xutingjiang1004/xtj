@@ -37,8 +37,8 @@ describe('cat-ai-reply-status API behavior', function() {
     assert.ok(server.includes('rr.parent_comment_id'), '必须验证 parent_comment_id');
   });
 
-  it('completed 但无有效回复时返回 processing 状态', function() {
-    assert.ok(server.includes("'回复记录正在同步'"), 'completed 无有效回复必须返回 processing');
+  it('completed 但无有效回复时返回 repair_required 状态', function() {
+    assert.ok(server.includes('repair_required'), 'completed 无有效回复必须返回 repair_required');
   });
 
   it('不会返回只有 id 的空对象', function() {

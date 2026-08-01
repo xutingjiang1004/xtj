@@ -20,6 +20,8 @@
   var LOAD_CACHE_TTL_MS = 20000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
+  // P5: 分页绑定状态 — 按 page 跟踪 requestId、AbortController、generation
+  var _fetchPhotoPageState = {};
   var pendingDeletedPhotoIds = new Set();
 
   function byId(id){ return document.getElementById(id); }
@@ -182,12 +184,27 @@
     return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
   }
 
-  async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal){
-    var from = pageIndex * PAGE_SIZE;
-    var to = from + PAGE_SIZE - 1;
+  async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal, requestId){
     var page = pageIndex;
     var limit = PAGE_SIZE;
+    // P5: 分页绑定 — 管理每个 page 的请求
+    var stateKey = 'page_' + page;
+    var prevState = _fetchPhotoPageState[stateKey];
+    if (requestId && prevState && prevState.requestId !== requestId) {
+      // 新请求不同 requestId，中止旧请求
+      if (prevState.controller) {
+        try { prevState.controller.abort(); } catch (e) {}
+      }
+    }
+    if (requestId) {
+      _fetchPhotoPageState[stateKey] = { requestId: requestId, controller: null, generation: (prevState ? prevState.generation + 1 : 1) };
+    }
+    var currentGen = requestId ? _fetchPhotoPageState[stateKey].generation : 0;
+
     var controller = new AbortController();
+    if (requestId) {
+      _fetchPhotoPageState[stateKey].controller = controller;
+    }
     var timeout = timeoutMs || 10000;
     var timer = setTimeout(function() { controller.abort(); }, timeout);
     var onAbort = function() { controller.abort(); };
@@ -197,6 +214,10 @@
     }
     try {
       var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
+      // P5: 如果 generation 已变化（被新请求替代），丢弃结果
+      if (requestId && currentGen !== _fetchPhotoPageState[stateKey].generation) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
       var result = await resp.json();
       if (!resp.ok || !result.ok) throw new Error(result.error || 'fetch failed');
       return result.data || [];
@@ -240,7 +261,8 @@
 
     try {
       // 首次请求 25s，已有缓存时后台刷新 10s
-      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal);
+      var requestId = 'load_' + photoLoadGeneration + '_' + Date.now();
+      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal, requestId);
       if (currentGen !== photoLoadGeneration) return window.photoWallData; // Aborted by newer request
       
       more = rows.length >= PAGE_SIZE;
@@ -317,7 +339,8 @@
     if (!more) return [];
     page += 1;
     try {
-      var rows = await fetchPhotoPage(page);
+      var requestId = 'more_' + page + '_' + Date.now();
+      var rows = await fetchPhotoPage(page, 10000, null, requestId);
       more = rows.length >= PAGE_SIZE;
       var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
       window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
@@ -509,11 +532,15 @@
       if (result && result.error) {
         item.views = originalViews;
         updatePhotoViewDisplays(item);
+        // P5: RPC 失败时删除节流键，允许用户立即重试
+        try { window.safeStorage.remove(key); } catch (_) {}
       }
     } catch (_) {
       // P4: 网络层异常也回滚
       item.views = originalViews;
       updatePhotoViewDisplays(item);
+      // P5: 网络异常也删除节流键，允许立即重试
+      try { window.safeStorage.remove(key); } catch (_) {}
     }
   }
 

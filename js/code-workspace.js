@@ -38,7 +38,9 @@
     lastFailedMessage: '',
     conversationId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
     pendingOperations: [],
+    recoveredOperations: [], // 流恢复操作，只读 Diff 视图
     snapshots: {},
+    _documentStates: {}, // path -> { state: 'extracting'|'ready'|'failed'|'timed_out'|'cancelled', generation, error }
     sending: false,
     // P2: request lifecycle status — 'idle' | 'loading' | 'ready' | 'failed'.
     // state.sending is a boolean for backward compat; requestStatus is the
@@ -1210,7 +1212,9 @@
     state.attachmentProcessing = false;
     state.attachmentError = '';
     state.pendingOperations = [];
+    state.recoveredOperations = [];
     state.snapshots = {};
+    state._documentStates = {};
     state.fileHandles = {};
     state.messages = [];
     state.conversationId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -2101,6 +2105,8 @@
                 tab._extractPromise = null;
                 tab._extractError = null;
                 tab._parseReady = false;
+                tab._docState = null;
+                tab._extractGeneration = null;
               } else if (result.type === 'binary') {
                 tab.content = result.content || null;
               }
@@ -3152,6 +3158,10 @@
 
     if (!tab._extractPromise) {
       tab._parseReady = false;
+      tab._docState = 'extracting';
+      tab._extractGeneration = state.workspaceGeneration;
+      tab._extractAbortController = new AbortController();
+      state._documentStates[tab.path] = { state: 'extracting', generation: state.workspaceGeneration, error: null };
       tab._extractPromise = fs.readFileByPath(tab.path).then(function (result) {
         if (!result || result.type !== 'document') {
           throw new Error('无法读取文档文件');
@@ -3159,16 +3169,26 @@
         return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
       }).then(function (docData) {
         if (!docData) return;
+        // 延迟提取守卫：检查 generation 是否已变化
+        if (tab._extractGeneration !== state.workspaceGeneration) {
+          tab._docState = 'cancelled';
+          state._documentStates[tab.path] = { state: 'cancelled', generation: tab._extractGeneration, error: '工作区已切换' };
+          return;
+        }
         tab._extractedText = docData.text;
         tab._extractedTruncated = docData.truncated;
         tab._extractedMetadata = docData.metadata;
         tab._parseReady = true;
         tab._extractError = null;
+        tab._docState = 'ready';
+        state._documentStates[tab.path] = { state: 'ready', generation: state.workspaceGeneration, error: null };
         docData.ext = tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : '';
         return docData;
       }).catch(function (err) {
         tab._extractError = err && err.message ? err.message : '文档提取失败';
         tab._parseReady = false;
+        tab._docState = 'failed';
+        state._documentStates[tab.path] = { state: 'failed', generation: tab._extractGeneration, error: tab._extractError };
         throw err;
       });
     }
@@ -4262,8 +4282,10 @@
         }) : [];
         state.models = models;
         state.modelLoadError = '';
+        // P3: 本地模型 ID 也视为可用，不重置选择
+        var isLocalSelected = !!(window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID);
         var selectedAvailable = models.some(function(model) { return model.id === state.selectedModelId; });
-        if (!selectedAvailable) state.selectedModelId = String(data.default_model || (models[0] && models[0].id) || '');
+        if (!selectedAvailable && !isLocalSelected) state.selectedModelId = String(data.default_model || (models[0] && models[0].id) || '');
         normalizeThinkingModeForSelectedModel();
         state._modelsPromise = null;
         updateComposerControls();
@@ -4281,7 +4303,12 @@
   }
 
   function selectedCodeModel() {
-    return state.models.filter(function(model) { return model.id === state.selectedModelId; })[0] || null;
+    var model = state.models.filter(function(model) { return model.id === state.selectedModelId; })[0] || null;
+    // P3: 如果选择的是本地模型，返回其描述符
+    if (!model && window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID) {
+      model = window.__xtjLocalAI.getModelDescriptor();
+    }
+    return model;
   }
 
   function normalizeThinkingModeForSelectedModel() {
@@ -4420,6 +4447,13 @@
     state.attachmentError = '';
     renderChatPanel();
 
+    // 附件提取超时处理（60s）
+    var attachmentTimeout = setTimeout(function() {
+      if (state._attachmentController === controller) {
+        try { controller.abort(); } catch (_) {}
+      }
+    }, 60000);
+
     return apiFetch('/api/code/document/extract', {
       method: 'POST',
       body: formData,
@@ -4471,12 +4505,14 @@
           state.attachments.pop();
           throw createNamedAbortError();
         }
+        clearTimeout(attachmentTimeout);
         state.attachmentProcessing = false;
         if (state._attachmentController === controller) state._attachmentController = null;
         renderChatPanel();
         return state.attachments[state.attachments.length - 1];
       });
     }).catch(function (error) {
+      clearTimeout(attachmentTimeout);
       if (attachmentGeneration !== state.workspaceGeneration) throw error;
       state.attachmentProcessing = false;
       if (state._attachmentController === controller) state._attachmentController = null;
@@ -4848,6 +4884,15 @@
           option.selected = model.id === current;
           modelSelect.appendChild(option);
         });
+        // P3: 添加本地模型选项
+        if (window.__xtjLocalAI) {
+          var localDesc = window.__xtjLocalAI.getModelDescriptor();
+          var localOption = document.createElement('option');
+          localOption.value = localDesc.id;
+          localOption.textContent = localDesc.name;
+          localOption.selected = localDesc.id === current;
+          modelSelect.appendChild(localOption);
+        }
         modelSelect.disabled = false;
       }
       var selectedModel = selectedCodeModel();
@@ -4871,17 +4916,49 @@
     }
     if (runtimeStatus) {
       var modelHint = selectedCodeModel();
-      if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
-        runtimeStatus.dataset.availability = 'degraded'; /*
-        runtimeStatus.title = '妯″瀷妫€娴嬫湭瀹屾垚锛屾湇鍔″櫒浼氬湪璇锋眰鏃跺啀娆℃牎楠?;
-      */ } else if (runtimeStatus.dataset.availability) {
-        delete runtimeStatus.dataset.availability;
-        runtimeStatus.removeAttribute('title');
-      }
-      runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError || (modelHint && modelHint.description) || '');
-      runtimeStatus.hidden = !runtime.thinkingFallback && !state.modelLoadError && !(modelHint && (modelHint.description || modelHint.availability === 'degraded'));
-      if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
-        runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
+      // P3: 本地模型状态显示
+      var isLocalModel = !!(window.__xtjLocalAI && modelHint && modelHint.local);
+      if (isLocalModel) {
+        var localState = window.__xtjLocalAI.getState();
+        var localProgress = window.__xtjLocalAI.getProgressValue();
+        var localText = window.__xtjLocalAI.getStatusText();
+        if (localState === 'downloading') {
+          runtimeStatus.textContent = '下载中 ' + Math.round(localProgress * 100) + '%';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '本地模型下载进度';
+        } else if (localState === 'initializing' || localState === 'idle') {
+          runtimeStatus.textContent = '初始化中…';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '本地模型初始化中';
+        } else if (localState === 'ready') {
+          runtimeStatus.textContent = '已就绪';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '本地模型已就绪，可离线使用';
+        } else if (localState === 'failed') {
+          runtimeStatus.textContent = '加载失败';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '本地模型加载失败，请重试';
+        } else if (localState === 'cancelled') {
+          runtimeStatus.textContent = '已取消';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '本地模型下载已取消';
+        } else {
+          runtimeStatus.textContent = localText || '本地模型';
+          runtimeStatus.hidden = false;
+        }
+      } else {
+        if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
+          runtimeStatus.dataset.availability = 'degraded'; /*
+          runtimeStatus.title = '妯″瀷妫€娴嬫湭瀹屾垚锛屾湇鍔″櫒浼氬湪璇锋眰鏃跺啀娆℃牎楠?;
+        */ } else if (runtimeStatus.dataset.availability) {
+          delete runtimeStatus.dataset.availability;
+          runtimeStatus.removeAttribute('title');
+        }
+        runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError || (modelHint && modelHint.description) || '');
+        runtimeStatus.hidden = !runtime.thinkingFallback && !state.modelLoadError && !(modelHint && (modelHint.description || modelHint.availability === 'degraded'));
+        if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
+          runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
+        }
       }
     }
   }
@@ -5142,7 +5219,7 @@
           if (retryBtn.disabled || state.sending || msg._retryStarted) return;
           msg._retryStarted = true;
           retryBtn.disabled = true;
-          sendMessage(msg.retryMessage || state.lastFailedMessage, msg.retryBody || null, { retry: true });
+          sendMessage(msg.retryMessage || state.lastFailedMessage, msg.retryBody || null, { retry: true, useCurrentContext: true });
         });
       }
     }
@@ -5245,11 +5322,21 @@
 
     // Only wait for relevant documents that are still extracting
     state.openTabs.forEach(function (tab) {
-      if (tab.type === 'document' && !tab._extractedText && tab._extractPromise && relevantPaths.has(tab.path)) {
+      if (tab.type === 'document' && tab._docState === 'extracting' && tab._extractPromise && relevantPaths.has(tab.path)) {
         // Add timeout to relevant document extractions (30s max)
         var extractWithTimeout = Promise.race([
           tab._extractPromise,
-          new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 30000); })
+          new Promise(function(resolve) {
+            setTimeout(function() {
+              // 超时：中止提取控制器并标记状态
+              if (tab._extractAbortController) {
+                try { tab._extractAbortController.abort(); } catch (_) {}
+              }
+              tab._docState = 'timed_out';
+              state._documentStates[tab.path] = { state: 'timed_out', generation: tab._extractGeneration, error: '文档提取超时' };
+              resolve(null);
+            }, 30000);
+          })
         ]);
         pending.push(extractWithTimeout);
       }
@@ -5262,12 +5349,12 @@
       });
       for (var i = 0; i < relevantTabs.length; i++) {
         var tab = relevantTabs[i];
-        if (tab._extractError) {
+        if (tab._docState === 'failed' || tab._extractError) {
           var isCurrent = (tab.path === state.activePath);
           var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
           var isAttachment = state.attachments.some(function(a) { return a.path === tab.path; });
           if (!message || isCurrent || isPinned || isAttachment) {
-            throw new Error('文档提取失败：' + tab._extractError);
+            throw new Error('文档提取失败：' + (tab._extractError || '未知错误'));
           }
         }
       }
@@ -5280,9 +5367,15 @@
     return Promise.all(pending).then(checkFailedTabs);
   }
 
-  function buildChatRequestBody(message, historyMsgs, clientRequestId) {
+  function buildChatRequestBody(message, historyMsgs, clientRequestId, sendOptions) {
     var scope = getWorkspaceScope();
-    return {
+    // 检查是否有文档仍未就绪
+    var warnings = [];
+    var hasPendingDocs = state.openTabs.some(function(t) { return t.type === 'document' && t._docState === 'extracting'; });
+    if (hasPendingDocs) {
+      warnings.push('documents_not_ready');
+    }
+    var body = {
       workspace_name: state.workspaceName || '',
       workspace_id: scope.workspace_id,
       workspace_generation: scope.workspace_generation,
@@ -5306,6 +5399,14 @@
         };
       })
     };
+    if (warnings.length > 0) {
+      body.context_warnings = warnings;
+    }
+    sendOptions = sendOptions || {};
+    if (sendOptions.replayOriginal === true) {
+      body.replay_original_context = true;
+    }
+    return body;
   }
 
   var _sendingWatchdog = null;
@@ -5412,6 +5513,8 @@
   function sendMessage(retryMessage, retryBody, sendOptions) {
     sendOptions = sendOptions || {};
     var isRetry = sendOptions.retry === true;
+    var useCurrentContext = sendOptions.useCurrentContext === true;
+    var replayOriginal = sendOptions.replayOriginal === true;
     if (state.sending) {
       // P2: 不静默丢弃第二条消息 — 给用户明确反馈。
       // 消息内容保留在输入框中，用户可在当前请求完成后手动发送。
@@ -5426,6 +5529,14 @@
     if (!isRetry && state.attachmentProcessing && hasAttachments) {
       showToast('资料正在解析，请完成后再发送', 'info');
       return;
+    }
+    // P0: 检查是否有文档仍在提取中，阻止发送
+    if (!isRetry) {
+      var extractingDocs = state.openTabs.filter(function(t) { return t.type === 'document' && t._docState === 'extracting'; });
+      if (extractingDocs.length > 0) {
+        showToast('文档正在提取中，请完成后再发送', 'info');
+        return;
+      }
     }
     if (!message && hasAttachments && !isRetry) {
       // The server requires a non-empty instruction. Make attachment-only
@@ -5573,11 +5684,11 @@
         finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
         return null;
       }
-      var body = retryBody ? Object.assign({}, retryBody, {
+      var body = (retryBody && !useCurrentContext) ? Object.assign({}, retryBody, {
         client_request_id: ctx.clientRequestId,
         conversation_id: state.conversationId,
         workspace_generation: getWorkspaceScope().workspace_generation
-      }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId);
+      }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId, sendOptions);
       ctx.originalBody = Object.assign({}, body);
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
@@ -5954,6 +6065,7 @@
         errorHtml += '</div>';
         if (retryable) {
           errorHtml += '<button class="code-stream-retry-btn" type="button" style="margin-top: 8px;">重新生成</button>';
+          errorHtml += '<button class="code-stream-replay-btn" type="button" style="margin-top: 8px; margin-left: 8px;">原上下文重放</button>';
         }
         errorEl.innerHTML = errorHtml;
         var retryBtn = errorEl.querySelector('.code-stream-retry-btn');
@@ -5962,7 +6074,18 @@
             if (retryBtn.disabled || state.sending || ctx._retryStarted) return;
             ctx._retryStarted = true;
             retryBtn.disabled = true;
-            sendMessage(ctx.originalMessage, ctx.originalBody, { retry: true });
+            // 重新生成使用当前上下文（文件、附件、模型、思考模式）
+            sendMessage(ctx.originalMessage, null, { retry: true, useCurrentContext: true });
+          });
+        }
+        var replayBtn = errorEl.querySelector('.code-stream-replay-btn');
+        if (replayBtn) {
+          replayBtn.addEventListener('click', function () {
+            if (replayBtn.disabled || state.sending || ctx._retryStarted) return;
+            ctx._retryStarted = true;
+            replayBtn.disabled = true;
+            // 原上下文重放：保留原始请求体
+            sendMessage(ctx.originalMessage, ctx.originalBody, { retry: true, replayOriginal: true });
           });
         }
       }
@@ -6775,6 +6898,8 @@
       // A resumed stream has no original request context to safely attach
       // local file-operation metadata to. Keep the reply, but require a new
       // request before offering any write operation.
+      // 保存恢复的操作作为只读 recoveredOperations（Diff 视图只读）
+      state.recoveredOperations = (operations || []).slice();
       state.pendingOperations = [];
       clearStreamState();
       renderChatPanel();
@@ -7155,8 +7280,9 @@
     if (!_dom.editorArea) return;
 
     var hasPending = state.pendingOperations.length > 0;
+    var hasRecovered = state.recoveredOperations && state.recoveredOperations.length > 0;
     var hasApplied = Object.keys(state.snapshots).length > 0;
-    var hasDiffSurface = hasPending || hasApplied;
+    var hasDiffSurface = hasPending || hasRecovered || hasApplied;
     _dom.editorArea.classList.toggle('has-diff-view', hasDiffSurface);
 
     // Remove existing diff view and apply bar
@@ -7168,7 +7294,7 @@
     var editorContainer = document.getElementById('codeEditorContainer');
     var previewArea = document.getElementById('codePreviewArea');
 
-    if (!hasPending && !hasApplied) {
+    if (!hasPending && !hasRecovered && !hasApplied) {
       // Nothing to show: restore editor view
       if (editorContainer) editorContainer.style.display = '';
       if (previewArea) previewArea.style.display = '';
@@ -7283,7 +7409,49 @@
 
       diffView.appendChild(diffBody);
       _dom.editorArea.appendChild(diffView);
-    } else {
+    }
+
+    // 显示恢复的操作（只读 Diff 视图）
+    if (hasRecovered) {
+      var recoveredView = document.createElement('div');
+      recoveredView.className = 'code-diff-view';
+      recoveredView.id = 'codeRecoveredDiffView';
+
+      var recoveredHeader = document.createElement('div');
+      recoveredHeader.style.cssText = 'padding:10px 14px;font-size:12px;font-weight:600;color:var(--cw-text-muted);border-bottom:1px solid var(--cw-border);';
+      recoveredHeader.textContent = '恢复的操作（只读）';
+      recoveredView.appendChild(recoveredHeader);
+
+      var recoveredBody = document.createElement('div');
+      recoveredBody.className = 'code-diff-body stacked';
+
+      for (var ri = 0; ri < state.recoveredOperations.length; ri++) {
+        var rop = state.recoveredOperations[ri];
+
+        var ropHeader = document.createElement('div');
+        ropHeader.className = 'code-diff-header';
+        ropHeader.innerHTML =
+          '<span class="diff-file-path">' + escapeHTML(rop.path || '') + '</span>' +
+          (rop.summary ? '<span class="diff-stats">' + escapeHTML(rop.summary) + '</span>' : '');
+        recoveredBody.appendChild(ropHeader);
+
+        var ropContent = document.createElement('div');
+        ropContent.style.cssText = 'padding:12px 14px;font-size:13px;color:var(--cw-text-muted);';
+        if (rop.type === 'document') {
+          ropContent.textContent = '文档操作：' + (rop.document_operations ? rop.document_operations.length + ' 个操作' : '另存为新文件');
+        } else if (rop.type === 'create') {
+          ropContent.textContent = '创建新文件';
+        } else {
+          ropContent.textContent = '修改文件内容';
+        }
+        recoveredBody.appendChild(ropContent);
+      }
+
+      recoveredView.appendChild(recoveredBody);
+      _dom.editorArea.appendChild(recoveredView);
+    }
+
+    if (!hasPending && !hasRecovered) {
       // Only applied changes (no pending): show a simple info panel
       var appliedPanel = document.createElement('div');
       appliedPanel.className = 'code-diff-view';
@@ -7305,6 +7473,9 @@
     var infoParts = [];
     if (hasPending) {
       infoParts.push(state.pendingOperations.length + ' 个文件待应用');
+    }
+    if (hasRecovered) {
+      infoParts.push(state.recoveredOperations.length + ' 个恢复的操作（只读）');
     }
     if (hasApplied) {
       infoParts.push(Object.keys(state.snapshots).length + ' 个文件已修改');
@@ -7521,6 +7692,51 @@
   }
 
   // ──────────────────────────────────────────────
+  // validateOperation(op)
+  // 验证操作是否仍然有效：检查 workspace generation、路径、SHA、snapshot
+  // ──────────────────────────────────────────────
+  function validateOperation(op) {
+    if (!op || !op.path) {
+      return { valid: false, reason: '无效操作' };
+    }
+
+    // 1. 检查 workspace generation 是否匹配
+    if (typeof op._workspaceGeneration === 'number' &&
+        op._workspaceGeneration !== state.workspaceGeneration) {
+      return { valid: false, reason: '操作已过期（工作区已切换）' };
+    }
+
+    // 2. 检查路径是否存在（create 操作要求路径不存在，其他操作要求路径存在）
+    var fs = window.__xtjCodeFS;
+    if (!fs || !fs.fileExistsByPath) {
+      return { valid: false, reason: '文件系统不可用' };
+    }
+
+    // 路径存在性检查通过 fileExistsByPath，但这是一个异步操作，
+    // 在 applyOperation 中异步调用。这里先做同步可检查的部分。
+
+    // 3. 检查 SHA 是否匹配（如果操作有 expected_sha256）
+    // 同步检查：如果 snapshot 已有记录，可以快速验证
+    if (op.expected_sha256) {
+      var snapshot = state.snapshots[op.path];
+      if (snapshot && snapshot.beforeSha256 && snapshot.beforeSha256 !== op.expected_sha256) {
+        return { valid: false, reason: '文件 "' + op.path + '" 的 SHA 不匹配，内容可能已被修改' };
+      }
+    }
+
+    // 4. 检查 snapshot 是否新鲜
+    if (state.snapshots[op.path]) {
+      var existingSnapshot = state.snapshots[op.path];
+      // 如果 snapshot 的 afterSha256 已经存在且操作类型不是 create，说明已应用过
+      if (op.type !== 'create' && existingSnapshot.afterSha256) {
+        return { valid: false, reason: '文件 "' + op.path + '" 的修改已被应用过' };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  // ──────────────────────────────────────────────
   // applyOperation(index)
   // ──────────────────────────────────────────────
   function applyOperation(index) {
@@ -7545,6 +7761,13 @@
     }
     if (op._conversationId && op._conversationId !== state.conversationId) {
       return Promise.reject(new Error('操作已过期（会话已切换），请重新生成'));
+    }
+
+    // P0: 通过 validateOperation 进行完整验证
+    var validation = validateOperation(op);
+    if (!validation.valid) {
+      showToast('操作验证失败: ' + validation.reason, 'error');
+      return Promise.reject(new Error(validation.reason));
     }
 
     // P2: Capture generation at apply start; re-check inside every async
@@ -7777,12 +8000,13 @@
   // 放弃所有未应用的 AI 建议（pendingOperations），不影响已应用的修改
   // ──────────────────────────────────────────────
   function discardPendingOperations() {
-    if (state.pendingOperations.length === 0) {
+    if (state.pendingOperations.length === 0 && (!state.recoveredOperations || state.recoveredOperations.length === 0)) {
       showToast('没有待放弃的建议', 'info');
       return;
     }
-    var count = state.pendingOperations.length;
+    var count = state.pendingOperations.length + (state.recoveredOperations ? state.recoveredOperations.length : 0);
     state.pendingOperations = [];
+    state.recoveredOperations = [];
     renderDiffView();
     renderTabs();
     if (state.activePath) {

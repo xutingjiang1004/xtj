@@ -134,37 +134,34 @@
       var now = Date.now();
       var maxAge = 7 * 24 * 60 * 60 * 1000; // 7 天过期
       var remaining = [];
+      var lowFreqQueue = readJson('xtj_photo_upload_lowfreq', []); // P5: 低频率重试队列
       var reconciled = 0;
 
       var maxRetryCount = 10; // P4: 最大重试次数
       var minRetryInterval = 30 * 1000; // P4: 最小重试间隔 30 秒
+      // P5: 同一 uploadId 的清理锁，防止并发清理
+      var _cleanupInProgress = window._photoCleanupInProgress = window._photoCleanupInProgress || {};
 
       for (var i = 0; i < pending.length; i++) {
         var entry = pending[i];
         if (!entry.uploadId) continue;
-        // P4: 真正的过期处理 — 超过 7 天直接标记 stale 并丢弃
+        // P5: 超过 7 天过期的记录 — 移入低频率重试队列，不直接丢弃
         if ((now - entry.createdAt) > maxAge) {
           entry.stale = true;
-          // 过期记录不查询服务端，直接丢弃并尝试清理 Storage
-          if (entry.path) {
-            try {
-              fetch((window.API_BASE || '') + '/api/photo/cleanup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: entry.path })
-              }).catch(function() {});
-            } catch (e) {}
-          }
-          continue; // 不加入 remaining
+          entry.movedToLowFreq = true;
+          lowFreqQueue.push(entry);
+          continue; // 不加入 remaining，但已加入 lowFreqQueue
         }
         // P4: 退避 — 距离上次查询不足最小间隔则跳过
         if (entry.lastQueriedAt && (now - entry.lastQueriedAt) < minRetryInterval) {
           remaining.push(entry);
           continue;
         }
-        // P4: 超过最大重试次数则标记 stale 并丢弃
+        // P5: 超过最大重试次数 — 移入低频率重试队列，不再主动查询
         if ((entry.retryCount || 0) >= maxRetryCount) {
           entry.stale = true;
+          entry.movedToLowFreq = true;
+          lowFreqQueue.push(entry);
           continue; // 不加入 remaining
         }
         entry.lastQueriedAt = now;
@@ -192,17 +189,26 @@
             // 删除 pending 记录（不删除 Storage，因为文件已提交）
             continue; // 不加入 remaining
           } else if (resp.ok && (data.status === 'failed' || data.status === 'not_found')) {
-            // 失败或不存在，清理 Storage 和 pending
-            try {
-              // 清理 Storage（通过服务端）
-              if (entry.path) {
-                fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+            // P5: 清理时必须等待结果，且使用 _cleanupInProgress 锁防止并发
+            if (entry.path && !_cleanupInProgress[entry.uploadId]) {
+              _cleanupInProgress[entry.uploadId] = true;
+              try {
+                var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+                var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
                   method: 'POST',
-                  headers: Object.assign({ 'Content-Type': 'application/json' }, typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {}),
+                  headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
                   body: JSON.stringify({ path: entry.path })
-                }).catch(function() {});
+                });
+                var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
+                if (!cleanupResp.ok || !cleanupData.ok) {
+                  console.warn('[PhotoWall] cleanup failed for', entry.uploadId, cleanupData);
+                }
+              } catch (e) {
+                console.warn('[PhotoWall] cleanup error for', entry.uploadId, e);
+              } finally {
+                delete _cleanupInProgress[entry.uploadId];
               }
-            } catch (e) {}
+            }
             continue; // 不加入 remaining
           } else if (resp.ok && data.status === 'processing') {
             // 仍在处理，保留记录
@@ -219,6 +225,8 @@
         }
       }
 
+      // P5: 保存低频率重试队列，限制大小
+      writeJson('xtj_photo_upload_lowfreq', lowFreqQueue.slice(-50));
       writeJson('xtj_photo_upload_pending', remaining);
       if (reconciled > 0 && typeof window.initPhotoWall === 'function') {
         window.initPhotoWall(true).catch(function() {});
@@ -227,6 +235,51 @@
       console.warn('[PhotoWall] reconcile pending uploads failed', e);
     }
   };
+
+  // P5: 低频率重试队列检查 — 每 30 分钟处理一次
+  window.recheckLowFreqPhotoQueue = async function() {
+    try {
+      var lowFreq = readJson('xtj_photo_upload_lowfreq', []);
+      if (!lowFreq.length) return;
+      var now = Date.now();
+      var remaining = [];
+      for (var i = 0; i < lowFreq.length; i++) {
+        var entry = lowFreq[i];
+        if (!entry || !entry.uploadId) continue;
+        // 低频率重试：每 24 小时检查一次
+        if (entry.lastLowFreqCheckAt && (now - entry.lastLowFreqCheckAt) < 24 * 60 * 60 * 1000) {
+          remaining.push(entry);
+          continue;
+        }
+        entry.lastLowFreqCheckAt = now;
+        try {
+          var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+          var resp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
+            body: JSON.stringify({ upload_id: entry.uploadId })
+          });
+          if (resp.ok) {
+            var data = await resp.json().catch(function(){ return {}; });
+            if (data && data.committed) {
+              // 已提交，触发刷新
+              if (typeof window.initPhotoWall === 'function') {
+                window.initPhotoWall(true).catch(function() {});
+              }
+              continue; // 不加入 remaining，已提交
+            }
+          }
+        } catch (_) {}
+        // 仍失败，保留在低频率队列中
+        remaining.push(entry);
+      }
+      writeJson('xtj_photo_upload_lowfreq', remaining);
+    } catch (e) {
+      console.warn('[PhotoWall] recheckLowFreqPhotoQueue failed', e);
+    }
+  };
+  // 每 30 分钟执行一次低频率重试
+  setInterval(function() { window.recheckLowFreqPhotoQueue(); }, 30 * 60 * 1000);
 
   // ★ 绑定 reconcile 触发时机
   (function() {

@@ -6,6 +6,10 @@
 var STREAM_RESUME_TTL_MS = 60 * 60 * 1000; // 1 hour
 var RESUME_ENABLED = false;
 
+// ── Error Classification ──────────────────────────────────────────────────
+
+var { classifySupabaseError } = require('../db-result.js');
+
 // ── Feature Flag ──────────────────────────────────────────────────────────
 
 function isResumeEnabled() {
@@ -17,10 +21,36 @@ function setResumeEnabledForTests(enabled) {
   RESUME_ENABLED = enabled;
 }
 
+// ── Backoff Helper ────────────────────────────────────────────────────────
+
+function getBackoffDelay(retryCount) {
+  return Math.min(1000 * Math.pow(2, retryCount), 30000);
+}
+
+// ── Idempotency Query ─────────────────────────────────────────────────────
+
+function queryIdempotencyKey(supabase, key) {
+  if (!supabase || !key) return Promise.resolve({ found: false });
+  return supabase.from('ai_stream_sessions').select('*')
+    .eq('client_request_id', String(key))
+    .limit(1)
+    .then(function(r) {
+      if (r.error) {
+        return { query_failed: true, error: { code: r.error.code || 'UNKNOWN', message: r.error.message || 'Query failed' } };
+      }
+      if (r.data && r.data[0]) return { found: true, data: r.data[0] };
+      return { found: false };
+    }).catch(function(e) {
+      return { query_failed: true, error: { code: 'UNKNOWN', message: e.message || 'Query failed' } };
+    });
+}
+
 // ── Session CRUD ──────────────────────────────────────────────────────────
 
 function createStreamSession(supabase, params) {
-  if (!isResumeEnabled() || !supabase) return Promise.resolve(null);
+  if (!isResumeEnabled() || !supabase) {
+    return Promise.resolve({ error: { code: 'DISABLED', message: 'Stream resume is not enabled' } });
+  }
   return supabase.from('ai_stream_sessions').insert({
     user_id: String(params.userId || ''),
     stream_id: String(params.streamId || ''),
@@ -36,12 +66,14 @@ function createStreamSession(supabase, params) {
   }).then(function(r) {
     if (r.error) {
       console.error('[stream-session] create session failed:', r.error.message);
-      return null;
+      return { error: { code: r.error.code || 'UNKNOWN', message: r.error.message || 'Create session failed' } };
     }
-    return r.data && r.data[0] ? r.data[0] : null;
+    var session = r.data && r.data[0] ? r.data[0] : null;
+    if (session) return { data: session };
+    return { error: { code: 'EMPTY_RESULT', message: 'No session data returned' } };
   }).catch(function(e) {
     console.error('[stream-session] create session error:', e.message);
-    return null;
+    return { error: { code: 'UNKNOWN', message: e.message || 'Create session error' } };
   });
 }
 
@@ -96,11 +128,51 @@ var PERSISTABLE_EVENT_TYPES = new Set([
 var DELTA_FLUSH_INTERVAL_MS = 300;
 var DELTA_FLUSH_MIN_CHARS = 200;
 
+function insertEvent(supabase, streamId, userId, eventId, type, data) {
+  return supabase.from('ai_stream_events').insert({
+    user_id: String(userId),
+    stream_id: String(streamId),
+    event_id: Number(eventId),
+    event_type: type,
+    event_data: data || {},
+    expires_at: new Date(Date.now() + STREAM_RESUME_TTL_MS).toISOString()
+  }).then(function(r) {
+    if (r.error) {
+      // 23505 = unique violation, event already exists — treat as success
+      if (r.error.code === '23505') {
+        return { attempted: 1, succeeded: 1, failed: 0, eventId: eventId };
+      }
+      var classified = classifySupabaseError(r.error);
+      console.error('[stream-session] insert event failed:', r.error.message);
+      return {
+        attempted: 1,
+        succeeded: 0,
+        failed: 1,
+        retryable: classified.retryable,
+        error: classified.error,
+        eventId: eventId
+      };
+    }
+    return { attempted: 1, succeeded: 1, failed: 0, eventId: eventId };
+  }).catch(function(e) {
+    var classified = classifySupabaseError(e);
+    console.error('[stream-session] insert event error:', e.message);
+    return {
+      attempted: 1,
+      succeeded: 0,
+      failed: 1,
+      retryable: classified.retryable,
+      error: classified.error,
+      eventId: eventId
+    };
+  });
+}
+
 function createEventLogger(supabase, streamId, userId) {
   if (!isResumeEnabled() || !supabase) {
     return {
       logEvent: function() { return Promise.resolve(); },
-      flush: function() { return Promise.resolve(); },
+      flush: function() { return Promise.resolve({ attempted: 0, succeeded: 0, failed: 0, lastPersistedEventId: 0 }); },
       getEvents: function() { return Promise.resolve([]); }
     };
   }
@@ -113,6 +185,8 @@ function createEventLogger(supabase, streamId, userId) {
   // Phase 1-P0-3/4: Track the last delta event_id so flush() never uses 0.
   // All persisted event_ids must be > 0, unique, and monotonically increasing.
   var _lastDeltaEventId = 0;
+  // Tracks the last event ID that was actually persisted (not just written to buffer)
+  var _lastPersistedEventId = 0;
 
   function trackWrite(promise) {
     var tracked = Promise.resolve(promise);
@@ -139,6 +213,16 @@ function createEventLogger(supabase, streamId, userId) {
     return Promise.resolve(combined);
   }
 
+  // Wraps insertEvent and tracks _lastPersistedEventId on success
+  function persistEvent(eventId, type, data) {
+    return insertEvent(supabase, streamId, userId, eventId, type, data).then(function(result) {
+      if (result.succeeded > 0) {
+        _lastPersistedEventId = eventId;
+      }
+      return result;
+    });
+  }
+
   function logEvent(type, data, eventId) {
     if (!isResumeEnabled() || !supabase) return Promise.resolve();
 
@@ -158,7 +242,7 @@ function createEventLogger(supabase, streamId, userId) {
         return trackWrite(doFlushDeltas().then(function(combined) {
           if (!combined) return;
           // Phase 1-P0-3: Use the last delta's event_id (always > 0)
-          return insertEvent(supabase, streamId, userId, _lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
+          return persistEvent(_lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
         }));
       }
       return Promise.resolve();
@@ -168,17 +252,18 @@ function createEventLogger(supabase, streamId, userId) {
     // Phase 1-P0-3: Use _lastDeltaEventId instead of eventId - 1 (which could be 0)
     var flushPromise = doFlushDeltas().then(function(combined) {
       if (combined) {
-        return insertEvent(supabase, streamId, userId, _lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
+        return persistEvent(_lastDeltaEventId, 'answer_delta', { delta: combined.slice(0, 10000) });
       }
     });
 
     return trackWrite(flushPromise.then(function() {
-      return insertEvent(supabase, streamId, userId, eventId, type, sanitizeEventData(type, data));
+      return persistEvent(eventId, type, sanitizeEventData(type, data));
     }));
   }
 
   function flush() {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    var flushResult = { attempted: 0, succeeded: 0, failed: 0, lastPersistedEventId: _lastPersistedEventId };
     return waitForWrites().then(function() { return doFlushDeltas(); }).then(function(combined) {
       flushed = true;
       if (combined) {
@@ -186,9 +271,18 @@ function createEventLogger(supabase, streamId, userId) {
         // (or 1 if no deltas were seen, which is still > 0).
         var flushEventId = _lastDeltaEventId > 0 ? _lastDeltaEventId + 1 : 1;
         _lastDeltaEventId = flushEventId;
-        return trackWrite(insertEvent(supabase, streamId, userId, flushEventId, 'answer_delta', { delta: combined.slice(0, 10000) }));
+        return persistEvent(flushEventId, 'answer_delta', { delta: combined.slice(0, 10000) }).then(function(result) {
+          flushResult.attempted += result.attempted;
+          flushResult.succeeded += result.succeeded;
+          flushResult.failed += result.failed;
+          flushResult.lastPersistedEventId = _lastPersistedEventId;
+          return flushResult;
+        });
       }
-    }).then(waitForWrites);
+      return flushResult;
+    }).then(waitForWrites).then(function() {
+      return flushResult;
+    });
   }
 
   return {
@@ -196,23 +290,6 @@ function createEventLogger(supabase, streamId, userId) {
     flush: flush,
     flushDeltas: doFlushDeltas
   };
-}
-
-function insertEvent(supabase, streamId, userId, eventId, type, data) {
-  return supabase.from('ai_stream_events').insert({
-    user_id: String(userId),
-    stream_id: String(streamId),
-    event_id: Number(eventId),
-    event_type: type,
-    event_data: data || {},
-    expires_at: new Date(Date.now() + STREAM_RESUME_TTL_MS).toISOString()
-  }).then(function(r) {
-    if (r.error && r.error.code !== '23505') { // 23505 = unique violation, ignore
-      console.error('[stream-session] insert event failed:', r.error.message);
-    }
-  }).catch(function(e) {
-    console.error('[stream-session] insert event error:', e.message);
-  });
 }
 
 function sanitizeEventData(type, data) {
@@ -273,5 +350,7 @@ module.exports = {
   createEventLogger: createEventLogger,
   getEventsAfter: getEventsAfter,
   isPersistableEvent: isPersistableEvent,
+  queryIdempotencyKey: queryIdempotencyKey,
+  getBackoffDelay: getBackoffDelay,
   STREAM_RESUME_TTL_MS: STREAM_RESUME_TTL_MS
 };
