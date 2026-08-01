@@ -9,6 +9,9 @@
     var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
     var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
     if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
+      // P3: 确保 cleanup 至多执行一次
+      if (codeModuleState._codeCleanupExecuted) return;
+      codeModuleState._codeCleanupExecuted = true;
       // P2: check cleanup return value FIRST — cancel navigation if user declined.
       // Only increment generation after we know navigation will actually proceed,
       // otherwise stale in-flight loads would be wrongly invalidated and the user
@@ -18,7 +21,6 @@
       // any in-flight Code module loads belonging to the old Code session.
       codeModuleState.generation++;
     }
-
     var aiPanel = document.getElementById('panelAiChat');
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
@@ -28,6 +30,8 @@
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
     }
     if (tab === 'code') {
+      // P3: 进入 Code 页面时重置 cleanup 标志，允许下次离开时再次执行
+      codeModuleState._codeCleanupExecuted = false;
       // The canonical API survives tab cleanup; restore the legacy alias
       // synchronously when returning to Code so core.js and integrations do
       // not observe a half-recovered workspace.
@@ -51,11 +55,18 @@
     // P0: 跟踪当前 tab 用于 Code 模块可见性判断
     var previousTab = codeModuleState.currentTab;
     if (previousTab === 'code' && tab !== 'code' && window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.cleanup === 'function') {
+      // P3: 确保 cleanup 至多执行一次
+      if (codeModuleState._codeCleanupExecuted) return;
+      codeModuleState._codeCleanupExecuted = true;
       try { window.__xtjCodeWorkspaceAPI.cleanup(); } catch (_) {}
     }
     codeModuleState.currentTab = tab;
     // Bootstrap a restored Code tab even when no click event fires.
-    if (tab === 'code') scheduleVisibleCodeWorkspaceLoad();
+    if (tab === 'code') {
+      // P3: 进入 Code 页面时重置 cleanup 标志
+      codeModuleState._codeCleanupExecuted = false;
+      scheduleVisibleCodeWorkspaceLoad();
+    }
     document.querySelectorAll('.desktop-nav-item').forEach(function (button) {
       var active = aiActive
         ? button.getAttribute('data-desktop-action') === 'ai-chat'
@@ -323,7 +334,9 @@
       'code-css':     { status: 'idle', url: '', startTime: 0 }
     },
     // P0: 当前 active tab 用于可靠的可见性判断
-    currentTab: 'posts'
+    currentTab: 'posts',
+    // P3: 确保 Code 页面 cleanup 至多执行一次
+    _codeCleanupExecuted: false
   };
 
   var _loadedModules = {};
