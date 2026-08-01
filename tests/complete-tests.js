@@ -509,6 +509,7 @@ test('/api/feed endReached based on database-filtered result not JS-filtered cou
   var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
   assert.ok(feedSection.indexOf('endReached') >= 0, '/api/feed missing endReached');
   assert.ok(feedSection.indexOf('preFilterCount < limit') >= 0, '/api/feed endReached must use preFilterCount < limit');
+  assert.ok(feedSection.indexOf('next_offset: preFilterCount ? from + preFilterCount : from') >= 0, '/api/feed next_offset must advance by the unfiltered page width');
 });
 
 test('/api/feed uses optionalAuth for unauthenticated access', function(){
