@@ -26,6 +26,9 @@ function parseStoragePhotoUrl(mediaUrl, supabaseUrl) {
   const encodedPath = parsed.pathname.slice(STORAGE_PUBLIC_PHOTO_PREFIX.length);
   let storagePath;
   try { storagePath = decodeURIComponent(encodedPath); } catch (_) { return invalid('图片地址无效', 'INVALID_INPUT'); }
+  // Reject residual percent-encoding so a downstream storage/router decode
+  // cannot turn %252e%252e into a traversal segment after this validation.
+  if (/%[0-9a-f]{2}/i.test(storagePath)) return invalid('图片地址无效', 'INVALID_INPUT');
   if (!storagePath || CONTROL_CHARACTERS.test(storagePath) || storagePath.indexOf('\\') >= 0 || storagePath.split('/').some(function(part) { return !part || part === '.' || part === '..'; })) return invalid('图片地址无效', 'INVALID_INPUT');
   return { ok: true, mediaUrl: parsed.toString(), storagePath: 'photos/' + storagePath };
 }
@@ -131,9 +134,12 @@ async function cleanupStorageFile(supabase, storagePath, logger) {
   }
 }
 
-async function findExistingPhotoByActorKey(supabase, actorKey) {
+async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
   try {
-    const result = await supabase.from('posts').select('id,user_name,media_url,content,created_at,views,actor_key').eq('actor_key', actorKey).maybeSingle();
+    var query = supabase.from('posts').select('id,user_name,media_url,content,created_at,views,actor_key').eq('actor_key', actorKey);
+    // 幂等键必须绑定用户，防止跨用户泄露/覆盖他人照片记录
+    if (typeof userName === 'string' && userName) query = query.eq('user_name', userName);
+    const result = await query.maybeSingle();
     if (result && result.data && !result.error) return { ok: true, data: result.data };
     return { ok: false, error: (result && result.error) || null };
   } catch (err) {
@@ -142,6 +148,9 @@ async function findExistingPhotoByActorKey(supabase, actorKey) {
 }
 
 async function createPhotoRecord(options) {
+  if (!options || typeof options.userName !== 'string' || !options.userName.trim()) {
+    return { status: 401, body: { ok: false, error: '未登录', code: 'AUTH_REQUIRED' } };
+  }
   const validated = validatePhotoCreatePayload(options.body, options.supabaseUrl);
   if (!validated.ok) {
     return { status: 400, body: { ok: false, error: validated.error, code: validated.code || 'INVALID_INPUT' } };
@@ -153,7 +162,7 @@ async function createPhotoRecord(options) {
 
   // 若提供了 upload_id, 先查询是否已存在 (幂等)
   if (uploadId) {
-    const existing = await findExistingPhotoByActorKey(options.supabase, actorKey);
+    const existing = await findExistingPhotoByActorKey(options.supabase, actorKey, options.userName);
     if (existing.ok && existing.data) {
       // ★ 检查旧记录引用的文件是否还存在
       var oldStoragePath = null;
@@ -255,7 +264,7 @@ async function createPhotoRecord(options) {
 
   // 插入失败：检查是否已存在 (并发幂等，例如唯一键冲突)
   if (uploadId) {
-    const existing = await findExistingPhotoByActorKey(options.supabase, actorKey);
+    const existing = await findExistingPhotoByActorKey(options.supabase, actorKey, options.userName);
     if (existing.ok && existing.data) {
       // 文件已被另一个请求上传成功：保留 storage 文件 (因为记录已存在)
       return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
