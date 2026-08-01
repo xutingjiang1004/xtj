@@ -32,7 +32,8 @@ CREATE POLICY "Users can view own stream sessions"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 DROP POLICY IF EXISTS "Users can view own stream events" ON public.ai_stream_events;
@@ -43,7 +44,8 @@ CREATE POLICY "Users can view own stream events"
     user_id = auth.uid()::text
     OR user_id = NULLIF(auth.jwt() ->> 'user_name', '')
     OR user_id = NULLIF(auth.jwt() ->> 'username', '')
-    OR user_id = NULLIF(auth.jwt() -> 'user_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'user_name', '')
+    OR user_id = NULLIF(auth.jwt() -> 'app_metadata' ->> 'username', '')
   );
 
 -- Migration 013 used the legacy *_thumb naming convention. Add the actual
