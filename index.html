@@ -54,7 +54,7 @@
     <link rel="stylesheet" href="css/ui-shell.min.css?v=5b846a64d6">
     <link rel="stylesheet" href="css/code-claude-style.css?v=e6361770e7">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4211272ae5">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=91bbfa907f">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=4cec2ae8f1">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2583028a16">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12ce06fd78">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=6ab6dccd6d">
@@ -73,8 +73,8 @@
     <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
     <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
     <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=614ef47aed">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=162b3b3906">
-    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=c8b75509eb">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=8b14f16179">
+    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=3a25e4084f">
     </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1070,7 +1070,41 @@
         })();
     </script>
     <!-- Local Qwen is opt-in: it loads a worker/model only after the user selects it. -->
-    <script defer src="js/local-ai-runtime.min.js?v=27f62f9fd7"></script>
+    <script id="xtjLocalAiRuntime" defer src="js/local-ai-runtime.min.js?v=27f62f9fd7"></script>
+    <script>
+        // A failed deferred asset must not permanently hide the opt-in local model.
+        (function() {
+            var pendingLocalAiRuntime = null;
+            window.__xtjEnsureLocalAI = function() {
+                if (window.__xtjLocalAI) return Promise.resolve(window.__xtjLocalAI);
+                if (pendingLocalAiRuntime) return pendingLocalAiRuntime;
+                var initial = document.getElementById('xtjLocalAiRuntime');
+                var source = initial && initial.src;
+                if (!source) return Promise.reject(new Error('本地 Qwen 运行时资源缺失。'));
+                pendingLocalAiRuntime = new Promise(function(resolve, reject) {
+                    var retry = document.createElement('script');
+                    var timer = setTimeout(function() {
+                        retry.remove();
+                        reject(new Error('本地 Qwen 运行时加载超时，请检查网络后重试。'));
+                    }, 45000);
+                    retry.src = source + (source.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                    retry.async = true;
+                    retry.onload = function() {
+                        clearTimeout(timer);
+                        if (window.__xtjLocalAI) resolve(window.__xtjLocalAI);
+                        else reject(new Error('本地 Qwen 运行时未正确初始化。'));
+                    };
+                    retry.onerror = function() {
+                        clearTimeout(timer);
+                        reject(new Error('本地 Qwen 运行时下载失败，请检查网络后重试。'));
+                    };
+                    document.head.appendChild(retry);
+                });
+                pendingLocalAiRuntime.then(function() { pendingLocalAiRuntime = null; }, function() { pendingLocalAiRuntime = null; });
+                return pendingLocalAiRuntime;
+            };
+        })();
+    </script>
     <!-- AI Core shared modules (must load before ai-agent and code-workspace) -->
     <script defer src="js/ai-core/errors.min.js?v=c3fc45343c"></script>
     <script defer src="js/ai-core/request-controller.min.js?v=c41ecc922e"></script>
@@ -1087,10 +1121,10 @@
     <script defer src="js/vendor/supabase.min.js?v=e87e170609"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
-    <script defer src="js/core.min.js?v=49018a81d6"></script>
+    <script defer src="js/core.min.js?v=7c8c628d40"></script>
     <script defer src="js/login-device.min.js?v=6b0e0216b3"></script>
     <script defer src="js/theme-toggle.min.js?v=a9201b15a8"></script>
-    <script defer src="js/desktop-shell.min.js?v=67c9468ae6"></script>
+    <script defer src="js/desktop-shell.min.js?v=a0857a3d02"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
