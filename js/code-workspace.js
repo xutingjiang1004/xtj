@@ -4412,7 +4412,7 @@
         state.models = models;
         state.modelLoadError = '';
         // P3: 本地模型 ID 也视为可用，不重置选择
-        var isLocalSelected = !!(window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID);
+        var isLocalSelected = state.selectedModelId === localCodeModelId();
         var selectedAvailable = models.some(function(model) { return model.id === state.selectedModelId; });
         if (!selectedAvailable && !isLocalSelected) state.selectedModelId = String(data.default_model || (models[0] && models[0].id) || '');
         normalizeThinkingModeForSelectedModel();
@@ -4433,11 +4433,31 @@
 
   function selectedCodeModel() {
     var model = state.models.filter(function(model) { return model.id === state.selectedModelId; })[0] || null;
-    // P3: 如果选择的是本地模型，返回其描述符
-    if (!model && window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID) {
-      model = window.__xtjLocalAI.getModelDescriptor();
-    }
+    if (!model && state.selectedModelId === localCodeModelId()) model = localCodeModelDescriptor();
     return model;
+  }
+
+  function localCodeModelId() {
+    return window.__xtjLocalAI ? window.__xtjLocalAI.LOCAL_MODEL_ID : 'local-qwen2.5-0.5b';
+  }
+
+  function localCodeModelDescriptor() {
+    if (window.__xtjLocalAI) return window.__xtjLocalAI.getModelDescriptor();
+    return {
+      id: localCodeModelId(),
+      name: '本地离线 · Qwen 2.5 0.5B（需下载）',
+      description: '首次使用需下载约 1 GB；下载后可在本机离线运行。',
+      local: true,
+      supported_thinking_modes: ['off'],
+      supports_thinking: false,
+      supports_tools: false
+    };
+  }
+
+  function ensureCodeLocalAiRuntime() {
+    if (window.__xtjLocalAI) return Promise.resolve(window.__xtjLocalAI);
+    if (typeof window.__xtjEnsureLocalAI === 'function') return window.__xtjEnsureLocalAI();
+    return Promise.reject(new Error('本地 Qwen 运行时加载器不可用。'));
   }
 
   function normalizeThinkingModeForSelectedModel() {
@@ -4763,6 +4783,7 @@
       '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
         '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="添加上下文" aria-haspopup="menu" aria-expanded="false">＋</button>' +
         '<select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select>' +
+        '<button type="button" class="code-local-model-setup" id="codeLocalModelSetupBtn">下载本地 Qwen（约 1GB）</button>' +
         '<select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
           '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
         '</select>' +
@@ -4999,33 +5020,33 @@
     var thinkingSelect = document.getElementById('codeThinkingSelect');
     var contextUsage = document.getElementById('codeContextUsage');
     var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
+    var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
     if (modelSelect) {
       var current = state.selectedModelId;
       modelSelect.innerHTML = '';
-      if (!state.models.length) {
-        modelSelect.disabled = true;
-        modelSelect.innerHTML = '<option value="">模型不可用</option>';
-      } else {
-        state.models.forEach(function(model) {
-          var option = document.createElement('option');
-          option.value = model.id;
-          option.textContent = model.name + (model.supports_tools ? ' · 工具' : '');
-          option.selected = model.id === current;
-          modelSelect.appendChild(option);
-        });
-        // P3: 添加本地模型选项
-        if (window.__xtjLocalAI) {
-          var localDesc = window.__xtjLocalAI.getModelDescriptor();
-          var localOption = document.createElement('option');
-          localOption.value = localDesc.id;
-          localOption.textContent = localDesc.name;
-          localOption.selected = localDesc.id === current;
-          modelSelect.appendChild(localOption);
-        }
-        modelSelect.disabled = false;
-      }
+      state.models.forEach(function(model) {
+        var option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name + (model.supports_tools ? ' · 工具' : '');
+        option.selected = model.id === current;
+        modelSelect.appendChild(option);
+      });
+      var localDesc = localCodeModelDescriptor();
+      var localOption = document.createElement('option');
+      localOption.value = localDesc.id;
+      localOption.textContent = localDesc.name;
+      localOption.selected = localDesc.id === current;
+      modelSelect.appendChild(localOption);
+      modelSelect.disabled = false;
       var selectedModel = selectedCodeModel();
       modelSelect.title = selectedModel ? (selectedModel.description || ((selectedModel.supports_thinking ? '支持思考' : '不支持思考') + (selectedModel.supports_tools ? '；支持工具调用' : ''))) : '';
+    }
+    if (localSetupButton) {
+      var localRuntime = window.__xtjLocalAI;
+      var localState = localRuntime && localRuntime.getState();
+      localSetupButton.disabled = localState === 'downloading' || localState === 'initializing';
+      localSetupButton.textContent = localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
+        (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）');
     }
     if (thinkingSelect) {
       normalizeThinkingModeForSelectedModel();
@@ -5099,6 +5120,7 @@
     var contextMenu = document.getElementById('codeComposerContextMenu');
     var contextUsage = document.getElementById('codeContextUsage');
     var contextDetails = document.getElementById('codeContextDetails');
+    var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
     if (modelSelect && !modelSelect.dataset.bound) {
       modelSelect.dataset.bound = '1';
       modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); updateCapabilitiesBadge(); });
@@ -5106,6 +5128,27 @@
     if (thinkingSelect && !thinkingSelect.dataset.bound) {
       thinkingSelect.dataset.bound = '1';
       thinkingSelect.addEventListener('change', function() { state.thinkingMode = thinkingSelect.value; saveComposerPreferences(); });
+    }
+    if (localSetupButton && !localSetupButton.dataset.bound) {
+      localSetupButton.dataset.bound = '1';
+      localSetupButton.addEventListener('click', function() {
+        localSetupButton.disabled = true;
+        localSetupButton.textContent = '正在准备本地 Qwen…';
+        ensureCodeLocalAiRuntime().then(function(runtime) {
+          if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
+          state.selectedModelId = runtime.LOCAL_MODEL_ID;
+          saveComposerPreferences();
+          try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
+          return runtime.ensureReady({ onProgress: function() { updateComposerControls(); } });
+        }).then(function() {
+          updateComposerControls();
+          updateCapabilitiesBadge();
+          showToast('本地 Qwen 已就绪，可以离线使用。', 'success');
+        }).catch(function(error) {
+          updateComposerControls();
+          showToast((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+        });
+      });
     }
     if (contextUsage && contextDetails && !contextUsage.dataset.bound) {
       contextUsage.dataset.bound = '1';
@@ -5837,7 +5880,7 @@
       });
       ctx.originalBody = Object.assign({}, body);
       // P3: 本地模型路由 — 不经过服务器，直接在浏览器端运行
-      if (window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID) {
+      if (state.selectedModelId === localCodeModelId()) {
         return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
       }
       // Phase 2: Route to streaming endpoint when feature flag is enabled
@@ -5878,10 +5921,13 @@
   function handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr) {
     var runtime = window.__xtjLocalAI;
     if (!runtime) {
-      state.messages.push({ role: 'assistant', content: '本地模型运行时不可用，请刷新页面后重试。', time: timeStr, errorCode: 'LOCAL_AI_NOT_AVAILABLE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
-      finalizeRequest(ctx, { error: 'Local AI runtime not available', errorCode: 'LOCAL_AI_NOT_AVAILABLE' });
-      renderChatPanel();
-      return Promise.resolve();
+      return ensureCodeLocalAiRuntime().then(function() {
+        return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
+      }).catch(function(error) {
+        state.messages.push({ role: 'assistant', content: '本地模型运行时不可用：' + ((error && error.message) || '请重试。'), time: timeStr, errorCode: 'LOCAL_AI_NOT_AVAILABLE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+        finalizeRequest(ctx, { error: 'Local AI runtime not available', errorCode: 'LOCAL_AI_NOT_AVAILABLE' });
+        renderChatPanel();
+      });
     }
 
     if (!runtime.isSupported()) {

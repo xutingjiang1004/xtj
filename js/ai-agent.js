@@ -6151,8 +6151,10 @@ function showChatMessages() {
       modelSelector.value = savedAiModel;
     }
     var localBadge = el('span', { class: 'ai-chat-local-badge', style: 'display:none; font-size:11px; padding:2px 6px; background:#e0f2f1; color:#00695c; border-radius:4px; margin-left:8px; vertical-align:middle;', text: '本地离线' });
+    var localSetupButton = el('button', { type: 'button', class: 'ai-chat-local-setup', style: 'margin-left:8px;padding:3px 7px;border:1px solid #7bc9b6;border-radius:4px;background:#f4fffb;color:#087b62;font-size:11px;cursor:pointer;', text: '下载本地 Qwen（约 1GB）' });
     modelSelectorWrap.appendChild(modelSelector);
     modelSelectorWrap.appendChild(localBadge);
+    modelSelectorWrap.appendChild(localSetupButton);
     
     function updateLocalBadge() {
       var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
@@ -6163,6 +6165,32 @@ function showChatMessages() {
     modelSelector.addEventListener('change', function() {
       try { localStorage.setItem('xtj_ai_model', modelSelector.value); } catch (e) {}
       updateLocalBadge();
+    });
+    localSetupButton.addEventListener('click', function() {
+      if (typeof window.__xtjEnsureLocalAI !== 'function') {
+        notify('本地 Qwen 运行时加载器不可用，请刷新页面后重试。', 'error');
+        return;
+      }
+      localSetupButton.disabled = true;
+      localSetupButton.textContent = '正在准备本地 Qwen…';
+      window.__xtjEnsureLocalAI().then(function(runtime) {
+        if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
+        var localOption = modelSelector.querySelector('option[value="' + runtime.LOCAL_MODEL_ID + '"]');
+        if (!localOption) modelSelector.appendChild(el('option', { value: runtime.LOCAL_MODEL_ID, text: runtime.getModelDescriptor().name }));
+        modelSelector.value = runtime.LOCAL_MODEL_ID;
+        try { localStorage.setItem('xtj_ai_model', runtime.LOCAL_MODEL_ID); localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
+        updateLocalBadge();
+        return runtime.ensureReady({ onProgress: function(progress) {
+          localSetupButton.textContent = '下载中 ' + Math.round((progress && progress.progress || 0) * 100) + '%';
+        } });
+      }).then(function() {
+        localSetupButton.textContent = '本地 Qwen 已就绪';
+        notify('本地 Qwen 已就绪，可以离线使用。', 'success');
+      }).catch(function(error) {
+        localSetupButton.disabled = false;
+        localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
+        notify((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+      });
     });
     updateLocalBadge();
     root.appendChild(modelSelectorWrap);
