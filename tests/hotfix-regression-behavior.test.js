@@ -342,7 +342,8 @@ describe('upload recovery behavior', function() {
   });
 
   it('reconcile 必须检查 committed 状态', function() {
-    assert.ok(upload.includes('data.committed'), '必须检查 committed');
+    // H-31: 服务端 /api/photo/status 返回 {status:'committed'}（无顶层 committed 字段）
+    assert.ok(upload.includes("data.status === 'committed'"), "必须检查 data.status === 'committed'");
   });
 
   it('reconcile 必须检查 failed/not_found 状态', function() {

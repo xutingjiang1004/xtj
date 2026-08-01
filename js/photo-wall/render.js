@@ -386,6 +386,8 @@
     if (!window.pwAlbumGroupKey) {
       window.pwCurrentSortedPhotos = photos.slice();
       grid.innerHTML = albumHtml(groups);
+      // H-33: 相册分组视图也要安装加载哨兵，否则分页失效，只能看到首屏/缓存上限
+      installLoadMoreSentinel(grid);
       return;
     }
 
@@ -394,6 +396,8 @@
       window.pwAlbumGroupKey = '';
       window.pwCurrentSortedPhotos = photos.slice();
       grid.innerHTML = albumHtml(groups);
+      // H-33: 同上，回到相册视图后重新挂载哨兵
+      installLoadMoreSentinel(grid);
       return;
     }
 
@@ -401,6 +405,8 @@
     grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos, 0);
     revealCards(grid);
     observeImages(grid);
+    // H-33: 相册分组详情页同样需要哨兵，滚动到底继续加载更多照片
+    installLoadMoreSentinel(grid);
   }
 
   var rendering = false;

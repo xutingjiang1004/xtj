@@ -968,11 +968,17 @@
             var token = null;
             try {
                 token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
+                if (token) { try { window.behaviorLastKnownToken = token; } catch (e) {} }
             } catch (e) { /* token refresh failed */ }
             if (!token) {
                 behaviorRetryCount++;
                 if (behaviorRetryCount <= behaviorMaxRetries) {
                     behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
+                } else {
+                    // H-34: 重试耗尽（无 token）即丢弃整个队列，避免死循环轮询；
+                    // 新事件入队时 queueBehavior 会自动重新调度。
+                    behaviorQueue.length = 0;
+                    behaviorRetryCount = 0;
                 }
                 behaviorPending = false;
                 return;
@@ -992,6 +998,9 @@
                         behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
                     } else {
                         removeSentBehaviors(batch);
+                        // H-34: HTTP 错误重试耗尽 → 丢弃批次，不再无限重试
+                        behaviorQueue.length = 0;
+                        behaviorRetryCount = 0;
                     }
                 } else {
                     removeSentBehaviors(batch);
@@ -1001,10 +1010,16 @@
             behaviorRetryCount++;
             if (behaviorRetryCount <= behaviorMaxRetries) {
                 behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
+            } else {
+                // H-34: 网络错误重试耗尽 → 丢弃批次，不再无限重试
+                removeSentBehaviors(batch);
+                behaviorQueue.length = 0;
+                behaviorRetryCount = 0;
             }
         }
         behaviorPending = false;
-        if (behaviorQueue.length && !behaviorFlushTimer && !behaviorPending) {
+        // H-34: 仅未耗尽重试时才尾调度；耗尽后由 queueBehavior 的新事件重新启动
+        if (behaviorQueue.length && behaviorRetryCount <= behaviorMaxRetries && !behaviorFlushTimer && !behaviorPending) {
             behaviorFlushTimer = setTimeout(flushBehavior, 5000);
         }
     }
@@ -1023,12 +1038,18 @@
     // pagehide 处理：使用 fetch keepalive 或持久化到 localStorage
     var behaviorLastKnownToken = null;
     function rememberBehaviorToken(token) {
-        if (token) behaviorLastKnownToken = token;
+        if (token) {
+            behaviorLastKnownToken = token;
+            // H-38: 通过 window 暴露 token，core.js 的 setUserToken 无局部
+            // rememberBehaviorToken 引用时回退到这里，pagehide keepalive 不再恒为 null。
+            window.behaviorLastKnownToken = token;
+        }
     }
+    window.__xtjRememberBehaviorToken = rememberBehaviorToken;
     function handlePagehideBehavior() {
         if (!behaviorQueue.length) return;
         var batch = behaviorQueue.slice(0, 50);
-        var token = behaviorLastKnownToken || (typeof window.getToken === 'function' ? window.getToken() : '');
+        var token = window.behaviorLastKnownToken || behaviorLastKnownToken || (typeof window.getToken === 'function' ? window.getToken() : '');
         if (token && typeof fetch === 'function') {
             try {
                 // fetch + keepalive 支持自定义请求头，适合 pagehide 场景
@@ -1236,6 +1257,11 @@
         if (!window.isSecureContext) return;
         if (!navigator.geolocation) return;
         if (locationWatchId !== null) return;
+        // H-39: 精确定位只能在用户明确开启位置共享后恢复；登录/注册流程
+        // 不得自行触发权限弹窗。持久化 opt-in 只用于恢复既有授权。
+        var optedIn = false;
+        try { optedIn = window.safeStorage.get('xtj_location_sharing_enabled') === '1'; } catch (e) {}
+        if (!optedIn) return;
         setLocationStatus('正在获取定位…');
         navigator.geolocation.getCurrentPosition(function(position) {
             setLocationStatus('已获取坐标，准备上传');
