@@ -1543,7 +1543,8 @@
 
 .code-composer-context-btn,
 .code-composer-select,
-.code-context-usage {
+.code-context-usage,
+.code-local-model-setup {
   min-height: 30px;
   border: 1px solid var(--cw-border);
   border-radius: var(--cw-radius-sm);
@@ -1580,6 +1581,14 @@
   cursor: pointer;
 }
 
+.code-local-model-setup {
+  max-width: 170px;
+  padding: 0 8px;
+  cursor: pointer;
+  color: var(--cw-accent);
+  border-color: color-mix(in srgb, var(--cw-accent) 45%, var(--cw-border));
+}
+
 .code-composer-runtime-status {
   flex: 0 1 auto;
   min-width: 0;
@@ -1591,7 +1600,8 @@
 }
 
 .code-composer-context-btn:hover:not(:disabled),
-.code-composer-select:hover:not(:disabled) {
+.code-composer-select:hover:not(:disabled),
+.code-local-model-setup:hover:not(:disabled) {
   border-color: var(--cw-accent);
   color: var(--cw-accent);
 }

@@ -60,6 +60,15 @@ test('Code composer sends real model and thinking selections instead of hard-cod
   assert.doesNotMatch(codeWorkspace, /thinking_mode:\s*'high'/);
 });
 
+test('Code keeps the local Qwen choice and explicit setup path available without server models', () => {
+  assert.match(codeWorkspace, /function localCodeModelDescriptor\(\)/);
+  assert.match(codeWorkspace, /本地离线 · Qwen 2\.5 0\.5B（需下载）/);
+  assert.match(codeWorkspace, /codeLocalModelSetupBtn/);
+  assert.match(codeWorkspace, /ensureCodeLocalAiRuntime\(\)/);
+  assert.match(codeWorkspace, /state\.selectedModelId === localCodeModelId\(\)/);
+  assert.doesNotMatch(codeWorkspace, /if \(!state\.models\.length\) \{\s*modelSelect\.disabled = true/);
+});
+
 test('Code chat panel mounts once and keeps draft/input updates local', () => {
   assert.match(codeWorkspace, /if \(state\.composerMounted\) \{[\s\S]{0,180}syncChatMessages\(\)/);
   assert.match(codeWorkspace, /function renderComposerAttachments\(\)/);

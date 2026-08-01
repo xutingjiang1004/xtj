@@ -454,7 +454,8 @@
     }
 
     var loadStartTime = Date.now();
-    var MODULE_TIMEOUT_MS = 15000;  // P0: 每个模块 15 秒超时
+    // Match the shared loader: cold Render static assets can exceed 15 seconds.
+    var MODULE_TIMEOUT_MS = 45000;
 
     // P0: 每个模块独立加载 + 独立超时 + 详细错误
     function loadModuleWithTimeout(id, metaName, loaderFn) {
