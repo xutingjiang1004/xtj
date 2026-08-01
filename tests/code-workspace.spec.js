@@ -13,7 +13,7 @@ test.describe('Code Workspace', () => {
     // cannot delay the local app bootstrap or page teardown.
     await page.route('**/*', (route) => {
       const url = route.request().url();
-      if (url.includes('jsdelivr.net') || /fonts\.googleapis\.com|fonts\.gstatic\.com|\.(?:woff2?|ttf|otf)(?:\?|$)/i.test(url)) {
+      if (url.includes('jsdelivr.net') || url.includes('npmmirror.com') || /fonts\.googleapis\.com|fonts\.gstatic\.com|\.(?:woff2?|ttf|otf)(?:\?|$)/i.test(url)) {
         return route.abort();
       }
       return route.continue();
