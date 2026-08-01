@@ -1,6 +1,6 @@
 /* Browser-only local Qwen runtime. The model is downloaded by WebLLM on first use
  * and then retained in the browser cache; no prompt or API key leaves the device. */
-import * as webllm from '/vendor/webllm/webllm.js';
+import * as webllm from '/vendor/webllm/index.js';
 
 const MODEL_ID = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
 let engine = null;
