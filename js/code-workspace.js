@@ -539,7 +539,7 @@
         function loadEditor() {
           try {
             require.config({
-              paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }
+              paths: { vs: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs' }
             });
             require(['vs/editor/editor.main'], function () {
               state._monacoLoaded = true;
@@ -554,7 +554,7 @@
           else existing.addEventListener('load', loadEditor, { once: true });
           return;
         }
-        script.src = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js';
+        script.src = 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs/loader.js';
         script.setAttribute('data-xtj-monaco-loader', '1');
         script.onload = loadEditor;
         script.onerror = function () { rejectMonaco(new Error('Failed to load Monaco loader')); };
@@ -1997,6 +1997,16 @@
     _dom.resizerLeft.addEventListener('keydown', onLeftKeyDown);
     _dom.resizerRight.addEventListener('keydown', onRightKeyDown);
     _dom.resizerContext.addEventListener('keydown', onContextKeyDown);
+
+    // Safety net: if the pointer-up is lost (window blur, alt-tab, dialog
+    // closing) the whole page would stay frozen by body.code-is-resizing.
+    // Never leave that state behind.
+    var onBlurEndDrag = function () { if (_dragState) onPointerUp({}); };
+    var onVisibilityEndDrag = function () {
+      if (document.visibilityState === 'hidden' && _dragState) onPointerUp({});
+    };
+    window.addEventListener('blur', onBlurEndDrag);
+    document.addEventListener('visibilitychange', onVisibilityEndDrag);
     
     // Listen for resize to re-clamp
     var onWindowResize = function() {
@@ -2016,6 +2026,8 @@
       document.removeEventListener('pointerup', onPointerUp);
       document.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('blur', onBlurEndDrag);
+      document.removeEventListener('visibilitychange', onVisibilityEndDrag);
       if (_dragState) {
         var dragTarget = _dragState.target;
         try {
@@ -2595,7 +2607,7 @@
         path: path,
         name: fileNameFromPath(path),
         modified: false,
-        content: result.type === 'text' ? result.content : null,
+        content: result.type === 'text' ? (result.content == null ? '' : result.content) : null,
         sha256: result.sha256 || '',
         type: result.type || 'text',
         mimeType: result.mimeType || '',
@@ -2881,6 +2893,24 @@
         }
 
         state._monacoEditor = editor;
+
+        // Watchdog: if the visible container ends up with zero height (layout
+        // race, hidden parent), Monaco renders blank and swallows clicks.
+        // Detect it on the next frame and fall back to the textarea editor.
+        requestAnimationFrame(function () {
+          if (renderId !== state._editorRenderId || state._monacoEditor !== editor) return;
+          if (container.offsetParent === null) return; // panel hidden, not an error
+          var layoutHeight = 0;
+          try { layoutHeight = editor.getLayoutInfo().height; } catch (_) {}
+          if (!layoutHeight && container.clientHeight === 0) {
+            try { editor.dispose(); } catch (_) {}
+            try { model.dispose(); } catch (_) {}
+            state._monacoEditor = null;
+            if (container.parentNode === _dom.editorArea) {
+              renderTextareaEditor(tab, container);
+            }
+          }
+        });
 
         if (!state._themeObserver) {
           state._themeObserver = new MutationObserver(function () {
@@ -5171,6 +5201,14 @@
     return output.join('');
   }
 
+  // Show provider HTTP failures as a human-readable status (e.g. "HTTP 502")
+  // instead of leaking internal error codes into the visible chat message.
+  function friendlyErrorCode(code) {
+    if (!code) return '';
+    var m = /^PROVIDER_HTTP_(\d+)$/.exec(String(code));
+    return m ? 'HTTP ' + m[1] : '';
+  }
+
   function appendChatMessage(msg, container) {
     if (!container) return;
     var el = document.createElement('div');
@@ -5182,6 +5220,7 @@
     if (isError) el.setAttribute('data-state', 'error');
     else if (isCancelled) el.setAttribute('data-state', 'cancelled');
     else if (isAssistant) el.setAttribute('data-state', 'complete');
+    if (isError && msg.errorCode) el.setAttribute('data-error-code', String(msg.errorCode));
     var messageIndex = state.messages.indexOf(msg);
     if (messageIndex >= 0) el.setAttribute('data-code-message-index', String(messageIndex));
 
@@ -5197,7 +5236,8 @@
     var body = '<div class="msg-body">';
     if (isError) {
       body += '<div class="code-stream-error-heading"><span>生成失败</span>' +
-        (msg.errorCode ? '<code>' + escapeHTML(msg.errorCode) + '</code>' : '') + '</div>';
+        (msg.errorCode ? '<span class="code-stream-error-code">' + friendlyErrorCode(msg.errorCode) + '</span>' : '') +
+        '</div>';
       body += '<div class="code-stream-status" data-state="error" role="status" aria-live="polite" aria-busy="false">' +
         '<span class="code-stream-status-text">生成失败</span></div>';
     }
@@ -6011,6 +6051,8 @@
       assistantNode.classList.remove('streaming');
       assistantNode.classList.add('error-state');
       assistantNode.setAttribute('data-state', 'error');
+      assistantNode.setAttribute('data-error-code', code || '');
+      if (statusEl) statusEl.style.display = 'none';
       if (errorEl) {
         errorEl.style.display = '';
         
@@ -6049,10 +6091,8 @@
         }
 
         var errorHtml = '<div class="code-stream-error-heading"><span>生成失败</span>';
-        if (code) {
-          errorHtml += '<code>' + escapeHTML(code) + '</code>';
-        }
-        errorHtml += '</div><div class="code-stream-error-msg">';
+        errorHtml += (code ? '<span class="code-stream-error-code">' + friendlyErrorCode(code) + '</span>' : '') +
+          '</div><div class="code-stream-error-msg">';
         errorHtml += escapeHTML(friendlyMessage);
         
         if (code) {

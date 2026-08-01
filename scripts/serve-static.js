@@ -47,7 +47,14 @@ http.createServer(function (req, res) {
     req.pipe(proxyReq);
     return;
   }
-  var relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  var relative;
+  if (pathname.indexOf('/vendor/webllm/') === 0) {
+    // 本地开发镜像生产端 render-api/server.js 的 /vendor/webllm 静态路由，
+    // 指向 node_modules/@mlc-ai/web-llm/lib（浏览器端本地 AI worker 依赖）。
+    relative = 'node_modules/@mlc-ai/web-llm/lib/' + pathname.replace(/^\/vendor\/webllm\//, '');
+  } else {
+    relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  }
   var file = path.resolve(root, relative);
   if (file !== root && file.indexOf(root + path.sep) !== 0) {
     res.writeHead(403).end('Forbidden');

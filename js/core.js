@@ -9052,7 +9052,10 @@ function renderProfileActivityList(kind) {
                 }
                 if (!_escapeDiv) _escapeDiv = document.createElement('div');
                 _escapeDiv.textContent = s;
-                return _escapeDiv.innerHTML;
+                // innerHTML serialization does NOT escape quotes in text, which
+                // would break values placed inside double-quoted attributes
+                // (e.g. long data: URLs used as avatar src). Escape them here.
+                return _escapeDiv.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             }
             window.escapeHtml = escapeHtml;
 
