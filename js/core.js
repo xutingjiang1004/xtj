@@ -11,7 +11,7 @@ window.safeStorage = {
     }
 };
 
-window.throttleRAF = function(fn) {
+if (!window.throttleRAF) { window.throttleRAF = function(fn) {
     var ticking = false, args, ctx;
     return function() {
         args = arguments;
@@ -27,7 +27,7 @@ window.throttleRAF = function(fn) {
             });
         }
     };
-};
+}; }
 
 window.safeParseDate = function(val) {
     if (!val) return new Date('Invalid Date');
@@ -3924,36 +3924,66 @@ function renderProfileActivityList(kind) {
             window.__catAiPollStatus = window.__catAiPollStatus || {};
             window.__catAiPollControllers = window.__catAiPollControllers || {};
 
-            // Phase 3-P0-2: 统一小猫 AI 任务清理函数
+            // Phase 4: 重写为接受 (commentId, reason) 参数，支持按 commentId 精确清理。
+            // 不传 commentId 或 commentId 为 null/undefined 时向后兼容：清理所有。
             // 集中清理 timer / AbortController / status DOM / cache，并通过 _catAiCancelled
             // 纪元标志防止正在进行的 fetch 回调在清理后仍写入状态（迟到回调防护）。
             // 替代各处分散的内联清理逻辑，避免遗漏 controller 或 status DOM。
-            function cancelCatAiTask() {
+            function cancelCatAiTask(commentId, reason) {
+                var isGlobal = (commentId == null);
+                var commentIdStr = commentId != null ? String(commentId) : null;
                 // 1. 递增取消纪元，让 pollCatAiReply 中正在进行的 fetch 回调检查后跳过
-                window._catAiCancelled = (window._catAiCancelled || 0) + 1;
-                // 2. 清理所有轮询 timer
+                if (isGlobal) {
+                    window._catAiCancelled = (window._catAiCancelled || 0) + 1;
+                }
+                // 2. 清理轮询 timer
                 try {
                     var timers = window.__catAiPollTimers || {};
-                    Object.keys(timers).forEach(function(k) { clearTimeout(timers[k]); });
-                    window.__catAiPollTimers = {};
+                    if (isGlobal) {
+                        Object.keys(timers).forEach(function(k) { clearTimeout(timers[k]); });
+                        window.__catAiPollTimers = {};
+                    } else if (timers[commentIdStr]) {
+                        clearTimeout(timers[commentIdStr]);
+                        delete timers[commentIdStr];
+                    }
                 } catch(e) {}
-                // 3. abort 所有进行中的 AbortController
+                // 3. abort 进行中的 AbortController
                 try {
                     var controllers = window.__catAiPollControllers || {};
-                    Object.keys(controllers).forEach(function(k) {
-                        try { controllers[k].abort(); } catch(err) {}
-                    });
-                    window.__catAiPollControllers = {};
+                    if (isGlobal) {
+                        Object.keys(controllers).forEach(function(k) {
+                            try { controllers[k].abort(); } catch(err) {}
+                        });
+                        window.__catAiPollControllers = {};
+                    } else if (controllers[commentIdStr]) {
+                        try { controllers[commentIdStr].abort(); } catch(err) {}
+                        delete controllers[commentIdStr];
+                    }
                 } catch(e) {}
-                // 4. 移除所有 .cat-ai-status 状态元素
+                // 4. 移除状态元素
                 try {
-                    var statusEls = document.querySelectorAll('.cat-ai-status');
-                    Array.prototype.forEach.call(statusEls, function(el) {
-                        if (el && el.parentNode) el.parentNode.removeChild(el);
-                    });
+                    if (isGlobal) {
+                        var statusEls = document.querySelectorAll('.cat-ai-status');
+                        Array.prototype.forEach.call(statusEls, function(el) {
+                            if (el && el.parentNode) el.parentNode.removeChild(el);
+                        });
+                    } else if (commentIdStr) {
+                        var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentIdStr + '"]');
+                        if (statusEl && statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
+                    }
                 } catch(e) {}
                 // 5. 清空状态缓存
-                try { window.__catAiPollStatus = {}; } catch(e) {}
+                try {
+                    if (isGlobal) {
+                        window.__catAiPollStatus = {};
+                    } else if (commentIdStr) {
+                        delete window.__catAiPollStatus[commentIdStr];
+                    }
+                } catch(e) {}
+                // 6. 记录取消原因（全局清理时忽略）
+                if (!isGlobal && reason) {
+                    console.log('[CAT_AI] task cancelled for comment', commentIdStr, 'reason:', reason);
+                }
             }
 
             function pollCatAiReply(commentId, postId) {
@@ -4073,6 +4103,18 @@ function renderProfileActivityList(kind) {
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'blocked') {
                                 removeCatAiStatus(commentIdStr);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
+                            } else if (data.status === 'reply_deleted' || data.status === 'reply_missing') {
+                                // Phase 4: 回复被删除或缺失 → 显示重试按钮
+                                showCatAiStatus(commentIdStr, data.message || '小猫的回复异常，点击重试', true);
+                                retryBtnSetup(commentIdStr, postId);
+                                delete window.__catAiPollTimers[commentIdStr];
+                                delete window.__catAiPollControllers[commentIdStr];
+                            } else if (data.status === 'repair_required') {
+                                // Phase 4: 需要修复 → 显示重试按钮
+                                showCatAiStatus(commentIdStr, data.message || '回复记录异常，点击重试', true);
+                                retryBtnSetup(commentIdStr, postId);
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'processing' || data.status === 'pending') {
@@ -9284,6 +9326,10 @@ function renderProfileActivityList(kind) {
                                 // 删除对应的 DOM 元素
                                 var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
                                 if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
+                                // Phase 4: 取消对应的 cat AI 轮询任务
+                                if (typeof cancelCatAiTask === 'function') {
+                                    cancelCatAiTask(commentId, 'comment deleted via Realtime');
+                                }
                             } else if (payload.eventType === 'INSERT') {
                                 var postIsVisible = (feedAllPosts || []).some(function(post) {
                                     return String(post && post.id) === String(row.post_id);
@@ -10845,7 +10891,9 @@ function renderProfileActivityList(kind) {
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
                 try {
-                    let actorKey = DM_MARKER;
+                    var storagePath = null;
+                    var mediaKind = null;
+                    var actorKey = DM_MARKER;
                     var mediaPayload = null;
                     if (file) {
                         const path = buildStorageUploadPath('chat', file.name);
@@ -10861,15 +10909,19 @@ function renderProfileActivityList(kind) {
                         if (uploadResult && uploadResult.error) {
                             throw new Error('媒体上传失败: ' + (uploadResult.error.message || '未知错误'));
                         }
+                        storagePath = path;
                         if (file.type.startsWith('video/')) {
+                            mediaKind = 'video';
                             actorKey = '__dm_vid__' + path;
                             mediaPayload = { kind: 'video', url: getMediaUrl('__dm_vid__', path), mimeType: file.type || '' };
                         } else if (file.type.startsWith('image/')) {
+                            mediaKind = 'image';
                             actorKey = '__dm_img__' + path;
                             mediaPayload = { kind: 'image', url: getMediaUrl('__dm_img__', path), mimeType: file.type || '' };
                         } else if (file.type.startsWith('audio/')) {
                             // P6: 明确支持音频 — 之前校验允许 audio/ 但上传分支和解析/渲染
                             // 全链路缺失，导致音频文件成为 Storage 孤儿。
+                            mediaKind = 'audio';
                             actorKey = '__dm_aud__' + path;
                             mediaPayload = { kind: 'audio', url: getMediaUrl('__dm_aud__', path), mimeType: file.type || '' };
                         } else {
@@ -10877,14 +10929,15 @@ function renderProfileActivityList(kind) {
                             throw new Error('不支持的媒体类型: ' + file.type);
                         }
                     }
-                    var contentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
+                    // P6: 构建乐观消息的 contentPayload（含媒体信息，用于本地即时渲染）
+                    var optimisticContentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
 
                     var optimisticMessage = {
                         id: tempId,
                         __tempId: tempId,
                         __optimistic: true,
                         user_name: currentUser,
-                        content: contentPayload,
+                        content: optimisticContentPayload,
                         media_type: DM_MARKER,
                         media_url: targetUser,
                         actor_key: actorKey,
@@ -10894,16 +10947,23 @@ function renderProfileActivityList(kind) {
                     renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
                     applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
 
+                    // P6: 客户端只提交 storage_path / kind / mime_type，后端生成 URL 和 actor_key
+                    // 禁止前端直接发送 actor_key 和 media_type，防止篡改。
+                    var requestBody = {
+                        target_user: targetUser,
+                        content: capturedContent
+                    };
+                    if (storagePath) {
+                        requestBody.storage_path = storagePath;
+                        requestBody.kind = mediaKind;
+                        requestBody.mime_type = file.type;
+                    }
+
                     // ★ 通过后端认证接口发送，禁止前端直连 Supabase
                     var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            target_user: targetUser,
-                            content: contentPayload,
-                            media_type: DM_MARKER,
-                            actor_key: actorKey
-                        })
+                        body: JSON.stringify(requestBody)
                     });
                     if (!sendResp.ok) {
                         var sendErrData = await sendResp.json().catch(function() { return {}; });
@@ -10939,6 +10999,7 @@ function renderProfileActivityList(kind) {
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
                 if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">视频</span>'; }
+                else if (file.type.startsWith('audio/')) { thumb.innerHTML = '<span class="cfp-audio-icon">音频</span>'; }
                 else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
                 if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
