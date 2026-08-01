@@ -340,7 +340,7 @@
     page += 1;
     try {
       var requestId = 'more_' + page + '_' + Date.now();
-      var rows = await fetchPhotoPage(page, 15000, null, requestId);
+      var rows = await fetchPhotoPage(page, 10000, null, requestId);
       more = rows.length >= PAGE_SIZE;
       var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
       window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
