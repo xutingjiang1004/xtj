@@ -46,6 +46,10 @@ self.onmessage = async function(event) {
       if (engine && typeof engine.interruptGenerate === 'function') engine.interruptGenerate();
       return;
     }
+    if (data.type === 'ping') {
+      self.postMessage({ type: 'pong', requestId: data.requestId, timestamp: Date.now() });
+      return;
+    }
     if (data.type !== 'chat') return;
     await initialize(data.requestId);
     const stream = await engine.chat.completions.create({
