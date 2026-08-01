@@ -504,6 +504,13 @@
   // ──────────────────────────────────────────────
   // Monaco lazy-load
   // ──────────────────────────────────────────────
+  // Monaco CDN URLs in priority order — 国内/国际双重备用
+  var MONACO_CDN_URLS = [
+    { vs: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs', loader: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs/loader.js' },
+    { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs', loader: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js' },
+    { vs: 'https://unpkg.com/monaco-editor@0.45.0/min/vs', loader: 'https://unpkg.com/monaco-editor@0.45.0/min/vs/loader.js' }
+  ];
+
   function loadMonaco(callback) {
     if (state._monacoLoaded) {
       callback(null);
@@ -519,46 +526,109 @@
     if (!state._monacoLoadPromise) {
       state._monacoLoadPromise = new Promise(function (resolve, reject) {
         var settled = false;
-        var timeoutId = setTimeout(function () {
-          rejectMonaco(new Error('Monaco 加载超时，已切换到基础编辑器'));
-        }, 2500);
-        function resolveMonaco() {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeoutId);
-          resolve();
-        }
+        var cdnIndex = 0;
+        var timeoutId = null;
+        var requireTimeoutId = null;
+
         function rejectMonaco(error) {
           if (settled) return;
           settled = true;
-          clearTimeout(timeoutId);
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          if (requireTimeoutId) { clearTimeout(requireTimeoutId); requireTimeoutId = null; }
           reject(error);
         }
-        var existing = document.querySelector('script[data-xtj-monaco-loader="1"]');
-        var script = existing || document.createElement('script');
-        function loadEditor() {
+
+        function resolveMonaco() {
+          if (settled) return;
+          settled = true;
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          if (requireTimeoutId) { clearTimeout(requireTimeoutId); requireTimeoutId = null; }
+          resolve();
+        }
+
+        // Clean up Monaco AMD loader state so the next CDN attempt starts fresh.
+        function cleanupMonacoLoader() {
           try {
-            require.config({
-              paths: { vs: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs' }
-            });
-            require(['vs/editor/editor.main'], function () {
-              state._monacoLoaded = true;
-              resolveMonaco();
-            }, rejectMonaco);
-          } catch (e) {
-            rejectMonaco(e);
+            // Remove any previous Monaco loader script
+            var prev = document.querySelector('script[data-xtj-monaco-loader="1"]');
+            if (prev) try { prev.remove(); } catch (_) {}
+            // Remove any Monaco AMD-loaded script tags (they reference the failed CDN)
+            document.querySelectorAll('script[src*="monaco-editor"]').forEach(function (s) { try { s.remove(); } catch (_) {} });
+          } catch (_) {}
+          // Delete the partially-loaded monaco global to prevent stale state
+          try { delete window.monaco; } catch (_) { window.monaco = undefined; }
+          // Delete AMD loader context if it exists (from a previous failed require)
+          try {
+            if (typeof require !== 'undefined' && require.s && require.s.contexts) {
+              Object.keys(require.s.contexts).forEach(function (ctx) {
+                if (ctx !== '_') try { delete require.s.contexts[ctx]; } catch (_) {}
+              });
+            }
+          } catch (_) {}
+        }
+
+        // Try loading from each CDN in order, retrying on failure
+        function tryLoadCDN() {
+          if (cdnIndex >= MONACO_CDN_URLS.length) {
+            rejectMonaco(new Error('Monaco 所有 CDN 加载失败，已切换到基础编辑器'));
+            return;
           }
+
+          var cdn = MONACO_CDN_URLS[cdnIndex];
+          cdnIndex++;
+
+          // Clean up stale loader state before trying a new CDN
+          cleanupMonacoLoader();
+
+          timeoutId = setTimeout(function () {
+            // 当前 CDN 超时，尝试下一个
+            timeoutId = null;
+            console.warn('[CODE] Monaco CDN ' + cdn.loader + ' 超时，尝试下一个 CDN...');
+            tryLoadCDN();
+          }, 5000);
+
+          var script = document.createElement('script');
+          script.src = cdn.loader;
+          script.setAttribute('data-xtj-monaco-loader', '1');
+
+          script.onload = function () {
+            if (settled) return;
+            // Loader script loaded, now require the editor main module
+            try {
+              require.config({ paths: { vs: cdn.vs } });
+              // Set a shorter timeout for the require call itself
+              requireTimeoutId = setTimeout(function () {
+                requireTimeoutId = null;
+                console.warn('[CODE] Monaco require 超时 (CDN: ' + cdn.loader + ')，尝试下一个 CDN...');
+                tryLoadCDN();
+              }, 8000);
+              require(['vs/editor/editor.main'], function () {
+                if (requireTimeoutId) { clearTimeout(requireTimeoutId); requireTimeoutId = null; }
+                if (settled) return;
+                state._monacoLoaded = true;
+                resolveMonaco();
+              }, function (err) {
+                if (requireTimeoutId) { clearTimeout(requireTimeoutId); requireTimeoutId = null; }
+                console.warn('[CODE] Monaco require 失败 (CDN: ' + cdn.loader + '):', err);
+                tryLoadCDN();
+              });
+            } catch (e) {
+              console.warn('[CODE] Monaco require 配置异常 (CDN: ' + cdn.loader + '):', e);
+              tryLoadCDN();
+            }
+          };
+
+          script.onerror = function () {
+            if (settled) return;
+            console.warn('[CODE] Monaco loader 下载失败 (CDN: ' + cdn.loader + ')');
+            tryLoadCDN();
+          };
+
+          document.head.appendChild(script);
         }
-        if (existing) {
-          if (typeof require === 'function') loadEditor();
-          else existing.addEventListener('load', loadEditor, { once: true });
-          return;
-        }
-        script.src = 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs/loader.js';
-        script.setAttribute('data-xtj-monaco-loader', '1');
-        script.onload = loadEditor;
-        script.onerror = function () { rejectMonaco(new Error('Failed to load Monaco loader')); };
-        document.head.appendChild(script);
+
+        // Start trying CDNs
+        tryLoadCDN();
       }).catch(function (error) {
         // Allow a later file open to retry after a transient CDN failure.
         state._monacoLoadPromise = null;
@@ -2847,6 +2917,26 @@
     container.style.flexDirection = 'column';
 
     _dom.editorArea.appendChild(container);
+
+    // Safety: render textarea immediately if editorArea is small or hidden
+    // (layout race). Monaco loads asynchronously and will replace it.
+    var immediateFallback = function () {
+      try {
+        if (container.parentNode === _dom.editorArea && container.children.length === 0) {
+          renderTextareaEditor(tab, container);
+        }
+      } catch (_) {}
+    };
+
+    // If the editor area has no visible height, fall back immediately
+    requestAnimationFrame(function () {
+      try {
+        if (container.offsetParent !== null && container.clientHeight < 20) {
+          console.warn('[CODE] editor container has near-zero height, forcing textarea fallback');
+          immediateFallback();
+        }
+      } catch (_) {}
+    });
 
     // Try Monaco
     loadMonaco(function (err) {
@@ -5730,6 +5820,10 @@
         workspace_generation: getWorkspaceScope().workspace_generation
       }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId, sendOptions);
       ctx.originalBody = Object.assign({}, body);
+      // P3: 本地模型路由 — 不经过服务器，直接在浏览器端运行
+      if (window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID) {
+        return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
+      }
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
         return sendStreamingRequest(ctx, body, timeStr);
@@ -5758,6 +5852,116 @@
       finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       renderChatPanel();
       return null;
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr)
+  // 处理 Code 工作区中的本地模型 AI 请求
+  // ──────────────────────────────────────────────
+  function handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr) {
+    var runtime = window.__xtjLocalAI;
+    if (!runtime) {
+      state.messages.push({ role: 'assistant', content: '本地模型运行时不可用，请刷新页面后重试。', time: timeStr, errorCode: 'LOCAL_AI_NOT_AVAILABLE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+      finalizeRequest(ctx, { error: 'Local AI runtime not available', errorCode: 'LOCAL_AI_NOT_AVAILABLE' });
+      renderChatPanel();
+      return Promise.resolve();
+    }
+
+    if (!runtime.isSupported()) {
+      state.messages.push({ role: 'assistant', content: '当前浏览器不支持本地模型：请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。', time: timeStr, errorCode: 'LOCAL_AI_UNSUPPORTED', retryable: false });
+      finalizeRequest(ctx, { error: 'Unsupported browser', errorCode: 'LOCAL_AI_UNSUPPORTED' });
+      renderChatPanel();
+      return Promise.resolve();
+    }
+
+    // First-time download confirmation
+    var confirmed = false;
+    try { confirmed = localStorage.getItem('xtj_local_model_confirmed') === '1'; } catch (e) {}
+    if (!confirmed) {
+      if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) {
+        // Remove the user message that was just added
+        state.messages.pop();
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
+        renderChatPanel();
+        return Promise.resolve();
+      }
+      try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
+    }
+
+    // Create assistant message placeholder
+    var assistantMsg = { role: 'assistant', content: '', time: timeStr, local: true };
+    state.messages.push(assistantMsg);
+    removeTypingIndicator();
+    var messagesContainer = document.getElementById('codeChatMessages');
+    var assistantNode = null;
+    if (messagesContainer) {
+      assistantNode = appendChatMessage(assistantMsg, messagesContainer);
+    }
+    scrollChatToBottom();
+
+    // Build conversation history for local model (limit to last 9 messages)
+    var chatHistory = [];
+    for (var hi = Math.max(0, historyMsgs.length - 8); hi < historyMsgs.length; hi++) {
+      chatHistory.push({ role: historyMsgs[hi].role, content: historyMsgs[hi].content });
+    }
+    chatHistory.push({ role: 'user', content: message });
+
+    var answer = '';
+    var stopRequested = false;
+
+    return runtime.streamChat(chatHistory, {
+      signal: ctx.abortController.signal,
+      onProgress: function(progress) {
+        var typingIndicator = messagesContainer && messagesContainer.querySelector('.code-typing-indicator');
+        if (typingIndicator && !answer) {
+          typingIndicator.textContent = progress.text || '正在准备本地模型…';
+        }
+      },
+      onDelta: function(delta) {
+        if (stopRequested) return;
+        answer += delta;
+        assistantMsg.content = answer;
+        if (assistantNode) {
+          var bubble = assistantNode.querySelector('.msg-content');
+          if (bubble) {
+            bubble.innerHTML = parseSimpleMarkdown(answer);
+          }
+        }
+        scrollChatToBottom();
+      }
+    }).then(function() {
+      if (stopRequested) return;
+      if (!answer) {
+        state.messages.pop(); // Remove empty assistant message
+        state.messages.push({ role: 'assistant', content: '本地模型未返回内容，请重试。', time: timeStr, errorCode: 'LOCAL_AI_EMPTY_RESPONSE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+        finalizeRequest(ctx, { error: 'Empty response', errorCode: 'LOCAL_AI_EMPTY_RESPONSE' });
+        renderChatPanel();
+        return;
+      }
+      finalizeRequest(ctx, {});
+      renderChatPanel();
+    }).catch(function(error) {
+      if (stopRequested) return;
+      stopRequested = true;
+      if (ctx.cancelled || (error && (error.code === 'ABORTED' || error.name === 'AbortError'))) {
+        assistantMsg.content = '（已停止）';
+        assistantMsg.stopped = true;
+        if (assistantNode) {
+          var bubble = assistantNode.querySelector('.msg-content');
+          if (bubble) bubble.innerHTML = '（已停止）';
+        }
+        finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
+        renderChatPanel();
+      } else {
+        // Remove the failed assistant message and replace with error message
+        var msgIdx = state.messages.indexOf(assistantMsg);
+        if (msgIdx >= 0) state.messages.splice(msgIdx, 1);
+        var errMsg = error && error.message ? error.message : '请稍后重试。';
+        state.messages.push({ role: 'assistant', content: '本地模型不可用：' + errMsg, time: timeStr, errorCode: error && error.code || 'LOCAL_AI_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+        finalizeRequest(ctx, { error: errMsg, errorCode: error && error.code || 'LOCAL_AI_ERROR' });
+        renderChatPanel();
+      }
     });
   }
 
