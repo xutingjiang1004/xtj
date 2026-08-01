@@ -1,9 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vercel = JSON.parse(fs.readFileSync('vercel.json', 'utf8'));
 
 const source = fs.readFileSync('render-api/server.js', 'utf8');
 const authMigration = fs.readFileSync('supabase/migrations/011_auth_record_uniqueness.sql', 'utf8');
+// CSP 已统一收敛到共享模块 security-headers.js（server.js 与 serve-static.js 共用一份）
+const sharedSecurityHeaders = require('../render-api/security-headers.js');
+const csp = sharedSecurityHeaders.CSP;
 
 function routeBlock(start, end) {
   const from = source.indexOf(start);
@@ -76,16 +80,14 @@ test('admin type filters are constrained before Supabase equality filters', () =
 });
 
 test('CSP must not contain strict-dynamic without nonce/hash coverage for all scripts', () => {
-  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
-  assert.ok(cspMatch, 'Content-Security-Policy header must exist in server.js');
-  const csp = cspMatch[1];
+  assert.ok(csp && csp.length, 'Content-Security-Policy must be defined in security-headers.js');
   assert.doesNotMatch(csp, /'strict-dynamic'/, "CSP script-src MUST NOT contain 'strict-dynamic' without per-script nonces/hashes (PR #366 production outage)");
+  // 服务端必须实际挂载共享安全头模块
+  assert.match(source, /require\('\.\/security-headers'\)/);
+  assert.match(source, /applySecurityHeaders/);
 });
 
 test('CSP script-src allows self, unsafe-inline, Supabase CDN, and jsDelivr', () => {
-  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
-  assert.ok(cspMatch);
-  const csp = cspMatch[1];
   const scriptSrc = csp.split(';').find(function(d) { return d.trim().startsWith('script-src'); });
   assert.ok(scriptSrc, 'script-src directive must exist');
   assert.match(scriptSrc, /'self'/);
@@ -95,9 +97,6 @@ test('CSP script-src allows self, unsafe-inline, Supabase CDN, and jsDelivr', ()
 });
 
 test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
-  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
-  assert.ok(cspMatch);
-  const csp = cspMatch[1];
   const styleSrc = csp.split(';').find(function(d) { return d.trim().startsWith('style-src'); });
   assert.ok(styleSrc, 'style-src directive must exist');
   assert.match(styleSrc, /'self'/);
@@ -106,9 +105,6 @@ test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
 });
 
 test('CSP font-src allows self and jsDelivr', () => {
-  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
-  assert.ok(cspMatch);
-  const csp = cspMatch[1];
   const fontSrc = csp.split(';').find(function(d) { return d.trim().startsWith('font-src'); });
   assert.ok(fontSrc, 'font-src directive must exist');
   assert.match(fontSrc, /'self'/);
@@ -116,11 +112,30 @@ test('CSP font-src allows self and jsDelivr', () => {
 });
 
 test('CSP includes security hardening directives', () => {
-  const cspMatch = source.match(/Content-Security-Policy["'],\s*["']([^"]+)["']/);
-  assert.ok(cspMatch);
-  const csp = cspMatch[1];
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /base-uri 'self'/);
   assert.match(csp, /form-action 'self'/);
   assert.match(csp, /default-src 'self'/);
+});
+
+test('photo cleanup validates generated paths and fails closed on reference lookup errors', () => {
+  const cleanup = routeBlock("app.post('/api/photo/cleanup'", 'function collectPhotoStoragePaths');
+  assert.match(cleanup, /typeof path !== 'string'/);
+  assert.match(cleanup, /typeof uploadId !== 'string'/);
+  assert.match(cleanup, /path\.indexOf\('photos\/' \+ uploadId \+ '_'\) !== 0/);
+  assert.match(cleanup, /\^photos\\\/\[a-z0-9_-\]\{8,64\}_/);
+  assert.match(cleanup, /\.ilike\('content'/);
+  assert.match(cleanup, /\.ilike\('media_url'/);
+  assert.match(cleanup, /refChecks\.some\(function\(result\) \{ return !result \|\| result\.error; \}\)/);
+  assert.match(cleanup, /status\(503\)/);
+  assert.doesNotMatch(cleanup, /var refCheck = null/);
+});
+
+test('Vercel forwards frontend API and admin requests to the Render backend', () => {
+  const rewrites = vercel.rewrites || [];
+  for (const sourcePath of ['/api/(.*)', '/admin/(.*)']) {
+    const rule = rewrites.find(item => item.source === sourcePath);
+    assert.ok(rule, `missing rewrite for ${sourcePath}`);
+    assert.match(rule.destination, /^https:\/\/xtj\.onrender\.com\/(api|admin)\//);
+  }
 });

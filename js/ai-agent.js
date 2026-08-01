@@ -1590,7 +1590,7 @@ window.throttleRAF = function(fn) {
     var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
     if (pending.length <= maxChunk) return pending;
 
-    var punctuation = /[锛屻€傦紒锛燂紱锛氥€?.!?;:\n]/;
+    var punctuation = /[，。！？；：?!.?:;\n]/;
     for (var i = Math.min(maxChunk - 1, pending.length - 1); i >= minChunk - 1; i--) {
       if (punctuation.test(pending.charAt(i))) return pending.slice(0, i + 1);
     }
@@ -1613,7 +1613,10 @@ window.throttleRAF = function(fn) {
     var rafId = 0;
     var cancelled = false;
     var finished = false;
-    var paused = false;
+    // A renderer can be created after the global pause button was pressed.
+    // Inherit that state so the next streamed chunk cannot restart animation
+    // until the user explicitly resumes.
+    var paused = !!S.paused;
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
@@ -2502,7 +2505,7 @@ window.throttleRAF = function(fn) {
         '<span class="ai-progress-elapsed">0s</span>' +
       '</div>' +
       '<div class="ai-progress-thinking-log" style="display:none"></div>' +
-      '<button type="button" class="ai-progress-stop">鍋滄鎬濊€?/button>';
+      '<button type="button" class="ai-progress-stop">\u505c\u6b62\u601d\u8003</button>';
     card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -3118,6 +3121,25 @@ window.throttleRAF = function(fn) {
           try { clearInterval(_idleCheckTimer); } catch (e) {}
           return;
         }
+      }
+      // H-25: 45s 无数据超时 — 清理卡片、复位状态并提示，避免永久"处理中"
+      // research 卡片的超时由调用方（sseResult.timedOut）专门处理，这里跳过
+      if (timedOut && !isResearchCard(progressCard)) {
+        safeRemoveProgressCard();
+        if (aiContentRef.value) {
+          ensureThinkCardNode();
+          if (aiNodeRef.value) {
+            aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），请重试'));
+          }
+          finishThinkCard(aiNodeRef.value, aiContentRef.value, null);
+        } else {
+          if (aiNodeRef.value) { try { aiNodeRef.value.remove(); } catch (e) {} }
+          aiNodeRef.value = null;
+        }
+        if (opts.onResetSending) { try { opts.onResetSending(); } catch (e) {} }
+        notify('AI 响应超时（45 秒未收到数据），请重试');
+        try { clearInterval(_idleCheckTimer); } catch (e) {}
+        return;
       }
       if (doneReceivedRef && doneReceivedRef.value) return;
       if (abortedRef && abortedRef.value) return;
@@ -3761,27 +3783,16 @@ window.throttleRAF = function(fn) {
     }
 
     // 鈽?蹇€熷弻鍑诲幓閲嶏細鍚屼竴绉掑唴鐩稿悓鏂囨湰鐨勮姹傚拷鐣?
-    var dedupKey = text + Math.floor(Date.now() / 1000);
-    if (S._lastDtDedupKey === dedupKey) {
-      try { notify('已发送，请勿重复点击'); } catch (e) {}
-      S.sending = false;
+    // H-28: 双发送守卫 — 上一请求仍在进行时拒绝新发送，避免双 Enter
+    // 追加第二条用户消息并中止第一个请求。锁在首个 await 之前同步设置。
+    if (S.sending) {
+      try { notify('AI 正在生成回复，请稍候'); } catch (e) {}
       return;
     }
-    S._lastDtDedupKey = dedupKey;
-    var hadActiveRequest = S.sending;
-    // Lock before awaiting auth so a rapid double click cannot launch a pair
-    // of deep-research jobs.
     S.sending = true;
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
-
-    if (hadActiveRequest) {
-      if (S.deepThinkJob) {
-        try { S.deepThinkJob.abort(); } catch (e) {}
-      }
-      try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
-    }
 
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
@@ -4302,15 +4313,14 @@ window.throttleRAF = function(fn) {
       pauseBtn.addEventListener('click', function(ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        if (!S.sending) return;
+        if (!S.sending && !S.paused) return;
         var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
         if (anyPaused) {
           if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
           S.paused = false;
           pauseBtn.textContent = '暂停';
         } else {
-          try { if (S.abortController) S.abortController.abort(); } catch (e) {}
-          try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
+          // H-24: 只暂停渲染器，不中止 SSE 请求 / deepThinkJob（中止会永久丢失回复）
           if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
           S.paused = true;
           pauseBtn.textContent = '继续';
@@ -5080,6 +5090,19 @@ window.throttleRAF = function(fn) {
         return assistantBubble;
       }
       
+      // H-25: 普通对话 idle 看门狗 — 45s 无数据视为超时，中止等待并清理，
+      // 避免服务端/provider 挂起时界面永久停在"处理中"
+      var _lastDataTime = Date.now();
+      var timedOut = false;
+      var _idleCheckTimer = setInterval(function() {
+        if (timedOut || !S.active) return;
+        if (Date.now() - _lastDataTime > 45000) {
+          timedOut = true;
+          if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
+          if (reader) { try { reader.cancel(); } catch (e) {} }
+        }
+      }, 5000);
+
       while (true) {
         if (S._currentReqId !== reqId || controller.signal.aborted) {
           aborted = true;
@@ -5095,6 +5118,7 @@ window.throttleRAF = function(fn) {
         buffer += decoder.decode(readResult.value, { stream: true });
         var lines = buffer.split('\n');
         buffer = lines.pop() || '';
+        _lastDataTime = Date.now();
         
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li].trim();
@@ -5505,6 +5529,27 @@ window.throttleRAF = function(fn) {
         if (doneReceived || aborted) break;
       }
       
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+
+      // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
+      if (timedOut) {
+        cleanupRenderers();
+        hideAssistantTyping();
+        if (aiContent) {
+          var timeoutNote = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
+          try { assistantNode.appendChild(timeoutNote); } catch (e) {}
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+        } else {
+          try { assistantNode.remove(); } catch (e) {}
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+          restoreInputText();
+          notify('AI 响应超时（45 秒未收到数据），请重试');
+        }
+        resetSendingIfCurrent();
+        return;
+      }
+
       if (S._currentReqId !== reqId || aborted) {
         // 被新请求取代，删除当前创建的任何节点
         cleanupRenderers();
@@ -5531,7 +5576,26 @@ window.throttleRAF = function(fn) {
         notify('AI 暂时没有回应，请稍后再试');
       }
     } catch (fetchErr) {
-      if (S._currentReqId !== reqId) return;
+      if (S._currentReqId !== reqId) { try { clearInterval(_idleCheckTimer); } catch (e) {} return; }
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+      // H-25: 超时中止触发的 AbortError 也走超时清理，避免被误判为"用户主动停止"
+      if (timedOut) {
+        cleanupRenderers();
+        hideAssistantTyping();
+        if (aiContent) {
+          var timeoutNote2 = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
+          try { assistantNode.appendChild(timeoutNote2); } catch (e) {}
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+        } else {
+          try { assistantNode.remove(); } catch (e) {}
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+          restoreInputText();
+          notify('AI 响应超时（45 秒未收到数据），请重试');
+        }
+        resetSendingIfCurrent();
+        return;
+      }
       // 缃戠粶閿欒鎴?abort
       if (fetchErr && fetchErr.name !== 'AbortError') {
         hideAssistantTyping();
@@ -6175,17 +6239,16 @@ function showChatMessages() {
 
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
-      if (!S.sending) return;
+      if (!S.sending && !S.paused) return;
       var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
       if (anyPaused) {
-        // 恢复
+        // 恢复渲染
         if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
         S.paused = false;
         pauseBtn.textContent = '暂停';
       } else {
-        // 真正中止 SSE 请求 + 暂停渲染
-        try { if (S.abortController) S.abortController.abort(); } catch (e) {}
-        try { if (S.deepThinkJob && S.deepThinkJob.abort) S.deepThinkJob.abort(); } catch (e) {}
+        // H-24: 真"暂停" — 只暂停渲染器，不中止 SSE 请求。
+        // 旧逻辑在此 abort 请求会永久丢失 AI 回复，且 S.sending 置 false 后"继续"按钮被卡死。
         if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
         pauseBtn.textContent = '继续';

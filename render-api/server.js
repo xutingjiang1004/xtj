@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const { applySecurityHeaders } = require('./security-headers');
 const registerCodeAgentRoutes = require('./code-agent');
 const registerCodeGitHubRoutes = require('./code-github');
 const sharp = require('sharp');
@@ -241,8 +242,12 @@ function getDeepSeekCapabilitySnapshot() {
   // Provider limits must come from deployment configuration (or a future
   // model-catalog response), never from a frontend claim. Keep them unknown
   // when the deployment has not declared them.
-  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS);
-  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS);
+  // Keep the capability endpoint aligned with both the provider-specific
+  // names and the CODE_AI_* names used by render.yaml/code-agent.js. Without
+  // the latter, the deployed UI reported null limits even though the service
+  // had a configured context/output budget.
+  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS || process.env.CODE_AI_CONTEXT_TOKENS);
+  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS || process.env.CODE_AI_MAX_OUTPUT_TOKENS);
   var providerContextTokens = Number.isSafeInteger(configuredContext) && configuredContext > 0 ? configuredContext : null;
   var providerMaxOutputTokens = Number.isSafeInteger(configuredOutput) && configuredOutput > 0 ? configuredOutput : null;
   return {
@@ -1990,25 +1995,23 @@ function validateDurationHours(value) {
 }
 
 // ===================== 中间件 ======================
+function isAllowedWebOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.length > 0) return ALLOWED_ORIGINS.includes(origin);
+  try {
+    var originHost = new URL(origin).hostname;
+    return originHost === SERVER_HOSTNAME || originHost === 'localhost' || originHost === '127.0.0.1' ||
+      /(^|\.)vercel\.app$/.test(originHost);
+  } catch (e) {
+    return false;
+  }
+}
+
 // CORS 限制：自动检测 + 白名单
 app.use(cors({
   origin: function (origin, callback) {
     // 允许无 origin 的请求（如 curl、Postman、同源请求）
-    if (!origin) return callback(null, true);
-    // 检查白名单
-    if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true);
-    }
-    // 自动检测模式：检查是否匹配服务器域名或已知域名
-    if (ALLOWED_ORIGINS.length === 0) {
-      try {
-        var originHost = new URL(origin).hostname;
-        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、本地开发域名
-        if (originHost === SERVER_HOSTNAME || originHost === 'localhost' || originHost === '127.0.0.1') {
-          return callback(null, true);
-        }
-      } catch(e) {}
-    }
+    if (isAllowedWebOrigin(origin)) return callback(null, true);
     // 返回 403（错误由后续错误处理器记录日志并返回 403）
     var err = new Error('不允许的来源');
     err.status = 403;
@@ -2016,6 +2019,7 @@ app.use(cors({
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
   maxAge: 86400
 }));
 
@@ -2065,13 +2069,8 @@ app.use((req, res, next) => {
 
 // 安全响应头 + CSRF 防护 + 访问记录（放在静态文件之前，确保 HTML 也带上安全头）
 app.use((req, res, next) => {
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  applySecurityHeaders(res);
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), interest-cohort=()');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   next();
 });
 
@@ -2098,7 +2097,7 @@ app.use(function(req, res, next) {
         return originHost === host || originHost === SERVER_HOSTNAME;
       } catch(e) { return false; }
     })();
-    const allowed = isSameOrigin || ALLOWED_ORIGINS.some(function(o) {
+    const allowed = isSameOrigin || isAllowedWebOrigin(origin) || ALLOWED_ORIGINS.some(function(o) {
       return origin === o || referer.startsWith(o + '/');
     });
     if (!allowed && origin) {
@@ -6907,6 +6906,20 @@ app.get('/api/user/me', authenticateUser, rateLimit(60000, 30), async (req, res)
   }
 });
 
+// 限制状态只通过服务端按当前 access token 查询，避免公开 RPC 接口被用来
+// 枚举任意用户名的封禁、拉黑和禁言状态。
+app.get('/api/user/restrictions', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var restrictionResult = await supabase.rpc('get_user_restrictions', { p_user_name: req.userName });
+    if (restrictionResult.error) return res.status(503).json({ ok: false, error: '限制状态暂不可用' });
+    return res.json({ ok: true, restrictions: restrictionResult.data || {
+      is_banned: false, is_blacklisted: false, is_muted: false
+    } });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: '限制状态暂不可用' });
+  }
+});
+
 // 刷新用户 access token（使用 HttpOnly cookie 中的 refresh token）
 app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
   try {
@@ -7390,14 +7403,15 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
 app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var uploadId = (req.body && req.body.upload_id) || '';
-    if (!uploadId) return res.status(400).json({ error: '缺少 upload_id' });
+    if (!/^[a-z0-9_-]{8,64}$/i.test(String(uploadId))) return res.status(400).json({ error: 'upload_id 格式无效' });
     // 按 upload_id 查询（actor_key 格式: photo_${uploadId}）
-    var { data: photo } = await supabase.from('posts')
+    var { data: photo, error: photoLookupError } = await supabase.from('posts')
       .select('id, media_url, created_at, content')
       .eq('media_type', '__photo_wall__')
       .eq('actor_key', 'photo_' + uploadId)
       .eq('user_name', req.userName)
       .maybeSingle();
+    if (photoLookupError) return res.status(503).json({ error: '照片状态暂不可用' });
     if (!photo) return res.json({ status: 'not_found' });
 
     // Phase 5: 同一 upload_id 可能存在不同路径的未引用文件，检查并清理
@@ -7405,17 +7419,19 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
       var photoContent = JSON.parse(photo.content || '{}');
       var referencedPath = photoContent.storagePath || photoContent.storage_path || '';
       if (referencedPath) {
-        // 列出 storage 中该 upload_id 相关的所有文件
-        var prefix = 'photos/' + uploadId.substring(0, 2) + '/' + uploadId + '/';
-        var { data: storageFiles, error: listErr } = await supabase.storage.from('uploads').list(prefix, { limit: 100 });
+        // 当前上传路径是 photos/<upload_id>_<timestamp>_... 的平面结构。
+        // 旧的分层前缀永远匹配不到，导致同一 upload_id 的孤儿文件无法清理。
+        var prefix = 'photos/';
+        var { data: storageFiles, error: listErr } = await supabase.storage.from('uploads').list(prefix, { limit: 1000 });
         if (!listErr && Array.isArray(storageFiles) && storageFiles.length > 1) {
           var unreferenced = storageFiles
             .map(function(f) { return prefix + f.name; })
+            .filter(function(p) { return p.indexOf('photos/' + uploadId + '_') === 0; })
             .filter(function(p) { return p !== referencedPath; });
           if (unreferenced.length > 0) {
-            // 只清理 thumb 目录下或文件名包含 uploadId 但非当前引用路径的
+            // 只清理同一 upload_id 的非当前引用路径
             var toClean = unreferenced.filter(function(p) {
-              return p.indexOf('thumbs/') >= 0 || p.indexOf(uploadId) >= 0;
+              return p.indexOf(uploadId) >= 0;
             });
             if (toClean.length > 0) {
               await supabase.storage.from('uploads').remove(toClean).catch(function() {});
@@ -7435,10 +7451,54 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
 app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
     var path = (req.body && req.body.path) || '';
-    if (!path) return res.status(400).json({ ok: false, error: '缺少 path 参数' });
-    // 安全校验：只允许清理 photos/ 目录下的文件
-    if (path.indexOf('photos/') !== 0 || path.indexOf('..') >= 0) {
+    var uploadId = (req.body && req.body.upload_id) || '';
+    if (typeof path !== 'string' || !path || typeof uploadId !== 'string' || !uploadId) {
+      return res.status(400).json({ ok: false, error: '缺少清理凭证' });
+    }
+    if (!/^[a-z0-9_-]{8,64}$/i.test(uploadId)) {
+      return res.status(400).json({ ok: false, error: '清理凭证不合法' });
+    }
+    // 只接受 upload-ui.js 生成的平面文件名，避免通过 PostgREST 表达式或
+    // Storage 路径穿越把本接口变成任意文件删除器。
+    if (path.indexOf('photos/' + uploadId + '_') !== 0 ||
+        !/^photos\/[a-z0-9_-]{8,64}_\d{10,}_[a-z0-9]+_[A-Za-z0-9_-]{1,48}(?:\.[A-Za-z0-9]{1,8})?$/i.test(path)) {
       return res.status(400).json({ ok: false, error: '路径不合法' });
+    }
+    // 派生文件（缩略图/旋转版）一律不允许通过本接口删除，只能走照片删除流程
+    if (path.indexOf('photos/thumbs/') === 0 || path.indexOf('photos/rotated/') === 0) {
+      return res.status(403).json({ ok: false, error: '无权清理该文件' });
+    }
+    // 归属校验：仅允许清理"未被任何照片记录引用"的孤儿文件（本次上传失败遗留）。
+    // 已发布的照片在 DB 中必然有记录引用其 storagePath/media_url，任何用户都不可通过本接口删除。
+    var escapedPath = path.replace(/[\\%_]/g, '\\$&');
+    var referencePattern = '%' + escapedPath + '%';
+    var refChecks = await Promise.all([
+      supabase.from('posts').select('id').eq('media_type', '__photo_wall__')
+        .ilike('content', referencePattern).limit(1),
+      supabase.from('posts').select('id').eq('media_type', '__photo_wall__')
+        .ilike('media_url', referencePattern).limit(1)
+    ]);
+    // DB 查询失败时必须拒绝删除；否则攻击者可以利用一个临时数据库故障
+    // 绕过“已被照片记录引用”的保护。
+    if (refChecks.some(function(result) { return !result || result.error; })) {
+      return res.status(503).json({ ok: false, error: '暂时无法确认文件归属，请稍后重试' });
+    }
+    if (refChecks.some(function(result) { return result.data && result.data.length > 0; })) {
+      return res.status(403).json({ ok: false, error: '该文件已被照片记录引用，无权清理' });
+    }
+    // 时间窗口校验：本接口只处理本次上传失败遗留的文件
+    // （命名约定 photos/<upload_id>_<epochMs>_<rand>_<name>）。
+    var namePart = path.slice('photos/'.length);
+    var tsMatch = String(namePart).match(/^[a-z0-9_-]{8,64}_(\d{10,})\_/i);
+    var PHOTO_CLEANUP_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000;
+    var allowedByAge = false;
+    if (tsMatch) {
+      var ts = Number(tsMatch[1]);
+      var now = Date.now();
+      if (Number.isSafeInteger(ts) && ts > 0 && ts <= now && (now - ts) < PHOTO_CLEANUP_MAX_AGE_MS) allowedByAge = true;
+    }
+    if (!allowedByAge) {
+      return res.status(403).json({ ok: false, error: '文件超出清理时限，无权清理' });
     }
     var result = await supabase.storage.from('uploads').remove([path]);
     if (result && result.error) {
@@ -8531,7 +8591,11 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       likes: likes,
       page: page,
       limit: limit,
-      next_offset: posts.length ? from + posts.length : from,
+      // `from`/`to` paginate the unfiltered database result. Content
+      // filtering can make `posts.length` smaller than the page width; using
+      // that filtered count would move the next request backwards and repeat
+      // rows forever. Advance by the number actually consumed from storage.
+      next_offset: preFilterCount ? from + preFilterCount : from,
       endReached: endReached,
       total_post_count: totalCount
     });
@@ -8653,7 +8717,106 @@ app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
   } catch (e) { console.error('[API] batch avatar:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
+// POST /api/avatar - 更新当前用户头像（服务端写入，替代浏览器直写 posts 表，
+// 修复 anon 可插入任意 user_name 头像记录的身份冒充问题）
+app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var mediaUrl = req.body && req.body.media_url;
+    if (typeof mediaUrl !== 'string' || !mediaUrl || mediaUrl.length > 2048) {
+      return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' });
+    }
+    var parsed, storageOrigin;
+    try { parsed = new URL(mediaUrl); storageOrigin = new URL(SUPABASE_URL).origin; } catch (_) { return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' }); }
+    if (parsed.protocol !== 'https:' || parsed.origin !== storageOrigin || parsed.search || parsed.hash) {
+      return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' });
+    }
+    if (parsed.pathname.indexOf('/storage/v1/object/public/uploads/avatars/') !== 0) {
+      return res.status(400).json({ error: '头像地址无效', code: 'INVALID_INPUT' });
+    }
+    var encodedName = parsed.pathname.slice('/storage/v1/object/public/uploads/avatars/'.length);
+    var decodedName;
+    try { decodedName = decodeURIComponent(encodedName); } catch (_) { return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' }); }
+    if (!decodedName || decodedName.indexOf('..') >= 0 || decodedName.indexOf('\\') >= 0 || decodedName.indexOf('/') >= 0) {
+      return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' });
+    }
+    var userName = req.userName;
+    if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
+    var insertRes = await supabase.from('posts').insert([{
+      user_name: userName,
+      content: '用户头像',
+      media_url: mediaUrl,
+      media_type: '__avatar__',
+      actor_key: '__avatar__'
+    }]).select('id,media_url').maybeSingle();
+    if (insertRes.error || !insertRes.data) {
+      console.error('[API] avatar insert:', insertRes.error && insertRes.error.message);
+      return res.status(500).json({ error: '头像保存失败', code: 'avatar_save_failed' });
+    }
+    // 清理旧头像记录（仅保留最新一条，避免记录无限累积）
+    var oldRes = await supabase.from('posts')
+      .select('id,media_url')
+      .eq('user_name', userName)
+      .eq('media_type', '__avatar__')
+      .eq('actor_key', '__avatar__')
+      .neq('id', insertRes.data.id)
+      .order('created_at', { ascending: false });
+    var oldIds = (oldRes && !oldRes.error && oldRes.data || []).map(function(row) { return row.id; });
+    if (oldIds.length > 0) {
+      var delRes = await supabase.from('posts').delete().in('id', oldIds);
+      if (delRes && delRes.error) console.error('[API] avatar cleanup:', delRes.error.message);
+    }
+    return res.json({ ok: true, avatar_url: mediaUrl });
+  } catch (e) {
+    console.error('[API] avatar update:', e && e.message);
+    return res.status(500).json({ error: '头像更新失败', code: 'avatar_update_failed' });
+  }
+});
+
 // ===================== 私信列表接口（修复 RLS 权限问题） ======================
+// GET /api/dm/list - 获取当前用户的对话列表
+// POST /api/avatar/status - recover from a lost response after the server
+// committed the avatar row. The client must query before deleting its upload.
+app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var mediaUrl = req.body && req.body.media_url;
+    if (typeof mediaUrl !== 'string' || !mediaUrl || mediaUrl.length > 2048) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    }
+    var parsed, storageOrigin;
+    try { parsed = new URL(mediaUrl); storageOrigin = new URL(SUPABASE_URL).origin; } catch (_) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    }
+    if (parsed.protocol !== 'https:' || parsed.origin !== storageOrigin || parsed.search || parsed.hash ||
+        parsed.pathname.indexOf('/storage/v1/object/public/uploads/avatars/') !== 0) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    }
+    var encodedName = parsed.pathname.slice('/storage/v1/object/public/uploads/avatars/'.length);
+    var decodedName;
+    try { decodedName = decodeURIComponent(encodedName); } catch (_) { decodedName = ''; }
+    if (!decodedName || decodedName.indexOf('..') >= 0 || decodedName.indexOf('\\') >= 0 || decodedName.indexOf('/') >= 0) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    }
+    var lookup = await supabase.from('posts')
+      .select('id,media_url')
+      .eq('user_name', req.userName)
+      .eq('media_type', '__avatar__')
+      .eq('actor_key', '__avatar__')
+      .eq('media_url', mediaUrl)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (lookup.error) {
+      console.error('[API] avatar status:', lookup.error.message);
+      return res.status(503).json({ error: 'avatar_status_failed', code: 'avatar_status_failed' });
+    }
+    var row = lookup.data && lookup.data[0];
+    return res.json({ ok: true, committed: !!row, avatar_url: row ? row.media_url : null });
+  } catch (e) {
+    console.error('[API] avatar status exception:', e && e.message);
+    return res.status(500).json({ error: 'avatar_status_failed', code: 'avatar_status_failed' });
+  }
+});
+
+// ===================== 私信列表接口 =====================
 // GET /api/dm/list - 获取当前用户的对话列表
 app.get('/api/dm/list', authenticateUser, async (req, res) => {
   try {
@@ -15701,6 +15864,23 @@ registerCodeAgentRoutes(app, {
 });
 registerCodeGitHubRoutes(app, {
   authenticateUser: authenticateUser
+});
+
+// Keep API failures machine-readable even when a route or body parser throws.
+// Do this after every route registration so it cannot turn a normal response
+// into a second write.
+app.use(function terminalNotFound(req, res) {
+  if (res.headersSent || res.writableEnded) return;
+  res.status(404).json({ error: 'NOT_FOUND', path: req.path });
+});
+app.use(function terminalError(err, req, res, next) {
+  if (res.headersSent || res.writableEnded) return next(err);
+  var status = Number(err && (err.status || err.statusCode)) || 500;
+  if (err && (err.type === 'entity.too.large' || err.code === 'LIMIT_FILE_SIZE')) status = 413;
+  if (err && err.type === 'entity.parse.failed') status = 400;
+  if (status < 400 || status > 599) status = 500;
+  console.error('[HTTP] request failed:', req.method, req.originalUrl, err && err.message ? err.message : err);
+  res.status(status).json({ error: status === 413 ? 'PAYLOAD_TOO_LARGE' : (status === 400 ? 'INVALID_REQUEST' : 'INTERNAL_ERROR') });
 });
 
 app.listen(port, () => {
