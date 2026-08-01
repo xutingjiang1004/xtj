@@ -568,7 +568,7 @@
     if (codeModuleState.status === 'loading') return;
     var panelCode = document.getElementById('panelCode');
     if (panelCode && codeModuleState.status === 'idle') {
-      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>姝ｅ湪鍔犺浇 Code 宸ヤ綔鍖?..</p></div>';
+      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
     }
     window.requestAnimationFrame(function () {
       window.requestAnimationFrame(function () {
