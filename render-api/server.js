@@ -3948,6 +3948,16 @@ function isValidCatTrigger(comment, authorRecord) {
   if (!hasCatMention(comment.content)) return false;
   // 评论作者不能是空
   if (!comment.user_name) return false;
+  // Phase 4: 如果传入了 authorRecord 且 DB 查询失败，不误判为已删除
+  // 即 DB 查询出错时假定 author 有效（fail-open），确保评论不被错误跳过
+  if (authorRecord && authorRecord.error) {
+    console.warn('[CAT_AI] isValidCatTrigger DB error, assuming valid:', authorRecord.error.message || authorRecord.error);
+    return true;
+  }
+  // 如果传入了 authorRecord 且明确查到作者不存在，视为无效触发
+  if (authorRecord && !authorRecord.data) {
+    return false;
+  }
   return true;
 }
 
@@ -4093,14 +4103,18 @@ async function processCatReplyJob(job) {
     // 验证源评论仍然存在
     var sourceRes = await supabase.from('comments').select('id, user_name, content, post_id').eq('id', job.source_comment_id).maybeSingle();
     if (!sourceRes.data) {
-      await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'source comment deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      // Phase 4: CAS — 仅当 job 仍处于 processing 时才更新
+      var { error: srcErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'source comment deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+      if (srcErr) console.warn('[CAT_AI] CAS update failed (source deleted):', srcErr && srcErr.message);
       return;
     }
 
     // 验证帖子仍然存在
     var postRes = await supabase.from('posts').select('id').eq('id', job.post_id).maybeSingle();
     if (!postRes.data) {
-      await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'post deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      // Phase 4: CAS — 仅当 job 仍处于 processing 时才更新
+      var { error: postErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'post deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+      if (postErr) console.warn('[CAT_AI] CAS update failed (post deleted):', postErr && postErr.message);
       return;
     }
 
@@ -4116,20 +4130,25 @@ async function processCatReplyJob(job) {
     }
 
     if (existingReplyRes.data) {
-      await supabase.from('ai_comment_reply_jobs').update({
+      // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记完成
+      var { error: dupErr } = await supabase.from('ai_comment_reply_jobs').update({
         status: 'completed',
         generated_reply: existingReplyRes.data.content || 'duplicate',
+        reply_comment_id: String(existingReplyRes.data.id),
         error_message: null,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }).eq('id', job.id);
+      }).eq('id', job.id).eq('status', 'processing');
+      if (dupErr) console.warn('[CAT_AI] CAS update failed (existing reply):', dupErr && dupErr.message);
       return;
     }
 
     // 获取上下文
     var context = await getCatPostContext(job.post_id, job.source_comment_id);
     if (!context) {
-      await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'context fetch failed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+      // Phase 4: CAS
+      var { error: ctxErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'context fetch failed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+      if (ctxErr) console.warn('[CAT_AI] CAS update failed (context):', ctxErr && ctxErr.message);
       return;
     }
 
@@ -4162,9 +4181,11 @@ async function processCatReplyJob(job) {
     if (!result) {
       // 失败后重试逻辑
       if (job.attempts < 1) {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id);
+        var { error: retryErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (retryErr) console.warn('[CAT_AI] CAS update failed (retry null):', retryErr && retryErr.message);
       } else {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'DeepSeek returned null', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+        var { error: nullErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'DeepSeek returned null', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (nullErr) console.warn('[CAT_AI] CAS update failed (null result):', nullErr && nullErr.message);
       }
       return;
     }
@@ -4174,19 +4195,23 @@ async function processCatReplyJob(job) {
     if (!validated) {
       // 解析失败，重试一次
       if (job.attempts < 1) {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id);
+        var { error: valRetryErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (valRetryErr) console.warn('[CAT_AI] CAS update failed (retry validation):', valRetryErr && valRetryErr.message);
       } else {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'invalid response format', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+        var { error: fmtErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'invalid response format', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (fmtErr) console.warn('[CAT_AI] CAS update failed (invalid format):', fmtErr && fmtErr.message);
       }
       return;
     }
 
     if (!validated.should_reply) {
       // 不应回复（安全原因等）
-      await supabase.from('ai_comment_reply_jobs').update({
+      // Phase 4: CAS
+      var { error: safeErr } = await supabase.from('ai_comment_reply_jobs').update({
         status: 'blocked', risk_type: validated.risk_type, error_message: 'blocked by safety check',
         completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }).eq('id', job.id);
+      }).eq('id', job.id).eq('status', 'processing');
+      if (safeErr) console.warn('[CAT_AI] CAS update failed (safety):', safeErr && safeErr.message);
       return;
     }
 
@@ -4215,27 +4240,38 @@ async function processCatReplyJob(job) {
       console.error('[CAT_AI] insert ai comment error:', aiComment.error);
       // 唯一键冲突 = 已有 AI 回复，标记为完成不报错
       if (aiComment.error.code === '23505') {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'completed', generated_reply: 'duplicate', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+        // Phase 4: CAS + reply_comment_id
+        var { error: dupInsertErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'completed', generated_reply: 'duplicate', reply_comment_id: String(aiComment.data && aiComment.data.id || ''), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (dupInsertErr) console.warn('[CAT_AI] CAS update failed (dup insert):', dupInsertErr && dupInsertErr.message);
       } else {
-        await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'comment insert failed: ' + aiComment.error.message, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+        // Phase 4: CAS
+        var { error: insertErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'comment insert failed: ' + aiComment.error.message, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
+        if (insertErr) console.warn('[CAT_AI] CAS update failed (insert err):', insertErr && insertErr.message);
       }
       return;
     }
 
-    // 标记任务完成
-    await supabase.from('ai_comment_reply_jobs').update({
+    // 标记任务完成，同时保存 reply_comment_id 供后续状态一致性检查
+    // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记完成
+    var { error: finalErr } = await supabase.from('ai_comment_reply_jobs').update({
       status: 'completed', generated_reply: replyContent,
+      reply_comment_id: String(aiComment.data.id),
       completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-    }).eq('id', job.id);
-
-    console.log('[CAT_AI] reply created for comment', job.source_comment_id, '->', aiComment.data.id);
+    }).eq('id', job.id).eq('status', 'processing');
+    if (finalErr) {
+      console.warn('[CAT_AI] CAS update failed (final):', finalErr && finalErr.message);
+    } else {
+      console.log('[CAT_AI] reply created for comment', job.source_comment_id, '->', aiComment.data.id);
+    }
   } catch (e) {
     console.error('[CAT_AI] process job error:', e && e.message);
     try {
-      await supabase.from('ai_comment_reply_jobs').update({
+      // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记失败
+      var { error: catchErr } = await supabase.from('ai_comment_reply_jobs').update({
         status: 'failed', error_message: String(e && e.message || '').slice(0, 500),
         completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }).eq('id', job.id);
+      }).eq('id', job.id).eq('status', 'processing');
+      if (catchErr) console.warn('[CAT_AI] CAS update failed (catch):', catchErr && catchErr.message);
     } catch (_) {}
   }
 }
@@ -4248,14 +4284,59 @@ async function recoverStaleCatJobs() {
       .select('id').eq('status', 'processing').lt('started_at', staleTime).limit(5);
     if (staleJobs && staleJobs.length) {
       for (var i = 0; i < staleJobs.length; i++) {
-        await supabase.from('ai_comment_reply_jobs').update({
+        // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记超时
+        var { error: staleErr } = await supabase.from('ai_comment_reply_jobs').update({
           status: 'failed', error_message: 'task timeout',
           completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        }).eq('id', staleJobs[i].id);
+        }).eq('id', staleJobs[i].id).eq('status', 'processing');
+        if (staleErr) console.warn('[CAT_AI] CAS update failed (stale):', staleErr && staleErr.message);
       }
     }
   } catch (e) { /* non-critical */ }
 }
+
+// Phase 4: 有限的幂等 reconciliation 函数
+// 检查 completed job 与实际 AI 评论的一致性，必要时标记 repair_required
+async function reconcileCatJobs() {
+  try {
+    // 1. 查找已完成但 reply_comment_id 不为空的 job
+    var { data: completedJobs, error: qErr } = await supabase.from('ai_comment_reply_jobs')
+      .select('id, source_comment_id, reply_comment_id')
+      .eq('status', 'completed')
+      .not('reply_comment_id', 'is', null)
+      .limit(20);
+    if (qErr) { console.warn('[CAT_AI] reconcile query error:', qErr.message); return; }
+    if (!completedJobs || !completedJobs.length) return;
+
+    for (var i = 0; i < completedJobs.length; i++) {
+      var j = completedJobs[i];
+      if (!j.reply_comment_id) continue;
+      // 验证引用的 AI 评论仍存在
+      var { data: replyRow, error: rErr } = await supabase.from('comments')
+        .select('id').eq('id', j.reply_comment_id).maybeSingle();
+      if (rErr) {
+        console.warn('[CAT_AI] reconcile DB error for job', j.id, ':', rErr.message);
+        continue;
+      }
+      if (!replyRow) {
+        // 引用的评论已被删除 → 标记为 repair_required
+        var { error: uErr } = await supabase.from('ai_comment_reply_jobs').update({
+          status: 'repair_required',
+          error_message: 'reply comment deleted, needs reconciliation',
+          updated_at: new Date().toISOString()
+        }).eq('id', j.id).eq('status', 'completed');
+        if (uErr) console.warn('[CAT_AI] reconcile update error for job', j.id, ':', uErr.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[CAT_AI] reconcile exception:', e && e.message);
+  }
+}
+
+// 定期运行 reconciliation（每 5 分钟，分散在 worker 循环中）
+setInterval(function() {
+  reconcileCatJobs().catch(function() {});
+}, 300000);
 
 let currentCatAiWorkers = 0;
 const MAX_CAT_AI_WORKERS = 3;
@@ -4300,9 +4381,9 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: 'access denied' });
     }
-    // 查询任务状态
+    // 查询任务状态，同时获取 reply_comment_id 用于一致性检查
     var jobRes = await supabase.from('ai_comment_reply_jobs')
-      .select('status, generated_reply, error_message, completed_at')
+      .select('status, generated_reply, error_message, completed_at, reply_comment_id')
       .eq('source_comment_id', commentId).maybeSingle();
     if (!jobRes.data) {
       // 检查是否已有 AI 回复 - 必须返回完整字段
@@ -4325,9 +4406,19 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     }
     if (status === 'pending' || status === 'processing') message = '小猫正在组织毒液……';
     else if (status === 'completed') {
-      var replyRes = await supabase.from('comments')
-        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      // Phase 4: 优先按 job.reply_comment_id 精确查找，不依赖模糊匹配
+      var replyCommentId = job.reply_comment_id;
+      var replyRes;
+      if (replyCommentId) {
+        replyRes = await supabase.from('comments')
+          .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+          .eq('id', replyCommentId).eq('generated_by_ai', true).maybeSingle();
+      } else {
+        // 旧数据：fallback 按 parent_comment_id 查找
+        replyRes = await supabase.from('comments')
+          .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+          .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      }
       if (replyRes.data) {
         var rr = replyRes.data;
         // ★ 严格验证：必须包含完整字段，否则返回 processing 状态而非空对象
@@ -4335,8 +4426,13 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
           return res.json({ status: 'completed', reply_comment_id: rr.id, message: '', data: rr });
         }
       }
-      // completed 但没有有效回复 -> 回复记录正在同步
-      return res.json({ status: 'processing', reply_comment_id: null, message: '回复记录正在同步' });
+      // Phase 4: 区分 reply_deleted 和 reply_missing
+      if (replyCommentId) {
+        // job 记录了 reply_comment_id 但数据库中找不到该评论 → 已被删除
+        return res.json({ status: 'reply_deleted', reply_comment_id: null, message: '小猫的回复已被删除，可点击重试' });
+      }
+      // completed 但没有 reply_comment_id 且没有有效回复 → 数据不一致
+      return res.json({ status: 'reply_missing', reply_comment_id: null, message: '回复记录缺失，可点击重试' });
     } else if (status === 'failed') message = '小猫暂时不想说话';
     else if (status === 'blocked') message = '';
     return res.json({ status: status, reply_comment_id: null, message: message });
@@ -4427,8 +4523,8 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       return res.status(400).json({ ok: false, code: 'non_retryable', error: '该任务已被安全规则拦截或关联数据已被删除，不可重试', status: 'blocked', source_comment_id: commentId });
     }
 
-    // 9. failed 状态重置为 pending（仅临时可重试错误）
-    if (existingJob && existingJob.status === 'failed') {
+    // 9. failed / repair_required / reply_deleted / reply_missing 状态重置为 pending（可重试错误）
+    if (existingJob && (existingJob.status === 'failed' || existingJob.status === 'repair_required' || existingJob.status === 'reply_deleted' || existingJob.status === 'reply_missing')) {
       // A retry consumes the same atomic quota as the original mention.  This
       // prevents provider failures from becoming an unbounded paid retry loop.
       var retryQuota = await checkCatRateLimit(sourceComment.user_name, post.id);
@@ -4445,7 +4541,7 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingJob.id)
-        .eq('status', 'failed');
+        .eq('status', existingJob.status);
       if (updateErr) {
         console.error('[ai-reply-retry] update failed:', updateErr.message);
         return res.status(500).json({ error: sanitizeError(updateErr), code: 'db_error' });
@@ -7303,9 +7399,58 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
       .eq('user_name', req.userName)
       .maybeSingle();
     if (!photo) return res.json({ status: 'not_found' });
+
+    // Phase 5: 同一 upload_id 可能存在不同路径的未引用文件，检查并清理
+    try {
+      var photoContent = JSON.parse(photo.content || '{}');
+      var referencedPath = photoContent.storagePath || photoContent.storage_path || '';
+      if (referencedPath) {
+        // 列出 storage 中该 upload_id 相关的所有文件
+        var prefix = 'photos/' + uploadId.substring(0, 2) + '/' + uploadId + '/';
+        var { data: storageFiles, error: listErr } = await supabase.storage.from('uploads').list(prefix, { limit: 100 });
+        if (!listErr && Array.isArray(storageFiles) && storageFiles.length > 1) {
+          var unreferenced = storageFiles
+            .map(function(f) { return prefix + f.name; })
+            .filter(function(p) { return p !== referencedPath; });
+          if (unreferenced.length > 0) {
+            // 只清理 thumb 目录下或文件名包含 uploadId 但非当前引用路径的
+            var toClean = unreferenced.filter(function(p) {
+              return p.indexOf('thumbs/') >= 0 || p.indexOf(uploadId) >= 0;
+            });
+            if (toClean.length > 0) {
+              await supabase.storage.from('uploads').remove(toClean).catch(function() {});
+            }
+          }
+        }
+      }
+    } catch (_) { /* 清理是尽力而为，不阻塞主流程 */ }
+
     return res.json({ status: 'committed', data: photo });
   } catch(e) {
     return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 照片 Storage 文件清理（供前端 reconcile 调用）
+app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var path = (req.body && req.body.path) || '';
+    if (!path) return res.status(400).json({ ok: false, error: '缺少 path 参数' });
+    // 安全校验：只允许清理 photos/ 目录下的文件
+    if (path.indexOf('photos/') !== 0 || path.indexOf('..') >= 0) {
+      return res.status(400).json({ ok: false, error: '路径不合法' });
+    }
+    var result = await supabase.storage.from('uploads').remove([path]);
+    if (result && result.error) {
+      var msg = String((result.error.message || result.error.error || '') || '').toLowerCase();
+      if (/not.?found|does not exist|no such|404/.test(msg)) {
+        return res.json({ ok: true, not_found: true });
+      }
+      return res.status(500).json({ ok: false, error: '清理失败: ' + (result.error.message || '') });
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: '清理异常: ' + (e && e.message || '') });
   }
 });
 
@@ -8138,7 +8283,7 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
             error_message: 'reply deleted by user',
             completed_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
-          }).eq('source_comment_id', String(parentId)).in('status', ['completed', 'processing', 'pending']);
+          }).eq('source_comment_id', String(parentId)).in('status', ['completed', 'processing', 'pending', 'repair_required']);
         }
       } else {
         // Case 2: 删除的是父评论 → 标记其 job 为 blocked
@@ -8147,7 +8292,7 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
           error_message: 'source comment deleted',
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        }).eq('source_comment_id', String(commentId)).in('status', ['completed', 'processing', 'pending']);
+        }).eq('source_comment_id', String(commentId)).in('status', ['completed', 'processing', 'pending', 'repair_required']);
       }
     } catch (jobCleanupErr) {
       // Job cleanup is best-effort — comment delete already succeeded.
@@ -8684,23 +8829,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var targetUser = String(req.body && req.body.target_user || '').trim();
     var content = String(req.body && req.body.content || '').trim();
     // P6: 强制 media_type 为 DM_MARKER — 不信任客户端传入值。
-    // 之前接受客户端任意 media_type，攻击者可传 __avatar__、__auth__ 等
-    // 系统保留 marker 污染 posts 表，绕过空内容校验。
     var mediaType = DM_MARKER;
-    var actorKey = String(req.body && req.body.actor_key || '').slice(0, 500);
 
-    // P6: 校验 actor_key 格式 — 必须使用 DM 媒体前缀
-    var ALLOWED_DM_ACTOR_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__', DM_MARKER];
-    var actorKeyValid = !actorKey || ALLOWED_DM_ACTOR_PREFIXES.some(function(prefix) {
-      return actorKey.indexOf(prefix) === 0;
-    });
-    if (!actorKeyValid) {
-      return res.status(400).json({ error: '无效的媒体标识', code: 'invalid_actor_key' });
-    }
-    // P6: 防止路径遍历
-    if (actorKey && /\.\./.test(actorKey)) {
-      return res.status(400).json({ error: '无效的媒体路径', code: 'invalid_media_path' });
-    }
+    // P6: 客户端只提交 storage_path / kind / mime_type，后端生成 actor_key 和 URL
+    var storagePath = String(req.body && req.body.storage_path || '').trim();
+    var mediaKind = String(req.body && req.body.kind || '').trim();
+    var mimeType = String(req.body && req.body.mime_type || '').trim();
 
     // 验证接收用户
     if (!targetUser || targetUser.length > MAX_USERNAME_LEN) {
@@ -8718,45 +8852,90 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       return res.status(400).json({ error: '消息内容过长（最大' + MAX_CONTENT_LEN + '字符）', code: 'content_too_long' });
     }
 
-    // 验证接收用户真实存在
-    var { data: targetExists } = await supabase.from('posts')
+    // P6: 验证接收用户真实存在 — 查询出错返回 503（可重试），仅查不到才返回 target_not_found
+    var { data: targetExists, error: targetErr } = await supabase.from('posts')
       .select('id')
       .eq('user_name', targetUser)
       .eq('media_type', AUTH_MARKER)
       .maybeSingle();
+    if (targetErr) {
+      console.error('[API] dm send target lookup error:', targetErr);
+      return res.status(503).json({ error: '暂时无法验证接收用户', code: 'target_lookup_retry' });
+    }
     if (!targetExists && targetUser !== ADMIN_USERNAME) {
       return res.status(400).json({ error: '接收用户不存在', code: 'target_not_found' });
     }
 
-    // 构建消息内容
-    var contentPayload = content;
-    try {
-      // 尝试JSON格式
-      var parsed = JSON.parse(content);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        if (!parsed.read_at) parsed.read_at = null;
-        // P6: 校验 mediaPayload 中的 URL — 必须指向 Supabase Storage
-        if (parsed.media && parsed.media.url) {
-          var mediaUrl = String(parsed.media.url);
-          if (!/^https?:\/\//i.test(mediaUrl)) {
-            return res.status(400).json({ error: '无效的媒体URL', code: 'invalid_media_url' });
-          }
-          // P6: MIME 类型白名单
-          var allowedMimeTypes = ['image/', 'video/', 'audio/'];
-          if (parsed.media.mimeType) {
-            var mimeOk = allowedMimeTypes.some(function(t) {
-              return String(parsed.media.mimeType).startsWith(t);
-            });
-            if (!mimeOk) {
-              return res.status(400).json({ error: '不支持的媒体类型', code: 'invalid_mime_type' });
-            }
-          }
-        }
-        contentPayload = JSON.stringify(parsed);
+    // P6: 媒体文件处理 — 如果有媒体文件，验证并生成 actor_key / URL
+    var actorKey = 'dm_' + Date.now();
+    var mediaPayload = null;
+    if (storagePath) {
+      // P6: 拒绝外部 URL — 只接受 Storage 路径引用
+      if (/^https?:\/\//i.test(storagePath)) {
+        return res.status(400).json({ error: '外部URL不被允许，请使用 Storage 路径', code: 'external_url_rejected' });
       }
-    } catch (_) {
-      // 纯文本，包装为JSON
-      contentPayload = JSON.stringify({ text: content, read_at: null });
+      // P6: 防止路径遍历
+      if (/\.\./.test(storagePath)) {
+        return res.status(400).json({ error: '无效的媒体路径', code: 'invalid_media_path' });
+      }
+      // P6: 校验路径所有权 — 必须属于 chat/ 作用域，确保来自 DM 上传流程
+      if (storagePath.indexOf('chat/') !== 0) {
+        return res.status(400).json({ error: '媒体路径不属于私信作用域', code: 'invalid_storage_scope' });
+      }
+
+      // P6: 校验 kind 合法
+      var ALLOWED_KINDS = { image: '__dm_img__', video: '__dm_vid__', audio: '__dm_aud__' };
+      var actorPrefix = ALLOWED_KINDS[mediaKind];
+      if (!actorPrefix) {
+        return res.status(400).json({ error: '不支持的媒体类型，仅支持 image/video/audio', code: 'invalid_kind' });
+      }
+
+      // P6: 校验 MIME 类型与 kind 匹配
+      var mimePrefixMap = { image: 'image/', video: 'video/', audio: 'audio/' };
+      var expectedMimePrefix = mimePrefixMap[mediaKind];
+      if (!mimeType || mimeType.indexOf(expectedMimePrefix) !== 0) {
+        return res.status(400).json({ error: 'MIME 类型与声明的媒体类型不匹配', code: 'mime_mismatch' });
+      }
+
+      // P6: 验证文件在 Storage 中真实存在
+      var storageDir = 'chat';
+      var storageFileName = storagePath.substring(storagePath.lastIndexOf('/') + 1);
+      var { data: storageItems, error: listErr } = await supabase.storage.from('uploads').list(storageDir, { limit: 1000 });
+      if (listErr) {
+        console.error('[API] dm send storage list error:', listErr);
+        return res.status(503).json({ error: '暂时无法验证媒体文件', code: 'storage_verify_retry' });
+      }
+      var fileExists = (storageItems || []).some(function(item) { return item.name === storageFileName; });
+      if (!fileExists) {
+        return res.status(400).json({ error: '媒体文件在 Storage 中不存在', code: 'media_not_found' });
+      }
+
+      // P6: 后端生成 actor_key 和媒体 URL
+      actorKey = actorPrefix + storagePath;
+      var publicUrl = supabase.storage.from('uploads').getPublicUrl(storagePath).data.publicUrl;
+      mediaPayload = { kind: mediaKind, url: publicUrl, mimeType: mimeType };
+    }
+
+    // P6: 构建消息内容 — 后端注入 mediaPayload，不信任任何客户端传入的 media 对象
+    var parsedPayload = null;
+    try {
+      parsedPayload = JSON.parse(content);
+    } catch (_) {}
+    if (parsedPayload && typeof parsedPayload === 'object' && !Array.isArray(parsedPayload)) {
+      if (!parsedPayload.read_at) parsedPayload.read_at = null;
+      // P6: 移除客户端可能传入的 media 字段，替换为后端生成的 mediaPayload
+      if (mediaPayload) {
+        parsedPayload.media = mediaPayload;
+      } else {
+        delete parsedPayload.media;
+      }
+      content = JSON.stringify(parsedPayload);
+    } else {
+      if (mediaPayload) {
+        content = JSON.stringify({ text: content, read_at: null, media: mediaPayload });
+      } else {
+        content = JSON.stringify({ text: content, read_at: null });
+      }
     }
 
     // 使用 service_role 写入 __dm__ 记录（绕过RLS）
@@ -8764,16 +8943,38 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       .from('posts')
       .insert([{
         user_name: sender,
-        content: contentPayload,
+        content: content,
         media_type: mediaType,
         media_url: targetUser,
-        actor_key: actorKey || ('dm_' + Date.now())
+        actor_key: actorKey
       }])
       .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
       .single();
 
     if (insertErr) {
       console.error('[API] dm send insert error:', insertErr);
+      // P6: 消息写入失败，清理已上传的 Storage 文件
+      if (storagePath) {
+        try {
+          var { error: cleanupErr } = await supabase.storage.from('uploads').remove([storagePath]);
+          if (cleanupErr) {
+            console.warn('[API] dm send storage cleanup failed, queueing job:', cleanupErr.message || cleanupErr);
+            // P6: 如果删除失败，进入 storage_cleanup_jobs 持久化重试队列
+            await supabase.from('storage_cleanup_jobs').insert({
+              bucket: 'uploads',
+              paths: [storagePath],
+              status: 'pending',
+              attempts: 0,
+              last_error: String(cleanupErr.message || 'storage_delete_failed').slice(0, 1000),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }).select().maybeSingle();
+          }
+        } catch (cleanupEx) {
+          console.warn('[API] dm send storage cleanup exception:', cleanupEx && cleanupEx.message);
+          // 异常不阻塞响应，记录日志即可
+        }
+      }
       return res.status(500).json({ error: sanitizeError(insertErr), code: 'dm_send_failed' });
     }
 
@@ -8853,6 +9054,16 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
         var { error: removeErr } = await supabase.storage.from('uploads').remove([storagePath]);
         if (removeErr) {
           console.warn('[API] dm withdraw storage cleanup error:', removeErr.message || removeErr);
+          // P6: 如果 Storage 删除失败，进入 storage_cleanup_jobs 持久化重试队列
+          await supabase.from('storage_cleanup_jobs').insert({
+            bucket: 'uploads',
+            paths: [storagePath],
+            status: 'pending',
+            attempts: 0,
+            last_error: String(removeErr.message || 'storage_delete_failed').slice(0, 1000),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).select().maybeSingle();
         }
       } catch (e) {
         console.warn('[API] dm withdraw storage cleanup failed:', e && e.message);
@@ -15313,10 +15524,10 @@ app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
 
 // 自动清理旧日志（每24小时执行一次）
 setInterval(function() {
-  cleanupOldLogs('login').catch(function() {});
-  cleanupOldLogs('security').catch(function() {});
-  cleanupOldLogs('error').catch(function() {});
-  cleanupOldLogs('behavior').catch(function() {});
+  cleanupOldLogs('login').catch(function(e) { console.warn('[Cleanup] Auto-cleanup login failed:', e && e.message); });
+  cleanupOldLogs('security').catch(function(e) { console.warn('[Cleanup] Auto-cleanup security failed:', e && e.message); });
+  cleanupOldLogs('error').catch(function(e) { console.warn('[Cleanup] Auto-cleanup error failed:', e && e.message); });
+  cleanupOldLogs('behavior').catch(function(e) { console.warn('[Cleanup] Auto-cleanup behavior failed:', e && e.message); });
 }, 24 * 60 * 60 * 1000);
 
 // 自动清理 AI 聊天记录 (每天一次)
