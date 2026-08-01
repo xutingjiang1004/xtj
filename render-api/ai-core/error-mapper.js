@@ -59,8 +59,8 @@ function classifyError(err, options) {
   options = options || {};
   if (!err) return buildErrorResponse(ERROR_CODES.UNKNOWN, '未知错误', options);
 
-  // Already structured
-  if (err.code && typeof err.code === 'string') {
+  // Already structured with one of our public codes
+  if (err.code && typeof err.code === 'string' && Object.prototype.hasOwnProperty.call(HTTP_STATUS, err.code)) {
     return buildErrorResponse(err.code, err.message, Object.assign({}, options, {
       retryable: err.retryable === true,
       toolTrace: err.toolTrace || null
@@ -70,6 +70,13 @@ function classifyError(err, options) {
   var msg = String(err.message || err || '');
   var code = ERROR_CODES.UNKNOWN;
   var retryable = false;
+
+  // Node/network errors also carry a `code` field, but codes such as
+  // ECONNRESET are not client protocol codes. Classify them as retryable
+  // network failures instead of leaking the internal code through unchanged.
+  if (err.code && /^(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|UND_ERR)/i.test(String(err.code))) {
+    return buildErrorResponse(ERROR_CODES.NETWORK_ERROR, msg || '网络连接失败', Object.assign({}, options, { retryable: true }));
+  }
 
   if (err.name === 'AbortError' || /abort|cancel|取消/i.test(msg)) {
     code = ERROR_CODES.REQUEST_CANCELLED;
@@ -106,6 +113,10 @@ function classifyError(err, options) {
 function sendErrorResponse(res, err, options) {
   var structured = classifyError(err, options);
   var status = structured.status || 500;
+  if (res.headersSent || res.writableEnded) {
+    if (!res.writableEnded && typeof res.end === 'function') res.end();
+    return structured;
+  }
   try {
     res.status(status).json({
       error: structured.error,
@@ -116,8 +127,9 @@ function sendErrorResponse(res, err, options) {
       tool_trace: structured.toolTrace
     });
   } catch (e) {
-    // Response already sent
+    if (!res.headersSent && !res.writableEnded && typeof res.end === 'function') res.end();
   }
+  return structured;
 }
 
 module.exports = {

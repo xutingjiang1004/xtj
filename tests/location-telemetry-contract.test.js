@@ -6,6 +6,7 @@ const server = fs.readFileSync('render-api/server.js', 'utf8');
 const device = fs.readFileSync('js/login-device.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const admin = fs.readFileSync('js/admin/admin.js', 'utf8');
+const sharedHeaders = require('../render-api/security-headers.js');
 
 test('precise geolocation is system-managed and can be stopped', () => {
   // 定位已改为后台自动管理，不再有用户手动开关
@@ -38,7 +39,9 @@ test('location endpoint validates coordinates and keeps one bounded record per p
   assert.match(server, /info\.last_precise_location = preciseLocation/);
   assert.match(server, /info\.precise_location_history = locationHistory\.slice\(-100\)/);
   assert.match(server, /item\.page_load_id !== pageLoadId/);
-  assert.match(server, /geolocation=\(self\)/);
+  // Permissions-Policy 已收敛到共享安全头模块（server.js 与 serve-static.js 共用）
+  const permissionsPolicy = sharedHeaders.SECURITY_HEADERS['Permissions-Policy'] || '';
+  assert.match(permissionsPolicy, /geolocation=\(self\)/);
 });
 
 test('device telemetry includes bounded network and capability metadata', () => {

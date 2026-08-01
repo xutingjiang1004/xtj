@@ -723,7 +723,12 @@ function applyIncrementalIndex(scope, changedFiles, options) {
     seen.add(existing.path);
   }
   changedByPath.forEach(function(file, path) { if (!seen.has(path)) merged.push(file); });
-  if (merged.length !== manifest.size) {
+  // H-4: deleted 路径也占用 manifest 配额，合并后数量应等于 manifest 减去
+  // "在 manifest 中的已删路径数"。旧逻辑按完整 manifest.size 校验，合法删除会
+  // 被误判为 INDEX_REBUILD_REQUIRED（409），客户端被迫全量重建。
+  var deletedInManifest = 0;
+  deleted.forEach(function(path) { if (manifest.has(path)) deletedInManifest += 1; });
+  if (merged.length !== manifest.size - deletedInManifest) {
     return { ok: false, error: 'Base index does not match the complete manifest', code: 'INDEX_REBUILD_REQUIRED' };
   }
   return buildIndex(normalized, merged, { truncated: options.truncated === true });
@@ -1174,8 +1179,11 @@ function listFiles(scope, directory, depth, pattern) {
     if (depthCount > maxDepth) return;
 
     if (pattern) {
+      // H-5: 用户可控 pattern 直接进 new RegExp 存在 ReDoS/注入风险。
+      // 与 code-agent.js 的 wildcardMatch 一致：转义元字符、限长、锚定。
       try {
-        var re = new RegExp(pattern.replace(/\*/g, '.*').replace(/\?/g, '.'), 'i');
+        var escapedPattern = String(pattern).slice(0, 120).replace(/[.+^${}()|[\]\\]/g, '\\$&');
+        var re = new RegExp('^' + escapedPattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
         if (!re.test(entry.name)) return;
       } catch (e) { /* invalid pattern */ }
     }
@@ -1415,7 +1423,12 @@ function persistIndexToDB(supabase, userId, identifier, projectIndex, options) {
             modifiedAt: entry.modifiedAt,
             sha256: entry.sha256
           }).then(function(fileRecord) {
-            if (!fileRecord || !fileRecord.id) return uploadFile(index + 1);
+            if (!fileRecord || !fileRecord.id) {
+              // H-14: 文件记录持久化失败不能再静默跳过（旧逻辑继续下一个文件，
+              // 最终 ok 响应与实际存储不一致）。中止整个持久化并抛错，
+              // 调用方将视为持久化失败（内存索引仍可用，下次重试）。
+              throw new Error('persist index file record failed: ' + fe.path);
+            }
 
             // Collect chunks for this file
             var chunkRows = [];

@@ -93,6 +93,12 @@ test('Code stream watchdog terminalizes its own assistant node and duplicates re
   assert.match(codeWorkspace, /A resumed stream has no original request context/);
 });
 
+test('Code stream recovery has a bounded polling budget', () => {
+  assert.match(codeWorkspace, /var MAX_RESUME_POLLS = 150/);
+  assert.match(codeWorkspace, /resumePollCount > MAX_RESUME_POLLS/);
+  assert.match(codeWorkspace, /RESUME_TIMEOUT/);
+});
+
 test('Code SSE backpressure and malformed stream requests are guarded', () => {
   const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
   assert.match(sse, /return res\.write\(data\) !== false/);

@@ -1194,7 +1194,8 @@
         type: 'text',
         mimeType: '',
         blobUrl: null,
-        size: 0
+        size: 0,
+        _contentVersion: 0
       };
     });
     state.activePath = paths.indexOf(saved.activePath) !== -1 ? saved.activePath : (paths[0] || '');
@@ -1225,6 +1226,9 @@
         ops[i]._workspaceGeneration = meta._workspaceGeneration;
         ops[i]._conversationId = meta._conversationId;
         ops[i]._timestamp = meta._timestamp;
+        if (ctx && ctx.fileContextVersions && Object.prototype.hasOwnProperty.call(ctx.fileContextVersions, ops[i].path)) {
+          ops[i]._requestContentVersion = ctx.fileContextVersions[ops[i].path];
+        }
       }
     }
     return ops;
@@ -2201,6 +2205,7 @@
                   tab.sha256 = result.sha256 || '';
                   tab.modified = false;
                   tab._currentContent = undefined;
+                  tab._contentVersion = 0;
                 }
               }
               // Generate new blob URL for image/PDF (old one was revoked)
@@ -2682,7 +2687,8 @@
         type: result.type || 'text',
         mimeType: result.mimeType || '',
         blobUrl: (result.type === 'image' || result.type === 'pdf') ? result.content : null,
-        size: result.size || 0
+        size: result.size || 0,
+        _contentVersion: 0
       };
 
       // Track blob URL
@@ -3017,6 +3023,7 @@
           if (newContent !== tab.content) {
             tab.modified = true;
             tab._currentContent = newContent;
+            tab._contentVersion = (tab._contentVersion || 0) + 1;
             renderTabs();
           }
         });
@@ -3061,6 +3068,7 @@
       if (newContent !== tab.content) {
         tab.modified = true;
         tab._currentContent = newContent;
+        tab._contentVersion = (tab._contentVersion || 0) + 1;
         renderTabs();
       }
     });
@@ -3133,6 +3141,7 @@
       if (unchanged) {
         tab.modified = false;
         tab._currentContent = undefined;
+        tab._contentVersion = 0;
       } else {
         tab.modified = true;
       }
@@ -5387,6 +5396,7 @@
         mimeType: tab.mimeType || '',
         content: content,
         sha256: tab.sha256 || '',
+        contentVersion: tab._contentVersion || 0,
         source: 'open',
         priority: tab.path === state.activePath ? 3 :
           (state.pinnedFiles.indexOf(tab.path) !== -1 ? 2 : 1)
@@ -5819,6 +5829,12 @@
         conversation_id: state.conversationId,
         workspace_generation: getWorkspaceScope().workspace_generation
       }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId, sendOptions);
+      ctx.fileContextVersions = {};
+      (body.open_files || []).forEach(function (file) {
+        if (file && typeof file.path === 'string') {
+          ctx.fileContextVersions[file.path] = Number(file.contentVersion || 0);
+        }
+      });
       ctx.originalBody = Object.assign({}, body);
       // P3: 本地模型路由 — 不经过服务器，直接在浏览器端运行
       if (window.__xtjLocalAI && state.selectedModelId === window.__xtjLocalAI.LOCAL_MODEL_ID) {
@@ -7248,8 +7264,16 @@
     var resumeUrl = '/api/code/chat/stream/resume?' + resumeParams;
     var fetchFn = window.xtjProtectedFetch || fetch;
 
+    var resumePollCount = 0;
+    var MAX_RESUME_POLLS = 150; // 5 minutes at the normal 2s interval
+
     function pollResume() {
       if (streamDone) return;
+      resumePollCount += 1;
+      if (resumePollCount > MAX_RESUME_POLLS) {
+        recoveryError('RESUME_TIMEOUT', '流恢复等待超时，请重新生成', true);
+        return;
+      }
       fetchFn(resumeUrl, { credentials: 'include', signal: abortController.signal })
         .then(function(resp) { return resp.json(); })
         .then(function(data) {
@@ -8056,6 +8080,7 @@
             state.openTabs[i].sha256 = writeResult.sha256 || '';
             state.openTabs[i].modified = false;
             state.openTabs[i]._currentContent = undefined;
+            state.openTabs[i]._contentVersion = 0;
             break;
           }
         }
@@ -8083,6 +8108,29 @@
         throw new Error('无法读取文件: ' + op.path);
       }
 
+      // P0-7: 文件存在未保存编辑时，AI 生成回复时看到的是该未保存内容（_currentContent），
+      // 而非磁盘内容。若直接以磁盘内容为基准应用，行号会错位，且写入会静默覆盖未保存编辑。
+      // 此处以未保存内容为基准并请求显式确认：确认后合并写入（未保存内容不丢失），
+      // 取消则放弃本次应用，未保存内容原样保留。
+      var currentText = result.type === 'text' ? result.content : '';
+      var usingUnsavedBase = false;
+      var openTabForOp = null;
+      for (var t = 0; t < state.openTabs.length; t++) {
+        if (state.openTabs[t].path === op.path) { openTabForOp = state.openTabs[t]; break; }
+      }
+      if (op._requestContentVersion !== undefined && openTabForOp &&
+          Number(openTabForOp._contentVersion || 0) !== Number(op._requestContentVersion)) {
+        throw new Error('文件 "' + op.path + '" 在生成完成后又被编辑，请重新生成后再应用。');
+      }
+      var unsavedContent = (openTabForOp && typeof openTabForOp._currentContent === 'string') ? openTabForOp._currentContent : null;
+      if (unsavedContent !== null && unsavedContent !== currentText) {
+        if (!window.confirm('文件 "' + op.path + '" 存在未保存的修改。\n\nAI 回复基于包含这些修改的内容生成。\n继续应用会把 AI 修改与未保存修改合并写入文件，未保存内容不会被丢弃。\n\n取消则不应用此操作，未保存修改保持不变。')) {
+          throw new Error('已取消应用：文件 "' + op.path + '" 存在未保存修改');
+        }
+        currentText = unsavedContent;
+        usingUnsavedBase = true;
+      }
+
       // Strict SHA-256 validation for replace_range
       if (op.type === 'replace_range') {
         if (!op.expected_sha256) {
@@ -8091,21 +8139,20 @@
         if (!op.start_line || !op.end_line) {
           throw new Error('replace_range 操作缺少 start_line 或 end_line，拒绝执行');
         }
-        if (result.sha256 !== op.expected_sha256) {
+        if (!usingUnsavedBase && result.sha256 !== op.expected_sha256) {
           throw new Error('文件 "' + op.path + '" 已被修改（SHA 不匹配），与 AI 生成回复时的内容不一致。请重新生成。');
         }
-      } else if (op.expected_sha256 && result.sha256 !== op.expected_sha256) {
+      } else if (op.expected_sha256 && !usingUnsavedBase && result.sha256 !== op.expected_sha256) {
         throw new Error('文件 "' + op.path + '" 已被修改，与 AI 生成回复时的内容不一致。请重新生成。');
       }
 
       // Take snapshot of current content BEFORE writing
-      var currentText = result.type === 'text' ? result.content : '';
       if (!state.snapshots[op.path]) {
         createdSnapshotForApply = true;
         state.snapshots[op.path] = {
           existed: true,
           beforeContent: currentText,
-          beforeSha256: result.sha256 || ''
+          beforeSha256: usingUnsavedBase ? '' : (result.sha256 || '')
         };
       }
 
@@ -8162,6 +8209,7 @@
           state.openTabs[i].sha256 = writeResult.sha256 || '';
           state.openTabs[i].modified = false;
           state.openTabs[i]._currentContent = undefined;
+          state.openTabs[i]._contentVersion = 0;
           break;
         }
       }
@@ -8359,6 +8407,7 @@
                   state.openTabs[j].content = snapshot.beforeContent || '';
                   state.openTabs[j].modified = false;
                   state.openTabs[j]._currentContent = undefined;
+                  state.openTabs[j]._contentVersion = 0;
                   state.openTabs[j].sha256 = snapshot.beforeSha256 || '';
                   break;
                 }
