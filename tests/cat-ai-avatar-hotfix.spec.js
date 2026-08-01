@@ -157,7 +157,8 @@ test.beforeEach(async ({ page }) => {
         window.pollCatAiReply('100', 'test-post-2');
       }
     });
-    await page.waitForTimeout(500);
+    // pollCatAiReply's first poll is scheduled 2s after the call; wait past it.
+    await page.waitForTimeout(3000);
 
     // Check DOM structure: AI reply should be inside .comment-replies
     const domCheck = await page.evaluate(() => {
@@ -242,7 +243,8 @@ test.beforeEach(async ({ page }) => {
         window.pollCatAiReply('999', 'test-post');
       }
     });
-    await page.waitForTimeout(500);
+    // pollCatAiReply's first poll is scheduled 2s after the call; wait past it.
+    await page.waitForTimeout(3000);
     // Check that invalid_comment_id error was logged
     const hasInvalidError = errors.some(e => e.includes('invalid comment_id'));
     expect(hasInvalidError).toBe(true);
@@ -254,6 +256,10 @@ test.beforeEach(async ({ page }) => {
 // ============================================================
 
 test.describe('Avatar CSS and Rendering', () => {
+// The avatar spec (40x40 fixed square + cover crop) is the base/mobile size;
+// desktop breakpoints intentionally scale it to 44/48px. Run at a mobile
+// viewport so the assertions lock the base contract.
+test.use({ viewport: { width: 390, height: 844 } });
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.xtjProtectedFetch = (path, options) => fetch(path, Object.assign({ credentials: 'include' }, options));

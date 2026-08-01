@@ -1415,6 +1415,13 @@
   opacity: 0.9;
 }
 
+/* Final error bubbles: hide the redundant status line and never surface raw
+   provider error codes/details in the visible chat message. */
+.code-chat-message.error-state .code-stream-status,
+.code-stream-error details {
+  display: none;
+}
+
 .code-stream-error-msg {
   color: var(--cw-text);
   margin-bottom: 6px;

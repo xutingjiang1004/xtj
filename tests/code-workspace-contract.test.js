@@ -283,7 +283,9 @@ test('code files do not modify other navigation buttons', () => {
 // ============================================================
 test('Monaco is lazy-loaded', () => {
   assert.match(codeWorkspace, /function loadMonaco/);
-  assert.match(codeWorkspace, /monaco-editor@0\.45\.0/);
+  // Accept both npm registry (jsdelivr/unpkg: monaco-editor@0.45.0) and
+  // npmmirror (monaco-editor/0.45.0/files/...) CDN URL formats.
+  assert.match(codeWorkspace, /monaco-editor[\/@]0\.45\.0/);
 });
 
 test('Monaco failure falls back to textarea', () => {

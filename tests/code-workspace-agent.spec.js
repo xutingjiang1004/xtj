@@ -158,7 +158,7 @@ test.describe('Code workspace Agent browser flow', () => {
     await page.locator('#githubOpenWorkspaceBtn').click();
 
     await expect(page.locator('.code-workspace-shell')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.chat-model-badge')).toContainText('DeepSeek · Agent');
+    await expect(page.locator('.chat-model-badge')).toContainText('DeepSeek V4 Flash · Agent');
     await expect(page.locator('.code-tree-item[data-path="README.md"]')).toBeVisible();
     await page.locator('.code-tree-item[data-path="src"]').click();
     await expect(page.locator('.code-tree-item[data-path="src/travel.js"]')).toBeVisible();
@@ -199,7 +199,9 @@ test.describe('Code workspace Agent browser flow', () => {
     await expect(page.locator('.code-chat-message').last()).toContainText('AI 服务暂时无法处理');
     await expect(page.locator('.code-chat-message').last()).not.toContainText('PROVIDER_HTTP_503');
     await expect(page.locator('#codeChatInput')).toBeEnabled();
+    await page.locator('#codeChatInput').fill('retry');
     await expect(page.locator('#codeChatSendBtn')).toBeEnabled();
+    await page.locator('#codeChatInput').fill('');
     // A provider 503 is rendered as a completed error message; retrying is
     // an explicit user action rather than silently resending the text.
     await expect(page.locator('#codeChatInput')).toHaveValue('');
