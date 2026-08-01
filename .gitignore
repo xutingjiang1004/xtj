@@ -13,9 +13,16 @@ node_modules/
 *.pem
 *.key
 secrets.*
-output/playwright/
+output/
 playwright-report/
 test-results/
+
+# Test/audit scratch artifacts
+/audit_summary.txt
+/runs.json
+/test-out.txt
+/test-results.txt
+/test-results2.txt
 
 # Local backups and accidental files
 *.bak
