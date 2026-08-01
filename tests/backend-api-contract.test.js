@@ -4,10 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-test('Render deployment follows the protected xtj-hotfix branch', () => {
+test('Render deployment follows the merged main branch', () => {
   const renderYaml = fs.readFileSync('render.yaml', 'utf8');
-  assert.match(renderYaml, /branch:\s*xtj-hotfix/);
-  assert.doesNotMatch(renderYaml, /branch:\s*main/);
+  assert.match(renderYaml, /branch:\s*main/);
+  assert.doesNotMatch(renderYaml, /branch:\s*xtj-hotfix/);
 });
 const path = require('node:path');
 

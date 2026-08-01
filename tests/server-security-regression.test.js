@@ -118,6 +118,15 @@ test('CSP includes security hardening directives', () => {
   assert.match(csp, /default-src 'self'/);
 });
 
+test('CSP permits only WebLLM Qwen download origins needed by the installed runtime', () => {
+  const connectSrc = csp.split(';').find(function(d) { return d.trim().startsWith('connect-src'); });
+  assert.ok(connectSrc, 'connect-src directive must exist');
+  assert.match(connectSrc, /https:\/\/huggingface\.co/);
+  assert.match(connectSrc, /https:\/\/\*\.hf\.co/);
+  assert.match(connectSrc, /https:\/\/raw\.githubusercontent\.com/);
+  assert.doesNotMatch(connectSrc, /\bhttps:\s*(?:;|$)/, 'connect-src must not be widened to every HTTPS origin');
+});
+
 test('photo cleanup validates generated paths and fails closed on reference lookup errors', () => {
   const cleanup = routeBlock("app.post('/api/photo/cleanup'", 'function collectPhotoStoragePaths');
   assert.match(cleanup, /typeof path !== 'string'/);
