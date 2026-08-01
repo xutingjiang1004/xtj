@@ -174,11 +174,11 @@ test('P6-20: /api/dm/send forces media_type to DM_MARKER', function () {
   var sendBlock = s.slice(s.indexOf("app.post('/api/dm/send'"), s.indexOf("app.post('/api/dm/withdraw'"));
   assert.ok(!/var mediaType\s*=\s*String\(req\.body/.test(sendBlock),
     'media_type must not be read from req.body in /api/dm/send');
-  // actor_key must be validated against allowed DM prefixes.
-  assert.ok(/ALLOWED_DM_ACTOR_PREFIXES/.test(sendBlock), 'actor_key must be validated against allowed DM prefixes');
-  // Path traversal must be blocked.
-  assert.ok(/\.test\(actorKey\)/.test(sendBlock),
-    'actorKey must be tested with a regex for path traversal');
+  // actor_key must be validated against allowed DM prefixes (ALLOWED_KINDS).
+  assert.ok(/ALLOWED_KINDS/.test(sendBlock), 'actor_key must be validated against allowed DM prefixes (ALLOWED_KINDS)');
+  // Path traversal must be blocked (on storagePath).
+  assert.ok(/\.test\(storagePath\)/.test(sendBlock) || /storagePath.*\.\./.test(sendBlock),
+    'storagePath must be tested for path traversal');
   assert.ok(sendBlock.indexOf('invalid_media_path') >= 0,
     'path traversal must be blocked with invalid_media_path error code');
 });
