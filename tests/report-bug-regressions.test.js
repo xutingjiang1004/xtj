@@ -51,6 +51,9 @@ test('persistent index RLS accepts both UUID and username JWT identities', () =>
   }
   assert.match(hardening, /user_id = auth\.uid\(\)::text/);
   assert.match(hardening, /user_id = NULLIF\(auth\.jwt\(\) ->> 'user_name', ''\)/);
+  assert.match(hardening, /auth\.jwt\(\) -> 'app_metadata' ->> 'user_name'/);
+  assert.doesNotMatch(hardening, /auth\.jwt\(\) -> 'user_metadata'/);
+  assert.doesNotMatch(read('supabase/migrations/031_harden_stream_identity_and_photo_views.sql'), /auth\.jwt\(\) -> 'user_metadata'/);
 });
 
 test('photo cleanup uses the generated webp thumbnail path', () => {
