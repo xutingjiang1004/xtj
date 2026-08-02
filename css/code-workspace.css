@@ -3120,10 +3120,13 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 }
 
 #panelCode .code-chat-message.assistant .msg-content {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  padding-left: 0;
-  padding-right: 0;
+  /* Code owns the reply surface so a theme layer cannot turn a live answer
+     into an indistinguishable, apparently blank panel. */
+  background: var(--cw-bg-tertiary) !important;
+  color: var(--cw-text) !important;
+  border: 1px solid var(--cw-border) !important;
+  border-radius: 8px 8px 8px 4px !important;
+  box-shadow: 0 1px 3px rgba(20, 51, 66, 0.08) !important;
+  padding-left: 14px;
+  padding-right: 14px;
 }

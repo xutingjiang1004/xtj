@@ -12,7 +12,10 @@
   var _stateChangedAt = 0;
   var _lastProgressTime = 0;
   var _lastProgressValue = 0;
+  var _hasProgressValue = false;
   var _lastProgressText = '';
+  var _lastActivityAt = 0;
+  var _lastElapsedSeconds = 0;
   var _totalTimeoutId = null;
   var _noProgressTimeoutId = null;
   var _heartbeatIntervalId = null;
@@ -71,6 +74,10 @@
     return _lastProgressText || getStatusText();
   }
 
+  function hasProgressValue() { return _hasProgressValue; }
+  function getLastActivityAt() { return _lastActivityAt; }
+  function getElapsedSeconds() { return _lastElapsedSeconds; }
+
   // ── Status listeners (for UI updates) ────────────────────────────
   var _statusListeners = [];
 
@@ -83,7 +90,14 @@
   }
 
   function _notifyStatusListeners() {
-    var info = { state: _state, text: getStatusText(), progress: _lastProgressValue };
+    var info = {
+      state: _state,
+      text: getProgressText(),
+      progress: _lastProgressValue,
+      hasProgress: _hasProgressValue,
+      lastActivityAt: _lastActivityAt,
+      timeElapsed: _lastElapsedSeconds
+    };
     _statusListeners.forEach(function (fn) { try { fn(info); } catch (_) {} });
   }
 
@@ -299,14 +313,22 @@
 
       if (data.type === 'progress') {
         _lastProgressTime = Date.now();
-        _lastProgressValue = Number(data.progress) || 0;
+        _lastActivityAt = _lastProgressTime;
+        var nextProgress = Number(data.progress);
+        if (isFinite(nextProgress)) {
+          _lastProgressValue = Math.max(0, Math.min(1, nextProgress));
+          _hasProgressValue = true;
+        }
         _lastProgressText = String(data.text || '');
+        var elapsed = Number(data.timeElapsed);
+        if (isFinite(elapsed) && elapsed >= 0) _lastElapsedSeconds = elapsed;
         if (_state === 'idle' || _state === 'downloading' || _state === 'initializing') {
           setState(_state === 'initializing' ? 'initializing' : 'downloading');
         }
         if (task.onProgress) task.onProgress(data);
       }
       if (data.type === 'status') {
+        _lastActivityAt = Date.now();
         if (data.status === 'loading') {
           setState('downloading');
           setupTimeouts(true);
@@ -388,7 +410,10 @@
       var requestId = taskId();
       _stopRequested = false;
       _lastProgressValue = 0;
+      _hasProgressValue = false;
       _lastProgressText = '';
+      _lastActivityAt = Date.now();
+      _lastElapsedSeconds = 0;
       setState('downloading');
 
       _initializingPromise = new Promise(function(resolve, reject) {
@@ -473,6 +498,9 @@
     getStatusText: getStatusText,
     getProgressValue: getProgressValue,
     getProgressText: getProgressText,
+    hasProgressValue: hasProgressValue,
+    getLastActivityAt: getLastActivityAt,
+    getElapsedSeconds: getElapsedSeconds,
     onStatusChange: onStatusChange
   };
 })();
