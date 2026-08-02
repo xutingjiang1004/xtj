@@ -92,8 +92,17 @@ test('CSP script-src allows self, unsafe-inline, Supabase CDN, and jsDelivr', ()
   assert.ok(scriptSrc, 'script-src directive must exist');
   assert.match(scriptSrc, /'self'/);
   assert.match(scriptSrc, /'unsafe-inline'/);
+  assert.match(scriptSrc, /'unsafe-eval'/, 'WebLLM requires eval in its worker runtime');
+  assert.match(scriptSrc, /'wasm-unsafe-eval'/, 'WebLLM requires WebAssembly compilation');
   assert.match(scriptSrc, /https:\/\/ithowxqignlhkwaykglt\.supabase\.co/);
   assert.match(scriptSrc, /https:\/\/cdn\.jsdelivr\.net/);
+});
+
+test('CSP gives WebLLM workers an explicit same-origin/blob execution scope', () => {
+  const workerSrc = csp.split(';').find(function(d) { return d.trim().startsWith('worker-src'); });
+  assert.ok(workerSrc, 'worker-src directive must exist');
+  assert.match(workerSrc, /'self'/);
+  assert.match(workerSrc, /blob:/);
 });
 
 test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {

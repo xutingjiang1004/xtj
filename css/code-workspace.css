@@ -1037,6 +1037,7 @@
 .code-chat-messages {
   flex: 1;
   overflow-y: auto;
+  min-width: 0;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1047,7 +1048,10 @@
 .code-chat-message {
   display: flex;
   gap: 8px;
+  width: min(92%, 780px);
   max-width: 92%;
+  min-width: 0;
+  box-sizing: border-box;
   animation: cw-message-in var(--cw-dur-base) var(--cw-ease);
 }
 
@@ -1068,6 +1072,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1 1 auto;
+  width: auto;
+  max-width: calc(100% - 36px);
   min-width: 0;
 }
 
@@ -1076,8 +1083,12 @@
   border-radius: 14px;
   font-size: 13px;
   line-height: 1.55;
-  word-break: break-word;
-  white-space: pre-wrap;
+  min-width: 0;
+  max-width: 100%;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  writing-mode: horizontal-tb;
 }
 
 .code-chat-message .msg-content pre {
@@ -1152,10 +1163,12 @@
 }
 
 .code-chat-back-to-bottom {
-  position: absolute;
-  right: 16px;
-  bottom: 88px;
-  z-index: 4;
+  /* Keep the control in the chat flow. A floating button obscures streamed
+     answers on short viewports and is especially harmful during generation. */
+  position: static;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  margin: 0 16px 6px;
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--cw-border);
@@ -1350,8 +1363,13 @@
 
 .code-stream-content {
   min-height: 20px;
+  width: 100%;
+  max-width: 100%;
   line-height: 1.6;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  writing-mode: horizontal-tb;
 }
 
 .code-stream-content:empty {
@@ -1362,10 +1380,18 @@
 .code-chat-message.streaming .code-stream-content:empty::before {
   content: "正在等待 AI 生成回复…";
   display: block;
+  width: 100%;
+  max-width: 100%;
   color: var(--cw-text-muted);
   font-size: 12px;
+  line-height: 1.6;
   font-style: italic;
   opacity: 0.85;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 
 .code-stream-usage {
@@ -2688,6 +2714,90 @@
 .code-toast.error {
   border-color: rgba(255, 59, 96, 0.25);
   color: var(--cw-danger);
+}
+
+/* Code notices occupy their own flow row so they never cover a streamed
+   answer or the composer. */
+.code-chat-notice {
+  flex: 0 0 auto;
+  display: block;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: var(--cw-bg-secondary);
+  color: var(--cw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.code-chat-notice[hidden] {
+  display: none;
+}
+
+.code-chat-notice.error {
+  border-color: rgba(255, 59, 96, 0.28);
+  background: var(--cw-danger-soft);
+  color: var(--cw-danger);
+}
+
+.code-chat-notice.success {
+  border-color: rgba(52, 211, 153, 0.28);
+  color: var(--cw-success);
+}
+
+.code-chat-notice.warning {
+  border-color: rgba(245, 158, 11, 0.28);
+  color: var(--cw-warning);
+}
+
+.code-local-model-status {
+  order: 5;
+  flex: 1 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 10px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius-sm);
+  background: var(--cw-bg-secondary);
+  color: var(--cw-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.code-local-model-status[hidden] {
+  display: none;
+}
+
+.code-local-model-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-local-model-status-line span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-local-model-status-line span:last-child {
+  flex: 0 0 auto;
+  color: var(--cw-text-muted);
+  white-space: nowrap;
+}
+
+.code-local-model-status progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--cw-accent);
 }
 
 /* hidden utility */

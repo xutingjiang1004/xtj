@@ -3085,6 +3085,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   // ── Phase 3: Stream abort controller registry ──────────────────────
   // Track active stream controllers so cancel requests can abort them.
   var streamAbortControllers = new Map();
+  // Prevent two requests with the same client_request_id from both reaching
+  // the provider while the first database insert is still in flight.
+  var pendingStreamCreations = new Map();
 
   // ── Document text extraction ────────────────────────────────────────
     app.post('/api/code/document/extract', rateLimit(60000, 30), authenticateUser, documentUpload, async function(req, res) {
@@ -4151,6 +4154,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     var aborted = false;
     var finalized = false;
+    var terminalStarted = false;
+    var finalizationPromise = null;
     var timedOut = false;
     var requestController = new AbortController();
     var timeoutTimer = null;
@@ -4174,9 +4179,50 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     // Phase 3: Register controller for external cancellation
 
-    // Phase 3: Stream resume — check idempotency for same client_request_id
-    if (streamSession.isResumeEnabled() && clientRequestId && supabase) {
-      var existingSession = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
+    var resumeEnabled = streamSession.isResumeEnabled();
+    var creationKey = userId + ':' + clientRequestId;
+    if (resumeEnabled && !supabase) {
+      return res.status(503).json({ ok: false, code: 'STREAM_PERSISTENCE_UNAVAILABLE', error: '流式会话持久化不可用', retryable: true });
+    }
+
+    // Phase 3: Stream resume - check idempotency for same client_request_id.
+    // A database query failure is not equivalent to not_found: stop before
+    // accepted/provider work and let the client retry the same request.
+    if (resumeEnabled && clientRequestId && pendingStreamCreations.has(creationKey)) {
+      var pendingCreation = pendingStreamCreations.get(creationKey);
+      var pendingSession = pendingCreation.session || null;
+      if (!pendingSession && pendingCreation.promise) {
+        var pendingResult = await pendingCreation.promise;
+        pendingSession = pendingResult && pendingResult.ok === true ? pendingResult.data : null;
+      }
+      if (pendingSession) {
+        var pendingStatus = pendingSession.status || 'running';
+        return res.json({
+          ok: true,
+          stream_id: pendingSession.stream_id,
+          request_id: pendingSession.request_id,
+          client_request_id: pendingSession.client_request_id,
+          status: pendingStatus,
+          result_status: pendingStatus,
+          terminal: pendingStatus !== 'running',
+          duplicate: true,
+          resume: { method: 'GET', path: '/api/code/chat/stream/resume?stream_id=' + encodeURIComponent(String(pendingSession.stream_id || '')) + '&client_request_id=' + encodeURIComponent(clientRequestId), after_event_id: Number(pendingSession.last_event_id) || 0 },
+          message: '请求已存在，请使用恢复接口继续接收结果'
+        });
+      }
+    }
+    if (resumeEnabled && clientRequestId && supabase) {
+      var existingResult = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
+      if (existingResult && existingResult.query_failed) {
+        return res.status(503).json({
+          ok: false,
+          code: 'STREAM_SESSION_QUERY_FAILED',
+          error: '流式会话查询失败，请稍后重试',
+          retryable: true,
+          details: existingResult.error || null
+        });
+      }
+      var existingSession = existingResult && existingResult.found === true ? existingResult.data : null;
       var duplicateStatuses = ['completed', 'running', 'failed', 'cancelled'];
       if (existingSession && duplicateStatuses.indexOf(existingSession.status) >= 0) {
         var duplicateStatus = existingSession.status;
@@ -4211,18 +4257,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     req.once('aborted', abortRequest);
     res.once('close', function() { if (!res.writableEnded) abortRequest(); });
 
-    // Setup SSE
-    aiCoreSSE.setupSSE(res, req);
-    var writer = aiCoreSSE.createSSEWriter(res, req);
-    // Duplicate client_request_id requests return above; only real streams own
-    // a cancellation controller.
-    streamAbortControllers.set(streamId, requestController);
-    timeoutTimer = setTimeout(function() {
-      if (finalized || aborted) return;
-      timedOut = true;
-      try { requestController.abort(); } catch (_) {}
-    }, DEEPSEEK_TIMEOUT_MS);
-    if (timeoutTimer && timeoutTimer.unref) timeoutTimer.unref();
     var nextEventId = aiCoreRequestId.generateEventId();
 
     var baseEvent = {
@@ -4233,10 +4267,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       startTime: requestStartTime
     };
 
-    // Phase 3: Stream resume — create session and event logger
     var eventLogger = streamSession.createEventLogger(supabase, streamId, userId);
-    if (streamSession.isResumeEnabled() && supabase) {
-      streamSession.createStreamSession(supabase, {
+    // Create and verify the durable session before opening a recoverable SSE
+    // stream or calling the provider. A failed insert must be an HTTP error,
+    // never an apparently resumable stream.
+    if (resumeEnabled) {
+      var sessionParams = {
         userId: userId,
         streamId: streamId,
         requestId: requestId,
@@ -4245,12 +4281,44 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         workspaceId: String((req.body.workspace_id || req.body.workspace_name || '')).slice(0, 200),
         workspaceGeneration: Number(req.body.workspace_generation || 0),
         startedAt: new Date(requestStartTime).toISOString()
-      }).catch(function(e) { console.error('[code-agent-stream] session create error:', e.message); });
+      };
+      var sessionCreationPromise = streamSession.createStreamSession(supabase, sessionParams);
+      if (clientRequestId) pendingStreamCreations.set(creationKey, { promise: sessionCreationPromise });
+      var sessionCreateResult = await sessionCreationPromise;
+      var createdSession = sessionCreateResult && sessionCreateResult.ok === true ? sessionCreateResult.data : null;
+      var validCreatedSession = createdSession &&
+        String(createdSession.stream_id || '') === streamId &&
+        String(createdSession.status || '') === 'running' &&
+        Number(createdSession.last_event_id || 0) === 0;
+      if (!validCreatedSession) {
+        if (clientRequestId) pendingStreamCreations.delete(creationKey);
+        return res.status(503).json({
+          ok: false,
+          code: 'STREAM_SESSION_CREATE_FAILED',
+          error: sessionCreateResult && sessionCreateResult.error && sessionCreateResult.error.message ? sessionCreateResult.error.message : '流式会话创建失败，请稍后重试',
+          retryable: !!(sessionCreateResult && sessionCreateResult.retryable),
+          details: sessionCreateResult && sessionCreateResult.error ? sessionCreateResult.error : null
+        });
+      }
+      if (clientRequestId) pendingStreamCreations.set(creationKey, { session: createdSession });
     }
 
+    // Setup SSE only after durable session creation succeeds.
+    aiCoreSSE.setupSSE(res, req);
+    var writer = aiCoreSSE.createSSEWriter(res, req);
+    streamAbortControllers.set(streamId, requestController);
+    timeoutTimer = setTimeout(function() {
+      if (finalized || aborted) return;
+      timedOut = true;
+      try { requestController.abort(); } catch (_) {}
+    }, DEEPSEEK_TIMEOUT_MS);
+    if (timeoutTimer && timeoutTimer.unref) timeoutTimer.unref();
+
     function sendSSE(type, data) {
-      if (finalized || (aborted && type !== 'cancelled')) return false;
-      if (type === 'done' || type === 'error' || type === 'cancelled') finalized = true;
+      if (finalized || terminalStarted || (aborted && type !== 'cancelled')) return false;
+      // Terminal events are emitted only by finalizeStream(), which persists
+      // the event and updates the session before writing it to the client.
+      if (type === 'done' || type === 'error' || type === 'cancelled') return false;
       var eventId = nextEventId();
       var event = aiCoreSSE.buildSSEEvent(
         Object.assign({}, baseEvent, { event_id: eventId }),
@@ -4282,15 +4350,84 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!res.writableEnded) res.end();
     }
 
+    function writeUnpersistedTerminalError(code, message, phase) {
+      if (!writer || res.writableEnded) return;
+      var eventId = nextEventId();
+      var event = aiCoreSSE.buildSSEEvent(Object.assign({}, baseEvent, { event_id: eventId }), 'error', {
+        status: 'running',
+        code: code,
+        message: message,
+        retryable: true,
+        request_id: requestId,
+        phase: phase || 'persistence'
+      });
+      writer.write(aiCoreSSE.formatSSEEvent(event));
+    }
+
+    function finalizeStream(status, type, data) {
+      if (finalizationPromise) return finalizationPromise;
+      if (finalized) return Promise.resolve({ ok: true, status: status });
+      terminalStarted = true;
+      finalizationPromise = (async function() {
+        // Drain all non-terminal writes first. A failed flush means the
+        // session is still recoverable; it must not be marked completed.
+        var beforeResult = await eventLogger.flush();
+        if (beforeResult && beforeResult.failed > 0) {
+          throw { code: 'STREAM_EVENT_FLUSH_FAILED', message: '流式事件持久化失败', retryable: true };
+        }
+
+        var eventId = nextEventId();
+        var event = aiCoreSSE.buildSSEEvent(Object.assign({}, baseEvent, { event_id: eventId }), type, data);
+        var persisted = await eventLogger.logEvent(type, data, eventId);
+        var terminalFlush = await eventLogger.flush();
+        if (!persisted || persisted.failed > 0 || !terminalFlush || terminalFlush.failed > 0) {
+          throw { code: 'STREAM_EVENT_FLUSH_FAILED', message: '终态事件持久化失败', retryable: true };
+        }
+
+        var lastEventId = Number(terminalFlush.lastPersistedEventId) || 0;
+        if (resumeEnabled) {
+          var updateResult = await streamSession.updateStreamSession(supabase, streamId, {
+            last_event_id: lastEventId,
+            status: status,
+            completed_at: new Date().toISOString()
+          });
+          if (!updateResult || updateResult.ok !== true || updateResult.updated !== true) {
+            throw {
+              code: 'STREAM_SESSION_UPDATE_FAILED',
+              message: updateResult && updateResult.error && updateResult.error.message ? updateResult.error.message : '流式会话终态更新失败',
+              retryable: !!(updateResult && updateResult.retryable)
+            };
+          }
+        }
+
+        var wrote = writer.write(aiCoreSSE.formatSSEEvent(event));
+        if (!wrote) throw { code: 'STREAM_CLIENT_WRITE_FAILED', message: '客户端连接已关闭', retryable: true };
+        finalized = true;
+        if (clientRequestId) pendingStreamCreations.delete(creationKey);
+        cleanup();
+        return { ok: true, status: status, last_event_id: lastEventId };
+      })().catch(function(error) {
+        console.error('[code-agent-stream] finalizer failed:', error && error.message ? error.message : error);
+        // Leave the persisted stream state untouched on a temporary failure.
+        // The client receives a retryable signal and can use resume/status.
+        writeUnpersistedTerminalError(error && error.code || 'STREAM_FINALIZE_FAILED', error && error.message || '流式终态保存失败，请稍后恢复', 'persistence');
+        finalized = true;
+        if (clientRequestId) pendingStreamCreations.delete(creationKey);
+        cleanup();
+        return { ok: false, status: 'running', retryable: true, error: error };
+      });
+      return finalizationPromise;
+    }
+
     function sendStreamError(code, message, phase) {
-      if (finalized) return;
+      if (finalized || finalizationPromise) return finalizationPromise;
       var structured = aiCoreErrorMapper.buildErrorResponse(code, message, {
         requestId: requestId,
         phase: phase || 'stream',
         retryable: (code === 'PROVIDER_TIMEOUT' || code === 'RATE_LIMITED' ||
           code === 'PROVIDER_EMPTY_RESPONSE' || code === 'STREAM_INTERRUPTED')
       });
-      sendSSE('error', {
+      return finalizeStream('failed', 'error', {
         status: 'failed',
         code: structured.code,
         message: structured.error,
@@ -4298,25 +4435,6 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         request_id: structured.requestId,
         phase: structured.phase
       });
-      // Phase 3: Flush the terminal error before marking the session failed.
-      // Otherwise a resume client can observe status=failed while the error
-      // event is still queued (or can lose the event if the process exits).
-      if (streamSession.isResumeEnabled() && supabase) {
-        Promise.resolve(eventLogger.flush()).then(function(flushResult) {
-          return streamSession.updateStreamSession(supabase, streamId, {
-            last_event_id: flushResult && flushResult.lastPersistedEventId || 0,
-            status: 'failed',
-            completed_at: new Date().toISOString()
-          });
-        }).catch(function(error) {
-          console.error('[code-agent-stream] terminal error flush failed:', error && error.message ? error.message : error);
-          return streamSession.updateStreamSession(supabase, streamId, {
-            status: 'failed',
-            completed_at: new Date().toISOString()
-          }).catch(function() {});
-        });
-      }
-      cleanup();
     }
 
     try {
@@ -4606,7 +4724,20 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
       }
       
-      if (aborted || finalized) { cleanup(); return; }
+      if (aborted || finalized) {
+        if (aborted && !finalized) {
+          await finalizeStream('cancelled', 'cancelled', {
+            status: 'cancelled',
+            code: 'REQUEST_CANCELLED',
+            message: 'Request cancelled',
+            retryable: false,
+            phase: 'cancelled'
+          });
+        } else {
+          cleanup();
+        }
+        return;
+      }
 
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
       if (!rawContent.trim()) {
@@ -4720,8 +4851,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         total_duration_ms: Date.now() - requestStartTime
       });
 
-      // Send done
-      sendSSE('done', {
+      // Persist the terminal event and session state before exposing done to
+      // the client. This keeps done, last_event_id, and session.status aligned.
+      await finalizeStream('completed', 'done', {
         status: 'completed',
         reply: reply,
         operations: operations,
@@ -4759,36 +4891,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         usage: usage
       });
 
-      // Phase 3: Flush pending deltas and mark session as completed
-      var finalFlushResult = await eventLogger.flush();
-      if (streamSession.isResumeEnabled() && supabase) {
-        await streamSession.updateStreamSession(supabase, streamId, {
-          last_event_id: finalFlushResult && finalFlushResult.lastPersistedEventId || 0,
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        }).catch(function() {});
-      }
-
-      cleanup();
     } catch (err) {
       if (timedOut) {
         sendStreamError('PROVIDER_TIMEOUT', 'AI 请求超时，服务端任务已停止', 'provider');
         return;
       }
       if (aborted || (err && err.name === 'AbortError')) {
-        if (!finalized) {
-          sendSSE('cancelled', { status: 'cancelled', code: 'REQUEST_CANCELLED', message: '请求已取消', retryable: false, phase: 'cancelled' });
-        }
-        // Phase 3: Mark session as cancelled
-        if (streamSession.isResumeEnabled() && supabase) {
-          var cancelFlushResult = await eventLogger.flush();
-          await streamSession.updateStreamSession(supabase, streamId, {
-            last_event_id: cancelFlushResult && cancelFlushResult.lastPersistedEventId || 0,
-            status: 'cancelled',
-            completed_at: new Date().toISOString()
-          }).catch(function() {});
-        }
-        cleanup();
+        await finalizeStream('cancelled', 'cancelled', { status: 'cancelled', code: 'REQUEST_CANCELLED', message: 'Request cancelled', retryable: false, phase: 'cancelled' });
         return;
       }
       var errMsg = err && err.message ? err.message : String(err);
@@ -4818,8 +4927,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
     try {
       // Validate session
-      var session = await streamSession.getStreamSession(supabase, streamId);
-      if (!session) {
+      var sessionResult = await streamSession.getStreamSession(supabase, streamId);
+      if (sessionResult && sessionResult.query_failed) {
+        return res.status(503).json({ ok: false, code: 'STREAM_SESSION_QUERY_FAILED', error: 'Stream session query failed; retry later', retryable: true, details: sessionResult.error || null });
+      }
+      var session = sessionResult && sessionResult.data;
+      if (!sessionResult || sessionResult.found !== true || !session) {
         return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
       }
 
@@ -4850,7 +4963,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
 
       // Get events after the given event_id
-      var events = await streamSession.getEventsAfter(supabase, streamId, afterEventId);
+      var eventsResult = await streamSession.getEventsAfter(supabase, streamId, afterEventId);
+      if (eventsResult && eventsResult.ok === false) {
+        return res.status(503).json({ ok: false, code: 'STREAM_EVENTS_QUERY_FAILED', error: 'Stream event query failed; retry later', retryable: true, details: eventsResult.error || null });
+      }
+      var events = eventsResult && Array.isArray(eventsResult.events) ? eventsResult.events : [];
 
       // Determine response based on session status
       var response = {
@@ -4901,8 +5018,12 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     }
 
     try {
-      var session = await streamSession.getStreamSession(supabase, streamId);
-      if (!session) {
+      var sessionResult = await streamSession.getStreamSession(supabase, streamId);
+      if (sessionResult && sessionResult.query_failed) {
+        return res.status(503).json({ ok: false, code: 'STREAM_SESSION_QUERY_FAILED', error: 'Stream session query failed; retry later', retryable: true, details: sessionResult.error || null });
+      }
+      var session = sessionResult && sessionResult.data;
+      if (!sessionResult || sessionResult.found !== true || !session) {
         return res.status(404).json({ ok: false, code: 'STREAM_NOT_FOUND', error: '流式会话不存在' });
       }
       if (session.user_id !== userId) {
@@ -4929,10 +5050,19 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         streamAbortControllers.delete(streamId);
       }
 
-      await streamSession.updateStreamSession(supabase, streamId, {
+      var cancelUpdateResult = await streamSession.updateStreamSession(supabase, streamId, {
         status: 'cancelled',
         completed_at: new Date().toISOString()
       });
+      if (!cancelUpdateResult || cancelUpdateResult.ok !== true || cancelUpdateResult.updated !== true) {
+        return res.status(503).json({
+          ok: false,
+          code: 'STREAM_CANCEL_UPDATE_FAILED',
+          error: 'Stream cancellation was not confirmed; retry later',
+          retryable: true,
+          details: cancelUpdateResult && cancelUpdateResult.error ? cancelUpdateResult.error : null
+        });
+      }
 
       return res.json({ ok: true, stream_id: streamId, status: 'cancelled', message: '流式会话已取消' });
     } catch (err) {
@@ -4955,25 +5085,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var clientRequestId = String(req.query.client_request_id || '').slice(0, 200);
 
     try {
-      var query = supabase.from('ai_stream_sessions').select('*')
-        .eq('user_id', userId)
-        .order('started_at', { ascending: false })
-        .limit(10);
-
-      if (workspaceId) {
-        query = query.eq('workspace_id', workspaceId);
+      var result = await streamSession.getStreamSessions(supabase, userId, {
+        workspaceId: workspaceId,
+        workspaceGeneration: workspaceGeneration,
+        conversationId: conversationId,
+        clientRequestId: clientRequestId,
+        limit: 10
+      });
+      if (!result || result.ok !== true) {
+        return res.status(503).json({ ok: false, code: 'DB_ERROR', error: 'Stream status query failed; retry later', retryable: true, has_running: false, sessions: [] });
       }
-      if (workspaceGeneration) {
-        query = query.eq('workspace_generation', workspaceGeneration);
-      }
-      if (conversationId) {
-        query = query.eq('conversation_id', conversationId);
-      }
-      if (clientRequestId) {
-        query = query.eq('client_request_id', clientRequestId);
-      }
-
-      var result = await query;
       // Phase 1-P0-8: Database errors must not be disguised as empty results.
       if (result.error) {
         return res.status(500).json({
@@ -4986,7 +5107,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         });
       }
 
-      var sessions = (result.data || []).map(function(s) {
+      var sessions = (result.sessions || []).map(function(s) {
         return {
           stream_id: s.stream_id,
           request_id: s.request_id,
