@@ -45,8 +45,11 @@ function updateHtmlAssetVersions(htmlFile) {
     return next;
   });
   if (changed) {
+    // 保留原文件的行尾风格（CRLF/LF），避免 Windows 下整文件换行噪音
+    const hadCRLF = /\r\n/.test(html);
     html = html.replace(/\r\n?/g, '\n');
     if (!html.endsWith('\n')) html += '\n';
+    if (hadCRLF) html = html.replace(/\n/g, '\r\n');
     fs.writeFileSync(htmlPath, html, 'utf8');
     console.log('[HASH] ' + htmlFile + ' local CSS/JS query strings updated');
   } else {

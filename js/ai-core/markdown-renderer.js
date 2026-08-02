@@ -16,10 +16,14 @@
       .replace(/'/g, '&#39;');
   };
 
-  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body)\b/gi;
-  var BLOCKED_ATTRS_RE = /\s(on\w+)\s*=\s*["'][^"']*["']/gi;
-  var JS_URL_RE = /\bhref\s*=\s*["']\s*javascript\s*:/gi;
-  var CSS_EXPR_RE = /\bstyle\s*=\s*["'][^"']*\bexpression\s*\(/gi;
+  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|video|audio|source)\b/gi;
+  // 同时匹配带引号与不带引号的属性值（<img src=x onerror=alert(1)>）
+  var BLOCKED_ATTRS_RE = /\s(on[a-z0-9_]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+  // 实体编码的事件属性名（onerror → &#111;nerror）
+  var BLOCKED_ATTRS_ENTITY_RE = /\s((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+  var JS_URL_RE = /(?:href|src)\s*=\s*(?:"|')?\s*(?:javascript|vbscript)\s*(?:\s*:|&#x0*3[aA];?|&#0*5[89];?)\s*/gi;
+  var DANGEROUS_DATA_RE = /(?:href|src)\s*=\s*(?:"|')?\s*data\s*:\s*(?:text\/html|text\/javascript|application\/xhtml\+xml)/gi;
+  var CSS_EXPR_RE = /\bstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)\bexpression\s*\(/gi;
   // DSML / tool_calls / reasoning_content — never show raw protocol to user
   var DSML_RE = /<[|\uff5c]DSML[|\uff5c][\s\S]*?<[|\uff5c]\/DSML[|\uff5c]>/gi;
   var TOOL_CALLS_RAW_RE = /\{"tool_calls"\s*:\s*\[[\s\S]*?\]\s*\}/g;
@@ -30,10 +34,14 @@
     var s = String(html);
     // Strip dangerous tags
     s = s.replace(BLOCKED_TAGS_RE, '');
-    // Strip event handlers
+    // Strip event handlers (quoted and unquoted values)
     s = s.replace(BLOCKED_ATTRS_RE, '');
-    // Strip javascript: URLs
+    // Strip entity-encoded event handler attribute names
+    s = s.replace(BLOCKED_ATTRS_ENTITY_RE, '');
+    // Strip javascript:/vbscript: URLs (quoted, unquoted, entity-encoded colon)
     s = s.replace(JS_URL_RE, 'href="#"');
+    // Strip dangerous data: URLs
+    s = s.replace(DANGEROUS_DATA_RE, 'href="#"');
     // Strip CSS expressions
     s = s.replace(CSS_EXPR_RE, '');
     // Strip DSML protocol frames
@@ -66,24 +74,23 @@
     });
 
     // 3. Bold: **text** or __text__
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return '<strong>' + _escapeHtml(t) + '</strong>'; });
+    s = s.replace(/__([^_]+)__/g, function (_, t) { return '<strong>' + _escapeHtml(t) + '</strong>'; });
 
     // 4. Italic: *text* or _text_
-    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    s = s.replace(/_([^_]+)_/g, '<em>$1</em>');
+    s = s.replace(/\*([^*]+)\*/g, function (_, t) { return '<em>' + _escapeHtml(t) + '</em>'; });
+    s = s.replace(/_([^_]+)_/g, function (_, t) { return '<em>' + _escapeHtml(t) + '</em>'; });
 
     // 5. Links: [text](url)
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
       var safeUrl = url.replace(/"/g, '&quot;');
-      return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+      return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
     });
 
     // 6. Images: ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) {
       var safeUrl = url.replace(/"/g, '&quot;');
-      var safeAlt = alt.replace(/"/g, '&quot;');
-      return '<img src="' + safeUrl + '" alt="' + safeAlt + '" loading="lazy" />';
+      return '<img src="' + safeUrl + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />';
     });
 
     // 7. Tables: | col1 | col2 |
@@ -97,7 +104,7 @@
         var tag = i === 0 ? 'th' : 'td';
         html += '<tr>';
         for (var j = 0; j < cells.length; j++) {
-          html += '<' + tag + '>' + cells[j].trim() + '</' + tag + '>';
+          html += '<' + tag + '>' + _escapeHtml(cells[j].trim()) + '</' + tag + '>';
         }
         html += '</tr>';
       }
@@ -106,24 +113,24 @@
     });
 
     // 8. Blockquotes: > text
-    s = s.replace(/^&gt;\s?(.+)$/gm, '<blockquote>$1</blockquote>');
-    s = s.replace(/^>\s?(.+)$/gm, '<blockquote>$1</blockquote>');
+    s = s.replace(/^&gt;\s?(.+)$/gm, function (_, t) { return '<blockquote>' + _escapeHtml(t) + '</blockquote>'; });
+    s = s.replace(/^>\s?(.+)$/gm, function (_, t) { return '<blockquote>' + _escapeHtml(t) + '</blockquote>'; });
 
     // 9. Headings: ## text
-    s = s.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
-    s = s.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-    s = s.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-    s = s.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+    s = s.replace(/^####\s+(.+)$/gm, function (_, t) { return '<h4>' + _escapeHtml(t) + '</h4>'; });
+    s = s.replace(/^###\s+(.+)$/gm, function (_, t) { return '<h3>' + _escapeHtml(t) + '</h3>'; });
+    s = s.replace(/^##\s+(.+)$/gm, function (_, t) { return '<h2>' + _escapeHtml(t) + '</h2>'; });
+    s = s.replace(/^#\s+(.+)$/gm, function (_, t) { return '<h1>' + _escapeHtml(t) + '</h1>'; });
 
     // 10. Horizontal rule
     s = s.replace(/^(---|\*\*\*|___)\s*$/gm, '<hr>');
 
     // 11. Unordered lists
-    s = s.replace(/^[\*\-]\s+(.+)$/gm, '<li>$1</li>');
+    s = s.replace(/^[\*\-]\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
     s = s.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
 
     // 12. Ordered lists
-    s = s.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+    s = s.replace(/^\d+\.\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
     // Fix: wrap ordered lists that weren't already caught by unordered
     s = s.replace(/<li>([\s\S]*?)<\/li>/g, function (match) {
       // Only wrap if not already inside a list
