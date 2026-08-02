@@ -92,12 +92,14 @@ test('P2-01: document states extracting/ready/failed/timed_out/cancelled', funct
     'document cancelled state must exist');
 });
 
-test('P2-02: default block send when doc not ready', function () {
+test('P2-02: relevant document readiness is enforced before send', function () {
   var s = read('js/code-workspace.js');
   assert.ok(/_docState\s*===?\s*'extracting'/.test(s),
     'sendMessage must check for extracting documents');
-  assert.ok(/toast.*正在解析|toast.*请稍候|toast.*documents_not_ready/.test(s),
-    'must show toast when docs are still extracting');
+  assert.ok(/relevantPaths\.has\(tab\.path\)/.test(s),
+    'unrelated open documents must not block a send');
+  assert.ok(/documents_not_ready/.test(s),
+    'request body must report documents that are not ready');
 });
 
 test('P2-03: ignore document send carries context_warnings', function () {

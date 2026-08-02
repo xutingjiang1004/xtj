@@ -1,6 +1,6 @@
 
 // ★ 使用安全的 throttleRAF（复用 core.js 版本或添加 try/finally）
-window.throttleRAF = function(fn) {
+if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) {
     var ticking = false, args, ctx;
     return function() {
         args = arguments;
@@ -6152,13 +6152,56 @@ function showChatMessages() {
     }
     var localBadge = el('span', { class: 'ai-chat-local-badge', style: 'display:none; font-size:11px; padding:2px 6px; background:#e0f2f1; color:#00695c; border-radius:4px; margin-left:8px; vertical-align:middle;', text: '本地离线' });
     var localSetupButton = el('button', { type: 'button', class: 'ai-chat-local-setup', style: 'margin-left:8px;padding:3px 7px;border:1px solid #7bc9b6;border-radius:4px;background:#f4fffb;color:#087b62;font-size:11px;cursor:pointer;', text: '下载本地 Qwen（约 1GB）' });
+    var localProgress = el('div', { class: 'ai-chat-local-progress', role: 'status', 'aria-live': 'polite' });
+    localProgress.hidden = true;
+    var localProgressLine = el('div', { class: 'ai-chat-local-progress-line' });
+    var localProgressText = el('span', { class: 'ai-chat-local-progress-text', text: '准备下载本地 Qwen' });
+    var localProgressValue = el('span', { class: 'ai-chat-local-progress-value', text: '0%' });
+    var localProgressTrack = el('div', { class: 'ai-chat-local-progress-track' });
+    var localProgressFill = el('div', { class: 'ai-chat-local-progress-fill' });
+    var localProgressDetail = el('div', { class: 'ai-chat-local-progress-detail', text: '等待开始' });
+    localProgressLine.appendChild(localProgressText);
+    localProgressLine.appendChild(localProgressValue);
+    localProgressTrack.appendChild(localProgressFill);
+    localProgress.appendChild(localProgressLine);
+    localProgress.appendChild(localProgressTrack);
+    localProgress.appendChild(localProgressDetail);
     modelSelectorWrap.appendChild(modelSelector);
     modelSelectorWrap.appendChild(localBadge);
     modelSelectorWrap.appendChild(localSetupButton);
+    modelSelectorWrap.appendChild(localProgress);
+
+    function updateLocalProgress(runtime, info, forceState) {
+      if (!runtime) {
+        localProgress.hidden = true;
+        return;
+      }
+      var localState = forceState || (typeof runtime.getState === 'function' ? runtime.getState() : 'idle');
+      var rawProgress = info && info.progress;
+      if (rawProgress === undefined && typeof runtime.getProgressValue === 'function') rawProgress = runtime.getProgressValue();
+      var progress = Number(rawProgress);
+      progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+      var isActive = localState === 'downloading' || localState === 'initializing';
+      var isResult = localState === 'ready' || localState === 'failed' || localState === 'cancelled';
+      localProgress.hidden = !isActive && !isResult;
+      localProgress.dataset.state = localState;
+      localProgressFill.style.width = Math.round(progress * 100) + '%';
+      localProgressValue.textContent = Math.round(progress * 100) + '%';
+      if (localState === 'downloading') localProgressText.textContent = '正在下载本地 Qwen';
+      else if (localState === 'initializing') localProgressText.textContent = '下载完成，正在初始化本地 Qwen';
+      else if (localState === 'ready') localProgressText.textContent = '本地 Qwen 已就绪';
+      else if (localState === 'failed') localProgressText.textContent = '本地 Qwen 准备失败';
+      else if (localState === 'cancelled') localProgressText.textContent = '本地 Qwen 下载已取消';
+      var detail = info && info.text;
+      if (!detail && typeof runtime.getProgressText === 'function') detail = runtime.getProgressText();
+      localProgressDetail.textContent = String(detail || (isActive ? '正在获取模型文件，请保持页面打开' : ''));
+      if (localState === 'ready') localProgressValue.textContent = '完成';
+    }
     
     function updateLocalBadge() {
       var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
       localBadge.style.display = isLocal ? 'inline-block' : 'none';
+      if (!isLocal) localProgress.hidden = true;
       if (isLocal && deepThinkBtn) deepThinkBtn.style.display = 'none';
       else if (deepThinkBtn) deepThinkBtn.style.display = '';
     }
@@ -6175,18 +6218,25 @@ function showChatMessages() {
       localSetupButton.textContent = '正在准备本地 Qwen…';
       window.__xtjEnsureLocalAI().then(function(runtime) {
         if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
+        if (typeof runtime.onStatusChange === 'function' && !runtime.__xtjAiAgentProgressBound) {
+          runtime.__xtjAiAgentProgressBound = true;
+          runtime.onStatusChange(function(info) { updateLocalProgress(runtime, info); });
+        }
         var localOption = modelSelector.querySelector('option[value="' + runtime.LOCAL_MODEL_ID + '"]');
         if (!localOption) modelSelector.appendChild(el('option', { value: runtime.LOCAL_MODEL_ID, text: runtime.getModelDescriptor().name }));
         modelSelector.value = runtime.LOCAL_MODEL_ID;
         try { localStorage.setItem('xtj_ai_model', runtime.LOCAL_MODEL_ID); localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
         updateLocalBadge();
         return runtime.ensureReady({ onProgress: function(progress) {
+          updateLocalProgress(runtime, progress);
           localSetupButton.textContent = '下载中 ' + Math.round((progress && progress.progress || 0) * 100) + '%';
         } });
       }).then(function() {
+        updateLocalProgress(window.__xtjLocalAI, null, 'ready');
         localSetupButton.textContent = '本地 Qwen 已就绪';
         notify('本地 Qwen 已就绪，可以离线使用。', 'success');
       }).catch(function(error) {
+        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请重试' }, 'failed');
         localSetupButton.disabled = false;
         localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
         notify((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');

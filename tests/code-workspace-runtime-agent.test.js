@@ -141,6 +141,9 @@ test('AI context waits for an in-flight document extraction before sending', asy
     path: 'guide.docx',
     name: 'guide.docx',
     type: 'document',
+    _docState: 'extracting',
+    _extractId: 'fixture-extraction-1',
+    _extractGeneration: loaded.state.workspaceGeneration,
     _extractPromise: extraction
   }];
 

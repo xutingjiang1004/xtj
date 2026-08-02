@@ -12,16 +12,18 @@
   var _stateChangedAt = 0;
   var _lastProgressTime = 0;
   var _lastProgressValue = 0;
+  var _lastProgressText = '';
   var _totalTimeoutId = null;
   var _noProgressTimeoutId = null;
   var _heartbeatIntervalId = null;
   var _initializingPromise = null;   // singleton: shared across multiple ensureReady calls
   var _stopRequested = false;
 
-  var DOWNLOAD_TIMEOUT     = 5 * 60 * 1000;   // 5 min
-  var INIT_TIMEOUT         = 30 * 1000;        // 30 sec
-  var NO_PROGRESS_TIMEOUT  = 30 * 1000;        // 30 sec
-  var HEARTBEAT_INTERVAL   = 10 * 1000;        // 10 sec
+  var DOWNLOAD_TIMEOUT     = 600000;   // 10 min total download timeout
+  var INIT_TIMEOUT         = 180000;   // 3 min initialization timeout
+  var DOWNLOAD_NO_PROGRESS_TIMEOUT = 120000; // Network gaps during a 1 GB download are normal
+  var INIT_NO_PROGRESS_TIMEOUT = 90000;     // WebGPU compilation should still fail promptly
+  var HEARTBEAT_INTERVAL   = 10000;    // 10 sec heartbeat interval
 
   function setState(newState) {
     _state = newState;
@@ -33,8 +35,16 @@
     return _state;
   }
 
+  function getAvailabilityState() {
+    if (!supported()) return 'unsupported';
+    if (_state === 'idle') return 'not_downloaded';
+    return _state;
+  }
+
   function getStatusText() {
     switch (_state) {
+      case 'not_downloaded': return 'Local model is not downloaded';
+      case 'unsupported':  return 'WebGPU is not supported in this browser';
       case 'idle':         return '未启动';
       case 'downloading':  return '下载中';
       case 'initializing': return '初始化中';
@@ -47,6 +57,10 @@
 
   function getProgressValue() {
     return _lastProgressValue;
+  }
+
+  function getProgressText() {
+    return _lastProgressText || getStatusText();
   }
 
   // ── Status listeners (for UI updates) ────────────────────────────
@@ -68,13 +82,14 @@
   // ── Timeout helpers ──────────────────────────────────────────────
   function clearTimeouts() {
     if (_totalTimeoutId) { clearTimeout(_totalTimeoutId); _totalTimeoutId = null; }
-    if (_noProgressTimeoutId) { clearTimeout(_noProgressTimeoutId); _noProgressTimeoutId = null; }
+    if (_noProgressTimeoutId) { clearInterval(_noProgressTimeoutId); _noProgressTimeoutId = null; }
   }
 
   function setupTimeouts(downloading) {
     clearTimeouts();
     // Total timeout
     var totalMs = downloading ? DOWNLOAD_TIMEOUT : INIT_TIMEOUT;
+    var noProgressMs = downloading ? DOWNLOAD_NO_PROGRESS_TIMEOUT : INIT_NO_PROGRESS_TIMEOUT;
     _totalTimeoutId = setTimeout(function () {
       _totalTimeoutId = null;
       failWithError('LOCAL_AI_TIMEOUT', '本地模型' + (downloading ? '下载' : '初始化') + '超时（' + (totalMs / 1000) + '秒）');
@@ -82,9 +97,9 @@
     // No-progress timeout
     _lastProgressTime = Date.now();
     _noProgressTimeoutId = setInterval(function () {
-      if (Date.now() - _lastProgressTime > NO_PROGRESS_TIMEOUT) {
+      if (Date.now() - _lastProgressTime > noProgressMs) {
         clearTimeouts();
-        failWithError('LOCAL_AI_NO_PROGRESS', '本地模型' + (downloading ? '下载' : '初始化') + '进度停滞超过' + (NO_PROGRESS_TIMEOUT / 1000) + '秒');
+        failWithError('LOCAL_AI_NO_PROGRESS', '本地模型' + (downloading ? '下载' : '初始化') + '进度停滞超过' + (noProgressMs / 1000) + '秒');
       }
     }, 5000);
   }
@@ -146,6 +161,7 @@
       supports_thinking: false,
       supported_thinking_modes: ['off'],
       availability: supported() ? 'available' : 'unsupported',
+      availability_state: getAvailabilityState(),
       enabled: true,
       local: true
     };
@@ -158,7 +174,7 @@
   }
 
   function failWithError(code, message) {
-    if (_state === 'failed' || _state === 'cancelled' || _state === 'ready') return;
+    if (_state === 'failed' || _state === 'cancelled') return;
     setState('failed');
     clearTimeouts();
     stopHeartbeat();
@@ -175,27 +191,41 @@
     Object.keys(pending).forEach(function (key) {
       if (pending[key]) { pending[key].reject(err); delete pending[key]; }
     });
+    // A timeout or stalled worker must release the Worker as well as the
+    // promises, otherwise a late event can resurrect a failed runtime.
+    terminateWorker();
   }
 
   function startWorker() {
     if (worker) return worker;
-    worker = new Worker('/js/local-ai-worker.min.js', { type: 'module', name: 'xtj-local-qwen' });
+    var workerUrl = '/js/local-ai-worker.min.js';
+    try {
+      var workerMeta = document.querySelector('meta[name="xtj-module-local-ai-worker"]');
+      if (workerMeta && workerMeta.content) workerUrl = workerMeta.content;
+    } catch (_) {}
+    worker = new Worker(workerUrl, { type: 'module', name: 'xtj-local-qwen' });
     worker.onmessage = function(event) {
       var data = event.data || {};
       var task = pending[data.requestId];
       if (!task) return;
 
-      if (data.type === 'progress' && task.onProgress) {
+      if (data.type === 'progress') {
         _lastProgressTime = Date.now();
         _lastProgressValue = Number(data.progress) || 0;
+        _lastProgressText = String(data.text || '');
         if (_state === 'idle' || _state === 'downloading' || _state === 'initializing') {
           setState(_state === 'initializing' ? 'initializing' : 'downloading');
         }
-        task.onProgress(data);
+        if (task.onProgress) task.onProgress(data);
       }
-      if (data.type === 'status' && data.status === 'loading') {
-        setState('downloading');
-        setupTimeouts(true);
+      if (data.type === 'status') {
+        if (data.status === 'loading') {
+          setState('downloading');
+          setupTimeouts(true);
+        } else if (data.status === 'initializing') {
+          setState('initializing');
+          setupTimeouts(false);
+        }
       }
       if (data.type === 'delta' && task.onDelta) task.onDelta(data.content || '');
       if (data.type === 'ready') {
@@ -222,25 +252,23 @@
         task.reject(err);
         // If this was an init task, transition to failed
         if (task.kind === 'init') {
+          failWithError(err.code, err.message);
+        } else {
           setState('failed');
-          clearTimeouts();
-          stopHeartbeat();
           _initializingPromise = null;
-          // Reject all other init tasks too
-          Object.keys(pending).forEach(function (key) {
-            var t = pending[key];
-            if (t && t.kind === 'init') { delete pending[key]; t.reject(err); }
-          });
+          terminateWorker();
         }
       }
     };
     worker.onerror = function(event) {
+      var failedWorker = worker;
       var error = makeError('LOCAL_AI_WORKER_ERROR', event && event.message || '本地模型工作线程异常');
       setState('failed');
       clearTimeouts();
       stopHeartbeat();
       _initializingPromise = null;
       Object.keys(pending).forEach(function(key) { if (pending[key]) { pending[key].reject(error); delete pending[key]; } });
+      try { if (failedWorker) failedWorker.terminate(); } catch (_) {}
       worker = null;
       ready = false;
     };
@@ -251,13 +279,21 @@
 
   function ensureReady(options) {
     options = options || {};
+    if (options.signal && options.signal.aborted) {
+      setState('cancelled');
+      return Promise.reject(makeError('LOCAL_AI_CANCELLED', 'Local model loading was cancelled'));
+    }
+    if (!supported()) setState('unsupported');
     if (!supported()) return Promise.reject(makeError('LOCAL_AI_UNSUPPORTED', '当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。'));
     if (ready) {
       setState('ready');
       return Promise.resolve(descriptor());
     }
     // Singleton: if already initializing, return the same promise
-    if (_initializingPromise) return _initializingPromise;
+    if (_initializingPromise) {
+      if (options.signal) options.signal.addEventListener('abort', function() { if (_initializingPromise) stop(); }, { once: true });
+      return _initializingPromise;
+    }
 
     var requestId = taskId();
     _stopRequested = false;
@@ -265,8 +301,18 @@
 
     _initializingPromise = new Promise(function(resolve, reject) {
       pending[requestId] = { kind: 'init', resolve: resolve, reject: reject, onProgress: options.onProgress };
-      startWorker().postMessage({ type: 'init', requestId: requestId });
+      try {
+        startWorker().postMessage({ type: 'init', requestId: requestId });
+      } catch (error) {
+        failWithError('LOCAL_AI_WORKER_START_FAILED', error && error.message || 'Local model worker failed to start');
+      }
     });
+
+    if (options.signal) {
+      var onAbort = function() { if (_initializingPromise) stop(); };
+      options.signal.addEventListener('abort', onAbort, { once: true });
+      _initializingPromise.then(function() { options.signal.removeEventListener('abort', onAbort); }, function() { options.signal.removeEventListener('abort', onAbort); });
+    }
 
     return _initializingPromise;
   }
@@ -282,7 +328,10 @@
   function streamChat(messages, options) {
     options = options || {};
     var requestId = taskId();
-    return ensureReady({ onProgress: options.onProgress }).then(function() {
+    return ensureReady({ onProgress: options.onProgress, signal: options.signal }).then(function() {
+      if (options.signal && options.signal.aborted) {
+        throw makeError('LOCAL_AI_CANCELLED', 'Local chat was cancelled');
+      }
       if (_stopRequested) return Promise.reject(makeError('ABORTED', '已停止本地回答'));
       return new Promise(function(resolve, reject) {
         pending[requestId] = { kind: 'chat', resolve: resolve, reject: reject, onDelta: options.onDelta };
@@ -292,7 +341,12 @@
             if (pending[requestId]) { delete pending[requestId]; reject(makeError('ABORTED', '已停止本地回答')); }
           }, { once: true });
         }
-        startWorker().postMessage({ type: 'chat', requestId: requestId, messages: messages });
+        try {
+          startWorker().postMessage({ type: 'chat', requestId: requestId, messages: messages });
+        } catch (error) {
+          delete pending[requestId];
+          reject(makeError('LOCAL_AI_WORKER_SEND_FAILED', error && error.message || 'Local chat could not start'));
+        }
       });
     });
   }
@@ -304,6 +358,7 @@
     _stateChangedAt = 0;
     _lastProgressTime = 0;
     _lastProgressValue = 0;
+    _lastProgressText = '';
     _initializingPromise = null;
     _stopRequested = false;
     ready = false;
@@ -320,8 +375,10 @@
     stop: stop,
     reset: reset,
     getState: getState,
+    getAvailabilityState: getAvailabilityState,
     getStatusText: getStatusText,
     getProgressValue: getProgressValue,
+    getProgressText: getProgressText,
     onStatusChange: onStatusChange
   };
 })();

@@ -40,7 +40,7 @@ test('upload_id must match pattern when provided', function() {
   assert.strictEqual(validatePhotoCreatePayload(valid({ upload_id: 'good_upload-id_123' }), ORIGIN).ok, true);
 });
 
-test('database failure awaits safe storage rollback and returns generic error', async function() {
+test('database outcome failure preserves storage for reconciliation', async function() {
   let removed = false;
   let logged = false;
   var failQuery = {
@@ -60,14 +60,16 @@ test('database failure awaits safe storage rollback and returns generic error', 
     storage: { from: function() { return { remove: async function(paths) { await Promise.resolve(); removed = paths[0] === 'photos/test.jpg'; return { error: { message: 'storage' } }; } }; } }
   };
   const result = await createPhotoRecord({ body: valid(), userName: 'user', supabase: supabase, supabaseUrl: ORIGIN, logger: { error: function() { logged = true; } }, createActorKey: function() { return 'uuid'; } });
-  assert.strictEqual(removed, true);
-  assert.strictEqual(logged, true);
-  assert.strictEqual(result.status, 500);
+  assert.strictEqual(removed, false);
+  assert.strictEqual(logged, false);
+  // A failed insert followed by an inconclusive actor-key lookup may already
+  // have committed. Keep the object and require a retry/reconciliation.
+  assert.strictEqual(result.status, 503);
   assert.strictEqual(result.body.ok, false);
-  assert.strictEqual(result.body.code, 'UPSTREAM_ERROR');
+  assert.strictEqual(result.body.code, 'PHOTO_COMMIT_UNKNOWN');
 });
 
-test('thrown database write also performs rollback', async function() {
+test('thrown database write preserves storage for reconciliation', async function() {
   let removed = false;
   var errQuery = {
     maybeSingle: async function() { throw new Error('transport'); }
@@ -85,8 +87,9 @@ test('thrown database write also performs rollback', async function() {
     storage: { from: function() { return { remove: async function() { removed = true; return {}; } }; } }
   };
   const result = await createPhotoRecord({ body: valid(), userName: 'user', supabase: supabase, supabaseUrl: ORIGIN, logger: { error: function() {} } });
-  assert.strictEqual(removed, true);
-  assert.strictEqual(result.status, 500);
+  assert.strictEqual(removed, false);
+  assert.strictEqual(result.status, 503);
+  assert.strictEqual(result.body.code, 'PHOTO_COMMIT_UNKNOWN');
 });
 
 test('successful write uses a server-generated actor key', async function() {

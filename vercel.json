@@ -18,11 +18,12 @@
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' http://127.0.0.1:10000 http://localhost:10000 https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' https:; worker-src 'self' blob:; connect-src 'self' http://127.0.0.1:10000 http://localhost:10000 https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }
       ]
     }
   ],
   "rewrites": [
+    { "source": "/vendor/webllm/(.*)", "destination": "https://xtj.onrender.com/vendor/webllm/$1" },
     { "source": "/api", "destination": "https://xtj.onrender.com/api" },
     { "source": "/api/(.*)", "destination": "https://xtj.onrender.com/api/$1" },
     { "source": "/admin", "destination": "https://xtj.onrender.com/admin" },
