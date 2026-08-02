@@ -72,6 +72,8 @@
     _composerGlobalCleanup: null,
     _localRuntime: null,
     _localRuntimeUnsubscribe: null,
+    _localDownloadController: null,
+    _localDownloadRuntime: null,
     _openFilePromises: {},
     _savePromises: {},
     _undoLock: false,
@@ -806,10 +808,16 @@
     abortController(state._githubController);
     abortController(state._indexController);
     abortController(state._indexStatusController);
+    abortController(state._localDownloadController);
+    if (state._localDownloadRuntime && typeof state._localDownloadRuntime.stop === 'function') {
+      try { state._localDownloadRuntime.stop(); } catch (_) {}
+    }
     state._attachmentController = null;
     state._githubController = null;
     state._indexController = null;
     state._indexStatusController = null;
+    state._localDownloadController = null;
+    state._localDownloadRuntime = null;
     state._githubLoadPromise = null;
     state._indexBuildPromise = null;
     state._openFilePromises = {};
@@ -1015,14 +1023,6 @@
           statusText.className = 'welcome-status error';
         }
       }).catch(function (err) {
-        if (extractionTimer) { clearTimeout(extractionTimer); extractionTimer = null; }
-        if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') return null;
-        if (err && err.name === 'AbortError') {
-          tab._docState = 'cancelled';
-          tab._parseReady = false;
-          state._documentStates[tab.path] = { state: 'cancelled', generation: tab._extractGeneration, extractionId: extractionId, error: '文档提取已取消' };
-          return null;
-        }
         clearBtn.disabled = false;
         clearBtn.textContent = '清除旧记录';
         statusText.textContent = '清除失败: ' + (err && err.message ? err.message : String(err));
@@ -1290,6 +1290,13 @@
     state._requestId++;
     state.sending = false;
     state.workspaceGeneration++;
+    state.openTabs.forEach(function (tab) {
+      if (tab && tab._extractAbortController) {
+        try { tab._extractAbortController.abort(); } catch (_) {}
+        tab._extractAbortController = null;
+      }
+      if (tab) { tab._extractId = null; tab._docState = 'cancelled'; }
+    });
     state.openTabs = [];
     state.activePath = '';
     state.pinnedFiles = [];
@@ -2769,6 +2776,23 @@
       }
     }
 
+    // Closing a document invalidates and aborts its extraction before a new
+    // tab for the same path can be opened.
+    if (tab._extractAbortController) {
+      try { tab._extractAbortController.abort(); } catch (_) {}
+      tab._extractAbortController = null;
+    }
+    tab._extractId = null;
+    tab._docState = 'cancelled';
+    if (state._documentStates && state._documentStates[path]) {
+      state._documentStates[path] = {
+        state: 'cancelled',
+        generation: state.workspaceGeneration,
+        extractionId: null,
+        error: null
+      };
+    }
+
     // Revoke blob URL
     if (tab.blobUrl) {
       revokeUrl(tab.blobUrl);
@@ -3302,15 +3326,16 @@
       return;
     }
 
+    var extractionId = tab._extractId;
     if (!tab._extractPromise) {
-      var extractionId = 'doc_extract_' + (++_documentExtractionSerial);
+      extractionId = 'doc_extract_' + (++_documentExtractionSerial);
       var extractionTimer = null;
       tab._extractId = extractionId;
       tab._parseReady = false;
       tab._docState = 'extracting';
       tab._extractGeneration = state.workspaceGeneration;
       tab._extractAbortController = new AbortController();
-      state._documentStates[tab.path] = { state: 'extracting', generation: state.workspaceGeneration, error: null };
+    state._documentStates[tab.path] = { state: 'extracting', generation: state.workspaceGeneration, extractionId: extractionId, error: null };
       extractionTimer = setTimeout(function () {
         if (tab._extractId !== extractionId || tab._docState !== 'extracting') return;
         try { tab._extractAbortController.abort(); } catch (_) {}
@@ -3331,10 +3356,11 @@
         if (extractionTimer) { clearTimeout(extractionTimer); extractionTimer = null; }
         if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') return;
         // 延迟提取守卫：检查 generation 是否已变化
-        if (state.workspaceGeneration !== tab._extractGeneration) {
-          // The generation is stale; discard the late extraction result.
-          tab._docState = 'cancelled';
-          state._documentStates[tab.path] = { state: 'cancelled', generation: tab._extractGeneration, error: '工作区已切换' };
+        var currentDocumentState = state._documentStates[tab.path];
+        if (state.workspaceGeneration !== tab._extractGeneration || !currentDocumentState || currentDocumentState.extractionId !== extractionId) {
+          // The generation/task is stale; discard the late result completely.
+          // Do not write a cancelled state into a newly opened tab at the
+          // same path.
           return;
         }
         tab._extractedText = docData.text;
@@ -3343,10 +3369,11 @@
         tab._parseReady = true;
         tab._extractError = null;
         tab._docState = 'ready';
-        state._documentStates[tab.path] = { state: 'ready', generation: state.workspaceGeneration, error: null };
+        state._documentStates[tab.path] = { state: 'ready', generation: state.workspaceGeneration, extractionId: extractionId, error: null };
         docData.ext = tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : '';
         return docData;
       }).catch(function (err) {
+        if (extractionTimer) { clearTimeout(extractionTimer); extractionTimer = null; }
         if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') {
           return null;
         }
@@ -4495,9 +4522,18 @@
     };
   }
 
-  function ensureCodeLocalAiRuntime() {
-    if (window.__xtjLocalAI) return Promise.resolve(window.__xtjLocalAI);
-    if (typeof window.__xtjEnsureLocalAI === 'function') return window.__xtjEnsureLocalAI();
+  function ensureCodeLocalAiRuntime(options) {
+    options = options || {};
+    if (window.__xtjLocalAI) {
+      if (options.signal && options.signal.aborted) {
+        var cancelled = new Error('Local Qwen runtime loading was cancelled');
+        cancelled.name = 'AbortError';
+        cancelled.code = 'LOCAL_AI_CANCELLED';
+        return Promise.reject(cancelled);
+      }
+      return Promise.resolve(window.__xtjLocalAI);
+    }
+    if (typeof window.__xtjEnsureLocalAI === 'function') return window.__xtjEnsureLocalAI(options);
     return Promise.reject(new Error('本地 Qwen 运行时加载器不可用。'));
   }
 
@@ -5075,6 +5111,7 @@
     if (state._localRuntimeUnsubscribe) {
       try { state._localRuntimeUnsubscribe(); } catch (_) {}
     }
+
     state._localRuntime = runtime;
     state._localRuntimeUnsubscribe = runtime.onStatusChange(function () {
       updateComposerControls();
@@ -5160,9 +5197,9 @@
       var localRuntime = window.__xtjLocalAI;
       bindLocalRuntimeStatus(localRuntime);
       var localState = localRuntime && localRuntime.getState();
-      localSetupButton.disabled = localState === 'downloading' || localState === 'initializing';
-      localSetupButton.textContent = localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
-        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'));
+      localSetupButton.disabled = (localState === 'downloading' || localState === 'initializing') && !state._localDownloadController;
+      localSetupButton.textContent = state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
+        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）')));
     }
     if (thinkingSelect) {
       normalizeThinkingModeForSelectedModel();
@@ -5253,23 +5290,38 @@
     if (localSetupButton && !localSetupButton.dataset.bound) {
       localSetupButton.dataset.bound = '1';
       localSetupButton.addEventListener('click', function() {
-        localSetupButton.disabled = true;
+        if (state._localDownloadController) {
+          try { state._localDownloadController.abort(); } catch (_) {}
+          if (state._localDownloadRuntime && typeof state._localDownloadRuntime.stop === 'function') {
+            try { state._localDownloadRuntime.stop(); } catch (_) {}
+          }
+          return;
+        }
+        var localDownloadController = new AbortController();
+        state._localDownloadController = localDownloadController;
+        localSetupButton.disabled = false;
         localSetupButton.textContent = '正在准备本地 Qwen…';
-        ensureCodeLocalAiRuntime().then(function(runtime) {
+        ensureCodeLocalAiRuntime({ signal: localDownloadController.signal }).then(function(runtime) {
+          state._localDownloadRuntime = runtime;
           bindLocalRuntimeStatus(runtime);
           updateComposerControls();
           if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
           state.selectedModelId = runtime.LOCAL_MODEL_ID;
           saveComposerPreferences();
           try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
-          return runtime.ensureReady({ onProgress: function() { updateComposerControls(); } });
+          return runtime.ensureReady({ signal: localDownloadController.signal, onProgress: function() { updateComposerControls(); } });
         }).then(function() {
+          state._localDownloadController = null;
+          state._localDownloadRuntime = null;
           updateComposerControls();
           updateCapabilitiesBadge();
           showToast('本地 Qwen 已就绪，可以离线使用。', 'success');
         }).catch(function(error) {
+          var cancelled = !!(error && (error.code === 'LOCAL_AI_CANCELLED' || error.code === 'ABORTED' || error.name === 'AbortError'));
+          state._localDownloadController = null;
+          state._localDownloadRuntime = null;
           updateComposerControls();
-          showToast((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+          if (!cancelled) showToast((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
         });
       });
     }
@@ -5652,11 +5704,34 @@
                 try { tab._extractAbortController.abort(); } catch (_) {}
               }
               tab._docState = 'timed_out';
-              state._documentStates[tab.path] = { state: 'timed_out', generation: tab._extractGeneration, error: '文档提取超时' };
+              state._documentStates[tab.path] = { state: 'timed_out', generation: tab._extractGeneration, extractionId: extractionId, error: '文档提取超时' };
               resolve(null);
             }, 30000);
           })
-        ]).finally(function() {
+        ]).then(function (docData) {
+          // The extraction promise is also consumed by send-time readiness
+          // checks.  Some adapters resolve it directly without running the
+          // preview continuation, so commit a valid result here while the
+          // tab and workspace generation are still current.
+          if (docData && typeof docData.text === 'string' &&
+              tab._extractId === extractionId &&
+              tab._docState === 'extracting' &&
+              extractionGeneration === state.workspaceGeneration) {
+            tab._extractedText = docData.text;
+            tab._extractedTruncated = !!docData.truncated;
+            tab._extractedMetadata = docData.metadata || null;
+            tab._parseReady = true;
+            tab._extractError = null;
+            tab._docState = 'ready';
+            state._documentStates[tab.path] = {
+              state: 'ready',
+              generation: extractionGeneration,
+              extractionId: extractionId,
+              error: null
+            };
+          }
+          return docData;
+        }).finally(function() {
           if (extractionTimeoutId) { clearTimeout(extractionTimeoutId); extractionTimeoutId = null; }
         });
         pending.push(extractWithTimeout);
@@ -5670,13 +5745,8 @@
       });
       for (var i = 0; i < relevantTabs.length; i++) {
         var tab = relevantTabs[i];
-        if (tab._docState === 'failed' || tab._extractError) {
-          var isCurrent = (tab.path === state.activePath);
-          var isPinned = (state.pinnedFiles.indexOf(tab.path) !== -1);
-          var isAttachment = state.attachments.some(function(a) { return a.path === tab.path; });
-          if (!message || isCurrent || isPinned || isAttachment) {
-            throw new Error('文档提取失败：' + (tab._extractError || '未知错误'));
-          }
+        if (tab._docState !== 'ready') {
+          throw new Error('document_not_ready: ' + (tab._extractError || tab._docState || 'unknown'));
         }
       }
       return [];
@@ -6064,9 +6134,15 @@
   function handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr) {
     var runtime = window.__xtjLocalAI;
     if (!runtime) {
-      return ensureCodeLocalAiRuntime().then(function() {
+      return ensureCodeLocalAiRuntime({ signal: ctx.abortController && ctx.abortController.signal }).then(function() {
         return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
       }).catch(function(error) {
+        var cancelled = !!(ctx.cancelled || (ctx.abortController && ctx.abortController.signal.aborted) ||
+          (error && (error.code === 'LOCAL_AI_CANCELLED' || error.code === 'ABORTED' || error.name === 'AbortError')));
+        if (cancelled) {
+          finalizeRequest(ctx, { cancelled: true, cancelReason: ctx.cancelReason || 'user_cancelled' });
+          return;
+        }
         state.messages.push({ role: 'assistant', content: '本地模型运行时不可用：' + ((error && error.message) || '请重试。'), time: timeStr, errorCode: 'LOCAL_AI_NOT_AVAILABLE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
         finalizeRequest(ctx, { error: 'Local AI runtime not available', errorCode: 'LOCAL_AI_NOT_AVAILABLE' });
         renderChatPanel();
@@ -7107,6 +7183,43 @@
   }
 
   // ── Phase 3: Stream resume function ────────────────────────────────────
+  var STREAM_RECOVERY_RETRY_STATUSES = { 408: true, 429: true, 500: true, 502: true, 503: true, 504: true };
+
+  function fetchStreamRecoveryJson(fetchFn, url, options, maxRetries) {
+    var attempt = 0;
+    var limit = Number.isFinite(Number(maxRetries)) ? Number(maxRetries) : 3;
+    function delayFor(response) {
+      var retryAfter = response && response.headers && response.headers.get && response.headers.get('Retry-After');
+      var retryMs = Number(retryAfter) * 1000;
+      if (!Number.isFinite(retryMs) || retryMs < 0) retryMs = 0;
+      return Math.min(5000, Math.max(retryMs, 250 * Math.pow(2, attempt - 1)));
+    }
+    function run() {
+      attempt += 1;
+      return fetchFn(url, options).then(function(resp) {
+        return resp.text().then(function(text) {
+          var data = null;
+          var parseFailed = false;
+          try { data = text ? JSON.parse(text) : null; } catch (_) { parseFailed = true; data = null; }
+          if (!resp.ok && STREAM_RECOVERY_RETRY_STATUSES[resp.status] && attempt <= limit) {
+            return new Promise(function(resolve) { setTimeout(resolve, delayFor(resp)); }).then(run);
+          }
+          if (parseFailed || !data || typeof data !== 'object') {
+            data = {
+              ok: false,
+              code: 'STREAM_RECOVERY_INVALID_RESPONSE',
+              error: '流恢复接口返回了无效响应',
+              retryable: !resp.ok
+            };
+          }
+          if (data && typeof data === 'object') data.__httpStatus = resp.status;
+          return data;
+        });
+      });
+    }
+    return run();
+  }
+
   function resumeStream(ctx, streamId, afterEventId) {
     if (!ctx || !streamId || !isCurrentRequest(ctx)) return;
     var streamState = ctx.streamState;
@@ -7125,8 +7238,7 @@
     var resumeUrl = '/api/code/chat/stream/resume?' + params;
 
     var fetchFn = window.xtjProtectedFetch || fetch;
-    fetchFn(resumeUrl, { credentials: 'include', signal: ctx.fetchSignal })
-      .then(function(resp) { return resp.json(); })
+    fetchStreamRecoveryJson(fetchFn, resumeUrl, { credentials: 'include', signal: ctx.fetchSignal }, 3)
       .then(function(data) {
         if (!isCurrentRequest(ctx) || ctx._finalized) return;
         if (!data || data.ok === false) {
@@ -7221,7 +7333,7 @@
     }
     var statusUrl = '/api/code/chat/stream/status?' + statusParams;
 
-    function reportRecoveryFailure(code, message) {
+    function reportRecoveryFailure(code, message, preserveState) {
       var originalMessage = String(savedState.originalMessage || '').trim();
       state.lastFailedMessage = originalMessage;
       state.messages.push({
@@ -7233,12 +7345,15 @@
         retryMessage: originalMessage,
         retryBody: null
       });
-      clearStreamState();
+      if (preserveState !== false) {
+        saveStreamState(Object.assign({}, getStreamState() || savedState));
+      } else {
+        clearStreamState();
+      }
       if (_dom.chatPanel) renderChatPanel();
     }
 
-    fetchFn(statusUrl, { credentials: 'include' })
-      .then(function(resp) { return resp.json(); })
+    fetchStreamRecoveryJson(fetchFn, statusUrl, { credentials: 'include' }, 3)
       .then(function(data) {
         if (!data || data.ok === false) {
           reportRecoveryFailure(
@@ -7395,7 +7510,8 @@
         retryBody: null
       });
       discardStreamingMessageNode(assistantNode);
-      clearStreamState();
+      if (retryable === false) clearStreamState();
+      else saveStreamState(Object.assign({}, getStreamState() || savedState, { lastEventId: lastEventId }));
       renderChatPanel();
     }
 
@@ -7476,8 +7592,7 @@
         recoveryError('RESUME_TIMEOUT', '流恢复等待超时，请重新生成', true);
         return;
       }
-      fetchFn(resumeUrl, { credentials: 'include', signal: abortController.signal })
-        .then(function(resp) { return resp.json(); })
+      fetchStreamRecoveryJson(fetchFn, resumeUrl, { credentials: 'include', signal: abortController.signal }, 3)
         .then(function(data) {
           if (streamDone) return;
           if (!data || data.ok === false) {

@@ -274,7 +274,8 @@ function createStreamSession(supabase, params) {
   });
 }
 
-function updateStreamSession(supabase, streamId, updates) {
+function updateStreamSession(supabase, streamId, updates, conditions) {
+  conditions = conditions || {};
   if (!isResumeEnabled() || !supabase) {
     return Promise.resolve({
       ok: false,
@@ -293,8 +294,13 @@ function updateStreamSession(supabase, streamId, updates) {
   }
   var payload = Object.assign({ updated_at: new Date().toISOString() }, updates || {});
   return runPersistenceQuery(function() {
-    return supabase.from('ai_stream_sessions').update(payload).select('*')
+    var query = supabase.from('ai_stream_sessions').update(payload).select('*')
       .eq('stream_id', String(streamId));
+    if (conditions.expectedStatus) query = query.eq('status', String(conditions.expectedStatus));
+    if (conditions.expectedLastEventId !== undefined && conditions.expectedLastEventId !== null) {
+      query = query.eq('last_event_id', Number(conditions.expectedLastEventId) || 0);
+    }
+    return query;
   }).then(function(result) {
     if (!result.ok) {
       return {
@@ -313,6 +319,26 @@ function updateStreamSession(supabase, streamId, updates) {
         retryable: false,
         error: { code: 'STREAM_NOT_FOUND', message: 'Stream session was not updated because no row matched' },
         attempts: result.attempts
+      };
+    }
+    if (payload.status && String(rows[0].status || '') !== String(payload.status)) {
+      return {
+        ok: false,
+        updated: false,
+        retryable: false,
+        error: { code: 'STREAM_STATE_CONFLICT', message: 'Stream session terminal state changed concurrently' },
+        attempts: result.attempts,
+        data: rows[0]
+      };
+    }
+    if (payload.last_event_id !== undefined && Number(rows[0].last_event_id) !== Number(payload.last_event_id)) {
+      return {
+        ok: false,
+        updated: false,
+        retryable: false,
+        error: { code: 'STREAM_EVENT_STATE_CONFLICT', message: 'Stream session event cursor was not confirmed' },
+        attempts: result.attempts,
+        data: rows[0]
       };
     }
     return {

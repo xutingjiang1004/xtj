@@ -6170,6 +6170,8 @@ function showChatMessages() {
     modelSelectorWrap.appendChild(localBadge);
     modelSelectorWrap.appendChild(localSetupButton);
     modelSelectorWrap.appendChild(localProgress);
+    var localDownloadController = null;
+    var localDownloadRuntime = null;
 
     function updateLocalProgress(runtime, info, forceState) {
       if (!runtime) {
@@ -6210,13 +6212,22 @@ function showChatMessages() {
       updateLocalBadge();
     });
     localSetupButton.addEventListener('click', function() {
+      if (localDownloadController) {
+        try { localDownloadController.abort(); } catch (_) {}
+        if (localDownloadRuntime && typeof localDownloadRuntime.stop === 'function') {
+          try { localDownloadRuntime.stop(); } catch (_) {}
+        }
+        return;
+      }
       if (typeof window.__xtjEnsureLocalAI !== 'function') {
         notify('本地 Qwen 运行时加载器不可用，请刷新页面后重试。', 'error');
         return;
       }
-      localSetupButton.disabled = true;
+      localDownloadController = new AbortController();
+      localSetupButton.disabled = false;
       localSetupButton.textContent = '正在准备本地 Qwen…';
       window.__xtjEnsureLocalAI().then(function(runtime) {
+        localDownloadRuntime = runtime;
         if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
         if (typeof runtime.onStatusChange === 'function' && !runtime.__xtjAiAgentProgressBound) {
           runtime.__xtjAiAgentProgressBound = true;
@@ -6227,19 +6238,28 @@ function showChatMessages() {
         modelSelector.value = runtime.LOCAL_MODEL_ID;
         try { localStorage.setItem('xtj_ai_model', runtime.LOCAL_MODEL_ID); localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
         updateLocalBadge();
-        return runtime.ensureReady({ onProgress: function(progress) {
+        return runtime.ensureReady({ signal: localDownloadController.signal, onProgress: function(progress) {
           updateLocalProgress(runtime, progress);
           localSetupButton.textContent = '下载中 ' + Math.round((progress && progress.progress || 0) * 100) + '%';
         } });
       }).then(function() {
+        localDownloadController = null;
+        localDownloadRuntime = null;
         updateLocalProgress(window.__xtjLocalAI, null, 'ready');
         localSetupButton.textContent = '本地 Qwen 已就绪';
         notify('本地 Qwen 已就绪，可以离线使用。', 'success');
       }).catch(function(error) {
-        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请重试' }, 'failed');
+        var localDownloadCancelled = !!(error && (
+          error.code === 'LOCAL_AI_CANCELLED' ||
+          error.code === 'ABORTED' ||
+          error.name === 'AbortError'
+        ));
+        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请重试' }, localDownloadCancelled ? 'cancelled' : 'failed');
+        localDownloadController = null;
+        localDownloadRuntime = null;
         localSetupButton.disabled = false;
         localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
-        notify((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+        if (!localDownloadCancelled) notify((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
       });
     });
     updateLocalBadge();

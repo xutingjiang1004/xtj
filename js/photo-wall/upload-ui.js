@@ -81,8 +81,45 @@
     return '上传失败';
   }
 
-  function cleanupStorage(path){
+  function cleanupStorage(path, uploadId, options){
     if (!path) return Promise.resolve();
+    options = options || {};
+    // Once /api/photo/create has been called, the response may be lost after
+    // the server commits the database row.  Never delete Storage directly in
+    // that ambiguous window; ask the authenticated backend to verify the
+    // reference first and retain a durable pending record if that request
+    // itself cannot be confirmed.
+    if (options.serverOnly) {
+      var pendingInfo = Object.assign({ uploadId: uploadId, path: path }, options.pendingInfo || {});
+      var rememberPending = function () {
+        if (pendingInfo.uploadId && pendingInfo.path) savePendingPhotoUpload(pendingInfo);
+      };
+      return Promise.resolve().then(function () {
+        var authHeaders = typeof window.getUserAuthHeaders === 'function' ? window.getUserAuthHeaders() : {};
+        return Promise.resolve(authHeaders).then(function (resolvedHeaders) {
+          var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+          return fetch(apiUrl('/api/photo/cleanup'), {
+            method: 'POST',
+            headers: buildPhotoCreateHeaders(resolvedHeaders || {}),
+            body: JSON.stringify({ path: path, upload_id: uploadId }),
+            signal: controller ? controller.signal : undefined
+          }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+              if (response.ok && data && data.ok === true) return { ok: true, data: data };
+              rememberPending();
+              return { ok: false, status: response.status, data: data };
+            });
+          }).finally(function () {
+            if (timeoutId) clearTimeout(timeoutId);
+          });
+        });
+      }).catch(function (error) {
+        rememberPending();
+        console.error('[photo-upload] Backend cleanup could not be confirmed', error);
+        return { ok: false, error: error };
+      });
+    }
     return Promise.resolve().then(function(){
       try { return window.sb.storage.from('uploads').remove([path]); }
       catch (e) { return { error: e }; }
@@ -168,7 +205,8 @@
         entry.retryCount = (entry.retryCount || 0) + 1;
         // 每个 uploadId 同时只能有一个 reconcile 请求（有并发请求时保留记录，不丢弃）
         if (_reconcileLocks[entry.uploadId]) { remaining.push(entry); continue; }
-        _reconcileLocks[entry.uploadId] = true;
+        var reconcileToken = 'reconcile_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        _reconcileLocks[entry.uploadId] = reconcileToken;
 
         try {
           var controller = new AbortController();
@@ -199,7 +237,8 @@
               continue;
             }
             if (entry.path && !_cleanupInProgress[entry.uploadId]) {
-              _cleanupInProgress[entry.uploadId] = true;
+              var cleanupToken = 'cleanup_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+              _cleanupInProgress[entry.uploadId] = cleanupToken;
               try {
                 var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
                 var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
@@ -216,7 +255,7 @@
               } catch (e) {
                 console.warn('[PhotoWall] cleanup error for', entry.uploadId, e);
               } finally {
-                delete _cleanupInProgress[entry.uploadId];
+                if (_cleanupInProgress[entry.uploadId] === cleanupToken) delete _cleanupInProgress[entry.uploadId];
                 if (!cleanupOk) {
                   entry.lastQueriedAt = now;
                   remaining.push(entry);
@@ -235,7 +274,7 @@
           // 网络错误，保留记录，不删除 Storage
           remaining.push(entry);
         } finally {
-          delete _reconcileLocks[entry.uploadId];
+          if (_reconcileLocks[entry.uploadId] === reconcileToken) delete _reconcileLocks[entry.uploadId];
         }
       }
 
@@ -251,6 +290,7 @@
   };
 
   // P5: 低频率重试队列检查 — 每 30 分钟处理一次
+  var _lowFreqLocks = window._photoLowFreqLocks = window._photoLowFreqLocks || {};
   window.recheckLowFreqPhotoQueue = async function() {
     try {
       var lowFreq = readJson('xtj_photo_upload_lowfreq', []);
@@ -260,34 +300,70 @@
       for (var i = 0; i < lowFreq.length; i++) {
         var entry = lowFreq[i];
         if (!entry || !entry.uploadId) continue;
-        // 低频率重试：每 24 小时检查一次
         if (entry.lastLowFreqCheckAt && (now - entry.lastLowFreqCheckAt) < 24 * 60 * 60 * 1000) {
           remaining.push(entry);
           continue;
         }
+        if (_lowFreqLocks[entry.uploadId]) {
+          remaining.push(entry);
+          continue;
+        }
+        var lowFreqToken = 'lowfreq_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        _lowFreqLocks[entry.uploadId] = lowFreqToken;
         entry.lastLowFreqCheckAt = now;
+        var keepEntry = true;
+        var refreshPhotoWall = false;
+        var controller = null;
+        var timeoutId = null;
         try {
+          controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          timeoutId = controller ? setTimeout(function() { controller.abort(); }, 15000) : null;
           var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
           var resp = await fetch((window.API_BASE || '') + '/api/photo/status', {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
-            body: JSON.stringify({ upload_id: entry.uploadId })
+            body: JSON.stringify({ upload_id: entry.uploadId }),
+            signal: controller ? controller.signal : undefined
           });
-          if (resp.ok) {
-            var data = await resp.json().catch(function(){ return {}; });
-            if (data && data.status === 'committed') {
-              // 已提交，触发刷新
-              if (typeof window.initPhotoWall === 'function') {
-                window.initPhotoWall(true).catch(function() {});
+          var data = await resp.json().catch(function(){ return {}; });
+          if (resp.ok && data && data.status === 'committed') {
+            keepEntry = false;
+            refreshPhotoWall = true;
+          } else if (resp.ok && data && (data.status === 'failed' || data.status === 'not_found')) {
+            if (!entry.path) {
+              keepEntry = false;
+            } else {
+              var cleanupController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+              var cleanupTimeoutId = cleanupController ? setTimeout(function() { cleanupController.abort(); }, 15000) : null;
+              try {
+                var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+                var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+                  method: 'POST',
+                  headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
+                  body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId }),
+                  signal: cleanupController ? cleanupController.signal : undefined
+                });
+                var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
+                if (cleanupResp.ok && cleanupData && cleanupData.ok === true) keepEntry = false;
+              } finally {
+                if (cleanupTimeoutId) clearTimeout(cleanupTimeoutId);
               }
-              continue; // 不加入 remaining，已提交
             }
+          } else if (resp.ok && data && data.status === 'processing') {
+            keepEntry = true;
           }
-        } catch (_) {}
-        // 仍失败，保留在低频率队列中
-        remaining.push(entry);
+        } catch (_) {
+          keepEntry = true;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (_lowFreqLocks[entry.uploadId] === lowFreqToken) delete _lowFreqLocks[entry.uploadId];
+        }
+        if (keepEntry) remaining.push(entry);
+        if (refreshPhotoWall && typeof window.initPhotoWall === 'function') {
+          window.initPhotoWall(true).catch(function() {});
+        }
       }
-      writeJson('xtj_photo_upload_lowfreq', remaining);
+      writeJson('xtj_photo_upload_lowfreq', remaining.slice(-50));
     } catch (e) {
       console.warn('[PhotoWall] recheckLowFreqPhotoQueue failed', e);
     }
@@ -611,6 +687,10 @@
       throw createPhotoUploadError('cancelled');
     }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+    var cleanupAfterCreateOptions = {
+      serverOnly: true,
+      pendingInfo: { uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type }
+    };
     var authHeaders = (typeof window.getUserAuthHeaders === 'function')
       ? window.getUserAuthHeaders()
       : null;
@@ -637,7 +717,7 @@
       clearTimeout(timeoutTimer);
       timedOut = fetchError.name === 'AbortError';
       if (state.cancelRequested || (signal && signal.aborted)) {
-        await cleanupStorage(path);
+        await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
         throw createPhotoUploadError('cancelled');
       }
       if (timedOut) {
@@ -701,7 +781,7 @@
         throw fetchError;
       }
       fetchError.photoUploadStage = 'network';
-      await cleanupStorage(path);
+      await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
       throw fetchError;
     }
     clearTimeout(timeoutTimer);
@@ -712,13 +792,13 @@
       var recordError = new Error((errBody && errBody.error) || '创建照片记录失败');
       recordError.status = createRes.status;
       recordError.photoUploadStage = 'record';
-      await cleanupStorage(path);
+      await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
       throw recordError;
     }
     var createData;
-    try { createData = await createRes.json(); } catch (parseError) { parseError.photoUploadStage = 'record'; await cleanupStorage(path); throw parseError; }
+    try { createData = await createRes.json(); } catch (parseError) { parseError.photoUploadStage = 'record'; await cleanupStorage(path, uploadId, cleanupAfterCreateOptions); throw parseError; }
     if (!createData || !createData.data) {
-      await cleanupStorage(path);
+      await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
       throw createPhotoUploadError('record');
     }
     return createData.data;

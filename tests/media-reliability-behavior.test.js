@@ -65,14 +65,34 @@ test('DM storage verification uses exact search instead of enumerating chat/1000
       return { list: async function (directory, options) {
         assert.equal(directory, 'chat');
         optionsSeen = options;
-        return { data: [{ name: 'exact_1.jpg', metadata: { size: 1234 } }], error: null };
+        return { data: [{ name: 'exact_1.jpg', metadata: { size: 1234, contentLength: 1234, mimetype: 'image/jpeg' } }], error: null };
       } };
     } }
   };
-  const result = await verifyStorageObject(supabase, 'chat/exact_1.jpg');
+  const result = await verifyStorageObject(supabase, 'chat/exact_1.jpg', { kind: 'image', mimeType: 'image/jpeg', sizeBytes: 1234 });
   assert.equal(result.ok, true);
   assert.equal(result.size, 1234);
   assert.deepEqual(optionsSeen, { limit: 10, search: 'exact_1.jpg' });
+});
+
+test('DM storage verification preserves an explicit zero size and rejects malformed registered sizes', async function () {
+  const supabase = {
+    storage: { from: function () {
+      return { list: async function () {
+        return { data: [{ name: 'empty_1.jpg', metadata: { size: 0, mimetype: 'image/jpeg' } }], error: null };
+      } };
+    } }
+  };
+  const zero = await verifyStorageObject(supabase, 'chat/empty_1.jpg', {
+    kind: 'image', mimeType: 'image/jpeg', sizeBytes: 0
+  });
+  assert.equal(zero.ok, true);
+  assert.equal(zero.size, 0);
+  const malformed = await verifyStorageObject(supabase, 'chat/empty_1.jpg', {
+    kind: 'image', mimeType: 'image/jpeg', sizeBytes: 0.5
+  });
+  assert.equal(malformed.ok, false);
+  assert.equal(malformed.code, 'media_size_unverified');
 });
 
 test('DM media reservation uses a single CAS lease and rejects a fresh concurrent sender', async function () {
@@ -83,6 +103,7 @@ test('DM media reservation uses a single CAS lease and rejects a fresh concurren
     uploader: 'alice',
     kind: 'image',
     mime_type: 'image/jpeg',
+    size_bytes: 1234,
     status: 'uploaded',
     updated_at: new Date().toISOString()
   };
@@ -97,7 +118,7 @@ test('DM media reservation uses a single CAS lease and rejects a fresh concurren
       return q;
     },
     storage: { from: function () {
-      return { list: async function () { return { data: [{ name: 'lease_1.jpg' }], error: null }; } };
+      return { list: async function () { return { data: [{ name: 'lease_1.jpg', metadata: { size: 1234, contentLength: 1234, mimetype: 'image/jpeg' } }], error: null }; } };
     } }
   };
   const reserved = await reserveDmMediaUpload(supabase, { row: uploadedRow });

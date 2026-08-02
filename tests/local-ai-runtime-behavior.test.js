@@ -260,6 +260,25 @@ test('local runtime reaches downloading, initializing and ready states', async (
   assert.equal(harness.api.getState(), 'ready');
 });
 
+test('silent worker import fails instead of leaving local Qwen downloading forever', async (t) => {
+  const harness = createRuntimeHarness();
+  const init = harness.api.ensureReady();
+  init.catch(() => {});
+  t.after(() => harness.reset());
+  await flushMicrotasks();
+
+  assert.equal(harness.api.getState(), 'downloading');
+  assert.equal(harness.workers.length, 1);
+  harness.clock.advance(125001);
+  await assert.rejects(
+    init,
+    (error) => error && (error.code === 'LOCAL_AI_NO_PROGRESS' || error.code === 'LOCAL_AI_TIMEOUT')
+  );
+  assert.equal(harness.api.getState(), 'failed');
+  assert.equal(harness.workers[0].terminated, true);
+  assert.equal(harness.clock.activeTimerCount(), 0);
+});
+
 test('download stall timeout fails and terminates the worker', async (t) => {
   const harness = createRuntimeHarness({
     behavior: {
@@ -329,6 +348,35 @@ test('AbortSignal cancels model initialization and terminates its worker', async
   assert.equal(harness.api.getState(), 'cancelled');
   assert.equal(harness.workers[0].terminated, true);
   assert.equal(harness.fetchCalls.length, 0, 'model loading stays inside the mocked Worker path');
+});
+
+test('cancelling one shared initialization waiter does not cancel another caller', async (t) => {
+  const harness = createRuntimeHarness({
+    behavior: {
+      onPost(worker, message) {
+        if (message.type === 'init') worker.emit({
+          type: 'status',
+          requestId: message.requestId,
+          status: 'loading'
+        });
+      }
+    }
+  });
+  t.after(() => harness.reset());
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+  const first = harness.api.ensureReady({ signal: firstController.signal });
+  const second = harness.api.ensureReady({ signal: secondController.signal });
+  first.catch(() => {});
+  await flushMicrotasks();
+  const worker = harness.workers[0];
+  firstController.abort();
+  await assert.rejects(first, (error) => error && error.code === 'LOCAL_AI_CANCELLED');
+  assert.equal(worker.terminated, false);
+  worker.emit({ type: 'ready', requestId: worker.messages[0].requestId });
+  await second;
+  assert.equal(harness.api.getState(), 'ready');
+  assert.equal(worker.terminated, false);
 });
 
 test('AbortSignal cancels an in-flight chat and sends worker cancel', async (t) => {
