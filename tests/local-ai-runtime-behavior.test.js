@@ -154,9 +154,20 @@ function createRuntimeHarness(options = {}) {
       return Promise.reject(new Error('page fetch must not be used by local runtime'));
     }
   };
+  const gpu = options.supported === false ? undefined : (options.gpu || {
+    requestAdapter() {
+      return Promise.resolve({
+        limits: {
+          maxStorageBuffersPerShaderStage: options.maxStorageBuffersPerShaderStage === undefined
+            ? 10
+            : options.maxStorageBuffersPerShaderStage
+        }
+      });
+    }
+  });
   const context = vm.createContext({
     window: windowObject,
-    navigator: { gpu: options.supported === false ? undefined : {} },
+    navigator: { gpu },
     Worker: FakeWorker,
     fetch: windowObject.fetch,
     Date: { now: clock.now },
@@ -218,6 +229,22 @@ function createChatEngine(chatCalls) {
   };
 }
 
+test('local worker classifies WebGPU storage-buffer initialization failures as unsupported', async () => {
+  const harness = createWorkerHarness(async function () {
+    throw new Error('Cannot initialize runtime because of requested maxStorageBuffersPerShaderStage exceeds limit. requested=10, limit=8.');
+  });
+
+  await harness.self.onmessage({ data: { type: 'init', requestId: 'low-limit' } });
+  assert.equal(harness.messages.length, 2);
+  assert.equal(harness.messages[0].type, 'status');
+  assert.equal(harness.messages[0].requestId, 'low-limit');
+  assert.equal(harness.messages[0].status, 'loading');
+  assert.equal(harness.messages[1].type, 'error');
+  assert.equal(harness.messages[1].requestId, 'low-limit');
+  assert.equal(harness.messages[1].code, 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED');
+  assert.match(harness.messages[1].message, /本地 Qwen.*在线 DeepSeek/);
+});
+
 test('local runtime exposes unsupported and not_downloaded availability states', async () => {
   const supportedHarness = createRuntimeHarness();
   assert.equal(supportedHarness.api.getState(), 'idle');
@@ -232,6 +259,19 @@ test('local runtime exposes unsupported and not_downloaded availability states',
     (error) => error && error.code === 'LOCAL_AI_UNSUPPORTED'
   );
   assert.equal(unsupportedHarness.api.getState(), 'unsupported');
+});
+
+test('local runtime rejects a low WebGPU storage-buffer limit before creating a worker or downloading', async () => {
+  const harness = createRuntimeHarness({ maxStorageBuffersPerShaderStage: 8 });
+
+  await assert.rejects(
+    harness.api.ensureReady(),
+    (error) => error && error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' && /限制为 8/.test(error.message)
+  );
+  assert.equal(harness.api.getState(), 'unsupported');
+  assert.equal(harness.api.getAvailabilityState(), 'unsupported');
+  assert.equal(harness.api.getProgressText().includes('在线 DeepSeek'), true);
+  assert.equal(harness.workers.length, 0, 'unsupported adapters must not start a WebLLM worker or download');
 });
 
 test('local runtime reaches downloading, initializing and ready states', async (t) => {
