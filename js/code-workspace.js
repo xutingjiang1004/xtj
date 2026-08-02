@@ -5164,12 +5164,17 @@
     var localState = typeof runtime.getState === 'function' ? runtime.getState() : 'idle';
     var progress = typeof runtime.getProgressValue === 'function' ? Number(runtime.getProgressValue()) : 0;
     progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+    var hasProgress = typeof runtime.hasProgressValue === 'function' ? runtime.hasProgressValue() : progress > 0;
+    var lastActivityAt = typeof runtime.getLastActivityAt === 'function' ? Number(runtime.getLastActivityAt()) : 0;
+    var elapsedSeconds = typeof runtime.getElapsedSeconds === 'function' ? Number(runtime.getElapsedSeconds()) : 0;
     var progressText = typeof runtime.getProgressText === 'function' ? runtime.getProgressText() : '';
     var label = '本地 Qwen 尚未下载';
     var value = '点击上方按钮开始';
     if (localState === 'downloading') {
       label = '正在下载本地 Qwen';
-      value = Math.round(progress * 100) + '%';
+      value = hasProgress && progress > 0 ? Math.round(progress * 100) + '%' : '正在准备…';
+      if (lastActivityAt > 0) value += ' · 刚刚有活动';
+      if (isFinite(elapsedSeconds) && elapsedSeconds > 0) value += ' · 已用 ' + Math.floor(elapsedSeconds) + ' 秒';
       progressEl.hidden = false;
     } else if (localState === 'initializing') {
       label = '正在初始化本地 Qwen';
@@ -6011,7 +6016,8 @@
     state._telemetry = null;
     updateChatRequestControls();
 
-    // Watchdog: 120s timeout for stuck sending
+    // Keep the client deadline slightly beyond the server's 180s DeepSeek
+    // deadline, so a healthy server request cannot fail locally first.
     clearSendingWatchdog();
     _sendingWatchdog = setTimeout(function() {
       if (state.sending && isCurrentRequest(ctx)) {
@@ -6034,7 +6040,7 @@
         }
       }
       _sendingWatchdog = null;
-    }, 120000);
+    }, 185000);
     ctx.watchdogTimer = _sendingWatchdog;
 
     // Shared request controller + telemetry (feature-flagged)
@@ -6042,7 +6048,7 @@
       ctx.sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: 'code_req_' + requestId,
         clientRequestId: clientRequestId,
-        timeoutMs: 120000,
+        timeoutMs: 185000,
         workspaceGeneration: wsGen
       });
       ctx.sharedCtrl.start();
@@ -6459,13 +6465,17 @@
     var finalRuntime = null;
     var streamCancelled = false;
     var toolItems = Object.create(null);
+    var streamStatusBaseText = '正在连接服务…';
 
     function setStreamStatus(text, stateName, busy) {
       if (!statusEl) return;
       statusEl.style.display = '';
       statusEl.setAttribute('data-state', stateName || 'working');
       statusEl.setAttribute('aria-busy', busy === false ? 'false' : 'true');
-      if (statusText && text) statusText.textContent = text;
+      if (statusText && text) {
+        if (text.indexOf('（已等待 ') === -1) streamStatusBaseText = text;
+        statusText.textContent = text;
+      }
       if (spinner) {
         spinner.style.display = busy === false ? 'none' : '';
         spinner.setAttribute('aria-hidden', busy === false ? 'true' : 'false');
@@ -6732,7 +6742,7 @@
       cleanupStream();
       finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
       renderChatPanel();
-    }, 120000);
+    }, 185000);
 
     // Send the SSE request
     var apiCall;
@@ -6997,7 +7007,9 @@
             console.warn('[CODE-STREAM] Warning:', event.data);
             break;
           case 'heartbeat':
-            // Keep-alive, do nothing
+            var elapsedMs = Number(event.data && event.data.elapsed_ms);
+            var elapsedSeconds = isFinite(elapsedMs) && elapsedMs >= 0 ? Math.floor(elapsedMs / 1000) : 0;
+            setStreamStatus(streamStatusBaseText + (elapsedSeconds ? '（已等待 ' + elapsedSeconds + ' 秒）' : '（服务端仍在处理）'), 'working', true);
             break;
           case 'done':
             if (_doneHandled) return; // done must be processed only once

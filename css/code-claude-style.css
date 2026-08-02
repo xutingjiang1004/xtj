@@ -156,12 +156,8 @@
 }
 
 #panelCode .code-chat-message.assistant .msg-content {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  padding-left: 0;
-  padding-right: 0;
+  /* The workspace stylesheet owns the assistant message surface. */
+  color: var(--cw-text) !important;
 }
 
 /* 暗色模式 — 匹配设计库 .dark 选择器下的 token */
@@ -468,10 +464,11 @@
   display: none !important;
 }
 
-/* 流式内容为空时 — 不显示光标，保持空白 */
+/* 流式内容为空时保留可见提示，不能把正常等待呈现为白屏。 */
 .code-chat-message.streaming .code-stream-content:empty::before {
-  content: none;
-  display: none;
+  content: '正在等待 AI 生成回复…';
+  display: block;
+  color: var(--cw-text-secondary);
 }
 
 /* 流式进行中 — 不追加光标，Claude 风格纯文字流 */
