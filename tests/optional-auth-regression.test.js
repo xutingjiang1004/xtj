@@ -33,7 +33,7 @@ test('admin health check uses apiCall with a separately scoped user access token
 test('admin verification rejects ordinary user access tokens', () => {
   const verify = between(server, 'async function verifyToken', '// =====================');
   assert.match(verify, /payload\.user === ADMIN_USERNAME && !payload\.type/);
-  assert.match(server, /return res\.json\(\{ ok: true, username: ADMIN_USERNAME, user_token:/);
+  assert.match(server, /return res\.json\(\{ ok: true, username: ADMIN_USERNAME, token: token, user_token:/);
 });
 
 test('feed requests attach identity when available but keep anonymous fallback non-interactive', () => {
