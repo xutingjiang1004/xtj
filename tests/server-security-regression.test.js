@@ -141,7 +141,7 @@ test('photo cleanup validates generated paths and fails closed on reference look
   assert.match(cleanup, /typeof path !== 'string'/);
   assert.match(cleanup, /typeof uploadId !== 'string'/);
   assert.match(cleanup, /path\.indexOf\('photos\/' \+ uploadId \+ '_'\) !== 0/);
-  assert.match(cleanup, /\^photos\\\/\[a-z0-9_-\]\{8,64\}_/);
+  assert.match(cleanup, /\^photos\\\/\[a-z0-9_-\]\{6,128\}_/);
   assert.match(cleanup, /\.ilike\('content'/);
   assert.match(cleanup, /\.ilike\('media_url'/);
   assert.match(cleanup, /refChecks\.some\(function\(result\) \{ return !result \|\| result\.error; \}\)/);

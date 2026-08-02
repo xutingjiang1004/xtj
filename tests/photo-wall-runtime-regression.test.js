@@ -166,7 +166,7 @@ test('post and photo uploads clean storage records and preserve audio type', () 
   assert.match(core, /file\.type\.startsWith\("audio\/"\) \? "audio"/);
   assert.match(core, /\[post-publish\] orphan cleanup failed/);
   assert.match(core, /<audio src=/);
-  assert.match(upload, /if \(!createRes\.ok\)[\s\S]{0,500}await cleanupStorage\(path\)/);
+  assert.match(upload, /if \(!createRes\.ok\)[\s\S]{0,700}await cleanupStorage\(path(?:, uploadId, cleanupAfterCreateOptions)?\)/);
   assert.match(upload, /MAX_PHOTO_UPLOAD_BYTES = 50 \* 1024 \* 1024/);
   const deleteIndex = server.indexOf('var hardDelete = await hardDeleteContent({');
   const storageIndex = server.indexOf("supabase.storage.from('uploads').remove", deleteIndex);

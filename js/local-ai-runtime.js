@@ -17,6 +17,7 @@
   var _noProgressTimeoutId = null;
   var _heartbeatIntervalId = null;
   var _initializingPromise = null;   // singleton: shared across multiple ensureReady calls
+  var _initializationWaiters = 0;
   var _stopRequested = false;
 
   var DOWNLOAD_TIMEOUT     = 600000;   // 10 min total download timeout
@@ -173,6 +174,38 @@
     return error;
   }
 
+  function waitForInitialization(promise, signal) {
+    _initializationWaiters += 1;
+    return new Promise(function(resolve, reject) {
+      var settled = false;
+      function release() {
+        if (settled) return false;
+        settled = true;
+        _initializationWaiters = Math.max(0, _initializationWaiters - 1);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        return true;
+      }
+      function onAbort() {
+        if (!release()) return;
+        // A caller leaving a shared initialization must not cancel other
+        // callers. Only stop the worker when this was the last waiter.
+        if (_initializationWaiters === 0 && _initializingPromise === promise) stop();
+        reject(makeError('LOCAL_AI_CANCELLED', 'Local model loading was cancelled'));
+      }
+      if (signal) {
+        if (signal.aborted) return onAbort();
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      promise.then(function(value) {
+        if (!release()) return;
+        resolve(value);
+      }, function(error) {
+        if (!release()) return;
+        reject(error);
+      });
+    });
+  }
+
   function failWithError(code, message) {
     if (_state === 'failed' || _state === 'cancelled') return;
     setState('failed');
@@ -291,16 +324,21 @@
     }
     // Singleton: if already initializing, return the same promise
     if (_initializingPromise) {
-      if (options.signal) options.signal.addEventListener('abort', function() { if (_initializingPromise) stop(); }, { once: true });
-      return _initializingPromise;
+      return waitForInitialization(_initializingPromise, options.signal);
     }
 
     var requestId = taskId();
     _stopRequested = false;
+    _lastProgressValue = 0;
+    _lastProgressText = '';
     setState('downloading');
 
     _initializingPromise = new Promise(function(resolve, reject) {
       pending[requestId] = { kind: 'init', resolve: resolve, reject: reject, onProgress: options.onProgress };
+      // Start the watchdog before waiting for the first Worker message. A
+      // silently hung module import or CSP-blocked Worker must not leave the
+      // UI in `downloading` forever.
+      setupTimeouts(true);
       try {
         startWorker().postMessage({ type: 'init', requestId: requestId });
       } catch (error) {
@@ -308,13 +346,7 @@
       }
     });
 
-    if (options.signal) {
-      var onAbort = function() { if (_initializingPromise) stop(); };
-      options.signal.addEventListener('abort', onAbort, { once: true });
-      _initializingPromise.then(function() { options.signal.removeEventListener('abort', onAbort); }, function() { options.signal.removeEventListener('abort', onAbort); });
-    }
-
-    return _initializingPromise;
+    return waitForInitialization(_initializingPromise, options.signal);
   }
 
   function stop() {
@@ -323,6 +355,7 @@
     setState('cancelled');
     terminateWorker();
     _initializingPromise = null;
+    _initializationWaiters = 0;
   }
 
   function streamChat(messages, options) {

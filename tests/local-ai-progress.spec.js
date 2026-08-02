@@ -36,8 +36,24 @@ test('small-cat Qwen setup renders a real download percentage and bar', async ({
         runtimeState = 'downloading';
         listeners.forEach(function (listener) { listener({ state: runtimeState, progress: 0.37, text: '正在下载模型文件' }); });
         options.onProgress({ progress: 0.37, text: '正在下载模型文件' });
-        return new Promise(function (resolve) {
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          function cancel() {
+            if (settled) return;
+            settled = true;
+            runtimeState = 'cancelled';
+            listeners.forEach(function (listener) { listener({ state: runtimeState, progress: 0.37, text: '已取消' }); });
+            var error = new Error('本地模型下载已取消');
+            error.code = 'LOCAL_AI_CANCELLED';
+            reject(error);
+          }
+          if (options.signal) {
+            if (options.signal.aborted) cancel();
+            else options.signal.addEventListener('abort', cancel, { once: true });
+          }
           setTimeout(function () {
+            if (settled) return;
+            settled = true;
             runtimeState = 'ready';
             listeners.forEach(function (listener) { listener({ state: runtimeState, progress: 1, text: '已完成' }); });
             resolve();
@@ -56,4 +72,8 @@ test('small-cat Qwen setup renders a real download percentage and bar', async ({
   await expect(progress.locator('.ai-chat-local-progress-value')).toHaveText('37%');
   await expect(progress.locator('.ai-chat-local-progress-fill')).toHaveCSS('width', /.+/);
   await expect(progress.locator('.ai-chat-local-progress-detail')).toHaveText('正在下载模型文件');
+
+  await page.locator('.ai-chat-local-setup').click();
+  await expect(progress).toHaveAttribute('data-state', 'cancelled');
+  await expect(page.locator('.ai-chat-local-setup')).toHaveText('下载本地 Qwen（约 1GB）');
 });

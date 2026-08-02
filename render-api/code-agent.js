@@ -4291,6 +4291,29 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         String(createdSession.status || '') === 'running' &&
         Number(createdSession.last_event_id || 0) === 0;
       if (!validCreatedSession) {
+        // A concurrent request on another Render instance may have won the
+        // unique (user_id, client_request_id) insert. Re-read the durable
+        // winner and return the same resumable contract instead of surfacing
+        // a false create failure or calling the provider twice.
+        if (clientRequestId && sessionCreateResult && sessionCreateResult.error && String(sessionCreateResult.error.code || '') === '23505') {
+          var conflictResult = await streamSession.getStreamSessionByClientRequestId(supabase, userId, clientRequestId);
+          if (conflictResult && conflictResult.found === true && conflictResult.data) {
+            var conflictSession = conflictResult.data;
+            var conflictStatus = String(conflictSession.status || 'running');
+            if (clientRequestId) pendingStreamCreations.delete(creationKey);
+            return res.json({
+              ok: true,
+              stream_id: conflictSession.stream_id,
+              request_id: conflictSession.request_id,
+              client_request_id: conflictSession.client_request_id,
+              status: conflictStatus,
+              result_status: conflictStatus,
+              terminal: conflictStatus !== 'running',
+              duplicate: true,
+              resume: { method: 'GET', path: '/api/code/chat/stream/resume?stream_id=' + encodeURIComponent(String(conflictSession.stream_id || '')) + '&client_request_id=' + encodeURIComponent(clientRequestId), after_event_id: Number(conflictSession.last_event_id) || 0 }
+            });
+          }
+        }
         if (clientRequestId) pendingStreamCreations.delete(creationKey);
         return res.status(503).json({
           ok: false,
@@ -4390,6 +4413,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             last_event_id: lastEventId,
             status: status,
             completed_at: new Date().toISOString()
+          }, {
+            expectedStatus: 'running',
+            // No non-terminal event updates the session cursor; the cursor is
+            // advanced atomically with this terminal transition.
+            expectedLastEventId: 0
           });
           if (!updateResult || updateResult.ok !== true || updateResult.updated !== true) {
             throw {
@@ -5053,6 +5081,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var cancelUpdateResult = await streamSession.updateStreamSession(supabase, streamId, {
         status: 'cancelled',
         completed_at: new Date().toISOString()
+      }, {
+        expectedStatus: 'running'
       });
       if (!cancelUpdateResult || cancelUpdateResult.ok !== true || cancelUpdateResult.updated !== true) {
         return res.status(503).json({
