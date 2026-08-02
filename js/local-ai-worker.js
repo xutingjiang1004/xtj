@@ -30,11 +30,17 @@ async function initialize(requestId) {
     return;
   }
   send('status', requestId, { status: 'loading' });
+  let sentInitializing = false;
   initializing = webllm.CreateMLCEngine(MODEL_ID, {
     initProgressCallback: function(progress) {
+      const ratio = Number(progress && progress.progress || 0);
+      if (!sentInitializing && ratio >= 0.999) {
+        sentInitializing = true;
+        send('status', requestId, { status: 'initializing' });
+      }
       send('progress', requestId, {
         text: String(progress && progress.text || '正在准备本地模型'),
-        progress: Number(progress && progress.progress || 0)
+        progress: ratio
       });
     }
   });

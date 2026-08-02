@@ -12,6 +12,7 @@ function builder(resultFactory) {
     update() { return query; },
     eq(...args) { state.filters.push(['eq', ...args]); return query; },
     gt(...args) { state.filters.push(['gt', ...args]); return query; },
+    is(...args) { state.filters.push(['is', ...args]); return query; },
     order(...args) { state.filters.push(['order', ...args]); return query; },
     limit(...args) { state.filters.push(['limit', ...args]); return query; },
     then(resolve, reject) {
@@ -79,6 +80,30 @@ test('updateStreamSession reports zero-row update instead of claiming success', 
   assert.equal(result.ok, false);
   assert.equal(result.updated, false);
   assert.equal(result.error.code, 'STREAM_NOT_FOUND');
+});
+
+test('terminal session updates use status and event cursor compare-and-swap guards', async () => {
+  let seenFilters = [];
+  const db = fakeSupabase((table, state) => {
+    seenFilters = state.filters;
+    return { data: [{ stream_id: 'stream-cas', status: 'completed', last_event_id: 4 }], error: null };
+  });
+  const result = await streamSession.updateStreamSession(db, 'stream-cas', {
+    status: 'cancelled',
+    last_event_id: 5
+  }, {
+    expectedStatus: 'running',
+    expectedLastEventId: 0
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.updated, false);
+  assert.equal(result.error.code, 'STREAM_STATE_CONFLICT');
+  assert.deepEqual(seenFilters, [
+    ['eq', 'stream_id', 'stream-cas'],
+    ['eq', 'status', 'running'],
+    ['eq', 'last_event_id', 0]
+  ]);
 });
 
 test('event flush exposes failed persistence and never advances last event id', async () => {
