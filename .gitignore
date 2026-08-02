@@ -9,6 +9,9 @@ node_modules/
 
 .codex/
 
+# Playwright CLI debug artifacts
+.playwright-cli/
+
 # Private keys
 *.pem
 *.key
