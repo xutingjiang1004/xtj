@@ -59,7 +59,8 @@ async function initialize(requestId) {
       }
       send('progress', requestId, {
         text: String(progress && progress.text || '正在准备本地模型'),
-        progress: ratio
+        progress: ratio,
+        timeElapsed: Number(progress && progress.timeElapsed) || 0
       });
     }
   });
