@@ -37,9 +37,9 @@ const CODE_AGENT_MAX_OUTPUT_TOKENS = Math.min(
 const MAX_OPEN_FILES = 12;
 const MAX_ATTACHMENTS = 8;
 const CHECKPOINT_KEEP = 12;
-const MAX_HISTORY_CHECKPOINT = 50;
 const MAX_SESSIONS = 200;
 const MAX_SESSION_MESSAGES = 200;
+const MAX_HISTORY_MSG_CHARS = 64 * 1024; // 每条历史消息 content 上限（64KB），防止缓存无界膨胀
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
 const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
@@ -62,6 +62,23 @@ const JSON_OBJECT_RE = /"operations"\s*:/;
 
 // ── Session Cache (isolated by user + workspace + generation + conversationId) ──
 const agentSessionCache = new Map();
+
+// 截断单条历史消息的 content，防止超长工具结果撑爆内存缓存（不改原消息对象）
+function clampHistoryMessage(msg) {
+  if (!msg || typeof msg !== 'object') return msg;
+  var content = msg.content;
+  if (typeof content === 'string' && content.length > MAX_HISTORY_MSG_CHARS) {
+    var copy = Object.assign({}, msg);
+    copy.content = content.slice(0, MAX_HISTORY_MSG_CHARS) + '\n[内容过长，已截断]';
+    return copy;
+  }
+  return msg;
+}
+
+function clampHistoryList(list) {
+  if (!Array.isArray(list)) return list;
+  return list.map(clampHistoryMessage);
+}
 
 function getSessionKey(userId, workspaceId, generation, conversationId) {
   return [
@@ -116,14 +133,15 @@ function getSession(userId, workspaceId, generation, conversationId) {
 function setSession(userId, workspaceId, generation, conversationId, history) {
   evictOldSessions();
   var key = getSessionKey(userId, workspaceId, generation, conversationId);
+  var safeHistory = clampHistoryList(history);
   var sessionData = {
-    history: history || [],
+    history: safeHistory || [],
     lastActive: Date.now(),
     userId: userId,
     workspaceId: workspaceId,
     generation: generation,
     createdAt: Date.now(),
-    messageCount: Array.isArray(history) ? history.length : 0
+    messageCount: Array.isArray(safeHistory) ? safeHistory.length : 0
   };
   agentSessionCache.set(key, sessionData);
   return sessionData;
@@ -841,6 +859,10 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
   var fileContentChars = 0;
   
   if (shouldInjectDocs) {
+    // 文档正文注入受 token 预算约束：预算充足时每文件最多 32000 字符，
+    // 预算紧张时按比例缩减，避免单条 user 消息撑爆上下文。
+    var docBudgetTokens = (typeof inputBudget === 'number' && inputBudget > 0) ? inputBudget : 64000;
+    var docCharsPerFile = Math.max(4000, Math.min(32000, Math.floor(docBudgetTokens * 2)));
     var hasOpenFileContent = false;
     for (var ofi = 0; ofi < openFiles.length; ofi++) {
       var of = openFiles[ofi];
@@ -857,7 +879,7 @@ function buildAgentMessages(history, currentMessage, workspaceName, indexSummary
         if (of2.content && of2.content.trim()) {
           stateLines.push('--- ' + of2.path + ' ---');
           // 限制单文档在状态块中的注入长度，避免撑爆上下文
-          var trimmed = of2.content.slice(0, 32000);
+          var trimmed = of2.content.slice(0, docCharsPerFile);
           stateLines.push(trimmed);
           injectedChars += trimmed.length + of2.path.length + 10;
         }
@@ -2963,11 +2985,11 @@ async function applyPptxOperations(buffer, operations, fileName) {
           var deleted = false;
           var newSlideXml2 = slideXml;
           
-          if (slideXml.indexOf(escapedDel) !== -1) {
-            newSlideXml2 = slideXml.split(escapedDel).join('');
-            deleted = true;
-          } else if (slideXml.indexOf(delText) !== -1) {
-            newSlideXml2 = slideXml.split(delText).join('');
+          // 只替换第一个出现位置，避免全局替换误删幻灯片中重复出现的文本
+          var searchText = slideXml.indexOf(escapedDel) !== -1 ? escapedDel : (slideXml.indexOf(delText) !== -1 ? delText : null);
+          if (searchText !== null) {
+            var firstIdx = slideXml.indexOf(searchText);
+            newSlideXml2 = slideXml.slice(0, firstIdx) + slideXml.slice(firstIdx + searchText.length);
             deleted = true;
           }
           
@@ -3852,7 +3874,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var userMsgId = body.client_request_id || ('umsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8));
         var userKey = 'user:' + String(message).slice(0, 200);
         if (!seenIds.has(userMsgId)) {
-          sessionData.history.push({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' });
+          sessionData.history.push(clampHistoryMessage({ role: 'user', content: message, message_id: userMsgId, turn_id: body.client_request_id || '' }));
           seenIds.add(userMsgId);
         }
 
@@ -3866,6 +3888,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           }
           var msgId = msg.message_id || ('amsg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 8) + '_' + i);
           if (!seenIds.has(msgId)) {
+            msg = clampHistoryMessage(msg);
             msg.message_id = msgId;
             sessionData.history.push(msg);
             seenIds.add(msgId);
@@ -4509,7 +4532,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var currentHistory;
       if (hasClientHistory2) {
         currentHistory = history;
-        if (sessionData) { sessionData.history = history.slice(); sessionData.messageCount = history.length; touchSession(sessionData); }
+        if (sessionData) { sessionData.history = clampHistoryList(history.slice()); sessionData.messageCount = sessionData.history.length; touchSession(sessionData); }
       } else {
         currentHistory = sessionData ? sessionData.history : [];
       }

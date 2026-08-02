@@ -170,10 +170,21 @@ function resolveIndex(scope) {
 }
 
 // ── Token estimation ────────────────────────────────────────────────────
+// CJK 字符约 1.2 字符/token（避免中文被按 3.5 字符/token 低估导致上下文溢出），
+// ASCII/代码约 3.5 字符/token。
 function estimateTokens(text) {
   if (!text) return 0;
-  // Rough estimate: ~3.5 chars per token for code, ~4 for natural language
-  return Math.ceil(text.length / 3.5);
+  var cjk = 0, ascii = 0;
+  for (var i = 0; i < text.length; i++) {
+    var code = text.charCodeAt(i);
+    if ((code >= 0x4E00 && code <= 0x9FFF) || (code >= 0x3400 && code <= 0x4DBF) ||
+        (code >= 0x3000 && code <= 0x303F) || (code >= 0xFF00 && code <= 0xFFEF)) {
+      cjk++;
+    } else {
+      ascii++;
+    }
+  }
+  return Math.ceil(cjk / 1.2 + ascii / 3.5);
 }
 
 function estimateTokensForChunks(chunks) {
