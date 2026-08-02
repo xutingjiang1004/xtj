@@ -19,6 +19,13 @@
   var _initializingPromise = null;   // singleton: shared across multiple ensureReady calls
   var _initializationWaiters = 0;
   var _stopRequested = false;
+  // WebLLM's Qwen graph needs this many storage buffers in a shader stage.
+  // Merely having navigator.gpu is not enough: some integrated GPUs expose
+  // WebGPU but have a lower adapter limit and will otherwise fail only after
+  // WebLLM starts its download/initialization work.
+  var REQUIRED_STORAGE_BUFFERS_PER_SHADER_STAGE = 10;
+  var _capabilityCheckPromise = null;
+  var _capabilityError = null;
 
   var DOWNLOAD_TIMEOUT     = 600000;   // 10 min total download timeout
   var INIT_TIMEOUT         = 180000;   // 3 min initialization timeout
@@ -151,6 +158,54 @@
   // ── Core functions ───────────────────────────────────────────────
   function supported() {
     return !!(window.isSecureContext && navigator.gpu && window.Worker);
+  }
+
+  function markUnsupported(code, message) {
+    var error = makeError(code, message);
+    _capabilityError = error;
+    _lastProgressText = message;
+    setState('unsupported');
+    return error;
+  }
+
+  function verifyWebGpuLimits() {
+    if (_capabilityError) return Promise.reject(_capabilityError);
+    if (_capabilityCheckPromise) return _capabilityCheckPromise;
+    if (!navigator.gpu || typeof navigator.gpu.requestAdapter !== 'function') {
+      return Promise.reject(markUnsupported(
+        'LOCAL_AI_UNSUPPORTED',
+        '当前浏览器无法使用 WebGPU；本地 Qwen 未开始下载。请切换到“在线 DeepSeek”，或使用最新版 Edge/Chrome 并通过 HTTPS 打开网站。'
+      ));
+    }
+
+    _capabilityCheckPromise = Promise.resolve().then(function() {
+      return navigator.gpu.requestAdapter();
+    }).then(function(adapter) {
+      if (!adapter || !adapter.limits) {
+        throw markUnsupported(
+          'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE',
+          '无法获取可用的 WebGPU 适配器；本地 Qwen 未开始下载。请切换到“在线 DeepSeek”。'
+        );
+      }
+      var limit = Number(adapter.limits.maxStorageBuffersPerShaderStage);
+      if (!isFinite(limit) || limit < REQUIRED_STORAGE_BUFFERS_PER_SHADER_STAGE) {
+        throw markUnsupported(
+          'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED',
+          '此设备的 WebGPU 存储缓冲区限制为 ' + (isFinite(limit) ? limit : '未知') +
+            '，本地 Qwen 至少需要 ' + REQUIRED_STORAGE_BUFFERS_PER_SHADER_STAGE +
+            '。本地下载已停止，请在模型选择器切换到“在线 DeepSeek”。'
+        );
+      }
+      return adapter;
+    }).catch(function(error) {
+      _capabilityCheckPromise = null;
+      if (error && error.code && error.code.indexOf('LOCAL_AI_') === 0) throw error;
+      throw markUnsupported(
+        'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE',
+        '无法初始化 WebGPU 适配器；本地 Qwen 未开始下载。请切换到“在线 DeepSeek”。'
+      );
+    });
+    return _capabilityCheckPromise;
   }
 
   function descriptor() {
@@ -316,37 +371,41 @@
       setState('cancelled');
       return Promise.reject(makeError('LOCAL_AI_CANCELLED', 'Local model loading was cancelled'));
     }
-    if (!supported()) setState('unsupported');
-    if (!supported()) return Promise.reject(makeError('LOCAL_AI_UNSUPPORTED', '当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。'));
+    if (!supported()) {
+      return Promise.reject(markUnsupported(
+        'LOCAL_AI_UNSUPPORTED',
+        '当前浏览器不支持 WebGPU；本地 Qwen 未开始下载。请切换到“在线 DeepSeek”，或使用最新版 Edge/Chrome 并通过 HTTPS 打开网站。'
+      ));
+    }
     if (ready) {
       setState('ready');
       return Promise.resolve(descriptor());
     }
-    // Singleton: if already initializing, return the same promise
-    if (_initializingPromise) {
+    return verifyWebGpuLimits().then(function() {
+      // Singleton: if already initializing, return the same promise.
+      if (_initializingPromise) return waitForInitialization(_initializingPromise, options.signal);
+
+      var requestId = taskId();
+      _stopRequested = false;
+      _lastProgressValue = 0;
+      _lastProgressText = '';
+      setState('downloading');
+
+      _initializingPromise = new Promise(function(resolve, reject) {
+        pending[requestId] = { kind: 'init', resolve: resolve, reject: reject, onProgress: options.onProgress };
+        // Start the watchdog before waiting for the first Worker message. A
+        // silently hung module import or CSP-blocked Worker must not leave the
+        // UI in `downloading` forever.
+        setupTimeouts(true);
+        try {
+          startWorker().postMessage({ type: 'init', requestId: requestId });
+        } catch (error) {
+          failWithError('LOCAL_AI_WORKER_START_FAILED', error && error.message || 'Local model worker failed to start');
+        }
+      });
+
       return waitForInitialization(_initializingPromise, options.signal);
-    }
-
-    var requestId = taskId();
-    _stopRequested = false;
-    _lastProgressValue = 0;
-    _lastProgressText = '';
-    setState('downloading');
-
-    _initializingPromise = new Promise(function(resolve, reject) {
-      pending[requestId] = { kind: 'init', resolve: resolve, reject: reject, onProgress: options.onProgress };
-      // Start the watchdog before waiting for the first Worker message. A
-      // silently hung module import or CSP-blocked Worker must not leave the
-      // UI in `downloading` forever.
-      setupTimeouts(true);
-      try {
-        startWorker().postMessage({ type: 'init', requestId: requestId });
-      } catch (error) {
-        failWithError('LOCAL_AI_WORKER_START_FAILED', error && error.message || 'Local model worker failed to start');
-      }
     });
-
-    return waitForInitialization(_initializingPromise, options.signal);
   }
 
   function stop() {
@@ -394,6 +453,8 @@
     _lastProgressText = '';
     _initializingPromise = null;
     _stopRequested = false;
+    _capabilityCheckPromise = null;
+    _capabilityError = null;
     ready = false;
   }
 

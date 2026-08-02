@@ -6184,7 +6184,7 @@ function showChatMessages() {
       var progress = Number(rawProgress);
       progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
       var isActive = localState === 'downloading' || localState === 'initializing';
-      var isResult = localState === 'ready' || localState === 'failed' || localState === 'cancelled';
+      var isResult = localState === 'ready' || localState === 'failed' || localState === 'cancelled' || localState === 'unsupported';
       localProgress.hidden = !isActive && !isResult;
       localProgress.dataset.state = localState;
       localProgressFill.style.width = Math.round(progress * 100) + '%';
@@ -6194,6 +6194,7 @@ function showChatMessages() {
       else if (localState === 'ready') localProgressText.textContent = '本地 Qwen 已就绪';
       else if (localState === 'failed') localProgressText.textContent = '本地 Qwen 准备失败';
       else if (localState === 'cancelled') localProgressText.textContent = '本地 Qwen 下载已取消';
+      else if (localState === 'unsupported') localProgressText.textContent = '此设备不兼容本地 Qwen';
       var detail = info && info.text;
       if (!detail && typeof runtime.getProgressText === 'function') detail = runtime.getProgressText();
       localProgressDetail.textContent = String(detail || (isActive ? '正在获取模型文件，请保持页面打开' : ''));
@@ -6254,12 +6255,25 @@ function showChatMessages() {
           error.code === 'ABORTED' ||
           error.name === 'AbortError'
         ));
-        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请重试' }, localDownloadCancelled ? 'cancelled' : 'failed');
+        var localIncompatible = !!(error && (
+          error.code === 'LOCAL_AI_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
+          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED'
+        ));
+        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请切换到“在线 DeepSeek”' }, localDownloadCancelled ? 'cancelled' : (localIncompatible ? 'unsupported' : 'failed'));
         localDownloadController = null;
         localDownloadRuntime = null;
-        localSetupButton.disabled = false;
-        localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
-        if (!localDownloadCancelled) notify((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+        if (localIncompatible) {
+          modelSelector.value = 'online';
+          try { localStorage.setItem('xtj_ai_model', 'online'); } catch (e) {}
+          updateLocalBadge();
+          localSetupButton.disabled = true;
+          localSetupButton.textContent = '此设备不支持本地 Qwen';
+        } else {
+          localSetupButton.disabled = false;
+          localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
+        }
+        if (!localDownloadCancelled) notify((error && error.message) || (localIncompatible ? '此设备不支持本地 Qwen，已切换到在线 DeepSeek。' : '本地 Qwen 准备失败，请重试。'), 'error');
       });
     });
     updateLocalBadge();

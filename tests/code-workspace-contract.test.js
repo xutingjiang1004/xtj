@@ -489,6 +489,11 @@ test('three-column layout: code-editor-column defined', () => {
   assert.match(css, /flex:\s*1/);
 });
 
+test('Code restores a safe welcome screen when synchronous workspace rendering fails', () => {
+  assert.match(codeWorkspace, /function renderWorkspace\(\)[\s\S]*?return renderWorkspaceImpl\(\);[\s\S]*?renderWelcome\(\)/);
+  assert.match(codeWorkspace, /var tabRestore = restoreTabs\(\);[\s\S]*?tabRestore\.catch\(function \(error\)/);
+});
+
 test('three-column layout: sidebar, editor-column, and chat-panel are separate children', () => {
   assert.match(codeWorkspace, /code-sidebar/);
   assert.match(codeWorkspace, /code-editor-column/);
