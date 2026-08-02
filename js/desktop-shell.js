@@ -58,14 +58,18 @@
     // P0: 跟踪当前 tab 用于 Code 模块可见性判断
     var previousTab = codeModuleState.currentTab;
     if (previousTab === 'code' && tab !== 'code' && window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.cleanup === 'function') {
-      // P3: 确保 cleanup 至多执行一次
-      if (codeModuleState._codeCleanupExecuted) return;
-      // H-35: 先执行再置位 —— 用户取消确认（cleanup 返回 false）时不置标志，
-      // 否则 cleanup 永不再次执行，造成 Monaco/resizer/监听器泄漏。
-      try {
-        if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
-      } catch (_) { return; }
-      codeModuleState._codeCleanupExecuted = true;
+      // P3: 确保 cleanup 至多执行一次；已执行过则跳过 cleanup，但必须继续下方
+      // 的 currentTab 更新与导航高亮同步（否则导航状态永久失效）。
+      if (codeModuleState._codeCleanupExecuted) {
+        /* cleanup 已执行，继续同步 */
+      } else {
+        // H-35: 先执行再置位 —— 用户取消确认（cleanup 返回 false）时不置标志，
+        // 否则 cleanup 永不再次执行，造成 Monaco/resizer/监听器泄漏。
+        try {
+          if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
+        } catch (_) { return; }
+        codeModuleState._codeCleanupExecuted = true;
+      }
     }
     codeModuleState.currentTab = tab;
     // Bootstrap a restored Code tab even when no click event fires.

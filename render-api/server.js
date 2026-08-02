@@ -6858,7 +6858,7 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   } catch(e) {}
 
   var adminUserSession = await issueUserSession(res, ADMIN_USERNAME);
-  return res.json({ ok: true, username: ADMIN_USERNAME, user_token: adminUserSession.token });
+  return res.json({ ok: true, username: ADMIN_USERNAME, token: token, user_token: adminUserSession.token });
   } catch (e) {
     console.error('[API] admin login error:', e && e.message);
     return res.status(500).json({ error: '登录失败，请稍后重试' });
@@ -11682,7 +11682,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
     // 加载安全设置，按开关决定是否写入
-    var securitySettings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
+    var securitySettings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
     try {
       var { data: settingsData } = await supabase.from('posts')
         .select('content')
@@ -11893,7 +11893,7 @@ app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
-    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
+    var settings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
     if (data && data.content) {
       try {
         var parsed = JSON.parse(data.content);
@@ -11908,7 +11908,7 @@ app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
     }
     return res.json({ settings: settings });
   } catch(e) {
-    return res.json({ settings: { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true } });
+    return res.json({ settings: { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false } });
   }
 });
 
@@ -12051,7 +12051,7 @@ app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (re
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
-    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
+    var settings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
     if (data && data.content) {
       try { var parsed = JSON.parse(data.content); Object.assign(settings, parsed); } catch(e) {}
     }

@@ -103,14 +103,14 @@
         if (result.done) {
           // Process remaining buffer
           if (buffer.trim()) {
-            processSSEBuffer(buffer, onEvent, options);
+            buffer = processSSEBuffer(buffer, onEvent, options) || '';
           }
           cleanup();
           return;
         }
 
         buffer += decoder.decode(result.value, { stream: true });
-        processSSEBuffer(buffer, onEvent, options);
+        buffer = processSSEBuffer(buffer, onEvent, options) || '';
         return pump();
       }).catch(function (err) {
         cleanup();
