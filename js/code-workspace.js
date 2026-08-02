@@ -1730,7 +1730,31 @@
     return '<svg class="code-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[name] || paths.reset) + '</svg>';
   }
 
+  // Recovery can re-enter Code with a stale layout, tab record, or browser
+  // handle.  The old implementation cleared panelCode first, so any synchronous
+  // exception below left a permanently blank, non-interactive Code page.
+  // Keep the welcome screen as a guaranteed recovery surface.
   function renderWorkspace() {
+    try {
+      return renderWorkspaceImpl();
+    } catch (error) {
+      console.error('[code-workspace] workspace render failed; returning to welcome screen', error);
+      state.openTabs = [];
+      state.activePath = '';
+      document.body.classList.remove('code-is-resizing', 'code-is-resizing-row');
+      try {
+        renderWelcome();
+        showToast('恢复上次工作区失败，已回到可重新选择文件的页面。', 'error');
+      } catch (fallbackError) {
+        if (_dom.panelCode) {
+          _dom.panelCode.innerHTML = '<div class="code-welcome"><h2>Code</h2><p>恢复工作区失败，请重新打开文件夹或刷新页面。</p></div>';
+        }
+      }
+      return false;
+    }
+  }
+
+  function renderWorkspaceImpl() {
     if (!_dom.panelCode) return;
     state.composerMounted = false;
     _dom.panelCode.innerHTML = '';
@@ -1952,7 +1976,15 @@
     loadProjectIndexStatus();
     loadCodeModels();
     restorePersistedTabs();
-    restoreTabs();
+    var tabRestore = restoreTabs();
+    tabRestore.catch(function (error) {
+      // The shell has already been mounted. Keep it interactive even if an
+      // individual restored file or browser handle is malformed.
+      console.warn('[code-workspace] restoring saved tabs failed', error);
+      renderTabs();
+      renderEmptyState();
+      showToast('部分上次文件未能恢复，请重新打开需要的文件。', 'warning');
+    });
   }
 
   // Pointer Events Drag Logic

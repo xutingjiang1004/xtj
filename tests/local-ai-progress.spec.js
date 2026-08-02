@@ -77,3 +77,44 @@ test('small-cat Qwen setup renders a real download percentage and bar', async ({
   await expect(progress).toHaveAttribute('data-state', 'cancelled');
   await expect(page.locator('.ai-chat-local-setup')).toHaveText('下载本地 Qwen（约 1GB）');
 });
+
+test('small-cat Qwen stops before download and returns to online mode when WebGPU has too few storage buffers', async ({ page }) => {
+  await page.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { sessionStorage.clear(); } catch (_) {}
+    window.currentUser = 'low-limit-fixture-user';
+    window.localStorage.setItem('xtj_user', 'low-limit-fixture-user');
+    window.localStorage.setItem('xtj_user_token', 'fixture-token');
+    window.ensureUserToken = async function () { return 'fixture-token'; };
+    window.ensureProtectedOperationAuth = async function () { return { ok: true }; };
+    Object.defineProperty(navigator, 'gpu', {
+      configurable: true,
+      value: {
+        requestAdapter: async function () {
+          return { limits: { maxStorageBuffersPerShaderStage: 8 } };
+        }
+      }
+    });
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof window.__xtjOpenAiChat === 'function', { timeout: 15000 });
+
+  await page.evaluate(() => {
+    window.currentUser = 'low-limit-fixture-user';
+    window.ensureUserToken = async function () { return 'fixture-token'; };
+    window.ensureProtectedOperationAuth = async function () { return { ok: true }; };
+    return window.__xtjOpenAiChat();
+  });
+
+  await expect(page.locator('#aiChatRoot')).toBeVisible({ timeout: 10000 });
+  await page.locator('.ai-chat-local-setup').click();
+
+  const progress = page.locator('.ai-chat-local-progress');
+  await expect(progress).toHaveAttribute('data-state', 'unsupported');
+  await expect(progress).toContainText('此设备不兼容本地 Qwen');
+  await expect(progress).toContainText('限制为 8');
+  await expect(progress).toContainText('在线 DeepSeek');
+  await expect(page.locator('.ai-chat-model-selector')).toHaveValue('online');
+  await expect(page.locator('.ai-chat-local-setup')).toBeDisabled();
+  await expect(page.locator('.ai-chat-local-setup')).toHaveText('此设备不支持本地 Qwen');
+});
