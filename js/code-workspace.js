@@ -27,6 +27,7 @@
     thinkingMode: 'auto',
     composerDraft: '',
     composerMenu: null,
+    ignoreDocumentContextOnce: false,
     composerIsComposing: false,
     composerMounted: false,
     autoScrollPinned: true,
@@ -69,6 +70,8 @@
     _capabilitiesPromise: null,
     _modelsPromise: null,
     _composerGlobalCleanup: null,
+    _localRuntime: null,
+    _localRuntimeUnsubscribe: null,
     _openFilePromises: {},
     _savePromises: {},
     _undoLock: false,
@@ -85,6 +88,7 @@
   // DOM cache
   // ──────────────────────────────────────────────
   var _dom = {};
+  var _documentExtractionSerial = 0;
   var MAX_OPEN_FILE_CONTEXT = 12;
   var MAX_OPEN_FILE_CHARS = 240000;
   var MAX_OPEN_FILES_TOTAL_CHARS = 900000;
@@ -431,26 +435,29 @@
   }
 
   function showToast(msg, type) {
-    try {
-      if (typeof window.showToast === 'function') {
-        window.showToast(msg, type);
-        return;
-      }
-    } catch (e) { /* ignore */ }
-    // Fallback: inline toast in code panel
-    var panel = _dom.panelCode;
-    if (!panel) return;
-    var existing = panel.querySelector('.code-toast');
-    if (existing) existing.remove();
-    var toast = document.createElement('div');
-    toast.className = 'code-toast' + (type === 'error' ? ' error' : '') + (type === 'success' ? ' success' : '');
-    toast.textContent = msg;
-    panel.appendChild(toast);
-    setTimeout(function () {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s ease';
-      setTimeout(function () { try { toast.remove(); } catch (e) { /* ignore */ } }, 300);
-    }, type === 'error' ? 4000 : 2500);
+    // Code notifications must stay inside the Code flow. The global toast is
+    // fixed near the top of the viewport and can cover the streamed answer.
+    var notice = document.getElementById('codeChatNotice');
+    if (!notice && _dom.panelCode) notice = _dom.panelCode.querySelector('.code-chat-notice');
+    if (!notice && _dom.panelCode) {
+      notice = document.createElement('div');
+      notice.className = 'code-chat-notice';
+      notice.id = 'codeChatNotice';
+      notice.hidden = true;
+      notice.setAttribute('role', 'status');
+      notice.setAttribute('aria-live', 'polite');
+      _dom.panelCode.insertBefore(notice, _dom.panelCode.firstChild || null);
+    }
+    if (!notice) return;
+    if (notice._hideTimer) clearTimeout(notice._hideTimer);
+    notice.className = 'code-chat-notice' + (type === 'error' ? ' error' : '') + (type === 'success' ? ' success' : '') + (type === 'warning' ? ' warning' : '');
+    notice.textContent = String(msg || '');
+    notice.hidden = false;
+    notice.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    notice._hideTimer = setTimeout(function () {
+      notice.hidden = true;
+      notice._hideTimer = null;
+    }, type === 'error' ? 6000 : 3500);
   }
 
   function validatePath(path) {
@@ -1008,6 +1015,14 @@
           statusText.className = 'welcome-status error';
         }
       }).catch(function (err) {
+        if (extractionTimer) { clearTimeout(extractionTimer); extractionTimer = null; }
+        if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') return null;
+        if (err && err.name === 'AbortError') {
+          tab._docState = 'cancelled';
+          tab._parseReady = false;
+          state._documentStates[tab.path] = { state: 'cancelled', generation: tab._extractGeneration, extractionId: extractionId, error: '文档提取已取消' };
+          return null;
+        }
         clearBtn.disabled = false;
         clearBtn.textContent = '清除旧记录';
         statusText.textContent = '清除失败: ' + (err && err.message ? err.message : String(err));
@@ -1448,12 +1463,12 @@
     }
     
     if (!window.isSecureContext) {
-      if (typeof window.showToast === 'function') window.showToast('需要 HTTPS 环境才能使用文件系统 API', 'error');
+      showToast('需要 HTTPS 环境才能使用文件系统 API', 'error');
       return;
     }
 
     if (!window.__xtjCodeFS || !window.__xtjCodeFS.selectDirectory) {
-      if (typeof window.showToast === 'function') window.showToast('文件系统 API 不可用', 'error');
+      showToast('文件系统 API 不可用', 'error');
       return;
     }
 
@@ -1491,7 +1506,7 @@
       } else if (err.name === 'AbortError') {
         return; // User cancelled
       }
-      if (typeof window.showToast === 'function') window.showToast('选择文件夹失败：' + msg, 'error');
+      showToast('选择文件夹失败：' + msg, 'error');
     });
   }
 
@@ -2709,8 +2724,10 @@
       renderTabs();
       renderEditor();
 
-      // Auto-pin opened file as high priority (not full context upload)
-      if ((tab.type === 'text' || tab.type === 'document') && state.pinnedFiles.indexOf(path) === -1) {
+      // Text files are cheap to keep in the active context. Documents must be
+      // explicitly selected/attached; auto-pinning every opened document made
+      // an unrelated failed extraction block the next AI request.
+      if (tab.type === 'text' && state.pinnedFiles.indexOf(path) === -1) {
         if (!isRestrictedContextFile(path)) {
           state.pinnedFiles.push(path);
           renderProjectStatus();
@@ -3286,20 +3303,36 @@
     }
 
     if (!tab._extractPromise) {
+      var extractionId = 'doc_extract_' + (++_documentExtractionSerial);
+      var extractionTimer = null;
+      tab._extractId = extractionId;
       tab._parseReady = false;
       tab._docState = 'extracting';
       tab._extractGeneration = state.workspaceGeneration;
       tab._extractAbortController = new AbortController();
       state._documentStates[tab.path] = { state: 'extracting', generation: state.workspaceGeneration, error: null };
-      tab._extractPromise = fs.readFileByPath(tab.path).then(function (result) {
+      extractionTimer = setTimeout(function () {
+        if (tab._extractId !== extractionId || tab._docState !== 'extracting') return;
+        try { tab._extractAbortController.abort(); } catch (_) {}
+        tab._docState = 'timed_out';
+        tab._parseReady = false;
+        tab._extractError = '文档提取超时';
+        state._documentStates[tab.path] = { state: 'timed_out', generation: tab._extractGeneration, extractionId: extractionId, error: tab._extractError };
+        renderProjectStatus();
+        updateChatRequestControls();
+      }, 30000);
+      tab._extractPromise = fs.readFileByPath(tab.path, { signal: tab._extractAbortController.signal }).then(function (result) {
         if (!result || result.type !== 'document') {
           throw new Error('无法读取文档文件');
         }
-        return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType);
+        return fs.readDocumentText(result._arrayBuffer, result.name, result.mimeType, { signal: tab._extractAbortController.signal });
       }).then(function (docData) {
         if (!docData) return;
+        if (extractionTimer) { clearTimeout(extractionTimer); extractionTimer = null; }
+        if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') return;
         // 延迟提取守卫：检查 generation 是否已变化
-        if (tab._extractGeneration !== state.workspaceGeneration) {
+        if (state.workspaceGeneration !== tab._extractGeneration) {
+          // The generation is stale; discard the late extraction result.
           tab._docState = 'cancelled';
           state._documentStates[tab.path] = { state: 'cancelled', generation: tab._extractGeneration, error: '工作区已切换' };
           return;
@@ -3314,6 +3347,9 @@
         docData.ext = tab.name.match(/\.[^.]+$/) ? tab.name.match(/\.[^.]+$/)[0] : '';
         return docData;
       }).catch(function (err) {
+        if (tab._extractId !== extractionId || tab._docState === 'timed_out' || tab._docState === 'cancelled') {
+          return null;
+        }
         tab._extractError = err && err.message ? err.message : '文档提取失败';
         tab._parseReady = false;
         tab._docState = 'failed';
@@ -3323,6 +3359,11 @@
     }
 
     tab._extractPromise.then(function (docData) {
+      if (!docData || tab._extractId !== extractionId || tab._docState !== 'ready') {
+        renderProjectStatus();
+        updateChatRequestControls();
+        return;
+      }
       renderDocData(docData);
       // P0: 文档提取完成后同步更新项目状态面板
       renderProjectStatus();
@@ -4746,6 +4787,14 @@
       '<span class="chat-model-badge" title="' + escapeHTML(badge.title) + '">' + escapeHTML(badge.text) + '</span>';
     _dom.chatPanel.appendChild(header);
 
+    var notice = document.createElement('div');
+    notice.className = 'code-chat-notice';
+    notice.id = 'codeChatNotice';
+    notice.hidden = true;
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    _dom.chatPanel.appendChild(notice);
+
     var messages = document.createElement('div');
     messages.className = 'code-chat-messages';
     messages.id = 'codeChatMessages';
@@ -4788,10 +4837,15 @@
           '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
         '</select>' +
         '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
-        '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
+      '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
+      '</div>' +
+      '<div class="code-local-model-status" id="codeLocalModelStatus" role="status" aria-live="polite" hidden>' +
+        '<div class="code-local-model-status-line"><span id="codeLocalModelStatusText"></span><span id="codeLocalModelStatusValue"></span></div>' +
+        '<progress id="codeLocalModelProgress" max="1" value="0" aria-label="本地 Qwen 下载进度"></progress>' +
       '</div>' +
       '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
       '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu" hidden>' +
+        '<button type="button" role="menuitem" data-composer-action="ignore-documents">Ignore documents for this send</button>' +
         '<button type="button" role="menuitem" data-composer-action="upload">上传资料</button>' +
         '<button type="button" role="menuitem" data-composer-action="current">添加当前文件</button>' +
         '<button type="button" role="menuitem" data-composer-action="open">添加已打开文件</button>' +
@@ -5015,6 +5069,67 @@
     });
   }
 
+  function bindLocalRuntimeStatus(runtime) {
+    if (!runtime || typeof runtime.onStatusChange !== 'function') return;
+    if (state._localRuntime === runtime && state._localRuntimeUnsubscribe) return;
+    if (state._localRuntimeUnsubscribe) {
+      try { state._localRuntimeUnsubscribe(); } catch (_) {}
+    }
+    state._localRuntime = runtime;
+    state._localRuntimeUnsubscribe = runtime.onStatusChange(function () {
+      updateComposerControls();
+    });
+  }
+
+  function updateLocalModelStatus(runtime, isLocalModel) {
+    var status = document.getElementById('codeLocalModelStatus');
+    var statusText = document.getElementById('codeLocalModelStatusText');
+    var statusValue = document.getElementById('codeLocalModelStatusValue');
+    var progressEl = document.getElementById('codeLocalModelProgress');
+    if (!status || !statusText || !statusValue || !progressEl) return;
+    if (!isLocalModel || !runtime) {
+      status.hidden = true;
+      return;
+    }
+    bindLocalRuntimeStatus(runtime);
+    var localState = typeof runtime.getState === 'function' ? runtime.getState() : 'idle';
+    var progress = typeof runtime.getProgressValue === 'function' ? Number(runtime.getProgressValue()) : 0;
+    progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+    var progressText = typeof runtime.getProgressText === 'function' ? runtime.getProgressText() : '';
+    var label = '本地 Qwen 尚未下载';
+    var value = '点击上方按钮开始';
+    if (localState === 'downloading') {
+      label = '正在下载本地 Qwen';
+      value = Math.round(progress * 100) + '%';
+      progressEl.hidden = false;
+    } else if (localState === 'initializing') {
+      label = '正在初始化本地 Qwen';
+      value = '请稍候';
+      progressEl.hidden = false;
+    } else if (localState === 'ready') {
+      label = '本地 Qwen 已就绪';
+      value = '可离线使用';
+      progress = 1;
+      progressEl.hidden = false;
+    } else if (localState === 'failed') {
+      label = '本地 Qwen 准备失败';
+      value = '点击上方按钮重试';
+      progressEl.hidden = true;
+    } else if (localState === 'cancelled') {
+      label = '本地 Qwen 下载已取消';
+      value = '点击上方按钮重试';
+      progressEl.hidden = true;
+    } else {
+      progressEl.hidden = true;
+    }
+    status.hidden = false;
+    status.dataset.state = localState;
+    statusText.textContent = label;
+    statusValue.textContent = value;
+    status.title = progressText || label;
+    progressEl.value = progress;
+  }
+
   function updateComposerControls() {
     var modelSelect = document.getElementById('codeModelSelect');
     var thinkingSelect = document.getElementById('codeThinkingSelect');
@@ -5043,10 +5158,11 @@
     }
     if (localSetupButton) {
       var localRuntime = window.__xtjLocalAI;
+      bindLocalRuntimeStatus(localRuntime);
       var localState = localRuntime && localRuntime.getState();
       localSetupButton.disabled = localState === 'downloading' || localState === 'initializing';
       localSetupButton.textContent = localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
-        (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）');
+        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'));
     }
     if (thinkingSelect) {
       normalizeThinkingModeForSelectedModel();
@@ -5068,6 +5184,7 @@
       var modelHint = selectedCodeModel();
       // P3: 本地模型状态显示
       var isLocalModel = !!(window.__xtjLocalAI && modelHint && modelHint.local);
+      updateLocalModelStatus(window.__xtjLocalAI, isLocalModel);
       if (isLocalModel) {
         var localState = window.__xtjLocalAI.getState();
         var localProgress = window.__xtjLocalAI.getProgressValue();
@@ -5076,10 +5193,14 @@
           runtimeStatus.textContent = '下载中 ' + Math.round(localProgress * 100) + '%';
           runtimeStatus.hidden = false;
           runtimeStatus.title = '本地模型下载进度';
-        } else if (localState === 'initializing' || localState === 'idle') {
+        } else if (localState === 'initializing') {
           runtimeStatus.textContent = '初始化中…';
           runtimeStatus.hidden = false;
           runtimeStatus.title = '本地模型初始化中';
+        } else if (localState === 'idle') {
+          runtimeStatus.textContent = '尚未下载';
+          runtimeStatus.hidden = false;
+          runtimeStatus.title = '点击下载按钮开始准备本地模型';
         } else if (localState === 'ready') {
           runtimeStatus.textContent = '已就绪';
           runtimeStatus.hidden = false;
@@ -5135,6 +5256,8 @@
         localSetupButton.disabled = true;
         localSetupButton.textContent = '正在准备本地 Qwen…';
         ensureCodeLocalAiRuntime().then(function(runtime) {
+          bindLocalRuntimeStatus(runtime);
+          updateComposerControls();
           if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
           state.selectedModelId = runtime.LOCAL_MODEL_ID;
           saveComposerPreferences();
@@ -5215,6 +5338,10 @@
           showToast(state.pinnedFiles.length ? ('已固定：' + state.pinnedFiles.map(function(path) { return path.split('/').pop(); }).join('、')) : '当前没有固定文件', 'info');
         }
         if (action === 'clear') consumeTransientAttachments();
+        if (action === 'ignore-documents') {
+          state.ignoreDocumentContextOnce = true;
+          showToast('This send will ignore documents that are not ready.', 'info');
+        }
         contextMenu.hidden = true;
         state.composerMenu = null;
         contextButton.setAttribute('aria-expanded', 'false');
@@ -5472,7 +5599,9 @@
     return selected;
   }
 
-  function ensureOpenFileContexts(message) {
+  function ensureOpenFileContexts(message, options) {
+    options = options || {};
+    if (options.ignoreDocumentContext === true) return Promise.resolve([]);
     // P0: Only wait for RELEVANT documents, not all open tabs
     // Relevant = current file + pinned files + attachments + files explicitly mentioned in message
     var pending = [];
@@ -5507,10 +5636,17 @@
     state.openTabs.forEach(function (tab) {
       if (tab.type === 'document' && tab._docState === 'extracting' && tab._extractPromise && relevantPaths.has(tab.path)) {
         // Add timeout to relevant document extractions (30s max)
+        var extractionTimeoutId = null;
+        var extractionId = tab._extractId;
+        var extractionGeneration = tab._extractGeneration;
         var extractWithTimeout = Promise.race([
           tab._extractPromise,
           new Promise(function(resolve) {
-            setTimeout(function() {
+            extractionTimeoutId = setTimeout(function() {
+              if (tab._extractId !== extractionId || tab._docState !== 'extracting' || extractionGeneration !== state.workspaceGeneration) {
+                resolve(null);
+                return;
+              }
               // 超时：中止提取控制器并标记状态
               if (tab._extractAbortController) {
                 try { tab._extractAbortController.abort(); } catch (_) {}
@@ -5520,7 +5656,9 @@
               resolve(null);
             }, 30000);
           })
-        ]);
+        ]).finally(function() {
+          if (extractionTimeoutId) { clearTimeout(extractionTimeoutId); extractionTimeoutId = null; }
+        });
         pending.push(extractWithTimeout);
       }
     });
@@ -5554,9 +5692,15 @@
     var scope = getWorkspaceScope();
     // 检查是否有文档仍未就绪
     var warnings = [];
-    var hasPendingDocs = state.openTabs.some(function(t) { return t.type === 'document' && t._docState === 'extracting'; });
-    if (hasPendingDocs) {
-      warnings.push('documents_not_ready');
+    var notReadyDocs = state.openTabs.filter(function(t) {
+      return t.type === 'document' && ['ready'].indexOf(t._docState) < 0;
+    });
+    if (notReadyDocs.length > 0) {
+      warnings.push({
+        code: 'documents_not_ready',
+        paths: notReadyDocs.map(function(t) { return t.path; }).filter(Boolean),
+        states: notReadyDocs.map(function(t) { return { path: t.path, state: t._docState || 'unknown' }; })
+      });
     }
     var body = {
       workspace_name: state.workspaceName || '',
@@ -5709,18 +5853,16 @@
     if (!input && !isRetry) return;
     var message = isRetry ? String(retryMessage || '').trim() : input.value.trim();
     var hasAttachments = state.attachments.length > 0;
+    var ignoreDocumentContext = sendOptions.ignoreDocumentContext === true || state.ignoreDocumentContextOnce === true;
     if (!isRetry && state.attachmentProcessing && hasAttachments) {
       showToast('资料正在解析，请完成后再发送', 'info');
       return;
     }
-    // P0: 检查是否有文档仍在提取中，阻止发送
-    if (!isRetry) {
-      var extractingDocs = state.openTabs.filter(function(t) { return t.type === 'document' && t._docState === 'extracting'; });
-      if (extractingDocs.length > 0) {
-        showToast('文档正在提取中，请完成后再发送', 'info');
-        return;
-      }
-    }
+    // Document readiness is resolved by ensureOpenFileContexts().  Do not
+    // block a request because an unrelated background tab failed extraction:
+    // that tab is omitted from open_files, while relevant extracting tabs are
+    // awaited and relevant failures remain actionable there.
+    if (ignoreDocumentContext) state.ignoreDocumentContextOnce = false;
     if (!message && hasAttachments && !isRetry) {
       // The server requires a non-empty instruction. Make attachment-only
       // sends useful without fabricating a model-side prompt elsewhere.
@@ -5862,7 +6004,8 @@
     // Documents are extracted asynchronously for preview. Wait for that
     // result before building the request, otherwise a fast send would omit
     // the document and the backend would incorrectly ask for an index.
-    return ensureOpenFileContexts(message).then(function () {
+    var requestSendOptions = Object.assign({}, sendOptions, { ignoreDocumentContext: ignoreDocumentContext });
+    return ensureOpenFileContexts(message, requestSendOptions).then(function () {
       if (requestId !== state._requestId || wsGen !== state.workspaceGeneration) {
         finalizeRequest(ctx, { cancelled: true, cancelReason: 'stale' });
         return null;
@@ -5871,7 +6014,7 @@
         client_request_id: ctx.clientRequestId,
         conversation_id: state.conversationId,
         workspace_generation: getWorkspaceScope().workspace_generation
-      }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId, sendOptions);
+      }) : buildChatRequestBody(message, historyMsgs, ctx.clientRequestId, requestSendOptions);
       ctx.fileContextVersions = {};
       (body.open_files || []).forEach(function (file) {
         if (file && typeof file.path === 'string') {
@@ -6063,7 +6206,20 @@
 
   function cancelCurrentRequest() {
     var ctx = state.activeRequest;
-    if (!ctx) return false;
+    // Recover the cancel path when a request was restored or entered the
+    // sending state before its full context object was published.
+    if (!ctx) {
+      if (!state.sending || !state._abortController) return false;
+      try { state._abortController.abort(); } catch (_) {}
+      state._abortController = null;
+      state.sending = false;
+      state.requestStatus = 'idle';
+      state._requestId++;
+      if (typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+        updateChatRequestControls();
+      }
+      return true;
+    }
     ctx.cancelled = true;
     ctx.cancelReason = 'user_cancelled';
     if (ctx.streamState && typeof ctx.streamState.cancel === 'function') {

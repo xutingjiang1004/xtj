@@ -53,6 +53,9 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     expect(csp).toContain("script-src");
     expect(csp).toContain("'self'");
     expect(csp).toContain("'unsafe-inline'");
+    expect(csp).toContain("'unsafe-eval'");
+    expect(csp).toContain("'wasm-unsafe-eval'");
+    expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("https://cdn.jsdelivr.net");
   });
 
@@ -63,6 +66,9 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     const csp = cspHeader.headers.find(x => x.key === 'Content-Security-Policy').value;
     expect(csp, "vercel.json CSP must NOT contain 'strict-dynamic'").not.toContain("'strict-dynamic'");
     expect(csp).toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("'unsafe-eval'");
+    expect(csp).toContain("'wasm-unsafe-eval'");
+    expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toBe(sharedSecurityHeaders.CSP);
   });

@@ -13,6 +13,7 @@
 
   var page = 0;
   var more = true;
+  var firstPageLoaded = false;
   var loading = false;
   var realtimeChannel = null;
   var bc = null;
@@ -20,6 +21,8 @@
   var LOAD_CACHE_TTL_MS = 20000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
+  var loadMoreController = null;
+  var loadMorePromise = null;
   // P5: 分页绑定状态 — 按 page 跟踪 requestId、AbortController、generation
   var _fetchPhotoPageState = {};
   var pendingDeletedPhotoIds = new Set();
@@ -184,7 +187,28 @@
     return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
   }
 
-  async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal, requestId){
+  function createPhotoAbortError(){
+    var error = new Error('photo page request aborted');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function abortPhotoPageRequests(){
+    if (activePhotoLoadController) {
+      try { activePhotoLoadController.abort(); } catch (e) {}
+    }
+    if (loadMoreController) {
+      try { loadMoreController.abort(); } catch (e) {}
+    }
+    Object.keys(_fetchPhotoPageState).forEach(function(key){
+      var state = _fetchPhotoPageState[key];
+      if (state && state.controller) {
+        try { state.controller.abort(); } catch (e) {}
+      }
+    });
+  }
+
+  async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal, requestId, requestGeneration){
     var page = pageIndex;
     var limit = PAGE_SIZE;
     // P5: 分页绑定 — 管理每个 page 的请求
@@ -196,34 +220,44 @@
         try { prevState.controller.abort(); } catch (e) {}
       }
     }
+    var requestState = null;
     if (requestId) {
-      _fetchPhotoPageState[stateKey] = { requestId: requestId, controller: null, generation: (prevState ? prevState.generation + 1 : 1) };
+      requestState = { requestId: requestId, controller: null, generation: (prevState ? prevState.generation + 1 : 1) };
+      _fetchPhotoPageState[stateKey] = requestState;
     }
-    var currentGen = requestId ? _fetchPhotoPageState[stateKey].generation : 0;
+    var currentGen = requestState ? requestState.generation : 0;
 
     var controller = new AbortController();
     if (requestId) {
-      _fetchPhotoPageState[stateKey].controller = controller;
+      requestState.controller = controller;
     }
     var timeout = timeoutMs || 10000;
     var timer = setTimeout(function() { controller.abort(); }, timeout);
     var onAbort = function() { controller.abort(); };
-    if (externalSignal) {
-      if (externalSignal.aborted) throw new DOMException('Aborted', 'AbortError');
-      externalSignal.addEventListener('abort', onAbort);
+    function isCurrentRequest(){
+      var stateIsCurrent = !requestState || (_fetchPhotoPageState[stateKey] === requestState && requestState.generation === currentGen);
+      var loadIsCurrent = requestGeneration == null || requestGeneration === photoLoadGeneration;
+      return stateIsCurrent && loadIsCurrent && !controller.signal.aborted;
     }
     try {
+      if (externalSignal) {
+        if (externalSignal.aborted) throw createPhotoAbortError();
+        externalSignal.addEventListener('abort', onAbort);
+      }
       var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
       // P5: 如果 generation 已变化（被新请求替代），丢弃结果
-      if (requestId && currentGen !== _fetchPhotoPageState[stateKey].generation) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
+      if (!isCurrentRequest()) throw createPhotoAbortError();
       var result = await resp.json();
+      // 响应体解析期间也可能发生 force refresh，旧结果不得再返回给调用方。
+      if (!isCurrentRequest()) throw createPhotoAbortError();
       if (!resp.ok || !result.ok) throw new Error(result.error || 'fetch failed');
       return result.data || [];
     } finally {
       clearTimeout(timer);
       if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
+      if (requestState && _fetchPhotoPageState[stateKey] === requestState) {
+        requestState.controller = null;
+      }
     }
   }
 
@@ -234,37 +268,41 @@
     photoLoadGeneration++;
     var currentGen = photoLoadGeneration;
     
-    if (activePhotoLoadController) {
-      try { activePhotoLoadController.abort(); } catch (e) {}
-    }
+    abortPhotoPageRequests();
+    // 旧分页 Promise 已被作废；它的 finally 会通过 identity check 保持新请求不受影响。
+    loadMorePromise = null;
+    loadMoreController = null;
     activePhotoLoadController = new AbortController();
-    var signal = activePhotoLoadController.signal;
+    var loadController = activePhotoLoadController;
+    var signal = loadController.signal;
     
     loading = true;
-    page = 0;
-    more = true;
-    setPhotoWallSyncStatus('syncing', '同步照片中');
-
-    // stale-while-revalidate: 立即展示本地缓存
-    var local = loadLocalPhotoWallData();
-    var hasCache = local.length > 0;
-    if (hasCache && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
-      window.photoWallData = mergePhotoLists(local, []);
-      lastLoadedAt = Date.now();
-      window.photoWallDataLoadedAt = lastLoadedAt;
-      if (typeof window.renderPhotoWallWithoutReload === 'function') {
-        window.renderPhotoWallWithoutReload();
-      } else if (typeof window.renderPhotoWall === 'function') {
-        window.renderPhotoWall();
-      }
-    }
-
+    var local = [];
+    var hasCache = false;
     try {
+      setPhotoWallSyncStatus('syncing', '同步照片中');
+
+      // stale-while-revalidate: 立即展示本地缓存
+      local = loadLocalPhotoWallData();
+      hasCache = local.length > 0;
+      if (hasCache && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
+        window.photoWallData = mergePhotoLists(local, []);
+        lastLoadedAt = Date.now();
+        window.photoWallDataLoadedAt = lastLoadedAt;
+        if (typeof window.renderPhotoWallWithoutReload === 'function') {
+          window.renderPhotoWallWithoutReload();
+        } else if (typeof window.renderPhotoWall === 'function') {
+          window.renderPhotoWall();
+        }
+      }
+
       // 首次请求 25s，已有缓存时后台刷新 10s
       var requestId = 'load_' + photoLoadGeneration + '_' + Date.now();
-      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal, requestId);
+      var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal, requestId, currentGen);
       if (currentGen !== photoLoadGeneration) return window.photoWallData; // Aborted by newer request
       
+      firstPageLoaded = true;
+      page = 0;
       more = rows.length >= PAGE_SIZE;
       if (!more && local.length) {
         // P4: 云端成功返回空数组 — 用户已在云端删除所有照片。
@@ -328,32 +366,52 @@
     } finally {
       if (currentGen === photoLoadGeneration) {
         loading = false;
-        if (activePhotoLoadController === activePhotoLoadController) {
-            // just to be safe
-        }
+      }
+      if (activePhotoLoadController === loadController) {
+        activePhotoLoadController = null;
       }
     }
   }
 
-  async function loadMorePhotos(){
-    if (!more) return [];
-    page += 1;
-    try {
-      var requestId = 'more_' + page + '_' + Date.now();
-      var rows = await fetchPhotoPage(page, 10000, null, requestId);
-      more = rows.length >= PAGE_SIZE;
-      var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
-      window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
-      saveLocalPhotoWallData();
-      lastLoadedAt = Date.now();
-      window.photoWallDataLoadedAt = lastLoadedAt;
-      return items;
-    } catch (err) {
-      console.warn('[PhotoWall] load more failed', err);
-      page = Math.max(0, page - 1);
-      // 抛出错误让渲染层区分"加载失败"和"没有更多"
-      throw err;
-    }
+  function loadMorePhotos(){
+    if (loadMorePromise) return loadMorePromise;
+    if (loading || !firstPageLoaded || !more) return Promise.resolve([]);
+
+    var requestGeneration = photoLoadGeneration;
+    var nextPage = page + 1;
+    var controller = new AbortController();
+    var requestId = 'more_' + nextPage + '_' + Date.now();
+    loadMoreController = controller;
+    var requestPromise;
+    requestPromise = (async function(){
+      try {
+        var rows = await fetchPhotoPage(nextPage, 10000, controller.signal, requestId, requestGeneration);
+        if (requestGeneration !== photoLoadGeneration || controller.signal.aborted) {
+          throw createPhotoAbortError();
+        }
+        var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
+        // page、more 和列表只在请求成功且仍属于当前 generation 时一起提交。
+        if (requestGeneration !== photoLoadGeneration || controller.signal.aborted) {
+          throw createPhotoAbortError();
+        }
+        window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
+        page = nextPage;
+        more = rows.length >= PAGE_SIZE;
+        saveLocalPhotoWallData();
+        lastLoadedAt = Date.now();
+        window.photoWallDataLoadedAt = lastLoadedAt;
+        return items;
+      } catch (err) {
+        console.warn('[PhotoWall] load more failed', err);
+        // 不回滚 page：失败路径从未提交 page，避免并发/刷新导致页码被旧请求污染。
+        throw err;
+      } finally {
+        if (loadMoreController === controller) loadMoreController = null;
+        if (loadMorePromise === requestPromise) loadMorePromise = null;
+      }
+    })();
+    loadMorePromise = requestPromise;
+    return requestPromise;
   }
 
   function hasMorePhotos(){ return !!more; }

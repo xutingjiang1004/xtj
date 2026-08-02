@@ -194,11 +194,17 @@ test.describe('Code workspace stream state regressions', () => {
     const ui = await page.locator('.code-stream-content').evaluate((content) => ({
       empty: content.textContent.trim() === '',
       placeholder: getComputedStyle(content, '::before').content,
-      visible: getComputedStyle(content).display !== 'none'
+      visible: getComputedStyle(content).display !== 'none',
+      writingMode: getComputedStyle(content).writingMode,
+      whiteSpace: getComputedStyle(content).whiteSpace,
+      backToBottomPosition: getComputedStyle(document.getElementById('codeChatBackToBottom')).position
     }));
     expect(ui.empty).toBe(true);
     expect(ui.placeholder).toContain('等待 AI');
     expect(ui.visible).toBe(true);
+    expect(ui.writingMode).toBe('horizontal-tb');
+    expect(ui.whiteSpace).toBe('normal');
+    expect(ui.backToBottomPosition).toBe('static');
     await expect(page.locator('.code-stream-status')).toHaveAttribute('data-state', 'connecting');
     await page.locator('#codeChatCancelBtn').click();
   });
