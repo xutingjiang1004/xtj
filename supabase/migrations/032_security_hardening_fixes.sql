@@ -14,6 +14,12 @@
 
 BEGIN;
 
+-- 025/026 (and manually applied production copies) may have created this
+-- signature with a different return type. PostgreSQL rejects CREATE OR
+-- REPLACE when only the return type changes; this migration owns the hardened
+-- definition, so drop the old signature before replacing it.
+DROP FUNCTION IF EXISTS public.delete_post_with_actor(UUID, TEXT);
+
 -- ============ 1. brain_nodes / ai_jobs RLS ============
 ALTER TABLE public.brain_nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_jobs ENABLE ROW LEVEL SECURITY;

@@ -3888,7 +3888,7 @@ const CAT_AI_DISPLAY_NAME = '小猫';
 const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
 // Phase 3-P0-6: Fix regex — old lookahead rejected Chinese chars after 小猫,
 // so @小猫帮我看看 did not match. Now only exclude 猫 (to reject @小猫咪).
-const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫])/;
+const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫咪])/;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_MAX_CONCURRENT = 3;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
@@ -7585,7 +7585,7 @@ async function listStorageObjectsPaged(bucket, directory, search) {
 app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var uploadId = (req.body && req.body.upload_id) || '';
-    if (!/^[a-z0-9_-]{8,64}$/i.test(String(uploadId))) return res.status(400).json({ error: 'upload_id 格式无效' });
+    if (!/^[a-z0-9_-]{6,128}$/i.test(String(uploadId))) return res.status(400).json({ error: 'upload_id 格式无效' });
     // 按 upload_id 查询（actor_key 格式: photo_${uploadId}）
     var { data: photo, error: photoLookupError } = await supabase.from('posts')
       .select('id, media_url, created_at, content')
@@ -7629,7 +7629,12 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
           }
         }
       }
-    } catch (_) { /* 清理是尽力而为，不阻塞主流程 */ }
+    } catch (cleanupError) {
+      // A status response must never claim the upload is committed while the
+      // reconciliation query or durable cleanup outcome is unknown.
+      console.warn('[PhotoWall] status cleanup failed:', cleanupError && cleanupError.message);
+      return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo storage reconciliation is temporarily unavailable' });
+    }
 
     return res.json({ status: 'committed', cleanup_pending: photo.cleanup_pending === true, data: photo });
   } catch(e) {
@@ -7645,13 +7650,13 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     if (typeof path !== 'string' || !path || typeof uploadId !== 'string' || !uploadId) {
       return res.status(400).json({ ok: false, error: '缺少清理凭证' });
     }
-    if (!/^[a-z0-9_-]{8,64}$/i.test(uploadId)) {
+    if (!/^[a-z0-9_-]{6,128}$/i.test(uploadId)) {
       return res.status(400).json({ ok: false, error: '清理凭证不合法' });
     }
     // 只接受 upload-ui.js 生成的平面文件名，避免通过 PostgREST 表达式或
     // Storage 路径穿越把本接口变成任意文件删除器。
     if (path.indexOf('photos/' + uploadId + '_') !== 0 ||
-        !/^photos\/[a-z0-9_-]{8,64}_\d{10,}_[a-z0-9]+_[A-Za-z0-9_-]{1,48}(?:\.[A-Za-z0-9]{1,8})?$/i.test(path)) {
+        !/^photos\/[a-z0-9_-]{6,128}_\d{10,}_[a-z0-9]+_[A-Za-z0-9_-]{1,48}(?:\.[A-Za-z0-9]{1,8})?$/i.test(path)) {
       return res.status(400).json({ ok: false, error: '路径不合法' });
     }
     // 派生文件（缩略图/旋转版）一律不允许通过本接口删除，只能走照片删除流程
@@ -7679,7 +7684,7 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     // 时间窗口校验：本接口只处理本次上传失败遗留的文件
     // （命名约定 photos/<upload_id>_<epochMs>_<rand>_<name>）。
     var namePart = path.slice('photos/'.length);
-    var tsMatch = String(namePart).match(/^[a-z0-9_-]{8,64}_(\d{10,})\_/i);
+    var tsMatch = String(namePart).match(/^[a-z0-9_-]{6,128}_(\d{10,})\_/i);
     var PHOTO_CLEANUP_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000;
     var allowedByAge = false;
     if (tsMatch) {
@@ -7690,15 +7695,20 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     if (!allowedByAge) {
       return res.status(403).json({ ok: false, error: '文件超出清理时限，无权清理' });
     }
-    var result = await supabase.storage.from('uploads').remove([path]);
-    if (result && result.error) {
-      var msg = String((result.error.message || result.error.error || '') || '').toLowerCase();
-      if (/not.?found|does not exist|no such|404/.test(msg)) {
-        return res.json({ ok: true, not_found: true });
-      }
-      return res.status(500).json({ ok: false, error: '清理失败: ' + (result.error.message || '') });
+    var cleanupResult;
+    try {
+      cleanupResult = await removeStorageWithQueue(supabase, {
+        bucket: 'uploads',
+        paths: [path],
+        photoId: 'photo_' + uploadId
+      });
+    } catch (cleanupError) {
+      return res.status(503).json({ ok: false, retryable: true, error: '清理暂时不可用，请稍后重试' });
     }
-    return res.json({ ok: true });
+    if (!cleanupResult || !cleanupResult.ok) {
+      return res.status(503).json({ ok: false, retryable: true, error: '清理未确认，请稍后重试', cleanup_pending: !!(cleanupResult && cleanupResult.cleanup_pending) });
+    }
+    return res.json({ ok: true, not_found: !!cleanupResult.not_found, cleanup_pending: !!cleanupResult.cleanup_pending });
   } catch (e) {
     return res.status(500).json({ ok: false, error: '清理异常: ' + (e && e.message || '') });
   }
@@ -7790,6 +7800,7 @@ async function hardDeleteContent(params) {
 
 var _storageCleanupRunning = false;
 var STORAGE_CLEANUP_CLAIM_TIMEOUT_MS = 60 * 1000;
+var STORAGE_CLEANUP_LEASE_MS = 60 * 1000;
 var STORAGE_CLEANUP_REMOVE_TIMEOUT_MS = 30 * 1000;
 
 function withStorageCleanupTimeout(promise, timeoutMs) {
@@ -7814,7 +7825,7 @@ async function processStorageCleanupJobs() {
   _storageCleanupRunning = true;
   try {
     var pending = await supabase.from('storage_cleanup_jobs')
-      .select('id, bucket, paths, attempts, status, updated_at')
+      .select('id, bucket, paths, attempts, status, updated_at, claim_token, lease_until')
       .in('status', ['pending', 'processing'])
       .order('created_at', { ascending: true })
       .limit(20);
@@ -7826,7 +7837,14 @@ async function processStorageCleanupJobs() {
     }
     for (var i = 0; i < (pending.data || []).length; i++) {
       var job = pending.data[i];
-      if (job.status === 'processing' && job.updated_at && Date.now() - Date.parse(job.updated_at) < STORAGE_CLEANUP_CLAIM_TIMEOUT_MS) continue;
+      if (job.status === 'processing') {
+        var leaseUntil = Date.parse(String(job.lease_until || ''));
+        if (Number.isFinite(leaseUntil) && leaseUntil > Date.now()) continue;
+        // Rows created before the lease columns were deployed may only have
+        // updated_at. Treat a recent legacy claim as still owned, but let an
+        // old one be reclaimed by the tokenized path below.
+        if (!job.lease_until && job.updated_at && Date.now() - Date.parse(job.updated_at) < STORAGE_CLEANUP_CLAIM_TIMEOUT_MS) continue;
+      }
       var paths = Array.isArray(job.paths) ? job.paths.filter(function(path) {
         return typeof path === 'string' && path && path.indexOf('..') < 0 && path.indexOf('\\') < 0;
       }) : [];
@@ -7835,7 +7853,18 @@ async function processStorageCleanupJobs() {
         continue;
       }
       var claimTime = new Date().toISOString();
-      var claim = await supabase.from('storage_cleanup_jobs').update({ status: 'processing', updated_at: claimTime }).eq('id', job.id).eq('status', job.status).select('id').maybeSingle();
+      var claimToken = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+      var claimQuery = supabase.from('storage_cleanup_jobs').update({
+        status: 'processing',
+        claim_token: claimToken,
+        lease_until: new Date(Date.now() + STORAGE_CLEANUP_LEASE_MS).toISOString(),
+        updated_at: claimTime
+      }).eq('id', job.id).eq('status', job.status);
+      if (job.status === 'processing') {
+        if (job.claim_token) claimQuery = claimQuery.eq('claim_token', job.claim_token);
+        else claimQuery = claimQuery.is('claim_token', null);
+      }
+      var claim = await claimQuery.select('id, claim_token').maybeSingle();
       if (claim.error || !claim.data) {
         if (claim.error) console.warn('[storage-cleanup] claim failed:', claim.error.message);
         continue;
@@ -7852,13 +7881,15 @@ async function processStorageCleanupJobs() {
       if (removeError && !isNotFoundError(removeError)) {
         finalUpdate = await supabase.from('storage_cleanup_jobs').update({
           status: 'pending', attempts: nextAttempts,
-          last_error: String(removeError.message || removeError.error || 'storage_delete_failed').slice(0, 1000), updated_at: new Date().toISOString()
-        }).eq('id', job.id).eq('status', 'processing').select('id').maybeSingle();
+          last_error: String(removeError.message || removeError.error || 'storage_delete_failed').slice(0, 1000),
+          claim_token: null, lease_until: null, updated_at: new Date().toISOString()
+        }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
       } else {
         finalUpdate = await supabase.from('storage_cleanup_jobs').update({
           status: 'completed', attempts: nextAttempts,
-          last_error: null, completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        }).eq('id', job.id).eq('status', 'processing').select('id').maybeSingle();
+          last_error: null, completed_at: new Date().toISOString(),
+          claim_token: null, lease_until: null, updated_at: new Date().toISOString()
+        }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
       }
       if (finalUpdate.error || !finalUpdate.data) {
         console.warn('[storage-cleanup] final state update not confirmed for job', job.id, finalUpdate.error && finalUpdate.error.message);
@@ -8500,7 +8531,10 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'comment_failed' });
 
     // 小猫 AI 自动回复触发
-    if (hasCatMention(content) && req.userName !== CAT_AI_USERNAME) {
+    // Use the same complete trigger validator as worker/reconciliation paths;
+    // this keeps generated replies, empty authors, and @小猫咪/@小猫猫 from
+    // entering the queue through the public comment route.
+    if (isValidCatTrigger(inserted.data) && req.userName !== CAT_AI_USERNAME) {
       var rateLimit = await checkCatRateLimit(req.userName, postId);
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
@@ -9326,7 +9360,6 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var mediaPayload = null;
     var mediaClaim = null;
     var registryRow = null;
-    var mediaRegistryPending = false;
     if (storagePath) {
       if (storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) {
         return res.status(400).json({ error: 'Invalid media path', code: 'invalid_media_path' });
@@ -9344,7 +9377,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
         uploader: sender,
         kind: kindResult.kind,
         mimeType: kindResult.mimeType,
-        sizeBytes: Number(req.body && req.body.size_bytes || 0)
+        sizeBytes: req.body && (req.body.size_bytes !== undefined ? req.body.size_bytes : null)
       });
       if (!mediaClaim.ok) {
         var claimStatus = mediaClaim.state === 'forbidden' ? 403 :
@@ -9511,11 +9544,17 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     if (storagePath && registryRow && registryRow.id) {
       var mediaAttach = await attachDmMediaRegistry(registryRow, inserted.id);
       if (!mediaAttach.ok || !mediaAttach.updated) {
-        mediaRegistryPending = true;
         console.warn('[API] dm media registry attach was not confirmed:', mediaAttach.error || mediaAttach.data);
+        return res.status(503).json({
+          ok: false,
+          message_id: inserted.id,
+          error: '消息已保存，但媒体关联尚未确认，请重试',
+          code: 'media_registry_update_retry',
+          retryable: true
+        });
       }
     }
-    return res.json({ ok: true, message: inserted, media_registry_pending: mediaRegistryPending });
+    return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
     return res.status(500).json({ error: '消息发送失败', code: 'dm_send_error' });
@@ -9580,6 +9619,30 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
       return res.status(403).json({ error: '消息发送时间已超过可撤回期限', code: 'timeout' });
     }
 
+    if (storagePath) {
+      // Storage removal is allowed only after both the message table and the
+      // media registry confirm that no other row points at this object.
+      // Otherwise a duplicated/legacy actor key could delete another
+      // message's attachment.
+      var mediaReferenceChecks = await Promise.all([
+        supabase.from('posts').select('id, actor_key').eq('actor_key', msg.actor_key).limit(10),
+        supabase.from('dm_media_uploads').select('id, message_id, status').eq('storage_path', storagePath).limit(10)
+      ]);
+      if (mediaReferenceChecks.some(function(result) { return !result || result.error; })) {
+        return res.status(503).json({ error: 'Media references could not be verified', code: 'dm_media_reference_check_failed', retryable: true });
+      }
+      var mediaRegistryRows = mediaReferenceChecks[1].data || [];
+      var otherPostReference = (mediaReferenceChecks[0].data || []).some(function(row) {
+        return String(row.id || '') !== messageId;
+      });
+      var otherRegistryReference = mediaRegistryRows.some(function(row) {
+        return String(row.message_id || '') !== messageId && String(row.status || '') !== 'deleted';
+      });
+      if (otherPostReference || otherRegistryReference) {
+        return res.status(409).json({ error: 'Media object is referenced by another message', code: 'dm_media_reference_conflict', retryable: true });
+      }
+    }
+
     // 更新内容为撤回状态
     var contentPayload = JSON.stringify({ text: '[消息已撤回]', withdrawn: true, read_at: null });
     var { data: updated, error: updateErr } = await supabase
@@ -9612,18 +9675,25 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
         cleanupResult = { ok: false, cleanup_pending: false, queue_failed: true, error: cleanupError };
       }
       var registryStatus = cleanupResult.cleanup_pending || !cleanupResult.ok ? 'cleanup_pending' : 'deleted';
-      try {
-        var registryCleanup = await supabase.from('dm_media_uploads').update({
-          status: registryStatus,
-          updated_at: new Date().toISOString()
-        }).eq('storage_path', storagePath).eq('uploader', reqUser).eq('message_id', messageId).in('status', ['uploaded', 'sending', 'attached', 'cleanup_pending']).select('id').maybeSingle();
-        if (registryCleanup.error || !registryCleanup.data) {
-          mediaRegistryPending = !!registryCleanup.error;
-          console.warn('[API] dm withdraw media registry update was not confirmed:', registryCleanup.error || registryCleanup.data);
+      var registryNeedsUpdate = mediaRegistryRows.some(function (row) {
+        return ['uploaded', 'sending', 'attached', 'cleanup_pending'].indexOf(String(row.status || '')) >= 0;
+      });
+      if (registryNeedsUpdate) {
+        try {
+          var registryCleanup = await supabase.from('dm_media_uploads').update({
+            status: registryStatus,
+            updated_at: new Date().toISOString()
+          }).eq('storage_path', storagePath).eq('uploader', reqUser).eq('message_id', messageId).in('status', ['uploaded', 'sending', 'attached', 'cleanup_pending']).select('id').maybeSingle();
+          if (registryCleanup.error || !registryCleanup.data) {
+            mediaRegistryPending = true;
+            console.warn('[API] dm withdraw media registry update was not confirmed:', registryCleanup.error || registryCleanup.data);
+            return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media registry could not be updated', code: 'DM_MEDIA_REGISTRY_UPDATE_FAILED', retryable: true });
+          }
+        } catch (registryError) {
+          mediaRegistryPending = true;
+          console.warn('[API] dm withdraw media registry update failed:', registryError && registryError.message);
+          return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media registry could not be updated', code: 'DM_MEDIA_REGISTRY_UPDATE_FAILED', retryable: true });
         }
-      } catch (registryError) {
-        mediaRegistryPending = true;
-        console.warn('[API] dm withdraw media registry update failed:', registryError && registryError.message);
       }
       if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
         return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media cleanup could not be queued', code: 'DM_CLEANUP_QUEUE_FAILED', retryable: true });

@@ -32,7 +32,7 @@ function validateDmMediaKind(kind, mimeType) {
   return { ok: true, kind: normalizedKind, mimeType: normalizedMime, actorPrefix: MEDIA_KINDS[normalizedKind], mimePrefix: prefix };
 }
 
-async function verifyStorageObject(supabase, storagePath) {
+async function verifyStorageObject(supabase, storagePath, expected) {
   const parsed = validateDmStoragePath(storagePath);
   if (!parsed.ok) return parsed;
   if (!supabase || !supabase.storage || typeof supabase.storage.from !== 'function') {
@@ -52,10 +52,33 @@ async function verifyStorageObject(supabase, storagePath) {
   if (result && result.error) return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: result.error };
   const item = (result && Array.isArray(result.data) ? result.data : []).find(function (row) { return row && row.name === name; });
   if (!item) return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };
-  const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
-  const size = Number(metadata.size || metadata.contentLength || 0);
+  const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : null;
+  if (!metadata) return { ok: false, state: 'invalid', code: 'media_metadata_missing', error: 'Media object metadata is missing' };
+  const rawSize = metadata.size !== undefined && metadata.size !== null ? metadata.size : metadata.contentLength;
+  const size = Number(rawSize);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    return { ok: false, state: 'invalid', code: 'media_size_unverified', error: 'Media object size could not be verified' };
+  }
   if (size > MAX_DM_MEDIA_SIZE) return { ok: false, state: 'invalid', code: 'media_too_large', error: 'Media file is too large' };
-  return { ok: true, state: 'found', storagePath: parsed.storagePath, name: name, size: size || null, metadata: metadata };
+  const expectedMime = String(expected && (expected.mimeType || expected.mime_type) || '').trim().toLowerCase();
+  const actualMime = String(metadata.mimetype || metadata.mimeType || metadata.contentType || '').trim().toLowerCase();
+  if (expectedMime && (!actualMime || actualMime !== expectedMime)) {
+    return { ok: false, state: 'invalid', code: 'media_mime_unverified', error: 'Media object MIME type does not match the registered upload' };
+  }
+  const expectedKind = String(expected && expected.kind || '').trim().toLowerCase();
+  if (expectedKind && (!actualMime || actualMime.indexOf(expectedKind + '/') !== 0)) {
+    return { ok: false, state: 'invalid', code: 'media_kind_unverified', error: 'Media object kind does not match the registered upload' };
+  }
+  const expectedSizeRaw = expected && (expected.sizeBytes !== undefined ? expected.sizeBytes : expected.size_bytes);
+  const hasExpectedSize = expectedSizeRaw !== undefined && expectedSizeRaw !== null && expectedSizeRaw !== '';
+  const expectedSize = hasExpectedSize ? Number(expectedSizeRaw) : null;
+  if (hasExpectedSize && (!Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > MAX_DM_MEDIA_SIZE)) {
+    return { ok: false, state: 'invalid', code: 'media_size_unverified', error: 'Registered media size is invalid' };
+  }
+  if (hasExpectedSize && size !== expectedSize) {
+    return { ok: false, state: 'invalid', code: 'media_size_mismatch', error: 'Media object size does not match the registered upload' };
+  }
+  return { ok: true, state: 'found', storagePath: parsed.storagePath, name: name, size: size, metadata: metadata };
 }
 
 async function claimDmMediaUpload(supabase, options) {
@@ -66,8 +89,11 @@ async function claimDmMediaUpload(supabase, options) {
   if (!kindResult.ok) return kindResult;
   const uploader = String(options.uploader || '').trim();
   if (!uploader) return { ok: false, code: 'auth_required', error: 'Uploader is required' };
-  const sizeBytes = Number(options.sizeBytes || 0);
-  if (sizeBytes < 0 || sizeBytes > MAX_DM_MEDIA_SIZE) return { ok: false, code: 'media_too_large', error: 'Media file is too large' };
+  const hasSize = options.sizeBytes !== undefined && options.sizeBytes !== null && options.sizeBytes !== '';
+  const sizeBytes = hasSize ? Number(options.sizeBytes) : null;
+  if (hasSize && (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > MAX_DM_MEDIA_SIZE)) {
+    return { ok: false, code: 'media_size_invalid', error: 'Media file size is invalid' };
+  }
 
   let existing;
   try {
@@ -87,12 +113,20 @@ async function claimDmMediaUpload(supabase, options) {
     }
     // A registry row is not proof that the object still exists. Re-check the
     // exact Storage object before reusing an idempotent or attached row.
-    const existingStorage = await verifyStorageObject(supabase, pathResult.storagePath);
+    const existingStorage = await verifyStorageObject(supabase, pathResult.storagePath, {
+      kind: row.kind,
+      mimeType: row.mime_type,
+      sizeBytes: row.size_bytes
+    });
     if (!existingStorage.ok) return existingStorage;
     return { ok: true, state: 'found', data: row, idempotent: String(row.status || '') === 'attached' };
   }
 
-  const storageResult = await verifyStorageObject(supabase, pathResult.storagePath);
+  const storageResult = await verifyStorageObject(supabase, pathResult.storagePath, {
+    kind: kindResult.kind,
+    mimeType: kindResult.mimeType,
+    sizeBytes: sizeBytes
+  });
   if (!storageResult.ok) return storageResult;
   let inserted;
   try {
@@ -101,7 +135,7 @@ async function claimDmMediaUpload(supabase, options) {
       uploader: uploader,
       kind: kindResult.kind,
       mime_type: kindResult.mimeType,
-      size_bytes: sizeBytes || storageResult.size || null,
+      size_bytes: hasSize ? sizeBytes : (storageResult.size !== undefined ? storageResult.size : null),
       status: 'uploaded',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -141,7 +175,11 @@ async function reserveDmMediaUpload(supabase, options) {
   }
   // The row may have been loaded before the object was deleted. Validate the
   // exact path again immediately before taking a send lease.
-  const storageResult = await verifyStorageObject(supabase, row.storage_path);
+  const storageResult = await verifyStorageObject(supabase, row.storage_path, {
+    kind: row.kind,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes
+  });
   if (!storageResult.ok) return storageResult;
   if (status === 'attached' && options.allowAttachedRepair !== true) {
     return { ok: true, state: 'attached', data: row, idempotent: true };
