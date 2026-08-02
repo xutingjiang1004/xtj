@@ -6183,12 +6183,15 @@ function showChatMessages() {
       if (rawProgress === undefined && typeof runtime.getProgressValue === 'function') rawProgress = runtime.getProgressValue();
       var progress = Number(rawProgress);
       progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+      var hasProgress = info && info.hasProgress;
+      if (hasProgress === undefined && typeof runtime.hasProgressValue === 'function') hasProgress = runtime.hasProgressValue();
+      if (hasProgress === undefined) hasProgress = progress > 0;
       var isActive = localState === 'downloading' || localState === 'initializing';
       var isResult = localState === 'ready' || localState === 'failed' || localState === 'cancelled' || localState === 'unsupported';
       localProgress.hidden = !isActive && !isResult;
       localProgress.dataset.state = localState;
-      localProgressFill.style.width = Math.round(progress * 100) + '%';
-      localProgressValue.textContent = Math.round(progress * 100) + '%';
+      localProgressFill.style.width = (hasProgress ? Math.round(progress * 100) : 0) + '%';
+      localProgressValue.textContent = hasProgress && progress > 0 ? Math.round(progress * 100) + '%' : '准备中';
       if (localState === 'downloading') localProgressText.textContent = '正在下载本地 Qwen';
       else if (localState === 'initializing') localProgressText.textContent = '下载完成，正在初始化本地 Qwen';
       else if (localState === 'ready') localProgressText.textContent = '本地 Qwen 已就绪';
@@ -6197,6 +6200,9 @@ function showChatMessages() {
       else if (localState === 'unsupported') localProgressText.textContent = '此设备不兼容本地 Qwen';
       var detail = info && info.text;
       if (!detail && typeof runtime.getProgressText === 'function') detail = runtime.getProgressText();
+      var elapsedSeconds = info && Number(info.timeElapsed);
+      if (!isFinite(elapsedSeconds) && typeof runtime.getElapsedSeconds === 'function') elapsedSeconds = Number(runtime.getElapsedSeconds());
+      if (isActive && isFinite(elapsedSeconds) && elapsedSeconds > 0) detail = String(detail || '正在获取模型文件，请保持页面打开') + ' · 已用 ' + Math.floor(elapsedSeconds) + ' 秒';
       localProgressDetail.textContent = String(detail || (isActive ? '正在获取模型文件，请保持页面打开' : ''));
       if (localState === 'ready') localProgressValue.textContent = '完成';
     }
