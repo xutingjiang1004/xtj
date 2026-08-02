@@ -31,6 +31,17 @@ const SOURCE_TO_MIN = {
   'js/login-device.js': 'js/login-device.min.js',
   'js/ai-agent.js': 'js/ai-agent.min.js',
   'js/performance.js': 'js/performance.min.js',
+  'js/config.js': 'js/config.min.js',
+  'js/local-ai-runtime.js': 'js/local-ai-runtime.min.js',
+  'js/local-ai-worker.js': 'js/local-ai-worker.min.js',
+  'js/admin/admin.js': 'js/admin/admin.min.js',
+  'js/ai-core/errors.js': 'js/ai-core/errors.min.js',
+  'js/ai-core/request-controller.js': 'js/ai-core/request-controller.min.js',
+  'js/ai-core/transport.js': 'js/ai-core/transport.min.js',
+  'js/ai-core/markdown-renderer.js': 'js/ai-core/markdown-renderer.min.js',
+  'js/ai-core/scroll-controller.js': 'js/ai-core/scroll-controller.min.js',
+  'js/ai-core/stream-renderer.js': 'js/ai-core/stream-renderer.min.js',
+  'js/ai-core/telemetry.js': 'js/ai-core/telemetry.min.js',
   'css/style.css': 'css/style.min.css',
   'css/desktop.css': 'css/desktop.min.css',
   'css/ai-agent.css': 'css/ai-agent.min.css',
@@ -38,6 +49,7 @@ const SOURCE_TO_MIN = {
   'css/ui-enhance.css': 'css/ui-enhance.min.css',
   'css/ui-shell.css': 'css/ui-shell.min.css',
   'css/photo-preview.css': 'css/photo-preview.min.css',
+  'css/admin.css': 'css/admin.min.css',
 };
 
 // photo-wall 特殊映射
@@ -101,67 +113,83 @@ for (const [src, min] of Object.entries(SOURCE_TO_MIN)) {
   const srcStat = fs.statSync(srcPath);
   const minStat = fs.statSync(minPath);
 
-  if (srcStat.mtimeMs > minStat.mtimeMs) {
+  // FAT/exFAT 时间戳粒度 2 秒，容忍 2.5s 以内的差值避免误报
+  if (srcStat.mtimeMs - minStat.mtimeMs > 2500) {
     error('Source newer than min file: ' + src + ' (' + srcStat.mtime.toISOString() + ') > ' + min + ' (' + minStat.mtime.toISOString() + ')');
   } else {
     console.log('  OK: ' + src + ' -> ' + min);
   }
 }
 
-// ─── 2. 检查 index.html 引用的 Hash ─────────────────────────
-console.log('\n=== 2. index.html Hash 一致性检查 ===');
-const htmlContent = fs.readFileSync(INDEX_HTML, 'utf-8');
-
-// 提取所有 script src 引用
+// ─── 2. 检查 HTML 引用的 Hash ─────────────────────────
+const HTML_FILES = ['index.html', 'admin.html'];
 const scriptRegex = /<script[^>]+src=["']([^"']+)["'][^>]*>/g;
 const linkRegex = /<link[^>]+href=["']([^"']+)["'][^>]*>/g;
 const metaRegex = /<meta[^>]+name=["']([^"']+)["'][^>]+content=["']([^"']+)["'][^>]*>/g;
 
-const resourceRefs = [];
-
-// 从 script 标签提取
-let match;
-while ((match = scriptRegex.exec(htmlContent)) !== null) {
-  const src = match[1];
-  if (src.includes('v=')) {
-    resourceRefs.push({ type: 'script', fullPath: src, tag: 'script' });
+function checkHtmlHashes(htmlFile) {
+  console.log('\n=== 2.' + (HTML_FILES.indexOf(htmlFile) + 1) + '. ' + htmlFile + ' Hash 一致性检查 ===');
+  const htmlPath = path.join(ROOT, htmlFile);
+  if (!fileExists(htmlPath)) {
+    error('HTML file not found: ' + htmlFile);
+    return '';
   }
+  const htmlContent = fs.readFileSync(htmlPath, 'utf-8');
+
+  const resourceRefs = [];
+
+  // 从 script 标签提取
+  let match;
+  scriptRegex.lastIndex = 0;
+  while ((match = scriptRegex.exec(htmlContent)) !== null) {
+    const src = match[1];
+    if (src.includes('v=')) {
+      resourceRefs.push({ type: 'script', fullPath: src, tag: 'script' });
+    }
+  }
+
+  // 从 link 标签提取
+  linkRegex.lastIndex = 0;
+  while ((match = linkRegex.exec(htmlContent)) !== null) {
+    const href = match[1];
+    if (href.includes('v=') && href.endsWith('.css')) {
+      resourceRefs.push({ type: 'css', fullPath: href, tag: 'link' });
+    }
+  }
+
+  // 从 meta 标签提取
+  metaRegex.lastIndex = 0;
+  while ((match = metaRegex.exec(htmlContent)) !== null) {
+    const name = match[1];
+    const content = match[2];
+    if (content.includes('v=') && (content.endsWith('.js') || content.endsWith('.css'))) {
+      resourceRefs.push({ type: 'meta', fullPath: content, metaName: name, tag: 'meta' });
+    }
+  }
+
+  for (const ref of resourceRefs) {
+    const urlPart = ref.fullPath.split('?v=')[0];
+    const hashPart = ref.fullPath.split('?v=')[1];
+    const filePath = path.join(ROOT, urlPart);
+
+    if (!fileExists(filePath)) {
+      error('File referenced in ' + htmlFile + ' not found: ' + urlPart + ' (from ' + ref.tag + ')');
+      continue;
+    }
+
+    const actualHash = fileSha256Short(filePath);
+    if (actualHash !== hashPart) {
+      error('Hash mismatch for ' + urlPart + ': expected ' + actualHash + ' but got ' + hashPart + ' (from ' + ref.tag + ', ' + htmlFile + ')');
+    } else {
+      console.log('  OK: ' + urlPart + '?v=' + hashPart);
+    }
+  }
+
+  return htmlContent;
 }
 
-// 从 link 标签提取
-while ((match = linkRegex.exec(htmlContent)) !== null) {
-  const href = match[1];
-  if (href.includes('v=') && href.endsWith('.css')) {
-    resourceRefs.push({ type: 'css', fullPath: href, tag: 'link' });
-  }
-}
-
-// 从 meta 标签提取
-while ((match = metaRegex.exec(htmlContent)) !== null) {
-  const name = match[1];
-  const content = match[2];
-  if (content.includes('v=') && (content.endsWith('.js') || content.endsWith('.css'))) {
-    resourceRefs.push({ type: 'meta', fullPath: content, metaName: name, tag: 'meta' });
-  }
-}
-
-for (const ref of resourceRefs) {
-  const urlPart = ref.fullPath.split('?v=')[0];
-  const hashPart = ref.fullPath.split('?v=')[1];
-  const filePath = path.join(ROOT, urlPart);
-
-  if (!fileExists(filePath)) {
-    error('File referenced in index.html not found: ' + urlPart + ' (from ' + ref.tag + ')');
-    continue;
-  }
-
-  const actualHash = fileSha256Short(filePath);
-  if (actualHash !== hashPart) {
-    error('Hash mismatch for ' + urlPart + ': expected ' + actualHash + ' but got ' + hashPart + ' (from ' + ref.tag + ')');
-  } else {
-    console.log('  OK: ' + urlPart + '?v=' + hashPart);
-  }
-}
+const htmlContent = checkHtmlHashes('index.html');
+checkHtmlHashes('admin.html');
 
 // ─── 3. 检查 Code 模块专用 meta 配置 ────────────────────────
 console.log('\n=== 3. Code 模块 meta 配置检查 ===');
