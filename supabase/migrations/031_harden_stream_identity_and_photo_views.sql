@@ -1,5 +1,13 @@
 -- Harden post-028 stream ownership and repair photo cleanup/view helpers.
 
+-- Existing projects may already have increment_post_views(UUID) with a
+-- different return type. PostgreSQL cannot change a function return type with
+-- CREATE OR REPLACE, so remove the old signature before installing the
+-- hardened definition.
+BEGIN;
+
+DROP FUNCTION IF EXISTS public.increment_post_views(UUID);
+
 CREATE OR REPLACE FUNCTION public.increment_post_views(p_post_id UUID)
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -74,3 +82,5 @@ UPDATE public.storage_cleanup_jobs j
        updated_at = now()
   FROM repaired
  WHERE j.id = repaired.id;
+
+COMMIT;

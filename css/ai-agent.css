@@ -883,6 +883,99 @@
   pointer-events: none;
 }
 
+/* Local Qwen download status: keep the percentage and the actual progress
+   bar visible in the small-cat chat instead of hiding progress in the button
+   label. The model can take several minutes on a first run. */
+.ai-chat-model-selector-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-chat-local-progress {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 7px 9px 6px;
+  border: 1px solid rgba(66, 155, 122, 0.22);
+  border-radius: 8px;
+  background: rgba(244, 255, 251, 0.82);
+  color: rgba(44, 91, 77, 0.92);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ai-chat-local-progress[hidden] { display: none !important; }
+
+.ai-chat-local-progress-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ai-chat-local-progress-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ai-chat-local-progress-value {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.ai-chat-local-progress-track {
+  width: 100%;
+  height: 7px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(66, 155, 122, 0.13);
+}
+
+.ai-chat-local-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4aa37f, #73c6a6);
+  transition: width 0.2s ease-out;
+}
+
+.ai-chat-local-progress-detail {
+  min-width: 0;
+  margin-top: 4px;
+  overflow: hidden;
+  color: rgba(91, 113, 106, 0.82);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-chat-local-progress[data-state="failed"] {
+  border-color: rgba(200, 80, 80, 0.28);
+  color: rgb(164, 67, 67);
+}
+
+.ai-chat-local-progress[data-state="failed"] .ai-chat-local-progress-fill {
+  background: #d56b6b;
+}
+
+[data-theme="dark"] .ai-chat-local-progress {
+  border-color: rgba(127, 187, 172, 0.22);
+  background: rgba(28, 43, 42, 0.82);
+  color: rgba(194, 224, 214, 0.9);
+}
+
+[data-theme="dark"] .ai-chat-local-progress-detail {
+  color: rgba(177, 201, 194, 0.74);
+}
+
 .ai-chat-input {
   flex: 1 1 auto;
   min-height: 38px;

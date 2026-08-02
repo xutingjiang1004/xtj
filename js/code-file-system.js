@@ -1029,13 +1029,25 @@
   // ──────────────────────────────────────────────
   // File reading
   // ──────────────────────────────────────────────
-  function readFile(fileHandle) {
+  function throwIfAborted(signal) {
+    if (signal && signal.aborted) {
+      var error = new Error('Operation aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+  }
+
+  function readFile(fileHandle, options) {
+    options = options || {};
+    var signal = options.signal;
+    throwIfAborted(signal);
     return new Promise(function (resolve, reject) {
       try {
         var fileName = fileHandle.name;
         var fileType = getFileType(fileName);
 
         fileHandle.getFile().then(function (file) {
+          throwIfAborted(signal);
           // Check size limits
           var limit = SIZE_LIMITS[fileType];
           if (limit && file.size > limit) {
@@ -1050,6 +1062,7 @@
           if (fileType === 'text') {
             file.text().then(function (content) {
               return getSHA256(content).then(function (sha256) {
+                throwIfAborted(signal);
                 resolve({
                   content: content,
                   sha256: sha256,
@@ -1067,6 +1080,7 @@
               var blobUrl = URL.createObjectURL(blob);
               trackUrl(blobUrl);
               return getSHA256(buffer).then(function (sha256) {
+                throwIfAborted(signal);
                 resolve({
                   content: blobUrl,
                   sha256: sha256,
@@ -1083,6 +1097,7 @@
           } else if (fileType === 'document') {
             file.arrayBuffer().then(function (buffer) {
               return getSHA256(buffer).then(function (sha256) {
+                throwIfAborted(signal);
                 resolve({
                   content: buffer,
                   sha256: sha256,
@@ -1100,6 +1115,7 @@
             // binary
             file.arrayBuffer().then(function (buffer) {
               return getSHA256(buffer).then(function (sha256) {
+                throwIfAborted(signal);
                 resolve({
                   content: null,
                   sha256: sha256,
@@ -1121,7 +1137,9 @@
     });
   }
 
-  function readFileByPath(pathParts) {
+  function readFileByPath(pathParts, options) {
+    options = options || {};
+    throwIfAborted(options.signal);
     if (!_dirHandle) {
       return Promise.reject(new Error('readFileByPath: no workspace selected'));
     }
@@ -1136,10 +1154,11 @@
         var index = 0;
 
         function traverse() {
+          throwIfAborted(options.signal);
           if (index >= parts.length - 1) {
             // Last part is the file
             current.getFileHandle(parts[index]).then(function (fileHandle) {
-              return readFile(fileHandle);
+              return readFile(fileHandle, options);
             }).then(resolve).catch(function (err) {
               reject(wrapError(err, 'readFileByPath'));
             });
@@ -1254,7 +1273,9 @@
   // ──────────────────────────────────────────────
   // Document text extraction (calls backend API)
   // ──────────────────────────────────────────────
-  function readDocumentText(arrayBuffer, fileName, mimeType) {
+  function readDocumentText(arrayBuffer, fileName, mimeType, options) {
+    options = options || {};
+    throwIfAborted(options.signal);
     if (!arrayBuffer && !(arrayBuffer instanceof ArrayBuffer)) {
       return Promise.reject(new Error('readDocumentText: arrayBuffer is required'));
     }
@@ -1272,13 +1293,14 @@
     if (window.xtjProtectedFetch) {
       apiCall = window.xtjProtectedFetch('/api/code/document/extract', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: options.signal
       });
     } else {
       apiCall = fetch('/api/code/document/extract', {
         method: 'POST',
         credentials: 'include',
-        
+        signal: options.signal,
         body: formData
       });
     }
@@ -1292,8 +1314,10 @@
           throw new Error(msg);
         });
       }
+      throwIfAborted(options.signal);
       return resp.json();
     }).then(function (data) {
+      throwIfAborted(options.signal);
       if (!data.ok) {
         throw new Error(data.error || '文档提取失败');
       }

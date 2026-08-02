@@ -48,18 +48,18 @@
     </script>
     <link rel="stylesheet" href="css/style.min.css?v=38612b8b5c" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=38612b8b5c" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" /><link rel="stylesheet" href="css/ai-agent.min.css?v=4211272ae5" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=38612b8b5c" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=6e71ff1947" /><link rel="stylesheet" href="css/ai-agent.min.css?v=f2976b8dbf" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=0a04a2b98e" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=bc7ef7cb72">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=5b846a64d6">
-    <link rel="stylesheet" href="css/code-claude-style.css?v=e6361770e7">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4211272ae5">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=4cec2ae8f1">
+    <link rel="stylesheet" href="css/code-claude-style.css?v=659b1d114a">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=f2976b8dbf">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=14c1deba57">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2583028a16">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12ce06fd78">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=6ab6dccd6d">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=14ba8e2f97">
-    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=54b8411d92">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=aacb802047">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=99bceebf80">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=18a17c38aa">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=e2c12135f4">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=57708a55b3">
@@ -72,9 +72,10 @@
     <meta name="xtj-module-ai-core-scroll" content="js/ai-core/scroll-controller.min.js?v=743e0a0b6d">
     <meta name="xtj-module-ai-core-telemetry" content="js/ai-core/telemetry.min.js?v=12407a1a7b">
     <meta name="xtj-module-ai-core-stream" content="js/ai-core/stream-renderer.min.js?v=22b2b02430">
-    <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=614ef47aed">
-    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=8b14f16179">
-    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=3a25e4084f">
+    <meta name="xtj-module-code-fs" content="js/code-file-system.min.js?v=93a193fcc0">
+    <meta name="xtj-module-code-workspace" content="js/code-workspace.min.js?v=f81d08d741">
+    <meta name="xtj-module-code-style" content="css/code-workspace.min.css?v=63a014ad10">
+    <meta name="xtj-module-local-ai-worker" content="js/local-ai-worker.min.js?v=ee51229978">
     </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -1070,14 +1071,49 @@
         })();
     </script>
     <!-- Local Qwen is opt-in: it loads a worker/model only after the user selects it. -->
-    <script id="xtjLocalAiRuntime" defer src="js/local-ai-runtime.min.js?v=27f62f9fd7"></script>
+    <script id="xtjLocalAiRuntime" defer src="js/local-ai-runtime.min.js?v=a6e7951ead"></script>
     <script>
         // A failed deferred asset must not permanently hide the opt-in local model.
         (function() {
             var pendingLocalAiRuntime = null;
-            window.__xtjEnsureLocalAI = function() {
-                if (window.__xtjLocalAI) return Promise.resolve(window.__xtjLocalAI);
-                if (pendingLocalAiRuntime) return pendingLocalAiRuntime;
+            function localAiAbortError() {
+                var error = new Error('本地 Qwen 运行时加载已取消。');
+                error.name = 'AbortError';
+                error.code = 'LOCAL_AI_CANCELLED';
+                return error;
+            }
+            function resolveWithLocalAiAbort(promise, signal) {
+                if (!signal) return promise;
+                if (signal.aborted) return Promise.reject(localAiAbortError());
+                return new Promise(function(resolve, reject) {
+                    var settled = false;
+                    function cleanup() {
+                        signal.removeEventListener('abort', onAbort);
+                    }
+                    function onAbort() {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
+                        reject(localAiAbortError());
+                    }
+                    signal.addEventListener('abort', onAbort, { once: true });
+                    promise.then(function(value) {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
+                        resolve(value);
+                    }, function(error) {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
+                        reject(error);
+                    });
+                });
+            }
+            window.__xtjEnsureLocalAI = function(options) {
+                options = options || {};
+                if (window.__xtjLocalAI) return resolveWithLocalAiAbort(Promise.resolve(window.__xtjLocalAI), options.signal);
+                if (pendingLocalAiRuntime) return resolveWithLocalAiAbort(pendingLocalAiRuntime, options.signal);
                 var initial = document.getElementById('xtjLocalAiRuntime');
                 var source = initial && initial.src;
                 if (!source) return Promise.reject(new Error('本地 Qwen 运行时资源缺失。'));
@@ -1101,7 +1137,7 @@
                     document.head.appendChild(retry);
                 });
                 pendingLocalAiRuntime.then(function() { pendingLocalAiRuntime = null; }, function() { pendingLocalAiRuntime = null; });
-                return pendingLocalAiRuntime;
+                return resolveWithLocalAiAbort(pendingLocalAiRuntime, options.signal);
             };
         })();
     </script>
@@ -1121,7 +1157,7 @@
     <script defer src="js/vendor/supabase.min.js?v=e87e170609"></script>
     <script defer src="js/config.min.js?v=88dc05fbfe"></script>
     <script defer src="js/performance.min.js?v=bed828f940"></script>
-    <script defer src="js/core.min.js?v=7c8c628d40"></script>
+    <script defer src="js/core.min.js?v=80f774878c"></script>
     <script defer src="js/login-device.min.js?v=6b0e0216b3"></script>
     <script defer src="js/theme-toggle.min.js?v=a9201b15a8"></script>
     <script defer src="js/desktop-shell.min.js?v=a0857a3d02"></script>

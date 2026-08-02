@@ -326,12 +326,14 @@ test('Playwright UI validation uses installed Edge channel and a dedicated test 
 console.log('\n=== Photo Upload Failure Behavior ===');
 test('upload has centralized cleanupStorage helper', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  assert.ok(s.indexOf('function cleanupStorage(path)') >= 0, 'cleanupStorage helper missing');
+  assert.ok(s.indexOf('function cleanupStorage(path, uploadId, options)') >= 0, 'cleanupStorage helper missing');
   assert.ok(s.indexOf("console.error('[photo-upload] Storage cleanup error'") >= 0, 'cleanupStorage logs errors');
+  assert.ok(s.indexOf("apiUrl('/api/photo/cleanup')") >= 0, 'backend cleanup endpoint missing');
 });
-test('Storage upload success but fetch network error removes file', function(){
+test('Storage upload success but fetch network error preserves file for reconciliation', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  assert.ok(s.indexOf("await cleanupStorage(path)") >= 0, 'cleanupStorage not called after error');
+  assert.ok(s.indexOf("await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)") >= 0, 'ambiguous create failure must use backend cleanup');
+  assert.ok(s.indexOf('savePendingPhotoUpload') >= 0, 'ambiguous create failure must be reconciled');
   assert.ok(s.indexOf("fetchError.photoUploadCode = 'backend_unreachable'") >= 0, 'network error code missing');
 });
 test('fetch throws timeout sets AbortController and clears timer', function(){
@@ -345,19 +347,19 @@ test('fetch throws timeout sets AbortController and clears timer', function(){
 test('HTTP non-2xx response cleans the uploaded file', function(){
   var s = read('js/photo-wall/upload-ui.js');
   var httpOkBlock = s.slice(s.indexOf('if (!createRes.ok)'), s.indexOf('var createData;'));
-  assert.ok(httpOkBlock.indexOf('await cleanupStorage(path)') >= 0, 'HTTP error leaves an orphan upload');
+  assert.ok(httpOkBlock.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'HTTP error must use backend cleanup');
   assert.ok(httpOkBlock.indexOf("photoUploadStage = 'record'") >= 0, 'record stage marker missing');
 });
 test('JSON parse failure after HTTP response cleans the uploaded file', function(){
   var s = read('js/photo-wall/upload-ui.js');
   var parseCatch = s.slice(s.indexOf('catch (parseError)'));
-  assert.ok(parseCatch.indexOf('await cleanupStorage(path)') >= 0, 'parse error leaves an orphan upload');
+  assert.ok(parseCatch.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'parse error must use backend cleanup');
 });
 test('response with missing data field remains a record failure', function(){
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf("if (!createData || !createData.data)") >= 0, 'missing data guard missing');
   var guardBlock = s.slice(s.indexOf("if (!createData || !createData.data)"), s.indexOf('return createData.data;'));
-  assert.ok(guardBlock.indexOf('await cleanupStorage(path)') >= 0, 'missing data leaves an orphan upload');
+  assert.ok(guardBlock.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'missing data must use backend cleanup');
 });
 
 test('photo create headers always retain JSON content type', function(){
