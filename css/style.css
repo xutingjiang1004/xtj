@@ -10324,6 +10324,33 @@ body.ios-chat-keyboard-open .chat-input-area {
 /* Final button-motion and unified card overrides */
 :root {
   --xtj-btn-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 兼容旧主题系统的变量引用（此前缺失导致部分样式失效），
+     映射到文件头部 :root 中实际存在的变量 */
+  --accent: var(--xtj-primary);
+  --success: var(--xtj-primary);
+  --warning: #f59e0b;
+  --info: var(--xtj-blue-soft);
+  --surface: var(--panel-bg);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --text-tertiary: var(--text-muted);
+  --bg-primary: var(--bg);
+  --bg-secondary: var(--bg-color);
+  --bg-card: var(--card-bg);
+  --bg-error: #fde8e8;
+  --border-color: var(--border);
+  --border-soft: var(--glass-border);
+  --border-soft-hover: rgba(255, 255, 255, 0.86);
+  --btn-soft: var(--glass-bg);
+  --btn-soft-hover: var(--button-glass-bg-hover);
+  --glass-line: var(--glass-border);
+  --cw-warning-bg: #fff7e6;
+  --cw-warning-text: var(--text-main);
+  --xtj-text-muted: var(--text-muted);
+  /* 爱心粒子动画位移变量（ui-enhance.css 的 xtjHeartFly 使用） */
+  --hx1: -40px; --hy1: -80px;
+  --hx2: 40px; --hy2: -120px;
 }
 
 :where(

@@ -205,16 +205,10 @@ server.tool("admin_get_photos", "获取照片列表", {}, async () => {
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_delete_photo", "软删除照片", { id: z.string() }, async ({ id }) => {
+server.tool("admin_delete_photo", "删除照片（硬删除，不可恢复）", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/photo/${id}`);
-  return { content: [{ type: "text", text: `✅ 照片 ${id} 已删除（软删除）` }] };
-});
-
-server.tool("admin_restore_photo", "恢复已删除的照片", { id: z.string() }, async ({ id }) => {
-  await ensureLoggedIn();
-  await apiRequest("POST", `/admin/photo/restore/${id}`);
-  return { content: [{ type: "text", text: `✅ 照片 ${id} 已恢复` }] };
+  return { content: [{ type: "text", text: `✅ 照片 ${id} 已删除（硬删除，不可恢复）` }] };
 });
 
 // --- 公告 ---
