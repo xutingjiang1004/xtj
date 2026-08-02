@@ -30,23 +30,45 @@
   width: min(92%, 780px);
   max-width: 92%;
   min-width: 0;
+  box-sizing: border-box;
   align-items: flex-start;
 }
 #panelCode .code-chat-message .msg-body {
   flex: 1 1 auto;
-  width: 0;
+  width: auto;
+  max-width: calc(100% - 36px);
   min-width: 0;
 }
 #panelCode .code-chat-message .msg-content {
   min-width: 0;
+  width: auto !important;
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: normal;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed;
+}
+#panelCode .code-stream-content {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed;
+}
+#panelCode .code-chat-notice,
+#panelCode .code-local-model-status {
+  position: static;
+  z-index: auto;
 }
 #panelCode .code-chat-back-to-bottom {
-  right: 20px;
-  bottom: 112px;
+  position: static;
+  align-self: flex-end;
+  margin: 0 20px 6px;
   max-width: calc(100% - 40px);
   opacity: .86;
 }

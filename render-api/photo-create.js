@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
 const MAX_MEDIA_URL_LENGTH = 2048;
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_MIME_TYPE_LENGTH = 128;
@@ -71,6 +72,31 @@ function publicStorageUrl(supabaseUrl, storagePath) {
   return origin + '/storage/v1/object/public/uploads/' + storagePath.split('/').map(encodeURIComponent).join('/');
 }
 
+function getPhotoDerivativePaths(storagePath) {
+  var key = crypto.createHash('sha256').update(String(storagePath || '')).digest('hex');
+  var rotatedKey = crypto.createHash('sha256').update(String(storagePath || '') + '_rotated').digest('hex');
+  return {
+    thumbnailPath: 'photos/thumbs/' + key + '.webp',
+    rotatedPath: 'photos/rotated/' + rotatedKey + '.webp'
+  };
+}
+
+function collectPhotoRecordPaths(record, supabaseUrl) {
+  var paths = new Set();
+  function add(value) {
+    if (typeof value === 'string' && value.trim()) paths.add(value.trim().replace(/^\/+/, ''));
+  }
+  try {
+    var content = JSON.parse(record && record.content || '{}');
+    add(content.storagePath || content.storage_path);
+    add(content.thumb || content.thumbnailPath || content.thumbnail_path);
+    add(content.rotatedPath || content.rotated_path);
+  } catch (_) {}
+  var parsed = parseStoragePhotoUrl(record && record.media_url, supabaseUrl);
+  if (parsed.ok) add(parsed.storagePath);
+  return paths;
+}
+
 async function createPhotoThumbnail(options) {
   var storagePath = options && options.storagePath;
   if (!storagePath || !options.supabase || !options.sharp) throw new Error('thumbnail unavailable');
@@ -79,25 +105,33 @@ async function createPhotoThumbnail(options) {
   var input = Buffer.from(await downloaded.data.arrayBuffer());
   var image = options.sharp(input, { animated: false });
   var meta = await image.metadata();
-  var key = crypto.createHash('sha256').update(storagePath).digest('hex');
-  var thumbnailPath = 'photos/thumbs/' + key + '.webp';
-  var output = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+  var derivativePaths = getPhotoDerivativePaths(storagePath);
+  var thumbnailPath = derivativePaths.thumbnailPath;
+  var outputResult = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
+  var output = Buffer.isBuffer(outputResult) ? outputResult : outputResult && outputResult.data;
+  var outputInfo = outputResult && !Buffer.isBuffer(outputResult) ? outputResult.info : null;
+  if (!output) throw new Error('thumbnail encode failed');
   var uploaded = await options.supabase.storage.from('uploads').upload(thumbnailPath, output, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
   if (uploaded && uploaded.error) throw new Error('thumbnail upload failed');
 
   // Phase 5: 如果检测到 EXIF 方向且非标准方向，创建旋转后的原始尺寸 WebP 版本
   var rotatedUrl = null;
   var rotatedFileSize = null;
+  var rotatedPath = null;
+  var finalInfo = outputInfo || null;
   if (meta && meta.orientation && meta.orientation !== 1) {
     try {
       var rotatedImage = options.sharp(input, { animated: false }).rotate().webp({ quality: 85 });
-      var rotatedOutput = await rotatedImage.toBuffer();
-      var rotatedKey = crypto.createHash('sha256').update(storagePath + '_rotated').digest('hex');
-      var rotatedPath = 'photos/rotated/' + rotatedKey + '.webp';
+      var rotatedResult = await rotatedImage.toBuffer({ resolveWithObject: true });
+      var rotatedOutput = Buffer.isBuffer(rotatedResult) ? rotatedResult : rotatedResult && rotatedResult.data;
+      var rotatedInfo = rotatedResult && !Buffer.isBuffer(rotatedResult) ? rotatedResult.info : null;
+      if (!rotatedOutput) throw new Error('rotated image encode failed');
+      rotatedPath = derivativePaths.rotatedPath;
       var rotatedUpload = await options.supabase.storage.from('uploads').upload(rotatedPath, rotatedOutput, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
       if (rotatedUpload && !rotatedUpload.error) {
         rotatedUrl = publicStorageUrl(options.supabaseUrl, rotatedPath);
         rotatedFileSize = rotatedOutput.length;
+        finalInfo = rotatedInfo || finalInfo;
       }
     } catch (_) { /* 旋转文件创建失败，降级使用原始文件 */ }
   }
@@ -106,32 +140,28 @@ async function createPhotoThumbnail(options) {
     path: thumbnailPath,
     url: publicStorageUrl(options.supabaseUrl, thumbnailPath),
     fileSize: output.length,
-    width: Number.isSafeInteger(meta.width) ? meta.width : null,
-    height: Number.isSafeInteger(meta.height) ? meta.height : null,
+    width: finalInfo && Number.isSafeInteger(finalInfo.width) ? finalInfo.width : (Number.isSafeInteger(meta.width) ? meta.width : null),
+    height: finalInfo && Number.isSafeInteger(finalInfo.height) ? finalInfo.height : (Number.isSafeInteger(meta.height) ? meta.height : null),
     exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null,
     rotatedUrl: rotatedUrl,
+    rotatedPath: rotatedPath,
     rotatedFileSize: rotatedFileSize
   };
 }
 
-async function cleanupStorageFile(supabase, storagePath, logger) {
-  if (!storagePath) return { ok: true };
-  try {
-    const result = await supabase.storage.from('uploads').remove([storagePath]);
-    if (result && result.error) {
-      const msg = String((result.error && (result.error.message || result.error.error)) || '').toLowerCase();
-      // not found 视为成功 (幂等)
-      if (/not.?found|does not exist|no such|404/.test(msg)) return { ok: true };
-      if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { target: storagePath.indexOf('photos/thumbs/') === 0 ? 'thumbnail' : 'original' });
-      return { ok: false, error: result.error };
-    }
-    return { ok: true };
-  } catch (err) {
-    const msg = String((err && (err.message || err.error)) || '').toLowerCase();
-    if (/not.?found|does not exist|no such|404/.test(msg)) return { ok: true };
-    if (logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', { target: storagePath.indexOf('photos/thumbs/') === 0 ? 'thumbnail' : 'original' });
-    return { ok: false, error: err };
-  }
+async function cleanupStorageFile(supabase, storagePath, logger, options) {
+  if (!storagePath) return { ok: true, cleanup_pending: false };
+  const result = await removeStorageWithQueue(supabase, {
+    bucket: 'uploads',
+    paths: [storagePath],
+    photoId: options && options.photoId
+  });
+  if (!result.ok && logger) logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', {
+    target: storagePath.indexOf('photos/thumbs/') === 0 ? 'thumbnail' : 'original',
+    cleanup_pending: result.cleanup_pending === true,
+    queue_failed: result.queue_failed === true
+  });
+  return result;
 }
 
 async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
@@ -140,11 +170,33 @@ async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
     // 幂等键必须绑定用户，防止跨用户泄露/覆盖他人照片记录
     if (typeof userName === 'string' && userName) query = query.eq('user_name', userName);
     const result = await query.maybeSingle();
-    if (result && result.data && !result.error) return { ok: true, data: result.data };
-    return { ok: false, error: (result && result.error) || null };
+    if (result && result.error) return { ok: false, found: false, error: result.error };
+    return { ok: true, found: !!(result && result.data), data: (result && result.data) || null, error: null };
   } catch (err) {
-    return { ok: false, error: err };
+    return { ok: false, found: false, error: err };
   }
+}
+
+async function cleanupPhotoPaths(options, paths) {
+  const uniquePaths = Array.from(new Set((Array.isArray(paths) ? paths : []).filter(Boolean)));
+  if (!uniquePaths.length) return { ok: true, cleanup_pending: false, queue_failed: false, results: [] };
+  const result = await removeStorageWithQueue(options.supabase, {
+    bucket: 'uploads',
+    paths: uniquePaths,
+    photoId: options.cleanupPhotoId
+  });
+  if (!result.ok && options.logger) options.logger.error('[PHOTO_STORAGE_CLEANUP_FAILED]', {
+    paths: uniquePaths,
+    cleanup_pending: result.cleanup_pending === true,
+    queue_failed: result.queue_failed === true
+  });
+  const results = [result];
+  return {
+    ok: results.every(function (result) { return result && result.ok === true; }),
+    cleanup_pending: results.some(function (result) { return result && result.cleanup_pending === true; }),
+    queue_failed: results.some(function (result) { return result && result.queue_failed === true; }),
+    results: results
+  };
 }
 
 async function createPhotoRecord(options) {
@@ -163,7 +215,10 @@ async function createPhotoRecord(options) {
   // 若提供了 upload_id, 先查询是否已存在 (幂等)
   if (uploadId) {
     const existing = await findExistingPhotoByActorKey(options.supabase, actorKey, options.userName);
-    if (existing.ok && existing.data) {
+    if (!existing.ok) {
+      return { status: 503, body: { ok: false, error: 'Unable to verify the existing photo record', code: 'PHOTO_IDEMPOTENCY_LOOKUP_FAILED', retryable: true } };
+    }
+    if (existing.found && existing.data) {
       // ★ 检查旧记录引用的文件是否还存在
       var oldStoragePath = null;
       try {
@@ -172,10 +227,15 @@ async function createPhotoRecord(options) {
       } catch (_) {}
       if (oldStoragePath) {
         var fileExists = false;
+        var fileCheckError = null;
         try {
           var fileCheck = await options.supabase.storage.from('uploads').createSignedUrl(oldStoragePath, 60);
           fileExists = fileCheck && !fileCheck.error;
-        } catch (_) {}
+          if (fileCheck && fileCheck.error && !isNotFoundError(fileCheck.error)) fileCheckError = fileCheck.error;
+        } catch (error) { fileCheckError = error; }
+        if (fileCheckError) {
+          return { status: 503, body: { ok: false, error: 'Unable to verify the existing photo file', code: 'PHOTO_FILE_CHECK_FAILED', retryable: true } };
+        }
         if (!fileExists) {
           // 旧文件丢失，使用新文件路径更新记录
           try {
@@ -210,8 +270,10 @@ async function createPhotoRecord(options) {
               // Phase 5: 验证失败（数据不一致），不删除新文件，返回错误
               if (options.logger) options.logger.error('[PHOTO_REPAIR_VERIFY_FAILED]', { expected: { media_url: validated.mediaUrl, storagePath: storagePath }, got: { media_url: updateResult.data.media_url, content: updateResult.data.content } });
               return { status: 500, body: { ok: false, error: '照片修复失败: 数据验证不一致', code: 'REPAIR_VERIFY_FAILED' } };
-            }
-          } catch (e) {
+             } else {
+             return { status: 503, body: { ok: false, error: 'Photo repair was not confirmed', code: 'REPAIR_UPDATE_NOT_CONFIRMED', retryable: true } };
+           }
+           } catch (e) {
             // Phase 5: 异常时返回错误，不删除新文件
             if (options.logger) options.logger.error('[PHOTO_REPAIR_EXCEPTION]', e);
             return { status: 500, body: { ok: false, error: '照片修复异常: ' + (e && e.message || '未知错误'), code: 'REPAIR_EXCEPTION' } };
@@ -219,7 +281,19 @@ async function createPhotoRecord(options) {
         }
       }
       // 旧文件存在或无法确认，删除本次新文件，返回旧记录
-      await cleanupStorageFile(options.supabase, storagePath, options.logger);
+      var derivativePaths = getPhotoDerivativePaths(storagePath);
+      var existingPaths = collectPhotoRecordPaths(existing.data, options.supabaseUrl);
+      var duplicatePaths = existingPaths.has(storagePath) ? [] : [storagePath, derivativePaths.thumbnailPath, derivativePaths.rotatedPath].filter(function (path) {
+        return !existingPaths.has(path);
+      });
+      var duplicateCleanup = await cleanupPhotoPaths({
+        supabase: options.supabase,
+        logger: options.logger,
+        cleanupPhotoId: actorKey
+      }, duplicatePaths);
+      if (!duplicateCleanup.ok && !duplicateCleanup.cleanup_pending) {
+        return { status: 503, body: { ok: false, error: 'Photo cleanup is pending a retry', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true } };
+      }
       return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
     }
   }
@@ -238,11 +312,20 @@ async function createPhotoRecord(options) {
       if (thumbnail.rotatedUrl) {
         validated.mediaUrl = thumbnail.rotatedUrl;
         contentObj.rotatedUrl = thumbnail.rotatedUrl;
+        contentObj.rotatedPath = thumbnail.rotatedPath || '';
         contentObj.rotatedFileSize = thumbnail.rotatedFileSize;
       }
       validated.content = JSON.stringify(contentObj);
-    } catch (_) {
-      await cleanupStorageFile(options.supabase, storagePath, options.logger);
+    } catch (error) {
+      var failedDerivativePaths = getPhotoDerivativePaths(storagePath);
+      var processingCleanup = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
+        storagePath,
+        failedDerivativePaths.thumbnailPath,
+        failedDerivativePaths.rotatedPath
+      ].concat(error && error.cleanupPaths || []));
+      if (processingCleanup.queue_failed) {
+        return { status: 503, body: { ok: false, error: 'Image processing failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true } };
+      }
       return { status: 422, body: { ok: false, error: '图片缩略图处理失败', code: 'IMAGE_PROCESSING_FAILED' } };
     }
   }
@@ -262,20 +345,31 @@ async function createPhotoRecord(options) {
     return { status: 200, body: { ok: true, data: insertResult.data, storage_path: storagePath } };
   }
 
-  // 插入失败：检查是否已存在 (并发幂等，例如唯一键冲突)
-  if (uploadId) {
-    const existing = await findExistingPhotoByActorKey(options.supabase, actorKey, options.userName);
-    if (existing.ok && existing.data) {
-      // 文件已被另一个请求上传成功：保留 storage 文件 (因为记录已存在)
-      return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
-    }
+  // 插入失败：无论是否带 upload_id，都必须先确认数据库最终状态。
+  // 网络超时可能发生在数据库已经提交之后；只有明确查到“没有记录”才允许
+  // 删除刚上传的对象，否则会把已提交的照片变成悬空记录。
+  const existing = await findExistingPhotoByActorKey(options.supabase, actorKey, options.userName);
+  if (!existing.ok) {
+    // The insert outcome is unknown. Keep the uploaded object so a retry or
+    // the status endpoint can reconcile it instead of deleting a committed file.
+    return { status: 503, body: { ok: false, error: 'Photo save outcome is unknown; please retry', code: 'PHOTO_COMMIT_UNKNOWN', retryable: true } };
+  }
+  if (existing.found && existing.data) {
+    // 文件已被另一个请求上传成功：保留 storage 文件 (因为记录已存在)
+    return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
   }
 
   // 真正失败: 清理 storage (幂等)
-  if (thumbnail && thumbnail.path) await cleanupStorageFile(options.supabase, thumbnail.path, options.logger);
-  await cleanupStorageFile(options.supabase, storagePath, options.logger);
+  var cleanupResult = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
+    thumbnail && thumbnail.path,
+    thumbnail && thumbnail.rotatedPath,
+    storagePath
+  ]);
   const isConflict = insertResult && insertResult.error && insertResult.error.code === '23505';
   const code = isConflict ? 'CONFLICT' : 'UPSTREAM_ERROR';
+  if (cleanupResult.queue_failed) {
+    return { status: 503, body: { ok: false, error: 'Photo save failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true, cleanup_pending: false } };
+  }
   return { status: 500, body: { ok: false, error: isConflict ? '数据已存在' : '照片保存失败', code: code } };
 }
 
