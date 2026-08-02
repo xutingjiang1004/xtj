@@ -64,7 +64,7 @@ test('Code keeps the local Qwen choice and explicit setup path available without
   assert.match(codeWorkspace, /function localCodeModelDescriptor\(\)/);
   assert.match(codeWorkspace, /本地离线 · Qwen 2\.5 0\.5B（需下载）/);
   assert.match(codeWorkspace, /codeLocalModelSetupBtn/);
-  assert.match(codeWorkspace, /ensureCodeLocalAiRuntime\(\)/);
+  assert.match(codeWorkspace, /ensureCodeLocalAiRuntime\(/);
   assert.match(codeWorkspace, /state\.selectedModelId === localCodeModelId\(\)/);
   assert.doesNotMatch(codeWorkspace, /if \(!state\.models\.length\) \{\s*modelSelect\.disabled = true/);
 });

@@ -404,7 +404,7 @@ describe('cat AI worker behavior', function() {
   });
 
   it('CAS 失败时静默返回不报错', function() {
-    const casFailBranch = server.match(/updateErr.*?\|.*?!updated[\s\S]*?return/);
+    const casFailBranch = server.match(/if \(!claimResult\.ok \|\| !claimResult\.updated\)[\s\S]*?return;/);
     assert.ok(casFailBranch, 'CAS 失败时必须静默返回');
   });
 

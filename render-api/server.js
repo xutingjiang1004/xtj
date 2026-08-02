@@ -9,6 +9,8 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const { claimDmMediaUpload, reserveDmMediaUpload, validateDmStoragePath, validateDmMediaKind, MEDIA_KINDS: ALLOWED_KINDS } = require('./dm-media');
+const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
 const registerCodeAgentRoutes = require('./code-agent');
 const registerCodeGitHubRoutes = require('./code-github');
@@ -3886,7 +3888,7 @@ const CAT_AI_DISPLAY_NAME = '小猫';
 const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
 // Phase 3-P0-6: Fix regex — old lookahead rejected Chinese chars after 小猫,
 // so @小猫帮我看看 did not match. Now only exclude 猫 (to reject @小猫咪).
-const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫])/;
+const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫咪])/;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_MAX_CONCURRENT = 3;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
@@ -4011,20 +4013,96 @@ async function createCatReplyJob(sourceCommentId, postId, requestUserName) {
 }
 
 // 获取帖子上下文（用于传给 DeepSeek）
+function catErrorText(error, fallback) {
+  return String(error && (error.message || error.details || error.hint) || fallback || 'unknown error').slice(0, 500);
+}
+
+// Every job transition is an explicit CAS. A successful HTTP response from
+// PostgREST is not enough: no returned row means another worker owns the job.
+async function updateCatJobCAS(jobId, expectedStatus, changes) {
+  try {
+    var result = await supabase.from('ai_comment_reply_jobs')
+      .update(changes)
+      .eq('id', jobId)
+      .eq('status', expectedStatus)
+      .select('id, status, generated_reply, error_message')
+      .maybeSingle();
+    return {
+      ok: !result.error,
+      updated: !!result.data,
+      data: result.data || null,
+      error: result.error || null
+    };
+  } catch (error) {
+    return { ok: false, updated: false, data: null, error: error };
+  }
+}
+
+function logCatCAS(label, result) {
+  if (!result || !result.ok || !result.updated) {
+    console.warn('[CAT_AI] CAS transition not confirmed (' + label + '):', result && result.error ? catErrorText(result.error) : 'row no longer matched');
+  }
+}
+
+async function blockCatJobAfterCommentDelete(sourceCommentId, reason) {
+  try {
+    var lookup = await supabase.from('ai_comment_reply_jobs')
+      .select('id, status')
+      .eq('source_comment_id', String(sourceCommentId))
+      .maybeSingle();
+    if (lookup.error) return { ok: false, updated: false, error: lookup.error };
+    if (!lookup.data) return { ok: true, updated: false, data: null };
+    if (['pending', 'processing', 'completed'].indexOf(String(lookup.data.status)) < 0) {
+      return { ok: true, updated: false, data: lookup.data };
+    }
+    return updateCatJobCAS(lookup.data.id, lookup.data.status, {
+      status: 'blocked',
+      error_message: reason,
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    return { ok: false, updated: false, error: error };
+  }
+}
+
+async function requeueCatJob(job, reason) {
+  var attempts = Number(job && job.attempts || 0);
+  var now = new Date().toISOString();
+  var changes = {
+    status: attempts < 2 ? 'pending' : 'failed',
+    error_message: String(reason || 'retryable error').slice(0, 500),
+    updated_at: now
+  };
+  if (changes.status === 'failed') changes.completed_at = now;
+  if (changes.status === 'pending') {
+    changes.started_at = null;
+    changes.completed_at = null;
+  }
+  var result = await updateCatJobCAS(job.id, 'processing', changes);
+  logCatCAS('retry: ' + reason, result);
+  return result;
+}
+
 async function getCatPostContext(postId, sourceCommentId) {
   try {
     var postRes = await supabase.from('posts').select('id, content, user_name').eq('id', postId).maybeSingle();
+    if (postRes.error) return { ok: false, state: 'query_failed', error: postRes.error, code: 'post_query_failed' };
     var post = postRes.data;
+    if (!post) return { ok: false, state: 'not_found', missing: 'post' };
 
     // 获取父级评论链
     var sourceComment = null;
     var parentComments = [];
     if (sourceCommentId) {
       var sourceRes = await supabase.from('comments').select('id, user_name, content, parent_comment_id').eq('id', sourceCommentId).maybeSingle();
+      if (sourceRes.error) return { ok: false, state: 'query_failed', error: sourceRes.error, code: 'source_query_failed' };
       sourceComment = sourceRes.data;
+      if (!sourceComment) return { ok: false, state: 'not_found', missing: 'source_comment' };
       if (sourceComment && sourceComment.parent_comment_id) {
         // 获取父级评论
         var parentRes = await supabase.from('comments').select('id, user_name, content').eq('id', sourceComment.parent_comment_id).maybeSingle();
+        if (parentRes.error) return { ok: false, state: 'query_failed', error: parentRes.error, code: 'parent_query_failed' };
         if (parentRes.data) parentComments.push(parentRes.data);
       }
     }
@@ -4036,11 +4114,14 @@ async function getCatPostContext(postId, sourceCommentId) {
       .neq('generated_by_ai', true)
       .order('created_at', { ascending: false })
       .limit(20);
+    if (nearbyRes.error) return { ok: false, state: 'query_failed', error: nearbyRes.error, code: 'nearby_query_failed' };
     var nearbyComments = (nearbyRes.data || []).filter(function(c) {
       return c.id !== sourceCommentId;
     });
 
     return {
+      ok: true,
+      state: 'ready',
       post: post ? {
         id: post.id,
         content: String(post.content || '').slice(0, 2000)
@@ -4057,7 +4138,7 @@ async function getCatPostContext(postId, sourceCommentId) {
     };
   } catch (e) {
     console.error('[CAT_AI] get context error:', e && e.message);
-    return null;
+    return { ok: false, state: 'query_failed', error: e, code: 'context_query_failed' };
   }
 }
 
@@ -4089,65 +4170,100 @@ function validateCatReply(parsed, rawText) {
 // 处理单个小猫 AI 回复任务
 async function processCatReplyJob(job) {
   var startedAt = new Date().toISOString();
+  var sourceCommentId = String(job.source_comment_id);
+  var workingJob = job;
+  var claimed = false;
   try {
     // 原子状态切换：pending -> processing（只有成功 CAS 的 worker 才继续）
-    var { data: updated, error: updateErr } = await supabase.from('ai_comment_reply_jobs')
-      .update({ status: 'processing', started_at: startedAt, attempts: (job.attempts || 0) + 1, updated_at: startedAt })
-      .eq('id', job.id).eq('status', 'pending').select('*').single();
-    if (updateErr || !updated) {
+    var claimResult = await updateCatJobCAS(job.id, 'pending', {
+      status: 'processing',
+      started_at: startedAt,
+      attempts: (job.attempts || 0) + 1,
+      updated_at: startedAt
+    });
+    if (!claimResult.ok || !claimResult.updated) {
+      logCatCAS('claim pending -> processing', claimResult);
       // 另一个 worker 已领取此任务，静默返回
       return;
     }
+    claimed = true;
+    workingJob = Object.assign({}, job, claimResult.data || {}, { attempts: (job.attempts || 0) + 1 });
 
     // 验证源评论仍然存在
-    var sourceRes = await supabase.from('comments').select('id, user_name, content, post_id').eq('id', job.source_comment_id).maybeSingle();
+    var sourceRes = await supabase.from('comments').select('id, user_name, content, post_id').eq('id', sourceCommentId).maybeSingle();
+    if (sourceRes.error) {
+      await requeueCatJob(workingJob, 'source comment query failed: ' + catErrorText(sourceRes.error));
+      return;
+    }
     if (!sourceRes.data) {
-      // Phase 4: CAS — 仅当 job 仍处于 processing 时才更新
-      var { error: srcErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'source comment deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-      if (srcErr) console.warn('[CAT_AI] CAS update failed (source deleted):', srcErr && srcErr.message);
+      var sourceBlocked = await updateCatJobCAS(workingJob.id, 'processing', {
+        status: 'blocked',
+        error_message: 'source comment deleted',
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      logCatCAS('source deleted', sourceBlocked);
       return;
     }
 
     // 验证帖子仍然存在
-    var postRes = await supabase.from('posts').select('id').eq('id', job.post_id).maybeSingle();
+    var postRes = await supabase.from('posts').select('id').eq('id', workingJob.post_id).maybeSingle();
+    if (postRes.error) {
+      await requeueCatJob(workingJob, 'post query failed: ' + catErrorText(postRes.error));
+      return;
+    }
     if (!postRes.data) {
-      // Phase 4: CAS — 仅当 job 仍处于 processing 时才更新
-      var { error: postErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'blocked', error_message: 'post deleted', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-      if (postErr) console.warn('[CAT_AI] CAS update failed (post deleted):', postErr && postErr.message);
+      var postBlocked = await updateCatJobCAS(workingJob.id, 'processing', {
+        status: 'blocked',
+        error_message: 'post deleted',
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      logCatCAS('post deleted', postBlocked);
       return;
     }
 
     // 检查是否已有 AI 回复（★ 直接使用 Supabase 查询，不再调用不存在的 buildSummaryQuery）
     var existingReplyRes = await supabase.from('comments')
       .select('id, post_id, user_name, content, created_at, parent_comment_id, generated_by_ai')
-      .eq('parent_comment_id', String(job.source_comment_id))
+      .eq('parent_comment_id', String(workingJob.source_comment_id))
       .eq('generated_by_ai', true)
+      .eq('user_name', CAT_AI_USERNAME)
       .maybeSingle();
 
     if (existingReplyRes.error) {
-      throw new Error('existing AI reply lookup failed: ' + String(existingReplyRes.error.message || 'unknown error'));
+      await requeueCatJob(workingJob, 'existing AI reply lookup failed: ' + catErrorText(existingReplyRes.error));
+      return;
     }
 
     if (existingReplyRes.data) {
-      // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记完成
-      var { error: dupErr } = await supabase.from('ai_comment_reply_jobs').update({
+      var duplicateResult = await updateCatJobCAS(workingJob.id, 'processing', {
         status: 'completed',
         generated_reply: existingReplyRes.data.content || 'duplicate',
-        reply_comment_id: String(existingReplyRes.data.id),
+        // reply_comment_id is not part of the deployed job schema; the API
+        // resolves it from this immutable parent relationship instead.
         error_message: null,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }).eq('id', job.id).eq('status', 'processing');
-      if (dupErr) console.warn('[CAT_AI] CAS update failed (existing reply):', dupErr && dupErr.message);
+      });
+      logCatCAS('existing reply -> completed', duplicateResult);
       return;
     }
 
     // 获取上下文
-    var context = await getCatPostContext(job.post_id, job.source_comment_id);
-    if (!context) {
-      // Phase 4: CAS
-      var { error: ctxErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'context fetch failed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-      if (ctxErr) console.warn('[CAT_AI] CAS update failed (context):', ctxErr && ctxErr.message);
+    var context = await getCatPostContext(workingJob.post_id, workingJob.source_comment_id);
+    if (!context || context.ok === false) {
+      if (context && context.state === 'not_found') {
+        var contextBlocked = await updateCatJobCAS(workingJob.id, 'processing', {
+          status: 'blocked',
+          error_message: String(context.missing || 'source data') + ' deleted',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        logCatCAS('context not found', contextBlocked);
+      } else {
+        await requeueCatJob(workingJob, 'context query failed: ' + catErrorText(context && context.error, 'context unavailable'));
+      }
       return;
     }
 
@@ -4173,19 +4289,16 @@ async function processCatReplyJob(job) {
         temperature: 0.8,
         signal: abortController.signal
       });
+    } catch (providerError) {
+      await requeueCatJob(workingJob, 'DeepSeek query failed: ' + catErrorText(providerError));
+      return;
     } finally {
       clearTimeout(abortTimer);
     }
 
     if (!result) {
       // 失败后重试逻辑
-      if (job.attempts < 1) {
-        var { error: retryErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (retryErr) console.warn('[CAT_AI] CAS update failed (retry null):', retryErr && retryErr.message);
-      } else {
-        var { error: nullErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'DeepSeek returned null', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (nullErr) console.warn('[CAT_AI] CAS update failed (null result):', nullErr && nullErr.message);
-      }
+      await requeueCatJob(workingJob, 'DeepSeek returned null');
       return;
     }
 
@@ -4193,31 +4306,28 @@ async function processCatReplyJob(job) {
     var validated = validateCatReply(result);
     if (!validated) {
       // 解析失败，重试一次
-      if (job.attempts < 1) {
-        var { error: valRetryErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (valRetryErr) console.warn('[CAT_AI] CAS update failed (retry validation):', valRetryErr && valRetryErr.message);
-      } else {
-        var { error: fmtErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'invalid response format', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (fmtErr) console.warn('[CAT_AI] CAS update failed (invalid format):', fmtErr && fmtErr.message);
-      }
+      await requeueCatJob(workingJob, 'invalid response format');
       return;
     }
 
     if (!validated.should_reply) {
       // 不应回复（安全原因等）
-      // Phase 4: CAS
-      var { error: safeErr } = await supabase.from('ai_comment_reply_jobs').update({
+      var safetyResult = await updateCatJobCAS(workingJob.id, 'processing', {
         status: 'blocked', risk_type: validated.risk_type, error_message: 'blocked by safety check',
         completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }).eq('id', job.id).eq('status', 'processing');
-      if (safeErr) console.warn('[CAT_AI] CAS update failed (safety):', safeErr && safeErr.message);
+      });
+      logCatCAS('safety blocked', safetyResult);
       return;
     }
 
     // ★ 创建 AI 子评论前，确认 job 仍处于 processing 状态（未被 recoverStaleCatJobs 重置）
-    var jobCheck = await supabase.from('ai_comment_reply_jobs').select('status').eq('id', job.id).maybeSingle();
+    var jobCheck = await supabase.from('ai_comment_reply_jobs').select('status').eq('id', workingJob.id).maybeSingle();
+    if (jobCheck.error) {
+      await requeueCatJob(workingJob, 'job status query failed: ' + catErrorText(jobCheck.error));
+      return;
+    }
     if (!jobCheck.data || jobCheck.data.status !== 'processing') {
-      console.log('[CAT_AI] job', job.id, 'status changed to', jobCheck.data && jobCheck.data.status, '- aborting comment insert');
+      console.log('[CAT_AI] job', workingJob.id, 'status changed to', jobCheck.data && jobCheck.data.status, '- aborting comment insert');
       return;
     }
 
@@ -4227,51 +4337,64 @@ async function processCatReplyJob(job) {
     replyContent = replyContent.replace(/@小猫\s*/g, '');
 
     var aiComment = await supabase.from('comments').insert([{
-      post_id: job.post_id,
+      post_id: workingJob.post_id,
       user_name: CAT_AI_USERNAME,
       content: replyContent,
-      parent_comment_id: job.source_comment_id,
+      parent_comment_id: sourceCommentId,
       generated_by_ai: true,
-      actor_key: 'cat_ai_reply_' + job.id
+      actor_key: 'cat_ai_reply_' + workingJob.id
     }]).select('id').single();
 
     if (aiComment.error) {
       console.error('[CAT_AI] insert ai comment error:', aiComment.error);
-      // 唯一键冲突 = 已有 AI 回复，标记为完成不报错
       if (aiComment.error.code === '23505') {
-        // Phase 4: CAS + reply_comment_id
-        var { error: dupInsertErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'completed', generated_reply: 'duplicate', reply_comment_id: String(aiComment.data && aiComment.data.id || ''), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (dupInsertErr) console.warn('[CAT_AI] CAS update failed (dup insert):', dupInsertErr && dupInsertErr.message);
+        // A concurrent worker may have inserted the reply. Re-read it before
+        // marking the job complete; the failed insert response has no id.
+        var duplicateReply = await supabase.from('comments')
+          .select('id, content, parent_comment_id, generated_by_ai, user_name')
+          .eq('parent_comment_id', sourceCommentId)
+          .eq('generated_by_ai', true)
+          .eq('user_name', CAT_AI_USERNAME)
+          .maybeSingle();
+        if (duplicateReply.error) {
+          await requeueCatJob(workingJob, 'duplicate reply query failed: ' + catErrorText(duplicateReply.error));
+        } else if (duplicateReply.data && duplicateReply.data.id) {
+          var duplicateInsertResult = await updateCatJobCAS(workingJob.id, 'processing', {
+            status: 'completed',
+            generated_reply: duplicateReply.data.content || 'duplicate',
+            // The real child comment is authoritative; do not invent an id
+            // in ai_comment_reply_jobs, which has no such column.
+            error_message: null,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+          logCatCAS('duplicate insert -> completed', duplicateInsertResult);
+        } else {
+          await requeueCatJob(workingJob, 'duplicate insert without reply row');
+        }
       } else {
-        // Phase 4: CAS
-        var { error: insertErr } = await supabase.from('ai_comment_reply_jobs').update({ status: 'failed', error_message: 'comment insert failed: ' + aiComment.error.message, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id).eq('status', 'processing');
-        if (insertErr) console.warn('[CAT_AI] CAS update failed (insert err):', insertErr && insertErr.message);
+        await requeueCatJob(workingJob, 'comment insert failed: ' + catErrorText(aiComment.error));
       }
       return;
     }
 
-    // 标记任务完成，同时保存 reply_comment_id 供后续状态一致性检查
+    // 标记任务完成，同时保存 generated_reply 供后续状态一致性检查
     // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记完成
-    var { error: finalErr } = await supabase.from('ai_comment_reply_jobs').update({
+    var finalResult = await updateCatJobCAS(workingJob.id, 'processing', {
       status: 'completed', generated_reply: replyContent,
-      reply_comment_id: String(aiComment.data.id),
+      // reply_comment_id is resolved from comments by the status endpoint.
       completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-    }).eq('id', job.id).eq('status', 'processing');
-    if (finalErr) {
-      console.warn('[CAT_AI] CAS update failed (final):', finalErr && finalErr.message);
+    });
+    if (!finalResult.ok || !finalResult.updated) {
+      logCatCAS('final -> completed', finalResult);
     } else {
-      console.log('[CAT_AI] reply created for comment', job.source_comment_id, '->', aiComment.data.id);
+      console.log('[CAT_AI] reply created for comment', workingJob.source_comment_id, '->', aiComment.data.id);
     }
   } catch (e) {
     console.error('[CAT_AI] process job error:', e && e.message);
-    try {
-      // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记失败
-      var { error: catchErr } = await supabase.from('ai_comment_reply_jobs').update({
-        status: 'failed', error_message: String(e && e.message || '').slice(0, 500),
-        completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }).eq('id', job.id).eq('status', 'processing');
-      if (catchErr) console.warn('[CAT_AI] CAS update failed (catch):', catchErr && catchErr.message);
-    } catch (_) {}
+    if (claimed) {
+      try { await requeueCatJob(workingJob, 'worker exception: ' + catErrorText(e)); } catch (_) {}
+    }
   }
 }
 
@@ -4283,48 +4406,71 @@ async function recoverStaleCatJobs() {
       .select('id').eq('status', 'processing').lt('started_at', staleTime).limit(5);
     if (staleJobs && staleJobs.length) {
       for (var i = 0; i < staleJobs.length; i++) {
-        // Phase 4: CAS — 仅当 job 仍处于 processing 时才标记超时
-        var { error: staleErr } = await supabase.from('ai_comment_reply_jobs').update({
+        var staleResult = await updateCatJobCAS(staleJobs[i].id, 'processing', {
           status: 'failed', error_message: 'task timeout',
           completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        }).eq('id', staleJobs[i].id).eq('status', 'processing');
-        if (staleErr) console.warn('[CAT_AI] CAS update failed (stale):', staleErr && staleErr.message);
+        });
+        logCatCAS('stale -> failed', staleResult);
       }
     }
   } catch (e) { /* non-critical */ }
 }
 
 // Phase 4: 有限的幂等 reconciliation 函数
-// 检查 completed job 与实际 AI 评论的一致性，必要时标记 repair_required
+// 检查 processing/completed job 与实际 AI 评论的一致性，必要时转为可重试 failed
 async function reconcileCatJobs() {
   try {
-    // 1. 查找已完成但 reply_comment_id 不为空的 job
-    var { data: completedJobs, error: qErr } = await supabase.from('ai_comment_reply_jobs')
-      .select('id, source_comment_id, reply_comment_id')
-      .eq('status', 'completed')
-      .not('reply_comment_id', 'is', null)
-      .limit(20);
-    if (qErr) { console.warn('[CAT_AI] reconcile query error:', qErr.message); return; }
-    if (!completedJobs || !completedJobs.length) return;
+    // Check processing/completed/failed jobs. A provider reply may have
+    // been inserted just before the final job CAS, so reconciliation must be
+    // able to finish that job without calling the provider again.
+    var jobsRes = await supabase.from('ai_comment_reply_jobs')
+      .select('id, source_comment_id, status, generated_reply')
+      .in('status', ['processing', 'completed', 'failed'])
+      .order('updated_at', { ascending: true })
+      .limit(50);
+    if (jobsRes.error) { console.warn('[CAT_AI] reconcile query error:', jobsRes.error.message); return; }
+    var jobs = jobsRes.data || [];
+    if (!jobs.length) return;
 
-    for (var i = 0; i < completedJobs.length; i++) {
-      var j = completedJobs[i];
-      if (!j.reply_comment_id) continue;
-      // 验证引用的 AI 评论仍存在
-      var { data: replyRow, error: rErr } = await supabase.from('comments')
-        .select('id').eq('id', j.reply_comment_id).maybeSingle();
-      if (rErr) {
-        console.warn('[CAT_AI] reconcile DB error for job', j.id, ':', rErr.message);
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      var replyRow = null;
+      var replyQueryError = null;
+      var replyByParent = await supabase.from('comments')
+        .select('id, content, parent_comment_id, generated_by_ai, user_name')
+        .eq('parent_comment_id', String(j.source_comment_id))
+        .eq('generated_by_ai', true)
+        .eq('user_name', CAT_AI_USERNAME)
+        .maybeSingle();
+      replyRow = replyByParent.data;
+      replyQueryError = replyByParent.error;
+      if (replyQueryError) {
+        console.warn('[CAT_AI] reconcile DB error for job', j.id, ':', replyQueryError.message);
         continue;
       }
-      if (!replyRow) {
-        // 引用的评论已被删除 → 标记为 repair_required
-        var { error: uErr } = await supabase.from('ai_comment_reply_jobs').update({
-          status: 'repair_required',
-          error_message: 'reply comment deleted, needs reconciliation',
+
+      var validReply = !!(replyRow && replyRow.id && replyRow.generated_by_ai === true && replyRow.user_name === CAT_AI_USERNAME && String(replyRow.parent_comment_id) === String(j.source_comment_id) && typeof replyRow.content === 'string' && replyRow.content.trim());
+      if (validReply && (j.status !== 'completed' || !j.generated_reply)) {
+        var repairedCompleted = await updateCatJobCAS(j.id, j.status, {
+          status: 'completed',
+          generated_reply: replyRow.content,
+          // The job table intentionally has no reply_comment_id column.
+          error_message: null,
+          completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        }).eq('id', j.id).eq('status', 'completed');
-        if (uErr) console.warn('[CAT_AI] reconcile update error for job', j.id, ':', uErr.message);
+        });
+        logCatCAS('reconcile reply -> completed', repairedCompleted);
+      } else if (j.status === 'completed' && !validReply) {
+        // The schema only permits pending/processing/completed/failed/blocked;
+        // legacy "repair_required" is represented as failed so the existing
+        // retry endpoint can repair the mismatch.
+        var repairedFailed = await updateCatJobCAS(j.id, 'completed', {
+          status: 'failed',
+          error_message: 'reply comment missing or invalid; retry required',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        logCatCAS('reconcile completed -> failed', repairedFailed);
       }
     }
   } catch (e) {
@@ -4373,22 +4519,26 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     var commentId = commentIdRaw;
     // 验证当前用户有权查看该评论
     var commentRes = await supabase.from('comments').select('id, post_id, user_name, created_at').eq('id', commentId).maybeSingle();
+    if (commentRes.error) return res.status(503).json({ error: 'comment lookup temporarily unavailable', code: 'comment_query_failed', retryable: true });
     if (!commentRes.data) return res.status(404).json({ error: 'comment not found' });
     // 验证帖子访问权限
     var postRes = await supabase.from('posts').select('id, visibility, user_name').eq('id', commentRes.data.post_id).maybeSingle();
+    if (postRes.error) return res.status(503).json({ error: 'post lookup temporarily unavailable', code: 'post_query_failed', retryable: true });
     if (!postRes.data) return res.status(404).json({ error: 'post not found' });
     if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: 'access denied' });
     }
-    // 查询任务状态，同时获取 reply_comment_id 用于一致性检查
+    // 查询任务状态，再从真实子评论解析 reply_comment_id 用于一致性检查
     var jobRes = await supabase.from('ai_comment_reply_jobs')
-      .select('status, generated_reply, error_message, completed_at, reply_comment_id')
+      .select('status, generated_reply, error_message, completed_at')
       .eq('source_comment_id', commentId).maybeSingle();
+    if (jobRes.error) return res.status(503).json({ error: 'AI reply status temporarily unavailable', code: 'job_query_failed', retryable: true });
     if (!jobRes.data) {
       // 检查是否已有 AI 回复 - 必须返回完整字段
       var replyRes = await supabase.from('comments')
         .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).eq('user_name', CAT_AI_USERNAME).maybeSingle();
+      if (replyRes.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
       if (replyRes.data) {
         var r = replyRes.data;
         if (r.id && typeof r.content === 'string' && r.content.trim() && r.user_name === 'cat_ai' && r.generated_by_ai === true && String(r.parent_comment_id) === String(commentId)) {
@@ -4400,24 +4550,33 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     var job = jobRes.data;
     var status = job.status;
     var message = '';
+    if (status === 'processing' || status === 'failed') {
+      // A comment can be committed before the job CAS. Treat that durable
+      // child as authoritative even if the worker or stale-job recovery has
+      // already moved the job to failed.
+      var recoveredReply = await supabase.from('comments')
+        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+        .eq('parent_comment_id', commentId)
+        .eq('generated_by_ai', true)
+        .eq('user_name', CAT_AI_USERNAME)
+        .maybeSingle();
+      if (recoveredReply.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
+      var recovered = recoveredReply.data;
+      if (recovered && recovered.id && typeof recovered.content === 'string' && recovered.content.trim() && recovered.user_name === CAT_AI_USERNAME && recovered.generated_by_ai === true && String(recovered.parent_comment_id) === String(commentId)) {
+        return res.json({ status: 'completed', reply_comment_id: recovered.id, message: '', data: recovered });
+      }
+    }
     if (status === 'failed' && ['user_limit', 'post_limit', 'global_busy'].includes(jobRes.data.error_message)) {
       return res.json({ status: 'rate_limited', message: '小猫今天被叫得有点烦，稍后再试' });
     }
     if (status === 'pending' || status === 'processing') message = '小猫正在组织毒液……';
     else if (status === 'completed') {
-      // Phase 4: 优先按 job.reply_comment_id 精确查找，不依赖模糊匹配
-      var replyCommentId = job.reply_comment_id;
-      var replyRes;
-      if (replyCommentId) {
-        replyRes = await supabase.from('comments')
-          .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-          .eq('id', replyCommentId).eq('generated_by_ai', true).maybeSingle();
-      } else {
-        // 旧数据：fallback 按 parent_comment_id 查找
-        replyRes = await supabase.from('comments')
-          .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-          .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
-      }
+      // The job table has no reply_comment_id column in the committed schema;
+      // resolve the real child comment from its immutable parent relationship.
+      var replyRes = await supabase.from('comments')
+        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      if (replyRes.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
       if (replyRes.data) {
         var rr = replyRes.data;
         // ★ 严格验证：必须包含完整字段，否则返回 processing 状态而非空对象
@@ -4425,19 +4584,19 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
           return res.json({ status: 'completed', reply_comment_id: rr.id, message: '', data: rr });
         }
       }
-      // Phase 4: 区分 reply_deleted 和 reply_missing
-      if (replyCommentId) {
-        // job 记录了 reply_comment_id 但数据库中找不到该评论 → 已被删除
+      // A recorded generated_reply with no child means the child was deleted;
+      // without generated_reply it is an incomplete/missing completion.
+      if (job.generated_reply) {
         return res.json({ status: 'reply_deleted', reply_comment_id: null, message: '小猫的回复已被删除，可点击重试' });
       }
-      // completed 但没有 reply_comment_id 且没有有效回复 → 数据不一致
+      // completed 但没有有效回复 → 数据不一致
       return res.json({ status: 'reply_missing', reply_comment_id: null, message: '回复记录缺失，可点击重试' });
     } else if (status === 'failed') message = '小猫暂时不想说话';
     else if (status === 'blocked') message = '';
     return res.json({ status: status, reply_comment_id: null, message: message });
   } catch (e) {
     console.error('[CAT_AI] status error:', e && e.message);
-    return res.status(500).json({ error: 'server error' });
+    return res.status(503).json({ error: 'server error', retryable: true });
   }
 });
 
@@ -4457,7 +4616,7 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       .select('id, post_id, user_name, content')
       .eq('id', commentId)
       .maybeSingle();
-    if (sourceErr) return res.status(500).json({ error: sanitizeError(sourceErr), code: 'db_error' });
+    if (sourceErr) return res.status(503).json({ error: sanitizeError(sourceErr), code: 'comment_query_failed', retryable: true });
     if (!sourceComment) return res.status(404).json({ error: '评论不存在', code: 'comment_not_found' });
 
     // 2. 验证帖子存在
@@ -4465,7 +4624,7 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       .select('id, user_name, visibility')
       .eq('id', sourceComment.post_id)
       .maybeSingle();
-    if (postErr) return res.status(500).json({ error: sanitizeError(postErr), code: 'db_error' });
+    if (postErr) return res.status(503).json({ error: sanitizeError(postErr), code: 'post_query_failed', retryable: true });
     if (!post) return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
 
     // 3. 权限检查：仅帖子作者或评论作者可重试（管理员也可）
@@ -4480,7 +4639,7 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       .select('*')
       .eq('source_comment_id', commentId)
       .maybeSingle();
-    if (jobErr) return res.status(500).json({ error: sanitizeError(jobErr), code: 'db_error' });
+    if (jobErr) return res.status(503).json({ error: sanitizeError(jobErr), code: 'job_query_failed', retryable: true });
 
     // 5. 查找现有 AI 评论
     var { data: aiReplyComment, error: replyErr } = await supabase.from('comments')
@@ -4489,16 +4648,14 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       .eq('generated_by_ai', true)
       .eq('user_name', 'cat_ai')
       .maybeSingle();
-    if (replyErr) return res.status(500).json({ error: sanitizeError(replyErr), code: 'db_error' });
+    if (replyErr) return res.status(503).json({ error: sanitizeError(replyErr), code: 'reply_query_failed', retryable: true });
 
-    // 6. 已完成的直接返回完整格式（与 GET /api/comments/ai-reply-status 一致）
-    if (aiReplyComment && aiReplyComment.id && typeof aiReplyComment.content === 'string' && aiReplyComment.content.trim() && aiReplyComment.user_name === 'cat_ai' && aiReplyComment.generated_by_ai === true && String(aiReplyComment.parent_comment_id) === String(commentId)) {
+    // 6. Only a verified child comment is terminal success. A completed job
+    // without one is an inconsistency and must remain retryable.
+    var hasValidAiReply = !!(aiReplyComment && aiReplyComment.id && typeof aiReplyComment.content === 'string' && aiReplyComment.content.trim() && aiReplyComment.user_name === 'cat_ai' && aiReplyComment.generated_by_ai === true && String(aiReplyComment.parent_comment_id) === String(commentId));
+    if (hasValidAiReply) {
       return res.json({ status: 'completed', reply_comment_id: aiReplyComment.id, message: '', data: aiReplyComment, source_comment_id: commentId });
     }
-    if (existingJob && existingJob.status === 'completed') {
-      return res.json({ status: 'completed', reply_comment_id: null, message: '', data: null, source_comment_id: commentId });
-    }
-
     // 7. pending/processing 不重复创建，直接返回当前状态
     if (existingJob && (existingJob.status === 'pending' || existingJob.status === 'processing')) {
       return res.json({ ok: true, status: existingJob.status, reply_comment_id: null, message: '小猫正在组织毒液……', source_comment_id: commentId });
@@ -4522,28 +4679,30 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       return res.status(400).json({ ok: false, code: 'non_retryable', error: '该任务已被安全规则拦截或关联数据已被删除，不可重试', status: 'blocked', source_comment_id: commentId });
     }
 
-    // 9. failed / repair_required / reply_deleted / reply_missing 状态重置为 pending（可重试错误）
-    if (existingJob && (existingJob.status === 'failed' || existingJob.status === 'repair_required' || existingJob.status === 'reply_deleted' || existingJob.status === 'reply_missing')) {
+    // 9. failed, or completed without a verified reply, resets to pending.
+    var completedWithoutReply = !!(existingJob && existingJob.status === 'completed' && !hasValidAiReply);
+    if (existingJob && (existingJob.status === 'failed' || completedWithoutReply)) {
       // A retry consumes the same atomic quota as the original mention.  This
       // prevents provider failures from becoming an unbounded paid retry loop.
       var retryQuota = await checkCatRateLimit(sourceComment.user_name, post.id);
       if (!retryQuota.allowed) {
         return res.status(429).json({ ok: false, code: retryQuota.reason || 'rate_limited', error: '小猫当前无法重试，请稍后再试', source_comment_id: commentId });
       }
-      var { error: updateErr } = await supabase.from('ai_comment_reply_jobs')
-        .update({
+      var retryResult = await updateCatJobCAS(existingJob.id, existingJob.status, {
           status: 'pending',
           error_message: null,
           risk_type: null,
+          generated_reply: null,
           started_at: null,
           completed_at: null,
           updated_at: new Date().toISOString()
-        })
-        .eq('id', existingJob.id)
-        .eq('status', existingJob.status);
-      if (updateErr) {
-        console.error('[ai-reply-retry] update failed:', updateErr.message);
-        return res.status(500).json({ error: sanitizeError(updateErr), code: 'db_error' });
+      });
+      if (!retryResult.ok) {
+        console.error('[ai-reply-retry] update failed:', retryResult.error && retryResult.error.message);
+        return res.status(503).json({ error: sanitizeError(retryResult.error), code: 'job_update_failed', retryable: true });
+      }
+      if (!retryResult.updated) {
+        return res.status(409).json({ ok: false, code: 'job_state_conflict', error: '任务状态已变化，请刷新后重试', retryable: true });
       }
       return res.json({ ok: true, status: 'pending', job_id: existingJob.id, source_comment_id: commentId });
     }
@@ -4551,20 +4710,21 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
     // 10. 无 Job — 复用 createCatReplyJob 创建新任务
     var newJob = await createCatReplyJob(commentId, sourceComment.post_id, userName);
     if (!newJob) {
-      var { data: doubleCheck } = await supabase.from('ai_comment_reply_jobs')
+      var { data: doubleCheck, error: doubleCheckErr } = await supabase.from('ai_comment_reply_jobs')
         .select('id, status')
         .eq('source_comment_id', commentId)
         .maybeSingle();
+      if (doubleCheckErr) return res.status(503).json({ error: sanitizeError(doubleCheckErr), code: 'job_query_failed', retryable: true });
       if (doubleCheck) {
         return res.json({ ok: true, status: doubleCheck.status, job_id: doubleCheck.id, source_comment_id: commentId });
       }
-      return res.status(500).json({ error: '创建重试任务失败或触发频率限制', code: 'create_job_failed' });
+      return res.status(503).json({ error: '创建重试任务失败或触发频率限制', code: 'create_job_failed', retryable: true });
     }
 
     return res.json({ ok: true, status: 'pending', job_id: newJob.id, source_comment_id: commentId });
   } catch (e) {
     console.error('[ai-reply-retry] error:', e && e.message);
-    return res.status(500).json({ error: '服务器错误' });
+    return res.status(503).json({ error: '服务器错误', retryable: true });
   }
 });
 
@@ -7400,10 +7560,32 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
 
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
 // 照片上传状态查询（按 upload_id 查询是否已提交）
+async function listStorageObjectsPaged(bucket, directory, search) {
+  var all = [];
+  var offset = 0;
+  var pageSize = 1000;
+  for (var pageNumber = 0; pageNumber < 100; pageNumber++) {
+    var result;
+    try {
+      var options = { limit: pageSize, offset: offset };
+      if (search) options.search = search;
+      result = await supabase.storage.from(bucket).list(directory, options);
+    } catch (error) {
+      return { ok: false, error: error };
+    }
+    if (result && result.error) return { ok: false, error: result.error };
+    var rows = result && Array.isArray(result.data) ? result.data : [];
+    all = all.concat(rows);
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return { ok: true, data: all };
+}
+
 app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var uploadId = (req.body && req.body.upload_id) || '';
-    if (!/^[a-z0-9_-]{8,64}$/i.test(String(uploadId))) return res.status(400).json({ error: 'upload_id 格式无效' });
+    if (!/^[a-z0-9_-]{6,128}$/i.test(String(uploadId))) return res.status(400).json({ error: 'upload_id 格式无效' });
     // 按 upload_id 查询（actor_key 格式: photo_${uploadId}）
     var { data: photo, error: photoLookupError } = await supabase.from('posts')
       .select('id, media_url, created_at, content')
@@ -7422,8 +7604,12 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
         // 当前上传路径是 photos/<upload_id>_<timestamp>_... 的平面结构。
         // 旧的分层前缀永远匹配不到，导致同一 upload_id 的孤儿文件无法清理。
         var prefix = 'photos/';
-        var { data: storageFiles, error: listErr } = await supabase.storage.from('uploads').list(prefix, { limit: 1000 });
-        if (!listErr && Array.isArray(storageFiles) && storageFiles.length > 1) {
+        var storageList = await listStorageObjectsPaged('uploads', 'photos', uploadId + '_');
+        if (!storageList.ok) {
+          return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo storage reconciliation is temporarily unavailable' });
+        }
+        var storageFiles = storageList.data || [];
+        if (storageFiles.length > 1) {
           var unreferenced = storageFiles
             .map(function(f) { return prefix + f.name; })
             .filter(function(p) { return p.indexOf('photos/' + uploadId + '_') === 0; })
@@ -7434,14 +7620,23 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
               return p.indexOf(uploadId) >= 0;
             });
             if (toClean.length > 0) {
-              await supabase.storage.from('uploads').remove(toClean).catch(function() {});
+              var cleanupResult = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: toClean, photoId: photo.id });
+              if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
+                return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo cleanup could not be queued' });
+              }
+              if (cleanupResult.cleanup_pending) photo.cleanup_pending = true;
             }
           }
         }
       }
-    } catch (_) { /* 清理是尽力而为，不阻塞主流程 */ }
+    } catch (cleanupError) {
+      // A status response must never claim the upload is committed while the
+      // reconciliation query or durable cleanup outcome is unknown.
+      console.warn('[PhotoWall] status cleanup failed:', cleanupError && cleanupError.message);
+      return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo storage reconciliation is temporarily unavailable' });
+    }
 
-    return res.json({ status: 'committed', data: photo });
+    return res.json({ status: 'committed', cleanup_pending: photo.cleanup_pending === true, data: photo });
   } catch(e) {
     return res.status(500).json({ error: '查询失败' });
   }
@@ -7455,13 +7650,13 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     if (typeof path !== 'string' || !path || typeof uploadId !== 'string' || !uploadId) {
       return res.status(400).json({ ok: false, error: '缺少清理凭证' });
     }
-    if (!/^[a-z0-9_-]{8,64}$/i.test(uploadId)) {
+    if (!/^[a-z0-9_-]{6,128}$/i.test(uploadId)) {
       return res.status(400).json({ ok: false, error: '清理凭证不合法' });
     }
     // 只接受 upload-ui.js 生成的平面文件名，避免通过 PostgREST 表达式或
     // Storage 路径穿越把本接口变成任意文件删除器。
     if (path.indexOf('photos/' + uploadId + '_') !== 0 ||
-        !/^photos\/[a-z0-9_-]{8,64}_\d{10,}_[a-z0-9]+_[A-Za-z0-9_-]{1,48}(?:\.[A-Za-z0-9]{1,8})?$/i.test(path)) {
+        !/^photos\/[a-z0-9_-]{6,128}_\d{10,}_[a-z0-9]+_[A-Za-z0-9_-]{1,48}(?:\.[A-Za-z0-9]{1,8})?$/i.test(path)) {
       return res.status(400).json({ ok: false, error: '路径不合法' });
     }
     // 派生文件（缩略图/旋转版）一律不允许通过本接口删除，只能走照片删除流程
@@ -7489,7 +7684,7 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     // 时间窗口校验：本接口只处理本次上传失败遗留的文件
     // （命名约定 photos/<upload_id>_<epochMs>_<rand>_<name>）。
     var namePart = path.slice('photos/'.length);
-    var tsMatch = String(namePart).match(/^[a-z0-9_-]{8,64}_(\d{10,})\_/i);
+    var tsMatch = String(namePart).match(/^[a-z0-9_-]{6,128}_(\d{10,})\_/i);
     var PHOTO_CLEANUP_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000;
     var allowedByAge = false;
     if (tsMatch) {
@@ -7500,15 +7695,20 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     if (!allowedByAge) {
       return res.status(403).json({ ok: false, error: '文件超出清理时限，无权清理' });
     }
-    var result = await supabase.storage.from('uploads').remove([path]);
-    if (result && result.error) {
-      var msg = String((result.error.message || result.error.error || '') || '').toLowerCase();
-      if (/not.?found|does not exist|no such|404/.test(msg)) {
-        return res.json({ ok: true, not_found: true });
-      }
-      return res.status(500).json({ ok: false, error: '清理失败: ' + (result.error.message || '') });
+    var cleanupResult;
+    try {
+      cleanupResult = await removeStorageWithQueue(supabase, {
+        bucket: 'uploads',
+        paths: [path],
+        photoId: 'photo_' + uploadId
+      });
+    } catch (cleanupError) {
+      return res.status(503).json({ ok: false, retryable: true, error: '清理暂时不可用，请稍后重试' });
     }
-    return res.json({ ok: true });
+    if (!cleanupResult || !cleanupResult.ok) {
+      return res.status(503).json({ ok: false, retryable: true, error: '清理未确认，请稍后重试', cleanup_pending: !!(cleanupResult && cleanupResult.cleanup_pending) });
+    }
+    return res.json({ ok: true, not_found: !!cleanupResult.not_found, cleanup_pending: !!cleanupResult.cleanup_pending });
   } catch (e) {
     return res.status(500).json({ ok: false, error: '清理异常: ' + (e && e.message || '') });
   }
@@ -7525,6 +7725,7 @@ function collectPhotoStoragePaths(photo) {
     var metadata = JSON.parse(photo && photo.content || '{}');
     addPath(metadata.storagePath || metadata.storage_path);
     addPath(metadata.thumb || metadata.thumbnailPath || metadata.thumbnail_path);
+    addPath(metadata.rotatedPath || metadata.rotated_path);
   } catch (_) {}
   if (photo && photo.media_url) {
     try {
@@ -7598,12 +7799,33 @@ async function hardDeleteContent(params) {
 }
 
 var _storageCleanupRunning = false;
+var STORAGE_CLEANUP_CLAIM_TIMEOUT_MS = 60 * 1000;
+var STORAGE_CLEANUP_LEASE_MS = 60 * 1000;
+var STORAGE_CLEANUP_REMOVE_TIMEOUT_MS = 30 * 1000;
+
+function withStorageCleanupTimeout(promise, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var timer = setTimeout(function() {
+      var error = new Error('storage cleanup timed out');
+      error.code = 'STORAGE_CLEANUP_TIMEOUT';
+      reject(error);
+    }, timeoutMs);
+    Promise.resolve(promise).then(function(value) {
+      clearTimeout(timer);
+      resolve(value);
+    }, function(error) {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 async function processStorageCleanupJobs() {
   if (_storageCleanupRunning) return;
   _storageCleanupRunning = true;
   try {
     var pending = await supabase.from('storage_cleanup_jobs')
-      .select('id, bucket, paths, attempts')
+      .select('id, bucket, paths, attempts, status, updated_at, claim_token, lease_until')
       .in('status', ['pending', 'processing'])
       .order('created_at', { ascending: true })
       .limit(20);
@@ -7615,27 +7837,62 @@ async function processStorageCleanupJobs() {
     }
     for (var i = 0; i < (pending.data || []).length; i++) {
       var job = pending.data[i];
+      if (job.status === 'processing') {
+        var leaseUntil = Date.parse(String(job.lease_until || ''));
+        if (Number.isFinite(leaseUntil) && leaseUntil > Date.now()) continue;
+        // Rows created before the lease columns were deployed may only have
+        // updated_at. Treat a recent legacy claim as still owned, but let an
+        // old one be reclaimed by the tokenized path below.
+        if (!job.lease_until && job.updated_at && Date.now() - Date.parse(job.updated_at) < STORAGE_CLEANUP_CLAIM_TIMEOUT_MS) continue;
+      }
       var paths = Array.isArray(job.paths) ? job.paths.filter(function(path) {
-        return typeof path === 'string' && path && path.indexOf('..') < 0;
+        return typeof path === 'string' && path && path.indexOf('..') < 0 && path.indexOf('\\') < 0;
       }) : [];
-      await supabase.from('storage_cleanup_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', job.id);
+      if (!Array.isArray(job.paths) || paths.length !== job.paths.length) {
+        console.warn('[storage-cleanup] refusing unsafe path list for job', job.id);
+        continue;
+      }
+      var claimTime = new Date().toISOString();
+      var claimToken = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+      var claimQuery = supabase.from('storage_cleanup_jobs').update({
+        status: 'processing',
+        claim_token: claimToken,
+        lease_until: new Date(Date.now() + STORAGE_CLEANUP_LEASE_MS).toISOString(),
+        updated_at: claimTime
+      }).eq('id', job.id).eq('status', job.status);
+      if (job.status === 'processing') {
+        if (job.claim_token) claimQuery = claimQuery.eq('claim_token', job.claim_token);
+        else claimQuery = claimQuery.is('claim_token', null);
+      }
+      var claim = await claimQuery.select('id, claim_token').maybeSingle();
+      if (claim.error || !claim.data) {
+        if (claim.error) console.warn('[storage-cleanup] claim failed:', claim.error.message);
+        continue;
+      }
+      var nextAttempts = Number(job.attempts || 0) + 1;
       var removeError = null;
       if (paths.length) {
         try {
-          var removal = await supabase.storage.from(job.bucket || 'uploads').remove(paths);
+          var removal = await withStorageCleanupTimeout(supabase.storage.from(job.bucket || 'uploads').remove(paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
           removeError = removal.error || null;
         } catch (error) { removeError = error; }
       }
-      if (removeError && !/not found/i.test(String(removeError.message || ''))) {
-        await supabase.from('storage_cleanup_jobs').update({
-          status: 'pending', attempts: Number(job.attempts || 0) + 1,
-          last_error: String(removeError.message || 'storage_delete_failed').slice(0, 1000), updated_at: new Date().toISOString()
-        }).eq('id', job.id);
+      var finalUpdate;
+      if (removeError && !isNotFoundError(removeError)) {
+        finalUpdate = await supabase.from('storage_cleanup_jobs').update({
+          status: 'pending', attempts: nextAttempts,
+          last_error: String(removeError.message || removeError.error || 'storage_delete_failed').slice(0, 1000),
+          claim_token: null, lease_until: null, updated_at: new Date().toISOString()
+        }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
       } else {
-        await supabase.from('storage_cleanup_jobs').update({
-          status: 'completed', attempts: Number(job.attempts || 0) + 1,
-          last_error: null, completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        }).eq('id', job.id);
+        finalUpdate = await supabase.from('storage_cleanup_jobs').update({
+          status: 'completed', attempts: nextAttempts,
+          last_error: null, completed_at: new Date().toISOString(),
+          claim_token: null, lease_until: null, updated_at: new Date().toISOString()
+        }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
+      }
+      if (finalUpdate.error || !finalUpdate.data) {
+        console.warn('[storage-cleanup] final state update not confirmed for job', job.id, finalUpdate.error && finalUpdate.error.message);
       }
     }
   } catch (error) {
@@ -8274,7 +8531,10 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'comment_failed' });
 
     // 小猫 AI 自动回复触发
-    if (hasCatMention(content) && req.userName !== CAT_AI_USERNAME) {
+    // Use the same complete trigger validator as worker/reconciliation paths;
+    // this keeps generated replies, empty authors, and @小猫咪/@小猫猫 from
+    // entering the queue through the public comment route.
+    if (isValidCatTrigger(inserted.data) && req.userName !== CAT_AI_USERNAME) {
       var rateLimit = await checkCatRateLimit(req.userName, postId);
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
@@ -8338,21 +8598,13 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
         // Case 1: 删除的是 AI 回复 → 找到其源评论对应的 job
         var parentId = existing.data.parent_comment_id;
         if (parentId) {
-          await supabase.from('ai_comment_reply_jobs').update({
-            status: 'blocked',
-            error_message: 'reply deleted by user',
-            completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }).eq('source_comment_id', String(parentId)).in('status', ['completed', 'processing', 'pending', 'repair_required']);
+          var replyDeleteJobResult = await blockCatJobAfterCommentDelete(parentId, 'reply deleted by user');
+          logCatCAS('reply deleted -> blocked', replyDeleteJobResult);
         }
       } else {
         // Case 2: 删除的是父评论 → 标记其 job 为 blocked
-        await supabase.from('ai_comment_reply_jobs').update({
-          status: 'blocked',
-          error_message: 'source comment deleted',
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq('source_comment_id', String(commentId)).in('status', ['completed', 'processing', 'pending', 'repair_required']);
+        var sourceDeleteJobResult = await blockCatJobAfterCommentDelete(commentId, 'source comment deleted');
+        logCatCAS('source deleted -> blocked', sourceDeleteJobResult);
       }
     } catch (jobCleanupErr) {
       // Job cleanup is best-effort — comment delete already succeeded.
@@ -8986,6 +9238,80 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
 });
 
 // POST /api/dm/send - 发送私信（后端认证写入，禁止前端直连 Supabase）
+async function findDmMessageByActorKey(sender, actorKey) {
+  try {
+    return await supabase.from('posts')
+      .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
+      .eq('actor_key', actorKey)
+      .eq('user_name', sender)
+      .eq('media_type', DM_MARKER)
+      .limit(1)
+      .maybeSingle();
+  } catch (error) {
+    return { data: null, error: error };
+  }
+}
+
+async function updateDmMediaRegistryCAS(registryId, expectedStatus, changes) {
+  try {
+    var result = await supabase.from('dm_media_uploads').update(changes)
+      .eq('id', registryId)
+      .eq('status', expectedStatus)
+      .select('id, storage_path, uploader, status, message_id')
+      .maybeSingle();
+    return {
+      ok: !result.error,
+      updated: !!result.data,
+      data: result.data || null,
+      error: result.error || null
+    };
+  } catch (error) {
+    return { ok: false, updated: false, data: null, error: error };
+  }
+}
+
+async function attachDmMediaRegistry(registryRow, messageId) {
+  if (!registryRow || !registryRow.id || !messageId) {
+    return { ok: false, updated: false, error: { code: 'MEDIA_REGISTRY_ROW_INVALID', message: 'Media registry row is invalid' } };
+  }
+  var expectedStatus = String(registryRow.status || '');
+  if (expectedStatus !== 'uploaded' && expectedStatus !== 'sending' && expectedStatus !== 'attached') {
+    return { ok: false, updated: false, error: { code: 'MEDIA_REGISTRY_STATE_INVALID', message: 'Media registry is not attachable' } };
+  }
+  return updateDmMediaRegistryCAS(registryRow.id, expectedStatus, {
+    status: 'attached',
+    message_id: messageId,
+    updated_at: new Date().toISOString()
+  });
+}
+
+async function cleanupDmMediaAfterFailedSend(registryRow, storagePath, reason) {
+  var cleanupResult;
+  try {
+    cleanupResult = await removeStorageWithQueue(supabase, {
+      bucket: 'uploads',
+      paths: [storagePath],
+      photoId: registryRow && registryRow.id,
+      lastError: reason
+    });
+  } catch (error) {
+    cleanupResult = { ok: false, cleanup_pending: false, queue_failed: true, error: error };
+  }
+  var nextStatus = cleanupResult && cleanupResult.ok && !cleanupResult.cleanup_pending ? 'deleted' : 'cleanup_pending';
+  var registryResult = null;
+  if (registryRow && registryRow.id) {
+    registryResult = await updateDmMediaRegistryCAS(registryRow.id, 'sending', {
+      status: nextStatus,
+      message_id: null,
+      updated_at: new Date().toISOString()
+    });
+  }
+  if (!registryResult || !registryResult.ok || !registryResult.updated) {
+    console.warn('[API] dm media cleanup registry update was not confirmed:', registryResult && (registryResult.error || registryResult.data));
+  }
+  return { cleanup: cleanupResult, registry: registryResult };
+}
+
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var sender = req.userName;
@@ -9030,56 +9356,120 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     }
 
     // P6: 媒体文件处理 — 如果有媒体文件，验证并生成 actor_key / URL
-    var actorKey = 'dm_' + Date.now();
+    var actorKey = 'dm_' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '_' + Math.random().toString(36).slice(2));
     var mediaPayload = null;
+    var mediaClaim = null;
+    var registryRow = null;
     if (storagePath) {
-      // P6: 拒绝外部 URL — 只接受 Storage 路径引用
-      if (/^https?:\/\//i.test(storagePath)) {
-        return res.status(400).json({ error: '外部URL不被允许，请使用 Storage 路径', code: 'external_url_rejected' });
+      if (storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) {
+        return res.status(400).json({ error: 'Invalid media path', code: 'invalid_media_path' });
       }
-      // P6: 防止路径遍历
-      if (/\.\./.test(storagePath)) {
-        return res.status(400).json({ error: '无效的媒体路径', code: 'invalid_media_path' });
-      }
-      // P6: 校验路径所有权 — 必须属于 chat/ 作用域，确保来自 DM 上传流程
-      if (storagePath.indexOf('chat/') !== 0) {
-        return res.status(400).json({ error: '媒体路径不属于私信作用域', code: 'invalid_storage_scope' });
+      var pathResult = validateDmStoragePath(storagePath);
+      if (!pathResult.ok) return res.status(400).json({ error: pathResult.error, code: pathResult.code });
+      var kindResult = validateDmMediaKind(mediaKind, mimeType);
+      if (!kindResult.ok) return res.status(400).json({ error: kindResult.error, code: kindResult.code });
+      if (!ALLOWED_KINDS[kindResult.kind] || ALLOWED_KINDS[kindResult.kind] !== kindResult.actorPrefix) {
+        return res.status(400).json({ error: 'Unsupported media kind', code: 'invalid_media_kind' });
       }
 
-      // P6: 校验 kind 合法
-      var ALLOWED_KINDS = { image: '__dm_img__', video: '__dm_vid__', audio: '__dm_aud__' };
-      var actorPrefix = ALLOWED_KINDS[mediaKind];
-      if (!actorPrefix) {
-        return res.status(400).json({ error: '不支持的媒体类型，仅支持 image/video/audio', code: 'invalid_kind' });
+      mediaClaim = await claimDmMediaUpload(supabase, {
+        storagePath: pathResult.storagePath,
+        uploader: sender,
+        kind: kindResult.kind,
+        mimeType: kindResult.mimeType,
+        sizeBytes: req.body && (req.body.size_bytes !== undefined ? req.body.size_bytes : null)
+      });
+      if (!mediaClaim.ok) {
+        var claimStatus = mediaClaim.state === 'forbidden' ? 403 :
+          (mediaClaim.state === 'query_failed' ? 503 : 400);
+        return res.status(claimStatus).json({
+          error: mediaClaim.error && mediaClaim.error.message ? mediaClaim.error.message : 'Media upload cannot be verified',
+          code: mediaClaim.code || 'media_verify_failed',
+          retryable: claimStatus === 503
+        });
       }
 
-      // P6: 校验 MIME 类型与 kind 匹配
-      var mimePrefixMap = { image: 'image/', video: 'video/', audio: 'audio/' };
-      var expectedMimePrefix = mimePrefixMap[mediaKind];
-      if (!mimeType || mimeType.indexOf(expectedMimePrefix) !== 0) {
-        return res.status(400).json({ error: 'MIME 类型与声明的媒体类型不匹配', code: 'mime_mismatch' });
+      registryRow = mediaClaim.data || {};
+      actorKey = kindResult.actorPrefix + pathResult.storagePath;
+      mediaKind = String(registryRow.kind || kindResult.kind);
+      mimeType = String(registryRow.mime_type || kindResult.mimeType);
+      var publicUrlResult;
+      try {
+        publicUrlResult = supabase.storage.from('uploads').getPublicUrl(pathResult.storagePath);
+      } catch (error) {
+        return res.status(503).json({ error: 'Media URL could not be generated', code: 'media_url_failed', retryable: true });
       }
-
-      // P6: 验证文件在 Storage 中真实存在
-      var storageDir = 'chat';
-      var storageFileName = storagePath.substring(storagePath.lastIndexOf('/') + 1);
-      var { data: storageItems, error: listErr } = await supabase.storage.from('uploads').list(storageDir, { limit: 1000 });
-      if (listErr) {
-        console.error('[API] dm send storage list error:', listErr);
-        return res.status(503).json({ error: '暂时无法验证媒体文件', code: 'storage_verify_retry' });
-      }
-      var fileExists = (storageItems || []).some(function(item) { return item.name === storageFileName; });
-      if (!fileExists) {
-        return res.status(400).json({ error: '媒体文件在 Storage 中不存在', code: 'media_not_found' });
-      }
-
-      // P6: 后端生成 actor_key 和媒体 URL
-      actorKey = actorPrefix + storagePath;
-      var publicUrl = supabase.storage.from('uploads').getPublicUrl(storagePath).data.publicUrl;
+      var publicUrl = publicUrlResult && publicUrlResult.data && publicUrlResult.data.publicUrl;
+      if (!publicUrl) return res.status(503).json({ error: 'Media URL could not be generated', code: 'media_url_failed', retryable: true });
       mediaPayload = { kind: mediaKind, url: publicUrl, mimeType: mimeType };
-    }
 
-    // P6: 构建消息内容 — 后端注入 mediaPayload，不信任任何客户端传入的 media 对象
+      // A second send for an already attached upload is idempotent. If the
+      // registry points at a deleted message, the normal insert path below
+      // can repair the attachment without letting another user claim it.
+      if (registryRow.status === 'attached' && registryRow.message_id) {
+        var existingMessage = await supabase.from('posts')
+          .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
+          .eq('id', registryRow.message_id).eq('user_name', sender).eq('media_type', DM_MARKER).maybeSingle();
+        if (existingMessage.error) return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
+        if (existingMessage.data) {
+          if (existingMessage.data.actor_key !== actorKey) {
+            return res.status(409).json({ error: 'Media registry does not match the message', code: 'media_registry_conflict', retryable: true });
+          }
+          return res.json({ ok: true, message: existingMessage.data, idempotent: true });
+        }
+      }
+
+      // Reconcile a message committed immediately before a previous request
+      // crashed while attaching the registry row. This check is deliberately
+      // before taking a new lease, so a retry never creates a second post.
+      var actorMessage = await findDmMessageByActorKey(sender, actorKey);
+      if (actorMessage.error) {
+        return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
+      }
+      if (actorMessage.data) {
+        if (registryRow.status === 'attached' && registryRow.message_id && String(registryRow.message_id) !== String(actorMessage.data.id)) {
+          return res.status(409).json({ error: 'Media registry points to another message', code: 'media_registry_conflict', retryable: true });
+        }
+        var reconciledAttach = await attachDmMediaRegistry(registryRow, actorMessage.data.id);
+        if (!reconciledAttach.ok && !reconciledAttach.updated) {
+          return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
+        }
+        return res.json({ ok: true, message: actorMessage.data, idempotent: true, media_registry_pending: !reconciledAttach.updated });
+      }
+
+      var reservation = await reserveDmMediaUpload(supabase, {
+        row: registryRow,
+        storagePath: pathResult.storagePath,
+        uploader: sender,
+        kind: kindResult.kind,
+        mimeType: kindResult.mimeType,
+        allowAttachedRepair: true
+      });
+      if (!reservation.ok) {
+        var reservationStatus = reservation.state === 'conflict' ? 409 : reservation.state === 'query_failed' ? 503 : 400;
+        return res.status(reservationStatus).json({
+          error: reservation.error && reservation.error.message ? reservation.error.message : 'Media upload cannot be reserved',
+          code: reservation.code || 'media_reserve_failed',
+          retryable: reservationStatus !== 400
+        });
+      }
+      registryRow = reservation.data || registryRow;
+      mediaClaim.data = registryRow;
+
+      // A stale lease can be reclaimed only after another actor has had a
+      // final chance to reveal a committed message.
+      actorMessage = await findDmMessageByActorKey(sender, actorKey);
+      if (actorMessage.error) {
+        return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
+      }
+      if (actorMessage.data) {
+        var reclaimedAttach = await attachDmMediaRegistry(registryRow, actorMessage.data.id);
+        if (!reclaimedAttach.ok && !reclaimedAttach.updated) {
+          return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
+        }
+        return res.json({ ok: true, message: actorMessage.data, idempotent: true, media_registry_pending: !reclaimedAttach.updated });
+      }
+    }
     var parsedPayload = null;
     try {
       parsedPayload = JSON.parse(content);
@@ -9102,45 +9492,68 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     }
 
     // 使用 service_role 写入 __dm__ 记录（绕过RLS）
-    var { data: inserted, error: insertErr } = await supabase
-      .from('posts')
-      .insert([{
-        user_name: sender,
-        content: content,
-        media_type: mediaType,
-        media_url: targetUser,
-        actor_key: actorKey
-      }])
-      .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
-      .single();
-
-    if (insertErr) {
-      console.error('[API] dm send insert error:', insertErr);
-      // P6: 消息写入失败，清理已上传的 Storage 文件
-      if (storagePath) {
-        try {
-          var { error: cleanupErr } = await supabase.storage.from('uploads').remove([storagePath]);
-          if (cleanupErr) {
-            console.warn('[API] dm send storage cleanup failed, queueing job:', cleanupErr.message || cleanupErr);
-            // P6: 如果删除失败，进入 storage_cleanup_jobs 持久化重试队列
-            await supabase.from('storage_cleanup_jobs').insert({
-              bucket: 'uploads',
-              paths: [storagePath],
-              status: 'pending',
-              attempts: 0,
-              last_error: String(cleanupErr.message || 'storage_delete_failed').slice(0, 1000),
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }).select().maybeSingle();
-          }
-        } catch (cleanupEx) {
-          console.warn('[API] dm send storage cleanup exception:', cleanupEx && cleanupEx.message);
-          // 异常不阻塞响应，记录日志即可
-        }
-      }
-      return res.status(500).json({ error: sanitizeError(insertErr), code: 'dm_send_failed' });
+    var inserted = null;
+    var insertErr = null;
+    try {
+      var insertResult = await supabase
+        .from('posts')
+        .insert([{
+          user_name: sender,
+          content: content,
+          media_type: mediaType,
+          media_url: targetUser,
+          actor_key: actorKey
+        }])
+        .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
+        .single();
+      inserted = insertResult && insertResult.data;
+      insertErr = insertResult && insertResult.error;
+    } catch (error) {
+      // A thrown transport error has an unknown commit outcome. Reconcile by
+      // deterministic actor_key before touching the uploaded object.
+      insertErr = error;
     }
 
+    if (insertErr || !inserted || !inserted.id) {
+      console.error('[API] dm send insert error:', insertErr);
+      if (storagePath) {
+        var committedAfterError = await findDmMessageByActorKey(sender, actorKey);
+        if (committedAfterError.error) {
+          return res.status(503).json({ error: 'Message save outcome is unknown; please retry', code: 'DM_COMMIT_UNKNOWN', retryable: true });
+        }
+        if (committedAfterError.data) {
+          var committedAttach = await attachDmMediaRegistry(registryRow, committedAfterError.data.id);
+          if (!committedAttach.ok && !committedAttach.updated) {
+            return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
+          }
+          return res.json({ ok: true, message: committedAfterError.data, idempotent: true, media_registry_pending: !committedAttach.updated });
+        }
+
+        // removeStorageWithQueue records a storage_cleanup_jobs task if the
+        // direct Storage removal is unavailable, so failed sends converge.
+        var cleanupOutcome = await cleanupDmMediaAfterFailedSend(registryRow, storagePath, sanitizeError(insertErr || { message: 'DM insert was not confirmed' }));
+        var cleanupResult = cleanupOutcome.cleanup;
+        if (!cleanupResult || !cleanupResult.ok || !cleanupOutcome.registry || !cleanupOutcome.registry.updated) {
+          return res.status(503).json({ error: 'Message save failed and media cleanup could not be confirmed', code: 'DM_CLEANUP_QUEUE_FAILED', retryable: true, cleanup_pending: !!(cleanupResult && cleanupResult.cleanup_pending) });
+        }
+        return res.status(500).json({ error: sanitizeError(insertErr || { message: 'DM insert was not confirmed' }), code: 'dm_send_failed', cleanup_pending: !!cleanupResult.cleanup_pending });
+      }
+      return res.status(500).json({ error: sanitizeError(insertErr || { message: 'DM insert was not confirmed' }), code: 'dm_send_failed' });
+    }
+
+    if (storagePath && registryRow && registryRow.id) {
+      var mediaAttach = await attachDmMediaRegistry(registryRow, inserted.id);
+      if (!mediaAttach.ok || !mediaAttach.updated) {
+        console.warn('[API] dm media registry attach was not confirmed:', mediaAttach.error || mediaAttach.data);
+        return res.status(503).json({
+          ok: false,
+          message_id: inserted.id,
+          error: '消息已保存，但媒体关联尚未确认，请重试',
+          code: 'media_registry_update_retry',
+          retryable: true
+        });
+      }
+    }
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
@@ -9181,8 +9594,53 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     var elapsed = Date.now() - new Date(msg.created_at).getTime();
     var timeLimit = 3 * 60 * 1000;
 
+    // Resolve and validate the backend-generated media path before changing
+    // the message. Never allow an old or forged actor_key to select an
+    // arbitrary Storage object for deletion.
+    var DM_MEDIA_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
+    var storagePath = null;
+    if (msg && msg.actor_key) {
+      for (var pi = 0; pi < DM_MEDIA_PREFIXES.length; pi++) {
+        if (msg.actor_key.indexOf(DM_MEDIA_PREFIXES[pi]) === 0) {
+          storagePath = msg.actor_key.substring(DM_MEDIA_PREFIXES[pi].length);
+          break;
+        }
+      }
+    }
+    if (storagePath) {
+      var validDmPath = validateDmStoragePath(storagePath);
+      if (!validDmPath.ok) {
+        return res.status(500).json({ error: 'Media path cannot be safely cleaned', code: 'invalid_media_path' });
+      }
+      storagePath = validDmPath.storagePath;
+    }
+
     if (elapsed > timeLimit) {
       return res.status(403).json({ error: '消息发送时间已超过可撤回期限', code: 'timeout' });
+    }
+
+    if (storagePath) {
+      // Storage removal is allowed only after both the message table and the
+      // media registry confirm that no other row points at this object.
+      // Otherwise a duplicated/legacy actor key could delete another
+      // message's attachment.
+      var mediaReferenceChecks = await Promise.all([
+        supabase.from('posts').select('id, actor_key').eq('actor_key', msg.actor_key).limit(10),
+        supabase.from('dm_media_uploads').select('id, message_id, status').eq('storage_path', storagePath).limit(10)
+      ]);
+      if (mediaReferenceChecks.some(function(result) { return !result || result.error; })) {
+        return res.status(503).json({ error: 'Media references could not be verified', code: 'dm_media_reference_check_failed', retryable: true });
+      }
+      var mediaRegistryRows = mediaReferenceChecks[1].data || [];
+      var otherPostReference = (mediaReferenceChecks[0].data || []).some(function(row) {
+        return String(row.id || '') !== messageId;
+      });
+      var otherRegistryReference = mediaRegistryRows.some(function(row) {
+        return String(row.message_id || '') !== messageId && String(row.status || '') !== 'deleted';
+      });
+      if (otherPostReference || otherRegistryReference) {
+        return res.status(409).json({ error: 'Media object is referenced by another message', code: 'dm_media_reference_conflict', retryable: true });
+      }
     }
 
     // 更新内容为撤回状态
@@ -9202,38 +9660,47 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     // P6: 撤回媒体加入幂等 Storage cleanup — 之前撤回仅更新 content 为
     // "[消息已撤回]"，完全忽略 Storage 层的媒体文件，导致撤回的图片/视频
     // 文件成为 Storage 永久孤儿（仍可通过 Public URL 访问）。
-    var DM_MEDIA_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
-    var storagePath = null;
-    if (msg && msg.actor_key) {
-      for (var pi = 0; pi < DM_MEDIA_PREFIXES.length; pi++) {
-        if (msg.actor_key.indexOf(DM_MEDIA_PREFIXES[pi]) === 0) {
-          storagePath = msg.actor_key.substring(DM_MEDIA_PREFIXES[pi].length);
-          break;
+    var cleanupResult = null;
+    var mediaRegistryPending = false;
+    if (storagePath) {
+      // removeStorageWithQueue performs supabase.storage.from('uploads').remove([storagePath]) and
+      // records a durable storage_cleanup_jobs retry task when removal fails.
+      try {
+        cleanupResult = await removeStorageWithQueue(supabase, {
+          bucket: 'uploads',
+          paths: [storagePath],
+          photoId: messageId
+        });
+      } catch (cleanupError) {
+        cleanupResult = { ok: false, cleanup_pending: false, queue_failed: true, error: cleanupError };
+      }
+      var registryStatus = cleanupResult.cleanup_pending || !cleanupResult.ok ? 'cleanup_pending' : 'deleted';
+      var registryNeedsUpdate = mediaRegistryRows.some(function (row) {
+        return ['uploaded', 'sending', 'attached', 'cleanup_pending'].indexOf(String(row.status || '')) >= 0;
+      });
+      if (registryNeedsUpdate) {
+        try {
+          var registryCleanup = await supabase.from('dm_media_uploads').update({
+            status: registryStatus,
+            updated_at: new Date().toISOString()
+          }).eq('storage_path', storagePath).eq('uploader', reqUser).eq('message_id', messageId).in('status', ['uploaded', 'sending', 'attached', 'cleanup_pending']).select('id').maybeSingle();
+          if (registryCleanup.error || !registryCleanup.data) {
+            mediaRegistryPending = true;
+            console.warn('[API] dm withdraw media registry update was not confirmed:', registryCleanup.error || registryCleanup.data);
+            return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media registry could not be updated', code: 'DM_MEDIA_REGISTRY_UPDATE_FAILED', retryable: true });
+          }
+        } catch (registryError) {
+          mediaRegistryPending = true;
+          console.warn('[API] dm withdraw media registry update failed:', registryError && registryError.message);
+          return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media registry could not be updated', code: 'DM_MEDIA_REGISTRY_UPDATE_FAILED', retryable: true });
         }
       }
-    }
-    if (storagePath) {
-      try {
-        var { error: removeErr } = await supabase.storage.from('uploads').remove([storagePath]);
-        if (removeErr) {
-          console.warn('[API] dm withdraw storage cleanup error:', removeErr.message || removeErr);
-          // P6: 如果 Storage 删除失败，进入 storage_cleanup_jobs 持久化重试队列
-          await supabase.from('storage_cleanup_jobs').insert({
-            bucket: 'uploads',
-            paths: [storagePath],
-            status: 'pending',
-            attempts: 0,
-            last_error: String(removeErr.message || 'storage_delete_failed').slice(0, 1000),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }).select().maybeSingle();
-        }
-      } catch (e) {
-        console.warn('[API] dm withdraw storage cleanup failed:', e && e.message);
+      if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
+        return res.status(503).json({ ok: false, withdrawn: true, error: 'Message withdrawn but media cleanup could not be queued', code: 'DM_CLEANUP_QUEUE_FAILED', retryable: true });
       }
     }
 
-    return res.json({ ok: true, message: updated });
+    return res.json({ ok: true, message: updated, cleanup_pending: !!(cleanupResult && cleanupResult.cleanup_pending), media_registry_pending: mediaRegistryPending });
   } catch (e) {
     console.error('[API] dm withdraw:', e && e.message);
     return res.status(500).json({ error: '撤回失败', code: 'dm_withdraw_error' });

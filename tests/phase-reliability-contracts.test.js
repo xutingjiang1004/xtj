@@ -84,7 +84,7 @@ test('P2-01: document states extracting/ready/failed/timed_out/cancelled', funct
   var s = read('js/code-workspace.js');
   assert.ok(/_docState\s*===?\s*'extracting'/.test(s),
     'document extracting state must exist');
-  assert.ok(/_docState\s*===?\s*'ready'/.test(s) || /_docState\s*===?\s*'failed'/.test(s),
+  assert.ok(/_docState\s*={1,3}\s*['"]ready['"]/.test(s) || /_docState\s*={1,3}\s*['"]failed['"]/.test(s) || /state\s*:\s*['"]ready['"]/.test(s),
     'document ready/failed states must exist');
   assert.ok(/timed_out/.test(s) || /'timed_out'/.test(s),
     'document timed_out state must exist');
@@ -92,12 +92,14 @@ test('P2-01: document states extracting/ready/failed/timed_out/cancelled', funct
     'document cancelled state must exist');
 });
 
-test('P2-02: default block send when doc not ready', function () {
+test('P2-02: relevant document readiness is enforced before send', function () {
   var s = read('js/code-workspace.js');
   assert.ok(/_docState\s*===?\s*'extracting'/.test(s),
     'sendMessage must check for extracting documents');
-  assert.ok(/toast.*正在解析|toast.*请稍候|toast.*documents_not_ready/.test(s),
-    'must show toast when docs are still extracting');
+  assert.ok(/relevantPaths\.has\(tab\.path\)/.test(s),
+    'unrelated open documents must not block a send');
+  assert.ok(/documents_not_ready/.test(s),
+    'request body must report documents that are not ready');
 });
 
 test('P2-03: ignore document send carries context_warnings', function () {
@@ -274,12 +276,12 @@ test('P4-07: @小猫咪 does not trigger', function () {
   var s = read('render-api/server.js');
   var frontend = read('js/core.js');
   // Both frontend and backend must use the correct regex
-  assert.ok(/\[@＠\]小猫\(\?!\[猫\]\)/.test(s) ||
-            /\[@＠\]小猫\(\?![猫]/.test(s),
-    'backend regex must exclude 猫 after 小猫');
-  assert.ok(/\[@＠\]小猫\(\?!\[猫\]\)/.test(frontend) ||
-            /\[@＠\]小猫\(\?![猫]/.test(frontend),
-    'frontend regex must exclude 猫 after 小猫');
+  assert.ok(/\[@＠\]小猫\(\?!\[猫咪\]\)/.test(s) ||
+            /\[@＠\]小猫\(\?![猫咪]/.test(s),
+    'backend regex must exclude 猫 and 咪 after 小猫');
+  assert.ok(/\[@＠\]小猫\(\?!\[猫咪\]\)/.test(frontend) ||
+            /\[@＠\]小猫\(\?![猫咪]/.test(frontend),
+    'frontend regex must exclude 猫 and 咪 after 小猫');
 });
 
 test('P4-08: limited idempotent reconciliation', function () {

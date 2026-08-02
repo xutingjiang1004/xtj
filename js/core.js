@@ -4182,8 +4182,14 @@ function renderProfileActivityList(kind) {
             // ★ 统一 AI 评论插入函数（polling 和 Realtime 共用）
             function upsertAiComment(aiComment, sourceCommentId, postId) {
                 if (!aiComment || !aiComment.id || !aiComment.content || !aiComment.content.trim()) return;
+                // Realtime and polling must accept exactly the same AI reply
+                // shape; a generated comment from another post must not be
+                // rendered under the current source comment.
+                if (aiComment.generated_by_ai !== true || String(aiComment.user_name || '') !== 'cat_ai') return;
                 var aiIdStr = String(aiComment.id);
                 var srcIdStr = String(sourceCommentId);
+                if (String(aiComment.parent_comment_id || '') !== srcIdStr) return;
+                if (postId != null && aiComment.post_id != null && String(aiComment.post_id) !== String(postId)) return;
                 // 去重：检查 feedAllComments 和 DOM
                 var existingInFeed = (feedAllComments || []).some(function(item) {
                     return item && item.id != null && String(item.id) === aiIdStr;
@@ -5073,7 +5079,7 @@ function renderProfileActivityList(kind) {
                         // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
                         // 小猫后跟非汉字字符，导致 @小猫帮我看看 不匹配（"帮"是汉字）。
                         // 改为负向断言 (?![猫])：仅排除 小猫咪，@小猫帮我看看 可匹配。
-                        if (content && /[@＠]小猫(?![猫])/.test(content) && insertedComment) {
+                        if (content && /[@＠]小猫(?![猫咪])/.test(content) && insertedComment) {
                             pollCatAiReply(insertedComment.id, targetPostId);
                         }
                     } catch (e) {
@@ -8209,7 +8215,10 @@ function renderProfileActivityList(kind) {
                     var insertRes = await insertPostRecord(payload, contentPayload);
                     if (!insertRes.ok) {
                         if (uploadedPath) {
-                            try { await sb.storage.from('uploads').remove([uploadedPath]); } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
+                            try {
+                                var cleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
+                                if (cleanupResult && cleanupResult.error) console.warn('[post-publish] orphan cleanup failed', cleanupResult.error);
+                            } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
                             uploadedPath = '';
                         }
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
@@ -8232,7 +8241,10 @@ function renderProfileActivityList(kind) {
                     loadProfileActivity(true);
                 } catch (e) {
                     if (uploadedPath) {
-                        try { await sb.storage.from('uploads').remove([uploadedPath]); } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
+                        try {
+                            var catchCleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
+                            if (catchCleanupResult && catchCleanupResult.error) console.warn('[post-publish] orphan cleanup failed', catchCleanupResult.error);
+                        } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
                     }
                     showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
@@ -9331,7 +9343,7 @@ function renderProfileActivityList(kind) {
                                 });
                                 feedAllComments.push(row);
                                 // ★ 如果是 AI 评论，使用统一 upsert 函数
-                                if (row.generated_by_ai && row.parent_comment_id) {
+                                if (row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id && row.post_id != null) {
                                     removeCatAiStatus(String(row.parent_comment_id));
                                     upsertAiComment(row, String(row.parent_comment_id), row.post_id);
                                 } else {

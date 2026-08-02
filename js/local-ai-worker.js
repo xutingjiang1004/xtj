@@ -4,6 +4,7 @@ import * as webllm from '/vendor/webllm/index.js';
 
 const MODEL_ID = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
 let engine = null;
+let initializing = null;
 
 function send(type, requestId, payload) {
   self.postMessage(Object.assign({ type: type, requestId: requestId }, payload || {}));
@@ -23,15 +24,30 @@ async function initialize(requestId) {
     send('ready', requestId, { modelId: MODEL_ID });
     return;
   }
+  if (initializing) {
+    await initializing;
+    send('ready', requestId, { modelId: MODEL_ID });
+    return;
+  }
   send('status', requestId, { status: 'loading' });
-  engine = await webllm.CreateMLCEngine(MODEL_ID, {
+  let sentInitializing = false;
+  initializing = webllm.CreateMLCEngine(MODEL_ID, {
     initProgressCallback: function(progress) {
+      const ratio = Number(progress && progress.progress || 0);
+      if (!sentInitializing && ratio >= 0.999) {
+        sentInitializing = true;
+        send('status', requestId, { status: 'initializing' });
+      }
       send('progress', requestId, {
         text: String(progress && progress.text || '正在准备本地模型'),
-        progress: Number(progress && progress.progress || 0)
+        progress: ratio
       });
     }
   });
+  // CreateMLCEngine covers both the first-run download and WebGPU setup. Do
+  // not announce "initializing" before that promise resolves: doing so made
+  // the page replace the long download timeout with a short init timeout.
+  engine = await initializing.finally(function() { initializing = null; });
   send('ready', requestId, { modelId: MODEL_ID });
 }
 
