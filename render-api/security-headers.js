@@ -6,10 +6,12 @@
 
 var CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com",
+  // WebLLM runs TVM/WebAssembly in a worker and needs these explicit runtime capabilities.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
+  "worker-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' http://127.0.0.1:10000 http://localhost:10000 https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
   "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com",
