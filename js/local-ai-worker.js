@@ -19,6 +19,25 @@ function cleanMessages(messages) {
   }).filter(function(message) { return message.content.trim(); });
 }
 
+// WebLLM can reject during device creation even when the adapter probe in the
+// page succeeded.  Preserve this as a capability result, not a generic model
+// failure, so both AI and Code can stop the download UI and select the online
+// provider instead of leaving the user at an unusable error.
+function runtimeErrorCode(error) {
+  const message = String(error && error.message || error || '');
+  if (/maxStorageBuffersPerShaderStage|storage buffers? per shader stage|requested\s*=\s*10.*limit\s*=\s*8/i.test(message)) {
+    return 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED';
+  }
+  return 'LOCAL_AI_RUNTIME_ERROR';
+}
+
+function runtimeErrorMessage(error, code) {
+  if (code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED') {
+    return '此设备的 WebGPU 存储缓冲区限制不足，本地 Qwen 至少需要 10 个缓冲区。已停止本地初始化，请切换到“在线 DeepSeek”。';
+  }
+  return error && error.message ? error.message : '本地模型无法启动';
+}
+
 async function initialize(requestId) {
   if (engine) {
     send('ready', requestId, { modelId: MODEL_ID });
@@ -81,9 +100,10 @@ self.onmessage = async function(event) {
     send('done', data.requestId);
   } catch (error) {
     engine = null;
+    const code = runtimeErrorCode(error);
     send('error', data.requestId, {
-      code: 'LOCAL_AI_RUNTIME_ERROR',
-      message: error && error.message ? error.message : '本地模型无法启动'
+      code: code,
+      message: runtimeErrorMessage(error, code)
     });
   }
 };
