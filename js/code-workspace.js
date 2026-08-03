@@ -5018,7 +5018,7 @@
       '<input type="file" id="codeAttachmentInput" accept="' + ATTACHMENT_ACCEPT + '" multiple hidden>' +
       '<textarea id="codeChatInput" aria-label="向 Code AI 发送消息" placeholder="输入消息，AI 将基于上下文文件回答..." rows="1"></textarea>' +
       '<button class="send-btn" id="codeChatSendBtn" type="button" title="发送" aria-label="发送消息">➤</button>';
-    inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="&#21462;&#28040;&#35831;&#27714;">&#21462;&#28040;</button>';
+    inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="取消请求">取消</button>';
     inputArea.innerHTML +=
       '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
         '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="菜单" aria-haspopup="menu" aria-expanded="false">＋</button>' +
@@ -5026,27 +5026,27 @@
       '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
       '<button type="button" class="code-model-retry" id="codeModelRetryBtn" hidden>重试在线模型</button>' +
       '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
-      '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu" hidden>' +
+      '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu">' +
         '<div class="code-composer-menu-section">' +
-          '<div class="code-composer-menu-label">模型</div>' +
+          '<div class="code-composer-menu-label">模型设置</div>' +
           '<div class="code-composer-menu-item"><select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select></div>' +
           '<div class="code-composer-menu-item"><select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
-            '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
+            '<option value="auto">自动思考</option><option value="off">快速 (关闭)</option><option value="low">轻度思考</option><option value="medium">标准思考</option><option value="high">深入思考</option><option value="max">极度深入</option>' +
           '</select></div>' +
         '</div>' +
         '<div class="code-composer-menu-section">' +
-          '<div class="code-composer-menu-label">上下文</div>' +
-          '<button type="button" role="menuitem" data-composer-action="upload">上传资料</button>' +
-          '<button type="button" role="menuitem" data-composer-action="current">添加当前文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="open">添加已打开文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="pin">固定/取消固定当前文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
+          '<div class="code-composer-menu-label">上下文附件</div>' +
+          '<button type="button" role="menuitem" data-composer-action="upload">📎 上传资料文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="current">📄 添加当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="open">📂 添加所有已打开文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pin">📌 固定/取消固定当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pinned">👀 查看已固定文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="clear">🗑️ 清除本轮附件</button>' +
         '</div>' +
         '<div class="code-composer-menu-section">' +
           '<div class="code-composer-menu-label">其他</div>' +
-          '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
-          '<button type="button" role="menuitem" data-composer-action="ignore-documents">Ignore documents for this send</button>' +
+          '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">📊 上下文 未估算</button>' +
+          '<button type="button" role="menuitem" data-composer-action="ignore-documents">🚫 本次忽略文档上下文</button>' +
         '</div>' +
       '</div>';
     // Keep the stable IDs and bindings, but give the composer a clear task
@@ -5392,7 +5392,7 @@
       contextUsage.dataset.bound = '1';
       contextUsage.addEventListener('click', function() {
         var opening = contextDetails.hidden;
-        if (contextMenu) contextMenu.hidden = true;
+        if (contextMenu) contextMenu.classList.remove('show');
         if (contextButton) contextButton.setAttribute('aria-expanded', 'false');
         if (opening) {
           var runtime = state.lastRuntime || {};
@@ -5419,10 +5419,11 @@
     if (contextButton && contextMenu && !contextButton.dataset.bound) {
       contextButton.dataset.bound = '1';
       contextButton.addEventListener('click', function() {
-        var opening = contextMenu.hidden;
+        var opening = !contextMenu.classList.contains('show');
         if (contextDetails) contextDetails.hidden = true;
         if (contextUsage) contextUsage.setAttribute('aria-expanded', 'false');
-        contextMenu.hidden = !opening;
+        if (opening) contextMenu.classList.add('show');
+        else contextMenu.classList.remove('show');
         state.composerMenu = opening ? 'context' : null;
         contextButton.setAttribute('aria-expanded', opening ? 'true' : 'false');
         if (opening) contextMenu.querySelector('button').focus();
@@ -5455,9 +5456,9 @@
         if (action === 'clear') consumeTransientAttachments();
         if (action === 'ignore-documents') {
           state.ignoreDocumentContextOnce = true;
-          showToast('This send will ignore documents that are not ready.', 'info');
+          showToast('本次请求将忽略未就绪的文档附件', 'info');
         }
-        contextMenu.hidden = true;
+        contextMenu.classList.remove('show');
         state.composerMenu = null;
         contextButton.setAttribute('aria-expanded', 'false');
         renderComposerAttachments();
@@ -5476,7 +5477,7 @@
         if (event.key === 'Home' && items.length) { event.preventDefault(); items[0].focus(); }
         if (event.key === 'End' && items.length) { event.preventDefault(); items[items.length - 1].focus(); }
         if (event.key === 'Tab') {
-          contextMenu.hidden = true;
+          contextMenu.classList.remove('show');
           state.composerMenu = null;
           contextButton.setAttribute('aria-expanded', 'false');
         }
