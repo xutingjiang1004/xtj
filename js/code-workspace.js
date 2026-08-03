@@ -4787,8 +4787,15 @@
     if (!element) return;
     var badge = capabilitiesLabel();
     var selected = selectedCodeModel();
-    element.textContent = selected ? ((selected.provider || 'AI') + ' · ' + (selected.name || selected.id) + ' · Agent') : badge.text;
-    element.title = badge.title;
+    if (selected && selected.local) {
+      var localRuntime = window.__xtjLocalAI;
+      var localReady = localRuntime && typeof localRuntime.getState === 'function' && localRuntime.getState() === 'ready';
+      element.textContent = '本地 Qwen · ' + (localReady ? '已就绪' : '未准备');
+      element.title = localReady ? '本地 Qwen 0.5B 已就绪；离线回复不调用服务端工具' : '本地 Qwen 需要先下载并准备；在线模型状态独立显示';
+    } else {
+      element.textContent = selected ? ((selected.provider || 'AI') + ' · ' + (selected.name || selected.id) + ' · Agent') : badge.text;
+      element.title = badge.title;
+    }
   }
 
   function attachmentMimeType(fileName, browserMime) {
@@ -5093,6 +5100,7 @@
         '</select>' +
         '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
       '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
+      '<button type="button" class="code-model-retry" id="codeModelRetryBtn" hidden>重试在线模型</button>' +
       '</div>' +
       '<div class="code-local-model-status" id="codeLocalModelStatus" role="status" aria-live="polite" hidden>' +
         '<div class="code-local-model-status-line"><span id="codeLocalModelStatusText"></span><span id="codeLocalModelStatusValue"></span></div>' +
@@ -5456,6 +5464,7 @@
     var thinkingSelect = document.getElementById('codeThinkingSelect');
     var contextUsage = document.getElementById('codeContextUsage');
     var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
+    var modelRetryButton = document.getElementById('codeModelRetryBtn');
     var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
     if (modelSelect) {
       var current = state.selectedModelId;
@@ -5470,7 +5479,10 @@
       var localDesc = localCodeModelDescriptor();
       var localOption = document.createElement('option');
       localOption.value = localDesc.id;
-      localOption.textContent = localDesc.name;
+      var localRuntimeForLabel = window.__xtjLocalAI;
+      var localStateForLabel = localRuntimeForLabel && typeof localRuntimeForLabel.getState === 'function' ? localRuntimeForLabel.getState() : '';
+      localOption.textContent = localStateForLabel === 'ready' ? '本地 Qwen 0.5B · 已就绪' : '本地 Qwen 0.5B · 需下载';
+      localOption.title = localDesc.name;
       localOption.selected = localDesc.id === current;
       modelSelect.appendChild(localOption);
       modelSelect.disabled = false;
@@ -5549,12 +5561,21 @@
           delete runtimeStatus.dataset.availability;
           runtimeStatus.removeAttribute('title');
         }
-        runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError || (modelHint && modelHint.description) || '');
+        runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError ? '在线不可用' : (modelHint && modelHint.description) || '');
+        runtimeStatus.title = state.modelLoadError ? ('在线模型：' + state.modelLoadError + '；点击“重试在线模型”重新探测') : runtimeStatus.title;
         runtimeStatus.hidden = !runtime.thinkingFallback && !state.modelLoadError && !(modelHint && (modelHint.description || modelHint.availability === 'degraded'));
+        if (modelRetryButton) {
+          modelRetryButton.hidden = !state.modelLoadError;
+          modelRetryButton.disabled = !!state._modelsPromise;
+        }
         if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
           runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
         }
       }
+    }
+    if (modelRetryButton) {
+      modelRetryButton.hidden = !state.modelLoadError;
+      modelRetryButton.disabled = !!state._modelsPromise;
     }
   }
 
@@ -5566,6 +5587,7 @@
     var contextUsage = document.getElementById('codeContextUsage');
     var contextDetails = document.getElementById('codeContextDetails');
     var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
+    var modelRetryButton = document.getElementById('codeModelRetryBtn');
     if (modelSelect && !modelSelect.dataset.bound) {
       modelSelect.dataset.bound = '1';
       modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); updateCapabilitiesBadge(); });
@@ -5573,6 +5595,15 @@
     if (thinkingSelect && !thinkingSelect.dataset.bound) {
       thinkingSelect.dataset.bound = '1';
       thinkingSelect.addEventListener('change', function() { state.thinkingMode = thinkingSelect.value; saveComposerPreferences(); });
+    }
+    if (modelRetryButton && !modelRetryButton.dataset.bound) {
+      modelRetryButton.dataset.bound = '1';
+      modelRetryButton.addEventListener('click', function() {
+        if (state._modelsPromise) return;
+        state.modelLoadError = '';
+        updateComposerControls();
+        loadCodeModels();
+      });
     }
     if (localSetupButton && !localSetupButton.dataset.bound) {
       localSetupButton.dataset.bound = '1';
@@ -5832,9 +5863,12 @@
   // a long status sentence. The phase rail is intentionally small, but it is
   // also a real status surface for screen readers and stream recovery.
   function streamPhaseKey(value) {
-    var phase = String(value || '').toLowerCase();
+    var phase = String(value || '').toLowerCase().trim();
     if (phase === 'tool' || phase === 'tool-complete' || phase === 'tool-error') return 'tool';
-    if (phase === 'answer' || phase === 'model_wait' || phase === 'model' || phase === 'complete') return phase === 'complete' ? 'complete' : 'answer';
+    if (phase === 'model_wait' || phase === 'model-wait' || phase === 'model' || phase === 'waiting_model') return 'model_wait';
+    if (phase === 'answer' || phase === 'answer_start' || phase === 'answer_delta') return 'answer';
+    if (phase === 'finalizing' || phase === 'finalize' || phase === 'operation_preview') return 'finalizing';
+    if (phase === 'complete' || phase === 'done') return 'complete';
     if (phase === 'error' || phase === 'cancelled') return phase;
     return 'context';
   }
@@ -5843,17 +5877,25 @@
     return '<div class="code-stream-phases" role="list" aria-label="回复进度" data-phase="context">' +
       '<div class="code-stream-phase is-active" data-phase="context" role="listitem" aria-current="step"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>理解任务</span></div>' +
       '<div class="code-stream-phase" data-phase="tool" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>读取与工具</span></div>' +
+      '<div class="code-stream-phase" data-phase="model_wait" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>等待模型</span></div>' +
       '<div class="code-stream-phase" data-phase="answer" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>组织回答</span></div>' +
+      '<div class="code-stream-phase" data-phase="finalizing" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>整理结果</span></div>' +
       '<div class="code-stream-phase" data-phase="complete" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>完成</span></div>' +
       '</div>';
   }
 
-  function updateStreamPhaseRail(node, value, terminal) {
+  function updateStreamPhaseRail(node, value, terminal, phaseSequence) {
     if (!node) return;
     var rail = node.querySelector('.code-stream-phases');
     if (!rail) return;
+    var incomingSequence = Number(phaseSequence);
+    if (isFinite(incomingSequence) && incomingSequence > 0) {
+      var previousSequence = Number(node.getAttribute('data-phase-sequence') || 0);
+      if (incomingSequence < previousSequence) return;
+      node.setAttribute('data-phase-sequence', String(incomingSequence));
+    }
     var phase = streamPhaseKey(value);
-    var order = ['context', 'tool', 'answer', 'complete'];
+    var order = ['context', 'tool', 'model_wait', 'answer', 'finalizing', 'complete'];
     var currentIndex = order.indexOf(phase);
     if (currentIndex < 0) currentIndex = 0;
     if (phase === 'error' || phase === 'cancelled') {
@@ -6011,8 +6053,8 @@
   }
 
   function renderPersistentToolTrace(trace) {
-    var visibleTrace = trace.slice(0, 12);
-    var items = visibleTrace.map(function (entry) {
+    var visibleTrace = trace.slice(0, 50);
+    var items = visibleTrace.map(function (entry, traceIndex) {
       entry = entry || {};
       var ok = entry.ok !== false && entry.success !== false && !entry.error;
       var name = String(entry.tool || entry.name || entry.tool_name || '工具调用');
@@ -6021,15 +6063,18 @@
       var state = ok ? '完成' : '失败';
       if (duration > 0 && isFinite(duration)) state += ' · ' + (duration >= 1000 ? (duration / 1000).toFixed(1) + ' 秒' : Math.round(duration) + ' ms');
       var evidence = renderToolEvidence(entry);
-      return '<div class="code-chat-tool-trace-item" data-ok="' + (ok ? 'true' : 'false') + '">' +
+      var index = entry.tool_index != null ? String(entry.tool_index) : String(traceIndex + 1);
+      var round = entry.round != null ? ' · 第 ' + String(entry.round) + ' 轮' : '';
+      return '<div class="code-chat-tool-trace-item" data-ok="' + (ok ? 'true' : 'false') + '" data-tool-index="' + escapeHTML(index) + '" role="listitem">' +
         '<span class="code-chat-tool-trace-dot" aria-hidden="true"></span>' +
-        '<div><div class="code-chat-tool-trace-name">' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div>' + evidence + '</div>' +
-        '<span class="code-chat-tool-trace-state">' + escapeHTML(state) + '</span></div>';
+        '<div><div class="code-chat-tool-trace-name"><span class="code-chat-tool-trace-index">#' + escapeHTML(index) + '</span>' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div>' + evidence + '</div>' +
+        '<span class="code-chat-tool-trace-state">' + escapeHTML(state + round) + '</span></div>';
     }).join('');
     if (trace.length > visibleTrace.length) {
       items += '<div class="code-chat-tool-trace-more">其余 ' + (trace.length - visibleTrace.length) + ' 项工具记录已折叠</div>';
     }
-    return '<details class="code-chat-tool-trace"><summary>工具与证据 (' + trace.length + ')</summary><div class="code-chat-tool-trace-list">' + items + '</div></details>';
+    var hasFailure = trace.some(function(entry) { return entry && (entry.ok === false || entry.success === false || entry.error); });
+    return '<details class="code-chat-tool-trace"' + (hasFailure ? ' open' : '') + '><summary>工具与证据 (' + trace.length + ')</summary><div class="code-chat-tool-trace-list" role="list">' + items + '</div></details>';
   }
 
   function formatToolRange(ranges) {
@@ -6909,15 +6954,19 @@
     var finalContextInfo = null;
     var finalToolTrace = null;
     var finalRuntime = null;
+    var streamToolTrace = [];
+    var streamToolTraceById = Object.create(null);
+    var streamToolTraceByIndex = Object.create(null);
     var streamCancelled = false;
     var toolItems = Object.create(null);
+    var toolItemsByIndex = Object.create(null);
     var streamStatusBaseText = '正在连接服务…';
 
-    function setStreamStatus(text, stateName, busy) {
+    function setStreamStatus(text, stateName, busy, phaseSequence) {
       if (!statusEl) return;
       statusEl.style.display = '';
       statusEl.setAttribute('data-state', stateName || 'working');
-      updateStreamPhaseRail(assistantNode, stateName || 'working');
+      updateStreamPhaseRail(assistantNode, stateName || 'working', false, phaseSequence);
       statusEl.setAttribute('aria-busy', busy === false ? 'false' : 'true');
       if (statusText && text) {
         if (text.indexOf('（已等待 ') === -1) streamStatusBaseText = text;
@@ -6960,11 +7009,11 @@
       scrollCtrl = window.XtjAiCore.Scroll.create(messagesContainer);
     }
 
-    function appendAnswerDelta(delta) {
+    function appendAnswerDelta(delta, phaseSequence) {
       if (streamCancelled) return;
       answerStarted = true;
       answerBuffer += String(delta);
-      setStreamStatus('正在生成回答…', 'answer', true);
+      setStreamStatus('正在生成回答…', 'answer', true, phaseSequence);
       // Use StreamRenderer for smooth text output
       if (!contentEl._streamRenderer && window.XtjAiCore && window.XtjAiCore.StreamRenderer) {
         contentEl._streamRenderer = window.XtjAiCore.StreamRenderer.create(contentEl, { plainStream: true });
@@ -6980,20 +7029,24 @@
 
     function addToolStart(data) {
       if (streamCancelled) return;
+      var firstTool = toolCount === 0;
       toolCount++;
       if (toolsContainer) toolsContainer.style.display = '';
       // Keep execution evidence available without allowing each tool start to
-      // repeatedly push the answer out of view. The user can expand it when
-      // they need the live detail.
+      // repeatedly push the answer out of view. The first tool opens the
+      // chronological activity rail; users can collapse it after inspection.
+      if (firstTool) toolsExpanded = true;
       if (toolsList) toolsList.style.display = toolsExpanded ? '' : 'none';
       updateToolsHeader();
       if (statusText) statusText.textContent = data.summary || ('执行工具: ' + (data.tool || ''));
-      setStreamStatus(data.summary || ('执行工具: ' + (data.tool || '工具调用')), 'tool', true);
+      setStreamStatus(data.summary || ('执行工具: ' + (data.tool || '工具调用')), data.phase || 'tool', true, data.phase_sequence);
       var item = document.createElement('div');
       item.className = 'code-stream-tool-item';
-      var toolKey = String(data.tool_call_id || ('tool-' + toolCount));
+      var toolKey = String(data.tool_call_id || (data.tool_index != null ? 'tool-index-' + data.tool_index : 'tool-' + toolCount));
       item.id = 'tool-item-' + toolCount;
       item.setAttribute('data-tool-call-id', toolKey);
+      if (data.tool_index != null) item.setAttribute('data-tool-index', String(data.tool_index));
+      if (data.round != null) item.setAttribute('data-tool-round', String(data.round));
       item.setAttribute('role', 'listitem');
       item.innerHTML = '<span class="code-stream-tool-icon spinner"></span>' +
         '<div class="code-stream-tool-main">' +
@@ -7001,20 +7054,59 @@
           '<div class="code-stream-tool-summary">' + escapeHTML(data.summary || data.description || data.command || data.path || '等待工具返回结果…') + '</div>' +
         '</div>' +
         '<span class="code-stream-tool-state">执行中</span>';
+      var traceEntry = {
+        tool: data.tool || '工具调用',
+        summary: data.summary || data.description || data.command || data.path || '等待工具返回结果…',
+        ok: null,
+        tool_call_id: data.tool_call_id || '',
+        tool_index: data.tool_index,
+        round: data.round
+      };
+      item._traceEntry = traceEntry;
+      streamToolTrace.push(traceEntry);
+      if (traceEntry.tool_call_id) streamToolTraceById[String(traceEntry.tool_call_id)] = traceEntry;
+      if (traceEntry.tool_index != null) streamToolTraceByIndex[String(traceEntry.tool_index)] = traceEntry;
       toolItems[toolKey] = item;
+      if (data.tool_index != null) toolItemsByIndex[String(data.tool_index)] = item;
       toolsList.appendChild(item);
+    }
+
+    function resolveToolItem(data) {
+      data = data || {};
+      var callId = data.tool_call_id == null ? '' : String(data.tool_call_id);
+      if (callId && toolItems[callId]) return toolItems[callId];
+      var index = data.tool_index == null ? '' : String(data.tool_index);
+      if (index && toolItemsByIndex[index]) return toolItemsByIndex[index];
+      return null;
     }
 
     function updateToolResult(data) {
       if (streamCancelled) return;
-      var toolKey = String(data.tool_call_id || ('tool-' + toolCount));
-      var item = toolItems[toolKey];
+      data = data || {};
+      var item = resolveToolItem(data);
       if (!item) {
-        // Item may have been created after tool_start, try finding by tool name
-        var items = toolsList.querySelectorAll('.code-stream-tool-item');
-        if (items.length > 0) item = items[items.length - 1];
+        // A result can arrive after reconnect or without a provider call id.
+        // Render an explicit unmatched row instead of silently attaching it to
+        // the last tool, which can misrepresent evidence in the final answer.
+        addToolStart({
+          tool_call_id: data.tool_call_id || '',
+          tool_index: data.tool_index,
+          round: data.round,
+          tool: data.tool || '工具结果',
+          summary: '未匹配到工具开始事件，已按结果保留'
+        });
+        item = resolveToolItem(data);
+        if (item) item.classList.add('is-unmatched');
       }
       var succeeded = data.ok !== false;
+      var traceEntry = item && item._traceEntry;
+      if (!traceEntry && data.tool_call_id && streamToolTraceById[String(data.tool_call_id)]) traceEntry = streamToolTraceById[String(data.tool_call_id)];
+      if (!traceEntry && data.tool_index != null && streamToolTraceByIndex[String(data.tool_index)]) traceEntry = streamToolTraceByIndex[String(data.tool_index)];
+      if (traceEntry) {
+        traceEntry.ok = succeeded;
+        traceEntry.summary = data.summary || data.result || data.error || traceEntry.summary;
+        if (data.duration_ms) traceEntry.duration_ms = data.duration_ms;
+      }
       var resultMessage = String(succeeded
         ? (data.summary || data.result || '工具已完成')
         : (data.error || data.message || data.summary || '工具调用失败'));
@@ -7029,7 +7121,7 @@
         if (stateLabel) stateLabel.textContent = succeeded ? '已完成' : '失败';
         item.classList.toggle('failed', !succeeded);
       }
-      setStreamStatus((succeeded ? '已完成 ' : '工具失败 · ') + toolCount + ' 个工具调用', succeeded ? 'tool-complete' : 'tool-error', false);
+      setStreamStatus((succeeded ? '已完成 ' : '工具失败 · ') + toolCount + ' 个工具调用', data.phase || (succeeded ? 'tool-complete' : 'tool-error'), false, data.phase_sequence);
       if (statusText) statusText.textContent = '已完成 ' + toolCount + ' 个工具调用';
     }
 
@@ -7131,9 +7223,9 @@
       }
     }
 
-    function finalizeNode() {
+    function finalizeNode(phaseSequence) {
       streamDone = true;
-      updateStreamPhaseRail(assistantNode, 'complete', true);
+      updateStreamPhaseRail(assistantNode, 'complete', true, phaseSequence);
       if (spinner) spinner.style.display = 'none';
       if (statusEl) {
         statusEl.setAttribute('aria-busy', 'false');
@@ -7153,6 +7245,11 @@
       } else {
         var finalContent = finalReply || answerBuffer || '未收到可显示回复，请重试。';
         contentEl.innerHTML = parseSimpleMarkdown(finalContent);
+      }
+
+      var resolvedToolTrace = (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace;
+      if (resolvedToolTrace.length && !assistantNode.querySelector('.code-chat-tool-trace')) {
+        contentEl.insertAdjacentHTML('afterend', renderPersistentToolTrace(resolvedToolTrace));
       }
 
       // Show usage
@@ -7198,7 +7295,7 @@
       // Replace any partial stream with an explicit terminal error in the
       // canonical state so the subsequent render cannot leave a blank/ambiguous bubble.
       answerBuffer = '';
-      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
       discardStreamingMessageNode(assistantNode);
       cleanupStream();
       finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
@@ -7354,7 +7451,7 @@
                 retryable: true,
                 retryMessage: ctx.originalMessage,
                 retryBody: Object.assign({}, ctx.originalBody || body),
-                toolTrace: finalToolTrace,
+                toolTrace: (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace,
                 operations: finalOperations,
                 contextInfo: finalContextInfo,
                 runtime: finalRuntime,
@@ -7448,13 +7545,13 @@
             if (isFinite(serverTimeoutMs) && serverTimeoutMs > 0) {
               armStreamTimeout(serverTimeoutMs - Math.max(0, serverElapsedMs) + 5000);
             }
-            setStreamStatus((event.data && event.data.message) || '请求已接受，正在处理…', 'working', true);
+            setStreamStatus((event.data && event.data.message) || '请求已接受，正在处理…', (event.data && event.data.phase) || 'context', true, event.data && event.data.phase_sequence);
             break;
           case 'planning':
-            setStreamStatus((event.data && event.data.message) || '正在分析任务…', 'working', true);
+            setStreamStatus((event.data && event.data.message) || '正在分析任务…', (event.data && event.data.phase) || 'context', true, event.data && event.data.phase_sequence);
             break;
           case 'status':
-            setStreamStatus((event.data && event.data.message) || '服务端正在处理请求…', 'working', true);
+            setStreamStatus((event.data && event.data.message) || '服务端正在处理请求…', (event.data && event.data.phase) || 'context', true, event.data && event.data.phase_sequence);
             break;
           case 'tool_start':
             addToolStart(event.data || {});
@@ -7463,15 +7560,15 @@
             updateToolResult(event.data || {});
             break;
           case 'answer_start':
-            setStreamStatus('正在生成回答…', 'answer', true);
+            setStreamStatus('正在生成回答…', (event.data && event.data.phase) || 'answer', true, event.data && event.data.phase_sequence);
             break;
           case 'answer_delta':
             var delta = (event.data && event.data.delta) ? event.data.delta : '';
-            if (delta) appendAnswerDelta(delta);
+            if (delta) appendAnswerDelta(delta, event.data && event.data.phase_sequence);
             break;
           case 'operation_preview':
             if (event.data && event.data.files) {
-              setStreamStatus('正在准备 ' + (event.data.files.length || 0) + ' 个文件修改…', 'working', true);
+              setStreamStatus('正在准备 ' + (event.data.files.length || 0) + ' 个文件修改…', (event.data && event.data.phase) || 'finalizing', true, event.data && event.data.phase_sequence);
             }
             break;
           case 'usage':
@@ -7483,7 +7580,7 @@
           case 'heartbeat':
             var elapsedMs = Number(event.data && event.data.elapsed_ms);
             var elapsedSeconds = isFinite(elapsedMs) && elapsedMs >= 0 ? Math.floor(elapsedMs / 1000) : 0;
-            setStreamStatus(streamStatusBaseText + (elapsedSeconds ? '（已等待 ' + elapsedSeconds + ' 秒）' : '（服务端仍在处理）'), 'working', true);
+            setStreamStatus(streamStatusBaseText + (elapsedSeconds ? '（已等待 ' + elapsedSeconds + ' 秒）' : '（服务端仍在处理）'), (event.data && event.data.phase) || 'context', true, event.data && event.data.phase_sequence);
             break;
           case 'done':
             if (_doneHandled) return; // done must be processed only once
@@ -7513,7 +7610,7 @@
               break;
             }
 
-            finalizeNode();
+            finalizeNode(event.data && event.data.phase_sequence);
 
             // Update state
             state.lastSentAttachmentPaths = state.attachments.filter(function (a) { return !a.pinned; }).map(function (a) { return a.path; });
@@ -7524,7 +7621,7 @@
               content: completedReply,
               time: timeStr,
               operations: finalOperations,
-              toolTrace: finalToolTrace,
+              toolTrace: (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace,
               contextInfo: finalContextInfo,
               runtime: finalRuntime,
               usage: finalUsage,
@@ -7546,7 +7643,7 @@
             if (finalRuntime) {
               state.lastRuntime = finalRuntime;
             }
-            state.lastToolTrace = finalToolTrace || [];
+            state.lastToolTrace = (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace;
 
             cleanupStream();
             finalizeRequest(ctx, { done: true, usage: finalUsage });
@@ -7583,7 +7680,8 @@
                 errorCode: errCode,
                 retryable: retryable,
                 retryMessage: ctx.originalMessage,
-                retryBody: Object.assign({}, ctx.originalBody || body)
+                retryBody: Object.assign({}, ctx.originalBody || body),
+                toolTrace: (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace
               });
               // Keep provider codes and raw diagnostics out of the visible
               // message; they remain available through errorCode/details.
@@ -7618,7 +7716,8 @@
           role: 'assistant',
           content: answerBuffer || '（已停止）',
           time: timeStr,
-          stopped: true
+          stopped: true,
+          toolTrace: streamToolTrace
         });
         discardStreamingMessageNode(assistantNode);
         // Phase 3: Clear stream state on cancel — prevent auto-reconnect
@@ -7701,7 +7800,7 @@
       }
       var errMsg = (err && err.message) ? err.message : String(err);
       showError('NETWORK_ERROR', errMsg, true);
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
       discardStreamingMessageNode(assistantNode);
       finalizeRequest(ctx, { error: errMsg, errorCode: 'NETWORK_ERROR' });
       renderChatPanel();
@@ -7939,6 +8038,8 @@
     var lastEventId = savedState.lastEventId || 0;
     var answerBuffer = '';
     var recoveredToolTrace = [];
+    var recoveredToolById = Object.create(null);
+    var recoveredToolByIndex = Object.create(null);
     var streamDone = false;
     var abortController = new AbortController();
 
@@ -7971,18 +8072,89 @@
     var statusEl = assistantNode.querySelector('.code-stream-status');
     var statusText = assistantNode.querySelector('.code-stream-status-text');
     var spinner = assistantNode.querySelector('.code-stream-spinner');
+    var toolsContainer = assistantNode.querySelector('.code-stream-tools');
+    var toolsList = assistantNode.querySelector('.code-stream-tools-list');
+    var toolsHeader = assistantNode.querySelector('.code-stream-tools-header');
     var contentEl = assistantNode.querySelector('.code-stream-content');
     var usageEl = assistantNode.querySelector('.code-stream-usage');
     var errorEl = assistantNode.querySelector('.code-stream-error');
+    var recoveryToolsExpanded = false;
+    var recoveryToolCount = 0;
 
-    function recoveryDone(reply, operations, usage, toolTrace) {
+    function updateRecoveryToolsHeader() {
+      if (!toolsHeader) return;
+      toolsHeader.setAttribute('aria-expanded', recoveryToolsExpanded ? 'true' : 'false');
+      var toggle = toolsHeader.querySelector('.code-stream-tools-toggle');
+      if (toggle) toggle.innerHTML = (recoveryToolsExpanded ? '&#9660;' : '&#9654;') + ' 工具执行记录 (' + recoveryToolCount + ')';
+    }
+    if (toolsHeader) {
+      toolsHeader.addEventListener('click', function() {
+        recoveryToolsExpanded = !recoveryToolsExpanded;
+        if (toolsList) toolsList.style.display = recoveryToolsExpanded ? '' : 'none';
+        updateRecoveryToolsHeader();
+      });
+      toolsHeader.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toolsHeader.click(); }
+      });
+    }
+
+    function appendRecoveryToolEntry(entry, unmatched) {
+      if (!toolsList) return null;
+      recoveryToolCount++;
+      if (toolsContainer) toolsContainer.style.display = '';
+      recoveryToolsExpanded = true;
+      toolsList.style.display = '';
+      var item = document.createElement('div');
+      item.className = 'code-stream-tool-item' + (unmatched ? ' is-unmatched' : '');
+      item.setAttribute('role', 'listitem');
+      if (entry.tool_call_id) item.setAttribute('data-tool-call-id', String(entry.tool_call_id));
+      if (entry.tool_index != null) item.setAttribute('data-tool-index', String(entry.tool_index));
+      item.innerHTML = '<span class="code-stream-tool-icon ' + (entry.ok === null ? 'spinner' : (entry.ok === false ? 'error' : 'success')) + '"></span>' +
+        '<div class="code-stream-tool-main"><div class="code-stream-tool-name">' + escapeHTML(entry.tool || '工具调用') + '</div>' +
+        '<div class="code-stream-tool-summary">' + escapeHTML(entry.summary || '等待工具返回结果…') + '</div></div>' +
+        '<span class="code-stream-tool-state">' + escapeHTML(entry.ok === null ? '执行中' : (entry.ok === false ? '失败' : '完成')) + '</span>';
+      toolsList.appendChild(item);
+      entry._node = item;
+      updateRecoveryToolsHeader();
+      return item;
+    }
+
+    function resolveRecoveryTool(data) {
+      var callId = data && data.tool_call_id != null ? String(data.tool_call_id) : '';
+      if (callId && recoveredToolById[callId]) return recoveredToolById[callId];
+      var index = data && data.tool_index != null ? String(data.tool_index) : '';
+      if (index && recoveredToolByIndex[index]) return recoveredToolByIndex[index];
+      return null;
+    }
+
+    function updateRecoveryToolEntry(entry, data) {
+      if (!entry) return;
+      entry.ok = data.ok !== false;
+      entry.summary = data.summary || data.result || data.error || entry.summary;
+      if (data.duration_ms) entry.duration_ms = data.duration_ms;
+      var node = entry._node;
+      if (!node) return;
+      var icon = node.querySelector('.code-stream-tool-icon');
+      if (icon) icon.className = 'code-stream-tool-icon ' + (entry.ok ? 'success' : 'error');
+      var summary = node.querySelector('.code-stream-tool-summary');
+      if (summary) summary.textContent = entry.summary || '';
+      var stateLabel = node.querySelector('.code-stream-tool-state');
+      if (stateLabel) stateLabel.textContent = entry.ok ? '完成' : '失败';
+      node.classList.toggle('failed', !entry.ok);
+    }
+
+    function recoveryDone(reply, operations, usage, toolTrace, phaseSequence) {
       if (streamDone) return;
       streamDone = true;
-      updateStreamPhaseRail(assistantNode, 'complete', true);
+      updateStreamPhaseRail(assistantNode, 'complete', true, phaseSequence);
       if (spinner) spinner.style.display = 'none';
       if (statusEl) statusEl.style.display = 'none';
       var finalContent = String(reply || answerBuffer || '').trim() || '未收到可显示回复，请重试。';
       contentEl.innerHTML = parseSimpleMarkdown(finalContent);
+      var resolvedToolTrace = Array.isArray(toolTrace) ? toolTrace : recoveredToolTrace;
+      if (resolvedToolTrace.length && !assistantNode.querySelector('.code-chat-tool-trace')) {
+        contentEl.insertAdjacentHTML('afterend', renderPersistentToolTrace(resolvedToolTrace));
+      }
       if (usage && usageEl) {
         usageEl.style.display = '';
         var parts = [];
@@ -8000,7 +8172,7 @@
         time: timeStr,
         operations: operations || [],
         usage: usage || null,
-        toolTrace: Array.isArray(toolTrace) ? toolTrace : recoveredToolTrace,
+        toolTrace: resolvedToolTrace,
         retryMessage: savedState.originalMessage || '',
         retryBody: null
       });
@@ -8041,7 +8213,8 @@
         errorCode: code || 'STREAM_RECOVERY_FAILED',
         retryable: retryable !== false,
         retryMessage: originalMessage,
-        retryBody: null
+        retryBody: null,
+        toolTrace: recoveredToolTrace
       });
       discardStreamingMessageNode(assistantNode);
       if (retryable === false) clearStreamState();
@@ -8063,7 +8236,8 @@
         role: 'assistant',
         content: '（已取消）',
         time: timeStr,
-        errorCode: 'CANCELLED'
+        errorCode: 'CANCELLED',
+        toolTrace: recoveredToolTrace
       });
       discardStreamingMessageNode(assistantNode);
       clearStreamState();
@@ -8079,17 +8253,17 @@
         case 'accepted':
         case 'planning':
         case 'status':
-          updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || (event.type === 'planning' ? 'context' : 'working'));
+          updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || (event.type === 'planning' ? 'context' : 'working'), false, event.data && event.data.phase_sequence);
           if (statusText) statusText.textContent = (event.data && event.data.message) || '正在恢复处理…';
           break;
         case 'answer_start':
-          updateStreamPhaseRail(assistantNode, 'answer');
+          updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || 'answer', false, event.data && event.data.phase_sequence);
           if (statusText) statusText.textContent = '正在生成回答…';
           break;
         case 'answer_delta':
           var delta = (event.data && event.data.delta) ? event.data.delta : '';
           if (delta) {
-            updateStreamPhaseRail(assistantNode, 'answer');
+            updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || 'answer', false, event.data && event.data.phase_sequence);
             answerBuffer += delta;
             if (statusEl) statusEl.style.display = 'none';
             contentEl.innerHTML = parseSimpleMarkdown(answerBuffer);
@@ -8097,32 +8271,42 @@
           }
           break;
         case 'tool_start':
-          updateStreamPhaseRail(assistantNode, 'tool');
-          recoveredToolTrace.push({
-            tool: event.data && event.data.tool,
-            summary: event.data && (event.data.summary || event.data.description || event.data.path),
-            ok: null
-          });
+          updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || 'tool', false, event.data && event.data.phase_sequence);
+          var recoveryStart = event.data || {};
+          var recoveryEntry = {
+            tool: recoveryStart.tool,
+            summary: recoveryStart.summary || recoveryStart.description || recoveryStart.path,
+            ok: null,
+            tool_call_id: recoveryStart.tool_call_id || '',
+            tool_index: recoveryStart.tool_index,
+            round: recoveryStart.round
+          };
+          recoveredToolTrace.push(recoveryEntry);
+          if (recoveryEntry.tool_call_id) recoveredToolById[String(recoveryEntry.tool_call_id)] = recoveryEntry;
+          if (recoveryEntry.tool_index != null) recoveredToolByIndex[String(recoveryEntry.tool_index)] = recoveryEntry;
+          appendRecoveryToolEntry(recoveryEntry, false);
           if (statusText) statusText.textContent = '正在恢复工具记录…';
           break;
         case 'tool_result':
           var recoveredResult = event.data || {};
-          var previousTrace = recoveredToolTrace.length ? recoveredToolTrace[recoveredToolTrace.length - 1] : null;
-          if (previousTrace) {
-            previousTrace.ok = recoveredResult.ok !== false;
-            previousTrace.summary = recoveredResult.summary || recoveredResult.result || recoveredResult.error || previousTrace.summary;
-            if (recoveredResult.duration_ms) previousTrace.duration_ms = recoveredResult.duration_ms;
-          } else {
-            recoveredToolTrace.push({ tool: recoveredResult.tool, summary: recoveredResult.summary || recoveredResult.result || recoveredResult.error, ok: recoveredResult.ok !== false, duration_ms: recoveredResult.duration_ms });
+          var previousTrace = resolveRecoveryTool(recoveredResult);
+          if (!previousTrace) {
+            previousTrace = { tool: recoveredResult.tool || '工具结果', summary: '未匹配到工具开始事件，已按结果保留', ok: null, tool_call_id: recoveredResult.tool_call_id || '', tool_index: recoveredResult.tool_index, round: recoveredResult.round };
+            recoveredToolTrace.push(previousTrace);
+            if (previousTrace.tool_call_id) recoveredToolById[String(previousTrace.tool_call_id)] = previousTrace;
+            if (previousTrace.tool_index != null) recoveredToolByIndex[String(previousTrace.tool_index)] = previousTrace;
+            appendRecoveryToolEntry(previousTrace, true);
           }
-          updateStreamPhaseRail(assistantNode, 'answer');
+          updateRecoveryToolEntry(previousTrace, recoveredResult);
+          updateStreamPhaseRail(assistantNode, (recoveredResult.phase) || 'model_wait', false, recoveredResult.phase_sequence);
           break;
         case 'done':
           recoveryDone(
             (event.data && event.data.reply) || '',
             (event.data && Array.isArray(event.data.operations)) ? event.data.operations : [],
             (event.data && event.data.usage) ? event.data.usage : null,
-            (event.data && Array.isArray(event.data.tool_trace)) ? event.data.tool_trace : recoveredToolTrace
+            (event.data && Array.isArray(event.data.tool_trace)) ? event.data.tool_trace : recoveredToolTrace,
+            event.data && event.data.phase_sequence
           );
           break;
         case 'error':
