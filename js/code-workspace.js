@@ -5659,6 +5659,9 @@
         '<span class="code-stream-status-text">生成失败</span></div>';
     }
     body += '<div class="msg-content markdown-body">' + parseSimpleMarkdown(visibleContent) + '</div>';
+    if (isAssistant && Array.isArray(msg.toolTrace) && msg.toolTrace.length) {
+      body += renderPersistentToolTrace(msg.toolTrace);
+    }
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
@@ -5680,6 +5683,23 @@
         });
       }
     }
+  }
+
+  function renderPersistentToolTrace(trace) {
+    var items = trace.slice(0, 12).map(function (entry) {
+      entry = entry || {};
+      var ok = entry.ok !== false && entry.success !== false && !entry.error;
+      var name = String(entry.tool || entry.name || entry.tool_name || '工具调用');
+      var summary = String(entry.summary || entry.result || entry.description || entry.path || entry.url || entry.error || '已完成');
+      var duration = Number(entry.duration_ms || entry.elapsed_ms || entry.duration || 0);
+      var state = ok ? '完成' : '失败';
+      if (duration > 0 && isFinite(duration)) state += ' · ' + (duration >= 1000 ? (duration / 1000).toFixed(1) + ' 秒' : Math.round(duration) + ' ms');
+      return '<div class="code-chat-tool-trace-item" data-ok="' + (ok ? 'true' : 'false') + '">' +
+        '<span class="code-chat-tool-trace-dot" aria-hidden="true"></span>' +
+        '<div><div class="code-chat-tool-trace-name">' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div></div>' +
+        '<span class="code-chat-tool-trace-state">' + escapeHTML(state) + '</span></div>';
+    }).join('');
+    return '<details class="code-chat-tool-trace"><summary>工具与证据 (' + trace.length + ')</summary><div class="code-chat-tool-trace-list">' + items + '</div></details>';
   }
 
   function updateChatScrollControl() {
@@ -6291,6 +6311,8 @@
     return runtime.streamChat(chatHistory, {
       signal: ctx.abortController.signal,
       onProgress: function(progress) {
+        var localProgressBubble = assistantNode && assistantNode.querySelector('.msg-content');
+        if (localProgressBubble && !answer) localProgressBubble.textContent = progress.text || '本地 Qwen 正在生成回复…';
         var typingIndicator = messagesContainer && messagesContainer.querySelector('.code-typing-indicator');
         if (typingIndicator && !answer) {
           typingIndicator.textContent = progress.text || '正在准备本地模型…';

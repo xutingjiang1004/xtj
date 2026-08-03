@@ -421,6 +421,21 @@
   transition: opacity 120ms ease, filter 160ms ease;
 }
 
+.ai-enhanced-status {
+  align-self: flex-start;
+  margin: 0 0 6px 42px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--ai-accent, #48a47a) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ai-accent, #48a47a) 8%, transparent);
+  color: var(--ai-text, #294239);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ai-enhanced-status[data-stage="verify"]::before { content: "✓ "; }
+.ai-enhanced-status[data-stage="answer"]::before { content: "→ "; }
+
 /* Reasoning has its own status card. Do not leave an empty assistant bubble
  * beneath it until the first real answer token arrives. */
 .ai-msg.assistant.generating .ai-msg-bubble.ai-reply-pending {

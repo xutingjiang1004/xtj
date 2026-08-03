@@ -38,6 +38,28 @@
   var DOWNLOAD_NO_PROGRESS_TIMEOUT = 120000; // Network gaps during a 1 GB download are normal
   var INIT_NO_PROGRESS_TIMEOUT = 90000;     // WebGPU compilation should still fail promptly
   var HEARTBEAT_INTERVAL   = 10000;    // 10 sec heartbeat interval
+  // `ready` only proves WebLLM initialized. A driver can still stall on the
+  // first inference dispatch while the worker continues answering pings.
+  var CHAT_FIRST_TOKEN_TIMEOUT = 90000;
+  var CHAT_TOTAL_TIMEOUT = 180000;
+
+  function clearChatTimers(task) {
+    if (!task) return;
+    if (task.firstTokenTimer) { clearTimeout(task.firstTokenTimer); task.firstTokenTimer = null; }
+    if (task.totalTimer) { clearTimeout(task.totalTimer); task.totalTimer = null; }
+  }
+
+  function failChatWatchdog(requestId, code, message) {
+    var task = pending[requestId];
+    if (!task || task.kind !== 'chat') return;
+    delete pending[requestId];
+    clearChatTimers(task);
+    _lastErrorCode = code;
+    try { if (worker) worker.postMessage({ type: 'cancel', requestId: requestId }); } catch (_) {}
+    task.reject(makeError(code, message));
+    setState('failed');
+    terminateWorker();
+  }
 
   function setState(newState) {
     _state = newState;
@@ -172,7 +194,7 @@
     // Reject all pending tasks
     var err = makeError('LOCAL_AI_CANCELLED', '本地模型已停止');
     Object.keys(pending).forEach(function (key) {
-      if (pending[key]) { pending[key].reject(err); delete pending[key]; }
+      if (pending[key]) { clearChatTimers(pending[key]); pending[key].reject(err); delete pending[key]; }
     });
   }
 
@@ -345,7 +367,13 @@
           setupTimeouts(false);
         }
       }
-      if (data.type === 'delta' && task.onDelta) task.onDelta(data.content || '');
+      if (data.type === 'delta') {
+        if (task.kind === 'chat' && !task.receivedFirstToken) {
+          task.receivedFirstToken = true;
+          if (task.firstTokenTimer) { clearTimeout(task.firstTokenTimer); task.firstTokenTimer = null; }
+        }
+        if (task.onDelta) task.onDelta(data.content || '');
+      }
       if (data.type === 'ready') {
         ready = true;
         _activeModelId = data.modelId || MODEL_ID;
@@ -361,13 +389,14 @@
         });
         _initializingPromise = null;
       }
-      if (data.type === 'done') { delete pending[data.requestId]; task.resolve(); }
+      if (data.type === 'done') { delete pending[data.requestId]; clearChatTimers(task); task.resolve(); }
       if (data.type === 'pong') {
         if (task && task.kind === 'ping') { delete pending[data.requestId]; task.resolve(); }
         return;
       }
       if (data.type === 'error') {
         delete pending[data.requestId];
+        clearChatTimers(task);
         var err = makeError(data.code || 'LOCAL_AI_RUNTIME_ERROR', data.message || '本地模型无法启动');
         _lastErrorCode = err.code || '';
         task.reject(err);
@@ -462,10 +491,20 @@
       }
       if (_stopRequested) return Promise.reject(makeError('ABORTED', '已停止本地回答'));
       return new Promise(function(resolve, reject) {
-        pending[requestId] = { kind: 'chat', resolve: resolve, reject: reject, onDelta: options.onDelta };
+        var chatTask = pending[requestId] = { kind: 'chat', resolve: resolve, reject: reject, onDelta: options.onDelta, receivedFirstToken: false, firstTokenTimer: null, totalTimer: null };
+        if (typeof options.onProgress === 'function') {
+          try { options.onProgress({ state: 'generating', text: '本地 Qwen 已就绪，正在生成回复…' }); } catch (_) {}
+        }
+        chatTask.firstTokenTimer = setTimeout(function() {
+          failChatWatchdog(requestId, 'LOCAL_AI_FIRST_TOKEN_TIMEOUT', '本地 Qwen 已就绪，但 90 秒内未开始生成。已安全重置本地推理，请再试一次。');
+        }, CHAT_FIRST_TOKEN_TIMEOUT);
+        chatTask.totalTimer = setTimeout(function() {
+          failChatWatchdog(requestId, 'LOCAL_AI_GENERATION_TIMEOUT', '本地 Qwen 生成超过 180 秒，已安全停止本次回复，请简化问题后重试。');
+        }, CHAT_TOTAL_TIMEOUT);
         if (options.signal) {
           options.signal.addEventListener('abort', function() {
             if (worker) worker.postMessage({ type: 'cancel', requestId: requestId });
+            if (pending[requestId]) clearChatTimers(pending[requestId]);
             if (pending[requestId]) { delete pending[requestId]; reject(makeError('ABORTED', '已停止本地回答')); }
           }, { once: true });
         }
@@ -473,6 +512,7 @@
           startWorker().postMessage({ type: 'chat', requestId: requestId, messages: messages });
         } catch (error) {
           delete pending[requestId];
+          clearChatTimers(chatTask);
           reject(makeError('LOCAL_AI_WORKER_SEND_FAILED', error && error.message || 'Local chat could not start'));
         }
       });
