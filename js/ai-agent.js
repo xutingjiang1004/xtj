@@ -6264,7 +6264,8 @@ function showChatMessages() {
         var localIncompatible = !!(error && (
           error.code === 'LOCAL_AI_UNSUPPORTED' ||
           error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
-          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED'
+          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
         ));
         updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请切换到“在线 DeepSeek”' }, localDownloadCancelled ? 'cancelled' : (localIncompatible ? 'unsupported' : 'failed'));
         localDownloadController = null;

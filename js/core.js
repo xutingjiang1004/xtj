@@ -1509,11 +1509,23 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             var _aiChatOpenInProgress = false;
             var _aiChatOpenPromise = null;
             var _aiChatLastError = null;
+            var _aiChatOpenGeneration = 0;
+
+            // A Code navigation must be able to invalidate a lazy AI load.
+            // Without this, an old ensureAiAgentLoaded()/ensureUserToken()
+            // continuation can re-open panelAiChat over Code after the user
+            // has already left it.
+            window.__xtjCancelPendingAiChatOpen = function() {
+                _aiChatOpenGeneration += 1;
+                _aiChatOpenInProgress = false;
+                _aiChatOpenPromise = null;
+            };
 
             window.__xtjOpenAiChat = function() {
                 if (_aiChatOpenInProgress) return;
                 _aiChatOpenInProgress = true;
                 _aiChatLastError = null;
+                var openGeneration = ++_aiChatOpenGeneration;
 
                 // 立即进入 AI 页面骨架（300ms 内）
                 var aiChatPanel = document.getElementById('panelAiChat');
@@ -1537,11 +1549,14 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
 
                 _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
                     if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
                     return ensureUserToken().then(function(token) {
+                        if (openGeneration !== _aiChatOpenGeneration) return;
                         if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
                         if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
                         if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
+                            if (openGeneration !== _aiChatOpenGeneration) return;
                             window.__xtjOpenAiChat();
                             if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
                             return;
@@ -1550,6 +1565,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         throw new Error('ai_module_not_ready');
                     });
                 }).catch(function(err) {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
                     _aiChatLastError = err;
                     _aiChatOpenInProgress = false;
                     if (aiChatPanel) {
@@ -1558,8 +1574,10 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     }
                     console.error('[XTJ] ai-agent lazy load failed:', err);
                 }).finally(function() {
-                    _aiChatOpenInProgress = false;
-                    if (loadingEl) loadingEl.textContent = '';
+                    if (openGeneration === _aiChatOpenGeneration) {
+                        _aiChatOpenInProgress = false;
+                        if (loadingEl) loadingEl.textContent = '';
+                    }
                 });
             };
             lazyAiChatLauncher._realOpen = window.__xtjOpenAiChat;

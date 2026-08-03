@@ -1533,7 +1533,35 @@
     maximizedPanel: null // 'editor' | 'chat' | null
   };
 
+  // Layout controls are persisted, so an invalid combination must never make
+  // every recovery control disappear after a reload. In particular, both main
+  // panes may not stay collapsed, and a maximized pane may not be collapsed.
+  // Return whether a stale saved layout was repaired so callers can persist it
+  // immediately instead of recreating the same white screen on refresh.
+  function normalizeLayoutState() {
+    var repaired = false;
+    if (_layoutState.maximizedPanel === 'editor') {
+      if (_layoutState.editorCollapsed || _layoutState.chatCollapsed) {
+        _layoutState.editorCollapsed = false;
+        _layoutState.chatCollapsed = false;
+        repaired = true;
+      }
+    } else if (_layoutState.maximizedPanel === 'chat') {
+      if (_layoutState.editorCollapsed || _layoutState.chatCollapsed) {
+        _layoutState.editorCollapsed = false;
+        _layoutState.chatCollapsed = false;
+        repaired = true;
+      }
+    } else if (_layoutState.editorCollapsed && _layoutState.chatCollapsed) {
+      _layoutState.editorCollapsed = false;
+      _layoutState.chatCollapsed = false;
+      repaired = true;
+    }
+    return repaired;
+  }
+
   function loadLayoutConfig() {
+    var repaired = false;
     try {
       var saved = localStorage.getItem('xtj_code_layout_v1');
       if (saved) {
@@ -1549,10 +1577,16 @@
         if (p.maximizedPanel === 'editor' || p.maximizedPanel === 'chat' || p.maximizedPanel === null) _layoutState.maximizedPanel = p.maximizedPanel;
       }
     } catch (err) {}
+    repaired = normalizeLayoutState();
+    if (repaired) saveLayoutConfig();
   }
 
   function saveLayoutConfig() {
     try {
+      // A queued debounce can run after a fast sequence of window controls.
+      // Normalize again at the persistence boundary so it can never restore
+      // an all-hidden workspace on the next refresh.
+      normalizeLayoutState();
       localStorage.setItem('xtj_code_layout_v1', JSON.stringify(_layoutState));
     } catch (err) {}
   }
@@ -1565,6 +1599,7 @@
 
   function applyLayoutToDOM() {
     if (!_dom.panelCode) return;
+    normalizeLayoutState();
 
     // Keep all three panes usable when the host window is smaller than the
     // desktop default. Without this fit pass, the fixed 260px + 360px panes
@@ -1662,6 +1697,7 @@
 
   function toggleEditor() {
     _layoutState.editorCollapsed = !_layoutState.editorCollapsed;
+    if (_layoutState.editorCollapsed) _layoutState.chatCollapsed = false;
     _layoutState.maximizedPanel = null;
     applyLayoutToDOM();
     triggerLayoutSave();
@@ -1675,6 +1711,7 @@
 
   function toggleChat() {
     _layoutState.chatCollapsed = !_layoutState.chatCollapsed;
+    if (_layoutState.chatCollapsed) _layoutState.editorCollapsed = false;
     _layoutState.maximizedPanel = null;
     applyLayoutToDOM();
     triggerLayoutSave();
@@ -1685,6 +1722,8 @@
       _layoutState.maximizedPanel = null;
     } else {
       _layoutState.maximizedPanel = 'editor';
+      _layoutState.editorCollapsed = false;
+      _layoutState.chatCollapsed = false;
     }
     applyLayoutToDOM();
     triggerLayoutSave();
@@ -1695,6 +1734,8 @@
       _layoutState.maximizedPanel = null;
     } else {
       _layoutState.maximizedPanel = 'chat';
+      _layoutState.editorCollapsed = false;
+      _layoutState.chatCollapsed = false;
     }
     applyLayoutToDOM();
     triggerLayoutSave();
@@ -1812,7 +1853,12 @@
       });
     }
     var foldSidebarBtn = sidebarHeader.querySelector('.fold-sidebar-btn');
-    if (foldSidebarBtn) foldSidebarBtn.addEventListener('click', toggleSidebar);
+    if (foldSidebarBtn) {
+      foldSidebarBtn.innerHTML = codeWorkspaceIcon('collapseLeft');
+      foldSidebarBtn.setAttribute('aria-label', '折叠文件目录');
+      foldSidebarBtn.title = '折叠文件目录';
+      foldSidebarBtn.addEventListener('click', toggleSidebar);
+    }
 
     sidebar.appendChild(sidebarHeader);
 
@@ -5234,9 +5280,11 @@
       var localRuntime = window.__xtjLocalAI;
       bindLocalRuntimeStatus(localRuntime);
       var localState = localRuntime && localRuntime.getState();
-      localSetupButton.disabled = (localState === 'downloading' || localState === 'initializing') && !state._localDownloadController;
-      localSetupButton.textContent = state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
-        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）')));
+      var localErrorCode = localRuntime && typeof localRuntime.getLastErrorCode === 'function' ? localRuntime.getLastErrorCode() : '';
+      var localHardwareUnsupported = /^(LOCAL_AI_UNSUPPORTED|LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE|LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED|LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED)$/.test(localErrorCode);
+      localSetupButton.disabled = localHardwareUnsupported || ((localState === 'downloading' || localState === 'initializing') && !state._localDownloadController);
+      localSetupButton.textContent = localHardwareUnsupported ? '此设备不支持本地 Qwen' : (state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
+        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'))));
     }
     if (thinkingSelect) {
       normalizeThinkingModeForSelectedModel();
@@ -5355,10 +5403,21 @@
           showToast('本地 Qwen 已就绪，可以离线使用。', 'success');
         }).catch(function(error) {
           var cancelled = !!(error && (error.code === 'LOCAL_AI_CANCELLED' || error.code === 'ABORTED' || error.name === 'AbortError'));
+          var localIncompatible = !!(error && (
+            error.code === 'LOCAL_AI_UNSUPPORTED' ||
+            error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
+            error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
+            error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
+          ));
           state._localDownloadController = null;
           state._localDownloadRuntime = null;
+          if (localIncompatible) {
+            state.selectedModelId = 'online';
+            saveComposerPreferences();
+            updateCapabilitiesBadge();
+          }
           updateComposerControls();
-          if (!cancelled) showToast((error && error.message) || '本地 Qwen 准备失败，请重试。', 'error');
+          if (!cancelled) showToast((error && error.message) || (localIncompatible ? '此设备无法运行本地 Qwen，已切换到在线 DeepSeek。' : '本地 Qwen 准备失败，请重试。'), 'error');
         });
       });
     }
@@ -6277,7 +6336,17 @@
         var msgIdx = state.messages.indexOf(assistantMsg);
         if (msgIdx >= 0) state.messages.splice(msgIdx, 1);
         var errMsg = error && error.message ? error.message : '请稍后重试。';
-        state.messages.push({ role: 'assistant', content: '本地模型不可用：' + errMsg, time: timeStr, errorCode: error && error.code || 'LOCAL_AI_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+        var localIncompatible = !!(error && (
+          error.code === 'LOCAL_AI_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
+          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
+        ));
+        if (localIncompatible) {
+          state.selectedModelId = 'online';
+          saveComposerPreferences();
+        }
+        state.messages.push({ role: 'assistant', content: '本地模型不可用：' + errMsg, time: timeStr, errorCode: error && error.code || 'LOCAL_AI_ERROR', retryable: !localIncompatible, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
         finalizeRequest(ctx, { error: errMsg, errorCode: error && error.code || 'LOCAL_AI_ERROR' });
         renderChatPanel();
       }
