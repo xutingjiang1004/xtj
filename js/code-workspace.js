@@ -1686,6 +1686,22 @@
         if (window.monacoEditorInstance) window.monacoEditorInstance.layout();
       });
     }
+    updateLayoutRecoveryControl();
+  }
+
+  function updateLayoutRecoveryControl() {
+    var control = _dom.layoutRecovery;
+    if (!control) return;
+    var hasFocusedPane = _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor';
+    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed || _layoutState.chatCollapsed || _layoutState.workbenchNavCollapsed;
+    control.hidden = !hasFocusedPane && !hasCollapsedPane;
+    if (control.hidden) return;
+    var label = control.querySelector('.code-layout-recovery-label');
+    if (label) {
+      label.textContent = hasFocusedPane
+        ? ('专注模式：' + (_layoutState.maximizedPanel === 'chat' ? 'AI 面板' : '编辑器') + ' · 随时可恢复完整工作台')
+        : '部分面板已收起 · 可恢复完整工作台';
+    }
   }
 
   function toggleSidebar() {
@@ -1958,7 +1974,7 @@
     var chatHeader = document.createElement('div');
     chatHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--cw-border);min-height:44px;flex-shrink:0;';
     chatHeader.innerHTML = 
-      '<div style="font-weight:600;font-size:13px;"></div>' +
+      '<div class="code-workbench-task-header"><span>Code AI</span><span>准备就绪</span></div>' +
       '<div class="code-panel-actions">' +
         '<button class="code-panel-action-btn max-chat-btn" title="最大化"></button>' +
         '<button class="code-panel-action-btn fold-chat-btn" title="折叠"></button>' +
@@ -1998,6 +2014,13 @@
     _dom.panelCode.appendChild(shell);
     shell.appendChild(workspace);
 
+    var layoutRecovery = document.createElement('div');
+    layoutRecovery.className = 'code-layout-recovery';
+    layoutRecovery.hidden = true;
+    layoutRecovery.innerHTML = '<span class="code-layout-recovery-label"></span><button type="button">恢复完整布局</button>';
+    layoutRecovery.querySelector('button').addEventListener('click', resetLayout);
+    shell.appendChild(layoutRecovery);
+
     _dom.fileTree = fileTree;
     _dom.contextPanel = contextPanel;
     _dom.tabBar = tabList;
@@ -2009,6 +2032,7 @@
     _dom.resizerLeft = resizerLeft;
     _dom.resizerRight = resizerRight;
     _dom.resizerContext = resizerContext;
+    _dom.layoutRecovery = layoutRecovery;
 
     renderFileTree();
     renderEmptyState();
