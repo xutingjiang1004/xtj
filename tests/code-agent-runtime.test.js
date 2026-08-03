@@ -32,8 +32,55 @@ function createApp(callDeepSeek, capabilitySnapshot, extras) {
   return app;
 }
 
+function parseSseEvents(text) {
+  return String(text || '').split(/\r?\n\r?\n/).map(block => {
+    const line = block.split(/\r?\n/).find(item => item.startsWith('data: '));
+    if (!line) return null;
+    try { return JSON.parse(line.slice(6)); } catch (_) { return null; }
+  }).filter(Boolean);
+}
+
 test.afterEach(() => {
   codeIndex._resetRegistryForTests();
+});
+
+test('stream progress exposes a monotonic phase cursor and stable tool index', async () => {
+  const app = createApp(async (_messages, options) => {
+    await options.tool_executor({
+      id: 'tool-stream-1',
+      function: { name: 'get_open_files', arguments: '{}' }
+    });
+    return { content: 'stream timeline complete', model: 'deepseek-v4-flash', usage: {} };
+  });
+
+  const response = await request(app).post('/api/code/chat/stream').set('x-test-user', 'alice').send({
+    workspace_name: 'stream-trace',
+    workspace_id: 'local:stream-trace',
+    workspace_generation: 1,
+    message: 'hello',
+    history: [],
+    open_files: [],
+    attachments: []
+  });
+
+  assert.equal(response.status, 200);
+  const events = parseSseEvents(response.text);
+  assert.ok(events.some(event => event.type === 'done'), 'stream should emit a terminal done event');
+
+  const phaseEvents = events.filter(event => event.data && Number.isFinite(Number(event.data.phase_sequence)));
+  assert.ok(phaseEvents.length >= 5, 'accepted, planning, status and tool events should expose phase metadata');
+  const sequences = phaseEvents.map(event => Number(event.data.phase_sequence));
+  assert.ok(sequences.every((value, index) => index === 0 || value >= sequences[index - 1]), 'phase sequence must never move backwards');
+
+  const toolStart = events.find(event => event.type === 'tool_start');
+  const toolResult = events.find(event => event.type === 'tool_result');
+  assert.ok(toolStart && toolResult, 'tool start and result events should both be present');
+  assert.equal(toolStart.data.tool_index, 1);
+  assert.equal(toolResult.data.tool_index, 1);
+  assert.ok(Number(toolResult.data.phase_sequence) >= Number(toolStart.data.phase_sequence));
+  const done = events.find(event => event.type === 'done');
+  assert.ok(Number.isFinite(Number(done.data.phase_sequence)), 'terminal event should carry the final phase cursor');
+  assert.equal(done.data.tool_trace[0].round, 1, 'final tool receipt should preserve the execution round');
 });
 
 test('generated edits are preflighted against supplied files before they reach Apply', async () => {

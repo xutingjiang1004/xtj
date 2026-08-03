@@ -5402,6 +5402,7 @@
     }
     bindLocalRuntimeStatus(runtime);
     var localState = typeof runtime.getState === 'function' ? runtime.getState() : 'idle';
+    var localSnapshot = typeof runtime.getStatusSnapshot === 'function' ? runtime.getStatusSnapshot() : null;
     var progress = typeof runtime.getProgressValue === 'function' ? Number(runtime.getProgressValue()) : 0;
     progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
     var hasProgress = typeof runtime.hasProgressValue === 'function' ? runtime.hasProgressValue() : progress > 0;
@@ -5426,8 +5427,12 @@
       progress = 1;
       progressEl.hidden = false;
     } else if (localState === 'failed') {
-      label = '本地 Qwen 准备失败';
-      value = '点击上方按钮重试';
+      label = localSnapshot && localSnapshot.availability === 'unsupported' ? '本地 Qwen 不可用' : '本地 Qwen 准备失败';
+      value = (localSnapshot && localSnapshot.errorMessage) || '点击上方按钮重试';
+      progressEl.hidden = true;
+    } else if (localState === 'unsupported') {
+      label = '本地 Qwen 不可用';
+      value = (localSnapshot && localSnapshot.errorMessage) || '请切换到在线 DeepSeek';
       progressEl.hidden = true;
     } else if (localState === 'cancelled') {
       label = '本地 Qwen 下载已取消';
@@ -5438,9 +5443,11 @@
     }
     status.hidden = false;
     status.dataset.state = localState;
+    if (localSnapshot && localSnapshot.errorCode) status.dataset.errorCode = localSnapshot.errorCode;
+    else delete status.dataset.errorCode;
     statusText.textContent = label;
     statusValue.textContent = value;
-    status.title = progressText || label;
+    status.title = [localSnapshot && localSnapshot.errorMessage, localSnapshot && localSnapshot.recommendation, progressText || label].filter(Boolean).join('；');
     progressEl.value = progress;
   }
 
@@ -5474,8 +5481,9 @@
       var localRuntime = window.__xtjLocalAI;
       bindLocalRuntimeStatus(localRuntime);
       var localState = localRuntime && localRuntime.getState();
-      var localErrorCode = localRuntime && typeof localRuntime.getLastErrorCode === 'function' ? localRuntime.getLastErrorCode() : '';
-      var localHardwareUnsupported = /^(LOCAL_AI_UNSUPPORTED|LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE|LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED|LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED)$/.test(localErrorCode);
+      var localSnapshot = localRuntime && typeof localRuntime.getStatusSnapshot === 'function' ? localRuntime.getStatusSnapshot() : null;
+      var localErrorCode = (localSnapshot && localSnapshot.errorCode) || (localRuntime && typeof localRuntime.getLastErrorCode === 'function' ? localRuntime.getLastErrorCode() : '');
+      var localHardwareUnsupported = !!(localSnapshot && localSnapshot.availability === 'unsupported') || /^(LOCAL_AI_UNSUPPORTED|LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE|LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED|LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED)$/.test(localErrorCode);
       localSetupButton.disabled = localHardwareUnsupported || ((localState === 'downloading' || localState === 'initializing') && !state._localDownloadController);
       localSetupButton.textContent = localHardwareUnsupported ? (localErrorCode === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ? '当前运行时不兼容' : '此设备不支持本地 Qwen') : (state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
         (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'))));
@@ -5818,6 +5826,57 @@
     if (!code) return '';
     var m = /^PROVIDER_HTTP_(\d+)$/.exec(String(code));
     return m ? 'HTTP ' + m[1] : '';
+  }
+
+  // Keep the streamed reply legible without hiding the actual answer behind
+  // a long status sentence. The phase rail is intentionally small, but it is
+  // also a real status surface for screen readers and stream recovery.
+  function streamPhaseKey(value) {
+    var phase = String(value || '').toLowerCase();
+    if (phase === 'tool' || phase === 'tool-complete' || phase === 'tool-error') return 'tool';
+    if (phase === 'answer' || phase === 'model_wait' || phase === 'model' || phase === 'complete') return phase === 'complete' ? 'complete' : 'answer';
+    if (phase === 'error' || phase === 'cancelled') return phase;
+    return 'context';
+  }
+
+  function buildStreamPhaseRail() {
+    return '<div class="code-stream-phases" role="list" aria-label="回复进度" data-phase="context">' +
+      '<div class="code-stream-phase is-active" data-phase="context" role="listitem" aria-current="step"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>理解任务</span></div>' +
+      '<div class="code-stream-phase" data-phase="tool" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>读取与工具</span></div>' +
+      '<div class="code-stream-phase" data-phase="answer" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>组织回答</span></div>' +
+      '<div class="code-stream-phase" data-phase="complete" role="listitem"><span class="code-stream-phase-dot" aria-hidden="true"></span><span>完成</span></div>' +
+      '</div>';
+  }
+
+  function updateStreamPhaseRail(node, value, terminal) {
+    if (!node) return;
+    var rail = node.querySelector('.code-stream-phases');
+    if (!rail) return;
+    var phase = streamPhaseKey(value);
+    var order = ['context', 'tool', 'answer', 'complete'];
+    var currentIndex = order.indexOf(phase);
+    if (currentIndex < 0) currentIndex = 0;
+    if (phase === 'error' || phase === 'cancelled') {
+      rail.setAttribute('data-phase', phase);
+      Array.prototype.forEach.call(rail.querySelectorAll('.code-stream-phase'), function (item) {
+        item.classList.remove('is-active', 'is-complete');
+        item.classList.toggle('is-error', item.getAttribute('data-phase') === 'answer');
+        item.removeAttribute('aria-current');
+      });
+      return;
+    }
+    if (terminal === true) currentIndex = order.length - 1;
+    rail.setAttribute('data-phase', order[currentIndex]);
+    Array.prototype.forEach.call(rail.querySelectorAll('.code-stream-phase'), function (item) {
+      var itemIndex = order.indexOf(item.getAttribute('data-phase'));
+      var active = itemIndex === currentIndex && currentIndex < order.length - 1;
+      var complete = itemIndex < currentIndex || (currentIndex === order.length - 1 && itemIndex <= currentIndex);
+      item.classList.toggle('is-active', active);
+      item.classList.toggle('is-complete', complete);
+      item.classList.remove('is-error');
+      if (active) item.setAttribute('aria-current', 'step');
+      else item.removeAttribute('aria-current');
+    });
   }
 
   function appendChatMessage(msg, container) {
@@ -6813,6 +6872,7 @@
           '<span class="code-stream-status-text">正在分析任务...</span>' +
           '<span class="code-stream-spinner"></span>' +
         '</div>' +
+        buildStreamPhaseRail() +
         '<div class="code-stream-tools" style="display:none">' +
           '<div class="code-stream-tools-header" role="button" tabindex="0" aria-expanded="false">' +
             '<span class="code-stream-tools-toggle">&#9654; 工具执行记录</span>' +
@@ -6857,6 +6917,7 @@
       if (!statusEl) return;
       statusEl.style.display = '';
       statusEl.setAttribute('data-state', stateName || 'working');
+      updateStreamPhaseRail(assistantNode, stateName || 'working');
       statusEl.setAttribute('aria-busy', busy === false ? 'false' : 'true');
       if (statusText && text) {
         if (text.indexOf('（已等待 ') === -1) streamStatusBaseText = text;
@@ -6974,6 +7035,7 @@
 
     function showError(code, message, retryable, force) {
       if (streamCancelled && !force) return;
+      updateStreamPhaseRail(assistantNode, 'error');
       setStreamStatus('生成失败', 'error', false);
       if (spinner) spinner.style.display = 'none';
       assistantNode.classList.remove('streaming');
@@ -7071,6 +7133,7 @@
 
     function finalizeNode() {
       streamDone = true;
+      updateStreamPhaseRail(assistantNode, 'complete', true);
       if (spinner) spinner.style.display = 'none';
       if (statusEl) {
         statusEl.setAttribute('aria-busy', 'false');
@@ -7890,6 +7953,7 @@
           '<span class="code-stream-status-text">正在恢复上一次会话...</span>' +
           '<span class="code-stream-spinner"></span>' +
         '</div>' +
+        buildStreamPhaseRail() +
         '<div class="code-stream-tools" style="display:none">' +
           '<div class="code-stream-tools-header" role="button" tabindex="0" aria-expanded="false">' +
             '<span class="code-stream-tools-toggle">&#9654; 工具执行记录</span>' +
@@ -7914,6 +7978,7 @@
     function recoveryDone(reply, operations, usage, toolTrace) {
       if (streamDone) return;
       streamDone = true;
+      updateStreamPhaseRail(assistantNode, 'complete', true);
       if (spinner) spinner.style.display = 'none';
       if (statusEl) statusEl.style.display = 'none';
       var finalContent = String(reply || answerBuffer || '').trim() || '未收到可显示回复，请重试。';
@@ -7954,6 +8019,7 @@
     function recoveryError(code, message, retryable) {
       if (streamDone) return;
       streamDone = true;
+      updateStreamPhaseRail(assistantNode, 'error');
       if (spinner) spinner.style.display = 'none';
       if (statusText) statusText.textContent = '恢复失败';
       assistantNode.classList.remove('streaming');
@@ -7986,6 +8052,7 @@
     function recoveryCancelled() {
       if (streamDone) return;
       streamDone = true;
+      updateStreamPhaseRail(assistantNode, 'cancelled');
       if (spinner) spinner.style.display = 'none';
       if (statusEl) statusEl.style.display = 'none';
       assistantNode.classList.remove('streaming');
@@ -8012,14 +8079,17 @@
         case 'accepted':
         case 'planning':
         case 'status':
+          updateStreamPhaseRail(assistantNode, (event.data && event.data.phase) || (event.type === 'planning' ? 'context' : 'working'));
           if (statusText) statusText.textContent = (event.data && event.data.message) || '正在恢复处理…';
           break;
         case 'answer_start':
+          updateStreamPhaseRail(assistantNode, 'answer');
           if (statusText) statusText.textContent = '正在生成回答…';
           break;
         case 'answer_delta':
           var delta = (event.data && event.data.delta) ? event.data.delta : '';
           if (delta) {
+            updateStreamPhaseRail(assistantNode, 'answer');
             answerBuffer += delta;
             if (statusEl) statusEl.style.display = 'none';
             contentEl.innerHTML = parseSimpleMarkdown(answerBuffer);
@@ -8027,6 +8097,7 @@
           }
           break;
         case 'tool_start':
+          updateStreamPhaseRail(assistantNode, 'tool');
           recoveredToolTrace.push({
             tool: event.data && event.data.tool,
             summary: event.data && (event.data.summary || event.data.description || event.data.path),
@@ -8044,6 +8115,7 @@
           } else {
             recoveredToolTrace.push({ tool: recoveredResult.tool, summary: recoveredResult.summary || recoveredResult.result || recoveredResult.error, ok: recoveredResult.ok !== false, duration_ms: recoveredResult.duration_ms });
           }
+          updateStreamPhaseRail(assistantNode, 'answer');
           break;
         case 'done':
           recoveryDone(

@@ -10,6 +10,7 @@
   // ── State machine ────────────────────────────────────────────────
   var _state = 'idle';         // idle | downloading | initializing | ready | failed | cancelled
   var _lastErrorCode = '';
+  var _lastErrorMessage = '';
   var _activeModelId = MODEL_ID;
   var _usingCompatibilityModel = false;
   var _stateChangedAt = 0;
@@ -57,6 +58,7 @@
     delete pending[requestId];
     clearChatTimers(task);
     _lastErrorCode = code;
+    _lastErrorMessage = message || '';
     try { if (worker) worker.postMessage({ type: 'cancel', requestId: requestId }); } catch (_) {}
     task.reject(makeError(code, message));
     setState('failed');
@@ -75,6 +77,10 @@
 
   function getLastErrorCode() {
     return _lastErrorCode;
+  }
+
+  function getLastErrorMessage() {
+    return _lastErrorMessage;
   }
 
   function getAvailabilityState() {
@@ -109,6 +115,43 @@
   function getLastActivityAt() { return _lastActivityAt; }
   function getElapsedSeconds() { return _lastElapsedSeconds; }
 
+  // Keep the browser-local model's state in the same shape that a remote
+  // provider status card can consume later.  Callers should not have to
+  // reconstruct an actionable error from several independent getters.
+  function getStatusSnapshot() {
+    var failed = _state === 'failed' || _state === 'unsupported';
+    var errorMessage = _lastErrorMessage || (failed ? _lastProgressText : '');
+    var recommendation = '';
+    if (_lastErrorCode === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
+        _lastErrorCode === 'LOCAL_AI_UNSUPPORTED' ||
+        _lastErrorCode === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
+        _lastErrorCode === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ||
+        _lastErrorCode === 'LOCAL_AI_INFERENCE_UNUSABLE') {
+      recommendation = '切换到在线 DeepSeek，或更新浏览器与显卡驱动后重试';
+    } else if (_state === 'failed' || _state === 'cancelled') {
+      recommendation = '点击重试，或切换到在线 DeepSeek';
+    }
+    return {
+      provider: 'local',
+      modelId: _activeModelId,
+      requestedModelId: MODEL_ID,
+      state: _state,
+      availability: getAvailabilityState(),
+      statusText: getStatusText(),
+      progressText: getProgressText(),
+      progress: _lastProgressValue,
+      hasProgress: _hasProgressValue,
+      lastActivityAt: _lastActivityAt,
+      timeElapsed: _lastElapsedSeconds,
+      errorCode: _lastErrorCode || '',
+      errorMessage: errorMessage,
+      recommendation: recommendation,
+      retryable: _state === 'failed' || _state === 'cancelled',
+      compatibilityFallback: _usingCompatibilityModel,
+      stateChangedAt: _stateChangedAt
+    };
+  }
+
   // ── Status listeners (for UI updates) ────────────────────────────
   var _statusListeners = [];
 
@@ -121,14 +164,10 @@
   }
 
   function _notifyStatusListeners() {
-    var info = {
-      state: _state,
-      text: getProgressText(),
-      progress: _lastProgressValue,
-      hasProgress: _hasProgressValue,
-      lastActivityAt: _lastActivityAt,
-      timeElapsed: _lastElapsedSeconds
-    };
+    var info = getStatusSnapshot();
+    // Preserve the legacy listener fields while exposing the normalized
+    // snapshot to newer Code/AI status renderers.
+    info.text = info.progressText;
     _statusListeners.forEach(function (fn) { try { fn(info); } catch (_) {} });
   }
 
@@ -209,6 +248,8 @@
   function markUnsupported(code, message) {
     var error = makeError(code, message);
     _capabilityError = error;
+    _lastErrorCode = code || '';
+    _lastErrorMessage = message || '';
     _lastProgressText = message;
     setState('unsupported');
     return error;
@@ -255,6 +296,10 @@
   }
 
   function descriptor() {
+    var snapshot = getStatusSnapshot();
+    var descriptorAvailability = supported() ? 'available' : 'unsupported';
+    if (snapshot.state === 'unsupported') descriptorAvailability = 'unsupported';
+    if (snapshot.state === 'failed') descriptorAvailability = 'degraded';
     return {
       id: 'local-qwen2.5-0.5b',
       name: _usingCompatibilityModel ? '本地离线 · Qwen 2.5 0.5B（兼容版）' : '本地离线 · Qwen 2.5 0.5B',
@@ -262,8 +307,14 @@
       supports_tools: false,
       supports_thinking: false,
       supported_thinking_modes: ['off'],
-      availability: supported() ? 'available' : 'unsupported',
-      availability_state: getAvailabilityState(),
+      availability: descriptorAvailability,
+      availability_state: snapshot.availability,
+      state: snapshot.state,
+      active_model_id: snapshot.modelId,
+      compatibility_fallback: snapshot.compatibilityFallback,
+      error_code: snapshot.errorCode,
+      error_message: snapshot.errorMessage,
+      recommendation: snapshot.recommendation,
       enabled: true,
       local: true
     };
@@ -310,6 +361,7 @@
   function failWithError(code, message) {
     if (_state === 'failed' || _state === 'cancelled') return;
     _lastErrorCode = code || '';
+    _lastErrorMessage = message || '';
     setState('failed');
     clearTimeouts();
     stopHeartbeat();
@@ -409,6 +461,7 @@
         clearChatTimers(task);
         var err = makeError(data.code || 'LOCAL_AI_RUNTIME_ERROR', data.message || '本地模型无法启动');
         _lastErrorCode = err.code || '';
+        _lastErrorMessage = err.message || '';
         task.reject(err);
         // If this was an init task, transition to failed
         if (task.kind === 'init') {
@@ -423,6 +476,8 @@
     worker.onerror = function(event) {
       var failedWorker = worker;
       var error = makeError('LOCAL_AI_WORKER_ERROR', event && event.message || '本地模型工作线程异常');
+      _lastErrorCode = error.code;
+      _lastErrorMessage = error.message;
       setState('failed');
       clearTimeouts();
       stopHeartbeat();
@@ -440,6 +495,8 @@
   function ensureReady(options) {
     options = options || {};
     if (options.signal && options.signal.aborted) {
+      _lastErrorCode = 'LOCAL_AI_CANCELLED';
+      _lastErrorMessage = '本地模型加载已取消';
       setState('cancelled');
       return Promise.reject(makeError('LOCAL_AI_CANCELLED', 'Local model loading was cancelled'));
     }
@@ -462,6 +519,8 @@
       _lastProgressValue = 0;
       _hasProgressValue = false;
       _lastProgressText = '';
+      _lastErrorCode = '';
+      _lastErrorMessage = '';
       _lastActivityAt = Date.now();
       _lastElapsedSeconds = 0;
       setState('downloading');
@@ -486,6 +545,8 @@
   function stop() {
     if (_state === 'ready' || _state === 'idle' || _state === 'failed') return;
     _stopRequested = true;
+    _lastErrorCode = 'LOCAL_AI_CANCELLED';
+    _lastErrorMessage = '本地模型已停止';
     setState('cancelled');
     terminateWorker();
     _initializingPromise = null;
@@ -534,6 +595,7 @@
     terminateWorker();
     _state = 'idle';
     _lastErrorCode = '';
+    _lastErrorMessage = '';
     _activeModelId = MODEL_ID;
     _usingCompatibilityModel = false;
     _stateChangedAt = 0;
@@ -559,6 +621,8 @@
     reset: reset,
     getState: getState,
     getLastErrorCode: getLastErrorCode,
+    getLastErrorMessage: getLastErrorMessage,
+    getStatusSnapshot: getStatusSnapshot,
     getActiveModelId: function() { return _activeModelId; },
     isUsingCompatibilityModel: function() { return _usingCompatibilityModel; },
     getAvailabilityState: getAvailabilityState,
