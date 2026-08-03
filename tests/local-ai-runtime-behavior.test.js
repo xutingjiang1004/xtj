@@ -194,7 +194,7 @@ function createRuntimeHarness(options = {}) {
   };
 }
 
-function createWorkerHarness(createEngine) {
+function createWorkerHarness(createEngine, options = {}) {
   const messages = [];
   const self = {
     onmessage: null,
@@ -207,6 +207,7 @@ function createWorkerHarness(createEngine) {
     "import * as webllm from '/vendor/webllm/index.js';",
     'const webllm = globalThis.__mockWebLLM;'
   );
+  if (options.navigator) self.navigator = options.navigator;
   const context = vm.createContext({ self, __mockWebLLM: mockWebLLM, console });
   vm.runInContext(transformedSource, context, { filename: 'local-ai-worker.js' });
   return { self, messages, context };
@@ -266,6 +267,27 @@ test('local worker retries a Qwen q4f16 shader pipeline failure once with the q4
   assert.equal(ready.modelId, 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC');
   assert.equal(ready.compatibilityFallback, true);
   assert.equal(harness.messages.some(message => message.type === 'error'), false);
+});
+
+test('local worker chooses q4f32 before downloading when WebGPU does not expose shader-f16', async () => {
+  const requestedModels = [];
+  const harness = createWorkerHarness(async function (modelId) {
+    requestedModels.push(modelId);
+    return createChatEngine([]);
+  }, {
+    navigator: {
+      gpu: {
+        async requestAdapter() {
+          return { features: new Set(['timestamp-query']) };
+        }
+      }
+    }
+  });
+
+  await harness.self.onmessage({ data: { type: 'init', requestId: 'f16-preflight' } });
+  assert.deepEqual(requestedModels, ['Qwen2.5-0.5B-Instruct-q4f32_1-MLC']);
+  const ready = harness.messages.find(message => message.type === 'ready');
+  assert.equal(ready.compatibilityFallback, true);
 });
 
 test('local runtime exposes unsupported and not_downloaded availability states', async () => {

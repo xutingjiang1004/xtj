@@ -50,6 +50,21 @@ function runtimeErrorMessage(error, code) {
   return error && error.message ? error.message : '本地模型无法启动';
 }
 
+function preferredModelId() {
+  // q4f16 needs the optional shader-f16 capability on the generated MLC
+  // kernels. Chrome's AMD GCN4 adapter can support general WebGPU while not
+  // exposing that feature, so choose q4f32 before any model download there.
+  try {
+    if (!self.navigator || !self.navigator.gpu) return MODEL_ID;
+    return self.navigator.gpu.requestAdapter().then(function(adapter) {
+      if (adapter && adapter.features && !adapter.features.has('shader-f16')) {
+        return COMPATIBILITY_MODEL_ID;
+      }
+      return MODEL_ID;
+    }).catch(function() { return MODEL_ID; });
+  } catch (_) { return MODEL_ID; }
+}
+
 async function initialize(requestId) {
   if (engine) {
     send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
@@ -82,10 +97,19 @@ async function initialize(requestId) {
   // not announce "initializing" before that promise resolves: doing so made
   // the page replace the long download timeout with a short init timeout.
   try {
-    initializing = createEngine(MODEL_ID);
+    const preferred = preferredModelId();
+    const initialModelId = typeof preferred === 'string' ? preferred : await preferred;
+    if (initialModelId === COMPATIBILITY_MODEL_ID) {
+      send('progress', requestId, {
+        text: '检测到当前 WebGPU 不支持 shader-f16，正在使用本地 Qwen 兼容版…',
+        progress: 0,
+        timeElapsed: 0
+      });
+    }
+    initializing = createEngine(initialModelId);
     engine = await initializing;
-    activeModelId = MODEL_ID;
-    usingCompatibilityModel = false;
+    activeModelId = initialModelId;
+    usingCompatibilityModel = initialModelId === COMPATIBILITY_MODEL_ID;
   } catch (error) {
     if (runtimeErrorCode(error) !== 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') throw error;
     // This is deliberately a single fallback, not a retry loop. It uses a
