@@ -5743,6 +5743,9 @@
     if (msg.time) {
       body += '<div class="msg-time">' + escapeHTML(msg.time) + '</div>';
     }
+    if (isAssistant && !isError && !isCancelled && visibleContent) {
+      body += renderAssistantMessageActions(!!msg.retryMessage);
+    }
     if (msg.role === 'assistant' && msg.retryable) {
       body += '<button class="code-chat-retry-btn" type="button">重新生成</button>';
     }
@@ -5756,6 +5759,9 @@
         if (path) openFile(path);
       });
     });
+    if (isAssistant && !isError && !isCancelled && visibleContent) {
+      bindAssistantMessageActions(el, msg, visibleContent);
+    }
     if (msg.role === 'assistant' && msg.retryable) {
       var retryBtn = el.querySelector('.code-chat-retry-btn');
       if (retryBtn) {
@@ -5767,6 +5773,66 @@
         });
       }
     }
+  }
+
+  function renderAssistantMessageActions(canRegenerate) {
+    return '<div class="code-chat-message-actions" aria-label="回答操作">' +
+      '<button type="button" class="code-chat-message-action" data-code-message-action="copy" title="复制回答">复制回答</button>' +
+      '<button type="button" class="code-chat-message-action" data-code-message-action="continue" title="继续追问">继续追问</button>' +
+      (canRegenerate ? '<button type="button" class="code-chat-message-action" data-code-message-action="regenerate" title="重新生成">重新生成</button>' : '') +
+      '</div>';
+  }
+
+  function copyAssistantMessageContent(content) {
+    var text = String(content || '');
+    if (!text) return Promise.reject(new Error('EMPTY_MESSAGE'));
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      var copied = false;
+      try { copied = document.execCommand('copy'); } catch (e) {}
+      area.remove();
+      if (copied) resolve();
+      else reject(new Error('COPY_UNAVAILABLE'));
+    });
+  }
+
+  function bindAssistantMessageActions(el, msg, visibleContent) {
+    if (!el) return;
+    Array.prototype.forEach.call(el.querySelectorAll('[data-code-message-action]'), function (button) {
+      button.addEventListener('click', function () {
+        var action = button.getAttribute('data-code-message-action');
+        if (action === 'copy') {
+          copyAssistantMessageContent(visibleContent).then(function () {
+            showToast('已复制回答', 'success');
+          }).catch(function () {
+            showToast('无法访问剪贴板，请手动复制回答', 'info');
+          });
+        } else if (action === 'continue') {
+          var input = document.getElementById('codeChatInput');
+          var continuation = '请继续展开上一条回答，并基于当前上下文给出下一步。';
+          if (!input) return;
+          input.value = continuation;
+          state.composerDraft = continuation;
+          saveComposerDraft();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        } else if (action === 'regenerate') {
+          if (button.disabled || state.sending || msg._retryStarted || !msg.retryMessage) return;
+          msg._retryStarted = true;
+          button.disabled = true;
+          sendMessage(msg.retryMessage, msg.retryBody || null, { retry: true, useCurrentContext: true });
+        }
+      });
+    });
   }
 
   function renderPersistentToolTrace(trace) {
@@ -6739,8 +6805,10 @@
       if (streamCancelled) return;
       toolCount++;
       if (toolsContainer) toolsContainer.style.display = '';
-      toolsExpanded = true;
-      if (toolsList) toolsList.style.display = '';
+      // Keep execution evidence available without allowing each tool start to
+      // repeatedly push the answer out of view. The user can expand it when
+      // they need the live detail.
+      if (toolsList) toolsList.style.display = toolsExpanded ? '' : 'none';
       updateToolsHeader();
       if (statusText) statusText.textContent = data.summary || ('执行工具: ' + (data.tool || ''));
       setStreamStatus(data.summary || ('执行工具: ' + (data.tool || '工具调用')), 'tool', true);
@@ -6888,7 +6956,16 @@
     function finalizeNode() {
       streamDone = true;
       if (spinner) spinner.style.display = 'none';
-      if (statusEl) statusEl.style.display = 'none';
+      if (statusEl) {
+        statusEl.setAttribute('aria-busy', 'false');
+        statusEl.setAttribute('data-state', 'complete');
+        statusEl.style.display = '';
+      }
+      if (statusText) statusText.textContent = toolCount ? ('已完成 · 使用 ' + toolCount + ' 个工具') : '已完成';
+      if (toolsList) toolsList.style.display = 'none';
+      toolsExpanded = false;
+      if (toolsContainer) toolsContainer.classList.add('is-complete');
+      updateToolsHeader();
 
       // Final markdown render
       if (contentEl._streamRenderer) {
@@ -7271,9 +7348,17 @@
               toolTrace: finalToolTrace,
               contextInfo: finalContextInfo,
               runtime: finalRuntime,
-              usage: finalUsage
+              usage: finalUsage,
+              retryMessage: ctx.originalMessage,
+              retryBody: Object.assign({}, ctx.originalBody || body)
             });
-            retainStreamingMessageNode(assistantNode, state.messages[state.messages.length - 1]);
+            var completedMessage = state.messages[state.messages.length - 1];
+            var completedBody = assistantNode.querySelector('.msg-body');
+            if (completedBody && !completedBody.querySelector('.code-chat-message-actions')) {
+              completedBody.insertAdjacentHTML('beforeend', renderAssistantMessageActions(true));
+              bindAssistantMessageActions(assistantNode, completedMessage, completedReply);
+            }
+            retainStreamingMessageNode(assistantNode, completedMessage);
 
             state.pendingOperations = attachPendingOpMetadata(ctx, finalOperations);
             if (finalContextInfo) {
@@ -7521,7 +7606,8 @@
             streamState.handleEvent({ type: 'done', data: {
               reply: resumedReply,
               operations: Array.isArray(data.operations) ? data.operations : [],
-              usage: data.usage || null
+              usage: data.usage || null,
+              tool_trace: Array.isArray(data.tool_trace) ? data.tool_trace : []
             }});
           } else {
             streamState.handleEvent({ type: 'error', data: {
@@ -7673,6 +7759,7 @@
     var streamId = savedState.streamId;
     var lastEventId = savedState.lastEventId || 0;
     var answerBuffer = '';
+    var recoveredToolTrace = [];
     var streamDone = false;
     var abortController = new AbortController();
 
@@ -7708,7 +7795,7 @@
     var usageEl = assistantNode.querySelector('.code-stream-usage');
     var errorEl = assistantNode.querySelector('.code-stream-error');
 
-    function recoveryDone(reply, operations, usage) {
+    function recoveryDone(reply, operations, usage, toolTrace) {
       if (streamDone) return;
       streamDone = true;
       if (spinner) spinner.style.display = 'none';
@@ -7731,7 +7818,10 @@
         content: finalContent,
         time: timeStr,
         operations: operations || [],
-        usage: usage || null
+        usage: usage || null,
+        toolTrace: Array.isArray(toolTrace) ? toolTrace : recoveredToolTrace,
+        retryMessage: savedState.originalMessage || '',
+        retryBody: null
       });
       retainStreamingMessageNode(assistantNode, state.messages[state.messages.length - 1]);
       // A resumed stream has no original request context to safely attach
@@ -7820,11 +7910,31 @@
             scrollChatToBottom();
           }
           break;
+        case 'tool_start':
+          recoveredToolTrace.push({
+            tool: event.data && event.data.tool,
+            summary: event.data && (event.data.summary || event.data.description || event.data.path),
+            ok: null
+          });
+          if (statusText) statusText.textContent = '正在恢复工具记录…';
+          break;
+        case 'tool_result':
+          var recoveredResult = event.data || {};
+          var previousTrace = recoveredToolTrace.length ? recoveredToolTrace[recoveredToolTrace.length - 1] : null;
+          if (previousTrace) {
+            previousTrace.ok = recoveredResult.ok !== false;
+            previousTrace.summary = recoveredResult.summary || recoveredResult.result || recoveredResult.error || previousTrace.summary;
+            if (recoveredResult.duration_ms) previousTrace.duration_ms = recoveredResult.duration_ms;
+          } else {
+            recoveredToolTrace.push({ tool: recoveredResult.tool, summary: recoveredResult.summary || recoveredResult.result || recoveredResult.error, ok: recoveredResult.ok !== false, duration_ms: recoveredResult.duration_ms });
+          }
+          break;
         case 'done':
           recoveryDone(
             (event.data && event.data.reply) || '',
             (event.data && Array.isArray(event.data.operations)) ? event.data.operations : [],
-            (event.data && event.data.usage) ? event.data.usage : null
+            (event.data && event.data.usage) ? event.data.usage : null,
+            (event.data && Array.isArray(event.data.tool_trace)) ? event.data.tool_trace : recoveredToolTrace
           );
           break;
         case 'error':
@@ -7878,7 +7988,8 @@
               recoveryDone(
                 reply || answerBuffer,
                 Array.isArray(data.operations) ? data.operations : [],
-                data.usage || null
+                data.usage || null,
+                Array.isArray(data.tool_trace) ? data.tool_trace : recoveredToolTrace
               );
             } else {
               recoveryError('RESUME_EMPTY', '流恢复完成但没有有效回复', true);
@@ -7979,7 +8090,9 @@
         toolTrace: state.lastToolTrace,
         contextInfo: data && data.context_info || null,
         runtime: data && data.runtime || null,
-        usage: data && data.usage || null
+        usage: data && data.usage || null,
+        retryMessage: ctx.originalMessage,
+        retryBody: Object.assign({}, ctx.originalBody || body)
       });
       removeTypingIndicator();
       finalizeRequest(ctx, { done: true, usage: data && data.usage || null });
