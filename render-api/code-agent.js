@@ -4215,6 +4215,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     return (Array.isArray(trace) ? trace : []).slice(0, 24).map(function(entry) {
       entry = entry || {};
       var safe = {
+        round: Math.max(1, Math.min(Math.floor(Number(entry.round) || 1), 1000)),
         tool: String(entry.tool || 'tool').slice(0, 80),
         ok: entry.ok !== false,
         duration_ms: Math.max(0, Math.min(Number(entry.duration_ms) || 0, 3600000)),
@@ -4363,6 +4364,33 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       startTime: requestStartTime
     };
     var streamPhase = 'accepted';
+    // Keep a server-authoritative progress cursor separate from event_id.
+    // event_id is a persistence/replay cursor, while phase_sequence identifies
+    // the visible reasoning/tool step for the Code UI.
+    var phaseSequence = 0;
+    var phaseStartedAt = requestStartTime;
+
+    function beginPhase(phase) {
+      var now = Date.now();
+      var nextPhase = String(phase || 'unknown');
+      if (streamPhase !== nextPhase) phaseStartedAt = now;
+      streamPhase = nextPhase;
+      phaseSequence += 1;
+      return {
+        phase: streamPhase,
+        phase_sequence: phaseSequence,
+        phase_elapsed_ms: Math.max(0, now - phaseStartedAt),
+        elapsed_ms: Math.max(0, now - requestStartTime)
+      };
+    }
+
+    function currentPhaseMetadata() {
+      return {
+        phase: streamPhase,
+        phase_sequence: phaseSequence,
+        phase_elapsed_ms: Math.max(0, Date.now() - phaseStartedAt)
+      };
+    }
 
     var eventLogger = streamSession.createEventLogger(supabase, streamId, userId);
     // Create and verify the durable session before opening a recoverable SSE
@@ -4439,6 +4467,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Terminal events are emitted only by finalizeStream(), which persists
       // the event and updates the session before writing it to the client.
       if (type === 'done' || type === 'error' || type === 'cancelled') return false;
+      // Any phase-bearing event gets the same server-authoritative cursor as a
+      // status event. This keeps legacy event types (accepted/planning/tool/
+      // answer) replayable without forcing clients to infer ordering from DOM
+      // insertion timing.
+      if (data && typeof data === 'object' && data.phase && data.phase_sequence == null) {
+        data = Object.assign({}, data, currentPhaseMetadata());
+      }
       var eventId = nextEventId();
       var event = aiCoreSSE.buildSSEEvent(
         Object.assign({}, baseEvent, { event_id: eventId }),
@@ -4458,17 +4493,15 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     }
 
     function sendPhase(phase, message) {
-      streamPhase = phase;
-      return sendSSE('status', {
-        phase: phase,
-        message: message,
-        elapsed_ms: Date.now() - requestStartTime
-      });
+      var metadata = beginPhase(phase);
+      return sendSSE('status', Object.assign({}, metadata, {
+        message: message
+      }));
     }
 
     // Heartbeat
     var heartbeat = aiCoreSSE.createHeartbeat(writer, function() { return baseEvent; }, 10000, function() {
-      return { phase: streamPhase, elapsed_ms: Date.now() - requestStartTime };
+      return Object.assign({ elapsed_ms: Date.now() - requestStartTime }, currentPhaseMetadata());
     });
     heartbeat.start();
 
@@ -4484,13 +4517,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     function writeUnpersistedTerminalError(code, message, phase) {
       if (!writer || res.writableEnded) return;
       var eventId = nextEventId();
+      var terminalPhase = currentPhaseMetadata();
       var event = aiCoreSSE.buildSSEEvent(Object.assign({}, baseEvent, { event_id: eventId }), 'error', {
         status: 'running',
         code: code,
         message: message,
         retryable: true,
         request_id: requestId,
-        phase: phase || 'persistence'
+        phase: phase || 'persistence',
+        phase_sequence: terminalPhase.phase_sequence,
+        phase_elapsed_ms: terminalPhase.phase_elapsed_ms
       });
       writer.write(aiCoreSSE.formatSSEEvent(event));
     }
@@ -4508,8 +4544,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         }
 
         var eventId = nextEventId();
-        var event = aiCoreSSE.buildSSEEvent(Object.assign({}, baseEvent, { event_id: eventId }), type, data);
-        var persisted = await eventLogger.logEvent(type, data, eventId);
+        // Terminal events are replayed on their own after a reconnect. Carry
+        // the final progress cursor with them so the client never has to
+        // reconstruct the last phase from an incomplete event batch.
+        var terminalData = Object.assign({}, data || {});
+        var terminalPhase = currentPhaseMetadata();
+        if (terminalData.phase_sequence == null) terminalData.phase_sequence = terminalPhase.phase_sequence;
+        if (terminalData.phase_elapsed_ms == null) terminalData.phase_elapsed_ms = terminalPhase.phase_elapsed_ms;
+        if (!terminalData.phase) terminalData.phase = terminalPhase.phase;
+        var event = aiCoreSSE.buildSSEEvent(Object.assign({}, baseEvent, { event_id: eventId }), type, terminalData);
+        var persisted = await eventLogger.logEvent(type, terminalData, eventId);
         var terminalFlush = await eventLogger.flush();
         if (!persisted || persisted.failed > 0 || !terminalFlush || terminalFlush.failed > 0) {
           throw { code: 'STREAM_EVENT_FLUSH_FAILED', message: '终态事件持久化失败', retryable: true };
@@ -4653,10 +4697,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return;
       }
 
-      // Send accepted
-      sendSSE('accepted', {
+      // Send accepted. Keep the legacy event type while exposing the same
+      // phase cursor used by status events.
+      var acceptedPhase = beginPhase('accepted');
+      sendSSE('accepted', Object.assign({}, acceptedPhase, {
         mode: 'modify',
-        phase: 'accepted',
         message: '请求已接受，正在准备处理',
         workspace_id: scope.workspaceId,
         workspace_generation: scope.generation,
@@ -4665,10 +4710,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         attachments_count: attachments.length,
         timeout_ms: DEEPSEEK_TIMEOUT_MS,
         elapsed_ms: Date.now() - requestStartTime
-      });
+      }));
 
       // Send planning
-      streamPhase = 'context';
+      beginPhase('context');
       sendSSE('planning', { phase: streamPhase, message: '正在分析任务和相关项目结构', elapsed_ms: Date.now() - requestStartTime });
 
       var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
@@ -4739,16 +4784,21 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       // Phase 2: Wrapped tool executor that emits SSE events
       var rawExecutor = createCodeToolExecutor(scope, activePath, openFiles, attachments, toolTrace, inputBudget, deps, runtimeCapabilities);
+      var toolInvocationCount = 0;
       var wrappedExecutor = function(toolCall) {
         var toolCallId = toolCall.id || ('tool_' + (toolTrace.length + 1));
         var toolName = toolCall.function ? toolCall.function.name : (toolCall.name || 'unknown');
         var toolSummary = getToolSummary(toolName, toolCall);
+        var toolIndex = ++toolInvocationCount;
 
         sendPhase('tool', '正在执行工具：' + toolSummary);
         sendSSE('tool_start', {
           tool_call_id: toolCallId,
           tool: toolName,
-          summary: toolSummary
+          summary: toolSummary,
+          tool_index: toolIndex,
+          phase: streamPhase,
+          phase_sequence: phaseSequence
         });
 
         var toolStart = Date.now();
@@ -4760,7 +4810,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             tool: toolName,
             ok: ok,
             duration_ms: duration,
-            summary: getToolResultSummary(toolName, result, ok)
+            summary: getToolResultSummary(toolName, result, ok),
+            tool_index: toolIndex,
+            phase: streamPhase,
+            phase_sequence: phaseSequence
           });
           sendPhase('model_wait', '工具执行完成，正在继续生成回答');
           return result;
@@ -4771,6 +4824,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             tool: toolName,
             ok: false,
             duration_ms: duration,
+            tool_index: toolIndex,
+            phase: streamPhase,
+            phase_sequence: phaseSequence,
             summary: '工具执行失败: ' + (err && err.message ? err.message.slice(0, 100) : '未知错误')
           });
           sendPhase('model_wait', '工具执行结束，正在整理结果');
@@ -4780,7 +4836,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       // Keep the established event for older clients, then immediately add
       // the more accurate status for clients that understand phase events.
-      sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
+      beginPhase('model_wait');
+      sendSSE('answer_start', { model: model, thinking_mode: thinkingMode, phase: streamPhase, phase_sequence: phaseSequence });
       sendPhase('model_wait', '正在连接模型并等待首个响应');
 
       // 脱敏诊断日志：跟踪 DOCX 上下文链路（SSE 流式路径）
@@ -4818,10 +4875,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           var deltaText = String(chunk);
           var MAX_DELTA_CHARS = 4000;
           if (deltaText.length <= MAX_DELTA_CHARS) {
-            sendSSE('answer_delta', { delta: deltaText });
+            sendSSE('answer_delta', { delta: deltaText, phase: streamPhase, phase_sequence: phaseSequence });
           } else {
             for (var di = 0; di < deltaText.length; di += MAX_DELTA_CHARS) {
-              sendSSE('answer_delta', { delta: deltaText.slice(di, di + MAX_DELTA_CHARS) });
+              sendSSE('answer_delta', { delta: deltaText.slice(di, di + MAX_DELTA_CHARS), phase: streamPhase, phase_sequence: phaseSequence });
             }
           }
         }
