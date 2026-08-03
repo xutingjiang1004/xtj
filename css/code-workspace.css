@@ -1048,8 +1048,11 @@
 
 .code-chat-empty-state {
   width: min(100%, 560px);
-  margin: auto;
+  margin: 8px auto;
   padding: 24px;
+  box-sizing: border-box;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
   border: 1px solid var(--cw-border);
   border-radius: 14px;
   background: var(--cw-bg-secondary);
@@ -1061,6 +1064,18 @@
 .code-chat-starter-prompts { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
 .code-chat-starter-prompts button { min-height: 32px; padding: 6px 9px; border: 1px solid var(--cw-border); border-radius: var(--cw-radius-sm); background: var(--cw-bg-tertiary); color: var(--cw-text); font: inherit; font-size: 12px; cursor: pointer; }
 .code-chat-starter-prompts button:hover, .code-chat-starter-prompts button:focus-visible { border-color: var(--cw-accent); color: var(--cw-accent); outline: none; }
+@container code-chat-panel (max-width: 420px) {
+  .code-chat-empty-state {
+    width: 100%;
+    margin: 4px 0;
+    padding: 16px;
+    border-radius: 12px;
+  }
+  .code-chat-empty-state h3 { font-size: 16px; }
+  .code-chat-empty-state p { font-size: 12px; }
+  .code-chat-starter-prompts { margin-top: 12px; }
+  .code-chat-starter-prompts button { flex: 1 1 100%; text-align: left; }
+}
 
 /* ── 23. Chat Message ─────────────────────────────────────── */
 .code-chat-message {
@@ -1144,7 +1159,7 @@
   flex-wrap: wrap;
   gap: 5px;
   padding: 2px 4px 0;
-  opacity: .42;
+  opacity: .82;
   transition: opacity var(--cw-dur-fast) var(--cw-ease);
 }
 
@@ -1172,6 +1187,25 @@
 }
 
 .code-chat-message-action:disabled { cursor: wait; opacity: .55; }
+
+.code-model-retry {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--cw-accent) 45%, var(--cw-border));
+  border-radius: var(--cw-radius-pill);
+  background: var(--cw-bg-secondary);
+  color: var(--cw-accent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-model-retry:hover, .code-model-retry:focus-visible {
+  background: var(--cw-accent-soft);
+  border-color: var(--cw-accent);
+  outline: none;
+}
+.code-model-retry:disabled { cursor: wait; opacity: .58; }
 
 /* ── 24. User Message ─────────────────────────────────────── */
 .code-chat-message.user {
@@ -1354,6 +1388,28 @@
    sidebar are both open. Use its actual inline size so the rail never
    collapses into an unreadable single line. */
 @container code-chat-panel (max-width: 320px) {
+  #panelCode .code-composer-toolbar {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px;
+  }
+  #panelCode #codeComposerRuntimeStatus {
+    grid-column: 1;
+    grid-row: 4;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #panelCode #codeModelRetryBtn {
+    grid-column: 2 / -1;
+    grid-row: 4;
+    min-height: 28px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #panelCode #codeLocalModelSetupBtn,
+  #panelCode #codeContextUsage { min-height: 30px; font-size: 10px; }
+
   .code-stream-phases {
     display: grid;
     grid-template-columns: 1fr;
@@ -1530,6 +1586,23 @@
   margin-top: 2px;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+.code-stream-tool-item.is-unmatched {
+  background: color-mix(in srgb, var(--cw-warning, #f59e0b) 8%, transparent);
+}
+@container code-chat-panel (max-width: 320px) {
+  .code-stream-tools-header { padding: 7px 8px; }
+  .code-stream-tool-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 6px;
+    padding: 7px 8px;
+  }
+  .code-stream-tool-state {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
+  }
 }
 
 .code-stream-content {
@@ -3614,6 +3687,7 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 
 .code-chat-tool-trace-item[data-ok="false"] .code-chat-tool-trace-dot { background: var(--cw-danger); }
 .code-chat-tool-trace-name { color: var(--cw-text); font-weight: 600; }
+.code-chat-tool-trace-index { display: inline-flex; margin-right: 5px; color: var(--cw-accent); font-family: var(--cw-font-mono); font-size: 10px; font-weight: 700; }
 .code-chat-tool-trace-summary { color: var(--cw-text-secondary); margin-top: 2px; overflow-wrap: anywhere; }
 .code-chat-tool-trace-state { color: var(--cw-text-secondary); font-size: 11px; white-space: nowrap; }
 .code-chat-tool-trace-more { padding: 7px 0 1px; color: var(--cw-text-secondary); font-size: 11px; }
@@ -3623,3 +3697,27 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 .code-tool-evidence-path { max-width: 100%; padding: 0; border: 0; border-bottom: 1px dashed var(--cw-border-strong); background: transparent; color: var(--cw-accent); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .code-tool-evidence-path:hover, .code-tool-evidence-path:focus-visible { border-bottom-style: solid; color: var(--cw-accent); outline: none; }
 .code-tool-evidence-path span, .code-tool-evidence-count, .code-tool-evidence-host { color: var(--cw-text-secondary); }
+
+/* Narrow chat panes still need a usable provider status row.  Keep the
+   retry action beside the status instead of letting grid auto-placement put
+   it over the context button. */
+@container code-chat-panel (max-width: 320px) {
+  #panelCode .code-composer-toolbar { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) !important; gap: 4px !important; }
+  #panelCode #codeComposerRuntimeStatus {
+    grid-column: 1 !important;
+    grid-row: 4 !important;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #panelCode #codeModelRetryBtn {
+    grid-column: 2 / -1 !important;
+    grid-row: 4 !important;
+    min-height: 28px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #panelCode #codeLocalModelSetupBtn,
+  #panelCode #codeContextUsage { min-height: 30px !important; font-size: 10px; }
+}

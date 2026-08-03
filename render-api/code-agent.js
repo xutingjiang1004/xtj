@@ -4970,10 +4970,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       // Send operation_preview
       if (operations.length > 0) {
-        sendSSE('operation_preview', {
+        var operationPhase = beginPhase('finalizing');
+        sendSSE('operation_preview', Object.assign({}, operationPhase, {
           operation_count: operations.length,
           files: operations.map(function(op) { return op.path || ''; }).filter(Boolean).slice(0, 20)
-        });
+        }));
       }
 
       // Update session
@@ -5055,7 +5056,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         total_duration_ms: Date.now() - requestStartTime
       });
 
-      sendPhase('finalizing', '正在保存结果并完成会话');
+      if (operations.length === 0) sendPhase('finalizing', '正在保存结果并完成会话');
 
       // Persist the terminal event and session state before exposing done to
       // the client. This keeps done, last_event_id, and session.status aligned.

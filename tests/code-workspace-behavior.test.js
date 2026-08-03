@@ -53,8 +53,8 @@ test('Code streaming exposes a compact phase rail and terminalizes it', () => {
   assert.match(codeWorkspace, /function buildStreamPhaseRail\(\)/);
   assert.match(codeWorkspace, /data-phase="context"/);
   assert.match(codeWorkspace, /读取与工具/);
-  assert.match(codeWorkspace, /function updateStreamPhaseRail\(node, value, terminal\)/);
-  assert.match(codeWorkspace, /updateStreamPhaseRail\(assistantNode, 'complete', true\)/);
+  assert.match(codeWorkspace, /function updateStreamPhaseRail\(node, value, terminal(?:, phaseSequence)?\)/);
+  assert.match(codeWorkspace, /updateStreamPhaseRail\(assistantNode, 'complete', true(?:, phaseSequence)?/);
   assert.match(codeWorkspace, /updateStreamPhaseRail\(assistantNode, 'error'\)/);
   const codeWorkspaceCss = fs.readFileSync(__dirname + '/../css/code-workspace.css', 'utf8');
   assert.match(codeWorkspaceCss, /\.code-stream-phases/);
@@ -64,6 +64,19 @@ test('Code streaming exposes a compact phase rail and terminalizes it', () => {
   assert.match(codeWorkspaceCss, /code-stream-content:empty::before[\s\S]{0,420}background: transparent !important/);
   assert.match(codeWorkspaceCss, /code-chat-input-area[\s\S]{0,220}background: var\(--cw-bg/);
   assert.match(codeWorkspaceCss, /codeLocalModelSetupBtn|code-local-model-setup/);
+});
+
+test('Code streaming consumes server phase cursors and matches tool results by id or index', () => {
+  assert.match(codeWorkspace, /phaseSequence\)/);
+  assert.match(codeWorkspace, /data-phase-sequence/);
+  assert.match(codeWorkspace, /resolveToolItem\(data\)/);
+  assert.match(codeWorkspace, /toolItemsByIndex/);
+  assert.match(codeWorkspace, /未匹配到工具开始事件/);
+  assert.match(codeWorkspace, /streamToolTrace/);
+  assert.match(codeWorkspace, /recoveredToolByIndex/);
+  assert.match(codeWorkspace, /toolTrace: recoveredToolTrace/);
+  assert.match(codeWorkspace, /renderPersistentToolTrace\(resolvedToolTrace\)/);
+  assert.match(codeWorkspace, /codeModelRetryBtn/);
 });
 
 test('Code SSE writer does not mistake a completed request body for a disconnected client', () => {
