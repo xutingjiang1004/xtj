@@ -790,3 +790,117 @@
   --cw-shadow: 0 1px 3px rgba(0,0,0,0.16), 0 2px 6px -2px rgba(0,0,0,0.16);
   --cw-shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
 }
+[data-theme="dark"] #panelCode.code-panel {
+  --cw-shadow: 0 1px 3px rgba(0,0,0,0.16), 0 2px 6px -2px rgba(0,0,0,0.16);
+  --cw-shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+/* + 按钮下拉菜单 - 整合模型选择、上下文等全部功能 */
+#panelCode .code-composer-toolbar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+#panelCode .code-composer-toolbar .code-composer-context-btn {
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--cw-border, #e0e0e0);
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--cw-text, #333);
+  transition: background 0.15s;
+}
+
+#panelCode .code-composer-toolbar .code-composer-context-btn:hover {
+  background: var(--cw-muted-bg, #f5f5f5);
+}
+
+#panelCode .code-composer-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 240px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--cw-card, #fff);
+  border: 1px solid var(--cw-border, #e0e0e0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 6px 0;
+  z-index: 100;
+}
+
+#panelCode .code-composer-menu-section {
+  padding: 2px 0;
+}
+
+#panelCode .code-composer-menu-section + .code-composer-menu-section {
+  border-top: 1px solid var(--cw-border, #e0e0e0);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+#panelCode .code-composer-menu-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cw-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 12px 4px;
+}
+
+#panelCode .code-composer-menu-item {
+  padding: 2px 8px;
+}
+
+#panelCode .code-composer-menu-item select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--cw-border, #e0e0e0);
+  border-radius: 5px;
+  background: var(--cw-bg, #fff);
+  color: var(--cw-text, #333);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+#panelCode .code-composer-menu-item select:focus {
+  border-color: var(--cw-accent, #0066cc);
+  box-shadow: 0 0 0 2px var(--cw-accent-soft, rgba(0,102,204,0.15));
+}
+
+#panelCode .code-composer-menu button[role="menuitem"],
+#panelCode .code-composer-menu .code-context-usage {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--cw-text, #333);
+  cursor: pointer;
+  border-radius: 0;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+#panelCode .code-composer-menu button[role="menuitem"]:hover,
+#panelCode .code-composer-menu .code-context-usage:hover {
+  background: var(--cw-muted-bg, #f5f5f5);
+}
+
+#panelCode .code-composer-menu button[role="menuitem"]:active,
+#panelCode .code-composer-menu .code-context-usage:active {
+  background: var(--cw-border, #e0e0e0);
+}

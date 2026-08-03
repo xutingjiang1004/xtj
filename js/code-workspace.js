@@ -1721,23 +1721,8 @@
         if (window.monacoEditorInstance) window.monacoEditorInstance.layout();
       });
     }
-    updateLayoutRecoveryControl();
-  }
-
-  function updateLayoutRecoveryControl() {
-    var control = _dom.layoutRecovery;
-    if (!control) return;
-    var hasFocusedPane = _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor';
-    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed || _layoutState.chatCollapsed || _layoutState.workbenchNavCollapsed || _layoutState.contextCollapsed;
-    control.hidden = !hasFocusedPane && !hasCollapsedPane;
-    if (control.hidden) return;
-    var label = control.querySelector('.code-layout-recovery-label');
-    if (label) {
-      label.textContent = hasFocusedPane
-        ? ('专注模式：' + (_layoutState.maximizedPanel === 'chat' ? 'AI 面板' : '编辑器') + ' · 随时可恢复完整工作台')
-        : '部分面板已收起 · 可恢复完整工作台';
     }
-  }
+
 
   function toggleSidebar() {
     _layoutState.sidebarCollapsed = !_layoutState.sidebarCollapsed;
@@ -2109,12 +2094,6 @@
     _dom.panelCode.appendChild(shell);
     shell.appendChild(workspace);
 
-    var layoutRecovery = document.createElement('div');
-    layoutRecovery.className = 'code-layout-recovery';
-    layoutRecovery.hidden = true;
-    layoutRecovery.innerHTML = '<span class="code-layout-recovery-label"></span><button type="button">恢复完整布局</button>';
-    layoutRecovery.querySelector('button').addEventListener('click', function () { resetLayout('#codeChatInput'); });
-    shell.appendChild(layoutRecovery);
 
     _dom.fileTree = fileTree;
     _dom.contextPanel = contextPanel;
@@ -2127,7 +2106,7 @@
     _dom.resizerLeft = resizerLeft;
     _dom.resizerRight = resizerRight;
     _dom.resizerContext = resizerContext;
-    _dom.layoutRecovery = layoutRecovery;
+
 
     renderFileTree();
     renderEmptyState();
@@ -5042,29 +5021,33 @@
     inputArea.innerHTML += '<button class="send-btn code-chat-cancel-btn" id="codeChatCancelBtn" type="button" title="&#21462;&#28040;&#35831;&#27714;">&#21462;&#28040;</button>';
     inputArea.innerHTML +=
       '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
-        '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="添加上下文" aria-haspopup="menu" aria-expanded="false">＋</button>' +
-        '<select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select>' +
-        
-        '<select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
-          '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
-        '</select>' +
-        '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
+        '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="菜单" aria-haspopup="menu" aria-expanded="false">＋</button>' +
+      '</div>' +
       '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
       '<button type="button" class="code-model-retry" id="codeModelRetryBtn" hidden>重试在线模型</button>' +
-      
-      
-        
-        
-      
       '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
       '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu" hidden>' +
-        '<button type="button" role="menuitem" data-composer-action="ignore-documents">Ignore documents for this send</button>' +
-        '<button type="button" role="menuitem" data-composer-action="upload">上传资料</button>' +
-        '<button type="button" role="menuitem" data-composer-action="current">添加当前文件</button>' +
-        '<button type="button" role="menuitem" data-composer-action="open">添加已打开文件</button>' +
-        '<button type="button" role="menuitem" data-composer-action="pin">固定/取消固定当前文件</button>' +
-        '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
-        '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
+        '<div class="code-composer-menu-section">' +
+          '<div class="code-composer-menu-label">模型</div>' +
+          '<div class="code-composer-menu-item"><select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select></div>' +
+          '<div class="code-composer-menu-item"><select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
+            '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
+          '</select></div>' +
+        '</div>' +
+        '<div class="code-composer-menu-section">' +
+          '<div class="code-composer-menu-label">上下文</div>' +
+          '<button type="button" role="menuitem" data-composer-action="upload">上传资料</button>' +
+          '<button type="button" role="menuitem" data-composer-action="current">添加当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="open">添加已打开文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pin">固定/取消固定当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
+        '</div>' +
+        '<div class="code-composer-menu-section">' +
+          '<div class="code-composer-menu-label">其他</div>' +
+          '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
+          '<button type="button" role="menuitem" data-composer-action="ignore-documents">Ignore documents for this send</button>' +
+        '</div>' +
       '</div>';
     // Keep the stable IDs and bindings, but give the composer a clear task
     // row and a quiet metadata row so the input remains the primary action.
