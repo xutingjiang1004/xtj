@@ -70,10 +70,6 @@
     _capabilitiesPromise: null,
     _modelsPromise: null,
     _composerGlobalCleanup: null,
-    _localRuntime: null,
-    _localRuntimeUnsubscribe: null,
-    _localDownloadController: null,
-    _localDownloadRuntime: null,
     _openFilePromises: {},
     _savePromises: {},
     _undoLock: false,
@@ -809,16 +805,10 @@
     abortController(state._githubController);
     abortController(state._indexController);
     abortController(state._indexStatusController);
-    abortController(state._localDownloadController);
-    if (state._localDownloadRuntime && typeof state._localDownloadRuntime.stop === 'function') {
-      try { state._localDownloadRuntime.stop(); } catch (_) {}
-    }
     state._attachmentController = null;
     state._githubController = null;
     state._indexController = null;
     state._indexStatusController = null;
-    state._localDownloadController = null;
-    state._localDownloadRuntime = null;
     state._githubLoadPromise = null;
     state._indexBuildPromise = null;
     state._openFilePromises = {};
@@ -871,7 +861,7 @@
         '<button class="folder-picker-btn-large" id="codeWelcomeFileBtn">' +
           '<span class="folder-icon">📄</span> 直接打开文件' +
         '</button>' +
-      '</div>' +
+      
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
 
     _dom.panelCode.appendChild(welcome);
@@ -2048,8 +2038,8 @@
             '<button type="button" role="menuitem" data-code-layout-action="sidebar">折叠文件目录</button>' +
             '<button type="button" role="menuitem" data-code-layout-action="nav">折叠左侧导航栏</button>' +
             '<button type="button" role="menuitem" data-code-layout-action="reset">恢复默认布局</button>' +
-          '</div>' +
-        '</div>' +
+          
+        
       '</div>';
     var maxChatBtn = chatHeader.querySelector('.max-chat-btn');
     maxChatBtn.innerHTML = codeWorkspaceIcon('maximize');
@@ -2694,13 +2684,13 @@
       '<div class="menu-item" data-action="toggle-context">' +
         '<span>' + (inContext ? '🔽' : '🔼') + '</span>' +
         '<span>' + contextLabel + '</span>' +
-      '</div>' +
+      
       '<div class="menu-item" data-action="rename" role="button" tabindex="0">' +
         '<span>✎</span><span>\u91cd\u547d\u540d\u6587\u4ef6</span>' +
-      '</div>' +
+      
       '<div class="menu-item danger" data-action="delete" role="button" tabindex="0">' +
         '<span>⌫</span><span>\u5220\u9664\u6587\u4ef6</span>' +
-      '</div>' +
+      
       '<div class="menu-separator"></div>' +
       '<div class="menu-item" data-action="open" role="button" tabindex="0">' +
         '<span>📄</span><span>打开文件</span>' +
@@ -3306,7 +3296,7 @@
     toolbar.innerHTML =
       '<div class="toolbar-breadcrumb">' +
         '<span class="crumb">' + escapeHTML(tab.path) + '</span>' +
-      '</div>' +
+      
       '<div class="toolbar-group">' +
         (state._isReadOnly ? '<span class="toolbar-readonly-label">只读</span>' :
           '<button class="toolbar-btn" id="codeSaveBtn" title="保存 (Ctrl+S)">💾</button>') +
@@ -4210,15 +4200,15 @@
       }
       
       indexDiv.innerHTML =
-        '<div style="' + docStatusClass + 'font-weight:600;margin-bottom:6px;">' + docStatus + '</div>' +
-        '<div style="color:var(--cw-text-muted);margin-bottom:2px;">' + escapeHTML(docTab.name) + '</div>' +
+        '<div style="' + docStatusClass + 'font-weight:600;margin-bottom:6px;">' + docStatus + 
+        '<div style="color:var(--cw-text-muted);margin-bottom:2px;">' + escapeHTML(docTab.name) + 
         (charCount > 0 ? '<div style="color:var(--cw-text-muted);margin-bottom:2px;">已解析文本：' + charCount.toLocaleString() + ' 字符</div>' : '') +
         '<div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;line-height:1.8;">' +
-        '  <div style="color:var(--cw-text-muted);">文件系统权限</div><div style="' + permClass + '">' + permStr + '</div>' +
-        '  <div style="color:var(--cw-text-muted);">文本解析状态</div><div style="' + parseStatusClass + '">' + parseStatus + '</div>' +
-        '  <div style="color:var(--cw-text-muted);">格式修改能力</div><div style="color:var(--cw-text);">' + formatCapStr + '</div>' +
-        '  <div style="color:var(--cw-text-muted);">保存验证状态</div><div style="' + saveStatusClass + '">' + saveStatus + '</div>' +
-        '</div>' +
+        '  <div style="color:var(--cw-text-muted);">文件系统权限</div><div style="' + permClass + '">' + permStr + 
+        '  <div style="color:var(--cw-text-muted);">文本解析状态</div><div style="' + parseStatusClass + '">' + parseStatus + 
+        '  <div style="color:var(--cw-text-muted);">格式修改能力</div><div style="color:var(--cw-text);">' + formatCapStr + 
+        '  <div style="color:var(--cw-text-muted);">保存验证状态</div><div style="' + saveStatusClass + '">' + saveStatus + 
+        
         (docTab._extractError ? '<div style="color:var(--cw-error);font-size:10px;margin-top:4px;">错误：' + escapeHTML(docTab._extractError) + '</div>' : '') +
         (docTab._saveError ? '<div style="color:var(--cw-error);font-size:10px;margin-top:2px;">保存错误：' + escapeHTML(docTab._saveError) + '</div>' : '');
     } else if (state.projectIndexStatus && state.projectIndexStatus.indexed) {
@@ -4229,7 +4219,7 @@
                       '<div style="color:var(--cw-text-muted);">' + idx.totalChunks + ' 个代码块</div>';
 
       indexDiv.innerHTML =
-        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + '</div>' +
+        '<div style="color:var(--cw-text);font-weight:600;margin-bottom:4px;">' + statusLabel + 
         statsHtml +
         '<div style="color:var(--cw-text-muted);">' + kindStr + '</div>';
       if (idx.truncated) {
@@ -4241,15 +4231,15 @@
     } else if (state.projectIndexStatus && state.projectIndexStatus.error) {
       indexDiv.innerHTML =
         '<div style="color:var(--cw-error);font-weight:600;margin-bottom:4px;">索引失败</div>' +
-        '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + '</div>' +
+        '<div style="color:var(--cw-text-muted);font-size:10px;">' + escapeHTML(state.projectIndexStatus.error) + 
         '<button class="code-retry-btn" style="margin-top:4px;font-size:10px;" id="codeRetryIndex">重试索引</button>';
     } else if (state.projectIndexStatus && state.projectIndexStatus.building) {
       var idx = state.projectIndexStatus;
       indexDiv.innerHTML =
         '<div style="color:var(--cw-text);font-weight:600;">' +
         (idx.phase && idx.phase.indexOf('比较') !== -1 ? '索引比较中' : '索引构建中') +
-        '</div>' +
-        '<div style="color:var(--cw-text-muted);">' + escapeHTML(idx.phase || '正在建立索引...') + '</div>' +
+        
+        '<div style="color:var(--cw-text-muted);">' + escapeHTML(idx.phase || '正在建立索引...') + 
         (idx.scannedFiles !== undefined
           ? '<div style="color:var(--cw-text-muted);">已扫描 ' + idx.scannedFiles +
             '，可索引 ' + idx.indexableFiles + '</div>'
@@ -4535,7 +4525,7 @@
         '<input type="text" id="githubRepoInput" placeholder="owner/repo（如 xutingjiang1004/xtj）" ' +
         'style="flex:1;max-width:400px;padding:10px 14px;border:1px solid var(--cw-border);border-radius:8px;font-size:14px;background:var(--cw-bg);color:var(--cw-text);">' +
         '<button class="folder-picker-btn-large" id="githubRepoLoadBtn" style="padding:10px 20px;font-size:14px;">加载仓库</button>' +
-      '</div>' +
+      
       '<div id="githubRepoBranches" style="display:none;margin-bottom:16px;"></div>' +
       '<div id="githubRepoFiles" style="display:none;max-height:300px;overflow-y:auto;text-align:left;border:1px solid var(--cw-border);border-radius:8px;padding:12px;"></div>' +
       '<div id="githubRepoActions" style="display:none;margin-top:12px;"></div>' +
@@ -4697,10 +4687,7 @@
         }) : [];
         state.models = models;
         state.modelLoadError = '';
-        // P3: 本地模型 ID 也视为可用，不重置选择
-        var isLocalSelected = state.selectedModelId === localCodeModelId();
         var selectedAvailable = models.some(function(model) { return model.id === state.selectedModelId; });
-        if (!selectedAvailable && !isLocalSelected) state.selectedModelId = String(data.default_model || (models[0] && models[0].id) || '');
         normalizeThinkingModeForSelectedModel();
         state._modelsPromise = null;
         updateComposerControls();
@@ -4719,41 +4706,9 @@
 
   function selectedCodeModel() {
     var model = state.models.filter(function(model) { return model.id === state.selectedModelId; })[0] || null;
-    if (!model && state.selectedModelId === localCodeModelId()) model = localCodeModelDescriptor();
     return model;
   }
 
-  function localCodeModelId() {
-    return window.__xtjLocalAI ? window.__xtjLocalAI.LOCAL_MODEL_ID : 'local-qwen2.5-0.5b';
-  }
-
-  function localCodeModelDescriptor() {
-    if (window.__xtjLocalAI) return window.__xtjLocalAI.getModelDescriptor();
-    return {
-      id: localCodeModelId(),
-      name: '本地离线 · Qwen 2.5 0.5B（需下载）',
-      description: '首次使用需下载约 1 GB；下载后可在本机离线运行。',
-      local: true,
-      supported_thinking_modes: ['off'],
-      supports_thinking: false,
-      supports_tools: false
-    };
-  }
-
-  function ensureCodeLocalAiRuntime(options) {
-    options = options || {};
-    if (window.__xtjLocalAI) {
-      if (options.signal && options.signal.aborted) {
-        var cancelled = new Error('Local Qwen runtime loading was cancelled');
-        cancelled.name = 'AbortError';
-        cancelled.code = 'LOCAL_AI_CANCELLED';
-        return Promise.reject(cancelled);
-      }
-      return Promise.resolve(window.__xtjLocalAI);
-    }
-    if (typeof window.__xtjEnsureLocalAI === 'function') return window.__xtjEnsureLocalAI(options);
-    return Promise.reject(new Error('本地 Qwen 运行时加载器不可用。'));
-  }
 
   function normalizeThinkingModeForSelectedModel() {
     var model = selectedCodeModel();
@@ -4787,12 +4742,7 @@
     if (!element) return;
     var badge = capabilitiesLabel();
     var selected = selectedCodeModel();
-    if (selected && selected.local) {
-      var localRuntime = window.__xtjLocalAI;
-      var localReady = localRuntime && typeof localRuntime.getState === 'function' && localRuntime.getState() === 'ready';
-      element.textContent = '本地 Qwen · ' + (localReady ? '已就绪' : '未准备');
-      element.title = localReady ? '本地 Qwen 0.5B 已就绪；离线回复不调用服务端工具' : '本地 Qwen 需要先下载并准备；在线模型状态独立显示';
-    } else {
+    {
       element.textContent = selected ? ((selected.provider || 'AI') + ' · ' + (selected.name || selected.id) + ' · Agent') : badge.text;
       element.title = badge.title;
     }
@@ -5094,18 +5044,18 @@
       '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
         '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="添加上下文" aria-haspopup="menu" aria-expanded="false">＋</button>' +
         '<select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select>' +
-        '<button type="button" class="code-local-model-setup" id="codeLocalModelSetupBtn">下载本地 Qwen（约 1GB）</button>' +
+        
         '<select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
           '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极深</option>' +
         '</select>' +
         '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">上下文 未估算</button>' +
       '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
       '<button type="button" class="code-model-retry" id="codeModelRetryBtn" hidden>重试在线模型</button>' +
-      '</div>' +
-      '<div class="code-local-model-status" id="codeLocalModelStatus" role="status" aria-live="polite" hidden>' +
-        '<div class="code-local-model-status-line"><span id="codeLocalModelStatusText"></span><span id="codeLocalModelStatusValue"></span></div>' +
-        '<progress id="codeLocalModelProgress" max="1" value="0" aria-label="本地 Qwen 下载进度"></progress>' +
-      '</div>' +
+      
+      
+        
+        
+      
       '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
       '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu" hidden>' +
         '<button type="button" role="menuitem" data-composer-action="ignore-documents">Ignore documents for this send</button>' +
@@ -5127,14 +5077,12 @@
     var composerSend = inputArea.querySelector('#codeChatSendBtn');
     var composerCancel = inputArea.querySelector('#codeChatCancelBtn');
     var composerToolbar = inputArea.querySelector('.code-composer-toolbar');
-    var composerLocalStatus = inputArea.querySelector('#codeLocalModelStatus');
     if (composerAttachmentButton) composerMainRow.appendChild(composerAttachmentButton);
     if (composerInput) composerMainRow.appendChild(composerInput);
     if (composerSend) composerMainRow.appendChild(composerSend);
     if (composerCancel) composerMainRow.appendChild(composerCancel);
-    inputArea.insertBefore(composerMainRow, composerToolbar || composerLocalStatus || null);
+    inputArea.insertBefore(composerMainRow, composerToolbar || null);
     if (composerToolbar) composerMetaRow.appendChild(composerToolbar);
-    if (composerLocalStatus) composerMetaRow.appendChild(composerLocalStatus);
     if (composerMetaRow.childNodes.length) inputArea.insertBefore(composerMetaRow, inputArea.querySelector('#codeContextDetails') || null);
     var thinkingLabels = {
       auto: String.fromCharCode(0x81ea, 0x52a8),
@@ -5385,79 +5333,7 @@
     });
   }
 
-  function bindLocalRuntimeStatus(runtime) {
-    if (!runtime || typeof runtime.onStatusChange !== 'function') return;
-    if (state._localRuntime === runtime && state._localRuntimeUnsubscribe) return;
-    if (state._localRuntimeUnsubscribe) {
-      try { state._localRuntimeUnsubscribe(); } catch (_) {}
-    }
 
-    state._localRuntime = runtime;
-    state._localRuntimeUnsubscribe = runtime.onStatusChange(function () {
-      updateComposerControls();
-    });
-  }
-
-  function updateLocalModelStatus(runtime, isLocalModel) {
-    var status = document.getElementById('codeLocalModelStatus');
-    var statusText = document.getElementById('codeLocalModelStatusText');
-    var statusValue = document.getElementById('codeLocalModelStatusValue');
-    var progressEl = document.getElementById('codeLocalModelProgress');
-    if (!status || !statusText || !statusValue || !progressEl) return;
-    if (!isLocalModel || !runtime) {
-      status.hidden = true;
-      return;
-    }
-    bindLocalRuntimeStatus(runtime);
-    var localState = typeof runtime.getState === 'function' ? runtime.getState() : 'idle';
-    var localSnapshot = typeof runtime.getStatusSnapshot === 'function' ? runtime.getStatusSnapshot() : null;
-    var progress = typeof runtime.getProgressValue === 'function' ? Number(runtime.getProgressValue()) : 0;
-    progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-    var hasProgress = typeof runtime.hasProgressValue === 'function' ? runtime.hasProgressValue() : progress > 0;
-    var lastActivityAt = typeof runtime.getLastActivityAt === 'function' ? Number(runtime.getLastActivityAt()) : 0;
-    var elapsedSeconds = typeof runtime.getElapsedSeconds === 'function' ? Number(runtime.getElapsedSeconds()) : 0;
-    var progressText = typeof runtime.getProgressText === 'function' ? runtime.getProgressText() : '';
-    var label = '本地 Qwen 尚未下载';
-    var value = '点击上方按钮开始';
-    if (localState === 'downloading') {
-      label = '正在下载本地 Qwen';
-      value = hasProgress && progress > 0 ? Math.round(progress * 100) + '%' : '正在准备…';
-      if (lastActivityAt > 0) value += ' · 刚刚有活动';
-      if (isFinite(elapsedSeconds) && elapsedSeconds > 0) value += ' · 已用 ' + Math.floor(elapsedSeconds) + ' 秒';
-      progressEl.hidden = false;
-    } else if (localState === 'initializing') {
-      label = '正在初始化本地 Qwen';
-      value = '请稍候';
-      progressEl.hidden = false;
-    } else if (localState === 'ready') {
-      label = '本地 Qwen 已就绪';
-      value = '可离线使用';
-      progress = 1;
-      progressEl.hidden = false;
-    } else if (localState === 'failed') {
-      label = localSnapshot && localSnapshot.availability === 'unsupported' ? '本地 Qwen 不可用' : '本地 Qwen 准备失败';
-      value = (localSnapshot && localSnapshot.errorMessage) || '点击上方按钮重试';
-      progressEl.hidden = true;
-    } else if (localState === 'unsupported') {
-      label = '本地 Qwen 不可用';
-      value = (localSnapshot && localSnapshot.errorMessage) || '请切换到在线 DeepSeek';
-      progressEl.hidden = true;
-    } else if (localState === 'cancelled') {
-      label = '本地 Qwen 下载已取消';
-      value = '点击上方按钮重试';
-      progressEl.hidden = true;
-    } else {
-      progressEl.hidden = true;
-    }
-    status.hidden = false;
-    status.dataset.state = localState;
-    if (localSnapshot && localSnapshot.errorCode) status.dataset.errorCode = localSnapshot.errorCode;
-    else delete status.dataset.errorCode;
-    statusText.textContent = label;
-    statusValue.textContent = value;
-    status.title = [localSnapshot && localSnapshot.errorMessage, localSnapshot && localSnapshot.recommendation, progressText || label].filter(Boolean).join('；');
-    progressEl.value = progress;
-  }
 
   function updateComposerControls() {
     var modelSelect = document.getElementById('codeModelSelect');
@@ -5465,7 +5341,6 @@
     var contextUsage = document.getElementById('codeContextUsage');
     var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
     var modelRetryButton = document.getElementById('codeModelRetryBtn');
-    var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
     if (modelSelect) {
       var current = state.selectedModelId;
       modelSelect.innerHTML = '';
@@ -5476,29 +5351,9 @@
         option.selected = model.id === current;
         modelSelect.appendChild(option);
       });
-      var localDesc = localCodeModelDescriptor();
-      var localOption = document.createElement('option');
-      localOption.value = localDesc.id;
-      var localRuntimeForLabel = window.__xtjLocalAI;
-      var localStateForLabel = localRuntimeForLabel && typeof localRuntimeForLabel.getState === 'function' ? localRuntimeForLabel.getState() : '';
-      localOption.textContent = localStateForLabel === 'ready' ? '本地 Qwen 0.5B · 已就绪' : '本地 Qwen 0.5B · 需下载';
-      localOption.title = localDesc.name;
-      localOption.selected = localDesc.id === current;
-      modelSelect.appendChild(localOption);
       modelSelect.disabled = false;
       var selectedModel = selectedCodeModel();
       modelSelect.title = selectedModel ? (selectedModel.description || ((selectedModel.supports_thinking ? '支持思考' : '不支持思考') + (selectedModel.supports_tools ? '；支持工具调用' : ''))) : '';
-    }
-    if (localSetupButton) {
-      var localRuntime = window.__xtjLocalAI;
-      bindLocalRuntimeStatus(localRuntime);
-      var localState = localRuntime && localRuntime.getState();
-      var localSnapshot = localRuntime && typeof localRuntime.getStatusSnapshot === 'function' ? localRuntime.getStatusSnapshot() : null;
-      var localErrorCode = (localSnapshot && localSnapshot.errorCode) || (localRuntime && typeof localRuntime.getLastErrorCode === 'function' ? localRuntime.getLastErrorCode() : '');
-      var localHardwareUnsupported = !!(localSnapshot && localSnapshot.availability === 'unsupported') || /^(LOCAL_AI_UNSUPPORTED|LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE|LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED|LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED)$/.test(localErrorCode);
-      localSetupButton.disabled = localHardwareUnsupported || ((localState === 'downloading' || localState === 'initializing') && !state._localDownloadController);
-      localSetupButton.textContent = localHardwareUnsupported ? (localErrorCode === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ? '当前运行时不兼容' : '此设备不支持本地 Qwen') : (state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
-        (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'))));
     }
     if (thinkingSelect) {
       normalizeThinkingModeForSelectedModel();
@@ -5518,41 +5373,6 @@
     }
     if (runtimeStatus) {
       var modelHint = selectedCodeModel();
-      // P3: 本地模型状态显示
-      var isLocalModel = !!(window.__xtjLocalAI && modelHint && modelHint.local);
-      updateLocalModelStatus(window.__xtjLocalAI, isLocalModel);
-      if (isLocalModel) {
-        var localState = window.__xtjLocalAI.getState();
-        var localProgress = window.__xtjLocalAI.getProgressValue();
-        var localText = window.__xtjLocalAI.getStatusText();
-        if (localState === 'downloading') {
-          runtimeStatus.textContent = '下载中 ' + Math.round(localProgress * 100) + '%';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '本地模型下载进度';
-        } else if (localState === 'initializing') {
-          runtimeStatus.textContent = '初始化中…';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '本地模型初始化中';
-        } else if (localState === 'idle') {
-          runtimeStatus.textContent = '尚未下载';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '点击下载按钮开始准备本地模型';
-        } else if (localState === 'ready') {
-          runtimeStatus.textContent = '已就绪';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '本地模型已就绪，可离线使用';
-        } else if (localState === 'failed') {
-          runtimeStatus.textContent = '加载失败';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '本地模型加载失败，请重试';
-        } else if (localState === 'cancelled') {
-          runtimeStatus.textContent = '已取消';
-          runtimeStatus.hidden = false;
-          runtimeStatus.title = '本地模型下载已取消';
-        } else {
-          runtimeStatus.textContent = localText || '本地模型';
-          runtimeStatus.hidden = false;
-        }
       } else {
         if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
           runtimeStatus.dataset.availability = 'degraded'; /*
@@ -5572,7 +5392,6 @@
           runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
         }
       }
-    }
     if (modelRetryButton) {
       modelRetryButton.hidden = !state.modelLoadError;
       modelRetryButton.disabled = !!state._modelsPromise;
@@ -5586,74 +5405,6 @@
     var contextMenu = document.getElementById('codeComposerContextMenu');
     var contextUsage = document.getElementById('codeContextUsage');
     var contextDetails = document.getElementById('codeContextDetails');
-    var localSetupButton = document.getElementById('codeLocalModelSetupBtn');
-    var modelRetryButton = document.getElementById('codeModelRetryBtn');
-    if (modelSelect && !modelSelect.dataset.bound) {
-      modelSelect.dataset.bound = '1';
-      modelSelect.addEventListener('change', function() { state.selectedModelId = modelSelect.value; normalizeThinkingModeForSelectedModel(); saveComposerPreferences(); updateComposerControls(); updateCapabilitiesBadge(); });
-    }
-    if (thinkingSelect && !thinkingSelect.dataset.bound) {
-      thinkingSelect.dataset.bound = '1';
-      thinkingSelect.addEventListener('change', function() { state.thinkingMode = thinkingSelect.value; saveComposerPreferences(); });
-    }
-    if (modelRetryButton && !modelRetryButton.dataset.bound) {
-      modelRetryButton.dataset.bound = '1';
-      modelRetryButton.addEventListener('click', function() {
-        if (state._modelsPromise) return;
-        state.modelLoadError = '';
-        updateComposerControls();
-        loadCodeModels();
-      });
-    }
-    if (localSetupButton && !localSetupButton.dataset.bound) {
-      localSetupButton.dataset.bound = '1';
-      localSetupButton.addEventListener('click', function() {
-        if (state._localDownloadController) {
-          try { state._localDownloadController.abort(); } catch (_) {}
-          if (state._localDownloadRuntime && typeof state._localDownloadRuntime.stop === 'function') {
-            try { state._localDownloadRuntime.stop(); } catch (_) {}
-          }
-          return;
-        }
-        var localDownloadController = new AbortController();
-        state._localDownloadController = localDownloadController;
-        localSetupButton.disabled = false;
-        localSetupButton.textContent = '正在准备本地 Qwen…';
-        ensureCodeLocalAiRuntime({ signal: localDownloadController.signal }).then(function(runtime) {
-          state._localDownloadRuntime = runtime;
-          bindLocalRuntimeStatus(runtime);
-          updateComposerControls();
-          if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
-          state.selectedModelId = runtime.LOCAL_MODEL_ID;
-          saveComposerPreferences();
-          try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
-          return runtime.ensureReady({ signal: localDownloadController.signal, onProgress: function() { updateComposerControls(); } });
-        }).then(function() {
-          state._localDownloadController = null;
-          state._localDownloadRuntime = null;
-          updateComposerControls();
-          updateCapabilitiesBadge();
-          showToast('本地 Qwen 已就绪，可以离线使用。', 'success');
-        }).catch(function(error) {
-          var cancelled = !!(error && (error.code === 'LOCAL_AI_CANCELLED' || error.code === 'ABORTED' || error.name === 'AbortError'));
-          var localIncompatible = !!(error && (
-            error.code === 'LOCAL_AI_UNSUPPORTED' ||
-            error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
-            error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
-            error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
-          ));
-          state._localDownloadController = null;
-          state._localDownloadRuntime = null;
-          if (localIncompatible) {
-            state.selectedModelId = 'online';
-            saveComposerPreferences();
-            updateCapabilitiesBadge();
-          }
-          updateComposerControls();
-          if (!cancelled) showToast((error && error.message) || (localIncompatible ? '此设备无法运行本地 Qwen，已切换到在线 DeepSeek。' : '本地 Qwen 准备失败，请重试。'), 'error');
-        });
-      });
-    }
     if (contextUsage && contextDetails && !contextUsage.dataset.bound) {
       contextUsage.dataset.bound = '1';
       contextUsage.addEventListener('click', function() {
@@ -6067,7 +5818,7 @@
       var round = entry.round != null ? ' · 第 ' + String(entry.round) + ' 轮' : '';
       return '<div class="code-chat-tool-trace-item" data-ok="' + (ok ? 'true' : 'false') + '" data-tool-index="' + escapeHTML(index) + '" role="listitem">' +
         '<span class="code-chat-tool-trace-dot" aria-hidden="true"></span>' +
-        '<div><div class="code-chat-tool-trace-name"><span class="code-chat-tool-trace-index">#' + escapeHTML(index) + '</span>' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div>' + evidence + '</div>' +
+        '<div><div class="code-chat-tool-trace-name"><span class="code-chat-tool-trace-index">#' + escapeHTML(index) + '</span>' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) +  evidence + 
         '<span class="code-chat-tool-trace-state">' + escapeHTML(state + round) + '</span></div>';
     }).join('');
     if (trace.length > visibleTrace.length) {
@@ -6607,10 +6358,6 @@
         }
       });
       ctx.originalBody = Object.assign({}, body);
-      // P3: 本地模型路由 — 不经过服务器，直接在浏览器端运行
-      if (state.selectedModelId === localCodeModelId()) {
-        return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
-      }
       // Phase 2: Route to streaming endpoint when feature flag is enabled
       if (CODE_STREAM_ENABLED) {
         return sendStreamingRequest(ctx, body, timeStr);
@@ -6643,136 +6390,6 @@
   }
 
   // ──────────────────────────────────────────────
-  // handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr)
-  // 处理 Code 工作区中的本地模型 AI 请求
-  // ──────────────────────────────────────────────
-  function handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr) {
-    var runtime = window.__xtjLocalAI;
-    if (!runtime) {
-      return ensureCodeLocalAiRuntime({ signal: ctx.abortController && ctx.abortController.signal }).then(function() {
-        return handleCodeLocalAiRequest(ctx, historyMsgs, message, timeStr);
-      }).catch(function(error) {
-        var cancelled = !!(ctx.cancelled || (ctx.abortController && ctx.abortController.signal.aborted) ||
-          (error && (error.code === 'LOCAL_AI_CANCELLED' || error.code === 'ABORTED' || error.name === 'AbortError')));
-        if (cancelled) {
-          finalizeRequest(ctx, { cancelled: true, cancelReason: ctx.cancelReason || 'user_cancelled' });
-          return;
-        }
-        state.messages.push({ role: 'assistant', content: '本地模型运行时不可用：' + ((error && error.message) || '请重试。'), time: timeStr, errorCode: 'LOCAL_AI_NOT_AVAILABLE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
-        finalizeRequest(ctx, { error: 'Local AI runtime not available', errorCode: 'LOCAL_AI_NOT_AVAILABLE' });
-        renderChatPanel();
-      });
-    }
-
-    if (!runtime.isSupported()) {
-      state.messages.push({ role: 'assistant', content: '当前浏览器不支持本地模型：请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。', time: timeStr, errorCode: 'LOCAL_AI_UNSUPPORTED', retryable: false });
-      finalizeRequest(ctx, { error: 'Unsupported browser', errorCode: 'LOCAL_AI_UNSUPPORTED' });
-      renderChatPanel();
-      return Promise.resolve();
-    }
-
-    // First-time download confirmation
-    var confirmed = false;
-    try { confirmed = localStorage.getItem('xtj_local_model_confirmed') === '1'; } catch (e) {}
-    if (!confirmed) {
-      if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) {
-        // Remove the user message that was just added
-        state.messages.pop();
-        finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
-        renderChatPanel();
-        return Promise.resolve();
-      }
-      try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
-    }
-
-    // Create assistant message placeholder
-    var assistantMsg = { role: 'assistant', content: '', time: timeStr, local: true };
-    state.messages.push(assistantMsg);
-    removeTypingIndicator();
-    var messagesContainer = document.getElementById('codeChatMessages');
-    var assistantNode = null;
-    if (messagesContainer) {
-      assistantNode = appendChatMessage(assistantMsg, messagesContainer);
-    }
-    scrollChatToBottom();
-
-    // Build conversation history for local model (limit to last 9 messages)
-    var chatHistory = [];
-    for (var hi = Math.max(0, historyMsgs.length - 8); hi < historyMsgs.length; hi++) {
-      chatHistory.push({ role: historyMsgs[hi].role, content: historyMsgs[hi].content });
-    }
-    chatHistory.push({ role: 'user', content: message });
-
-    var answer = '';
-    var stopRequested = false;
-
-    return runtime.streamChat(chatHistory, {
-      signal: ctx.abortController.signal,
-      onProgress: function(progress) {
-        var localProgressBubble = assistantNode && assistantNode.querySelector('.msg-content');
-        if (localProgressBubble && !answer) localProgressBubble.textContent = progress.text || '本地 Qwen 正在生成回复…';
-        var typingIndicator = messagesContainer && messagesContainer.querySelector('.code-typing-indicator');
-        if (typingIndicator && !answer) {
-          typingIndicator.textContent = progress.text || '正在准备本地模型…';
-        }
-      },
-      onDelta: function(delta) {
-        if (stopRequested) return;
-        answer += delta;
-        assistantMsg.content = answer;
-        if (assistantNode) {
-          var bubble = assistantNode.querySelector('.msg-content');
-          if (bubble) {
-            bubble.innerHTML = parseSimpleMarkdown(answer);
-          }
-        }
-        scrollChatToBottom();
-      }
-    }).then(function() {
-      if (stopRequested) return;
-      if (!answer) {
-        state.messages.pop(); // Remove empty assistant message
-        state.messages.push({ role: 'assistant', content: '本地模型未返回内容，请重试。', time: timeStr, errorCode: 'LOCAL_AI_EMPTY_RESPONSE', retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
-        finalizeRequest(ctx, { error: 'Empty response', errorCode: 'LOCAL_AI_EMPTY_RESPONSE' });
-        renderChatPanel();
-        return;
-      }
-      finalizeRequest(ctx, {});
-      renderChatPanel();
-    }).catch(function(error) {
-      if (stopRequested) return;
-      stopRequested = true;
-      if (ctx.cancelled || (error && (error.code === 'ABORTED' || error.name === 'AbortError'))) {
-        assistantMsg.content = '（已停止）';
-        assistantMsg.stopped = true;
-        if (assistantNode) {
-          var bubble = assistantNode.querySelector('.msg-content');
-          if (bubble) bubble.innerHTML = '（已停止）';
-        }
-        finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
-        renderChatPanel();
-      } else {
-        // Remove the failed assistant message and replace with error message
-        var msgIdx = state.messages.indexOf(assistantMsg);
-        if (msgIdx >= 0) state.messages.splice(msgIdx, 1);
-        var errMsg = error && error.message ? error.message : '请稍后重试。';
-        var localIncompatible = !!(error && (
-          error.code === 'LOCAL_AI_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
-          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_INFERENCE_UNUSABLE'
-        ));
-        if (localIncompatible) {
-          state.selectedModelId = 'online';
-          saveComposerPreferences();
-        }
-        state.messages.push({ role: 'assistant', content: '本地模型不可用：' + errMsg, time: timeStr, errorCode: error && error.code || 'LOCAL_AI_ERROR', retryable: !localIncompatible, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
-        finalizeRequest(ctx, { error: errMsg, errorCode: error && error.code || 'LOCAL_AI_ERROR' });
-        renderChatPanel();
-      }
-    });
-  }
 
   function restoreFailedMessage(message) {
     if (!message) return;
@@ -6924,10 +6541,10 @@
           '</div>' +
           '<div class="code-stream-tools-list" role="list"></div>' +
         '</div>' +
-        '<div class="msg-content markdown-body code-stream-content"></div>' +
+        '<div class="msg-content markdown-body code-stream-content""></div>' +
         '<div class="code-stream-usage" style="display:none"></div>' +
         '<div class="code-stream-error" style="display:none"></div>' +
-        '<div class="msg-time">' + escapeHTML(timeStr) + '</div>' +
+        '<div class="msg-time">' + escapeHTML(timeStr) + 
       '</div>';
     messagesContainer.appendChild(assistantNode);
     scrollChatToBottom();
@@ -7050,9 +6667,9 @@
       item.setAttribute('role', 'listitem');
       item.innerHTML = '<span class="code-stream-tool-icon spinner"></span>' +
         '<div class="code-stream-tool-main">' +
-          '<div class="code-stream-tool-name">' + escapeHTML(data.tool || '工具调用') + '</div>' +
-          '<div class="code-stream-tool-summary">' + escapeHTML(data.summary || data.description || data.command || data.path || '等待工具返回结果…') + '</div>' +
-        '</div>' +
+          '<div class="code-stream-tool-name">' + escapeHTML(data.tool || '工具调用') + 
+          '<div class="code-stream-tool-summary">' + escapeHTML(data.summary || data.description || data.command || data.path || '等待工具返回结果…') + 
+        
         '<span class="code-stream-tool-state">执行中</span>';
       var traceEntry = {
         tool: data.tool || '工具调用',
@@ -8061,10 +7678,10 @@
           '</div>' +
           '<div class="code-stream-tools-list" role="list"></div>' +
         '</div>' +
-        '<div class="msg-content markdown-body code-stream-content"></div>' +
+        '<div class="msg-content markdown-body code-stream-content""></div>' +
         '<div class="code-stream-usage" style="display:none"></div>' +
         '<div class="code-stream-error" style="display:none"></div>' +
-        '<div class="msg-time">' + escapeHTML(timeStr) + '</div>' +
+        '<div class="msg-time">' + escapeHTML(timeStr) + 
       '</div>';
     messagesContainer.appendChild(assistantNode);
     scrollChatToBottom();
@@ -8110,7 +7727,7 @@
       if (entry.tool_call_id) item.setAttribute('data-tool-call-id', String(entry.tool_call_id));
       if (entry.tool_index != null) item.setAttribute('data-tool-index', String(entry.tool_index));
       item.innerHTML = '<span class="code-stream-tool-icon ' + (entry.ok === null ? 'spinner' : (entry.ok === false ? 'error' : 'success')) + '"></span>' +
-        '<div class="code-stream-tool-main"><div class="code-stream-tool-name">' + escapeHTML(entry.tool || '工具调用') + '</div>' +
+        '<div class="code-stream-tool-main"><div class="code-stream-tool-name">' + escapeHTML(entry.tool || '工具调用') + 
         '<div class="code-stream-tool-summary">' + escapeHTML(entry.summary || '等待工具返回结果…') + '</div></div>' +
         '<span class="code-stream-tool-state">' + escapeHTML(entry.ok === null ? '执行中' : (entry.ok === false ? '失败' : '完成')) + '</span>';
       toolsList.appendChild(item);
@@ -8201,7 +7818,7 @@
         errorEl.style.display = '';
         errorEl.innerHTML =
           '<div class="code-stream-error-heading"><span>恢复失败</span>' +
-          (code ? '<code>' + escapeHTML(code) + '</code>' : '') + '</div>' +
+          (code ? '<code>' + escapeHTML(code) + '</code>' : '') + 
           '<div class="code-stream-error-msg">' + escapeHTML(message || '请求失败') + '</div>';
       }
       var originalMessage = String(savedState.originalMessage || '').trim();
@@ -8694,7 +8311,7 @@
           var ext = (op.path || '').split('.').pop().toLowerCase();
           var docType = ext === 'docx' ? 'Word' : ext === 'xlsx' ? 'Excel' : '文档';
           docInfo.innerHTML = '<div style="margin-bottom:8px;font-weight:600;">' +
-            escapeHTML(docType + ' 修改') + '</div>' +
+            escapeHTML(docType + ' 修改') + 
             '<div style="margin-bottom:6px;">' +
             '  将另存为: <strong>' + escapeHTML((op.path || '').replace(/(\.[^.]+)$/, '_AI修改版$1')) + '</strong>' +
             '</div>';

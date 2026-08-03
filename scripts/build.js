@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+﻿const { execSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -100,9 +100,7 @@ const JS_FILES = [
   'js/core-animations.js',
   'js/ui-effects.js',
   'js/login-device.js',
-  'js/local-ai-runtime.js',
-  'js/local-ai-worker.js',
-  'js/ai-agent.js',
+   'js/ai-agent.js',
   'js/theme-toggle.js',
   'js/desktop-shell.js',
   'js/config.js',

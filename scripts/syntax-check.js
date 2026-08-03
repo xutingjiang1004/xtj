@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const fs = require('fs');
 const path = require('path');
@@ -33,8 +33,7 @@ let passed = 0;
 
 for (const file of allFiles) {
   try {
-    // 顶层 import/export 的 ESM 文件（如 js/local-ai-worker.js）用 --input-type=module 检查
-    const head = fs.readFileSync(file, 'utf8').slice(0, 4096);
+       const head = fs.readFileSync(file, 'utf8').slice(0, 4096);
     const isEsm = /^\s*(import\s|export\s)/m.test(head);
     if (isEsm) {
       execFileSync('node', ['--check', '--input-type=module', '-'], { input: fs.readFileSync(file), stdio: ['pipe', 'ignore', 'pipe'], timeout: 10000 });
