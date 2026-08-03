@@ -563,9 +563,13 @@ test('worker serializes CreateMLCEngine and clears the init lock after failure',
       messages: [{ role: 'system', content: 'ignored role' }, { role: 'user', content: '你好' }]
     }
   });
-  assert.equal(chatCalls.length, 1);
-  assert.equal(chatCalls[0].stream, true);
-  assert.deepEqual(chatCalls[0].messages.map((message) => message.role), ['user', 'user']);
+  // Each successful engine initialization now performs one tiny real-token
+  // warm-up before reporting ready; the final entry is the user chat.
+  assert.equal(chatCalls.length, 3);
+  assert.equal(chatCalls[0].max_tokens, 4);
+  assert.equal(chatCalls[1].max_tokens, 4);
+  assert.equal(chatCalls.at(-1).stream, true);
+  assert.deepEqual(chatCalls.at(-1).messages.map((message) => message.role), ['user', 'user']);
   assert.deepEqual(
     retryHarness.messages.filter((message) => message.requestId === 'chat-1').map((message) => message.type),
     ['ready', 'delta', 'delta', 'done']

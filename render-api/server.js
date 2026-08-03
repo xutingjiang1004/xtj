@@ -14089,7 +14089,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'enhanced_stage', stage: 'understand', message: '正在梳理问题与回答结构…' });
     }
     var useThinking = thinkingMode !== 'off';
-    var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
+    // Enhanced chat is a bounded, single-agent middle gear: it may use the
+    // server-owned search pipeline even when the legacy chat toggle is off.
+    // Deep research remains a separate route with its own multi-agent budget.
+    var enhancedSearchAllowed = responseProfile === 'enhanced' && !(config && config.enhanced && config.enhanced.allow_web_search === false);
+    var allowSearch = enhancedSearchAllowed || !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
 
     // ★ P3 修复 bug 3: 提前预加载 useThinking 模式下的搜索结果, 与后续 fetch DeepSeek 完全并行
     //   之前在 line 8560-8595 才 await searchWeb, 阻塞 5-15s, 导致首字延迟 = searchWeb + max 思考 = 15-25s
@@ -14578,11 +14582,50 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           })
         ]).catch(function() { return _preloadedSearchResults || null; });
         var _psResults = _psSr && Array.isArray(_psSr.results) ? cleanSearchResults(_psSr.results, 20) : [];
+        // Enhanced mode stays deliberately bounded: one primary query plus at
+        // most two diversified follow-ups, executed by the server rather than
+        // by provider function-calling (which conflicts with reasoning mode).
+        if (responseProfile === 'enhanced' && _psResults.length > 0) {
+          var _enhancedQueries = generateExpandedQueries(message, [_psQuery], 2).slice(0, 2);
+          if (_enhancedQueries.length > 0) {
+            writeSse(res, { type: 'tool_pending', tool_name: 'search_web' });
+            var _enhancedLists = await Promise.all(_enhancedQueries.map(function(_enhancedQuery) {
+              return Promise.race([
+                searchWeb(_enhancedQuery, 6).then(function(_enhancedResult) {
+                  return _enhancedResult && Array.isArray(_enhancedResult.results) ? _enhancedResult.results : [];
+                }).catch(function() { return []; }),
+                new Promise(function(resolve) { setTimeout(function() { resolve([]); }, 6000); })
+              ]);
+            }));
+            var _enhancedUrls = {};
+            _psResults.forEach(function(_enhancedItem) {
+              if (_enhancedItem && _enhancedItem.url) _enhancedUrls[_enhancedItem.url] = true;
+            });
+            _enhancedLists.forEach(function(_enhancedList) {
+              _enhancedList.forEach(function(_enhancedItem) {
+                if (!_enhancedItem || !_enhancedItem.url || _enhancedUrls[_enhancedItem.url]) return;
+                _enhancedUrls[_enhancedItem.url] = true;
+                _psResults.push(_enhancedItem);
+              });
+            });
+            _psResults = cleanSearchResults(_psResults, 12);
+            writeSse(res, {
+              type: 'tool_result', tool_name: 'search_web', success: true,
+              count: _psResults.length, query: _psQuery, items: _psResults.slice(0, 12)
+            });
+          }
+        }
         if (_psResults.length > 0) {
           var _psCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + _psQuery + '\n\n' +
             _psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
             '\n\n要求：必须优先使用以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
           roundMessages.push({ role: 'system', content: _psCtx });
+          if (responseProfile === 'enhanced') {
+            roundMessages.push({
+              role: 'system',
+              content: '【增强思考的证据呈现】基于检索证据作答时，请在相关事实后使用 [1]、[2] 这类简短编号；编号对应界面展示的来源卡片。不要编造编号、链接或未检索到的事实。'
+            });
+          }
           res.write('data: ' + JSON.stringify({ type: 'search', count: _psResults.length, results: _psResults.slice(0, 20), query: _psQuery }) + '\n\n');
           _sharedSearchMeta = {
             count: _psResults.length,
@@ -14596,6 +14639,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (e) {
         console.error('[AGENT-STREAM] thinking mode search error:', e && e.message);
       }
+    }
+
+    if (responseProfile === 'enhanced') {
+      writeSse(res, { type: 'enhanced_stage', stage: 'answer', message: '正在组织回答…' });
     }
 
     var apiBody = {
