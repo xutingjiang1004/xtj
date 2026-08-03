@@ -98,7 +98,7 @@ function buildSSEEvent(base, type, data) {
 }
 
 // ── Heartbeat Manager ────────────────────────────────────────────────────
-function createHeartbeat(writer, getBase, intervalMs) {
+function createHeartbeat(writer, getBase, intervalMs, getData) {
   intervalMs = intervalMs || 10000; // 10 seconds default
   var timer = null;
   var stopped = false;
@@ -107,9 +107,11 @@ function createHeartbeat(writer, getBase, intervalMs) {
     if (stopped) return;
     timer = setInterval(function () {
       if (stopped) return;
-      var event = buildSSEEvent(getBase ? getBase() : {}, 'heartbeat', {
-        elapsed_ms: Date.now() - (getBase ? getBase().startTime || 0 : 0)
-      });
+      var base = getBase ? getBase() : {};
+      var data = Object.assign({
+        elapsed_ms: Date.now() - (base.startTime || 0)
+      }, getData && typeof getData === 'function' ? getData() : {});
+      var event = buildSSEEvent(base, 'heartbeat', data);
       var ok = writer.write(formatSSEEvent(event));
       if (!ok) stop();
     }, intervalMs);
