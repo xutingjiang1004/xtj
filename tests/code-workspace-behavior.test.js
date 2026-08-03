@@ -40,6 +40,14 @@ test('Code streaming timeout exits the pending state and reports an error', () =
   assert.match(codeWorkspace, /var signal = ctx\.sharedCtrl \? ctx\.sharedCtrl\.signal : ctx\.abortController\.signal/);
 });
 
+test('Code stream adopts the server timeout contract and renders status heartbeats', () => {
+  assert.match(codeWorkspace, /function armStreamTimeout\(timeoutMs\)/);
+  assert.match(codeWorkspace, /serverTimeoutMs - Math\.max\(0, serverElapsedMs\) \+ 5000/);
+  assert.match(codeWorkspace, /case 'status':/);
+  assert.match(codeWorkspace, /case 'heartbeat':[\s\S]*?已等待/);
+  assert.match(codeWorkspace, /timeoutMs: 305000/);
+});
+
 test('Code SSE writer does not mistake a completed request body for a disconnected client', () => {
   const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
   assert.match(sse, /req\.on\('aborted', markClosed\)/);

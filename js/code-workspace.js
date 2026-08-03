@@ -6040,7 +6040,7 @@
         }
       }
       _sendingWatchdog = null;
-    }, 185000);
+    }, 305000);
     ctx.watchdogTimer = _sendingWatchdog;
 
     // Shared request controller + telemetry (feature-flagged)
@@ -6048,7 +6048,7 @@
       ctx.sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: 'code_req_' + requestId,
         clientRequestId: clientRequestId,
-        timeoutMs: 185000,
+        timeoutMs: 305000,
         workspaceGeneration: wsGen
       });
       ctx.sharedCtrl.start();
@@ -6728,8 +6728,9 @@
       }
     }
 
-    // Timeout
-    ctx.timeoutTimer = setTimeout(function () {
+    function armStreamTimeout(timeoutMs) {
+      if (ctx.timeoutTimer) { clearTimeout(ctx.timeoutTimer); ctx.timeoutTimer = null; }
+      ctx.timeoutTimer = setTimeout(function () {
       if (streamDone || ctx._finalized) return;
       showError('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true, true);
       assistantNode.classList.remove('streaming');
@@ -6742,7 +6743,12 @@
       cleanupStream();
       finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
       renderChatPanel();
-    }, 185000);
+      }, Math.max(1000, Number(timeoutMs) || 185000));
+    }
+
+    // Default remains slightly longer than the current server deadline. The
+    // accepted event below replaces it with the server's actual contract.
+    armStreamTimeout(185000);
 
     // Send the SSE request
     var apiCall;
@@ -6977,10 +6983,18 @@
 
         switch (event.type) {
           case 'accepted':
-            setStreamStatus('请求已接受，正在处理…', 'working', true);
+            var serverTimeoutMs = Number(event.data && event.data.timeout_ms);
+            var serverElapsedMs = Number(event.data && event.data.elapsed_ms) || 0;
+            if (isFinite(serverTimeoutMs) && serverTimeoutMs > 0) {
+              armStreamTimeout(serverTimeoutMs - Math.max(0, serverElapsedMs) + 5000);
+            }
+            setStreamStatus((event.data && event.data.message) || '请求已接受，正在处理…', 'working', true);
             break;
           case 'planning':
             setStreamStatus((event.data && event.data.message) || '正在分析任务…', 'working', true);
+            break;
+          case 'status':
+            setStreamStatus((event.data && event.data.message) || '服务端正在处理请求…', 'working', true);
             break;
           case 'tool_start':
             addToolStart(event.data || {});
@@ -7587,6 +7601,7 @@
       switch (event.type) {
         case 'accepted':
         case 'planning':
+        case 'status':
           if (statusText) statusText.textContent = (event.data && event.data.message) || '正在恢复处理…';
           break;
         case 'answer_start':

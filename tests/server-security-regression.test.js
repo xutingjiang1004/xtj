@@ -113,11 +113,13 @@ test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
   assert.match(styleSrc, /https:\/\/cdn\.jsdelivr\.net/);
 });
 
-test('CSP font-src allows self and jsDelivr', () => {
+test('CSP font-src permits the exact Monaco font origins', () => {
   const fontSrc = csp.split(';').find(function(d) { return d.trim().startsWith('font-src'); });
   assert.ok(fontSrc, 'font-src directive must exist');
   assert.match(fontSrc, /'self'/);
   assert.match(fontSrc, /https:\/\/cdn\.jsdelivr\.net/);
+  assert.match(fontSrc, /https:\/\/registry\.npmmirror\.com/);
+  assert.doesNotMatch(fontSrc, /\bhttps:\s*(?:;|$)/, 'font-src must not be widened to every HTTPS origin');
 });
 
 test('CSP includes security hardening directives', () => {
