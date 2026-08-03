@@ -3111,6 +3111,54 @@ body.code-is-resizing *, body.code-is-resizing-row * {
   align-items: center;
   gap: 4px;
 }
+.code-layout-menu { position: relative; flex: 0 0 auto; }
+.code-layout-menu-trigger {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--cw-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--cw-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.code-layout-menu-trigger .code-action-icon { width: 14px; height: 14px; }
+.code-layout-menu-trigger:hover,
+.code-layout-menu-trigger:focus-visible,
+.code-layout-menu-trigger[aria-expanded="true"] { border-color: var(--cw-border-strong); color: var(--cw-text); background: var(--cw-bg-hover); outline: none; }
+.code-layout-menu-popover {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 178px;
+  padding: 5px;
+  border: 1px solid var(--cw-border-strong);
+  border-radius: 7px;
+  background: var(--cw-bg-secondary);
+  box-shadow: 0 10px 28px rgba(20, 51, 66, .18);
+}
+.code-layout-menu-popover[hidden] { display: none; }
+.code-layout-menu-popover [role="menuitem"] {
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cw-text);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.code-layout-menu-popover [role="menuitem"]:hover,
+.code-layout-menu-popover [role="menuitem"]:focus-visible { background: var(--cw-bg-hover); color: var(--cw-accent); outline: none; }
 .code-workbench-task-header { display: flex; align-items: baseline; gap: 7px; min-width: 0; color: var(--cw-text); font-size: 13px; font-weight: 650; }
 .code-workbench-task-header span:last-child { color: var(--cw-text-secondary); font-size: 11px; font-weight: 400; }
 .code-panel-action-btn {
@@ -3159,6 +3207,13 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 .code-layout-recovery-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-layout-recovery button { flex: 0 0 auto; min-height: 28px; padding: 0 9px; border: 1px solid var(--cw-border); border-radius: 4px; background: var(--cw-bg-tertiary); color: var(--cw-text); font: inherit; cursor: pointer; }
 .code-layout-recovery button:hover, .code-layout-recovery button:focus-visible { border-color: var(--cw-accent); color: var(--cw-accent); outline: none; }
+
+#panelCode.is-chat-maximized .code-layout-recovery { left: 14px; right: auto; }
+
+@media (max-width: 899px) {
+  .code-workbench-task-header span:last-child { display: none; }
+  .code-layout-menu-trigger { min-width: 56px; }
+}
 
 /* Final Code controls pass: this file is loaded after the shared Claude
    overlay, so keep the actual workspace widgets compact and rectangular. */
