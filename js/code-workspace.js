@@ -1600,6 +1600,17 @@
     _saveLayoutDebounce = setTimeout(saveLayoutConfig, 500);
   }
 
+  function syncResizerAccessibility(resizer, min, max, current) {
+    if (!resizer) return;
+    var safeMin = Math.round(Number(min) || 0);
+    var safeMax = Math.max(safeMin, Math.round(Number(max) || safeMin));
+    var safeCurrent = Math.max(safeMin, Math.min(safeMax, Math.round(Number(current) || safeMin)));
+    resizer.setAttribute('aria-valuemin', String(safeMin));
+    resizer.setAttribute('aria-valuemax', String(safeMax));
+    resizer.setAttribute('aria-valuenow', String(safeCurrent));
+    resizer.setAttribute('aria-valuetext', safeCurrent + ' 像素');
+  }
+
   function applyLayoutToDOM() {
     if (!_dom.panelCode) return;
     normalizeLayoutState();
@@ -1636,6 +1647,16 @@
       var availableHeight = (layoutRoot && layoutRoot.clientHeight) || _dom.panelCode.clientHeight || window.innerHeight;
       var maxContextHeight = Math.max(80, Math.floor(availableHeight * 0.65));
       _layoutState.contextHeight = Math.max(80, Math.min(_layoutState.contextHeight, maxContextHeight));
+      // The effective End point also respects the opposite pane and the
+      // editor's minimum width. This prevents End from being immediately
+      // clamped back by the overflow-reduction pass on compact desktops.
+      var leftEffectiveMax = Math.min(maxSidebar, Math.max(minSidebar,
+        availableWidth - Math.max(minChat, _layoutState.chatWidth) - minEditor - dividerBudget));
+      var rightEffectiveMax = Math.min(maxChat, Math.max(minChat,
+        availableWidth - Math.max(minSidebar, _layoutState.sidebarWidth) - minEditor - dividerBudget));
+      syncResizerAccessibility(_dom.resizerLeft, minSidebar, leftEffectiveMax, _layoutState.sidebarWidth);
+      syncResizerAccessibility(_dom.resizerRight, minChat, rightEffectiveMax, _layoutState.chatWidth);
+      syncResizerAccessibility(_dom.resizerContext, 80, maxContextHeight, _layoutState.contextHeight);
     }
     
     // Apply inline vars
@@ -1923,6 +1944,9 @@
     resizerContext.setAttribute('tabindex', '0');
     resizerContext.setAttribute('aria-orientation', 'horizontal');
     resizerContext.setAttribute('aria-label', '调整项目状态区域高度');
+    resizerContext.setAttribute('aria-valuemin', '80');
+    resizerContext.setAttribute('aria-valuemax', '80');
+    resizerContext.setAttribute('aria-valuenow', '80');
     resizerContext.setAttribute('title', '拖动调整项目状态区域高度，双击恢复默认');
     sidebar.appendChild(resizerContext);
 
@@ -1940,6 +1964,9 @@
     resizerLeft.setAttribute('tabindex', '0');
     resizerLeft.setAttribute('aria-orientation', 'vertical');
     resizerLeft.setAttribute('aria-label', '调整文件树宽度');
+    resizerLeft.setAttribute('aria-valuemin', '188');
+    resizerLeft.setAttribute('aria-valuemax', '560');
+    resizerLeft.setAttribute('aria-valuenow', '260');
     resizerLeft.setAttribute('title', '拖动调整文件树宽度，双击恢复默认');
     resizerLeft.addEventListener('dblclick', resetLayout);
     workspace.appendChild(resizerLeft);
@@ -1994,6 +2021,9 @@
     resizerRight.setAttribute('tabindex', '0');
     resizerRight.setAttribute('aria-orientation', 'vertical');
     resizerRight.setAttribute('aria-label', '调整编辑器与 AI 面板宽度');
+    resizerRight.setAttribute('aria-valuemin', '240');
+    resizerRight.setAttribute('aria-valuemax', '760');
+    resizerRight.setAttribute('aria-valuenow', '360');
     resizerRight.setAttribute('title', '拖动调整编辑器与 AI 面板宽度，双击恢复默认');
     resizerRight.addEventListener('dblclick', resetLayout);
     workspace.appendChild(resizerRight);
@@ -2241,6 +2271,17 @@
 
     function onKeyDown(e, type) {
       var key = e.key;
+      var target = e.currentTarget;
+      if (key === 'Home' || key === 'End') {
+        e.preventDefault();
+        var boundary = Number(target && target.getAttribute(key === 'Home' ? 'aria-valuemin' : 'aria-valuemax')) || 0;
+        if (type === 'left') _layoutState.sidebarWidth = boundary;
+        else if (type === 'right') _layoutState.chatWidth = boundary;
+        else _layoutState.contextHeight = boundary;
+        applyLayoutToDOM();
+        triggerLayoutSave();
+        return;
+      }
       var step = e.shiftKey ? 32 : 8;
       var delta = 0;
       if (type === 'context') {

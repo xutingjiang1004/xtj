@@ -202,6 +202,44 @@ test.describe('Code Workspace', () => {
     await expect(page.locator('#codeChatInput')).toBeFocused();
   });
 
+  test('Code dividers expose dimensions and support Home/End keyboard sizing', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'divider-a11y.js',
+        getFile: async () => new File(['export const divider = true;'], 'divider-a11y.js', { type: 'text/javascript' })
+      }];
+    });
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto('/');
+    await page.locator('button[data-desktop-tab="code"]').click();
+    await page.locator('#codeWelcomeFileBtn').click();
+    const leftDivider = page.locator('.code-resizer-left');
+    const rightDivider = page.locator('.code-resizer-right');
+    const contextDivider = page.locator('.code-resizer-context');
+    for (const divider of [leftDivider, rightDivider, contextDivider]) {
+      await expect(divider).toHaveAttribute('role', 'separator');
+      await expect(divider).toHaveAttribute('aria-valuemin', /\d+/);
+      await expect(divider).toHaveAttribute('aria-valuemax', /\d+/);
+      await expect(divider).toHaveAttribute('aria-valuenow', /\d+/);
+      await expect(divider).toHaveAttribute('aria-valuetext', /像素/);
+    }
+
+    await leftDivider.focus();
+    await page.keyboard.press('End');
+    const leftEnd = await leftDivider.getAttribute('aria-valuenow');
+    expect(leftEnd).toBe(await leftDivider.getAttribute('aria-valuemax'));
+    await page.keyboard.press('Home');
+    expect(await leftDivider.getAttribute('aria-valuenow')).toBe(await leftDivider.getAttribute('aria-valuemin'));
+
+    await rightDivider.focus();
+    await page.keyboard.press('End');
+    expect(await rightDivider.getAttribute('aria-valuenow')).toBe(await rightDivider.getAttribute('aria-valuemax'));
+    await contextDivider.focus();
+    await page.keyboard.press('Home');
+    expect(await contextDivider.getAttribute('aria-valuenow')).toBe(await contextDivider.getAttribute('aria-valuemin'));
+  });
+
   test('Code repairs a persisted all-hidden layout instead of restoring an unclickable blank workspace', async ({ page }) => {
     await page.evaluate(() => {
       localStorage.setItem('xtj_code_layout_v1', JSON.stringify({
