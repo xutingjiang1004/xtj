@@ -4289,6 +4289,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       conversation_id: String(req.body.conversation_id || ''),
       startTime: requestStartTime
     };
+    var streamPhase = 'accepted';
 
     var eventLogger = streamSession.createEventLogger(supabase, streamId, userId);
     // Create and verify the durable session before opening a recoverable SSE
@@ -4383,8 +4384,19 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       return wrote;
     }
 
+    function sendPhase(phase, message) {
+      streamPhase = phase;
+      return sendSSE('status', {
+        phase: phase,
+        message: message,
+        elapsed_ms: Date.now() - requestStartTime
+      });
+    }
+
     // Heartbeat
-    var heartbeat = aiCoreSSE.createHeartbeat(writer, function() { return baseEvent; }, 10000);
+    var heartbeat = aiCoreSSE.createHeartbeat(writer, function() { return baseEvent; }, 10000, function() {
+      return { phase: streamPhase, elapsed_ms: Date.now() - requestStartTime };
+    });
     heartbeat.start();
 
     function cleanup() {
@@ -4571,15 +4583,20 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Send accepted
       sendSSE('accepted', {
         mode: 'modify',
+        phase: 'accepted',
+        message: '请求已接受，正在准备处理',
         workspace_id: scope.workspaceId,
         workspace_generation: scope.generation,
         has_index: !!indexSummary,
         open_files_count: openFiles.length,
-        attachments_count: attachments.length
+        attachments_count: attachments.length,
+        timeout_ms: DEEPSEEK_TIMEOUT_MS,
+        elapsed_ms: Date.now() - requestStartTime
       });
 
       // Send planning
-      sendSSE('planning', { message: '正在分析任务和相关项目结构' });
+      streamPhase = 'context';
+      sendSSE('planning', { phase: streamPhase, message: '正在分析任务和相关项目结构', elapsed_ms: Date.now() - requestStartTime });
 
       var apiKey = deps.getDeepSeekApiKey ? deps.getDeepSeekApiKey() : '';
       var model = deps.getDeepSeekModel ? deps.getDeepSeekModel() : '';
@@ -4654,6 +4671,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var toolName = toolCall.function ? toolCall.function.name : (toolCall.name || 'unknown');
         var toolSummary = getToolSummary(toolName, toolCall);
 
+        sendPhase('tool', '正在执行工具：' + toolSummary);
         sendSSE('tool_start', {
           tool_call_id: toolCallId,
           tool: toolName,
@@ -4671,6 +4689,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             duration_ms: duration,
             summary: getToolResultSummary(toolName, result, ok)
           });
+          sendPhase('model_wait', '工具执行完成，正在继续生成回答');
           return result;
         }).catch(function(err) {
           var duration = Date.now() - toolStart;
@@ -4681,12 +4700,15 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             duration_ms: duration,
             summary: '工具执行失败: ' + (err && err.message ? err.message.slice(0, 100) : '未知错误')
           });
+          sendPhase('model_wait', '工具执行结束，正在整理结果');
           throw err;
         });
       };
 
-      // Send answer_start
+      // Keep the established event for older clients, then immediately add
+      // the more accurate status for clients that understand phase events.
       sendSSE('answer_start', { model: model, thinking_mode: thinkingMode });
+      sendPhase('model_wait', '正在连接模型并等待首个响应');
 
       // 脱敏诊断日志：跟踪 DOCX 上下文链路（SSE 流式路径）
       console.log('[code-agent] stream_request_diagnostics:', JSON.stringify({
@@ -4716,6 +4738,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         signal: requestController.signal,
         onContentChunk: function(chunk) {
           if (aborted || finalized) return;
+          if (!hasStartedStreaming) sendPhase('answer', '正在生成回答');
           hasStartedStreaming = true;
           // H-12: 单 chunk 超过 4000 字符时按 4000 拆分多条 answer_delta，
           // 避免超出部分被静默丢弃导致客户端收到残缺回答。
@@ -4764,7 +4787,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           thinkingFallback = true;
           callArgs.thinking_mode = 'off';
           logPhase('thinking_fallback', { reason: parsedError });
-          sendSSE('answer_start', { model: model, thinking_mode: 'off' });
+          sendPhase('model_wait', '正在以兼容模式重新连接模型');
           aiResult = await deps.callDeepSeek(messages, callArgs);
           aiResult.thinking_fallback = true;
           aiResult.thinking_mode = 'off';
@@ -4901,6 +4924,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         tool_calls: toolTrace.length,
         total_duration_ms: Date.now() - requestStartTime
       });
+
+      sendPhase('finalizing', '正在保存结果并完成会话');
 
       // Persist the terminal event and session state before exposing done to
       // the client. This keeps done, last_event_id, and session.status aligned.
