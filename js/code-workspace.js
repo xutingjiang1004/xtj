@@ -80,6 +80,7 @@
     _requestId: 0,
     _themeObserver: null,
     _resizerCleanup: null,
+    _layoutMenuCleanup: null,
     _isReadOnly: false,
     _persistenceFailed: false, // P0-9: 标记 IndexedDB 持久化是否失败
     workspaceGeneration: 0,
@@ -824,6 +825,8 @@
     state._savePromises = {};
     state._requestId++;
     if (state._resizerCleanup) state._resizerCleanup();
+    if (state._layoutMenuCleanup) state._layoutMenuCleanup();
+    state._layoutMenuCleanup = null;
     if (state._composerGlobalCleanup) state._composerGlobalCleanup();
     state._composerGlobalCleanup = null;
     revokeAllUrls();
@@ -1654,7 +1657,28 @@
     }
 
     _dom.panelCode.classList.toggle('is-editor-collapsed', _layoutState.editorCollapsed === true && _layoutState.maximizedPanel !== 'editor');
+    _dom.panelCode.classList.toggle('is-chat-maximized', _layoutState.maximizedPanel === 'chat');
     document.documentElement.classList.toggle('code-workbench-nav-collapsed', _layoutState.workbenchNavCollapsed === true);
+
+    var maxChatControl = _dom.panelCode.querySelector('.max-chat-btn');
+    if (maxChatControl) {
+      var chatFocused = _layoutState.maximizedPanel === 'chat';
+      var chatFocusLabel = chatFocused ? '退出 AI 专注模式' : '最大化 AI 面板';
+      maxChatControl.setAttribute('aria-label', chatFocusLabel);
+      maxChatControl.setAttribute('title', chatFocusLabel);
+      maxChatControl.setAttribute('aria-pressed', chatFocused ? 'true' : 'false');
+      maxChatControl.innerHTML = codeWorkspaceIcon(chatFocused ? 'reset' : 'maximize');
+    }
+    var layoutMenuItems = _dom.panelCode.querySelectorAll('[data-code-layout-action]');
+    Array.prototype.forEach.call(layoutMenuItems, function (item) {
+      var action = item.getAttribute('data-code-layout-action');
+      var label = action === 'chat' ? (_layoutState.chatCollapsed ? '显示 AI 面板' : '折叠 AI 面板')
+        : action === 'editor' ? (_layoutState.editorCollapsed ? '显示文件查看区' : '折叠文件查看区')
+        : action === 'sidebar' ? (_layoutState.sidebarCollapsed ? '显示文件目录' : '折叠文件目录')
+        : action === 'nav' ? (_layoutState.workbenchNavCollapsed ? '显示左侧导航栏' : '折叠左侧导航栏')
+        : '恢复默认布局';
+      item.textContent = label;
+    });
 
     if (_layoutState.contextCollapsed && _dom.sidebar) {
       _dom.sidebar.classList.add('is-context-collapsed');
@@ -1693,7 +1717,7 @@
     var control = _dom.layoutRecovery;
     if (!control) return;
     var hasFocusedPane = _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor';
-    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed || _layoutState.chatCollapsed || _layoutState.workbenchNavCollapsed;
+    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed || _layoutState.chatCollapsed || _layoutState.workbenchNavCollapsed || _layoutState.contextCollapsed;
     control.hidden = !hasFocusedPane && !hasCollapsedPane;
     if (control.hidden) return;
     var label = control.querySelector('.code-layout-recovery-label');
@@ -1757,7 +1781,7 @@
     triggerLayoutSave();
   }
 
-  function resetLayout() {
+  function resetLayout(focusTarget) {
     _layoutState = {
       sidebarWidth: 260,
       chatWidth: 360,
@@ -1771,6 +1795,12 @@
     };
     applyLayoutToDOM();
     triggerLayoutSave();
+    if (focusTarget) {
+      requestAnimationFrame(function () {
+        var target = typeof focusTarget === 'string' ? document.querySelector(focusTarget) : focusTarget;
+        if (target && target.offsetParent !== null && typeof target.focus === 'function') target.focus();
+      });
+    }
   }
 
   function codeWorkspaceIcon(name) {
@@ -1780,6 +1810,7 @@
       reset: '<path d="M4 7V3m0 4h4"/><path d="M4.7 7A8 8 0 1 1 4 12"/><path d="M12 8v4l3 2"/>',
       collapseLeft: '<path d="m15 6-6 6 6 6"/>',
       collapseRight: '<path d="m9 6 6 6-6 6"/>',
+      layout: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
       maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>',
       plus: '<path d="M12 5v14M5 12h14"/>',
       refresh: '<path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 5v6h-6"/>'
@@ -1813,6 +1844,8 @@
 
   function renderWorkspaceImpl() {
     if (!_dom.panelCode) return;
+    if (state._layoutMenuCleanup) state._layoutMenuCleanup();
+    state._layoutMenuCleanup = null;
     state.composerMounted = false;
     _dom.panelCode.innerHTML = '';
     
@@ -1976,31 +2009,73 @@
     chatHeader.innerHTML = 
       '<div class="code-workbench-task-header"><span>Code AI</span><span>准备就绪</span></div>' +
       '<div class="code-panel-actions">' +
-        '<button class="code-panel-action-btn max-chat-btn" title="最大化"></button>' +
-        '<button class="code-panel-action-btn fold-chat-btn" title="折叠"></button>' +
+        '<button type="button" class="code-panel-action-btn max-chat-btn" title="最大化 AI 面板" aria-label="最大化 AI 面板"></button>' +
+        '<div class="code-layout-menu">' +
+          '<button type="button" class="code-layout-menu-trigger" title="布局选项" aria-label="布局选项" aria-haspopup="menu" aria-controls="codeLayoutMenu" aria-expanded="false"></button>' +
+          '<div class="code-layout-menu-popover" id="codeLayoutMenu" role="menu" hidden>' +
+            '<button type="button" role="menuitem" data-code-layout-action="chat">折叠 AI 面板</button>' +
+            '<button type="button" role="menuitem" data-code-layout-action="editor">折叠文件查看区</button>' +
+            '<button type="button" role="menuitem" data-code-layout-action="sidebar">折叠文件目录</button>' +
+            '<button type="button" role="menuitem" data-code-layout-action="nav">折叠左侧导航栏</button>' +
+            '<button type="button" role="menuitem" data-code-layout-action="reset">恢复默认布局</button>' +
+          '</div>' +
+        '</div>' +
       '</div>';
-    var chatActions = chatHeader.querySelector('.code-panel-actions');
     var maxChatBtn = chatHeader.querySelector('.max-chat-btn');
     maxChatBtn.innerHTML = codeWorkspaceIcon('maximize');
-    maxChatBtn.setAttribute('aria-label', '最大化 AI 面板');
-    var foldChatBtn = chatHeader.querySelector('.fold-chat-btn');
-    foldChatBtn.innerHTML = codeWorkspaceIcon('collapseRight');
-    foldChatBtn.setAttribute('aria-label', '折叠 AI 面板');
-    function addChatPanelToggle(className, label, handler) {
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'code-panel-action-btn ' + className;
-      button.title = label;
-      button.setAttribute('aria-label', label);
-      button.innerHTML = codeWorkspaceIcon(className === 'fold-workbench-nav-btn' ? 'collapseLeft' : (className === 'fold-editor-from-chat-btn' ? 'collapseLeft' : 'collapseRight'));
-      button.addEventListener('click', handler);
-      chatActions.insertBefore(button, chatActions.firstChild);
-    }
-    addChatPanelToggle('fold-workbench-nav-btn', '折叠左侧导航栏', toggleWorkbenchNav);
-    addChatPanelToggle('fold-editor-from-chat-btn', '折叠文件查看区', toggleEditor);
-    addChatPanelToggle('fold-directory-from-chat-btn', '折叠文件目录', toggleSidebar);
     maxChatBtn.addEventListener('click', toggleMaximizeChat);
-    foldChatBtn.addEventListener('click', toggleChat);
+    var layoutMenu = chatHeader.querySelector('.code-layout-menu');
+    var layoutTrigger = chatHeader.querySelector('.code-layout-menu-trigger');
+    var layoutPopover = chatHeader.querySelector('.code-layout-menu-popover');
+    layoutTrigger.innerHTML = codeWorkspaceIcon('layout') + '<span>布局</span>';
+    function setLayoutMenuOpen(open) {
+      layoutPopover.hidden = !open;
+      layoutTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        var firstItem = layoutPopover.querySelector('[role="menuitem"]');
+        if (firstItem) firstItem.focus();
+      }
+    }
+    layoutTrigger.addEventListener('click', function () { setLayoutMenuOpen(layoutPopover.hidden); });
+    layoutTrigger.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setLayoutMenuOpen(true);
+      }
+    });
+    layoutPopover.addEventListener('keydown', function (event) {
+      var menuItems = Array.prototype.slice.call(layoutPopover.querySelectorAll('[role="menuitem"]'));
+      var itemIndex = menuItems.indexOf(document.activeElement);
+      if (event.key === 'Escape') { event.preventDefault(); setLayoutMenuOpen(false); layoutTrigger.focus(); }
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        var direction = event.key === 'ArrowDown' ? 1 : -1;
+        var nextIndex = itemIndex < 0 ? 0 : (itemIndex + direction + menuItems.length) % menuItems.length;
+        menuItems[nextIndex].focus();
+      } else if (event.key === 'Home' && menuItems.length) { event.preventDefault(); menuItems[0].focus(); }
+      else if (event.key === 'End' && menuItems.length) { event.preventDefault(); menuItems[menuItems.length - 1].focus(); }
+    });
+    layoutPopover.addEventListener('click', function (event) {
+      var action = event.target && event.target.getAttribute('data-code-layout-action');
+      if (!action) return;
+      if (action === 'chat') toggleChat();
+      else if (action === 'editor') toggleEditor();
+      else if (action === 'sidebar') toggleSidebar();
+      else if (action === 'nav') toggleWorkbenchNav();
+      else if (action === 'reset') resetLayout();
+      setLayoutMenuOpen(false);
+      var recoveryButton = document.querySelector('.code-layout-recovery:not([hidden]) button');
+      if (action === 'chat' && recoveryButton) recoveryButton.focus();
+      else layoutTrigger.focus();
+    });
+    var closeLayoutMenuOnOutsidePointer = function (event) {
+      if (!layoutPopover.hidden && !layoutMenu.contains(event.target)) setLayoutMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeLayoutMenuOnOutsidePointer);
+    state._layoutMenuCleanup = function () {
+      document.removeEventListener('pointerdown', closeLayoutMenuOnOutsidePointer);
+      state._layoutMenuCleanup = null;
+    };
     chatPanel.appendChild(chatHeader);
     
     // Container for original chat app
@@ -2018,7 +2093,7 @@
     layoutRecovery.className = 'code-layout-recovery';
     layoutRecovery.hidden = true;
     layoutRecovery.innerHTML = '<span class="code-layout-recovery-label"></span><button type="button">恢复完整布局</button>';
-    layoutRecovery.querySelector('button').addEventListener('click', resetLayout);
+    layoutRecovery.querySelector('button').addEventListener('click', function () { resetLayout('#codeChatInput'); });
     shell.appendChild(layoutRecovery);
 
     _dom.fileTree = fileTree;
