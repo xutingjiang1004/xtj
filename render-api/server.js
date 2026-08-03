@@ -14077,6 +14077,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // DeepSeek cannot safely combine reasoning mode with tools. Station actions
     // are routed through function calling, so select the non-thinking path.
     if (/搜索|查找|找一下|私信|发送消息|草稿|公告|维修任务/i.test(message)) thinkingMode = 'off';
+    // A bounded middle gear for normal chat. This is intentionally not the
+    // deep_think multi-agent route and keeps provider/tool compatibility.
+    var responseProfile = (req.body && req.body.response_profile) === 'enhanced' ? 'enhanced' : 'normal';
+    if (responseProfile === 'enhanced') {
+      thinkingMode = thinkingMode === 'off' || thinkingMode === 'low' ? 'medium' : thinkingMode;
+      messages.push({
+        role: 'system',
+        content: '【增强思考回复约束】先在内部梳理问题，再判断是否需要查证；对时效、比较、推荐或事实性结论，优先基于已提供的可靠检索证据回答。不要展示原始思维链。输出遵循：先给结论，再给关键依据和可执行建议；信息不足时明确说明限制。若界面展示了检索来源，可在正文用 [1]、[2] 指代它们。'
+      });
+      writeSse(res, { type: 'enhanced_stage', stage: 'understand', message: '正在梳理问题与回答结构…' });
+    }
     var useThinking = thinkingMode !== 'off';
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
 
@@ -14542,6 +14553,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 搜索 → 思考 → 回复：先执行搜索（阻塞），再将搜索结果注入上下文，最后开始思考流
     if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
+      if (responseProfile === 'enhanced') writeSse(res, { type: 'enhanced_stage', stage: 'verify', message: '正在查证必要信息…' });
       var _psQuery = _preloadedQuery || message.slice(0, 80);
       if (!_preloadedSearchPromise) {
         var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);

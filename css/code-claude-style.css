@@ -193,7 +193,8 @@
   --cw-border-strong:#cdcabf;  /* --border-400 */
   --cw-text:         #3d3929;  /* --text-800 / --foreground */
   --cw-text-secondary:#6e6d68; /* --text-500 / --muted-foreground */
-  --cw-text-muted:   #9b988c;  /* --text-400 */
+  /* 12px status text needs a readable contrast ratio on white surfaces. */
+  --cw-text-muted:   #6e6d68;  /* --text-400 */
   --cw-accent:       #c96442;  /* --brand-500 (light) */
   --cw-accent-soft:  rgba(201,100,66,0.08);
   --cw-accent-glow:  rgba(201,100,66,0.14);

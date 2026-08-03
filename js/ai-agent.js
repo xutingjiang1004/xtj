@@ -54,6 +54,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   绠＄悊鍛樺彲鍦ㄥ悗鍙?/admin/ai-agent/config 鍒囨崲涓?low/medium/high/max
     //   鏅€氱敤鎴蜂笉鑳藉湪 UI 切换 (allow_user_thinking_switch: false)
     thinkingMode: 'low',
+    // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
+    // separate from deep research so the latter remains a dedicated flow.
+    responseProfile: 'normal',
     // 鈽?P 鏂板: 深度思考冧笓鐢ㄦ€濊€冪▼搴?(浠庡悗绔?config 鍚屾, 涓庢櫘閫氳亰澶╁垎寮€)
     deepThinkEffort: 'max',
     deepThinkEnabled: true,    // 后端 config.deep_think.enabled
@@ -4810,6 +4813,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       conversation_id: S.conversationId,
       client_request_id: reqId,
       thinking_mode: S.thinkingMode || 'max',
+      response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
       attachments: attachmentPayload || undefined
     });
     
@@ -5273,6 +5277,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             toolBar.textContent = 'AI 正在使用：' + toolDesc;
             continue;
           }
+
+          if (evt.type === 'enhanced_stage') {
+            var stageLabel = evt.message || ({ understand: '正在梳理问题与回答结构…', verify: '正在查证必要信息…', answer: '正在组织回答…' }[evt.stage] || '正在增强思考…');
+            var enhancedBar = assistantNode.querySelector('.ai-enhanced-status');
+            if (!enhancedBar) {
+              enhancedBar = el('div', { class: 'ai-enhanced-status', role: 'status', 'aria-live': 'polite' });
+              assistantNode.insertBefore(enhancedBar, assistantBubble);
+            }
+            enhancedBar.textContent = stageLabel;
+            enhancedBar.setAttribute('data-stage', evt.stage || 'working');
+            continue;
+          }
           
           if (evt.type === 'card') {
             try { renderAiToolCard(messagesEl, evt.card); } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
@@ -5428,6 +5444,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'content') {
+            if (S.responseProfile === 'enhanced') {
+              var answerStage = assistantNode.querySelector('.ai-enhanced-status');
+              if (answerStage) { answerStage.textContent = '正在组织回答…'; answerStage.setAttribute('data-stage', 'answer'); }
+            }
             var contentChunk = evt.text || '';
             if (!contentChunk) continue;
             aiContent += contentChunk;
@@ -6167,6 +6187,25 @@ function showChatMessages() {
     localProgress.appendChild(localProgressTrack);
     localProgress.appendChild(localProgressDetail);
     modelSelectorWrap.appendChild(modelSelector);
+
+    var responseProfileSelector = el('select', {
+      class: 'ai-chat-response-profile',
+      'aria-label': '小猫 AI 回复档位',
+      title: '增强思考会先梳理问题，必要时联网查证；不会进入深度研究。',
+      style: 'margin-left:8px;padding:4px;border:1px solid var(--border, #ccc);border-radius:4px;background:var(--bg, #fff);color:var(--text, #333);'
+    });
+    responseProfileSelector.appendChild(el('option', { value: 'normal', text: '常规回复' }));
+    responseProfileSelector.appendChild(el('option', { value: 'enhanced', text: '增强思考 · 查证后回答' }));
+    try {
+      var savedResponseProfile = localStorage.getItem('xtj_ai_response_profile');
+      if (savedResponseProfile === 'enhanced') S.responseProfile = 'enhanced';
+    } catch (eResponseProfile) {}
+    responseProfileSelector.value = S.responseProfile;
+    responseProfileSelector.addEventListener('change', function () {
+      S.responseProfile = responseProfileSelector.value === 'enhanced' ? 'enhanced' : 'normal';
+      try { localStorage.setItem('xtj_ai_response_profile', S.responseProfile); } catch (eSaveProfile) {}
+    });
+    modelSelectorWrap.appendChild(responseProfileSelector);
     modelSelectorWrap.appendChild(localBadge);
     modelSelectorWrap.appendChild(localSetupButton);
     modelSelectorWrap.appendChild(localProgress);
@@ -6210,6 +6249,9 @@ function showChatMessages() {
     function updateLocalBadge() {
       var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
       localBadge.style.display = isLocal ? 'inline-block' : 'none';
+      responseProfileSelector.disabled = isLocal;
+      if (isLocal) responseProfileSelector.title = '本地 Qwen 目前使用本地快速回复；增强思考需要在线工具。';
+      else responseProfileSelector.title = '增强思考会先梳理问题，必要时联网查证；不会进入深度研究。';
       if (!isLocal) localProgress.hidden = true;
       if (isLocal && deepThinkBtn) deepThinkBtn.style.display = 'none';
       else if (deepThinkBtn) deepThinkBtn.style.display = '';
