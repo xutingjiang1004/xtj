@@ -48,6 +48,24 @@ test('Code stream adopts the server timeout contract and renders status heartbea
   assert.match(codeWorkspace, /timeoutMs: 305000/);
 });
 
+test('Code streaming exposes a compact phase rail and terminalizes it', () => {
+  assert.match(codeWorkspace, /function streamPhaseKey\(value\)/);
+  assert.match(codeWorkspace, /function buildStreamPhaseRail\(\)/);
+  assert.match(codeWorkspace, /data-phase="context"/);
+  assert.match(codeWorkspace, /读取与工具/);
+  assert.match(codeWorkspace, /function updateStreamPhaseRail\(node, value, terminal\)/);
+  assert.match(codeWorkspace, /updateStreamPhaseRail\(assistantNode, 'complete', true\)/);
+  assert.match(codeWorkspace, /updateStreamPhaseRail\(assistantNode, 'error'\)/);
+  const codeWorkspaceCss = fs.readFileSync(__dirname + '/../css/code-workspace.css', 'utf8');
+  assert.match(codeWorkspaceCss, /\.code-stream-phases/);
+  assert.match(codeWorkspaceCss, /\.code-stream-phase\.is-active/);
+  assert.match(codeWorkspaceCss, /code-chat-message\.assistant\.streaming \.msg-content[\s\S]{0,260}background: var\(--cw-popover/);
+  assert.match(codeWorkspaceCss, /code-stream-content:empty::before[\s\S]{0,260}position: static !important/);
+  assert.match(codeWorkspaceCss, /code-stream-content:empty::before[\s\S]{0,420}background: transparent !important/);
+  assert.match(codeWorkspaceCss, /code-chat-input-area[\s\S]{0,220}background: var\(--cw-bg/);
+  assert.match(codeWorkspaceCss, /codeLocalModelSetupBtn|code-local-model-setup/);
+});
+
 test('Code SSE writer does not mistake a completed request body for a disconnected client', () => {
   const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
   assert.match(sse, /req\.on\('aborted', markClosed\)/);
@@ -74,6 +92,9 @@ test('Code keeps the local Qwen choice and explicit setup path available without
   assert.match(codeWorkspace, /codeLocalModelSetupBtn/);
   assert.match(codeWorkspace, /ensureCodeLocalAiRuntime\(/);
   assert.match(codeWorkspace, /state\.selectedModelId === localCodeModelId\(\)/);
+  assert.match(codeWorkspace, /getStatusSnapshot/);
+  assert.match(codeWorkspace, /localSnapshot\.errorMessage/);
+  assert.match(codeWorkspace, /data-error-code/);
   assert.doesNotMatch(codeWorkspace, /if \(!state\.models\.length\) \{\s*modelSelect\.disabled = true/);
 });
 

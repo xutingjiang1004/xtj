@@ -295,6 +295,11 @@ test('local runtime exposes unsupported and not_downloaded availability states',
   assert.equal(supportedHarness.api.getState(), 'idle');
   assert.equal(supportedHarness.api.getAvailabilityState(), 'not_downloaded');
   assert.equal(supportedHarness.api.getModelDescriptor().availability_state, 'not_downloaded');
+  const initialSnapshot = supportedHarness.api.getStatusSnapshot();
+  assert.equal(initialSnapshot.provider, 'local');
+  assert.equal(initialSnapshot.state, 'idle');
+  assert.equal(initialSnapshot.errorCode, '');
+  assert.equal(initialSnapshot.retryable, false);
 
   const unsupportedHarness = createRuntimeHarness({ supported: false });
   assert.equal(unsupportedHarness.api.getAvailabilityState(), 'unsupported');
@@ -304,6 +309,15 @@ test('local runtime exposes unsupported and not_downloaded availability states',
     (error) => error && error.code === 'LOCAL_AI_UNSUPPORTED'
   );
   assert.equal(unsupportedHarness.api.getState(), 'unsupported');
+  const unsupportedSnapshot = unsupportedHarness.api.getStatusSnapshot();
+  assert.equal(unsupportedSnapshot.errorCode, 'LOCAL_AI_UNSUPPORTED');
+  assert.match(unsupportedSnapshot.errorMessage, /WebGPU/);
+  assert.match(unsupportedSnapshot.recommendation, /在线 DeepSeek/);
+  assert.equal(unsupportedHarness.api.getLastErrorCode(), 'LOCAL_AI_UNSUPPORTED');
+  assert.match(unsupportedHarness.api.getLastErrorMessage(), /本地 Qwen/);
+  const unsupportedDescriptor = unsupportedHarness.api.getModelDescriptor();
+  assert.equal(unsupportedDescriptor.error_code, 'LOCAL_AI_UNSUPPORTED');
+  assert.match(unsupportedDescriptor.error_message, /WebGPU/);
 });
 
 test('local runtime rejects a low WebGPU storage-buffer limit before creating a worker or downloading', async () => {
@@ -316,6 +330,10 @@ test('local runtime rejects a low WebGPU storage-buffer limit before creating a 
   assert.equal(harness.api.getState(), 'unsupported');
   assert.equal(harness.api.getAvailabilityState(), 'unsupported');
   assert.equal(harness.api.getProgressText().includes('在线 DeepSeek'), true);
+  assert.equal(harness.api.getLastErrorCode(), 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED');
+  assert.equal(harness.api.getStatusSnapshot().errorCode, 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED');
+  assert.match(harness.api.getStatusSnapshot().recommendation, /在线 DeepSeek/);
+  assert.equal(harness.api.getModelDescriptor().availability, 'unsupported');
   assert.equal(harness.workers.length, 0, 'unsupported adapters must not start a WebLLM worker or download');
 });
 
@@ -343,6 +361,10 @@ test('local runtime reaches downloading, initializing and ready states', async (
   worker.emit({ type: 'ready', requestId: worker.messages[0].requestId });
   await init;
   assert.equal(harness.api.getState(), 'ready');
+  const readySnapshot = harness.api.getStatusSnapshot();
+  assert.equal(readySnapshot.state, 'ready');
+  assert.equal(readySnapshot.errorCode, '');
+  assert.equal(readySnapshot.retryable, false);
 });
 
 test('silent worker import fails instead of leaving local Qwen downloading forever', async (t) => {
@@ -431,6 +453,8 @@ test('AbortSignal cancels model initialization and terminates its worker', async
   controller.abort();
   await assert.rejects(init, (error) => error && error.code === 'LOCAL_AI_CANCELLED');
   assert.equal(harness.api.getState(), 'cancelled');
+  assert.equal(harness.api.getStatusSnapshot().errorCode, 'LOCAL_AI_CANCELLED');
+  assert.equal(harness.api.getStatusSnapshot().retryable, true);
   assert.equal(harness.workers[0].terminated, true);
   assert.equal(harness.fetchCalls.length, 0, 'model loading stays inside the mocked Worker path');
 });
@@ -511,6 +535,10 @@ test('initialization error rejects callers and cleans up the worker', async (t) 
 
   await assert.rejects(init, (error) => error && error.code === 'LOCAL_AI_RUNTIME_ERROR');
   assert.equal(harness.api.getState(), 'failed');
+  assert.equal(harness.api.getLastErrorCode(), 'LOCAL_AI_RUNTIME_ERROR');
+  assert.equal(harness.api.getLastErrorMessage(), 'mock initialization failure');
+  assert.equal(harness.api.getStatusSnapshot().retryable, true);
+  assert.equal(harness.api.getModelDescriptor().availability, 'degraded');
   assert.equal(harness.workers[0].terminated, true);
 });
 
