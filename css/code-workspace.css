@@ -3059,6 +3059,8 @@ body.code-is-resizing *, body.code-is-resizing-row * {
   align-items: center;
   gap: 4px;
 }
+.code-workbench-task-header { display: flex; align-items: baseline; gap: 7px; min-width: 0; color: var(--cw-text); font-size: 13px; font-weight: 650; }
+.code-workbench-task-header span:last-child { color: var(--cw-text-secondary); font-size: 11px; font-weight: 400; }
 .code-panel-action-btn {
   width: 24px;
   height: 24px;
@@ -3081,6 +3083,30 @@ body.code-is-resizing *, body.code-is-resizing-row * {
   width: 14px;
   height: 14px;
 }
+
+/* Visible escape hatch for focus/collapsed states. It prevents a compact
+   icon action from leaving users unsure how to restore the full workbench. */
+.code-layout-recovery {
+  position: absolute;
+  z-index: 30;
+  right: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: calc(100% - 28px);
+  padding: 7px 8px 7px 11px;
+  border: 1px solid var(--cw-border-strong);
+  border-radius: 7px;
+  background: var(--cw-bg-secondary);
+  box-shadow: 0 8px 24px rgba(20, 51, 66, .16);
+  color: var(--cw-text-secondary);
+  font-size: 11px;
+}
+.code-layout-recovery[hidden] { display: none; }
+.code-layout-recovery-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-layout-recovery button { flex: 0 0 auto; min-height: 28px; padding: 0 9px; border: 1px solid var(--cw-border); border-radius: 4px; background: var(--cw-bg-tertiary); color: var(--cw-text); font: inherit; cursor: pointer; }
+.code-layout-recovery button:hover, .code-layout-recovery button:focus-visible { border-color: var(--cw-accent); color: var(--cw-accent); outline: none; }
 
 /* Final Code controls pass: this file is loaded after the shared Claude
    overlay, so keep the actual workspace widgets compact and rectangular. */
