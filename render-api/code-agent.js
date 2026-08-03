@@ -1322,6 +1322,22 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
       result_estimated_tokens: estimatedTokens
     };
     if (result && result.path) entry.path = result.path;
+    // Keep a compact, reviewable explanation for the terminal trace.  The
+    // raw tool result remains server-only because it may include source text,
+    // uploaded documents, or fetched page bodies.
+    entry.summary = summarizeTraceResult(name, result, entry.ok).slice(0, 180);
+    if ((name === 'search_code' || name === 'web_search') && args && args.query) {
+      entry.query = String(args.query).slice(0, 160);
+    }
+    if ((name === 'read_file' || name === 'read_file_range' || name === 'get_symbols') && !entry.path && args && args.path) {
+      entry.path = String(args.path).slice(0, 240);
+    }
+    if (name === 'fetch_web_page' && args && args.url) {
+      try {
+        var parsedTraceUrl = new URL(String(args.url));
+        if (parsedTraceUrl.protocol === 'https:') entry.host = parsedTraceUrl.hostname.slice(0, 180);
+      } catch (_) {}
+    }
     if (result && result.code) entry.code = String(result.code).slice(0, 80);
     if (result && (result.startLine || result.endLine)) entry.ranges = [[result.startLine || 1, result.endLine || result.startLine || 1]];
     if (result && Array.isArray(result.results)) {
@@ -1330,9 +1346,29 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
     if (result && result.error) entry.error = String(result.error).slice(0, 240);
     if (result && result.truncated === true) entry.truncated = true;
     if (result && typeof result.totalFiles === 'number') entry.totalFiles = result.totalFiles;
+    if (result && typeof result.totalHits === 'number') entry.totalHits = result.totalHits;
+    if (result && Array.isArray(result.results)) entry.resultCount = result.results.length;
     trace.push(entry);
     console.log('[code-agent] tool', JSON.stringify(entry));
     return result;
+  }
+
+  function summarizeTraceResult(name, result, ok) {
+    if (!ok) return '失败: ' + String(result && result.error || '工具未完成').slice(0, 120);
+    if (name === 'search_code' || name === 'web_search') {
+      var hits = result && (typeof result.totalHits === 'number' ? result.totalHits : (Array.isArray(result.results) ? result.results.length : 0));
+      return '找到 ' + hits + ' 项结果';
+    }
+    if (name === 'read_file' || name === 'read_file_range') {
+      var start = Number(result && result.startLine) || 1;
+      var end = Number(result && result.endLine) || start;
+      return '读取 L' + start + '-' + end;
+    }
+    if (name === 'list_files') return '找到 ' + (Number(result && result.totalFiles) || 0) + ' 个文件';
+    if (name === 'fetch_web_page') return '已抓取网页';
+    if (name === 'get_symbols') return '已获取 ' + (Array.isArray(result && result.symbols) ? result.symbols.length : 0) + ' 个符号';
+    if (name === 'get_open_files') return '已获取 ' + (Array.isArray(result && result.files) ? result.files.length : 0) + ' 个打开文件';
+    return '工具执行完成';
   }
 
   function readPath(path, startLine, endLine) {
@@ -3853,7 +3889,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
       var rawContent = aiResult && typeof aiResult.content === 'string' ? aiResult.content : '';
       if (!rawContent) {
-        return sendError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 502, { tool_trace: toolTrace, retryable: true });
+          return sendError('PROVIDER_EMPTY_RESPONSE', 'AI 返回了空响应', 502, { tool_trace: sanitizeToolTraceForClient(toolTrace), retryable: true });
       }
       var rawReasoning = aiResult && typeof aiResult.reasoning === 'string' ? aiResult.reasoning : '';
 
@@ -3991,7 +4027,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         usage: usage,
         capabilities: capabilities,
         runtime: runtimeInfo,
-        tool_trace: toolTrace,
+        tool_trace: sanitizeToolTraceForClient(toolTrace),
         context_info: {
           indexed: !!indexSummary,
           index: indexSummary,
@@ -4172,6 +4208,43 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   var aiCoreRequestId = require('./ai-core/request-id');
   var aiCoreErrorMapper = require('./ai-core/error-mapper');
   var streamSession = require('./ai-core/stream-session');
+
+  // The tool executor's internal trace can contain result bodies and raw
+  // arguments. Browser clients only receive a bounded evidence receipt.
+  function sanitizeToolTraceForClient(trace) {
+    return (Array.isArray(trace) ? trace : []).slice(0, 24).map(function(entry) {
+      entry = entry || {};
+      var safe = {
+        tool: String(entry.tool || 'tool').slice(0, 80),
+        ok: entry.ok !== false,
+        duration_ms: Math.max(0, Math.min(Number(entry.duration_ms) || 0, 3600000)),
+        summary: String(entry.summary || '').slice(0, 180)
+      };
+      if (entry.code) safe.code = String(entry.code).slice(0, 80);
+      if (entry.query) safe.query = String(entry.query).slice(0, 160);
+      if (entry.path) safe.path = String(entry.path).slice(0, 240);
+      if (entry.host) safe.host = String(entry.host).slice(0, 180);
+      if (entry.truncated === true) safe.truncated = true;
+      if (typeof entry.totalFiles === 'number') safe.totalFiles = Math.max(0, Math.min(Math.floor(entry.totalFiles), 100000));
+      if (typeof entry.totalHits === 'number') safe.totalHits = Math.max(0, Math.min(Math.floor(entry.totalHits), 100000));
+      if (typeof entry.resultCount === 'number') safe.resultCount = Math.max(0, Math.min(Math.floor(entry.resultCount), 1000));
+      if (Array.isArray(entry.ranges)) {
+        safe.ranges = entry.ranges.slice(0, 8).map(function(range) {
+          return [Math.max(1, Math.floor(Number(range && range[0]) || 1)), Math.max(1, Math.floor(Number(range && range[1]) || Number(range && range[0]) || 1))];
+        });
+      }
+      if (Array.isArray(entry.files)) {
+        safe.files = entry.files.slice(0, 5).map(function(file) {
+          var item = { path: String(file && file.path || '').slice(0, 240) };
+          if (Array.isArray(file && file.ranges)) item.ranges = file.ranges.slice(0, 4).map(function(range) {
+            return [Math.max(1, Math.floor(Number(range && range[0]) || 1)), Math.max(1, Math.floor(Number(range && range[1]) || Number(range && range[0]) || 1))];
+          });
+          return item;
+        }).filter(function(file) { return !!file.path; });
+      }
+      return safe;
+    });
+  }
 
   app.post('/api/code/chat/stream', rateLimit(60000, 20), authenticateUser, async function(req, res) {
 
@@ -4942,9 +5015,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           total_tool_calls: toolTrace.length,
           total_tokens: readTokens
         },
-        tool_trace: toolTrace.map(function(t) {
-          return { tool: t.tool, ok: t.ok, duration_ms: t.duration_ms, summary: t.summary || '' };
-        }),
+        tool_trace: sanitizeToolTraceForClient(toolTrace),
         runtime: {
           model: aiResult.model || model,
           thinking_mode: thinkingMode,
