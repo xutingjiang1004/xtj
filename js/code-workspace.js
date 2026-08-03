@@ -4932,6 +4932,7 @@
     for (var i = 0; i < state.messages.length; i++) {
       appendChatMessage(state.messages[i], messages);
     }
+    if (!state.messages.length) renderCodeChatEmptyState(messages);
 
     var inputArea = document.createElement('div');
     inputArea.className = 'code-chat-input-area';
@@ -4967,6 +4968,26 @@
         '<button type="button" role="menuitem" data-composer-action="pinned">查看固定文件</button>' +
         '<button type="button" role="menuitem" data-composer-action="clear">清除本轮附件</button>' +
       '</div>';
+    // Keep the stable IDs and bindings, but give the composer a clear task
+    // row and a quiet metadata row so the input remains the primary action.
+    var composerMainRow = document.createElement('div');
+    composerMainRow.className = 'code-composer-main-row';
+    var composerMetaRow = document.createElement('div');
+    composerMetaRow.className = 'code-composer-meta-row';
+    var composerAttachmentButton = inputArea.querySelector('#codeAttachmentBtn');
+    var composerInput = inputArea.querySelector('#codeChatInput');
+    var composerSend = inputArea.querySelector('#codeChatSendBtn');
+    var composerCancel = inputArea.querySelector('#codeChatCancelBtn');
+    var composerToolbar = inputArea.querySelector('.code-composer-toolbar');
+    var composerLocalStatus = inputArea.querySelector('#codeLocalModelStatus');
+    if (composerAttachmentButton) composerMainRow.appendChild(composerAttachmentButton);
+    if (composerInput) composerMainRow.appendChild(composerInput);
+    if (composerSend) composerMainRow.appendChild(composerSend);
+    if (composerCancel) composerMainRow.appendChild(composerCancel);
+    inputArea.insertBefore(composerMainRow, composerToolbar || composerLocalStatus || null);
+    if (composerToolbar) composerMetaRow.appendChild(composerToolbar);
+    if (composerLocalStatus) composerMetaRow.appendChild(composerLocalStatus);
+    if (composerMetaRow.childNodes.length) inputArea.insertBefore(composerMetaRow, inputArea.querySelector('#codeContextDetails') || null);
     var thinkingLabels = {
       auto: String.fromCharCode(0x81ea, 0x52a8),
       off: String.fromCharCode(0x5173),
@@ -5119,6 +5140,9 @@
   function syncChatMessages() {
     var messages = document.getElementById('codeChatMessages');
     if (!messages) return;
+    var emptyState = messages.querySelector('.code-chat-empty-state');
+    if (state.messages.length && emptyState) emptyState.remove();
+    if (!state.messages.length && !state.sending && !emptyState) renderCodeChatEmptyState(messages);
     for (var i = 0; i < state.messages.length; i++) {
       if (!messages.querySelector('[data-code-message-index="' + i + '"]')) {
         appendChatMessage(state.messages[i], messages);
@@ -5131,6 +5155,36 @@
         discardStreamingMessageNode(node);
       });
     }
+  }
+
+  function renderCodeChatEmptyState(container) {
+    if (!container || container.querySelector('.code-chat-empty-state')) return;
+    var hasFile = !!state.activePath;
+    var empty = document.createElement('section');
+    empty.className = 'code-chat-empty-state';
+    empty.setAttribute('aria-label', 'Code AI 开始任务');
+    empty.innerHTML =
+      '<div class="code-chat-empty-kicker">CODE AI</div>' +
+      '<h3>从一个清晰的任务开始</h3>' +
+      '<p>' + (hasFile ? '我会基于当前文件、已打开文件和你明确添加的资料工作。' : '选择工作区或打开文件后，我可以分析、检索并提出可确认的修改。') + '</p>' +
+      '<div class="code-chat-starter-prompts">' +
+        '<button type="button" data-code-starter="' + (hasFile ? '解释当前文件的结构和关键逻辑' : '帮我规划这个项目的下一步开发任务') + '">' + (hasFile ? '解释当前文件' : '规划一个功能') + '</button>' +
+        '<button type="button" data-code-starter="' + (hasFile ? '检查当前文件可能存在的 Bug、边界条件和可维护性问题' : '告诉我应该先打开哪些文件来理解这个项目') + '">' + (hasFile ? '寻找潜在 Bug' : '理解项目结构') + '</button>' +
+        '<button type="button" data-code-starter="审查我准备进行的改动，列出风险和验证步骤">审查改动</button>' +
+      '</div>';
+    container.appendChild(empty);
+    Array.prototype.forEach.call(empty.querySelectorAll('[data-code-starter]'), function(button) {
+      button.addEventListener('click', function() {
+        var input = document.getElementById('codeChatInput');
+        var prompt = button.getAttribute('data-code-starter') || '';
+        if (!input || !prompt) return;
+        input.value = prompt;
+        state.composerDraft = prompt;
+        saveComposerDraft();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+      });
+    });
   }
 
   // A stream paints into a transient node before its final message is written
@@ -5672,6 +5726,12 @@
 
     el.innerHTML = avatar + body;
     container.appendChild(el);
+    Array.prototype.forEach.call(el.querySelectorAll('[data-code-evidence-path]'), function (button) {
+      button.addEventListener('click', function () {
+        var path = button.getAttribute('data-code-evidence-path') || '';
+        if (path) openFile(path);
+      });
+    });
     if (msg.role === 'assistant' && msg.retryable) {
       var retryBtn = el.querySelector('.code-chat-retry-btn');
       if (retryBtn) {
@@ -5695,15 +5755,39 @@
       var duration = Number(entry.duration_ms || entry.elapsed_ms || entry.duration || 0);
       var state = ok ? '完成' : '失败';
       if (duration > 0 && isFinite(duration)) state += ' · ' + (duration >= 1000 ? (duration / 1000).toFixed(1) + ' 秒' : Math.round(duration) + ' ms');
+      var evidence = renderToolEvidence(entry);
       return '<div class="code-chat-tool-trace-item" data-ok="' + (ok ? 'true' : 'false') + '">' +
         '<span class="code-chat-tool-trace-dot" aria-hidden="true"></span>' +
-        '<div><div class="code-chat-tool-trace-name">' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div></div>' +
+        '<div><div class="code-chat-tool-trace-name">' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div>' + evidence + '</div>' +
         '<span class="code-chat-tool-trace-state">' + escapeHTML(state) + '</span></div>';
     }).join('');
     if (trace.length > visibleTrace.length) {
       items += '<div class="code-chat-tool-trace-more">其余 ' + (trace.length - visibleTrace.length) + ' 项工具记录已折叠</div>';
     }
     return '<details class="code-chat-tool-trace"><summary>工具与证据 (' + trace.length + ')</summary><div class="code-chat-tool-trace-list">' + items + '</div></details>';
+  }
+
+  function formatToolRange(ranges) {
+    if (!Array.isArray(ranges) || !ranges.length) return '';
+    return ranges.slice(0, 3).map(function(range) {
+      var start = Math.max(1, Number(range && range[0]) || 1);
+      var end = Math.max(start, Number(range && range[1]) || start);
+      return 'L' + start + (end === start ? '' : '–' + end);
+    }).join(', ');
+  }
+
+  function renderToolEvidence(entry) {
+    var parts = [];
+    if (entry.query) parts.push('<span class="code-tool-evidence-label">检索：</span><code>' + escapeHTML(String(entry.query).slice(0, 160)) + '</code>');
+    if (entry.path) {
+      var range = formatToolRange(entry.ranges);
+      parts.push('<button type="button" class="code-tool-evidence-path" data-code-evidence-path="' + escapeHTML(String(entry.path).slice(0, 240)) + '" title="打开文件">' + escapeHTML(String(entry.path).slice(0, 240)) + (range ? ' <span>' + escapeHTML(range) + '</span>' : '') + '</button>');
+    }
+    if (entry.host) parts.push('<span class="code-tool-evidence-host">网页：' + escapeHTML(String(entry.host).slice(0, 180)) + '</span>');
+    var count = typeof entry.totalHits === 'number' ? entry.totalHits : (typeof entry.totalFiles === 'number' ? entry.totalFiles : (typeof entry.resultCount === 'number' ? entry.resultCount : null));
+    if (count !== null) parts.push('<span class="code-tool-evidence-count">' + escapeHTML(String(count)) + ' 项</span>');
+    if (entry.truncated === true) parts.push('<span class="code-tool-evidence-count">结果已截断</span>');
+    return parts.length ? '<div class="code-tool-evidence">' + parts.join('') + '</div>' : '';
   }
 
   function updateChatScrollControl() {
