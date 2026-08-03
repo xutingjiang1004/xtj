@@ -1809,7 +1809,14 @@
       layout: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
       maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>',
       plus: '<path d="M12 5v14M5 12h14"/>',
-      refresh: '<path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 5v6h-6"/>'
+      refresh: '<path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 5v6h-6"/>',
+      upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+      files: '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>',
+      pin: '<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>',
+      eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+      trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+      barChart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+      slash: '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>'
     };
     return '<svg class="code-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[name] || paths.reset) + '</svg>';
   }
@@ -5036,17 +5043,17 @@
         '</div>' +
         '<div class="code-composer-menu-section">' +
           '<div class="code-composer-menu-label">上下文附件</div>' +
-          '<button type="button" role="menuitem" data-composer-action="upload">📎 上传资料文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="current">📄 添加当前文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="open">📂 添加所有已打开文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="pin">📌 固定/取消固定当前文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="pinned">👀 查看已固定文件</button>' +
-          '<button type="button" role="menuitem" data-composer-action="clear">🗑️ 清除本轮附件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="upload">' + codeWorkspaceIcon('upload') + ' 上传资料文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="current">' + codeWorkspaceIcon('file') + ' 添加当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="open">' + codeWorkspaceIcon('files') + ' 添加所有已打开文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pin">' + codeWorkspaceIcon('pin') + ' 固定/取消固定当前文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="pinned">' + codeWorkspaceIcon('eye') + ' 查看已固定文件</button>' +
+          '<button type="button" role="menuitem" data-composer-action="clear">' + codeWorkspaceIcon('trash') + ' 清除本轮附件</button>' +
         '</div>' +
         '<div class="code-composer-menu-section">' +
           '<div class="code-composer-menu-label">其他</div>' +
-          '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">📊 上下文 未估算</button>' +
-          '<button type="button" role="menuitem" data-composer-action="ignore-documents">🚫 本次忽略文档上下文</button>' +
+          '<button type="button" class="code-context-usage" id="codeContextUsage" aria-label="查看上下文占用" aria-expanded="false">' + codeWorkspaceIcon('barChart') + ' 上下文 未估算</button>' +
+          '<button type="button" role="menuitem" data-composer-action="ignore-documents">' + codeWorkspaceIcon('slash') + ' 本次忽略文档上下文</button>' +
         '</div>' +
       '</div>';
     // Keep the stable IDs and bindings, but give the composer a clear task
