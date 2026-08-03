@@ -6532,7 +6532,7 @@
           '</div>' +
           '<div class="code-stream-tools-list" role="list"></div>' +
         '</div>' +
-        '<div class="msg-content markdown-body code-stream-content""></div>' +
+        '<div class="msg-content markdown-body code-stream-content"></div>' +
         '<div class="code-stream-usage" style="display:none"></div>' +
         '<div class="code-stream-error" style="display:none"></div>' +
         '<div class="msg-time">' + escapeHTML(timeStr) + 
@@ -7669,7 +7669,7 @@
           '</div>' +
           '<div class="code-stream-tools-list" role="list"></div>' +
         '</div>' +
-        '<div class="msg-content markdown-body code-stream-content""></div>' +
+        '<div class="msg-content markdown-body code-stream-content"></div>' +
         '<div class="code-stream-usage" style="display:none"></div>' +
         '<div class="code-stream-error" style="display:none"></div>' +
         '<div class="msg-time">' + escapeHTML(timeStr) + 
