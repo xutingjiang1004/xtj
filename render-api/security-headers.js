@@ -14,7 +14,8 @@ var CSP = [
   "worker-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' http://127.0.0.1:10000 http://localhost:10000 https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
-  "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com",
+  // Monaco loads its codicon font from the same npm mirror allowed for its script/style assets.
+  "font-src 'self' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.gstatic.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'"

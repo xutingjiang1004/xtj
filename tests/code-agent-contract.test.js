@@ -238,6 +238,18 @@ test('streaming code chat defines its phase logger and does not gate simple chat
   assert.match(codeAgent, /needsProjectContext\(message\) && !isFreshnessQuery\(message\)/);
 });
 
+test('streaming code chat publishes server-authoritative phase and timeout metadata', () => {
+  assert.match(codeAgent, /function sendPhase\(phase, message\)/);
+  assert.match(codeAgent, /timeout_ms:\s*DEEPSEEK_TIMEOUT_MS/);
+  assert.match(codeAgent, /message: '请求已接受，正在准备处理'/);
+  assert.match(codeAgent, /sendPhase\('model_wait', '正在连接模型并等待首个响应'\)/);
+  assert.match(codeAgent, /sendPhase\('finalizing', '正在保存结果并完成会话'\)/);
+  assert.match(codeAgent, /createHeartbeat\(writer,[\s\S]*?phase: streamPhase/);
+  const streamSession = fs.readFileSync('render-api/ai-core/stream-session.js', 'utf8');
+  assert.match(streamSession, /'accepted', 'planning', 'status', 'tool_start'/);
+  assert.doesNotMatch(streamSession, /'heartbeat'/);
+});
+
 // ============================================================
 // 16. 操作解析
 // ============================================================
