@@ -21,6 +21,7 @@
   var _lastElapsedSeconds = 0;
   var _totalTimeoutId = null;
   var _noProgressTimeoutId = null;
+  var _warmupTimeoutId = null;
   var _heartbeatIntervalId = null;
   var _initializingPromise = null;   // singleton: shared across multiple ensureReady calls
   var _initializationWaiters = 0;
@@ -37,6 +38,7 @@
   var INIT_TIMEOUT         = 180000;   // 3 min initialization timeout
   var DOWNLOAD_NO_PROGRESS_TIMEOUT = 120000; // Network gaps during a 1 GB download are normal
   var INIT_NO_PROGRESS_TIMEOUT = 90000;     // WebGPU compilation should still fail promptly
+  var WARMUP_TIMEOUT = 45000;               // engine load is not a usable inference proof
   var HEARTBEAT_INTERVAL   = 10000;    // 10 sec heartbeat interval
   // `ready` only proves WebLLM initialized. A driver can still stall on the
   // first inference dispatch while the worker continues answering pings.
@@ -134,6 +136,7 @@
   function clearTimeouts() {
     if (_totalTimeoutId) { clearTimeout(_totalTimeoutId); _totalTimeoutId = null; }
     if (_noProgressTimeoutId) { clearInterval(_noProgressTimeoutId); _noProgressTimeoutId = null; }
+    if (_warmupTimeoutId) { clearTimeout(_warmupTimeoutId); _warmupTimeoutId = null; }
   }
 
   function setupTimeouts(downloading) {
@@ -365,6 +368,13 @@
         } else if (data.status === 'initializing') {
           setState('initializing');
           setupTimeouts(false);
+        } else if (data.status === 'warming') {
+          clearTimeouts();
+          _lastProgressText = '本地 Qwen 正在验证实际推理能力…';
+          setState('initializing');
+          _warmupTimeoutId = setTimeout(function() {
+            failWithError('LOCAL_AI_INFERENCE_UNUSABLE', '本地 Qwen 模型已加载，但 45 秒内无法完成实际 WebGPU 推理。无需重新下载；请切换到“在线 DeepSeek”或更新浏览器与显卡驱动。');
+          }, WARMUP_TIMEOUT);
         }
       }
       if (data.type === 'delta') {

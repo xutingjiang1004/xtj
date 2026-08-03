@@ -5686,7 +5686,8 @@
   }
 
   function renderPersistentToolTrace(trace) {
-    var items = trace.slice(0, 12).map(function (entry) {
+    var visibleTrace = trace.slice(0, 12);
+    var items = visibleTrace.map(function (entry) {
       entry = entry || {};
       var ok = entry.ok !== false && entry.success !== false && !entry.error;
       var name = String(entry.tool || entry.name || entry.tool_name || '工具调用');
@@ -5699,6 +5700,9 @@
         '<div><div class="code-chat-tool-trace-name">' + escapeHTML(name) + '</div><div class="code-chat-tool-trace-summary">' + escapeHTML(summary.slice(0, 320)) + '</div></div>' +
         '<span class="code-chat-tool-trace-state">' + escapeHTML(state) + '</span></div>';
     }).join('');
+    if (trace.length > visibleTrace.length) {
+      items += '<div class="code-chat-tool-trace-more">其余 ' + (trace.length - visibleTrace.length) + ' 项工具记录已折叠</div>';
+    }
     return '<details class="code-chat-tool-trace"><summary>工具与证据 (' + trace.length + ')</summary><div class="code-chat-tool-trace-list">' + items + '</div></details>';
   }
 
@@ -6362,7 +6366,8 @@
           error.code === 'LOCAL_AI_UNSUPPORTED' ||
           error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
           error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
+          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_INFERENCE_UNUSABLE'
         ));
         if (localIncompatible) {
           state.selectedModelId = 'online';
@@ -7863,6 +7868,7 @@
       state.messages.push({
         role: 'assistant', content: replyContent, time: timeStr,
         operations: state.pendingOperations,
+        toolTrace: state.lastToolTrace,
         contextInfo: data && data.context_info || null,
         runtime: data && data.runtime || null,
         usage: data && data.usage || null

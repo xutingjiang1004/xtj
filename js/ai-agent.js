@@ -4898,10 +4898,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var evtHandled = false;
       var _finalized = false;
 
+      function clearAssistantTransientStatus(node) {
+        var target = node || assistantNode;
+        if (!target) return;
+        var statuses = target.querySelectorAll('.ai-enhanced-status, .ai-tool-status, .ai-search-supplement');
+        for (var statusIndex = 0; statusIndex < statuses.length; statusIndex++) {
+          try { statuses[statusIndex].remove(); } catch (eStatus) {}
+        }
+      }
+
       function finishAiMessage(node, content, thinking, evt) {
         // P4 修复: 防止重复 finalize
         if (_finalized) return;
         _finalized = true;
+        // A stage is only a live progress indicator. Keeping it after the
+        // answer is rendered makes a completed answer look permanently stuck.
+        clearAssistantTransientStatus(node);
         if (thinkingTimer) {
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
@@ -4986,7 +4998,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // 濡傛灉鏈夋悳绱㈢粨鏋滐紝鎶婂凡鏈夌殑鎼滅储鏉＄Щ鍏ユ秷鎭妭鐐癸紙鑰岄潪鍗曠嫭鍦?container 里）
           var liveSearchBar = null;
           if (searchCount > 0) {
-            liveSearchBar = messagesEl.querySelector('.ai-search-status');
+            liveSearchBar = node.querySelector('.ai-search-status');
           }
           if (liveSearchBar) {
             node.appendChild(liveSearchBar);
@@ -5146,10 +5158,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'multi_agent') {
-            var maStatus = messagesEl.querySelector('.ai-search-status');
+            var maStatus = assistantNode.querySelector('.ai-search-status');
             if (!maStatus) {
               maStatus = el('div', { class: 'ai-search-status' });
-              if (assistantNode && assistantNode.parentElement) assistantNode.parentElement.insertBefore(maStatus, assistantNode);
+              assistantNode.insertBefore(maStatus, assistantBubble);
             }
             if (evt.action === 'searching') {
               var qs = evt.queries || [];
@@ -5160,7 +5172,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // 鎬濊€冨悗琛ュ厖鎼滅储锛氶噸缃唴瀹圭姸鎬佷互鎺ユ敹鏂颁竴杞?stream锛屼繚鐣欏凡鏄剧ず鐨勬€濊€冭繃绋?
           if (evt.type === 'search_supplement') {
             var searchNote = el('div', { class: 'ai-search-supplement', text: '正在联网补充信息...' });
-            if (assistantNode && assistantNode.parentElement) assistantNode.parentElement.appendChild(searchNote);
+            if (assistantNode) assistantNode.insertBefore(searchNote, assistantBubble);
             // 清空旧内容，让第二轮 stream 重新生成
             cleanupRenderers();
             hideAssistantTyping();
@@ -5178,10 +5190,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // 鏄剧ず鎼滅储鐘舵€佹潯
             var searchCount = evt.count;
             var searchDiag = evt.diagnostics;
-            var searchBar = messagesEl.querySelector('.ai-search-status');
+            var searchBar = assistantNode.querySelector('.ai-search-status');
             if (!searchBar) {
               searchBar = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(searchBar);
+              assistantNode.insertBefore(searchBar, assistantBubble);
             }
             var summaryText = '';
             if (searchCount > 0) {
@@ -5238,10 +5250,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'search_error') {
             var searchDiag2 = evt.diagnostics;
-            var searchBar2 = messagesEl.querySelector('.ai-search-status');
+            var searchBar2 = assistantNode.querySelector('.ai-search-status');
             if (!searchBar2) {
               searchBar2 = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(searchBar2);
+              assistantNode.insertBefore(searchBar2, assistantBubble);
             }
             searchBar2.textContent = evt.error || '联网搜索失败';
             // 鏄剧ず璇︾粏失败鍘熷洜锛堝彲灞曞紑锛?
@@ -5269,10 +5281,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (t.args && t.args.location) return label + ' ' + t.args.location;
               return label;
             }).join('、');
-            var toolBar = messagesEl.querySelector('.ai-tool-status');
+            var toolBar = assistantNode.querySelector('.ai-tool-status');
             if (!toolBar) {
               toolBar = el('div', { class: 'ai-tool-status' });
-              messagesEl.appendChild(toolBar);
+              assistantNode.insertBefore(toolBar, assistantBubble);
             }
             toolBar.textContent = 'AI 正在使用：' + toolDesc;
             continue;
@@ -5296,8 +5308,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'tool_pending') {
-            var pendingBar = messagesEl.querySelector('.ai-tool-status');
-            if (!pendingBar) { pendingBar = el('div', { class: 'ai-tool-status' }); messagesEl.appendChild(pendingBar); }
+            var pendingBar = assistantNode.querySelector('.ai-tool-status');
+            if (!pendingBar) { pendingBar = el('div', { class: 'ai-tool-status' }); assistantNode.insertBefore(pendingBar, assistantBubble); }
             pendingBar.textContent = 'AI 正在准备：' + (evt.tool_name || '站内工具');
             continue;
           }
@@ -5308,10 +5320,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'tool_result') {
-            var toolBar2 = messagesEl.querySelector('.ai-tool-status');
+            var toolBar2 = assistantNode.querySelector('.ai-tool-status');
             if (!toolBar2) {
               toolBar2 = el('div', { class: 'ai-tool-status' });
-              messagesEl.appendChild(toolBar2);
+              assistantNode.insertBefore(toolBar2, assistantBubble);
             }
             var nameMap = { search_web: '已联网搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
             var label = nameMap[evt.tool_name] || evt.tool_name;
@@ -5506,12 +5518,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var streamComplete = evt.complete === true;
             var streamSaved = evt.saved === true;
             
-            if (aiContent) {
+            if (assistantNode) {
               ensureAssistantBubbleReady();
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
-            } else if (aiReasoning) {
-              if (!assistantNode) ensureReasoningNode();
-              finishAiMessage(assistantNode, '', aiReasoning, evt);
             }
             // Attachments are single-use: remove the preview only after a
             // successful terminal event; errors and aborts remain retryable.
@@ -5651,6 +5660,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
         } else {
           hideAssistantTyping();
+          try { if (assistantNode) assistantNode.remove(); } catch (eAbortNode) {}
           S.messages.pop();
           removeLastUserMessage(messagesEl);
         }
@@ -6307,7 +6317,8 @@ function showChatMessages() {
           error.code === 'LOCAL_AI_UNSUPPORTED' ||
           error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
           error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED'
+          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ||
+          error.code === 'LOCAL_AI_INFERENCE_UNUSABLE'
         ));
         updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请切换到“在线 DeepSeek”' }, localDownloadCancelled ? 'cancelled' : (localIncompatible ? 'unsupported' : 'failed'));
         localDownloadController = null;
