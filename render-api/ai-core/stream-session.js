@@ -395,7 +395,7 @@ function getStreamSessions(supabase, userId, filters) {
 // ==================== Event persistence ====================
 
 var PERSISTABLE_EVENT_TYPES = new Set([
-  'accepted', 'planning', 'tool_start', 'tool_result',
+  'accepted', 'planning', 'status', 'tool_start', 'tool_result',
   'answer_start', 'answer_delta', 'operation_preview',
   'usage', 'warning', 'done', 'error', 'cancelled'
 ]);
