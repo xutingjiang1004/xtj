@@ -3135,6 +3135,42 @@ body.code-is-resizing *, body.code-is-resizing-row * {
   padding-right: 14px;
 }
 
+/* Final Code conversation layer: CJK-first typography and explicit contrast.
+   This is the single authority after the Claude inspiration stylesheet. */
+#panelCode .code-chat-message .msg-content {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif !important;
+  font-size: 15px !important;
+  line-height: 1.72 !important;
+  letter-spacing: 0.01em;
+  text-shadow: none;
+}
+
+#panelCode .code-chat-message.user .msg-content {
+  background: #e8e4da !important;
+  color: #26231d !important;
+  border-color: #cfc9bc !important;
+}
+
+#panelCode .code-chat-message.assistant .msg-content {
+  background: #ffffff !important;
+  color: #26231d !important;
+  border-color: #cbc7bd !important;
+}
+
+#panelCode .code-stream-status,
+#panelCode .code-stream-tool-summary,
+#panelCode .code-stream-tool-state,
+#panelCode .code-stream-usage,
+#panelCode .msg-time { color: #4c4942 !important; opacity: 1; }
+
+[data-theme="dark"] #panelCode .code-chat-message.user .msg-content { background: #353530 !important; color: #f8f8f2 !important; border-color: #56564e !important; }
+[data-theme="dark"] #panelCode .code-chat-message.assistant .msg-content { background: #2c2c2b !important; color: #f8f8f2 !important; border-color: #4e4e47 !important; }
+[data-theme="dark"] #panelCode .code-stream-status,
+[data-theme="dark"] #panelCode .code-stream-tool-summary,
+[data-theme="dark"] #panelCode .code-stream-tool-state,
+[data-theme="dark"] #panelCode .code-stream-usage,
+[data-theme="dark"] #panelCode .msg-time { color: #cbc9c0 !important; }
+
 /* Persistent, compact evidence trail for completed Code replies. */
 .code-chat-tool-trace {
   margin-top: 10px;
@@ -3175,3 +3211,4 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 .code-chat-tool-trace-name { color: var(--cw-text); font-weight: 600; }
 .code-chat-tool-trace-summary { color: var(--cw-text-secondary); margin-top: 2px; overflow-wrap: anywhere; }
 .code-chat-tool-trace-state { color: var(--cw-text-secondary); font-size: 11px; white-space: nowrap; }
+.code-chat-tool-trace-more { padding: 7px 0 1px; color: var(--cw-text-secondary); font-size: 11px; }

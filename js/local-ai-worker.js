@@ -30,6 +30,7 @@ function cleanMessages(messages) {
 // failure, so both AI and Code can stop the download UI and select the online
 // provider instead of leaving the user at an unusable error.
 function runtimeErrorCode(error) {
+  if (error && error.code === 'LOCAL_AI_INFERENCE_UNUSABLE') return error.code;
   const message = String(error && error.message || error || '');
   if (/maxStorageBuffersPerShaderStage|storage buffers? per shader stage|requested\s*=\s*10.*limit\s*=\s*8/i.test(message)) {
     return 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED';
@@ -41,6 +42,9 @@ function runtimeErrorCode(error) {
 }
 
 function runtimeErrorMessage(error, code) {
+  if (code === 'LOCAL_AI_INFERENCE_UNUSABLE') {
+    return '本地 Qwen 文件已加载，但此设备的 WebGPU/驱动无法完成实际推理。无需重新下载；请切换到“在线 DeepSeek”或更新浏览器与显卡驱动。';
+  }
   if (code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED') {
     return '此设备的 WebGPU 存储缓冲区限制不足，本地 Qwen 至少需要 10 个缓冲区。已停止本地初始化，请切换到“在线 DeepSeek”。';
   }
@@ -63,6 +67,32 @@ function preferredModelId() {
       return MODEL_ID;
     }).catch(function() { return MODEL_ID; });
   } catch (_) { return MODEL_ID; }
+}
+
+async function verifyInference(requestId) {
+  send('status', requestId, { status: 'warming' });
+  const chunks = await engine.chat.completions.create({
+    messages: [
+      { role: 'system', content: 'You are a concise assistant.' },
+      { role: 'user', content: 'Reply with OK.' }
+    ],
+    stream: true,
+    temperature: 0,
+    max_tokens: 4
+  });
+  let gotContent = false;
+  for await (const chunk of chunks) {
+    const delta = chunk && chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+    if (delta && delta.content) gotContent = true;
+  }
+  if (!gotContent) {
+    const error = new Error('WebGPU inference warmup produced no output');
+    error.code = 'LOCAL_AI_INFERENCE_UNUSABLE';
+    throw error;
+  }
+  // Current WebLLM exposes resetChat; retain a defensive guard for a custom
+  // compatible engine implementation while the output check remains required.
+  if (engine && typeof engine.resetChat === 'function') await engine.resetChat();
 }
 
 async function initialize(requestId) {
@@ -93,42 +123,49 @@ async function initialize(requestId) {
       }
     });
   }
-  // CreateMLCEngine covers both the first-run download and WebGPU setup. Do
-  // not announce "initializing" before that promise resolves: doing so made
-  // the page replace the long download timeout with a short init timeout.
-  try {
-    const preferred = preferredModelId();
-    const initialModelId = typeof preferred === 'string' ? preferred : await preferred;
-    if (initialModelId === COMPATIBILITY_MODEL_ID) {
+  // Keep the single-flight lock through the warm-up.  If it were released
+  // after CreateMLCEngine, a second caller could receive a false ready event
+  // while the first caller is still waiting for its first real token.
+  const initializationTask = (async function() {
+    try {
+      const preferred = preferredModelId();
+      const initialModelId = typeof preferred === 'string' ? preferred : await preferred;
+      if (initialModelId === COMPATIBILITY_MODEL_ID) {
+        send('progress', requestId, {
+          text: '检测到当前 WebGPU 不支持 shader-f16，正在使用本地 Qwen 兼容版…',
+          progress: 0,
+          timeElapsed: 0
+        });
+      }
+      engine = await createEngine(initialModelId);
+      activeModelId = initialModelId;
+      usingCompatibilityModel = initialModelId === COMPATIBILITY_MODEL_ID;
+    } catch (error) {
+      if (runtimeErrorCode(error) !== 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') throw error;
+      // This is deliberately a single fallback, not a retry loop. It uses a
+      // different MLC model library and quantization path, not another attempt
+      // to compile the failing q4f16 shader.
+      sentInitializing = false;
       send('progress', requestId, {
-        text: '检测到当前 WebGPU 不支持 shader-f16，正在使用本地 Qwen 兼容版…',
+        text: '检测到 q4f16 WebGPU shader 不兼容，正在切换本地 Qwen 兼容版…',
         progress: 0,
         timeElapsed: 0
       });
+      engine = await createEngine(COMPATIBILITY_MODEL_ID);
+      activeModelId = COMPATIBILITY_MODEL_ID;
+      usingCompatibilityModel = true;
     }
-    initializing = createEngine(initialModelId);
-    engine = await initializing;
-    activeModelId = initialModelId;
-    usingCompatibilityModel = initialModelId === COMPATIBILITY_MODEL_ID;
-  } catch (error) {
-    if (runtimeErrorCode(error) !== 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') throw error;
-    // This is deliberately a single fallback, not a retry loop. It uses a
-    // different MLC model library and quantization path, not another attempt
-    // to compile the failing q4f16 shader.
-    sentInitializing = false;
-    send('progress', requestId, {
-      text: '检测到 q4f16 WebGPU shader 不兼容，正在切换本地 Qwen 兼容版…',
-      progress: 0,
-      timeElapsed: 0
-    });
-    initializing = createEngine(COMPATIBILITY_MODEL_ID);
-    engine = await initializing;
-    activeModelId = COMPATIBILITY_MODEL_ID;
-    usingCompatibilityModel = true;
+    // Engine creation alone is not enough on some AMD/Chrome paths. Only mark
+    // ready after a tiny real prefill/decode succeeds.
+    await verifyInference(requestId);
+  }());
+  initializing = initializationTask;
+  try {
+    await initializationTask;
+    send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
   } finally {
-    initializing = null;
+    if (initializing === initializationTask) initializing = null;
   }
-  send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
 }
 
 self.onmessage = async function(event) {
