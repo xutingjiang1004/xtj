@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 构建一致性检查脚本
  * 
  * 检查:
@@ -32,9 +32,7 @@ const SOURCE_TO_MIN = {
   'js/ai-agent.js': 'js/ai-agent.min.js',
   'js/performance.js': 'js/performance.min.js',
   'js/config.js': 'js/config.min.js',
-  'js/local-ai-runtime.js': 'js/local-ai-runtime.min.js',
-  'js/local-ai-worker.js': 'js/local-ai-worker.min.js',
-  'js/admin/admin.js': 'js/admin/admin.min.js',
+   'js/admin/admin.js': 'js/admin/admin.min.js',
   'js/ai-core/errors.js': 'js/ai-core/errors.min.js',
   'js/ai-core/request-controller.js': 'js/ai-core/request-controller.min.js',
   'js/ai-core/transport.js': 'js/ai-core/transport.min.js',

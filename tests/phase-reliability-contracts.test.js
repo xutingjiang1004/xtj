@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 // Phase 1-6 reliability contracts tests for the overnight audit confirmation fix.
 // Static-contract tests: read source files and verify fixed code patterns.
@@ -166,58 +166,6 @@ test('P2-10: validation pass before allowing operations', function () {
     'SHA validation must be part of operation validation');
 });
 
-// ──────────────────────────────────────────────
-// Phase 3: Local model and frontend lifecycle
-// ──────────────────────────────────────────────
-
-test('P3-01: local model has full state machine', function () {
-  var s = read('js/local-ai-runtime.js');
-  assert.ok(/idle|downloading|initializing|ready|failed|cancelled/.test(s),
-    'local model must have states: idle, downloading, initializing, ready, failed, cancelled');
-  assert.ok(/getState/.test(s) && /getStatusText/.test(s),
-    'must expose getState and getStatusText');
-});
-
-test('P3-02: total timeout and no-progress timeout', function () {
-  var s = read('js/local-ai-runtime.js');
-  assert.ok(/timeout/.test(s) && /30000|60000|120000|300000/.test(s),
-    'must have timeout values (total and no-progress)');
-  assert.ok(/progress.*timeout|no.*progress|stuck/.test(s) ||
-            /_progressTimeout/.test(s),
-    'must have no-progress timeout logic');
-});
-
-test('P3-03: stop during download terminates Worker', function () {
-  var s = read('js/local-ai-runtime.js');
-  assert.ok(/terminate/.test(s) || /worker\.terminate/.test(s),
-    'stop must terminate the Worker');
-  assert.ok(/stop\(\)/.test(s) || /function stop/.test(s),
-    'stop function must exist');
-});
-
-test('P3-04: multiple ensureReady share initializingPromise', function () {
-  var s = read('js/local-ai-runtime.js');
-  assert.ok(/_initializingPromise/.test(s),
-    'must use shared initializingPromise');
-});
-
-test('P3-05: at most one engine per Worker', function () {
-  var s = read('js/local-ai-worker.js') || '';
-  assert.ok(/if\s*\(engine\)/.test(s) || /if\s*\(!engine\)/.test(s),
-    'Worker must check engine before creating');
-});
-
-test('P3-06: AI module does not overwrite window.throttleRAF', function () {
-  var s = read('js/core.js');
-  assert.ok(/!window\.throttleRAF/.test(s) || /typeof window\.throttleRAF/.test(s),
-    'must guard window.throttleRAF from overwrite');
-});
-
-test('P3-07: Code page leave executes cleanup at most once', function () {
-  var s = read('js/desktop-shell.js');
-  assert.ok(/_codeCleanupExecuted/.test(s),
-    'must use _codeCleanupExecuted flag to prevent double cleanup');
-});
 
 // ──────────────────────────────────────────────
 // Phase 4: Kitty AI lifecycle

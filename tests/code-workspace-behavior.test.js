@@ -63,7 +63,6 @@ test('Code streaming exposes a compact phase rail and terminalizes it', () => {
   assert.match(codeWorkspaceCss, /code-stream-content:empty::before[\s\S]{0,260}position: static !important/);
   assert.match(codeWorkspaceCss, /code-stream-content:empty::before[\s\S]{0,420}background: transparent !important/);
   assert.match(codeWorkspaceCss, /code-chat-input-area[\s\S]{0,220}background: var\(--cw-bg/);
-  assert.match(codeWorkspaceCss, /codeLocalModelSetupBtn|code-local-model-setup/);
 });
 
 test('Code streaming consumes server phase cursors and matches tool results by id or index', () => {
@@ -99,17 +98,6 @@ test('Code composer sends real model and thinking selections instead of hard-cod
   assert.doesNotMatch(codeWorkspace, /thinking_mode:\s*'high'/);
 });
 
-test('Code keeps the local Qwen choice and explicit setup path available without server models', () => {
-  assert.match(codeWorkspace, /function localCodeModelDescriptor\(\)/);
-  assert.match(codeWorkspace, /本地离线 · Qwen 2\.5 0\.5B（需下载）/);
-  assert.match(codeWorkspace, /codeLocalModelSetupBtn/);
-  assert.match(codeWorkspace, /ensureCodeLocalAiRuntime\(/);
-  assert.match(codeWorkspace, /state\.selectedModelId === localCodeModelId\(\)/);
-  assert.match(codeWorkspace, /getStatusSnapshot/);
-  assert.match(codeWorkspace, /localSnapshot\.errorMessage/);
-  assert.match(codeWorkspace, /data-error-code/);
-  assert.doesNotMatch(codeWorkspace, /if \(!state\.models\.length\) \{\s*modelSelect\.disabled = true/);
-});
 
 test('Code chat panel mounts once and keeps draft/input updates local', () => {
   assert.match(codeWorkspace, /if \(state\.composerMounted\) \{[\s\S]{0,180}syncChatMessages\(\)/);
