@@ -28,12 +28,18 @@ function runtimeErrorCode(error) {
   if (/maxStorageBuffersPerShaderStage|storage buffers? per shader stage|requested\s*=\s*10.*limit\s*=\s*8/i.test(message)) {
     return 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED';
   }
+  if (/Invalid ShaderModule|reshape\d*_kernel|WGSL|While validating compute stage|WebGPU.*validation/i.test(message)) {
+    return 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED';
+  }
   return 'LOCAL_AI_RUNTIME_ERROR';
 }
 
 function runtimeErrorMessage(error, code) {
   if (code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED') {
     return '此设备的 WebGPU 存储缓冲区限制不足，本地 Qwen 至少需要 10 个缓冲区。已停止本地初始化，请切换到“在线 DeepSeek”。';
+  }
+  if (code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') {
+    return '本地 Qwen 已下载，但此设备的 GPU 或驱动无法编译模型所需的 WebGPU shader。重新下载通常无效；请切换到“在线 DeepSeek”，或更新浏览器和显卡驱动后再试。';
   }
   return error && error.message ? error.message : '本地模型无法启动';
 }

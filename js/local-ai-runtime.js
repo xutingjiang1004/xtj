@@ -9,6 +9,7 @@
 
   // ── State machine ────────────────────────────────────────────────
   var _state = 'idle';         // idle | downloading | initializing | ready | failed | cancelled
+  var _lastErrorCode = '';
   var _stateChangedAt = 0;
   var _lastProgressTime = 0;
   var _lastProgressValue = 0;
@@ -44,6 +45,10 @@
 
   function getState() {
     return _state;
+  }
+
+  function getLastErrorCode() {
+    return _lastErrorCode;
   }
 
   function getAvailabilityState() {
@@ -277,6 +282,7 @@
 
   function failWithError(code, message) {
     if (_state === 'failed' || _state === 'cancelled') return;
+    _lastErrorCode = code || '';
     setState('failed');
     clearTimeouts();
     stopHeartbeat();
@@ -359,6 +365,7 @@
       if (data.type === 'error') {
         delete pending[data.requestId];
         var err = makeError(data.code || 'LOCAL_AI_RUNTIME_ERROR', data.message || '本地模型无法启动');
+        _lastErrorCode = err.code || '';
         task.reject(err);
         // If this was an init task, transition to failed
         if (task.kind === 'init') {
@@ -472,6 +479,7 @@
   function reset() {
     terminateWorker();
     _state = 'idle';
+    _lastErrorCode = '';
     _stateChangedAt = 0;
     _lastProgressTime = 0;
     _lastProgressValue = 0;
@@ -494,6 +502,7 @@
     stop: stop,
     reset: reset,
     getState: getState,
+    getLastErrorCode: getLastErrorCode,
     getAvailabilityState: getAvailabilityState,
     getStatusText: getStatusText,
     getProgressValue: getProgressValue,
