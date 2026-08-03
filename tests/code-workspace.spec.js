@@ -155,6 +155,58 @@ test.describe('Code Workspace', () => {
     await expect(page.locator('#desktopWorkbenchSidebar')).toBeHidden();
     await page.locator('.fold-workbench-nav-btn').click();
     await expect(page.locator('#desktopWorkbenchSidebar')).toBeVisible();
+
+    // Hiding the remaining chat pane must reveal the editor instead of
+    // persisting an all-hidden workspace with no recovery control.
+    await page.locator('.fold-chat-btn').click();
+    await expect(page.locator('.code-chat-panel')).toBeHidden();
+    await expect(page.locator('.code-editor-column')).toBeVisible();
+  });
+
+  test('Code repairs a persisted all-hidden layout instead of restoring an unclickable blank workspace', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('xtj_code_layout_v1', JSON.stringify({
+        sidebarWidth: 260,
+        chatWidth: 360,
+        contextHeight: 180,
+        sidebarCollapsed: true,
+        editorCollapsed: true,
+        workbenchNavCollapsed: false,
+        chatCollapsed: true,
+        contextCollapsed: false,
+        maximizedPanel: null
+      }));
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'layout-recovery.js',
+        getFile: async () => new File(['export const recovery = true;'], 'layout-recovery.js', { type: 'text/javascript' })
+      }];
+    });
+
+    await page.locator('#codeWelcomeFileBtn').click();
+    await expect(page.locator('.code-workspace')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.code-editor-column')).toBeVisible();
+    await expect(page.locator('.code-chat-panel')).toBeVisible();
+
+    const repaired = await page.evaluate(() => JSON.parse(localStorage.getItem('xtj_code_layout_v1')));
+    expect(repaired.editorCollapsed).toBe(false);
+    expect(repaired.chatCollapsed).toBe(false);
+  });
+
+  test('opening Code clears an AI overlay even if its lazy close handler is stale', async ({ page }) => {
+    await page.locator('button[data-desktop-tab="posts"]').click();
+    await page.evaluate(() => {
+      const overlay = document.getElementById('panelAiChat');
+      overlay.classList.remove('hidden');
+      overlay.classList.add('active');
+      overlay.setAttribute('aria-hidden', 'false');
+      window.__xtjAiChatActive = true;
+      window.__xtjCloseAiChat = function() {};
+    });
+
+    await page.locator('button[data-desktop-tab="code"]').click();
+    await expect(page.locator('#panelAiChat')).toBeHidden();
+    await expect(page.locator('#panelCode')).toBeVisible();
   });
 
   test('should intercept 500 API errors and show toast', async ({ page }, testInfo) => {

@@ -5,6 +5,9 @@
   window.__xtjDesktopShellBound = true;
 
   function openTab(tab) {
+    if (tab === 'code' && typeof window.__xtjCancelPendingAiChatOpen === 'function') {
+      window.__xtjCancelPendingAiChatOpen();
+    }
     // When leaving Code panel, call cleanup
     var currentPanel = document.querySelector('.dock-panel.active:not(.hidden)');
     var currentIsCode = currentPanel && currentPanel.id === 'panelCode';
@@ -28,6 +31,18 @@
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
       window.__xtjCloseAiChat();
+    }
+    // The lazy AI launcher may still be loading when no close handler has
+    // been installed yet. Code must never remain underneath that overlay.
+    if (tab === 'code' && aiPanel) {
+      aiPanel.classList.add('hidden');
+      aiPanel.classList.remove('active', 'is-entering', 'is-leaving');
+      aiPanel.setAttribute('aria-hidden', 'true');
+      window.__xtjAiChatActive = false;
+      if (window.XTJSecondaryPageState && typeof window.XTJSecondaryPageState.close === 'function') {
+        window.XTJSecondaryPageState.close('ai-chat');
+      }
+      if (typeof window.restoreMainNavigationState === 'function') window.restoreMainNavigationState();
     }
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });

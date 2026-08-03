@@ -494,6 +494,14 @@ test('Code restores a safe welcome screen when synchronous workspace rendering f
   assert.match(codeWorkspace, /var tabRestore = restoreTabs\(\);[\s\S]*?tabRestore\.catch\(function \(error\)/);
 });
 
+test('Code layout repair prevents persisted pane-collapse states from hiding every recovery control', () => {
+  assert.match(codeWorkspace, /function normalizeLayoutState\(\)/);
+  assert.match(codeWorkspace, /_layoutState\.editorCollapsed && _layoutState\.chatCollapsed/);
+  assert.match(codeWorkspace, /repaired = normalizeLayoutState\(\);[\s\S]*?saveLayoutConfig\(\)/);
+  assert.match(codeWorkspace, /if \(_layoutState\.editorCollapsed\) _layoutState\.chatCollapsed = false/);
+  assert.match(codeWorkspace, /if \(_layoutState\.chatCollapsed\) _layoutState\.editorCollapsed = false/);
+});
+
 test('three-column layout: sidebar, editor-column, and chat-panel are separate children', () => {
   assert.match(codeWorkspace, /code-sidebar/);
   assert.match(codeWorkspace, /code-editor-column/);
@@ -1017,6 +1025,20 @@ test('desktop-shell openTab does not modify other navigation', () => {
   assert.match(desktopShell, /switchDockTab\(tab/);
   // openTab should still handle AI chat close
   assert.match(desktopShell, /__xtjCloseAiChat/);
+});
+
+test('entering Code cancels a stale lazy AI opener and hides its overlay', () => {
+  assert.match(coreSource, /__xtjCancelPendingAiChatOpen/);
+  assert.match(coreSource, /_aiChatOpenGeneration/);
+  assert.match(coreSource, /openGeneration !== _aiChatOpenGeneration/);
+  assert.match(desktopShell, /tab === 'code' && typeof window\.__xtjCancelPendingAiChatOpen === 'function'/);
+  assert.match(desktopShell, /aiPanel\.classList\.add\('hidden'\)/);
+});
+
+test('WebGPU shader incompatibility switches Code away from a non-retryable local model', () => {
+  assert.match(codeWorkspace, /LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED/);
+  assert.match(codeWorkspace, /retryable: !localIncompatible/);
+  assert.match(coreSource, /__xtjCancelPendingAiChatOpen/);
 });
 
 // ============================================================
