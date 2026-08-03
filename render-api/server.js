@@ -231,7 +231,7 @@ function getDeepSeekProbeSnapshot() {
   return {
     fetchedAt: deepseekModelCatalog.fetchedAt || 0,
     status: deepseekModelCatalog.status || 'idle',
-    error: deepseekModelCatalog.error || '',
+    errMsg: deepseekModelCatalog.error || '',
     models: Array.isArray(deepseekModelCatalog.models) ? deepseekModelCatalog.models.slice() : [],
     preferred_model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
   };
