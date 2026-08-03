@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -1035,11 +1035,6 @@ test('entering Code cancels a stale lazy AI opener and hides its overlay', () =>
   assert.match(desktopShell, /aiPanel\.classList\.add\('hidden'\)/);
 });
 
-test('WebGPU shader incompatibility switches Code away from a non-retryable local model', () => {
-  assert.match(codeWorkspace, /LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED/);
-  assert.match(codeWorkspace, /retryable: !localIncompatible/);
-  assert.match(coreSource, /__xtjCancelPendingAiChatOpen/);
-});
 
 // ============================================================
 // ★ 真实行为测试 — cleanup 是幂等的

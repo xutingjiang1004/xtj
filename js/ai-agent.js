@@ -5677,71 +5677,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, true);
   }
 
-  async function handleLocalAiMessage(input, messagesEl) {
-    var runtime = window.__xtjLocalAI;
-    var text = String(input.value || '').trim();
-    if (!runtime || !text) return;
-    if (S.sending) return;
-    if (_aiChatFileData) {
-      notify('本地离线模式暂不支持附件，请移除附件后发送。', 'info');
-      return;
-    }
-    if (!runtime.isSupported()) {
-      notify('当前浏览器不支持本地模型：请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。', 'error');
-      return;
-    }
-    var confirmed = false;
-    try { confirmed = localStorage.getItem('xtj_local_model_confirmed') === '1'; } catch (e) {}
-    if (!confirmed) {
-      if (!confirm('首次使用会下载约 1GB 的 Qwen 0.5B 模型到此浏览器；下载完成后可离线问答。是否继续？')) return;
-      try { localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
-    }
-
-    S.sending = true;
-    var controller = new AbortController();
-    S.abortController = controller;
-    var nowIso = new Date().toISOString();
-    var userMsg = { role: 'user', content: text, created_at: nowIso, local: true };
-    S.messages.push(userMsg);
-    appendMessage(messagesEl, userMsg);
-    input.value = '';
-    input.style.height = 'auto';
-    updateInputMetrics();
-
-    var assistantMsg = { role: 'assistant', content: '', created_at: nowIso, local: true };
-    var assistantNode = appendMessage(messagesEl, assistantMsg);
-    var bubble = assistantNode && assistantNode.querySelector('.ai-msg-bubble');
-    var answer = '';
-    try {
-      await runtime.streamChat(S.messages.slice(-9).map(function(message) {
-        return { role: message.role, content: message.content };
-      }), {
-        signal: controller.signal,
-        onProgress: function(progress) {
-          if (bubble && !answer) bubble.textContent = progress.text || '正在准备本地模型…';
-        },
-        onDelta: function(delta) {
-          answer += delta;
-          assistantMsg.content = answer;
-          if (bubble) bubble.innerHTML = renderMarkdown(answer);
-          scrollToBottom(messagesEl, true);
-        }
-      });
-      if (!answer) throw new Error('本地模型未返回内容，请重试。');
-      S.messages.push(assistantMsg);
-    } catch (error) {
-      if (assistantNode && assistantNode.parentNode) assistantNode.parentNode.removeChild(assistantNode);
-      var message = error && error.code === 'ABORTED' ? '已停止本地回答。' : ('本地模型不可用：' + (error && error.message || '请稍后重试。'));
-      var errorMsg = { role: 'assistant', content: message, created_at: new Date().toISOString(), error: true, local: true };
-      S.messages.push(errorMsg);
-      appendMessage(messagesEl, errorMsg);
-    } finally {
-      S.sending = false;
-      S.abortController = null;
-      scrollToBottom(messagesEl, true);
-    }
-  }
-
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;
@@ -6172,30 +6107,12 @@ function showChatMessages() {
     var modelSelectorWrap = el('div', { class: 'ai-chat-model-selector-wrap', style: 'padding: 8px 12px 0 12px;' });
     var modelSelector = el('select', { class: 'ai-chat-model-selector', style: 'padding: 4px; border: 1px solid var(--border, #ccc); border-radius: 4px; background: var(--bg, #fff); color: var(--text, #333);' });
     modelSelector.appendChild(el('option', { value: 'online', text: '在线 DeepSeek' }));
-    if (window.__xtjLocalAI) {
-      modelSelector.appendChild(el('option', { value: window.__xtjLocalAI.LOCAL_MODEL_ID, text: window.__xtjLocalAI.getModelDescriptor().name }));
-    }
+    
     var savedAiModel = '';
     try { savedAiModel = localStorage.getItem('xtj_ai_model'); } catch (e) {}
     if (savedAiModel) {
       modelSelector.value = savedAiModel;
     }
-    var localBadge = el('span', { class: 'ai-chat-local-badge', style: 'display:none; font-size:11px; padding:2px 6px; background:#e0f2f1; color:#00695c; border-radius:4px; margin-left:8px; vertical-align:middle;', text: '本地离线' });
-    var localSetupButton = el('button', { type: 'button', class: 'ai-chat-local-setup', style: 'margin-left:8px;padding:3px 7px;border:1px solid #7bc9b6;border-radius:4px;background:#f4fffb;color:#087b62;font-size:11px;cursor:pointer;', text: '下载本地 Qwen（约 1GB）' });
-    var localProgress = el('div', { class: 'ai-chat-local-progress', role: 'status', 'aria-live': 'polite' });
-    localProgress.hidden = true;
-    var localProgressLine = el('div', { class: 'ai-chat-local-progress-line' });
-    var localProgressText = el('span', { class: 'ai-chat-local-progress-text', text: '准备下载本地 Qwen' });
-    var localProgressValue = el('span', { class: 'ai-chat-local-progress-value', text: '0%' });
-    var localProgressTrack = el('div', { class: 'ai-chat-local-progress-track' });
-    var localProgressFill = el('div', { class: 'ai-chat-local-progress-fill' });
-    var localProgressDetail = el('div', { class: 'ai-chat-local-progress-detail', text: '等待开始' });
-    localProgressLine.appendChild(localProgressText);
-    localProgressLine.appendChild(localProgressValue);
-    localProgressTrack.appendChild(localProgressFill);
-    localProgress.appendChild(localProgressLine);
-    localProgress.appendChild(localProgressTrack);
-    localProgress.appendChild(localProgressDetail);
     modelSelectorWrap.appendChild(modelSelector);
 
     var responseProfileSelector = el('select', {
@@ -6216,127 +6133,10 @@ function showChatMessages() {
       try { localStorage.setItem('xtj_ai_response_profile', S.responseProfile); } catch (eSaveProfile) {}
     });
     modelSelectorWrap.appendChild(responseProfileSelector);
-    modelSelectorWrap.appendChild(localBadge);
-    modelSelectorWrap.appendChild(localSetupButton);
-    modelSelectorWrap.appendChild(localProgress);
-    var localDownloadController = null;
-    var localDownloadRuntime = null;
-
-    function updateLocalProgress(runtime, info, forceState) {
-      if (!runtime) {
-        localProgress.hidden = true;
-        return;
-      }
-      var localState = forceState || (typeof runtime.getState === 'function' ? runtime.getState() : 'idle');
-      var rawProgress = info && info.progress;
-      if (rawProgress === undefined && typeof runtime.getProgressValue === 'function') rawProgress = runtime.getProgressValue();
-      var progress = Number(rawProgress);
-      progress = isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-      var hasProgress = info && info.hasProgress;
-      if (hasProgress === undefined && typeof runtime.hasProgressValue === 'function') hasProgress = runtime.hasProgressValue();
-      if (hasProgress === undefined) hasProgress = progress > 0;
-      var isActive = localState === 'downloading' || localState === 'initializing';
-      var isResult = localState === 'ready' || localState === 'failed' || localState === 'cancelled' || localState === 'unsupported';
-      localProgress.hidden = !isActive && !isResult;
-      localProgress.dataset.state = localState;
-      localProgressFill.style.width = (hasProgress ? Math.round(progress * 100) : 0) + '%';
-      localProgressValue.textContent = hasProgress && progress > 0 ? Math.round(progress * 100) + '%' : '准备中';
-      if (localState === 'downloading') localProgressText.textContent = '正在下载本地 Qwen';
-      else if (localState === 'initializing') localProgressText.textContent = '下载完成，正在初始化本地 Qwen';
-      else if (localState === 'ready') localProgressText.textContent = '本地 Qwen 已就绪';
-      else if (localState === 'failed') localProgressText.textContent = '本地 Qwen 准备失败';
-      else if (localState === 'cancelled') localProgressText.textContent = '本地 Qwen 下载已取消';
-      else if (localState === 'unsupported') localProgressText.textContent = '此设备不兼容本地 Qwen';
-      var detail = info && info.text;
-      if (!detail && typeof runtime.getProgressText === 'function') detail = runtime.getProgressText();
-      var elapsedSeconds = info && Number(info.timeElapsed);
-      if (!isFinite(elapsedSeconds) && typeof runtime.getElapsedSeconds === 'function') elapsedSeconds = Number(runtime.getElapsedSeconds());
-      if (isActive && isFinite(elapsedSeconds) && elapsedSeconds > 0) detail = String(detail || '正在获取模型文件，请保持页面打开') + ' · 已用 ' + Math.floor(elapsedSeconds) + ' 秒';
-      localProgressDetail.textContent = String(detail || (isActive ? '正在获取模型文件，请保持页面打开' : ''));
-      if (localState === 'ready') localProgressValue.textContent = '完成';
-    }
-    
-    function updateLocalBadge() {
-      var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
-      localBadge.style.display = isLocal ? 'inline-block' : 'none';
-      responseProfileSelector.disabled = isLocal;
-      if (isLocal) responseProfileSelector.title = '本地 Qwen 目前使用本地快速回复；增强思考需要在线工具。';
-      else responseProfileSelector.title = '增强思考会先梳理问题，必要时联网查证；不会进入深度研究。';
-      if (!isLocal) localProgress.hidden = true;
-      if (isLocal && deepThinkBtn) deepThinkBtn.style.display = 'none';
-      else if (deepThinkBtn) deepThinkBtn.style.display = '';
-    }
     modelSelector.addEventListener('change', function() {
       try { localStorage.setItem('xtj_ai_model', modelSelector.value); } catch (e) {}
-      updateLocalBadge();
+  
     });
-    localSetupButton.addEventListener('click', function() {
-      if (localDownloadController) {
-        try { localDownloadController.abort(); } catch (_) {}
-        if (localDownloadRuntime && typeof localDownloadRuntime.stop === 'function') {
-          try { localDownloadRuntime.stop(); } catch (_) {}
-        }
-        return;
-      }
-      if (typeof window.__xtjEnsureLocalAI !== 'function') {
-        notify('本地 Qwen 运行时加载器不可用，请刷新页面后重试。', 'error');
-        return;
-      }
-      localDownloadController = new AbortController();
-      localSetupButton.disabled = false;
-      localSetupButton.textContent = '正在准备本地 Qwen…';
-      window.__xtjEnsureLocalAI().then(function(runtime) {
-        localDownloadRuntime = runtime;
-        if (!runtime.isSupported()) throw new Error('当前浏览器不支持 WebGPU；请使用最新版 Edge 或 Chrome，并通过 HTTPS 打开网站。');
-        if (typeof runtime.onStatusChange === 'function' && !runtime.__xtjAiAgentProgressBound) {
-          runtime.__xtjAiAgentProgressBound = true;
-          runtime.onStatusChange(function(info) { updateLocalProgress(runtime, info); });
-        }
-        var localOption = modelSelector.querySelector('option[value="' + runtime.LOCAL_MODEL_ID + '"]');
-        if (!localOption) modelSelector.appendChild(el('option', { value: runtime.LOCAL_MODEL_ID, text: runtime.getModelDescriptor().name }));
-        modelSelector.value = runtime.LOCAL_MODEL_ID;
-        try { localStorage.setItem('xtj_ai_model', runtime.LOCAL_MODEL_ID); localStorage.setItem('xtj_local_model_confirmed', '1'); } catch (e) {}
-        updateLocalBadge();
-        return runtime.ensureReady({ signal: localDownloadController.signal, onProgress: function(progress) {
-          updateLocalProgress(runtime, progress);
-          localSetupButton.textContent = '下载中 ' + Math.round((progress && progress.progress || 0) * 100) + '%';
-        } });
-      }).then(function() {
-        localDownloadController = null;
-        localDownloadRuntime = null;
-        updateLocalProgress(window.__xtjLocalAI, null, 'ready');
-        localSetupButton.textContent = '本地 Qwen 已就绪';
-        notify('本地 Qwen 已就绪，可以离线使用。', 'success');
-      }).catch(function(error) {
-        var localDownloadCancelled = !!(error && (
-          error.code === 'LOCAL_AI_CANCELLED' ||
-          error.code === 'ABORTED' ||
-          error.name === 'AbortError'
-        ));
-        var localIncompatible = !!(error && (
-          error.code === 'LOCAL_AI_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE' ||
-          error.code === 'LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ||
-          error.code === 'LOCAL_AI_INFERENCE_UNUSABLE'
-        ));
-        updateLocalProgress(window.__xtjLocalAI, { text: (error && error.message) || '请切换到“在线 DeepSeek”' }, localDownloadCancelled ? 'cancelled' : (localIncompatible ? 'unsupported' : 'failed'));
-        localDownloadController = null;
-        localDownloadRuntime = null;
-        if (localIncompatible) {
-          modelSelector.value = 'online';
-          try { localStorage.setItem('xtj_ai_model', 'online'); } catch (e) {}
-          updateLocalBadge();
-          localSetupButton.disabled = true;
-          localSetupButton.textContent = '此设备不支持本地 Qwen';
-        } else {
-          localSetupButton.disabled = false;
-          localSetupButton.textContent = '下载本地 Qwen（约 1GB）';
-        }
-        if (!localDownloadCancelled) notify((error && error.message) || (localIncompatible ? '此设备不支持本地 Qwen，已切换到在线 DeepSeek。' : '本地 Qwen 准备失败，请重试。'), 'error');
-      });
-    });
-    updateLocalBadge();
     root.appendChild(modelSelectorWrap);
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
@@ -6401,14 +6201,8 @@ function showChatMessages() {
           fileInput.value = '';
         };
       }
-      var isLocal = window.__xtjLocalAI && modelSelector.value === window.__xtjLocalAI.LOCAL_MODEL_ID;
-      if (isLocal) {
-        handleLocalAiMessage(input, messagesEl);
-      } else {
-        handleSendMessage(input, sendBtn, messagesEl, fileData);
-      }
+            handleSendMessage(input, sendBtn, messagesEl, fileData);
     }
-
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending && !S.paused) return;
