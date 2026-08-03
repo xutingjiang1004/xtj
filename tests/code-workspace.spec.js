@@ -142,25 +142,64 @@ test.describe('Code Workspace', () => {
     await page.locator('button[data-desktop-tab="code"]').click();
     await page.locator('#codeWelcomeFileBtn').click();
     await expect(page.locator('.code-chat-panel')).toBeVisible({ timeout: 10000 });
+    const selectLayoutAction = async (action) => {
+      await page.locator('.code-layout-menu-trigger').click();
+      await expect(page.locator('#codeLayoutMenu')).toBeVisible();
+      await page.locator('[data-code-layout-action="' + action + '"]').click();
+      await expect(page.locator('#codeLayoutMenu')).toBeHidden();
+    };
 
-    await page.locator('.fold-directory-from-chat-btn').click();
+    await selectLayoutAction('sidebar');
     await expect(page.locator('.code-sidebar')).toBeHidden();
 
-    await page.locator('.fold-editor-from-chat-btn').click();
+    await selectLayoutAction('editor');
     await expect(page.locator('.code-editor-column')).toBeHidden();
     await expect(page.locator('.code-chat-panel')).toBeVisible();
 
-    await page.locator('.fold-workbench-nav-btn').click();
+    await selectLayoutAction('nav');
     await expect(page.locator('html')).toHaveClass(/code-workbench-nav-collapsed/);
     await expect(page.locator('#desktopWorkbenchSidebar')).toBeHidden();
-    await page.locator('.fold-workbench-nav-btn').click();
+    await selectLayoutAction('nav');
     await expect(page.locator('#desktopWorkbenchSidebar')).toBeVisible();
 
     // Hiding the remaining chat pane must reveal the editor instead of
     // persisting an all-hidden workspace with no recovery control.
-    await page.locator('.fold-chat-btn').click();
+    await selectLayoutAction('chat');
     await expect(page.locator('.code-chat-panel')).toBeHidden();
     await expect(page.locator('.code-editor-column')).toBeVisible();
+  });
+
+  test('Code layout menu is keyboard-accessible and recovery restores a usable focused workspace', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.showOpenFilePicker = async () => [{
+        kind: 'file',
+        name: 'recovery-focus.js',
+        getFile: async () => new File(['export const recovery = true;'], 'recovery-focus.js', { type: 'text/javascript' })
+      }];
+    });
+    await page.setViewportSize({ width: 900, height: 760 });
+    await page.goto('/');
+    await page.locator('button[data-desktop-tab="code"]').click();
+    await page.locator('#codeWelcomeFileBtn').click();
+    const trigger = page.locator('.code-layout-menu-trigger');
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#codeLayoutMenu')).toBeVisible();
+    await expect(page.locator('#codeLayoutMenu [role="menuitem"]').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#codeLayoutMenu')).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await page.locator('[data-code-layout-action="chat"]').click();
+    const recovery = page.locator('.code-layout-recovery button');
+    await expect(recovery).toBeVisible();
+    await recovery.click();
+    await expect(page.locator('.code-sidebar')).toBeVisible();
+    await expect(page.locator('.code-editor-column')).toBeVisible();
+    await expect(page.locator('.code-chat-panel')).toBeVisible();
+    await expect(page.locator('.code-layout-recovery')).toBeHidden();
+    await expect(page.locator('#codeChatInput')).toBeFocused();
   });
 
   test('Code repairs a persisted all-hidden layout instead of restoring an unclickable blank workspace', async ({ page }) => {
