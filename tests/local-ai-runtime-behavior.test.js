@@ -245,16 +245,27 @@ test('local worker classifies WebGPU storage-buffer initialization failures as u
   assert.match(harness.messages[1].message, /本地 Qwen.*在线 DeepSeek/);
 });
 
-test('local worker classifies Qwen shader pipeline validation failures as unsupported', async () => {
-  const harness = createWorkerHarness(async function () {
-    throw new Error('Invalid ShaderModule (unlabeled) is invalid due to a previous error. While validating compute stage ([Invalid ShaderModule], entryPoint: "reshape1_kernel").');
+test('local worker retries a Qwen q4f16 shader pipeline failure once with the q4f32 compatibility model', async () => {
+  const requestedModels = [];
+  const fallbackEngine = createChatEngine([]);
+  const harness = createWorkerHarness(async function (modelId) {
+    requestedModels.push(modelId);
+    if (modelId === 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC') {
+      throw new Error('Invalid ShaderModule (unlabeled) is invalid due to a previous error. While validating compute stage ([Invalid ShaderModule], entryPoint: "reshape1_kernel").');
+    }
+    return fallbackEngine;
   });
 
   await harness.self.onmessage({ data: { type: 'init', requestId: 'shader-failure' } });
-  const error = harness.messages.find(message => message.type === 'error');
-  assert.ok(error);
-  assert.equal(error.code, 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED');
-  assert.match(error.message, /GPU.*driver|GPU.*驱动|驱动/);
+  assert.deepEqual(requestedModels, [
+    'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
+    'Qwen2.5-0.5B-Instruct-q4f32_1-MLC'
+  ]);
+  const ready = harness.messages.find(message => message.type === 'ready');
+  assert.ok(ready);
+  assert.equal(ready.modelId, 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC');
+  assert.equal(ready.compatibilityFallback, true);
+  assert.equal(harness.messages.some(message => message.type === 'error'), false);
 });
 
 test('local runtime exposes unsupported and not_downloaded availability states', async () => {

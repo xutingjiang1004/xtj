@@ -5283,7 +5283,7 @@
       var localErrorCode = localRuntime && typeof localRuntime.getLastErrorCode === 'function' ? localRuntime.getLastErrorCode() : '';
       var localHardwareUnsupported = /^(LOCAL_AI_UNSUPPORTED|LOCAL_AI_WEBGPU_ADAPTER_UNAVAILABLE|LOCAL_AI_WEBGPU_LIMIT_UNSUPPORTED|LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED)$/.test(localErrorCode);
       localSetupButton.disabled = localHardwareUnsupported || ((localState === 'downloading' || localState === 'initializing') && !state._localDownloadController);
-      localSetupButton.textContent = localHardwareUnsupported ? '此设备不支持本地 Qwen' : (state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
+      localSetupButton.textContent = localHardwareUnsupported ? (localErrorCode === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED' ? '当前运行时不兼容' : '此设备不支持本地 Qwen') : (state._localDownloadController ? '取消本地 Qwen 下载' : (localState === 'downloading' ? ('下载中 ' + Math.round(localRuntime.getProgressValue() * 100) + '%') :
         (localState === 'initializing' ? '准备中…' : (localState === 'ready' ? '本地 Qwen 已就绪' : '下载本地 Qwen（约 1GB）'))));
     }
     if (thinkingSelect) {

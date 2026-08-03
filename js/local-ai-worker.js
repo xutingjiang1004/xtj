@@ -3,8 +3,14 @@
 import * as webllm from '/vendor/webllm/index.js';
 
 const MODEL_ID = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
+// AMD GCN4 in Chrome exposes WebGPU but not shader-f16.  The q4f32 MLC
+// library keeps the same Qwen capability while avoiding the q4f16 shader
+// family that can fail at reshape1_kernel during engine initialization.
+const COMPATIBILITY_MODEL_ID = 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC';
 let engine = null;
 let initializing = null;
+let activeModelId = MODEL_ID;
+let usingCompatibilityModel = false;
 
 function send(type, requestId, payload) {
   self.postMessage(Object.assign({ type: type, requestId: requestId }, payload || {}));
@@ -39,42 +45,66 @@ function runtimeErrorMessage(error, code) {
     return '此设备的 WebGPU 存储缓冲区限制不足，本地 Qwen 至少需要 10 个缓冲区。已停止本地初始化，请切换到“在线 DeepSeek”。';
   }
   if (code === 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') {
-    return '本地 Qwen 已下载，但此设备的 GPU 或驱动无法编译模型所需的 WebGPU shader。重新下载通常无效；请切换到“在线 DeepSeek”，或更新浏览器和显卡驱动后再试。';
+    return '本地 Qwen 已下载，但当前 WebLLM 运行时与此浏览器的 WebGPU shader 编译路径不兼容。此问题不代表电脑性能不足；请切换到“在线 DeepSeek”。系统升级后的新版运行时可再次尝试，无需重复下载模型。';
   }
   return error && error.message ? error.message : '本地模型无法启动';
 }
 
 async function initialize(requestId) {
   if (engine) {
-    send('ready', requestId, { modelId: MODEL_ID });
+    send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
     return;
   }
   if (initializing) {
     await initializing;
-    send('ready', requestId, { modelId: MODEL_ID });
+    send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
     return;
   }
   send('status', requestId, { status: 'loading' });
   let sentInitializing = false;
-  initializing = webllm.CreateMLCEngine(MODEL_ID, {
-    initProgressCallback: function(progress) {
-      const ratio = Number(progress && progress.progress || 0);
-      if (!sentInitializing && ratio >= 0.999) {
-        sentInitializing = true;
-        send('status', requestId, { status: 'initializing' });
+  function createEngine(modelId) {
+    return webllm.CreateMLCEngine(modelId, {
+      initProgressCallback: function(progress) {
+        const ratio = Number(progress && progress.progress || 0);
+        if (!sentInitializing && ratio >= 0.999) {
+          sentInitializing = true;
+          send('status', requestId, { status: 'initializing' });
+        }
+        send('progress', requestId, {
+          text: String(progress && progress.text || '正在准备本地模型'),
+          progress: ratio,
+          timeElapsed: Number(progress && progress.timeElapsed) || 0
+        });
       }
-      send('progress', requestId, {
-        text: String(progress && progress.text || '正在准备本地模型'),
-        progress: ratio,
-        timeElapsed: Number(progress && progress.timeElapsed) || 0
-      });
-    }
-  });
+    });
+  }
   // CreateMLCEngine covers both the first-run download and WebGPU setup. Do
   // not announce "initializing" before that promise resolves: doing so made
   // the page replace the long download timeout with a short init timeout.
-  engine = await initializing.finally(function() { initializing = null; });
-  send('ready', requestId, { modelId: MODEL_ID });
+  try {
+    initializing = createEngine(MODEL_ID);
+    engine = await initializing;
+    activeModelId = MODEL_ID;
+    usingCompatibilityModel = false;
+  } catch (error) {
+    if (runtimeErrorCode(error) !== 'LOCAL_AI_WEBGPU_SHADER_UNSUPPORTED') throw error;
+    // This is deliberately a single fallback, not a retry loop. It uses a
+    // different MLC model library and quantization path, not another attempt
+    // to compile the failing q4f16 shader.
+    sentInitializing = false;
+    send('progress', requestId, {
+      text: '检测到 q4f16 WebGPU shader 不兼容，正在切换本地 Qwen 兼容版…',
+      progress: 0,
+      timeElapsed: 0
+    });
+    initializing = createEngine(COMPATIBILITY_MODEL_ID);
+    engine = await initializing;
+    activeModelId = COMPATIBILITY_MODEL_ID;
+    usingCompatibilityModel = true;
+  } finally {
+    initializing = null;
+  }
+  send('ready', requestId, { modelId: activeModelId, compatibilityFallback: usingCompatibilityModel });
 }
 
 self.onmessage = async function(event) {

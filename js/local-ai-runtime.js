@@ -10,6 +10,8 @@
   // ── State machine ────────────────────────────────────────────────
   var _state = 'idle';         // idle | downloading | initializing | ready | failed | cancelled
   var _lastErrorCode = '';
+  var _activeModelId = MODEL_ID;
+  var _usingCompatibilityModel = false;
   var _stateChangedAt = 0;
   var _lastProgressTime = 0;
   var _lastProgressValue = 0;
@@ -230,8 +232,8 @@
   function descriptor() {
     return {
       id: 'local-qwen2.5-0.5b',
-      name: '本地离线 · Qwen 2.5 0.5B',
-      description: '首次联网下载约 1GB；下载后可离线纯文本问答，不调用工具或文件。',
+      name: _usingCompatibilityModel ? '本地离线 · Qwen 2.5 0.5B（兼容版）' : '本地离线 · Qwen 2.5 0.5B',
+      description: _usingCompatibilityModel ? '已自动切换到 q4f32 WebGPU 兼容模型；下载后可离线纯文本问答，不调用工具或文件。' : '首次联网下载约 1GB；下载后可离线纯文本问答，不调用工具或文件。',
       supports_tools: false,
       supports_thinking: false,
       supported_thinking_modes: ['off'],
@@ -346,6 +348,8 @@
       if (data.type === 'delta' && task.onDelta) task.onDelta(data.content || '');
       if (data.type === 'ready') {
         ready = true;
+        _activeModelId = data.modelId || MODEL_ID;
+        _usingCompatibilityModel = !!data.compatibilityFallback;
         setState('ready');
         clearTimeouts();
         startHeartbeat();
@@ -480,6 +484,8 @@
     terminateWorker();
     _state = 'idle';
     _lastErrorCode = '';
+    _activeModelId = MODEL_ID;
+    _usingCompatibilityModel = false;
     _stateChangedAt = 0;
     _lastProgressTime = 0;
     _lastProgressValue = 0;
@@ -503,6 +509,8 @@
     reset: reset,
     getState: getState,
     getLastErrorCode: getLastErrorCode,
+    getActiveModelId: function() { return _activeModelId; },
+    isUsingCompatibilityModel: function() { return _usingCompatibilityModel; },
     getAvailabilityState: getAvailabilityState,
     getStatusText: getStatusText,
     getProgressValue: getProgressValue,
