@@ -143,6 +143,9 @@
           if (!resolved) {
             resolved = true;
             console.error('[CODE-IDB] Open timeout after 3s');
+            // 必须清空 _dbOpenPromise：否则后续 openDB() 会一直复用这个已
+            // reject 的 Promise，IndexedDB 永久不可用（无法重连）
+            _dbOpenPromise = null;
             reject(new Error('[IndexedDB.open] Timeout'));
           }
         }, 3000);

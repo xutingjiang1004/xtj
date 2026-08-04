@@ -6317,11 +6317,13 @@
     }
 
     // Build history WITHOUT the current message (dedup)
+    // 只跳过 assistant 的错误/停止占位消息；user 消息保留，让 AI 仍能理解
+    // 用户之前问过什么（否则失败后重发会丢失错误上下文）
     var historyMsgs = [];
     var recentMsgs = state.messages.slice(0, -1).slice(-50);
     for (var mi = 0; mi < recentMsgs.length; mi++) {
       var m = recentMsgs[mi];
-      if (m.errorCode || m.retryable || m.stopped || !m.content || m.content === '（已停止）' || m.content === '（无响应）') {
+      if (m.role === 'assistant' && (m.errorCode || m.retryable || m.stopped || !m.content || m.content === '（已停止）' || m.content === '（无响应）')) {
         continue;
       }
       historyMsgs.push({ role: m.role, content: m.content });
