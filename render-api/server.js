@@ -13851,8 +13851,15 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 // POST /api/agent/chat
 app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
-  req.on('aborted', function() { aborted = true; });
-  res.on('close', function() { if (!res.writableEnded) aborted = true; });
+  // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
+  var requestAbortCtrl = new AbortController();
+  function markChatAborted() {
+    if (aborted) return;
+    aborted = true;
+    try { requestAbortCtrl.abort(); } catch (e) {}
+  }
+  req.on('aborted', markChatAborted);
+  res.on('close', function() { if (!res.writableEnded) markChatAborted(); });
 
   // ★ M: 深度思考模式分支 — 走 SSE 长连接 + 多 agent 流程
   if (req.body && req.body.deep_think === true) {
@@ -13931,6 +13938,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       tools: AI_TOOLS,
       tool_choice: 'auto',
       max_tool_rounds: 4,
+      signal: requestAbortCtrl.signal,
       // ★ wrapper：拦截 search_web 的真实 results 数组
       tool_executor: async function(toolCall) {
         var res = await executeToolCall(toolCall, { userName: userName });
@@ -13970,7 +13978,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       });
     }
     if (typeof reply !== 'string' || !reply) reply = '（AI 没有回复，请稍后再试）';
-    if (reply.length > 4000) reply = reply.slice(0, 4000) + '\n…（已截断）';
+    // 非流式端点也允许长回复：代码/长文回答远超 4000 字符，仅对异常超长
+    // 内容做保护性截断（DeepSeek 单次输出上限约 8K token ≈ 24K 字符）
+    if (reply.length > 24000) reply = reply.slice(0, 24000) + '\n…（已截断）';
     reply = sanitizeAssistantVisibleText(reply);
 
     // 9. 保存消息（含 conversation_id，不物理删除旧数据）
