@@ -206,12 +206,12 @@
           var req = store.put(value, HANDLE_KEY);
           req.onsuccess = function () { resolve(); };
           req.onerror = function (e) {
-            db.close();
+            // ★ 修复：不再在每次操作后关闭连接——openDB 复用常驻连接（见 openDB 注释），
+            // 按操作关闭会 abort 并发中其他事务的未完成请求，导致句柄持久化/恢复静默丢失。
             reject(wrapError(e.target.error, 'IndexedDB.storeHandle'));
           };
-          tx.oncomplete = function () { db.close(); };
+          tx.oncomplete = function () {};
         } catch (err) {
-          db.close();
           reject(wrapError(err, 'IndexedDB.storeHandle'));
         }
       });
@@ -227,15 +227,12 @@
           var req = store.get(HANDLE_KEY);
           req.onsuccess = function () {
             var dirHandle = req.result;
-            db.close();
             resolve(dirHandle || null);
           };
           req.onerror = function (e) {
-            db.close();
             reject(wrapError(e.target.error, 'IndexedDB.restoreHandle'));
           };
         } catch (err) {
-          db.close();
           reject(wrapError(err, 'IndexedDB.restoreHandle'));
         }
       });
@@ -464,6 +461,17 @@
     });
   }
 
+  // 统一关闭连接并清空 _dbConnection 引用。仅用于显式销毁路径
+  // （版本变更 versionchange / clearWorkspaceStorage 删除库时）。
+  // 注意：storeHandle/restoreHandle/clearWorkspaceRecord 等常规操作【不得】关闭连接，
+  // openDB 复用常驻连接，按操作关闭会 abort 并发事务并导致下次复用已关闭连接。
+  function closeDbAndNull(db) {
+    if (db) {
+      try { db.close(); } catch (e) { /* ignore */ }
+    }
+    if (_dbConnection === db) _dbConnection = null;
+  }
+
   function clearWorkspaceRecord() {
     return openDB().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -473,12 +481,10 @@
           var req = store.delete(HANDLE_KEY);
           req.onsuccess = function () { resolve(); };
           req.onerror = function (e) {
-            db.close();
             reject(wrapError(e.target.error, 'IndexedDB.clearWorkspaceRecord'));
           };
-          tx.oncomplete = function () { db.close(); };
+          tx.oncomplete = function () {};
         } catch (err) {
-          db.close();
           reject(wrapError(err, 'IndexedDB.clearWorkspaceRecord'));
         }
       });
@@ -489,11 +495,8 @@
 
   function clearWorkspaceStorage() {
     console.log('[CODE-IDB] Clearing workspace storage');
-    // 关闭当前连接
-    if (_dbConnection) {
-      try { _dbConnection.close(); } catch (e) {}
-      _dbConnection = null;
-    }
+    // 关闭当前连接（显式销毁路径）
+    closeDbAndNull(_dbConnection);
     _dirHandle = null;
     _workspaceKind = 'directory';
     // 清理 localStorage

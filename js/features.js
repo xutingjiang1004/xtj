@@ -89,16 +89,10 @@
   }
 
   function patchChat() {
-    if (typeof window.openChat === 'function' && !window.openChat.__xtjPatchedV10) {
-      var originalOpen = window.openChat;
-      window.openChat = function () { return originalOpen.apply(this, arguments); };
-      window.openChat.__xtjPatchedV10 = true;
-    }
-    if (typeof window.switchDockTab === 'function' && !window.switchDockTab.__xtjPatchedV10) {
-      var originalSwitch = window.switchDockTab;
-      window.switchDockTab = function () { return originalSwitch.apply(this, arguments); };
-      window.switchDockTab.__xtjPatchedV10 = true;
-    }
+    // G6 修复：原实现是无操作的函数包装（openChat/switchDockTab 原样转发），
+    // 属于死代码。真正的乱码修复由 MutationObserver 的 repairMarkedNode 完成，
+    // 此处不再做无意义的别名覆盖。
+    return;
   }
 
   function initProfileSync() {

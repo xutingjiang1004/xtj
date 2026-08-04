@@ -2579,15 +2579,20 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             }
             window.doLogin = doLogin;
 
-            document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
-            document.getElementById('regPwInp').addEventListener('keydown', function (e) {
+            var _regSubmitBtn = document.getElementById('registerSubmitBtn');
+            var _regPwInp = document.getElementById('regPwInp');
+            var _regNickInp = document.getElementById('regNickInp');
+            var _regEmailInp = document.getElementById('regEmailInp');
+            // 判空保护：任一注册表单元素缺失不得中断 core.js 后续全部逻辑
+            if (_regSubmitBtn) _regSubmitBtn.addEventListener('click', doRegister);
+            if (_regPwInp) _regPwInp.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doRegister();
             });
-            document.getElementById('regNickInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') document.getElementById('regEmailInp').focus();
+            if (_regNickInp) _regNickInp.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { var _email = document.getElementById('regEmailInp'); if (_email) _email.focus(); }
             });
-            document.getElementById('regEmailInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') document.getElementById('regPwInp').focus();
+            if (_regEmailInp) _regEmailInp.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { var _pw = document.getElementById('regPwInp'); if (_pw) _pw.focus(); }
             });
             async function doRegister() {
                 const name = document.getElementById("regNickInp").value.trim();
@@ -2669,9 +2674,12 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
             // ========== 查看用户资料卡 ==========
             let upcTargetUser = null;
+            // S7 修复：资料卡请求代次号，防止快速切换用户时旧响应覆盖新用户资料
+            let upcRequestSeq = 0;
 
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
+                var _seq = ++upcRequestSeq;
                 document.getElementById('upcName').textContent = userName;
                 document.getElementById('upcLogin').textContent = '最近登录：加载中...';
                 
@@ -2727,6 +2735,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     
                     var avatarUrl = await fetchAvatarUrl(userName);
                     
+                    // S7 修复：响应落地前校验目标用户是否已切换，旧响应不得覆盖新资料
+                    if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
+                    
                     if (avatarUrl) {
                         if (userName !== currentUser) {
                             avatarCache[userName] = avatarUrl;
@@ -2750,6 +2761,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         .eq("media_type", "__user_info__")
                         .order("created_at", { ascending: false })
                         .limit(1);
+                    
+                    // S7 修复：同上，用户已切换则丢弃本次结果
+                    if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     
                     if (userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
@@ -3144,6 +3158,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 } catch (e) {}
                 try { stopRestrictionPolling(); } catch (e) {}
                 try { stopDMPolling(); } catch (e) {}
+                try { stopReportReplyPolling(); } catch (e) {}
                 try { if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; } } catch (e) {}
                 try { if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; } } catch (e) {}
                 try { if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; } } catch (e) {}
@@ -3170,6 +3185,10 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 _chatCache = {};
                 window.dockChatListCacheTime = 0;
                 window._xtjAuthState = 'unauthenticated';
+                // L11 修复：登出时断开浏览量 Observer 并清空跨会话缓存，避免单页长开内存缓慢增长
+                try { if (typeof window.__xtjCleanupObservers === 'function') window.__xtjCleanupObservers(); } catch(e) {}
+                try { if (typeof window.viewTracked === 'object' && window.viewTracked.clear) window.viewTracked.clear(); } catch(e) {}
+                try { if (typeof window.postInfoCache === 'object') { Object.keys(window.postInfoCache).forEach(function(k) { delete window.postInfoCache[k]; }); } } catch(e) {}
 
                 var xtjKeys = [];
                 // H-36: 登出只清除会话相关键，保留用户偏好与设备身份：
@@ -5470,6 +5489,7 @@ function renderProfileActivityList(kind) {
 
             function ivApplyTransform() {
                 const img = document.getElementById('ivImg');
+                if (!img) return;
                 const v = ivZoomState;
                 const t = `translate3d(${v.tx}px, ${v.ty}px, 0) scale(${v.scale})`;
                 img.style.transform = t;
@@ -5478,6 +5498,7 @@ function renderProfileActivityList(kind) {
 
             function ivResetZoom(instant = false) {
                 const img = document.getElementById('ivImg');
+                if (!img) return;
                 ivZoomState.scale = 1;
                 ivZoomState.tx = 0;
                 ivZoomState.ty = 0;
@@ -5512,6 +5533,7 @@ function renderProfileActivityList(kind) {
 
             function ivShowHint() {
                 const h = document.getElementById('ivZoomHint');
+                if (!h) return;
                 h.classList.add('show');
                 clearTimeout(ivHintTimer);
                 ivHintTimer = setTimeout(() => h.classList.remove('show'), 2000);
@@ -5674,6 +5696,8 @@ function renderProfileActivityList(kind) {
             const ivViewerEl = document.getElementById('imgViewer');
             const ivImgEl = document.getElementById('ivImg');
 
+            // 判空保护：图片查看器元素缺失时跳过绑定，不得中断 core.js 后续逻辑
+            if (ivViewerEl) {
             ivViewerEl.addEventListener('click', function (e) {
                 if (Date.now() - ivTouchEndTime < 120) return;
                 if (e.target === ivViewerEl || e.target === document.getElementById('ivWrapper')) {
@@ -5798,6 +5822,7 @@ function renderProfileActivityList(kind) {
                     ivResetZoom(true);
                 }
             }, { passive: false });
+            } // end if (ivViewerEl)
 
             // ===================== 濞村繗顫嶉梺鎻掔箳缁櫣锟?=====================
             // 閸忋劌锟斤拷帖子锟解剝浼呴敓鏂ゆ嫹閿熸枻鎷烽敍宀€鏁ゆ禍搴㈢セ鐟欏牐顔囬敓?
@@ -6382,7 +6407,10 @@ function renderProfileActivityList(kind) {
 
                 // Reattach:
                 detachedPanels.forEach(function(item) {
-                    var post = feed.querySelector('.post[data-post-id="' + escapeHtml(item.id) + '"]');
+                    // L9 修复：CSS 选择器里不能用 escapeHtml（HTML 实体是字面字符永不匹配），
+                    // 应转义选择器特殊字符（对齐 6573 行的 replace(/"/g,'\\"') 模式）
+                    var _pid = String(item.id == null ? '' : item.id).replace(/"/g, '\\"');
+                    var post = feed.querySelector('.post[data-post-id="' + _pid + '"]');
                     if (post) {
                         var actions = post.querySelector('.actions');
                         if (actions) actions.insertAdjacentElement('afterend', item.panel);
@@ -7974,7 +8002,11 @@ function renderProfileActivityList(kind) {
                 }
             };
 
+            // G10 修复：可见性切换并发锁（与 togglePostPin 的 isPinningPost 对齐），
+            // 防止双击基于同一旧 visibility 发两次更新 + 两次整页刷新
+            window.isTogglingPostVisibility = false;
             window.togglePostVisibility = async function(postId, btn) {
+                if (window.isTogglingPostVisibility) return;
                 var post;
                 var nextVisibility;
                 try {
@@ -7987,6 +8019,7 @@ function renderProfileActivityList(kind) {
                         btn.disabled = true;
                         btn.textContent = "处理中..";
                     }
+                    window.isTogglingPostVisibility = true;
                     nextVisibility = post.visibility === "private" ? "public" : "private";
                     var result = await updatePostRecord(post, {
                         visibility: nextVisibility
@@ -8006,6 +8039,9 @@ function renderProfileActivityList(kind) {
                         btn.textContent = "🔒 设为私密";
                     }
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
+                } finally {
+                    window.isTogglingPostVisibility = false;
+                    if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
                 }
             };
             // ============== Global click delegation ==============
@@ -9564,6 +9600,14 @@ function renderProfileActivityList(kind) {
                 }
                 checkReportReplies();
                 reportReplyPollTimer = setInterval(checkReportReplies, REPORT_REPLY_POLL_INTERVAL);
+            }
+
+            // S8 修复：登出/会话销毁时必须停止举报轮询，避免定时器残留
+            function stopReportReplyPolling() {
+                if (reportReplyPollTimer) {
+                    clearInterval(reportReplyPollTimer);
+                    reportReplyPollTimer = null;
+                }
             }
 
             function clearReportReplyBadge() {
@@ -11250,7 +11294,13 @@ function renderProfileActivityList(kind) {
                         themeBtn.setAttribute('aria-label', '切换到深色模式');
                         themeBtn.setAttribute('title', '切换到深色模式');
                     }
-                    window.safeStorage.set(THEME_STORAGE_KEY, 'light');
+                    // G7 修复：仅当用户显式选择了浅色（此前存过偏好）时才落盘 'light'；
+                    // 首次访问跟随系统浅色时不写 localStorage，保证系统深色监听（11441 行）持续生效
+                    if (window.safeStorage.get(THEME_STORAGE_KEY)) {
+                        window.safeStorage.set(THEME_STORAGE_KEY, 'light');
+                    } else {
+                        window.safeStorage.remove(THEME_STORAGE_KEY);
+                    }
                 }
             }
 
@@ -14023,7 +14073,11 @@ function renderProfileActivityList(kind) {
                 body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><section class="stat-col stat-col--flat"><div class="stat-col-title">点赞记录 <span>' + statAllLikes.length + '</span></div>' + buildLikesCol() + '</section><section class="stat-col stat-col--flat"><div class="stat-col-title">评论记录 <span>' + statAllComments.length + '</span></div>' + buildCommentsCol() + '</section></div>';
             };
 
+            // S7 修复：帖子详情请求代次号，防止快速切换详情时旧响应覆盖新内容
+            var _postDetailReqSeq = 0;
+
             window.openPostDetail = async function(postId) {
+                var _seq = ++_postDetailReqSeq;
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
@@ -14035,26 +14089,28 @@ function renderProfileActivityList(kind) {
                     var apiUrl = (window.API_BASE || '') + '/api/post/detail/' + encodeURIComponent(postId);
                     var apiRes = await fetch(apiUrl, { credentials: 'include' });
                     if (!apiRes.ok && (!apiRes.headers.get('content-type') || !apiRes.headers.get('content-type').includes('application/json'))) {
-                        if (body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
+                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
                         return;
                     }
                     var apiData;
                     try {
                         apiData = await apiRes.json();
                     } catch(e) {
-                        if (body) body.innerHTML = '<div class="stat-empty">解析帖子详情失败，请稍后重试。</div>';
+                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">解析帖子详情失败，请稍后重试。</div>';
                         return;
                     }
                     if (!apiRes.ok || !apiData || !apiData.ok) {
                         var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
-                        if (body) body.innerHTML = '<div class="stat-empty">' + errMsg + '</div>';
+                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">' + errMsg + '</div>';
                         return;
                     }
+                    // S7 修复：响应落地前校验是否已被新请求替代
+                    if (_seq !== _postDetailReqSeq) return;
                     var post = apiData.post;
                     var likes = apiData.likes || [];
                     var comments = apiData.comments || [];
-                    // normalize to match renderPostDetail expectations
-                    post.views = post.view_count || 0;
+                    // normalize to match renderPostDetail expectations；避免真实 views 被清零
+                    post.views = (post.view_count != null ? post.view_count : (post.views != null ? post.views : 0));
                     if (!post.user_name || !post.created_at) {
                         if (body) body.innerHTML = '<div class="stat-empty">该帖子不存在、已删除或不可查看。</div>';
                         return;
@@ -14062,7 +14118,7 @@ function renderProfileActivityList(kind) {
                     trackView(postId);
                     renderPostDetail(post, likes, comments);
                 } catch (e) {
-                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
                 }
             };

@@ -511,7 +511,9 @@
     opts = opts || {};
     if (!item) return { ok:false, error:'missing_photo' };
     var current = window.currentUser || '';
-    var isAdmin = (typeof window.isAdmin === 'function' && window.isAdmin()) || (current === 'xxz');
+    // L3 修复：管理员判断统一走 window.isAdmin()（由后端 /admin/verify 结果驱动），
+    // 移除硬编码用户名 'xxz' 的前端后门式提权通道（后端 /api/photo/delete 仍独立校验权限）
+    var isAdmin = typeof window.isAdmin === 'function' && window.isAdmin();
     var isOwner = !!(item.username && current && item.username === current);
     if (!current || (!isOwner && !isAdmin)) {
       toast('无权删除这张照片');

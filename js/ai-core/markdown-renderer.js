@@ -73,24 +73,47 @@
       return '<code>' + _escapeHtml(code) + '</code>';
     });
 
-    // 3. Bold: **text** or __text__
-    s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return '<strong>' + _escapeHtml(t) + '</strong>'; });
-    s = s.replace(/__([^_]+)__/g, function (_, t) { return '<strong>' + _escapeHtml(t) + '</strong>'; });
-
-    // 4. Italic: *text* or _text_
-    s = s.replace(/\*([^*]+)\*/g, function (_, t) { return '<em>' + _escapeHtml(t) + '</em>'; });
-    s = s.replace(/_([^_]+)_/g, function (_, t) { return '<em>' + _escapeHtml(t) + '</em>'; });
+    // 3. Bold: **text** / __text__；Italic: *text* / _text_；Bold+Italic: ***text*** / ___text___
+    // ★ 修复（AI 回复出现字面量 </strong>）：加粗/斜体先替换成占位符、最后统一还原，
+    //   避免斜体步骤把加粗步骤产出的 <strong> 当作内容再次转义（例如 ***重要***
+    //   会被渲染成字面量 <strong>重要</strong>，界面上出现 </strong> 残留）。
+    var inlineStore = [];
+    function stashInline(html) {
+      var idx = inlineStore.length;
+      inlineStore.push(html);
+      return '\x00INLINE' + idx + '\x00';
+    }
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
+    s = s.replace(/___([^_]+)___/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
+    s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
+    s = s.replace(/__([^_]+)__/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
+    s = s.replace(/\*([^*]+)\*/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
+    s = s.replace(/_([^_]+)_/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
 
     // 5. Links: [text](url)
+    // ★ 修复（XSS）：协议白名单 + 实体转义。原实现只转义双引号，`[x](jav&#x61;script:alert(1))`
+    // 这类实体编码协议可绕过 sanitizeHtml 的 JS_URL_RE（仅匹配字面 javascript/vbscript），
+    // 浏览器解析实体后点击即执行。此处统一校验 scheme，非 http/https/mailto 一律降级为纯文本。
+    function safeHref(rawUrl, allowDataImage) {
+      var u = String(rawUrl || '').trim();
+      var scheme = (u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/) || [])[1];
+      if (!scheme) return { ok: true, url: u }; // 相对路径/无协议
+      var s = scheme.toLowerCase();
+      if (s === 'http' || s === 'https' || s === 'mailto') return { ok: true, url: u };
+      if (allowDataImage && s === 'data' && /^data:image\//i.test(u)) return { ok: true, url: u };
+      return { ok: false, url: u };
+    }
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
-      var safeUrl = url.replace(/"/g, '&quot;');
-      return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
+      var h = safeHref(url, false);
+      if (!h.ok) return '<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>';
+      return '<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
     });
 
     // 6. Images: ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) {
-      var safeUrl = url.replace(/"/g, '&quot;');
-      return '<img src="' + safeUrl + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />';
+      var h = safeHref(url, true);
+      if (!h.ok) return _escapeHtml(alt || '图片');
+      return '<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />';
     });
 
     // 7. Tables: | col1 | col2 |
@@ -147,7 +170,18 @@
       return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
     }).join('\n');
 
-    // 14. Restore code blocks
+    // 14. Restore inline (bold/italic) placeholders — 先于代码块还原，
+    //     以便内联占位符中嵌套的代码块占位符（如 **```js```**）也能被还原。
+    //     使用迭代还原，处理 *a**b**c* 这类斜体包裹加粗的嵌套场景。
+    var inlinePasses = 0;
+    while (/\x00INLINE(\d+)\x00/.test(s) && inlinePasses < 10) {
+      s = s.replace(/\x00INLINE(\d+)\x00/g, function (_, idx) {
+        return inlineStore[parseInt(idx, 10)] || '';
+      });
+      inlinePasses++;
+    }
+
+    // 14b. Restore code blocks
     s = s.replace(/\x00CODE(\d+)\x00/g, function (_, idx) {
       return codeBlocks[parseInt(idx, 10)] || '';
     });

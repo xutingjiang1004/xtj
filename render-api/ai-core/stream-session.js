@@ -577,18 +577,39 @@ function createEventLogger(supabase, streamId, userId) {
 
 function sanitizeEventData(type, data) {
   if (!data || typeof data !== 'object') return {};
+  var SENSITIVE_KEYS = ['apikey', 'accesstoken', 'refreshtoken', 'clientsecret', 'password', 'authorization', 'cookie', 'setcookie', 'token', 'secret', 'auth'];
+  function isSensitiveKey(key) {
+    var normalizedKey = String(key).replace(/[-_]/g, '').toLowerCase();
+    return SENSITIVE_KEYS.indexOf(normalizedKey) >= 0;
+  }
+  function sanitizeValue(key, value) {
+    // L6 修复：递归过滤嵌套对象/数组中的敏感键，避免 data.tool_result 等嵌套结构里的
+    // apiKey/token 等泄漏到持久化事件中
+    if (typeof value === 'string') {
+      if (isSensitiveKey(key) || value.length > 10000) {
+        return value.slice(0, 10000) + '...[truncated]';
+      }
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map(function(item, idx) { return sanitizeValue(String(idx), item); });
+    }
+    if (value && typeof value === 'object') {
+      var out = {};
+      try {
+        Object.keys(value).forEach(function(k) {
+          if (isSensitiveKey(k)) { out[k] = '[redacted]'; return; }
+          out[k] = sanitizeValue(k, value[k]);
+        });
+      } catch (_) { out = null; }
+      return out;
+    }
+    return value;
+  }
   var sanitized = {};
   Object.keys(data).forEach(function(key) {
-    var value = data[key];
-    var normalizedKey = String(key).replace(/[-_]/g, '').toLowerCase();
-    if (['apikey', 'accesstoken', 'refreshtoken', 'clientsecret', 'password', 'authorization', 'cookie', 'setcookie', 'token', 'secret', 'auth'].indexOf(normalizedKey) >= 0) return;
-    if (typeof value === 'string' && value.length > 10000) {
-      sanitized[key] = value.slice(0, 10000) + '...[truncated]';
-    } else if (typeof value === 'object' && value !== null) {
-      try { sanitized[key] = JSON.parse(JSON.stringify(value)); } catch (_) { sanitized[key] = null; }
-    } else {
-      sanitized[key] = value;
-    }
+    if (isSensitiveKey(key)) { sanitized[key] = '[redacted]'; return; }
+    sanitized[key] = sanitizeValue(key, data[key]);
   });
   return sanitized;
 }
