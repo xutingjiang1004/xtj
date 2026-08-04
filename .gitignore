@@ -9,6 +9,9 @@ node_modules/
 
 .codex/
 
+# Workbuddy 工具记忆目录（本地工具产物，不进版本库）
+.workbuddy/
+
 # Playwright CLI debug artifacts
 .playwright-cli/
 
