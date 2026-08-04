@@ -808,6 +808,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (e) {}
       S.abortController = null;
     }
+    S.sending = false;
+    S.paused = false;
+    S.loading = false;
+    S.loadingMore = false;
+    S.activeRenderers = [];
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+  }
+
+  // 深度思考与主聊天共用 S 状态但互为独立流程：
+  // 主聊天发送新消息时不得静默取消正在进行的深度思考研究（S6），
+  // 反之深度思考页发送时也不得取消主聊天回复。
+  // 该函数在"页面级关闭/登出"等全局场景才完整清理两套状态。
+  function abortAllAiRequests() {
+    abortCurrentRequest();
     if (S.deepThinkJob) {
       try {
         S.deepThinkJob._abortReason = 'aborted';
@@ -821,12 +835,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e) {}
       S.deepThinkProgressCard = null;
     }
-    S.sending = false;
-    S.paused = false;
-    S.loading = false;
-    S.loadingMore = false;
-    S.activeRenderers = [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
   
   function isAdminUser() {
@@ -3184,6 +3192,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._currentReqId = reqId;
     function resetSendingIfCurrent() {
       if (S._currentReqId === reqId) {
+        if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
         S.sending = false;
         S.deepThinkJob = null;
         S.deepThinkProgressCard = null;
@@ -3224,6 +3233,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.abortController = controller;
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
+    // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
+    // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
+    var dtFetchTimeoutTimer = setTimeout(function() {
+      if (S._currentReqId !== reqId) return;
+      try { controller.abort('timeout'); } catch (e) {}
+      controller._abortReason = 'timeout';
+    }, 120000);
+    if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
     var url = API_BASE + '/chat';
     var auth = await getUserAuthPayload({ forceNoToken: false });
@@ -3802,6 +3819,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._currentReqId = reqId;
     function resetSendingIfCurrent() {
       if (S._currentReqId === reqId) {
+        if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
         S.sending = false;
         S.deepThinkJob = null;
         S.deepThinkProgressCard = null;
@@ -3854,6 +3872,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.abortController = controller;
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
+    // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
+    // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
+    var dtFetchTimeoutTimer = setTimeout(function() {
+      if (S._currentReqId !== reqId) return;
+      try { controller.abort('timeout'); } catch (e) {}
+      controller._abortReason = 'timeout';
+    }, 120000);
+    if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
     var url = API_BASE + '/chat';
     var auth = await getUserAuthPayload({ forceNoToken: false });
@@ -6413,7 +6439,8 @@ function showChatMessages() {
     S.conversationRequestId += 1;
     window.__xtjAiChatActive = false;
     clearReplyTimer();
-    abortCurrentRequest(); // 鍐呴儴宸茶皟鐢?clearStreamCleanup
+    // 页面级关闭：完整清理主聊天 + 深度思考两套状态
+    abortAllAiRequests();
     // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
     // Clean up deep think state
     if (S.deepThinkProgressCard) {

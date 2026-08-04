@@ -10,6 +10,29 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const REPO_PART_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9_.-])?$/;
 const REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const GIT_OBJECT_SHA_RE = /^[a-f0-9]{40,64}$/i;
+// 全站共享 GITHUB_TOKEN（GitHub 5k requests/hour 配额）。每用户滑动窗口配额：
+// 默认每分钟 30 次，防止单个用户 tree?recursive=1 等高频请求耗尽共享配额导致全站 403。
+const USER_QUOTA_WINDOW_MS = 60 * 1000;
+const USER_QUOTA_MAX = 30;
+const _githubUserQuota = new Map();
+function consumeGithubUserQuota(userName) {
+  if (!userName) return true;
+  var now = Date.now();
+  var entry = _githubUserQuota.get(userName);
+  if (!entry || now - entry.windowStart >= USER_QUOTA_WINDOW_MS) {
+    entry = { windowStart: now, count: 0 };
+    _githubUserQuota.set(userName, entry);
+  }
+  entry.count++;
+  return entry.count <= USER_QUOTA_MAX;
+}
+// 定期清理配额表，防止内存累积
+setInterval(function () {
+  var now = Date.now();
+  _githubUserQuota.forEach(function (entry, key) {
+    if (now - entry.windowStart >= USER_QUOTA_WINDOW_MS) _githubUserQuota.delete(key);
+  });
+}, USER_QUOTA_WINDOW_MS).unref();
 
 function parseAllowedRepos(raw) {
   return new Set(String(raw || '')
@@ -118,6 +141,12 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
     }
     if (typeof fetchImpl !== 'function') {
       res.status(503).json({ ok: false, code: 'github_fetch_unavailable', error: 'GitHub 连接不可用' });
+      return null;
+    }
+    // 每用户配额：保护共享 token 的 GitHub 小时配额不被单个用户耗尽
+    var quotaUser = String((req.userName || req.query && req.query.user_name || '') || '');
+    if (quotaUser && !consumeGithubUserQuota(quotaUser)) {
+      res.status(429).json({ ok: false, code: 'github_quota_exceeded', error: 'GitHub 请求过于频繁，请稍后再试' });
       return null;
     }
 

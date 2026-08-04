@@ -136,6 +136,25 @@ function cleanupRegistry(now) {
   pendingIndexBatches.forEach(function (batch, key) {
     if (!batch || batch.expiresAt <= now) pendingIndexBatches.delete(key);
   });
+  // pendingIndexBatches 也必须有数量与总字节上限：多用户反复 reset+append
+  // 可能堆积大量 32MB 级批次，导致内存失控。
+  var MAX_PENDING_BATCHES = registryConfig.maxWorkspaces * 2;
+  var MAX_PENDING_BATCH_BYTES = registryConfig.maxBytes;
+  var pendingBytes = 0;
+  pendingIndexBatches.forEach(function (batch) {
+    pendingBytes += (batch && batch.totalBytes) || 0;
+  });
+  if (pendingIndexBatches.size > MAX_PENDING_BATCHES || pendingBytes > MAX_PENDING_BATCH_BYTES) {
+    var batchEntries = Array.from(pendingIndexBatches.entries()).sort(function (a, b) {
+      return (a[1] && a[1].expiresAt || 0) - (b[1] && b[1].expiresAt || 0);
+    });
+    for (var bi = 0; bi < batchEntries.length; bi++) {
+      if (pendingIndexBatches.size <= MAX_PENDING_BATCHES && pendingBytes <= MAX_PENDING_BATCH_BYTES) break;
+      var expiredBytes = (batchEntries[bi][1] && batchEntries[bi][1].totalBytes) || 0;
+      pendingIndexBatches.delete(batchEntries[bi][0]);
+      pendingBytes -= expiredBytes;
+    }
+  }
 }
 
 function touchEntry(key, entry) {
@@ -873,7 +892,16 @@ function searchCode(scope, query, options) {
   var results = [];
 
   projectIndex.files.forEach(function (fileEntry) {
-    if (pathFilter && fileEntry.path.indexOf(pathFilter) === -1) return;
+    if (pathFilter) {
+      // 按路径段边界匹配：'dir' 不应匹配 'dir2/a.js'，避免污染 AI 上下文
+      var filterNorm = String(pathFilter).replace(/\/+$/, '');
+      var pathNorm = String(fileEntry.path || '');
+      var pathMatched = pathNorm === filterNorm ||
+        pathNorm.indexOf(filterNorm + '/') === 0 ||
+        pathNorm.indexOf('/' + filterNorm + '/') >= 0 ||
+        pathNorm.indexOf('/' + filterNorm) === pathNorm.length - filterNorm.length - 1;
+      if (!pathMatched) return;
+    }
     if (extFilter) {
       var ext = fileEntry.name.slice(fileEntry.name.lastIndexOf('.')).toLowerCase();
       if (extFilter.indexOf(ext) === -1) return;
