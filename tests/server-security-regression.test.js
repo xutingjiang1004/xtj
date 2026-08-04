@@ -87,15 +87,17 @@ test('CSP must not contain strict-dynamic without nonce/hash coverage for all sc
   assert.match(source, /applySecurityHeaders/);
 });
 
-test('CSP script-src allows self, unsafe-inline, Supabase CDN, and jsDelivr', () => {
+test('CSP script-src allows self, unsafe-inline, jsDelivr, and excludes user-writable Supabase origin', () => {
   const scriptSrc = csp.split(';').find(function(d) { return d.trim().startsWith('script-src'); });
   assert.ok(scriptSrc, 'script-src directive must exist');
   assert.match(scriptSrc, /'self'/);
   assert.match(scriptSrc, /'unsafe-inline'/);
   assert.match(scriptSrc, /'unsafe-eval'/, 'WebLLM requires eval in its worker runtime');
   assert.match(scriptSrc, /'wasm-unsafe-eval'/, 'WebLLM requires WebAssembly compilation');
-  assert.match(scriptSrc, /https:\/\/ithowxqignlhkwaykglt\.supabase\.co/);
   assert.match(scriptSrc, /https:\/\/cdn\.jsdelivr\.net/);
+  // H-9: script-src 不得放行 supabase.co——public 桶是用户可写源，可上传 JS 当
+  // "白名单源"加载；supabase 仅 API 调用，由 connect-src 放行
+  assert.doesNotMatch(scriptSrc, /supabase\.co/, 'script-src must not allow the user-writable Supabase origin');
 });
 
 test('CSP gives WebLLM workers an explicit same-origin/blob execution scope', () => {

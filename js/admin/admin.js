@@ -1280,15 +1280,6 @@ async function initAdminClient() {
         };
     }
 
-    function getUserStateFlags(userName) {
-        return {
-            isAdmin: userName === ADMIN,
-            isBanned: bansData.some(function(b) { return b.user_name === userName && b.is_active; }),
-            isMuted: mutesData.some(function(m) { return m.user_name === userName && m.is_active; }),
-            isBlacklisted: blacklistData.some(function(b) { return b.user_name === userName && b.is_active; })
-        };
-    }
-
     function buildUserTagMarkup(flags) {
         var html = '';
         if (flags.isBanned) html += '<span class="tag tag-banned">封禁中</span>';

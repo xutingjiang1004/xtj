@@ -39,6 +39,7 @@ function validateSize(value) { return typeof value === 'number' && Number.isSafe
 
 // 精确判断 storage 对象是否存在：createSignedUrl 在部分配置下即使对象不存在也会返回成功，
 // 这里用 list + 精确文件名匹配，避免"旧文件丢失→修复"分支变成死代码。
+// 注意：Supabase list 返回的文件项有 id、文件夹项 id 为 null（FileObject.id 语义）。
 async function storageObjectExists(supabase, bucket, path) {
   if (!supabase || !path) return { ok: false, exists: false, error: null };
   try {
@@ -48,10 +49,19 @@ async function storageObjectExists(supabase, bucket, path) {
     var directory = parts.join('/');
     var result = await supabase.storage.from(bucket).list(directory, { limit: 1000, search: name });
     if (result.error) return { ok: false, exists: false, error: result.error };
-    var found = (result.data || []).some(function(item) {
-      return item && item.name === name && !item.id; // 目录项有 id，文件项没有
+    // 文件项有 id（目录项 id 为 null），精确名命中即可判定文件存在
+    var foundItem = (result.data || []).find(function(item) {
+      return item && item.name === name && !!item.id;
     });
-    if (found) return { ok: true, exists: true, error: null };
+    if (foundItem) {
+      // 顺带返回真实文件大小，供调用方在下载前做体积预检（避免全量下载导致 OOM）
+      var fileSize = null;
+      try {
+        var meta = foundItem.metadata || {};
+        if (Number.isSafeInteger(meta.size) && meta.size >= 0) fileSize = meta.size;
+      } catch (_) {}
+      return { ok: true, exists: true, error: null, size: fileSize };
+    }
     // 精确名未命中（list search 是模糊匹配，可能截断），再尝试 download HEAD 级验证
     var probe = await supabase.storage.from(bucket).download(cleanPath);
     if (probe && probe.error) {
@@ -110,10 +120,33 @@ function getPhotoDerivativePaths(storagePath) {
   };
 }
 
+// H-8: 把存储对象的公网 URL（https://<supabase>/storage/v1/object/public/uploads/<path>）
+// 反解为 storage path，避免把 URL 直接当 remove() 路径导致缩略图成为删不掉的孤儿。
+function storageUrlToStoragePath(url, supabaseUrl) {
+  if (typeof url !== 'string' || !url) return null;
+  if (url.indexOf('http://') !== 0 && url.indexOf('https://') !== 0) return null;
+  try {
+    var parsed = new URL(url);
+    if (supabaseUrl) {
+      var expectedOrigin = new URL(supabaseUrl).origin;
+      if (parsed.origin !== expectedOrigin) return null;
+    }
+    var match = parsed.pathname.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
+    if (!match || !match[1]) return null;
+    try { return decodeURIComponent(match[1]); } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
+}
+
 function collectPhotoRecordPaths(record, supabaseUrl) {
   var paths = new Set();
   function add(value) {
-    if (typeof value === 'string' && value.trim()) paths.add(value.trim().replace(/^\/+/, ''));
+    if (typeof value !== 'string' || !value.trim()) return;
+    var path = value.trim().replace(/^\/+/, '');
+    // 完整 URL（thumb/rotated 历史字段）先反解为对象路径
+    var resolved = storageUrlToStoragePath(value, supabaseUrl) || path;
+    paths.add(resolved);
   }
   try {
     var content = JSON.parse(record && record.content || '{}');
@@ -129,16 +162,34 @@ function collectPhotoRecordPaths(record, supabaseUrl) {
 async function createPhotoThumbnail(options) {
   var storagePath = options && options.storagePath;
   if (!storagePath || !options.supabase || !options.sharp) throw new Error('thumbnail unavailable');
+  // M-10: 给瞬态错误打标记——源探测/下载失败是网络抖动，不应删除用户原图
+  var sourceError = new Error('thumbnail source unavailable');
+  sourceError.transient = true;
+  var tooLargeError = new Error('thumbnail source too large');
+  tooLargeError.code = 'PHOTO_SOURCE_TOO_LARGE';
+  // H-6: 下载前先用 list/HEAD 探测对象真实大小，超过上限直接拒绝，
+  // 避免把超大对象全量读入内存后才检查（OOM 发生在校验之前）。
+  var sizeProbe = await storageObjectExists(options.supabase, 'uploads', storagePath);
+  if (!sizeProbe.ok && sizeProbe.error) throw sourceError;
+  if (Number.isSafeInteger(sizeProbe.size) && sizeProbe.size > MAX_IMAGE_SIZE) {
+    throw tooLargeError;
+  }
   var downloaded = await options.supabase.storage.from('uploads').download(storagePath);
-  if (!downloaded || downloaded.error || !downloaded.data) throw new Error('thumbnail source unavailable');
+  if (!downloaded || downloaded.error || !downloaded.data) throw sourceError;
   var input = Buffer.from(await downloaded.data.arrayBuffer());
-  // 服务端核对真实文件大小：客户端声称值不可信，防止超大文件/解压炸弹拖垮内存
+  // 服务端核对真实文件大小：客户端声称值不可信，防止超大文件/解压炸弹拖垮内存（下载后兜底校验）
   if (input.length > MAX_IMAGE_SIZE) {
-    throw new Error('thumbnail source too large');
+    throw tooLargeError;
   }
   // 限制解码像素总量，防止高维"解压炸弹"图片耗尽内存（默认约 1.6 亿像素上限，这里收紧到 1 亿）
   var image = options.sharp(input, { animated: false, limitInputPixels: 100000000 });
   var meta = await image.metadata();
+  // M-8a: 用 sharp 解码出的真实格式校验（客户端声明的 mime_type 不可信）。
+  // SVG 可内嵌脚本，直接打开原图 URL 即存储型 XSS 载体——即使客户端伪报
+  // mime_type 也必须拒绝，非瞬态错误会触发 422 清理原图。
+  if (meta && meta.format && String(meta.format).toLowerCase() === 'svg') {
+    throw new Error('thumbnail source unsupported');
+  }
   var derivativePaths = getPhotoDerivativePaths(storagePath);
   var thumbnailPath = derivativePaths.thumbnailPath;
   var outputResult = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
@@ -155,7 +206,12 @@ async function createPhotoThumbnail(options) {
   var finalInfo = outputInfo || null;
   if (meta && meta.orientation && meta.orientation !== 1) {
     try {
-      var rotatedImage = options.sharp(input, { animated: false }).rotate().webp({ quality: 85 });
+      // H-7: 旋转分支与缩略图分支一致，限制解码像素总量并对输出尺寸设上限
+      // （最长边 4096），防止高分辨率 EXIF 图全分辨率解码产生 GB 级缓冲
+      var rotatedImage = options.sharp(input, { animated: false, limitInputPixels: 100000000 })
+        .rotate()
+        .resize({ width: 4096, height: 4096, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 85 });
       var rotatedResult = await rotatedImage.toBuffer({ resolveWithObject: true });
       var rotatedOutput = Buffer.isBuffer(rotatedResult) ? rotatedResult : rotatedResult && rotatedResult.data;
       var rotatedInfo = rotatedResult && !Buffer.isBuffer(rotatedResult) ? rotatedResult.info : null;
@@ -209,6 +265,30 @@ async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
   } catch (err) {
     return { ok: false, found: false, error: err };
   }
+}
+
+// ★ C-2/C-3 修复：查询引用指定 storagePath 的帖子记录。
+// 照片走「客户端直传 public 桶 + 服务端事后登记」，服务端仅凭 URL 无法判断
+// 文件归属；此函数用于在删除/改写文件前确认该路径是否已被其他（尤其是他人
+// 的）帖子引用，防止借幂等分支把受害者原图当重复上传删除。
+async function findStoragePathRefs(supabase, storagePath, excludeId) {
+  try {
+    if (!storagePath) return { ok: true, refs: [], error: null };
+    var cleanPath = String(storagePath).replace(/^\/+/, '');
+    // content JSON 中序列化为 "storagePath":"photos/xxx"，用带引号的 token 精确匹配
+    var contentToken = '"' + cleanPath + '"';
+    var query = supabase.from('posts').select('id,user_name').ilike('content', '%' + contentToken + '%');
+    if (excludeId) query = query.neq('id', excludeId);
+    var result = await query.limit(50);
+    if (result && result.error) return { ok: false, refs: [], error: result.error };
+    return { ok: true, refs: (result && result.data) || [], error: null };
+  } catch (err) {
+    return { ok: false, refs: [], error: err };
+  }
+}
+
+function hasOtherOwnerRef(refs, userName) {
+  return (refs || []).some(function (ref) { return ref && ref.user_name !== userName; });
 }
 
 async function cleanupPhotoPaths(options, paths) {
@@ -271,6 +351,15 @@ async function createPhotoRecord(options) {
           return { status: 503, body: { ok: false, error: 'Unable to verify the existing photo file', code: 'PHOTO_FILE_CHECK_FAILED', retryable: true } };
         }
         if (!fileExists) {
+          // ★ C-3 修复：新路径若已被其他用户引用，禁止把他人照片文件
+          //   绑定进自己的记录（否则删自己帖子会连带删除受害者原图）
+          var repairRefs = await findStoragePathRefs(options.supabase, storagePath, existing.data.id);
+          if (!repairRefs.ok) {
+            return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
+          }
+          if (hasOtherOwnerRef(repairRefs.refs, options.userName)) {
+            return { status: 409, body: { ok: false, error: '图片已被其他帖子使用，无法关联', code: 'PHOTO_ALREADY_REFERENCED' } };
+          }
           // 旧文件丢失，使用新文件路径更新记录
           try {
             var newContent = existing.data.content;
@@ -315,6 +404,17 @@ async function createPhotoRecord(options) {
         }
       }
       // 旧文件存在或无法确认，删除本次新文件，返回旧记录
+      // ★ C-2 修复：提交的 storagePath 若已被其他用户帖子引用（受害者照片），
+      //   绝不能删除——攻击者用 upload_id 幂等命中自己的记录后提交他人文件
+      //   URL，会让这里把受害者原图当"重复上传的新文件"清掉
+      var duplicateRefs = await findStoragePathRefs(options.supabase, storagePath, existing.data.id);
+      if (!duplicateRefs.ok) {
+        return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
+      }
+      if (hasOtherOwnerRef(duplicateRefs.refs, options.userName)) {
+        // 该文件属于其他用户的帖子，禁止删除；仅返回现有记录（幂等语义）
+        return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
+      }
       var derivativePaths = getPhotoDerivativePaths(storagePath);
       var existingPaths = collectPhotoRecordPaths(existing.data, options.supabaseUrl);
       var duplicatePaths = existingPaths.has(storagePath) ? [] : [storagePath, derivativePaths.thumbnailPath, derivativePaths.rotatedPath].filter(function (path) {
@@ -332,12 +432,25 @@ async function createPhotoRecord(options) {
     }
   }
 
+  // ★ C-2/C-3 修复：首次创建前校验 storagePath 未被其他用户帖子引用，
+  //   防止建帖引用他人照片文件（内容盗用 + 删帖连带删除他人原图）
+  var createRefs = await findStoragePathRefs(options.supabase, storagePath, null);
+  if (!createRefs.ok) {
+    return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
+  }
+  if (hasOtherOwnerRef(createRefs.refs, options.userName)) {
+    return { status: 409, body: { ok: false, error: '图片已被其他帖子使用，请重新上传', code: 'PHOTO_ALREADY_REFERENCED' } };
+  }
+
   var thumbnail = null;
   if (typeof options.createThumbnail === 'function') {
     try {
       thumbnail = await options.createThumbnail({ supabase: options.supabase, supabaseUrl: options.supabaseUrl, storagePath: storagePath });
       var contentObj = JSON.parse(validated.content);
       contentObj.thumb = thumbnail.url || '';
+      // H-8: 持久化缩略图 storage path，删除时才能正确移除（thumb 是 https URL，
+      // 直接当 storage path 传 remove() 永删不掉，缩略图成公网孤儿）
+      contentObj.thumbnailPath = thumbnail.path || '';
       contentObj.thumbFileSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : null;
       contentObj.width = thumbnail.width || null;
       contentObj.height = thumbnail.height || null;
@@ -351,6 +464,11 @@ async function createPhotoRecord(options) {
       }
       validated.content = JSON.stringify(contentObj);
     } catch (error) {
+      // M-10: 瞬态失败（源探测/下载失败）属于网络抖动，保留原图并返回可重试错误，
+      // 仅 sharp 解码/编码等确定性失败才清理原图与衍生物
+      if (error && error.transient === true) {
+        return { status: 503, body: { ok: false, error: '图片处理暂时不可用，请稍后重试', code: 'PHOTO_PROCESSING_RETRYABLE', retryable: true } };
+      }
       var failedDerivativePaths = getPhotoDerivativePaths(storagePath);
       var processingCleanup = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
         storagePath,

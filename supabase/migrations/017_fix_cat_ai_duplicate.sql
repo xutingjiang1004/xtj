@@ -1,18 +1,13 @@
 -- 防止 AI小猫 对同一条评论生成重复回复
--- parent_comment_id/generated_by_ai are introduced by 020_cat_ai_reply.sql.
--- Keep this historical migration safe for a fresh database; 032 repeats the
--- idempotent index creation after the columns are guaranteed to exist.
+-- parent_comment_id/generated_by_ai 由 020_cat_ai_reply.sql 引入。
+-- 本迁移在 comments 表存在但列缺失时先补列（与 020 的幂等定义一致），
+-- 再无条件建唯一索引，避免 017 早于 020 执行时条件恒 false 而静默 no-op、
+-- 去重约束只剩 032 一处兜底（H-14 修复）。
 DO $$
 BEGIN
-  IF to_regclass('public.comments') IS NOT NULL
-     AND EXISTS (
-       SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'comments' AND column_name = 'parent_comment_id'
-     )
-     AND EXISTS (
-       SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'comments' AND column_name = 'generated_by_ai'
-     ) THEN
+  IF to_regclass('public.comments') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE IF EXISTS public.comments ADD COLUMN IF NOT EXISTS parent_comment_id bigint REFERENCES public.comments(id) ON DELETE SET NULL';
+    EXECUTE 'ALTER TABLE IF EXISTS public.comments ADD COLUMN IF NOT EXISTS generated_by_ai boolean NOT NULL DEFAULT false';
     EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_unique_ai_reply ON public.comments (parent_comment_id) WHERE generated_by_ai = true';
   END IF;
 END;

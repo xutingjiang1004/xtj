@@ -327,7 +327,7 @@ console.log('\n=== Photo Upload Failure Behavior ===');
 test('upload has centralized cleanupStorage helper', function(){
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf('function cleanupStorage(path, uploadId, options)') >= 0, 'cleanupStorage helper missing');
-  assert.ok(s.indexOf("console.error('[photo-upload] Storage cleanup error'") >= 0, 'cleanupStorage logs errors');
+  assert.ok(s.indexOf("console.error('[photo-upload] Backend cleanup could not be confirmed'") >= 0, 'cleanupStorage logs errors');
   assert.ok(s.indexOf("apiUrl('/api/photo/cleanup')") >= 0, 'backend cleanup endpoint missing');
 });
 test('Storage upload success but fetch network error preserves file for reconciliation', function(){
@@ -397,7 +397,7 @@ test('batch upload refresh failure does not swallow upload results', function(){
 });
 test('storage cleanup failure preserves original upload error and logs', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  assert.ok(s.indexOf("console.error('[photo-upload] Storage cleanup failed'") >= 0, 'cleanup failure not logged');
+  assert.ok(s.indexOf("console.error('[photo-upload] Backend cleanup could not be confirmed'") >= 0, 'cleanup failure not logged');
 });
 test('refresh failure does not re-upload files', function(){
   var s = read('js/photo-wall/upload-ui.js');

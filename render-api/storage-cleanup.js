@@ -35,7 +35,13 @@ function errorMessage(error) {
 }
 
 function isNotFoundError(error) {
-  return /not.?found|does not exist|no such|404/i.test(errorMessage(error));
+  const msg = errorMessage(error);
+  if (!msg) return false;
+  // M-4b: 仅对象级 404 视为"已删除"；Bucket not found / 网关错误不能当作删除成功
+  if (/BucketNotFound|Bucket not found/i.test(msg)) return false;
+  const statusCode = String((error && (error.statusCode || error.code)) || '');
+  if (statusCode === '404' && /NotFound|NoSuchKey|does not exist/i.test(msg)) return true;
+  return /does not exist|no such object|NoSuchKey/i.test(msg);
 }
 
 async function enqueueStorageCleanupJob(supabase, options) {
@@ -81,7 +87,26 @@ async function enqueueStorageCleanupJob(supabase, options) {
       // 否则会打断持 claim_token 的 worker，导致无限重试循环。
       const existingStatus = String(existing.data.status || '');
       if (existingStatus === 'processing') {
-        return { ok: true, queued: true, failed: false, duplicate: true, in_progress: true, jobId: existing.data.id, paths: paths };
+        // M-1b: processing 期间新提交的路径不能静默丢弃（否则新路径成孤儿）。
+        // 合并进已有 job 并重置为 pending（清 claim），worker 的 finalUpdate
+        // 因状态不匹配不会覆盖；下一轮按序重跑全部路径，remove 幂等无害。
+        let merged;
+        try {
+          merged = await supabase.from('storage_cleanup_jobs').update({
+            status: 'pending',
+            paths: normalizePaths((existing.data.paths || []).concat(paths)),
+            last_error: payload.last_error,
+            updated_at: payload.updated_at,
+            completed_at: null,
+            claim_token: null,
+            lease_until: null
+          }).eq('id', existing.data.id).select('id').maybeSingle();
+        } catch (error) {
+          return { ok: false, queued: false, failed: true, paths: paths, error: error };
+        }
+        if (merged && merged.error) return { ok: false, queued: false, failed: true, paths: paths, error: merged.error };
+        if (!merged || !merged.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
+        return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
       }
       if (existingStatus === 'completed' || existingStatus === 'failed') {
         // 终态 job 允许重新排队重试
@@ -95,10 +120,10 @@ async function enqueueStorageCleanupJob(supabase, options) {
         if (!update || !update.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
         return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
       }
-      // pending / 其他状态：幂等合并，仅当路径不同时更新
+      // pending / 其他状态：M-2b 幂等合并必须做并集，不能整体覆盖（否则旧路径被丢弃）
       let update;
       try {
-        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
       } catch (error) {
         return { ok: false, queued: false, failed: true, paths: paths, error: error };
       }
@@ -134,7 +159,32 @@ async function removeStorageWithQueue(supabase, options) {
     removal = { error: error };
   }
   if (removal && !removal.error) {
-    return { ok: true, removed: true, cleanup_pending: false, paths: paths };
+    // M-3b: 校验实际删除结果——remove 对不存在对象不报错，部分失败仅返回已删列表。
+    // 若 data 长度小于请求路径数，剩余路径重新入队，避免永远不再重试。
+    const removedNames = new Set((Array.isArray(removal.data) ? removal.data : []).map(function(item) {
+      return String(item && (item.name || item.path) || '').trim().replace(/^\/+/, '');
+    }));
+    const remaining = paths.filter(function(p) {
+      return !removedNames.has(String(p).trim().replace(/^\/+/, ''));
+    });
+    if (!remaining.length) {
+      return { ok: true, removed: true, cleanup_pending: false, paths: paths };
+    }
+    const queue = await enqueueStorageCleanupJob(supabase, {
+      bucket: options.bucket || 'uploads',
+      paths: remaining,
+      photoId: options.photoId,
+      lastError: 'partial_remove_' + remaining.length + '_of_' + paths.length
+    });
+    return {
+      ok: queue.ok,
+      removed: false,
+      cleanup_pending: queue.ok,
+      queue_failed: !queue.ok,
+      paths: remaining,
+      error: { code: 'STORAGE_PARTIAL_DELETE', message: 'Storage deleted ' + (paths.length - remaining.length) + ' of ' + paths.length + ' objects; remaining requeued' },
+      queue: queue
+    };
   }
   if (removal && removal.error && isNotFoundError(removal.error)) {
     return { ok: true, removed: true, cleanup_pending: false, paths: paths };

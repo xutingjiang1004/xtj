@@ -333,24 +333,6 @@
     applyImageTransform(animate);
   }
 
-  function clearInteractionState() {
-    state.mode = 'idle';
-    state.pointers.clear();
-    state.activePointerId = null;
-    state.pointerType = '';
-    state.mouseDown = false;
-    state.moved = false;
-    state.dragAxis = '';
-    state.startX = 0;
-    state.startY = 0;
-    state.startTx = state.tx;
-    state.startTy = state.ty;
-    state.startScale = state.scale;
-    state.pinchStartDistance = 0;
-    state.pinchAnchorX = 0;
-    state.pinchAnchorY = 0;
-  }
-
   function resetPreviewState(options) {
     var opts = options || {};
     clearInteractionState();
@@ -639,13 +621,21 @@
   }
 
   function clearInteractionState() {
+    state.mode = 'idle';
     state.pointers.clear();
     state.activePointerId = null;
-    state.mode = 'idle';
-    state.moved = false;
-    state.dragAxis = '';
     state.pointerType = '';
     state.mouseDown = false;
+    state.moved = false;
+    state.dragAxis = '';
+    state.startX = 0;
+    state.startY = 0;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.startScale = state.scale;
+    state.pinchStartDistance = 0;
+    state.pinchAnchorX = 0;
+    state.pinchAnchorY = 0;
     state.viewportWidthCache = 0;
     state.viewportHeightCache = 0;
     clearDismissVisual(true);

@@ -16,14 +16,21 @@
       .replace(/'/g, '&#39;');
   };
 
-  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|video|audio|source)\b/gi;
-  // 同时匹配带引号与不带引号的属性值（<img src=x onerror=alert(1)>）
-  var BLOCKED_ATTRS_RE = /\s(on[a-z0-9_]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|details|summary|video|audio|source)\b/gi;
+  // 事件处理属性：必须覆盖紧贴引号/斜杠/标签边界的情况（如 <img src="x"onerror="alert(1)">，
+  // HTML 解析会把引号后的 onerror 当作独立属性，原正则要求属性名前有空白导致漏删）
+  var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])on[a-z0-9_]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
   // 实体编码的事件属性名（onerror → &#111;nerror）
-  var BLOCKED_ATTRS_ENTITY_RE = /\s((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
-  var JS_URL_RE = /(?:href|src)\s*=\s*(?:"|')?\s*(?:javascript|vbscript)\s*(?:\s*:|&#x0*3[aA];?|&#0*5[89];?)\s*/gi;
-  var DANGEROUS_DATA_RE = /(?:href|src)\s*=\s*(?:"|')?\s*data\s*:\s*(?:text\/html|text\/javascript|application\/xhtml\+xml)/gi;
-  var CSS_EXPR_RE = /\bstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)\bexpression\s*\(/gi;
+  var BLOCKED_ATTRS_ENTITY_RE = /(^|[\s"'>\/])((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+
+  // 危险协议检测（对属性值先解码 HTML 实体，再剥离空白，最后校验 scheme）：
+  // 覆盖 jav&#x61;script:、java&#x09;script:、data:text/html 等实体编码/空白分隔绕过。
+  var DANGEROUS_SCHEME_RE = /^(?:javascript|vbscript|livescript|mocha)\s*[:\\]|^data\s*:\s*(?:text\/html|text\/javascript|application\/xhtml\+xml|image\/svg)/i;
+  function decodeHtmlEntities(str) {
+    return String(str)
+      .replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
+      .replace(/&#(\d+);/g, function (_, d) { return String.fromCharCode(parseInt(d, 10)); });
+  }
   // DSML / tool_calls / reasoning_content — never show raw protocol to user
   var DSML_RE = /<[|\uff5c]DSML[|\uff5c][\s\S]*?<[|\uff5c]\/DSML[|\uff5c]>/gi;
   var TOOL_CALLS_RAW_RE = /\{"tool_calls"\s*:\s*\[[\s\S]*?\]\s*\}/g;
@@ -34,16 +41,20 @@
     var s = String(html);
     // Strip dangerous tags
     s = s.replace(BLOCKED_TAGS_RE, '');
-    // Strip event handlers (quoted and unquoted values)
+    // Strip event handlers (quoted and unquoted values, incl. no-space boundary)
     s = s.replace(BLOCKED_ATTRS_RE, '');
     // Strip entity-encoded event handler attribute names
     s = s.replace(BLOCKED_ATTRS_ENTITY_RE, '');
-    // Strip javascript:/vbscript: URLs (quoted, unquoted, entity-encoded colon)
-    s = s.replace(JS_URL_RE, 'href="#"');
-    // Strip dangerous data: URLs
-    s = s.replace(DANGEROUS_DATA_RE, 'href="#"');
-    // Strip CSS expressions
-    s = s.replace(CSS_EXPR_RE, '');
+    // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离空白
+    // （java&#x09;script → javascript），命中危险 scheme 一律降级为 '#'
+    s = s.replace(/(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, function (match, attr, dq, sq, unq) {
+      var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
+      var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
+      if (DANGEROUS_SCHEME_RE.test(decoded)) return attr + '="#"';
+      return match;
+    });
+    // Strip CSS expressions（防 style 内 expression() 历史漏洞）
+    s = s.replace(/\bexpression\s*\(/gi, '');
     // Strip DSML protocol frames
     s = s.replace(DSML_RE, '');
     // Strip raw tool_calls JSON

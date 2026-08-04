@@ -20,7 +20,8 @@ const PHOTO_URL = ORIGIN + '/storage/v1/object/public/uploads/photos/test.jpg';
 
 function chain(result) {
   const query = {};
-  ['select', 'eq', 'in', 'order', 'limit', 'update'].forEach(function (name) {
+  // C-2/C-3 归属检查 findStoragePathRefs 走 ilike/neq 链，纳入 chain
+  ['select', 'eq', 'in', 'order', 'limit', 'update', 'ilike', 'neq'].forEach(function (name) {
     query[name] = function () { return query; };
   });
   query.maybeSingle = async function () { return result; };
@@ -72,7 +73,8 @@ test('DM storage verification uses exact search instead of enumerating chat/1000
   const result = await verifyStorageObject(supabase, 'chat/exact_1.jpg', { kind: 'image', mimeType: 'image/jpeg', sizeBytes: 1234 });
   assert.equal(result.ok, true);
   assert.equal(result.size, 1234);
-  assert.deepEqual(optionsSeen, { limit: 10, search: 'exact_1.jpg' });
+  // G3 修复后 limit 提升到 1000（避免同前缀文件多时精确对象被截断误判 not_found）
+  assert.deepEqual(optionsSeen, { limit: 1000, search: 'exact_1.jpg' });
 });
 
 test('DM storage verification preserves an explicit zero size and rejects malformed registered sizes', async function () {
@@ -191,6 +193,8 @@ test('photo thumbnail dimensions come from the final WebP output', async functio
   const supabase = {
     storage: { from: function () {
       return {
+        // H-6: 下载前先 list 探测真实大小（storageObjectExists），mock 需支持
+        list: async function () { return { data: [{ name: 'original.jpg', id: 'obj-1', metadata: { size: 3 } }], error: null }; },
         download: async function () { return { data: { arrayBuffer: async function () { return new Uint8Array([1, 2, 3]); } } }; },
         upload: async function (path, buffer) { uploaded.push({ path: path, buffer: buffer }); return { data: { path: path }, error: null }; }
       };
@@ -223,6 +227,8 @@ test('same upload_id never removes the already referenced storage path', async f
     },
     storage: { from: function () {
       return {
+        // storageObjectExists 用 list 精确探测（G3 修复后），mock 需支持
+        list: async function () { return { data: [{ name: 'test.jpg', id: 'obj-1', metadata: { size: 12 } }], error: null }; },
         createSignedUrl: async function () { return { data: { signedUrl: 'signed' }, error: null }; },
         remove: async function () { removeCalled = true; return { data: [], error: null }; }
       };

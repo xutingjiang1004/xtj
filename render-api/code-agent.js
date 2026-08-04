@@ -1031,18 +1031,15 @@ function isPrivateAddress(address) {
       (first === 203 && octets[1] === 0 && octets[2] === 113);
   }
   if (net.isIP(value) === 6) {
+    // ★ H-5 修复：IPv4-mapped IPv6（::ffff:x.x.x.x）必须先还原成 IPv4 再走私网判定。
+    //   原实现只兜底 ::ffff:127./10./192.168./169.254. 前缀，::ffff:172.16.0.1、
+    //   ::ffff:100.64.0.1、::ffff:198.18.0.1 等会被漏判为公网 → SSRF 可访问内网。
     if (value.indexOf('::ffff:') === 0) {
-      var mapped = value.slice(7).split(':');
-      if (mapped.length === 2) {
-        var hi = parseInt(mapped[0], 16), lo = parseInt(mapped[1], 16);
-        if (Number.isFinite(hi) && Number.isFinite(lo)) {
-          if (isPrivateAddress([(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join('.'))) return true;
-        }
-      }
+      var mappedV4 = value.slice(7);
+      if (net.isIP(mappedV4) === 4) return isPrivateAddress(mappedV4);
     }
     return value === '::' || value === '::1' || value.indexOf('fc') === 0 || value.indexOf('fd') === 0 ||
-      /^(fe[89ab]):/i.test(value) || value.indexOf('::ffff:127.') === 0 || value.indexOf('::ffff:10.') === 0 ||
-      value.indexOf('::ffff:192.168.') === 0 || value.indexOf('::ffff:169.254.') === 0;
+      /^(fe[89ab]):/i.test(value);
   }
   return false;
 }

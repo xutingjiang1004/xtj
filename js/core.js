@@ -3183,6 +3183,11 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
                 _chatCache = {};
+                // M-2d: 登出时复位聊天面板会话状态，防止切换账号后残留上一账号的
+                // 聊天标题/渲染签名，导致串号或列表不刷新
+                try { dockChatActiveUser = null; } catch(e) {}
+                try { _dockChatListRenderSignature = ''; } catch(e) {}
+                try { _chatRenderSignature = {}; } catch(e) {}
                 window.dockChatListCacheTime = 0;
                 window._xtjAuthState = 'unauthenticated';
                 // L11 修复：登出时断开浏览量 Observer 并清空跨会话缓存，避免单页长开内存缓慢增长
@@ -9345,7 +9350,13 @@ function renderProfileActivityList(kind) {
             window.markMessagesRead = markMessagesRead;
 
             function subscribeToMessages() {
-                if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
+                // H-10 修复：sb 在 SUPABASE_URL/ANON_KEY 缺失时为 null，
+                // 缺守卫会抛 TypeError（与 subscribeToComments 对齐）
+                if (!sb) return;
+                if (chatRealtime) {
+                    try { sb.removeChannel(chatRealtime); } catch(e) {}
+                    chatRealtime = null;
+                }
                 chatRealtime = sb.channel('chat-dms')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
                         var m = payload.new || payload.old;
