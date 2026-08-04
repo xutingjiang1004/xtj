@@ -3,7 +3,8 @@
 var http = require('http');
 var fs = require('fs');
 var path = require('path');
-var { SECURITY_HEADERS } = require('../render-api/security-headers');
+// 本地静态服务使用含回环地址放行的 CSP_LOCAL（生产版 CSP 不放行 localhost）
+var { SECURITY_HEADERS_LOCAL } = require("../render-api/security-headers");
 
 var root = path.resolve(__dirname, '..');
 var mime = {
@@ -26,23 +27,27 @@ http.createServer(function (req, res) {
   try {
     pathname = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
   } catch (_) {
-    res.writeHead(400, SECURITY_HEADERS).end('Bad request');
+    res.writeHead(400, SECURITY_HEADERS_LOCAL).end('Bad request');
     return;
   }
 
   // 代理 /api/* 请求到后端服务器
   if (pathname.indexOf('/api/') === 0) {
+    // 不透传客户端 Host（API_PROXY_TARGET 的 Host 才准确），同时设 X-Forwarded-Proto
+    var proxyHeaders = Object.assign({}, req.headers);
+    delete proxyHeaders.host;
+    proxyHeaders['x-forwarded-proto'] = 'http';
     var proxyReq = http.request(
       API_PROXY_TARGET + req.url,
-      { method: req.method, headers: req.headers },
+      { method: req.method, headers: proxyHeaders },
       function (proxyRes) {
-        res.writeHead(proxyRes.statusCode, Object.assign({}, proxyRes.headers, SECURITY_HEADERS));
+        res.writeHead(proxyRes.statusCode, Object.assign({}, proxyRes.headers, SECURITY_HEADERS_LOCAL));
         proxyRes.pipe(res);
       }
     );
     proxyReq.on('error', function (err) {
       console.error('[serve-static] API proxy error:', err.message);
-      res.writeHead(502, Object.assign({ 'Content-Type': 'application/json' }, SECURITY_HEADERS));
+      res.writeHead(502, Object.assign({ 'Content-Type': 'application/json' }, SECURITY_HEADERS_LOCAL));
       res.end(JSON.stringify({ error: 'Backend unavailable', code: 'proxy_error' }));
     });
     req.pipe(proxyReq);
@@ -58,28 +63,28 @@ http.createServer(function (req, res) {
   }
   var file = path.resolve(root, relative);
   if (file !== root && file.indexOf(root + path.sep) !== 0) {
-    res.writeHead(403, SECURITY_HEADERS).end('Forbidden');
+    res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
     return;
   }
   try {
     var real = fs.realpathSync(file);
     if (real !== file && real.indexOf(root + path.sep) !== 0 && real !== root) {
-      res.writeHead(403, SECURITY_HEADERS).end('Forbidden');
+      res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
       return;
     }
   } catch (_) {
-    res.writeHead(403, SECURITY_HEADERS).end('Forbidden');
+    res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
     return;
   }
   fs.stat(file, function (statError, stat) {
     if (statError || !stat.isFile()) {
-      res.writeHead(404, SECURITY_HEADERS).end('Not found');
+      res.writeHead(404, SECURITY_HEADERS_LOCAL).end('Not found');
       return;
     }
-    res.writeHead(200, Object.assign({ 'Content-Type': mime[path.extname(file).toLowerCase()] || 'application/octet-stream' }, SECURITY_HEADERS));
+    res.writeHead(200, Object.assign({ 'Content-Type': mime[path.extname(file).toLowerCase()] || 'application/octet-stream' }, SECURITY_HEADERS_LOCAL));
     var stream = fs.createReadStream(file);
     stream.on('error', function() {
-      if (!res.headersSent) res.writeHead(404, SECURITY_HEADERS).end('Not found');
+      if (!res.headersSent) res.writeHead(404, SECURITY_HEADERS_LOCAL).end('Not found');
       else res.destroy();
     });
     stream.pipe(res);

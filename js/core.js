@@ -432,6 +432,11 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
+                // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
+                try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_feed_cache_v7'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_feed_cache_v7'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -2602,7 +2607,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 try {
                     var registerRes = await fetch(API_BASE + '/api/user/register', {
                         method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ user_name: name, password: pw })
+                        body: JSON.stringify({ user_name: name, password: pw, email: email || undefined })
                     });
                     var registerData = await registerRes.json().catch(function(){ return {}; });
                     if (!registerRes.ok || !registerData.token) {
@@ -3168,9 +3173,9 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
                 var xtjKeys = [];
                 // H-36: 登出只清除会话相关键，保留用户偏好与设备身份：
-                // xtj_theme（主题偏好）、xtj_device_id（设备 ID，设备追踪）、
+                // xtj-theme（主题偏好，theme-toggle.js 实际使用连字符 key）、xtj_device_id（设备 ID，设备追踪）、
                 // xtj_pending_behavior（未上报的遥测队列）。
-                var xtjPreserveKeys = { 'xtj_theme': 1, 'xtj_device_id': 1, 'xtj_pending_behavior': 1 };
+                var xtjPreserveKeys = { 'xtj-theme': 1, 'xtj_theme': 1, 'xtj_device_id': 1, 'xtj_pending_behavior': 1 };
                 try {
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
@@ -5369,18 +5374,10 @@ function renderProfileActivityList(kind) {
                                 cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
                             }
                             return;
-                            // 快速本地检查：不从网络确认，避免二次超时
-                            var localCheck = quickPostExistsCheck(targetPostId);
-                            if (finished) return;
-                            finished = true;
-                            if (localCheck === 'deleted' || localCheck === 'not_found') {
-                                applyConfirmedPostDeletion(targetPostId, session);
-                            } else if (localCheck === 'exists') {
-                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
-                            } else {
-                                cleanupDeleteSession({ toast: "删除超时，无法确认状态，请刷新后重试" });
-                            }
-                            return;
+                            // 说明：原先此处有"快速本地检查"兜底，但被上方 return 短路成为死代码。
+                            // 超时后必须以权威接口 confirmPostDeleteStatus 的结果为准（避免误删/误恢复），
+                            // 本地缓存检查不可靠，故移除。
+                            // [dead code removed - quickPostExistsCheck local fallback]
                         }
                         throw raceErr;
                     } finally {
@@ -6403,17 +6400,34 @@ function renderProfileActivityList(kind) {
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
             function updateFeedStats() {
-    var posts = document.querySelectorAll('.post');
+    // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
+    // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
+    var posts = [];
     var totalLikes = 0, totalComments = 0, totalViews = 0;
-    posts.forEach(function(p) {
-        var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-        var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
-        if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
-        var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
-        if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
-        var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
-        if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
-    });
+    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问；
+    // 未初始化（undefined）时回退 DOM 统计，避免筛选/分页后统计错乱。
+    var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
+    if (hasFullData) {
+        posts = feedAllPosts;
+        feedAllLikes.forEach(function(like) {
+            if (!(like && (like.is_like === false || like.like_type === 'unlike'))) totalLikes += 1;
+        });
+        totalComments = feedAllComments.length;
+        posts.forEach(function(p) {
+            if (p && Number(p.views)) totalViews += Number(p.views);
+        });
+    } else {
+        posts = Array.prototype.slice.call(document.querySelectorAll('.post'));
+        posts.forEach(function(p) {
+            var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
+            var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
+            if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
+            var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
+            if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
+            var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
+            if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
+        });
+    }
                 var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
                 var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
@@ -7315,7 +7329,7 @@ function renderProfileActivityList(kind) {
                         return like && firstPageIds.has(String(like.post_id || ''));
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        version: 6,
+                        version: 7,
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -7385,7 +7399,7 @@ function renderProfileActivityList(kind) {
                     }];
                 }
                 return {
-                    version: parsed.version || 3,
+                    version: parsed.version || 7, // 必须与 CACHE_KEY v7 一致，旧缓存自动以新版本重写
                     timestamp: parsed.timestamp || 0,
                     data: {
                         posts: posts,
@@ -8970,6 +8984,7 @@ function renderProfileActivityList(kind) {
                 if (!modal || !modal.classList.contains('active')) return;
                 var type = statCurrentType;
                 if (!type) return;
+                if (!sb || typeof sb.from !== 'function') return; // Supabase SDK 未加载时返回，避免同步 TypeError
                 Promise.all([
                     sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
@@ -9002,9 +9017,10 @@ function renderProfileActivityList(kind) {
                 const bubble = document.createElement('div');
                 bubble.className = 'notification-bubble';
 
-                const avatarHtml = avatarCache[userName] ? 
-                    `<img loading="lazy" decoding="async" src="${avatarCache[userName]}" alt="${userName}">` : 
-                    userName[0].toUpperCase();
+                const safeAvatarUrl = avatarCache[userName] ? sanitizeUrl(avatarCache[userName]) : '';
+                const avatarHtml = safeAvatarUrl ? 
+                    `<img loading="lazy" decoding="async" src="${escapeHtml(safeAvatarUrl)}" alt="${escapeHtml(userName)}">` : 
+                    escapeHtml(String(userName)[0] || '').toUpperCase();
 
                 const truncatedMsg = message.length > 50 ? message.slice(0, 50) + '...' : message;
 
@@ -10726,7 +10742,7 @@ function renderProfileActivityList(kind) {
                 var timeLimit = 3 * 60 * 1000;
                 var canWithdraw = sent && !message.__optimistic && !isWithdrawn && (elapsed <= timeLimit);
                 
-                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" onclick="window.withdrawDMMessage(\'' + message.id + '\', this)" style="cursor:pointer; font-size: 11px; margin-left: 6px; color: #999;">撤回</span>' : '';
+                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" onclick="window.withdrawDMMessage(\'' + safeJsStr(String(message.id)) + '\', this)" style="cursor:pointer; font-size: 11px; margin-left: 6px; color: #999;">撤回</span>' : '';
                 
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
@@ -11667,10 +11683,10 @@ function renderProfileActivityList(kind) {
                 // 设置发布閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
                 if (userInfoEl) {
-                    var avUrl = avatarCache[ann.user_name];
+                    var avUrl = avatarCache[ann.user_name] ? sanitizeUrl(avatarCache[ann.user_name]) : '';
                     var avatarHtml = avUrl
-                        ? '<div class="announcement-detail-avatar"><img loading="lazy" decoding="async" src="' + avUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
-                        : '<div class="announcement-detail-avatar">' + ann.user_name.charAt(0).toUpperCase() + '</div>';
+                        ? '<div class="announcement-detail-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
+                        : '<div class="announcement-detail-avatar">' + escapeHtml(String(ann.user_name).charAt(0) || '').toUpperCase() + '</div>';
                     userInfoEl.innerHTML = avatarHtml + '<div class="announcement-detail-name">' + escapeHtml(ann.user_name) + '</div>';
                 }
 

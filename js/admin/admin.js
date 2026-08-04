@@ -786,6 +786,8 @@ async function initAdminClient() {
         stopRegisterAlertPolling();
         // 清理定时器和事件监听
         if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
+        // 重置监控标志：管理员重新登录后必须重新挂载 24h 无操作自动登出与 activity 监听
+        sessionTimeoutMonitorStarted = false;
         if (_adminReportPollTimer) { clearInterval(_adminReportPollTimer); _adminReportPollTimer = null; }
         if (onlineRefreshTimer) { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {

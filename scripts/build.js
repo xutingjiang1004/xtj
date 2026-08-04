@@ -169,6 +169,8 @@ function minifyJS(filePath, optional) {
     return true;
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
+    // Minify 失败时删除旧产物：保留旧 .min 文件会让非 CI 部署静默上线旧代码
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
     return false;
   } finally {
     if (normalizedInputPath) {
@@ -228,6 +230,8 @@ function minifyCSS(filePath, optional) {
     return true;
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
+    // Minify 失败时删除旧产物：保留旧 .min 文件会让非 CI 部署静默上线旧代码
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
     return false;
   } finally {
     if (normalizedInputPath) {

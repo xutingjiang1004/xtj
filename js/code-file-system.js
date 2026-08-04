@@ -127,16 +127,16 @@
   // IndexedDB
   // ──────────────────────────────────────────────
   var _dbConnection = null;
+  var _dbOpenPromise = null;
 
   function openDB() {
-    return new Promise(function (resolve, reject) {
-      try {
-        // 关闭旧连接
-        if (_dbConnection) {
-          try { _dbConnection.close(); } catch (e) {}
-          _dbConnection = null;
-        }
+    // 复用已打开的连接：每次关闭重建会 abort 旧连接上的未完成事务，
+    // 导致 storeHandle/restoreHandle/getStoredManifest 并发时句柄持久化/清单静默丢失
+    if (_dbConnection) return Promise.resolve(_dbConnection);
+    if (_dbOpenPromise) return _dbOpenPromise;
 
+    _dbOpenPromise = new Promise(function (resolve, reject) {
+      try {
         var resolved = false;
         // P0: IndexedDB 打开超时 (3 秒)
         var timeoutId = setTimeout(function () {
@@ -164,11 +164,12 @@
           resolved = true;
           clearTimeout(timeoutId);
           _dbConnection = db;
+          _dbOpenPromise = null;
           // 监听 versionchange，当其他页面升级数据库时主动关闭
           db.onversionchange = function () {
             console.log('[CODE-IDB] Database version change detected, closing connection');
-            db.close();
-            _dbConnection = null;
+            try { db.close(); } catch (_) {}
+            if (_dbConnection === db) _dbConnection = null;
           };
           resolve(db);
         };
@@ -176,25 +177,23 @@
           if (resolved) return;
           resolved = true;
           clearTimeout(timeoutId);
+          _dbOpenPromise = null;
           var err = e.target.error;
           console.error('[CODE-IDB] Open error:', err && err.message ? err.message : String(err));
           reject(wrapError(err, 'IndexedDB.open'));
         };
         req.onblocked = function (e) {
           console.warn('[CODE-IDB] Database open blocked by another connection');
-          // 尝试关闭旧连接后重试
-          if (_dbConnection) {
-            try { _dbConnection.close(); } catch (ex) {}
-            _dbConnection = null;
-          }
-          // 不直接 reject，让 onerror 或 onsuccess 处理
+          // 当前连接可正常使用，等待 onsuccess/onerror 处理即可，无需强制关闭
         };
       } catch (err) {
         clearTimeout(timeoutId);
+        _dbOpenPromise = null;
         console.error('[CODE-IDB] Open exception:', err && err.message ? err.message : String(err));
         reject(wrapError(err, 'IndexedDB.open'));
       }
     });
+    return _dbOpenPromise;
   }
 
   function storeHandle(handle, kind) {
@@ -1190,13 +1189,24 @@
     return new Promise(function (resolve, reject) {
       try {
         var originalSHA256 = null;
+        var backupText = null;
 
         // Compute SHA-256 of original content
         getSHA256(content).then(function (sha) {
           originalSHA256 = sha;
 
-          // Create writable
-          return fileHandle.createWritable();
+          // 写前备份原内容：createWritable 会立即截断文件，写入中断将导致数据丢失。
+          // 先读取当前内容作为回滚备份（文件不存在时 backupText 保持 null，无需回滚）。
+          return readFile(fileHandle).then(function (existing) {
+            backupText = existing && existing.content;
+            return undefined;
+          }).catch(function () {
+            backupText = null; // 文件不存在或不可读：首次创建，无需备份
+            return undefined;
+          }).then(function () {
+            // Create writable
+            return fileHandle.createWritable();
+          });
         }).then(function (writable) {
           return writable.write(content).then(function () {
             return writable.close();
@@ -1206,6 +1216,24 @@
           return readFile(fileHandle);
         }).then(function (result) {
           if (result.sha256 !== originalSHA256) {
+            // 校验失败：尝试用备份内容回滚，尽量不留下被截断的文件
+            if (backupText !== null) {
+              return fileHandle.createWritable().then(function (w) {
+                return w.write(backupText).then(function () { return w.close(); });
+              }).then(function () {
+                reject(new Error(
+                  'writeFile: verification failed - SHA-256 mismatch. ' +
+                  'Expected: ' + originalSHA256 + ', Got: ' + result.sha256
+                ));
+                return;
+              }).catch(function () {
+                reject(new Error(
+                  'writeFile: verification failed and rollback failed - ' +
+                  'file may be truncated. Expected: ' + originalSHA256 + ', Got: ' + result.sha256
+                ));
+                return;
+              });
+            }
             reject(new Error(
               'writeFile: verification failed - SHA-256 mismatch. ' +
               'Expected: ' + originalSHA256 + ', Got: ' + result.sha256
@@ -1219,6 +1247,12 @@
             type: result.type
           });
         }).catch(function (err) {
+          // 写入/关闭过程抛错：同样尝试回滚备份，避免留下截断文件
+          if (backupText !== null) {
+            fileHandle.createWritable().then(function (w) {
+              return w.write(backupText).then(function () { return w.close(); });
+            }).catch(function () {});
+          }
           reject(wrapError(err, 'writeFile'));
         });
       } catch (err) {
@@ -1924,10 +1958,22 @@
     return new Promise(function (resolve, reject) {
       try {
         var originalSHA256 = null;
+        var backupBuffer = null;
 
         getSHA256(buffer).then(function (sha) {
           originalSHA256 = sha;
-          return fileHandle.createWritable();
+          // 写前备份原二进制内容（Blob 引用），写入失败/校验失败时回滚，避免截断丢失
+          return fileHandle.getFile().then(function (f) {
+            return f.arrayBuffer().then(function (ab) {
+              backupBuffer = ab;
+              return undefined;
+            });
+          }).catch(function () {
+            backupBuffer = null; // 首次创建，无需备份
+            return undefined;
+          }).then(function () {
+            return fileHandle.createWritable();
+          });
         }).then(function (writable) {
           return writable.write(buffer).then(function () {
             return writable.close();
@@ -1936,6 +1982,17 @@
           return readFile(fileHandle);
         }).then(function (result) {
           if (result.sha256 !== originalSHA256) {
+            if (backupBuffer !== null) {
+              return fileHandle.createWritable().then(function (w) {
+                return w.write(backupBuffer).then(function () { return w.close(); });
+              }).then(function () {
+                reject(new Error('writeBinaryFile: verification failed - SHA-256 mismatch'));
+                return;
+              }).catch(function () {
+                reject(new Error('writeBinaryFile: verification failed and rollback failed - file may be truncated'));
+                return;
+              });
+            }
             reject(new Error('writeBinaryFile: verification failed - SHA-256 mismatch'));
             return;
           }
@@ -1946,6 +2003,11 @@
             type: result.type
           });
         }).catch(function (err) {
+          if (backupBuffer !== null) {
+            fileHandle.createWritable().then(function (w) {
+              return w.write(backupBuffer).then(function () { return w.close(); });
+            }).catch(function () {});
+          }
           reject(wrapError(err, 'writeBinaryFile'));
         });
       } catch (err) {
