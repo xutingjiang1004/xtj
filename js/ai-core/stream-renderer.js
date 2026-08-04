@@ -179,10 +179,18 @@
           rendered = 'AI 暂无回复，请重试。';
           targetEl.classList.add('ai-empty-fallback');
         }
-        targetEl.innerHTML = Markdown.render(rendered);
+        // C-5 修复：plainStream 模式保持纯文本输出（与流式阶段一致），
+        // 不统一走 Markdown.render，避免纯文本流在结束时突变为 HTML 渲染
+        // 导致 XSS 面扩大与样式跳变
+        if (options.plainStream) {
+          var pNode = ensurePlainTextNode();
+          try { pNode.data = rendered; } catch (e3) { pNode.textContent = rendered; }
+        } else {
+          targetEl.innerHTML = Markdown.render(rendered);
+        }
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
-          try { options.onRender(rendered); } catch (e3) {}
+          try { options.onRender(rendered); } catch (e) {}
         }
         if (typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}

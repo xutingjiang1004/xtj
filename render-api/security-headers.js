@@ -8,7 +8,10 @@
 var CSP = [
   "default-src 'self'",
   // WebLLM runs TVM/WebAssembly in a worker and needs these explicit runtime capabilities.
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net https://registry.npmmirror.com",
+  // H-9: script-src 不放行 supabase.co——public 桶是用户可写源（可上传 JS 脚本），
+  // 放进 script-src 等于允许「上传 JS → 白名单源加载」；supabase 仅用于 API 调用，
+  // 由 connect-src 放行。jsdelivr/npmmirror 承载 supabase-js/Monaco/GSAP，必须保留。
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",

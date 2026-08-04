@@ -1046,6 +1046,25 @@ async function searchBingHtml(query, maxResults) {
 }
 
 // 主搜索函数：按优先级依次尝试 Provider，取第一个成功的结果（避免浪费 API 配额）
+// M-6: 给单个搜索 provider 套超时（Promise.race），防止无自带超时的 provider
+// 挂起永久卡住整个串行搜索链并泄漏整体定时器
+function withSearchProviderTimeout(providerFn, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var timer = setTimeout(function() {
+      var error = new Error('search provider timed out');
+      error.code = 'SEARCH_PROVIDER_TIMEOUT';
+      reject(error);
+    }, timeoutMs);
+    Promise.resolve(providerFn()).then(function(value) {
+      clearTimeout(timer);
+      resolve(value);
+    }, function(error) {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
@@ -1099,7 +1118,9 @@ async function searchWeb(query, maxResults) {
     }
     diagnostics.enabled_providers.push(provider.name);
     try {
-      var result = await provider.fn();
+      // M-6: 每个 provider 单独套 12s 超时——整体 25s 定时器只在循环间检查，
+      // 单个无自带超时的 provider 挂起会永久卡住 await 且泄漏 25s 定时器
+      var result = await withSearchProviderTimeout(provider.fn, 12000);
       if (result.error) {
         diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
       } else if (result.results && result.results.length > 0) {
@@ -1549,7 +1570,6 @@ const USER_BEHAVIOR_MARKER = '__user_behavior__';
 const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
 const CLIENT_ERROR_MARKER = '__client_error__';
-// VIP / Pro 相关
 // 公告已读（跨设备同步用户已读公告）
 const ANN_READ_MARKER = '__ann_read__';
 // 邮件 / 历史邮箱
@@ -2009,8 +2029,8 @@ function isAllowedWebOrigin(origin) {
   if (ALLOWED_ORIGINS.length > 0) return ALLOWED_ORIGINS.includes(origin);
   try {
     var originHost = new URL(origin).hostname;
-    return originHost === SERVER_HOSTNAME || originHost === 'localhost' || originHost === '127.0.0.1' ||
-      /(^|\.)vercel\.app$/.test(originHost);
+    // 仅放行服务器自身域名与本机开发域名；不再通配任何第三方托管域（如 *.vercel.app）
+    return originHost === SERVER_HOSTNAME || originHost === 'localhost' || originHost === '127.0.0.1';
   } catch (e) {
     return false;
   }
@@ -2119,16 +2139,23 @@ app.use(function(req, res, next) {
 });
 
 // 阻止敏感路径被静态文件服务泄露
+// ★ C-1 修复：req.path 不解码百分号编码，黑名单必须先用解码后的路径匹配，
+//   否则 /%72ender-api/（%72=r）可绕过前缀黑名单被 express.static 解码命中。
 app.use(function(req, res, next) {
   var p = req.path;
+  try { p = decodeURIComponent(p); } catch (e) { return res.status(400).end(); }
+  // 双重编码防御：解码后仍含有效 %xx 序列的静态请求直接拒绝
+  if (/%[0-9a-fA-F]{2}/.test(p)) return res.status(404).end();
+  // 路径穿越 / 反斜杠兜底（send 对 \ 也会做兼容处理）
+  if (p.indexOf('..') !== -1 || p.indexOf('\\') !== -1) return res.status(404).end();
   // 精确文件匹配
-  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/bug_audit_report.md', '/security_best_practices_report.md'];
+  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
   // 目录前缀匹配
-  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/.git/'];
+  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/.git/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.workbuddy/', '/.playwright-cli/', '/output/'];
   for (var i = 0; i < dirs.length; i++) { if (p.indexOf(dirs[i]) === 0) return res.status(404).end(); }
   // 后缀匹配
-  if (p.endsWith('.bak') || p.endsWith('.md') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0) return res.status(404).end();
+  if (p.endsWith('.bak') || p.endsWith('.md') || p.endsWith('.pem') || p.endsWith('.env') || p.endsWith('.log') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0) return res.status(404).end();
   next();
 });
 
@@ -6524,7 +6551,8 @@ function _verifyToken(token) {
     if (sigBuf.length !== expBuf.length) return null;
     if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
     var payload = JSON.parse(Buffer.from(b64, 'base64url').toString());
-    if (Date.now() > payload.exp) return null;
+    // M-7: exp 缺失时 Date.now() > undefined 恒 false → token 永不过期（fail-open）
+    if (typeof payload.exp !== 'number' || !(payload.exp > 0) || Date.now() > payload.exp) return null;
     return payload;
   } catch(e) { return null; }
 }
@@ -7765,7 +7793,19 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
 function collectPhotoStoragePaths(photo) {
   var paths = [];
   function addPath(value) {
-    var path = String(value || '').trim().replace(/^\/+/, '');
+    var raw = String(value || '').trim();
+    var path = raw.replace(/^\/+/, '');
+    // H-8: thumb 等历史字段可能是完整 https URL，先反解为 storage path 再收集，
+    // 否则 remove() 收到 URL 永不删除，缩略图成为公网可访问孤儿
+    if (raw.indexOf('http://') === 0 || raw.indexOf('https://') === 0) {
+      try {
+        var parsedUrl = new URL(raw);
+        var urlMatch = parsedUrl.pathname.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/) || parsedUrl.pathname.match(/\/uploads\/(.+)$/);
+        if (urlMatch && urlMatch[1]) {
+          try { path = decodeURIComponent(urlMatch[1]); } catch (_) {}
+        }
+      } catch (_) {}
+    }
     if (!path || path.indexOf('..') >= 0 || paths.indexOf(path) >= 0) return;
     paths.push(path);
   }
@@ -7850,6 +7890,9 @@ var _storageCleanupRunning = false;
 var STORAGE_CLEANUP_CLAIM_TIMEOUT_MS = 60 * 1000;
 var STORAGE_CLEANUP_LEASE_MS = 60 * 1000;
 var STORAGE_CLEANUP_REMOVE_TIMEOUT_MS = 30 * 1000;
+// M-12: 清理失败最大重试次数，达到上限转 failed（终态），避免永久 pending 的
+// 任务始终排最前挤占 20 个处理名额导致新任务队头阻塞
+var STORAGE_CLEANUP_MAX_ATTEMPTS = 5;
 
 function withStorageCleanupTimeout(promise, timeoutMs) {
   return new Promise(function(resolve, reject) {
@@ -7927,8 +7970,10 @@ async function processStorageCleanupJobs() {
       }
       var finalUpdate;
       if (removeError && !isNotFoundError(removeError)) {
+        // M-12: 连续失败达上限转 failed 终态，不再无限重试
+        const failedForever = nextAttempts >= STORAGE_CLEANUP_MAX_ATTEMPTS;
         finalUpdate = await supabase.from('storage_cleanup_jobs').update({
-          status: 'pending', attempts: nextAttempts,
+          status: failedForever ? 'failed' : 'pending', attempts: nextAttempts,
           last_error: String(removeError.message || removeError.error || 'storage_delete_failed').slice(0, 1000),
           claim_token: null, lease_until: null, updated_at: new Date().toISOString()
         }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
@@ -12434,8 +12479,8 @@ async function saveEmailRecipientHistory(recipients) {
     var hInfo = histList[hi];
     var exist = existMap[hInfo.email];
     if (exist) {
-      // 已有：保留更好的名字（如果新名字是邮箱且旧有非邮箱名字，则保留旧名字）
-      if (hInfo.user_name === hInfo.email && exist.user_name && exist.user_name !== exist.user_name.toLowerCase()) {
+      // 已有：保留更好的名字（如果新名字是邮箱且旧名不是邮箱格式（真名/中文昵称），则保留旧名字）
+      if (hInfo.user_name === hInfo.email && exist.user_name && !isValidEmailAddress(exist.user_name)) {
         hInfo.user_name = exist.user_name;
       }
       try {
@@ -12567,6 +12612,14 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     if (recipients.length > MAX_RECIPIENTS) {
       return res.status(400).json({ error: '单次最多发送 ' + MAX_RECIPIENTS + ' 人' });
     }
+    // M-2: 校验每个收件人 email 格式，防止 undefined/非字符串/控制字符直接进入发送通道
+    const invalidRecipients = recipients.filter(function(r) {
+      const e = normalizeEmailAddress(r && r.email);
+      return !e || !isValidEmailAddress(e);
+    });
+    if (invalidRecipients.length) {
+      return res.status(400).json({ error: '存在无效的收件人邮箱', invalid: invalidRecipients.map(function(r) { return r && r.email; }).slice(0, 20) });
+    }
     const subjectVal = subject.trim().slice(0, 200);
     const isHtml = content_type === 'html';
     const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
@@ -12642,7 +12695,6 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         }
         if (SENDGRID_API_KEY && !GMAIL_GAS_URL) {
           // SendGrid 失败 → 回退到 SMTP（不再重置常量，只走本地逻辑开关）
-          var sendgridBroken = true;
           try {
             var sgTransporter = getMailTransporter();
             if (sgTransporter) {
@@ -12659,7 +12711,10 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           } catch(e2) {
             console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
           }
-        } else if (!GMAIL_GAS_URL && usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
+        }
+        // M-4: 465 连接失败时回退 587 STARTTLS——与上方 SendGrid 回退解耦（原为
+        // else if 互斥，配 SendGrid 时 465 失败永远走不到 587）
+        if (!GMAIL_GAS_URL && usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
           try {
             console.warn('[Email] 465 连接失败，回退到 587 STARTTLS');
             var fallbackTransporter = nodemailer.createTransport({
@@ -14816,16 +14871,30 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var buffer = '';
     var usageInStream = null;
     var hasReasoningContent = false;
-    var reasoningBuffer = persistentReasoning || '';
-    var contentBuffer = '';
+    // ★ H-3 修复：多轮工具调用之间正文必须累积——原实现每轮 `var contentBuffer=''`
+    //   把上一轮已推送的"前言"清空，最终 finishStream 落库只存最后一轮正文。
+    //   var 声明提升到函数作用域，仅首轮初始化，后续轮不清空。
+    if (contentBuffer === undefined) { contentBuffer = ''; }
+    if (reasoningBuffer === undefined) { reasoningBuffer = persistentReasoning || ''; }
     var reasoningSent = false;
     var reasoningStartedAt = 0;
     var pendingToolCalls = {};
     var finishReason = '';
     
     var lastChunkTime = Date.now();
+    // ★ H-2 修复：chunk 读取超时定时器必须复用，避免每轮 while 循环新建一个
+    //   60s 定时器且从不 clearTimeout（长回复上千 chunk 会累积上千个定时器，RSS 上涨）
+    var chunkTimer = null;
+    function clearChunkTimer() { if (chunkTimer) { clearTimeout(chunkTimer); chunkTimer = null; } }
+    function startChunkTimer() {
+      clearChunkTimer();
+      return new Promise(function (_, reject) {
+        chunkTimer = setTimeout(function () { chunkTimer = null; reject(new Error('chunk_timeout')); }, 60000);
+      });
+    }
     while (true) {
       if (aborted) {
+        clearChunkTimer();
         controller.abort();
         return safeEnd();
       }
@@ -14864,7 +14933,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       try {
         readResult = await Promise.race([
           reader.read(),
-          new Promise(function(_, reject) { setTimeout(function() { reject(new Error('chunk_timeout')); }, 60000); })
+          startChunkTimer()
         ]);
       } catch (e) {
         if (e && e.message === 'chunk_timeout') {
@@ -14882,8 +14951,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         break;
       }
-      if (readResult && readResult.done) break;
+      if (readResult && readResult.done) { clearChunkTimer(); break; }
       lastChunkTime = Date.now();
+      clearChunkTimer();
       
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
@@ -14911,15 +14981,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           persistentReasoning += delta.reasoning_content;
           if (thinkingMode !== 'off') {
             if (!reasoningSent) {
-              res.write('data: ' + JSON.stringify({ type: 'reasoning_start' }) + '\n\n');
+              // H-4 修复：统一走 writeSse（带 256KB 背压），返回 false 说明
+              // 慢客户端缓冲已满，应中断生成而不是继续裸写导致 OOM/事件乱序
+              if (!writeSse(res, { type: 'reasoning_start' })) { aborted = true; break; }
               reasoningSent = true;
             }
-            res.write('data: ' + JSON.stringify({ type: 'reasoning', text: delta.reasoning_content }) + '\n\n');
+            if (!writeSse(res, { type: 'reasoning', text: delta.reasoning_content })) { aborted = true; break; }
           }
         }
         if (delta.content) {
           contentBuffer += delta.content;
-          res.write('data: ' + JSON.stringify({ type: 'content', text: delta.content }) + '\n\n');
+          if (!writeSse(res, { type: 'content', text: delta.content })) { aborted = true; break; }
         }
         
         // 收集 tool calls（思考模式下的搜索请求）

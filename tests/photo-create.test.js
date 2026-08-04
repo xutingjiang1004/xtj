@@ -48,6 +48,10 @@ test('database outcome failure preserves storage for reconciliation', async func
   };
   failQuery.eq = function() { return failQuery; };
   failQuery.select = function() { return failQuery; };
+  // C-2/C-3: 归属检查 findStoragePathRefs 走 select→ilike→limit 链，无引用返回空
+  failQuery.ilike = function() { return failQuery; };
+  failQuery.neq = function() { return failQuery; };
+  failQuery.limit = async function() { return { data: [], error: null }; };
   var failInsert = { select: function() { return failQuery; } };
   const supabase = {
     from: function() {
@@ -76,6 +80,10 @@ test('thrown database write preserves storage for reconciliation', async functio
   };
   errQuery.eq = function() { return errQuery; };
   errQuery.select = function() { return errQuery; };
+  // C-2/C-3: 归属检查 findStoragePathRefs 链
+  errQuery.ilike = function() { return errQuery; };
+  errQuery.neq = function() { return errQuery; };
+  errQuery.limit = async function() { return { data: [], error: null }; };
   const supabase = {
     from: function() {
       return {
@@ -97,6 +105,10 @@ test('successful write uses a server-generated actor key', async function() {
   var okQuery = { maybeSingle: async function() { return { data: { id: 1 } }; } };
   okQuery.eq = function() { return okQuery; };
   okQuery.select = function() { return okQuery; };
+  // C-2/C-3: 归属检查 findStoragePathRefs 链
+  okQuery.ilike = function() { return okQuery; };
+  okQuery.neq = function() { return okQuery; };
+  okQuery.limit = async function() { return { data: [], error: null }; };
   var supabase = {
     from: function() {
       return {
@@ -117,6 +129,10 @@ test('upload_id idempotency: existing record returned without insert', async fun
   var existingQuery = { maybeSingle: async function() { return { data: existingRow, error: null }; } };
   existingQuery.eq = function() { return existingQuery; };
   existingQuery.select = function() { return existingQuery; };
+  // C-2/C-3: 归属检查 findStoragePathRefs 链（无他人引用 → 幂等返回）
+  existingQuery.ilike = function() { return existingQuery; };
+  existingQuery.neq = function() { return existingQuery; };
+  existingQuery.limit = async function() { return { data: [], error: null }; };
   var supabase = {
     from: function() {
       return {
