@@ -274,7 +274,12 @@
     }
     function G(e, t) {
         var o = null == e || "" === e ? t || "--" : e;
-        return window.escapeHtml ? window.escapeHtml(String(o)) : String(o);
+        // 内置 escapeHtml 兜底：core.js 加载顺序变化或独立复用时，避免用户可控字段（username/exif）
+        // 原样拼入 innerHTML 形成存储型 XSS（同 hotfix 的 escapeValue）
+        var escapeFn = typeof window.escapeHtml === 'function' ? window.escapeHtml : function(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        };
+        return escapeFn(String(o));
     }
     function J(e) {
         if (!e) return "";

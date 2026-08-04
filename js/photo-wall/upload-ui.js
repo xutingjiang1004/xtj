@@ -47,7 +47,8 @@
     })();
   }
 
-  function isImage(file){ return !!(file && /^image\//i.test(file.type || '')); }
+  // SVG 可内嵌脚本，原图 URL 打开即 XSS 载体，照片墙显式拒绝
+  function isImage(file){ return !!(file && /^image\//i.test(file.type || '') && !/^image\/svg(\+xml)?/i.test(file.type || '')); }
   function isVideo(file){ return !!(file && /^video\//i.test(file.type || '')); }
   function isMedia(file){ return isImage(file) || isVideo(file); }
   function isPhotoWallImage(file){ return isImage(file); }
@@ -120,19 +121,35 @@
         return { ok: false, error: error };
       });
     }
-    return Promise.resolve().then(function(){
-      try { return window.sb.storage.from('uploads').remove([path]); }
-      catch (e) { return { error: e }; }
-    }).then(function(result){
-      if (result && result.error) {
-        var msg = String((result.error && (result.error.message || result.error.error)) || '').toLowerCase();
-        if (/not.?found|does not exist|no such|404/.test(msg)) return;
-        console.error('[photo-upload] Storage cleanup error', result.error);
-      }
-    }).catch(function(e){
-      var msg = String((e && (e.message || e.error)) || '').toLowerCase();
-      if (/not.?found|does not exist|no such|404/.test(msg)) return;
-      console.error('[photo-upload] Storage cleanup failed', e);
+    // 统一走后端 /api/photo/cleanup（含归属与路径校验），禁止前端 anon key 直删 Storage：
+    // 直删会绕过服务端校验与审计，且若 bucket 删除策略未按 owner 收紧即为任意文件删除。
+    // 后端要求 upload_id + 规范路径；缺少 upload_id 时无法通过后端校验，直接放弃删除并警告。
+    if (!uploadId) {
+      console.warn('[photo-upload] cleanup skipped: missing upload_id (cannot verify ownership)', path);
+      return Promise.resolve({ ok: false, reason: 'missing_upload_id' });
+    }
+    return Promise.resolve().then(function () {
+      var authHeaders = typeof window.getUserAuthHeaders === 'function' ? window.getUserAuthHeaders() : {};
+      return Promise.resolve(authHeaders).then(function (resolvedHeaders) {
+        var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+        return fetch(apiUrl('/api/photo/cleanup'), {
+          method: 'POST',
+          headers: buildPhotoCreateHeaders(resolvedHeaders || {}),
+          body: JSON.stringify({ path: path, upload_id: uploadId }),
+          signal: controller ? controller.signal : undefined
+        }).then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (data) {
+            if (response.ok && data && data.ok === true) return { ok: true, data: data };
+            return { ok: false, status: response.status, data: data };
+          });
+        }).finally(function () {
+          if (timeoutId) clearTimeout(timeoutId);
+        });
+      });
+    }).catch(function (error) {
+      console.error('[photo-upload] Backend cleanup could not be confirmed', error);
+      return { ok: false, error: error };
     });
   }
 
@@ -471,9 +488,9 @@
       revoke('photoUrls');
       state.photoFiles = [];
       state.skippedFiles = [];
-      var grid = byId('pwUploadGrid');
+      var grid = byId('pwUploadSheetGrid');
       if (grid) grid.innerHTML = '';
-      var input = byId('pwUploadInput');
+      var input = byId('photoFileInput');
       if (input) input.value = '';
       var title = byId('pwUploadTitle');
       if (title) title.textContent = '选择照片';
@@ -683,7 +700,8 @@
     }
     if (upload && upload.error) { upload.error.photoUploadStage = 'storage'; throw upload.error; }
     if (state.cancelRequested || (signal && signal.aborted)) {
-      await cleanupStorage(path);
+      // 取消上传：必须走后端 /api/photo/cleanup 校验路径归属，禁止前端 anon key 直删 Storage
+      await cleanupStorage(path, uploadId);
       throw createPhotoUploadError('cancelled');
     }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;

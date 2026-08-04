@@ -40,6 +40,7 @@ const CHECKPOINT_KEEP = 12;
 const MAX_SESSIONS = 200;
 const MAX_SESSION_MESSAGES = 200;
 const MAX_HISTORY_MSG_CHARS = 64 * 1024; // 每条历史消息 content 上限（64KB），防止缓存无界膨胀
+const MAX_HISTORY_TOTAL_BYTES = 1024 * 1024; // 单会话历史总字节上限（1MB），防止 200 会话 × 64KB 级膨胀到 GB 级内存
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
 const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
@@ -78,6 +79,26 @@ function clampHistoryMessage(msg) {
 function clampHistoryList(list) {
   if (!Array.isArray(list)) return list;
   return list.map(clampHistoryMessage);
+}
+
+// 强制会话历史总字节预算：从头部丢弃最旧消息（保留至少 2 条），
+// 防止工具密集型对话把进程内会话缓存膨胀到 GB 级内存。
+function enforceHistoryByteBudget(history) {
+  if (!Array.isArray(history) || history.length <= 2) return history;
+  var totalBytes = 0;
+  for (var i = 0; i < history.length; i++) {
+    var content = history[i] && history[i].content;
+    if (typeof content === 'string') totalBytes += Buffer.byteLength(content, 'utf8');
+  }
+  if (totalBytes <= MAX_HISTORY_TOTAL_BYTES) return history;
+  var kept = history.slice();
+  while (kept.length > 2 && totalBytes > MAX_HISTORY_TOTAL_BYTES) {
+    var droppedContent = kept[0] && kept[0].content;
+    if (typeof droppedContent === 'string') totalBytes -= Buffer.byteLength(droppedContent, 'utf8');
+    kept.shift();
+  }
+  console.log('[code-agent] History byte-budget trimmed to ' + kept.length + ' messages / ' + totalBytes + ' bytes');
+  return kept;
 }
 
 function getSessionKey(userId, workspaceId, generation, conversationId) {
@@ -367,7 +388,9 @@ function normalizeContextPath(p) {
     var parts = s.split('/');
     s = parts[parts.length - 1] || 'unnamed';
   }
-  s = s.replace(/\.\./g, '').replace(/\/\//g, '/');
+  // 不再静默剥离 '..'：剥离会改变路径语义（src/../../foo.js → src/foo.js）。
+  // 路径是否合法由 validatePath 统一判定，含 '..' 的路径直接拒绝，而不是改写成另一个文件。
+  s = s.replace(/\/\//g, '/');
   if (s.charCodeAt(0) === 47) s = s.substring(1);
   return s;
 }
@@ -1196,9 +1219,14 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   function resolveOverlayFile(path) {
     var normalized = normalizeToolPath(path);
     if (!normalized) return null;
-    if (overlay.has(normalized)) return overlay.get(normalized);
+    if (overlay.has(normalized)) return { file: overlay.get(normalized), matchedByBasename: false };
     var basename = normalized.split('/').pop();
-    return overlayBasenames.get(basename) || null;
+    var candidate = overlayBasenames.get(basename);
+    if (!candidate) return null;
+    // basename 回退匹配存在读错文件风险（如 read_file("app.js") 命中 src/app.js）。
+    // 仅当工作区内该 basename 唯一时才允许；返回时标注 matchedByBasename，
+    // 供调用方在写入类操作时拒绝，避免把修改写进错误文件。
+    return { file: candidate, matchedByBasename: true };
   }
 
   function wildcardMatch(value, pattern) {
@@ -1374,8 +1402,13 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   function readPath(path, startLine, endLine) {
     var normalizedPath = normalizeToolPath(path);
     if (!normalizedPath) return { ok: false, code: 'INVALID_PATH', error: '文件路径无效' };
-    var overlayFile = resolveOverlayFile(normalizedPath);
-    if (overlayFile) return fileToToolResult(overlayFile, startLine, endLine);
+    var overlayResolved = resolveOverlayFile(normalizedPath);
+    if (overlayResolved && overlayResolved.file) {
+      // basename 回退匹配时标注来源，供日志/后续操作识别，避免误读同名文件
+      return Object.assign(fileToToolResult(overlayResolved.file, startLine, endLine), {
+        matchedByBasename: overlayResolved.matchedByBasename === true
+      });
+    }
     var range = codeIndex.readFileRange(scope, normalizedPath, startLine || 1, endLine || 1000000);
     if (!range || !range.ok) return range;
     var actualStart = Array.isArray(range.lines) && range.lines.length ? range.lines[0].lineNum : range.startLine;
@@ -1813,8 +1846,12 @@ async function applyXlsxOperations(buffer, operations, fileName) {
             oldValue = String(workbook.Sheets[sheetName][cell].v || '');
           }
 
-          if (typeof value === 'string' && value.startsWith('=')) {
+          if (typeof value === 'string' && value.startsWith('=') && op.is_formula === true) {
             workbook.Sheets[sheetName][cell] = { t: 'n', f: value.slice(1) };
+          } else if (typeof value === 'string' && value.startsWith('=')) {
+            // 公式注入防护：未显式声明 is_formula 时，以 = 开头的文本一律作为普通字符串写入，
+            // 防止 AI 生成 =HYPERLINK/=WEBSERVICE/=IMPORTXML 等公式在用户打开文件时触发恶意请求
+            workbook.Sheets[sheetName][cell] = { t: 's', v: String(value) };
           } else if (typeof value === 'number') {
             workbook.Sheets[sheetName][cell] = { t: 'n', v: value };
           } else {
@@ -3946,6 +3983,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             console.log('[code-agent] History compressed: ' + totalMsgs + ' -> ' + sessionData.history.length + ' messages');
           }
         }
+        // Enforce total history byte budget: keep the tail within 1MB,
+        // dropping the oldest messages first so tool-heavy turns cannot
+        // grow the in-process session cache into gigabytes.
+        sessionData.history = enforceHistoryByteBudget(sessionData.history);
         sessionData.messageCount = sessionData.history.length;
         touchSession(sessionData);
       }
@@ -5019,6 +5060,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             ]).concat(msgTail);
           }
         }
+        sessionData.history = enforceHistoryByteBudget(sessionData.history);
         sessionData.messageCount = sessionData.history.length;
         touchSession(sessionData);
       }

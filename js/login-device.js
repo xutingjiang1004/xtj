@@ -571,7 +571,15 @@
 
             // 加载安全设置，按开关决定是否采集指纹
             getSecuritySettings().then(function(settings) {
-                if (!settings.record_device) bodyObj.device_meta = null;
+                if (!settings.record_device) {
+                    // 关闭设备记录时彻底移除设备标识字段，避免服务端仍可据 device_id 关联设备
+                    bodyObj.device_meta = null;
+                    bodyObj.device_id = undefined;
+                    bodyObj.device_type = undefined;
+                    bodyObj.os = undefined;
+                    bodyObj.browser = undefined;
+                    bodyObj.user_agent = undefined;
+                }
                 // advanced_fingerprint 作为主开关：开启时等同启用所有指纹采集
                 var advFp = !!settings.advanced_fingerprint;
                 var browserFpPromise = (advFp || settings.browser_fingerprint) ? getBrowserFingerprint() : null;
@@ -579,14 +587,16 @@
                 var webglFpPromise = (advFp || settings.webgl_fingerprint) ? getWebglFingerprint() : null;
                 var webglMeta = (advFp || settings.webgl_fingerprint) ? getWebglMeta() : null;
                 var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
-                var batteryPromise = getBatteryInfo();
-                var storagePromise = getStorageEstimate();
-                var mediaDevicesPromise = getMediaDevices();
+                // 高敏感采集必须受开关控制：电池/存储配额/媒体设备枚举是强设备指纹，
+                // 默认仅在 advanced_fingerprint 或对应独立开关开启时才采集
+                var batteryPromise = (advFp || settings.battery_fingerprint) ? getBatteryInfo() : null;
+                var storagePromise = (advFp || settings.storage_fingerprint) ? getStorageEstimate() : null;
+                var mediaDevicesPromise = (advFp || settings.media_devices_fingerprint) ? getMediaDevices() : null;
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
 
-                // 始终采集精确设备型号（UA Client Hints / 无成本的异步 API）
-                var exactModelPromise = getExactDeviceModel();
+                // 精确设备型号（UA Client Hints）：仅在启用设备记录时采集
+                var exactModelPromise = settings.record_device ? getExactDeviceModel() : null;
 
                 // 收集所有异步指纹，然后统一发送
                 var collectAndSend = function() {

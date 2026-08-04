@@ -71,15 +71,34 @@ async function enqueueStorageCleanupJob(supabase, options) {
   if (result && result.error && String(result.error.code || '') === '23505') {
     let existing;
     try {
-      existing = await supabase.from('storage_cleanup_jobs').select('id,photo_id,paths,status').eq('photo_id', photoId).maybeSingle();
+      existing = await supabase.from('storage_cleanup_jobs').select('id,photo_id,paths,status,claim_token').eq('photo_id', photoId).maybeSingle();
     } catch (error) {
       return { ok: false, queued: false, failed: true, paths: paths, error: error };
     }
     if (existing && existing.error) return { ok: false, queued: false, failed: true, paths: paths, error: existing.error };
     if (existing && existing.data) {
+      // 正在处理（processing）或已完成的 job 不能被并发重复提交强制重置：
+      // 否则会打断持 claim_token 的 worker，导致无限重试循环。
+      const existingStatus = String(existing.data.status || '');
+      if (existingStatus === 'processing') {
+        return { ok: true, queued: true, failed: false, duplicate: true, in_progress: true, jobId: existing.data.id, paths: paths };
+      }
+      if (existingStatus === 'completed' || existingStatus === 'failed') {
+        // 终态 job 允许重新排队重试
+        let update;
+        try {
+          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+        } catch (error) {
+          return { ok: false, queued: false, failed: true, paths: paths, error: error };
+        }
+        if (update && update.error) return { ok: false, queued: false, failed: true, paths: paths, error: update.error };
+        if (!update || !update.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
+        return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
+      }
+      // pending / 其他状态：幂等合并，仅当路径不同时更新
       let update;
       try {
-        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null }).eq('id', existing.data.id).select('id').maybeSingle();
+        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
       } catch (error) {
         return { ok: false, queued: false, failed: true, paths: paths, error: error };
       }

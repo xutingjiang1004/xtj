@@ -1373,7 +1373,9 @@ async function finishStream(res, opt) {
     sanitized_content: contentWasFiltered ? content : undefined,
     filtered: contentWasFiltered || undefined,
     reasoning: thinkingMode !== 'off' ? reasoning : '',
-    usage: null,
+    // 流式响应也回传真实 usage（DeepSeek 流式末尾带 usage 字段），
+    // 否则管理后台对普通聊天（走 stream 的对话）永远统计不到 token/cost，用量报表失真
+    usage: opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length ? opt.usage : null,
     model: usedModel,
     thinking_mode: thinkingMode,
     requested_thinking_mode: thinkingMode,
@@ -1563,30 +1565,27 @@ const REVOKED_TOKEN_MARKER = '__revoked_token__';
 var _mergeUserInfoLocks = new Map();
 function _mergeUserInfoLock(userName) {
   var safeUser = String(userName || '').trim().toLowerCase();
-  if (!_mergeUserInfoLocks.has(safeUser)) _mergeUserInfoLocks.set(safeUser, Promise.resolve());
-  var prev = _mergeUserInfoLocks.get(safeUser);
+  var entry = _mergeUserInfoLocks.get(safeUser);
+  if (!entry) {
+    entry = { ts: Date.now(), waiters: 0, lock: Promise.resolve() };
+    _mergeUserInfoLocks.set(safeUser, entry);
+  }
+  entry.ts = Date.now();
+  entry.waiters++;
+  var prev = entry.lock;
   var next = prev.then(function() { return undefined; }, function() { return undefined; });
-  _mergeUserInfoLocks.set(safeUser, next);
+  entry.lock = next;
+  next.then(function() { entry.waiters--; }, function() { entry.waiters--; });
   return next;
 }
-// 定期清理空闲锁（60 秒后删除，避免内存泄漏）
+// 定期清理空闲锁：仅当无排队等待者且超过 60 秒未再使用时删除，避免内存泄漏且不会破坏进行中的链
 setInterval(function() {
   var now = Date.now();
-  // 只清理已 resolve 的锁，每 60s 清理一次，使用 size 估算，实际清理在下次 mergeUserInfo 调用时
-  if (_mergeUserInfoLocks.size > 1000) {
-    var keysToDelete = [];
-    _mergeUserInfoLocks.forEach(function(value, key) {
-      // 检查是否是 resolved promise（非 thenable 或已 settled）
-      if (typeof value === 'object' && value !== null) {
-        var isResolved = false;
-        try {
-          isResolved = typeof value.then !== 'function';
-        } catch (e) { isResolved = true; }
-        if (isResolved) keysToDelete.push(key);
-      }
-    });
-    keysToDelete.forEach(function(key) { _mergeUserInfoLocks.delete(key); });
-  }
+  var keysToDelete = [];
+  _mergeUserInfoLocks.forEach(function(entry, key) {
+    if (entry.waiters <= 0 && now - entry.ts > 60000) keysToDelete.push(key);
+  });
+  keysToDelete.forEach(function(key) { _mergeUserInfoLocks.delete(key); });
 }, 60000);
 async function mergeUserInfo(userName, patch) {
   var safeUser = String(userName || '').trim();
@@ -2180,7 +2179,8 @@ function getRealIp(req) {
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-// 获取客户端 IP（信任 req.ip，由 trust proxy 解析 X-Forwarded-For，用于登录事件记录）
+// 获取客户端 IP（仅信任 req.ip：trust proxy=1 时 Express 负责解析 X-Forwarded-For，
+// 客户端无法伪造；不再读取 cf-connecting-ip / x-real-ip 等可任意设置的请求头，防止 IP 伪造污染安全检测）
 function getClientIp(req) {
   function normalizeClientIpValue(value) {
     var ip = String(value || '').trim();
@@ -2194,14 +2194,9 @@ function getClientIp(req) {
     if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
     return ip;
   }
-  var headers = req && req.headers ? req.headers : {};
+  // 只信任 Express 解析后的 req.ip（trust proxy=1）与底层 socket 地址，
+  // 忽略任何客户端可控的转发头（cf-connecting-ip / x-real-ip / x-forwarded-for 等）
   var candidates = [
-    headers['cf-connecting-ip'],
-    headers['x-real-ip'],
-    headers['x-client-ip'],
-    headers['fly-client-ip'],
-    headers['x-vercel-forwarded-for'],
-    headers['x-forwarded-for'],
     req && req.ip,
     req && req.socket && req.socket.remoteAddress
   ];
@@ -3601,7 +3596,8 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
   }
 
   try {
-    // 原子 upsert：使用 actor_key 唯一约束
+    // 原子 upsert：media_url 唯一索引（迁移 036）保证跨实例并发下同一 key 只有一行。
+    // 先读当前值，再通过 .onConflict 原子写入（含条件比较，避免并发双写丢计数）。
     var actorKey = 'rl_' + key.replace(/[^a-zA-Z0-9_-]/g, '_');
     var { data: existing } = await supabase.from('posts')
       .select('id, content, created_at')
@@ -3628,21 +3624,46 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
 
     count++;
     var newContent = JSON.stringify({ count: count, resetAt: resetAt });
+
     if (existing) {
-      await supabase.from('posts').update({ content: newContent, created_at: new Date(resetAt).toISOString() })
-        .eq('id', existing.id);
-    } else {
-      await supabase.from('posts').insert([{
-        user_name: 'system',
-        content: newContent,
-        media_type: DB_RATE_LIMIT_MARKER,
-        media_url: actorKey,
-        actor_key: actorKey,
-        created_at: new Date(resetAt).toISOString()
-      }]);
+      // 条件更新：仅当 content 未被并发修改时才递增，防止两个请求都读到 count=N 都写 N+1。
+      // Supabase update 支持 .eq('content', oldContent) 做乐观锁；更新 0 行说明被并发改写，
+      // 直接以失败路径让调用方下次重新读取（数据以 DB 为准，不会丢失计数）。
+      var upd = await supabase.from('posts').update({ content: newContent, created_at: new Date(resetAt).toISOString() })
+        .eq('id', existing.id)
+        .eq('content', existing.content || '')
+        .select('id');
+      if (!upd.error && upd.data && upd.data.length > 0) {
+        persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
+        return { limited: false };
+      }
+      // 并发更新冲突：本次不计入（对方已计入），返回未限流但不缓存，避免放大
+      return { limited: false };
     }
-    persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
-    return { limited: false };
+
+    // 新 key：原子插入，依赖 036 唯一索引去重；23505 表示并发已插入，按对方记录判断
+    var ins = await supabase.from('posts').upsert([{
+      user_name: 'system',
+      content: newContent,
+      media_type: DB_RATE_LIMIT_MARKER,
+      media_url: actorKey,
+      actor_key: actorKey,
+      created_at: new Date(resetAt).toISOString()
+    }], { onConflict: 'media_url' }).select('content');
+    if (!ins.error && ins.data && ins.data.length > 0) {
+      // 若并发请求抢先插入（content 是对方的计数），以最终行内容为准
+      try {
+        var finalRow = JSON.parse(ins.data[0].content || '{}');
+        if (finalRow.resetAt && finalRow.resetAt > now && finalRow.count >= maxRequests) {
+          persistenceRateLimitCache.set(cacheKey, { count: finalRow.count, resetAt: finalRow.resetAt });
+          return { limited: true, retryAfter: Math.ceil((finalRow.resetAt - now) / 1000) };
+        }
+      } catch(e) {}
+      persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
+      return { limited: false };
+    }
+    // 插入失败（如唯一索引尚未部署）：降级为不限流，避免误伤
+    return { limited: false, degraded: true };
   } catch(e) {
     // DB 不可用时降级为仅本地限流
     return { limited: false, degraded: true };
@@ -7037,6 +7058,11 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
     if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
       return res.status(400).json({ error: '密码长度应为 6-128 位' });
     }
+    // 可选邮箱：前端同时提交时由后端原子写入 user_info，避免前端 anon key 直写 Supabase 静默失败
+    var emailVal = req.body && req.body.email ? String(req.body.email).trim().slice(0, 254) : '';
+    if (emailVal && !isValidEmailAddress(emailVal)) {
+      return res.status(400).json({ error: '邮箱格式不正确' });
+    }
     var { data: existing, error: lookupError } = await supabase.from('posts')
       .select('id').eq('user_name', userNameVal).eq('media_type', AUTH_MARKER).maybeSingle();
     if (lookupError) return res.status(503).json({ error: '注册服务暂不可用' });
@@ -7049,6 +7075,14 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
     if (insertError) {
       if (String(insertError.code || '') === '23505') return res.status(409).json({ error: '该昵称已被注册' });
       return res.status(503).json({ error: '注册失败，请重试' });
+    }
+    // 注册成功后写入邮箱到 user_info（失败不阻断注册，仅记录日志）
+    if (emailVal) {
+      try {
+        await mergeUserInfo(userNameVal, { email: emailVal });
+      } catch (e) {
+        console.warn('[API] 注册邮箱写入 user_info 失败:', e && e.message || e);
+      }
     }
     return res.status(201).json(await issueUserSession(res, userNameVal));
   } catch (e) {
@@ -8518,9 +8552,15 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     if (!content) return res.status(400).json({ error: 'Comment cannot be empty', code: 'empty_comment' });
     if (content.length > 5000) return res.status(400).json({ error: 'Comment is too long', code: 'comment_too_long' });
 
-    var postResult = await supabase.from('posts').select('id').eq('id', postId).maybeSingle();
+    var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type').eq('id', postId).maybeSingle();
     if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_lookup_failed' });
     if (!postResult.data) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    // 只允许对普通可见帖子评论：私密帖仅作者本人可评论，系统内部 marker（DM/登录事件等）不可评论
+    var targetPost = postResult.data;
+    if (!isNormalPost(targetPost)) return res.status(422).json({ error: '该帖子不存在、已删除或不可评论', code: 'not_normal_post' });
+    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
+    }
 
     var inserted = await supabase.from('comments').insert([{
       post_id: postId,
@@ -8724,6 +8764,22 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       return res.json({ ok: true, recorded: false, reason: 'self_view', views: Number(selfView.data && selfView.data.views) || 0 });
     }
     var now = new Date().toISOString();
+    var dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD 自然日去重
+    var viewKey = 'pview_' + String(postId) + '_' + String(req.userName || '').toLowerCase() + '_' + dayKey;
+    // 当日同一用户对同一帖子只记录一次浏览，防止刷新刷量
+    var dupCheck = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', POST_VIEW_MARKER)
+      .eq('media_url', String(postId))
+      .eq('user_name', req.userName)
+      .eq('actor_key', viewKey)
+      .limit(1)
+      .maybeSingle();
+    if (dupCheck.error) return res.status(500).json({ error: sanitizeError(dupCheck.error), code: 'post_view_record_failed' });
+    if (dupCheck.data) {
+      var dupCount = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
+      return res.json({ ok: true, recorded: false, reason: 'already_viewed_today', views: Number(dupCount.data && dupCount.data.views) || 0 });
+    }
     var postText = String(post.content || '');
     try {
       var parsed = JSON.parse(postText);
@@ -8736,7 +8792,7 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       media_type: POST_VIEW_MARKER,
       media_url: String(postId),
       content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: postText.slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
-      actor_key: 'pview_' + postId + '_' + Date.now()
+      actor_key: viewKey
     }]).select('id, created_at').single();
     if (eventResult.error) return res.status(500).json({ error: sanitizeError(eventResult.error), code: 'post_view_record_failed' });
     var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: postId });
@@ -8879,8 +8935,10 @@ app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
 // GET /api/photos/public - 公开照片墙（无需登录，限流）
 app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 0;
-    const limit = parseInt(req.query.limit, 10) || 20;
+    const pageRaw = parseInt(req.query.page, 10);
+    const limitRaw = parseInt(req.query.limit, 10);
+    const page = (!isNaN(pageRaw) && pageRaw >= 0) ? pageRaw : 0;
+    const limit = (!isNaN(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 100) : 20;
     const from = Math.max(page, 0) * limit;
     const to = from + limit - 1;
     const { data, error } = await supabase.from('posts')
@@ -10218,6 +10276,7 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
   }});
 
 app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
+  try {
   const { id } = req.params;
   const { status } = req.body;
   const allowedStatuses = ['pending', 'reviewed', 'actioned', 'dismissed'];
@@ -10238,10 +10297,14 @@ app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (r
   var notifMsg = status === 'actioned' ? '管理员已将你的举报标记为已处理' : (status === 'dismissed' ? '管理员已驳回你的举报' : '管理员已审核你的举报');
   addReportNotification(id, status, notifMsg).catch(function(){});
   return res.json({ ok: true });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // 管理员回复举报
 app.put('/admin/report/:id/respond', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
+  try {
   const { id } = req.params;
   const { response } = req.body;
   if (!response || !String(response).trim()) {
@@ -10266,7 +10329,10 @@ app.put('/admin/report/:id/respond', verifyToken, securityRateLimit(60000, 30), 
   sendAdminDm(post.user_name, '[举报回复] ' + responseVal);
   addReportNotification(id, 'replied', '管理员已回复你的举报').catch(function(){});
   return res.json({ ok: true });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // 管理员处理举报 + 删除帖子
 app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
@@ -10435,6 +10501,7 @@ app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) 
 
 // 用户查看自己的举报
 app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, res) => {
+  try {
   const userName = req.userName;
   const { data, error } = await supabase.from('posts')
     .select('*')
@@ -10463,7 +10530,10 @@ app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, r
     };
   });
   return res.json({ data: reports });
-});
+  } catch (e) {
+    console.error('Unhandled route error:', e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }});
 
 // ===================== 用户数据（只读） ======================
 app.get('/admin/users', verifyToken, async (req, res) => {
@@ -14356,6 +14426,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           thinkingMode: 'off',
           useThinking: false,
           usedModel: fcModel,
+          usage: fcFallbackUsage || null,
           finishReason: 'stop',
           userName: userName,
           convId: convId,
@@ -14735,6 +14806,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   thinkingMode: thinkingMode,
                   useThinking: useThinking,
                   usedModel: usedModel,
+                  usage: usageInStream || null,
                   searchMeta: _toolSearchMeta || _sharedSearchMeta,
                   siteCards: siteToolCards,
                   finishReason: 'idle_timeout',
@@ -14765,7 +14837,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (!aborted) {
             var pc = contentBuffer && contentBuffer.length > 0;
             if (pc) {
-              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, searchMeta: _toolSearchMeta || _sharedSearchMeta, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, startTime: T0 });
+              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, startTime: T0 });
             } else {
               writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
             }
@@ -14846,6 +14918,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
+          usage: usageInStream || null,
           searchMeta: _toolSearchMeta || _sharedSearchMeta,
           siteCards: siteToolCards,
           finishReason: finishReason,
@@ -14943,6 +15016,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
+          usage: usageInStream || null,
           searchMeta: _toolSearchMeta || _sharedSearchMeta,
           siteCards: siteToolCards,
           finishReason: 'upstream_closed',
@@ -16192,13 +16266,16 @@ app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
     var deleted = 0;
     var batchSize = 500;
     while (deleted < count) {
-      var { error: delErr } = await supabase.from('posts')
+      var { data: delData, error: delErr } = await supabase.from('posts')
         .delete()
+        .select('id')
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .lt('created_at', cutoff)
         .limit(batchSize);
       if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
-      deleted += batchSize;
+      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      if (batchDeleted <= 0) break; // 无更多可删，防止死循环
+      deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 200); });
     }
 
@@ -16244,9 +16321,11 @@ async function autoCleanupAiMessages() {
 
     var deleted = 0;
     while (deleted < count) {
-      var { error: delErr } = await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
+      var { data: delData, error: delErr } = await supabase.from('posts').delete().select('id').eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
       if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
-      deleted += 500;
+      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      if (batchDeleted <= 0) break; // 无更多可删，防止死循环
+      deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 300); });
     }
     console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 7 天前的 AI 消息');

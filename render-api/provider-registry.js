@@ -138,8 +138,8 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
           name: p.name,
           provider_type: p.provider_type,
           models: p.models_config || [],
-          capabilities: p.capabilities || {},
-          base_url: p.base_url
+          capabilities: p.capabilities || {}
+          // base_url 不下发：避免泄露自定义内网端点
         };
       });
 
@@ -283,6 +283,26 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         return res.status(400).json({ error: '自定义提供商需要提供 base_url', code: 'MISSING_BASE_URL' });
       }
 
+      // SSRF 防护：仅允许 https，拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据地址
+      var parsedTestUrl = null;
+      try { parsedTestUrl = new URL(testUrl); } catch (_) {
+        return res.status(400).json({ error: 'base_url 不是合法的 URL', code: 'INVALID_BASE_URL' });
+      }
+      if (parsedTestUrl.protocol !== 'https:') {
+        return res.status(400).json({ error: '仅支持 https:// 的 base_url', code: 'INVALID_BASE_URL' });
+      }
+      var hostname = parsedTestUrl.hostname.toLowerCase();
+      var hostIsBlocked = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+        || hostname.endsWith('.localhost') || hostname.endsWith('.local')
+        || hostname === '169.254.169.254' || hostname.endsWith('.internal')
+        || /^10\./.test(hostname) || /^192\.168\./.test(hostname)
+        || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+        || /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(hostname)
+        || /^\d+\.\d+\.\d+\.\d+$/.test(hostname); // 直接 IP 字面量一律拒绝
+      if (hostIsBlocked) {
+        return res.status(400).json({ error: 'base_url 指向不允许的主机', code: 'BLOCKED_BASE_URL' });
+      }
+
       // 移除末尾的 /v1 等路径以获取基础 URL
       var modelsUrl = testUrl.replace(/\/+$/, '');
       if (modelsUrl.indexOf('/v1') === -1) {
@@ -331,12 +351,11 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
             status: response.status
           });
         } else {
-          var errorText = '';
-          try { errorText = (await response.text()).slice(0, 200); } catch (_) {}
+          // 不回显响应体内容，防止 SSRF 探测结果外带；只返回状态码
           return res.status(200).json({
             ok: false,
             message: 'API Key 验证失败 (HTTP ' + response.status + ')',
-            detail: errorText,
+            detail: '',
             status: response.status
           });
         }

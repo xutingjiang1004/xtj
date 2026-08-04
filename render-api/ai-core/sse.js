@@ -19,12 +19,21 @@ function setupSSE(res, req) {
 
 // ── Safe SSE Write ───────────────────────────────────────────────────────
 // Prevents writing after response is closed/finished.
+// Node's res.write returns false when the output buffer reaches the
+// high-water mark. That is normal backpressure, not a disconnect: we queue
+// the pending frames and flush them on 'drain' instead of dropping the
+// stream. Only an actual close/finish (or an unbounded buffer over the
+// safety cap) returns false.
 function createSSEWriter(res, req) {
   var closed = false;
   var finished = false;
+  var _buffer = [];
+  var _bufferBytes = 0;
+  var _drainQueued = false;
+  var MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024; // 4MB safety cap per stream
 
-  function markClosed() { closed = true; }
-  function markFinished() { finished = true; }
+  function markClosed() { closed = true; _buffer = []; _bufferBytes = 0; }
+  function markFinished() { finished = true; _buffer = []; _bufferBytes = 0; }
 
   if (res.on) {
     res.on('close', markClosed);
@@ -34,6 +43,38 @@ function createSSEWriter(res, req) {
     req.on('aborted', markClosed);
   }
 
+  function flushBuffer() {
+    if (_drainQueued) return;
+    if (_buffer.length === 0) return;
+    if (closed || finished || res.writableEnded || res.finished) {
+      _buffer = [];
+      _bufferBytes = 0;
+      return;
+    }
+    _drainQueued = true;
+    res.once('drain', function () {
+      _drainQueued = false;
+      var pending = _buffer.slice();
+      _buffer = [];
+      _bufferBytes = 0;
+      for (var i = 0; i < pending.length; i++) {
+        if (closed || finished || res.writableEnded || res.finished) break;
+        try {
+          if (res.write(pending[i]) === false) {
+            // Re-queue only the still-pending tail
+            _buffer = pending.slice(i + 1);
+            _bufferBytes = _buffer.reduce(function (n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
+            flushBuffer();
+            break;
+          }
+        } catch (e) {
+          markClosed();
+          break;
+        }
+      }
+    });
+  }
+
   function write(data) {
     if (closed || finished) return false;
     if (res.writableEnded || res.finished) {
@@ -41,10 +82,20 @@ function createSSEWriter(res, req) {
       return false;
     }
     try {
-      // Node returns false when its output buffer reaches the high-water
-      // mark. Propagate that signal so callers stop heartbeats/writes instead
-      // of endlessly buffering a disconnected or very slow client.
-      return res.write(data) !== false;
+      var ok = res.write(data);
+      if (ok !== false) return true;
+      // Backpressure: queue the frame and flush on drain. Return true so the
+      // caller keeps producing content instead of aborting the stream.
+      if ((_bufferBytes || 0) + Buffer.byteLength(data, 'utf8') > MAX_SSE_BUFFER_BYTES) {
+        // Safety cap: a client that cannot keep up for this long is effectively
+        // disconnected; stop rather than buffer unboundedly.
+        markClosed();
+        return false;
+      }
+      _buffer.push(data);
+      _bufferBytes += Buffer.byteLength(data, 'utf8');
+      flushBuffer();
+      return true;
     } catch (e) {
       markClosed();
       return false;

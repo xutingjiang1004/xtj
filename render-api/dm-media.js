@@ -45,13 +45,28 @@ async function verifyStorageObject(supabase, storagePath, expected) {
   try {
     // Search for the exact object in its parent directory. Do not enumerate
     // chat/ with a large limit: the folder may contain more than 1000 files.
-    result = await supabase.storage.from('uploads').list(directory, { limit: 10, search: name });
+    // 提高 limit 并对结果二次精确过滤，避免同前缀文件较多时真实对象被截断误判 not_found。
+    result = await supabase.storage.from('uploads').list(directory, { limit: 1000, search: name });
   } catch (error) {
     return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: error };
   }
   if (result && result.error) return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: result.error };
-  const item = (result && Array.isArray(result.data) ? result.data : []).find(function (row) { return row && row.name === name; });
-  if (!item) return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };
+  let item = (result && Array.isArray(result.data) ? result.data : []).find(function (row) { return row && row.name === name; });
+  if (!item) {
+    // list search 是模糊匹配且可能截断：用 download 做精确探测，避免合法媒体被误判不存在
+    try {
+      const probe = await supabase.storage.from('uploads').download(parsed.storagePath);
+      if (probe && !probe.error && probe.data) {
+        const probeData = probe.data;
+        const probeSize = typeof probeData.size === 'number' ? probeData.size : (probeData.arrayBuffer ? (await probeData.arrayBuffer()).byteLength : null);
+        item = { name: name, metadata: { size: probeSize, mimetype: String(probeData.type || '') } };
+      } else {
+        return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };
+      }
+    } catch (probeError) {
+      return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: probeError };
+    }
+  }
   const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : null;
   if (!metadata) return { ok: false, state: 'invalid', code: 'media_metadata_missing', error: 'Media object metadata is missing' };
   const rawSize = metadata.size !== undefined && metadata.size !== null ? metadata.size : metadata.contentLength;

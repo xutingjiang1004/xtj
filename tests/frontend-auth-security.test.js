@@ -8,7 +8,8 @@ const ai = fs.readFileSync('js/ai-agent.js', 'utf8');
 
 test('login and registration send the user-entered password only to dedicated auth APIs', () => {
   assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/login'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw \}\)/);
-  assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/register'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw \}\)/);
+  // 注册可附带可选 email（后端校验格式并原子写入 user_info），密码仅发往注册接口
+  assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/register'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw, email: email \|\| undefined \}\)/);
   assert.doesNotMatch(core, /findAuthRecord|hashPasswordWithSalt|verifyPassword|authPasswordHash/);
   assert.doesNotMatch(core, /\.insert\(\[\{[\s\S]{0,200}media_type:\s*AUTH_MARKER/);
 });

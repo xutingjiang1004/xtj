@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
+const { removeStorageWithQueue } = require('./storage-cleanup');
 const MAX_MEDIA_URL_LENGTH = 2048;
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_MIME_TYPE_LENGTH = 128;
@@ -10,7 +10,8 @@ const MAX_UPLOAD_ID_LENGTH = 128;
 const UPLOAD_ID_RE = /^[a-zA-Z0-9_\-]{6,128}$/;
 const STORAGE_PUBLIC_PHOTO_PREFIX = '/storage/v1/object/public/uploads/photos/';
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
-const IMAGE_MIME_TYPE = /^image\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
+// 照片墙只接受位图图片；SVG 可内嵌 <script>/onload，上传后原图 URL 直接打开即存储型 XSS 载体，显式拒绝
+const IMAGE_MIME_TYPE = /^image\/(?!svg\+xml)(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tiff?|x-ms-bmp)[a-z0-9!#$&^_.+-]{0,126}$/i;
 
 function invalid(error, code) {
   const body = { ok: false, error: error };
@@ -35,6 +36,34 @@ function parseStoragePhotoUrl(mediaUrl, supabaseUrl) {
 }
 
 function validateSize(value) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_IMAGE_SIZE; }
+
+// 精确判断 storage 对象是否存在：createSignedUrl 在部分配置下即使对象不存在也会返回成功，
+// 这里用 list + 精确文件名匹配，避免"旧文件丢失→修复"分支变成死代码。
+async function storageObjectExists(supabase, bucket, path) {
+  if (!supabase || !path) return { ok: false, exists: false, error: null };
+  try {
+    var cleanPath = String(path).replace(/^\/+/, '');
+    var parts = cleanPath.split('/');
+    var name = parts.pop();
+    var directory = parts.join('/');
+    var result = await supabase.storage.from(bucket).list(directory, { limit: 1000, search: name });
+    if (result.error) return { ok: false, exists: false, error: result.error };
+    var found = (result.data || []).some(function(item) {
+      return item && item.name === name && !item.id; // 目录项有 id，文件项没有
+    });
+    if (found) return { ok: true, exists: true, error: null };
+    // 精确名未命中（list search 是模糊匹配，可能截断），再尝试 download HEAD 级验证
+    var probe = await supabase.storage.from(bucket).download(cleanPath);
+    if (probe && probe.error) {
+      var code = String(probe.error.statusCode || probe.error.code || probe.error.message || '');
+      if (/404|not.?found|NoSuchKey/i.test(code)) return { ok: true, exists: false, error: null };
+      return { ok: false, exists: false, error: probe.error };
+    }
+    return { ok: true, exists: true, error: null };
+  } catch (e) {
+    return { ok: false, exists: false, error: e };
+  }
+}
 
 function validatePhotoCreatePayload(body, supabaseUrl) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return invalid('请求无效', 'INVALID_INPUT');
@@ -103,7 +132,12 @@ async function createPhotoThumbnail(options) {
   var downloaded = await options.supabase.storage.from('uploads').download(storagePath);
   if (!downloaded || downloaded.error || !downloaded.data) throw new Error('thumbnail source unavailable');
   var input = Buffer.from(await downloaded.data.arrayBuffer());
-  var image = options.sharp(input, { animated: false });
+  // 服务端核对真实文件大小：客户端声称值不可信，防止超大文件/解压炸弹拖垮内存
+  if (input.length > MAX_IMAGE_SIZE) {
+    throw new Error('thumbnail source too large');
+  }
+  // 限制解码像素总量，防止高维"解压炸弹"图片耗尽内存（默认约 1.6 亿像素上限，这里收紧到 1 亿）
+  var image = options.sharp(input, { animated: false, limitInputPixels: 100000000 });
   var meta = await image.metadata();
   var derivativePaths = getPhotoDerivativePaths(storagePath);
   var thumbnailPath = derivativePaths.thumbnailPath;
@@ -229,9 +263,9 @@ async function createPhotoRecord(options) {
         var fileExists = false;
         var fileCheckError = null;
         try {
-          var fileCheck = await options.supabase.storage.from('uploads').createSignedUrl(oldStoragePath, 60);
-          fileExists = fileCheck && !fileCheck.error;
-          if (fileCheck && fileCheck.error && !isNotFoundError(fileCheck.error)) fileCheckError = fileCheck.error;
+          var fileCheck = await storageObjectExists(options.supabase, 'uploads', oldStoragePath);
+          fileExists = fileCheck.exists === true;
+          if (!fileCheck.ok && fileCheck.error) fileCheckError = fileCheck.error;
         } catch (error) { fileCheckError = error; }
         if (fileCheckError) {
           return { status: 503, body: { ok: false, error: 'Unable to verify the existing photo file', code: 'PHOTO_FILE_CHECK_FAILED', retryable: true } };
