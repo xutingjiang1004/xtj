@@ -9,6 +9,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_limit_posts_actor_key_unique
   ON public.posts (media_url)
   WHERE media_type = '__rate_limit__'
     AND media_url IS NOT NULL
-    AND media_url ~ '^rl_[a-zA-Z0-9_-]{1,128}$';
+    AND media_url ~ '^rl_[a-zA-Z0-9_-]{1,200}$';
 
 COMMIT;

@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   'use strict';
 
   if (window.__xtjCodeWorkspace) return;
@@ -5543,7 +5543,9 @@
     function inline(value) {
       return escapeHTML(value)
         .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        .replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>');
     }
     function tableCells(row) {
       return row.trim().replace(/^\||\|$/g, '').split('|').map(function(cell) { return inline(cell.trim()); });

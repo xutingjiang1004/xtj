@@ -550,8 +550,14 @@
                 lastSendAtByKey[sentKey] = Date.now();
                 var headers = { 'Content-Type': 'application/json' };
                 var token = '';
-                if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
-                else if (typeof window.getUserToken === 'function') token = window.getUserToken();
+                try {
+                    if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
+                    else if (typeof window.getUserToken === 'function') token = window.getUserToken();
+                } catch (e) {
+                    // L1 修复：token 刷新失败时清除冷却，允许后续重试；不得产生未捕获的 rejection
+                    lastSendAtByKey[sentKey] = 0;
+                    return;
+                }
                 if (!token) { lastSendAtByKey[sentKey] = 0; return; }
                 headers['Authorization'] = 'Bearer ' + token;
                 fetch(API_BASE + '/api/log-login-event', {
@@ -1059,7 +1065,13 @@
     function handlePagehideBehavior() {
         if (!behaviorQueue.length) return;
         var batch = behaviorQueue.slice(0, 50);
-        var token = window.behaviorLastKnownToken || behaviorLastKnownToken || (typeof window.getToken === 'function' ? window.getToken() : '');
+        // L2 修复：统一 token 获取函数名（其他处均用 getUserToken；旧代码用不存在的
+        // window.getToken 导致 pagehide 时 token 恒为空、行为数据丢失）。
+        // 注：ensureUserToken 是异步的，pagehide 场景无法等待，仅用同步缓存 + getUserToken。
+        var token = window.behaviorLastKnownToken || behaviorLastKnownToken;
+        if (!token && typeof window.getUserToken === 'function') {
+            try { token = window.getUserToken(); } catch (e) {}
+        }
         if (token && typeof fetch === 'function') {
             try {
                 // fetch + keepalive 支持自定义请求头，适合 pagehide 场景

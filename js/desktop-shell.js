@@ -525,7 +525,13 @@
 
     codeModuleState.promise = loadPromise
       .then(function () {
-        if (gen !== codeModuleState.generation) return;
+        if (gen !== codeModuleState.generation) {
+          // G14 修复：过期代次的加载完成后必须复位状态，否则 status 卡在 'loading'，
+          // 后续 ensureCodeModulesLoaded 会复用已 resolve 的旧 promise 跳过真正加载
+          codeModuleState.status = 'idle';
+          codeModuleState.promise = null;
+          return;
+        }
         if (!isCodePanelVisible()) {
           codeModuleState.status = 'idle';
           codeModuleState.promise = null;

@@ -47,8 +47,11 @@
     })();
   }
 
-  // SVG 可内嵌脚本，原图 URL 打开即 XSS 载体，照片墙显式拒绝
-  function isImage(file){ return !!(file && /^image\//i.test(file.type || '') && !/^image\/svg(\+xml)?/i.test(file.type || '')); }
+  // G5 修复：除拒绝 SVG 外，仅允许位图 MIME 白名单（与后端 photo-create.js 一致）。
+  // 防止伪造 file.type 上传 text/html、application/javascript 等可执行内容到公开可读的
+  // Storage bucket（原图 URL 直接打开即存储型 XSS 载体）。
+  var PHOTO_WALL_ALLOWED_IMAGE_MIME = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tiff|x-ms-bmp)(?:[a-z0-9!#$&^_.+-]{0,126})?$/i;
+  function isImage(file){ return !!(file && PHOTO_WALL_ALLOWED_IMAGE_MIME.test(String(file.type || ''))); }
   function isVideo(file){ return !!(file && /^video\//i.test(file.type || '')); }
   function isMedia(file){ return isImage(file) || isVideo(file); }
   function isPhotoWallImage(file){ return isImage(file); }

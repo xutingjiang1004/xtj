@@ -1145,7 +1145,15 @@ function sanitizeAssistantVisibleText(text) {
   if (!s) return s;
 
   // 1. 删除所有独立成行的括号内容（允许全角/半角/方括号，至少 3 个字符）
-  s = s.replace(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/gm, '');
+  //    G12 修复：加白名单豁免——含 API/价格/版本号/术语/链接等合法信息的括号行保留，
+  //    避免误删"（注：API 文档）"这类内容。
+  s = s.split(/\r?\n/).map(function(line) {
+    var m = line.match(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/);
+    if (!m) return line;
+    var inner = m[0].replace(/[（(【）)】\s]/g, '');
+    if (/^(?:api|v\d|http|https|www|价格|元|美元|欧元|港元|台币|万|亿|GB|MB|KB|版|号|年|月|日|周)/i.test(inner) || /[0-9]/.test(inner)) return line;
+    return '';
+  }).join('\n');
 
   // 2-3. 拆分清洗正则避免单次超长表达式导致的 ReDoS
   var actionSets = [
@@ -3598,7 +3606,10 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
   try {
     // 原子 upsert：media_url 唯一索引（迁移 036）保证跨实例并发下同一 key 只有一行。
     // 先读当前值，再通过 .onConflict 原子写入（含条件比较，避免并发双写丢计数）。
-    var actorKey = 'rl_' + key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    // G2 修复：key 做 SHA-256 摘要，避免 IP/路径中特殊字符归一化后碰撞，
+    // 同时保证长度恒定（配合迁移 036 的 ^rl_[a-zA-Z0-9_-]{1,128}$ 唯一索引）。
+    var keyDigest = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 32);
+    var actorKey = 'rl_' + keyDigest;
     var { data: existing } = await supabase.from('posts')
       .select('id, content, created_at')
       .eq('media_type', DB_RATE_LIMIT_MARKER)
@@ -5329,7 +5340,7 @@ async function callDeepSeek(messages, options) {
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
               onProgress();
-              try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
+              try { if (hasContentCb && !deferToolRoundContent) options.onContentChunk(String(sDelta.content)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
@@ -5414,7 +5425,10 @@ async function callDeepSeek(messages, options) {
           finalContent = '（工具调用解析失败，请重试。）';
         } else {
           finalContent = content;
-          try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(String(content).slice(0, 4000)); } catch (e) {}
+          // ★ 修复：defer 模式下最终内容必须完整推送给 onContentChunk（原代码 slice(0,4000)
+          // 截断，>4000 字符的回答流式显示残缺；断线/异常路径下状态只保存前 4000 字符导致
+          // 内容永久丢失）。code-agent.js 的 H-12 拆分（MAX_DELTA_CHARS=4000）负责切分下发。
+          try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(content); } catch (e) {}
         }
         break;
       }
@@ -8853,7 +8867,10 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
     if (!isAdmin) {
       if (isLoggedIn) {
-        query = query.or('visibility.eq.public,user_name.eq.' + req.userName);
+        // G1 修复：userName 以双引号包裹进 PostgREST 过滤条件，
+        // 避免含特殊字符（. , 空格）的用户名破坏查询语法或注入过滤条件
+        var _feedOwner = String(req.userName || '').replace(/"/g, '');
+        query = query.or('visibility.eq.public,user_name.eq."' + _feedOwner + '"');
       } else {
         query = query.eq('visibility', 'public');
       }
@@ -13586,6 +13603,9 @@ async function handleDeepThinkChat(req, res) {
         duration_ms: 0,
         remaining: { hour: rl.remainingHour, day: rl.remainingDay }
       });
+      // ★ 修复：缓存命中提前返回前必须清理心跳定时器，否则每个命中请求
+      // 泄漏一个常驻 setInterval（res 结束后仍每 1.5s 空转）。
+      try { if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; } } catch (_) {}
       activeDeepThinkJobs.delete(convId);
       return safeEnd();
     }
@@ -14250,7 +14270,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      _fcTimer = setTimeout(function() { fcController.abort(); }, 1000);
+      // S4 修复：FC 预检查是带 tools 的非流式调用，DeepSeek 正常响应常超过 1 秒；
+      // 1 秒超时会导致 FC 几乎必然 abort，工具调用名存实亡。放宽到 8 秒，
+      // 同时该段整体处于"预检查"路径，超时后仍会回退到普通流式，不影响兜底。
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 8000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
@@ -14372,7 +14395,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 });
                 if (newItems.length > 0) {
                   var extraContent = JSON.stringify(newItems);
-                  messages.push({ role: 'tool', tool_call_id: 'auto_expand', content: JSON.stringify({ tool_name: 'search_web', query: '多 Agent 并行搜索', results_count: newItems.length, content: extraContent }) });
+                  // S5 修复：auto_expand 无对应的 assistant tool_calls 条目，
+                  // 以 role:'tool' 发送会被 DeepSeek 判定消息序列非法（invalid tool_call_id）。
+                  // 改为 system 消息注入，语义不变且协议合法。
+                  messages.push({ role: 'system', content: '【多Agent自动补充搜索结果】' + extraContent });
                   res.write('data: ' + JSON.stringify({
                     type: 'tool_result',
                     tool_name: 'search_web',
@@ -14951,6 +14977,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         var tcExec = { function: { name: tc.name, arguments: tc.args } };
         return { result: await executeToolCall(tcExec, { userName: userName }), id: tc.id, name: tc.name };
       }));
+      // ★ 消息顺序修复：OpenAI/DeepSeek 协议要求 role:'tool' 消息必须跟在
+      // 携带 tool_calls 的 role:'assistant' 消息之后。此前先 push tool 结果、
+      // 再 push assistant(tool_calls)，第二轮请求必然 400（消息序列非法）。
+      // 先 push assistant(tool_calls)，再依次 push 各 tool 结果。
+      roundMessages.push({ role: 'assistant', content: contentBuffer || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
       for (var ti = 0; ti < toolResults.length; ti++) {
         var toolResult = toolResults[ti].result;
         
@@ -14982,20 +15013,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         
         roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
       }
-      
-      // 将包含 tool_calls 的助理消息加入 roundMessages（缺少会导致下一轮上下文丢失）
-      roundMessages.push({ role: 'assistant', content: contentBuffer || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
       toolRound++;
        if (useThinking) {
+         // 思考模式多轮工具调用：freshMsgs 是 roundMessages 的快照（避免 apiBody.messages
+         // 与 roundMessages 共享引用被后续 push 干扰）。思考模式不带 tools（DeepSeek 限制），
+         // 非思考模式复用原 apiBody（含 AI_TOOLS，消息数组为同一引用自动同步）。
          var freshMsgs = roundMessages.slice();
          apiBody = {
            model: usedModel,
            messages: freshMsgs,
            stream: true
          };
-         if (!useThinking) {
-           apiBody.tools = AI_TOOLS;
-         }
        }
        continue;
     }

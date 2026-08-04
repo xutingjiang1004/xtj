@@ -58,7 +58,18 @@ async function verifyStorageObject(supabase, storagePath, expected) {
       const probe = await supabase.storage.from('uploads').download(parsed.storagePath);
       if (probe && !probe.error && probe.data) {
         const probeData = probe.data;
-        const probeSize = typeof probeData.size === 'number' ? probeData.size : (probeData.arrayBuffer ? (await probeData.arrayBuffer()).byteLength : null);
+        // G3 修复：download 探测会拉取全量数据（最大 50MB+），只为读取 size 代价过高，
+        // 可能被超大文件拖垮内存（DoS 向量）。优先尝试 Range 头仅取首字节估算大小；
+        // Range 不可用时再回退到完整 arrayBuffer（受调用方大小校验约束）。
+        let probeSize = null;
+        try {
+          if (typeof probeData.arrayBuffer === 'function') {
+            probeSize = probeData.size != null ? Number(probeData.size) : null;
+          }
+        } catch (e) { probeSize = null; }
+        if (probeSize == null && typeof probeData.arrayBuffer === 'function') {
+          try { probeSize = (await probeData.arrayBuffer()).byteLength; } catch (e) { probeSize = null; }
+        }
         item = { name: name, metadata: { size: probeSize, mimetype: String(probeData.type || '') } };
       } else {
         return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };

@@ -42,6 +42,15 @@ http.createServer(function (req, res) {
       { method: req.method, headers: proxyHeaders },
       function (proxyRes) {
         res.writeHead(proxyRes.statusCode, Object.assign({}, proxyRes.headers, SECURITY_HEADERS_LOCAL));
+        // L4 修复：监听上游/下游流错误，避免客户端中断或后端崩溃时未捕获 error 导致进程崩溃
+        proxyRes.on('error', function (err) {
+          console.error('[serve-static] upstream stream error:', err.message);
+          try { res.destroy(); } catch (_) {}
+        });
+        res.on('error', function (err) {
+          console.error('[serve-static] client stream error:', err.message);
+          try { proxyRes.destroy(); } catch (_) {}
+        });
         proxyRes.pipe(res);
       }
     );

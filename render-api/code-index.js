@@ -903,7 +903,10 @@ function searchCode(scope, query, options) {
       if (!pathMatched) return;
     }
     if (extFilter) {
-      var ext = fileEntry.name.slice(fileEntry.name.lastIndexOf('.')).toLowerCase();
+      // ★ 修复：无扩展名文件（name 无 '.'）时 lastIndexOf 返回 -1，slice(-1) 会把
+      // 最后一个字符误当扩展名（如 'config' → 'g'）。改为无 '.' 时取空串。
+      var _dotIdx = fileEntry.name.lastIndexOf('.');
+      var ext = _dotIdx > 0 ? fileEntry.name.slice(_dotIdx).toLowerCase() : '';
       if (extFilter.indexOf(ext) === -1) return;
     }
 

@@ -315,7 +315,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!bubbleEl || !bubbleEl.parentNode) return;
     var _longPressTimer = null;
     var _longPressStarted = false;
-    // 鈽?U3: AbortController 绠＄悊鎵€鏈夌洃鍚櫒, 杞垹闄ゆ椂鍙粺涓€娓呯悊
+    // L10 修复：原文为 UTF-8 被按 GBK 解读产生的乱码注释，恢复正确文案
+    // ★ U3: AbortController 管理所有监听器，移除时统一清理
     var _bubbleAbort = new AbortController();
 
     function getBubbleText() {
@@ -807,6 +808,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (typeof S.abortController.abort === 'function') S.abortController.abort('aborted');
       } catch (e) {}
       S.abortController = null;
+    }
+    // ★ 修复：同时中止历史加载请求（独立 controller，避免与流式发送共用）
+    if (S.historyController) {
+      try {
+        S.historyController._abortReason = 'aborted';
+        if (typeof S.historyController.abort === 'function') S.historyController.abort('aborted');
+      } catch (e) {}
+      S.historyController = null;
     }
     S.sending = false;
     S.paused = false;
@@ -3102,6 +3111,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             ensureThinkCardNode();
             aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, evt.error || 'AI 调用失败'));
             finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+            // ★ 修复：已保留并渲染部分回答，标记 evtHandled 防止外层
+            // `S._currentReqId !== reqId || ab.value` 分支把节点删除（回答闪现后消失）
+            if (evtHandledRef) evtHandledRef.value = true;
           } else {
             notify(evt.error || 'AI 调用失败');
             if (!isResearchCard(progressCard) && opts.onErrorNoContent) opts.onErrorNoContent();
@@ -3538,7 +3550,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         onResetSending: resetSendingIfCurrent
       });
       if (sc.value) { S.conversationId = sc.value; writeConvId(sc.value); }
-      if (S._currentReqId !== reqId || ab.value) {
+      if ((S._currentReqId !== reqId || ab.value) && !eh.value) {
+        // ★ 修复：error 事件已渲染部分回答（evtHandledRef=true）时不得删除节点，
+        // 否则已完成的思考卡片会闪现后消失（服务端也未保存）。
         safeRemoveProgressCard(); if (ar.value) try { ar.value.cancel(); } catch(e){}
         if (r.value) try { r.value.remove(); } catch(e){} resetSendingIfCurrent(); return;
       }
@@ -5605,8 +5619,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return;
       }
 
-      if (S._currentReqId !== reqId || aborted) {
+      if ((S._currentReqId !== reqId || aborted) && !_finalized) {
         // 被新请求取代，删除当前创建的任何节点
+        // ★ 修复：若 error 事件已 finishAiMessage（_finalized=true，部分回复已保留并写入
+        // S.messages），不得再删除节点，否则已渲染的回复会闪现后消失且服务端未保存。
         cleanupRenderers();
         if (assistantNode) try { assistantNode.remove(); } catch (e) {}
         hideAssistantTyping();
@@ -5710,7 +5726,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var requestId = ++S.historyRequestId;
     var requestedConversationId = S.conversationId;
     var loadController = typeof AbortController === 'function' ? new AbortController() : null;
-    S.abortController = loadController;
+    // ★ 修复：历史加载使用独立 controller，不得覆盖 S.abortController——
+    // 否则流式发送中滚动加载历史会把发送请求的停止能力（停止按钮）指向已完成的加载请求。
+    S.historyController = loadController;
 
     var hasCache = false;
     if (!before && messagesEl) {
@@ -5799,6 +5817,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } finally {
       S.loading = false;
       S.loadingMore = false;
+      if (S.historyController === loadController) S.historyController = null;
       if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
     }
   }
@@ -5884,6 +5903,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           S.hasMore = false;
           if (S.messagesEl) S.messagesEl.innerHTML = '';
           setAiRootState('ai-empty');
+          // ★ 修复：同步清除本地记录的上次会话 id，避免刷新后
+          // 用已软删除的旧会话继续发消息（写入被删会话）
+          if (typeof writeConvId === 'function') { try { writeConvId(null); } catch (_) {} }
         }
         showConversationList();
       } else {
