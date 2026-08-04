@@ -821,6 +821,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.paused = false;
     S.loading = false;
     S.loadingMore = false;
+    // ★ 修复：显式 cancel 所有活跃渲染器，防止未完成的 rAF 帧继续写入
+    // 旧 DOM（仅清空数组会让渲染器后台继续运行，快速打断+新消息时产生
+    // 交叉渲染/光标残留）
+    var liveRenderers = S.activeRenderers || [];
+    for (var rIdx = 0; rIdx < liveRenderers.length; rIdx++) {
+      var liveR = liveRenderers[rIdx];
+      if (liveR && typeof liveR.cancel === 'function') {
+        try { liveR.cancel(); } catch (eCancel) {}
+      }
+    }
     S.activeRenderers = [];
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
@@ -899,9 +909,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  window.__xtjAiAuthDiag = function() {
-    return diagRun('manual');
-  };
+  // 仅本地开发或显式开启 ai_debug 参数时挂载诊断钩子：生产环境普通用户
+  // 从控制台调用会泄露 API Base 与凭据上下文
+  var _isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || /[?&]ai_debug=1/.test(window.location.search);
+  if (_isLocalDev) {
+    window.__xtjAiAuthDiag = function() {
+      return diagRun('manual');
+    };
+  }
 
   function clearAiUserToken() {
     clearAiHistoryCacheForUser();
