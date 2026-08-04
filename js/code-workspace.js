@@ -827,7 +827,7 @@
     state.active = false;
     state.composerMounted = false;
     _dom = {};
-    if (typeof _dragState !== 'undefined' && _dragState) {
+    if (_dragState) {
       document.body.classList.remove('code-is-resizing');
       document.body.classList.remove('code-is-resizing-row');
       _dragState = null;
@@ -861,7 +861,7 @@
         '<button class="folder-picker-btn-large" id="codeWelcomeFileBtn">' +
           '<span class="folder-icon">📄</span> 直接打开文件' +
         '</button>' +
-      
+      '</div>' +
       '<p class="welcome-recent" id="codeWelcomeRecent" style="display:none"></p>';
 
     _dom.panelCode.appendChild(welcome);
@@ -2030,8 +2030,8 @@
             '<button type="button" role="menuitem" data-code-layout-action="sidebar">折叠文件目录</button>' +
             '<button type="button" role="menuitem" data-code-layout-action="nav">折叠左侧导航栏</button>' +
             '<button type="button" role="menuitem" data-code-layout-action="reset">恢复默认布局</button>' +
-          
-        
+          '</div>' +   // close .code-layout-menu-popover
+        '</div>' +     // close .code-layout-menu
       '</div>';
     var maxChatBtn = chatHeader.querySelector('.max-chat-btn');
     maxChatBtn.innerHTML = codeWorkspaceIcon('maximize');
@@ -2198,7 +2198,7 @@
         _layoutState.sidebarWidth = newWidth;
       } else if (_dragState.type === 'right') {
         // Dragging right resizer leftwards INCREASES chat width
-        var newWidth = _dragState.startChatWidth - dx;
+        newWidth = _dragState.startChatWidth - dx;
         var compactChat = _dragState.wsWidth < 900;
         var minChat = compactChat ? 240 : 280;
         // Clamp to the same bounds used by applyLayoutToDOM.
@@ -2633,7 +2633,6 @@
         e.stopPropagation();
         row._toggle();
       });
-      wrapper._toggle = row._toggle;
     } else {
       // File click — open in editor
       row.addEventListener('click', function (e) {
@@ -2667,16 +2666,16 @@
     var contextLabel = inContext ? '取消固定' : '固定到 AI 上下文';
 
     menu.innerHTML =
-      '<div class="menu-item" data-action="toggle-context">' +
+      '<div class="menu-item" data-action="toggle-context" role="button" tabindex="0">' +
         '<span>' + (inContext ? '🔽' : '🔼') + '</span>' +
         '<span>' + contextLabel + '</span>' +
-      
+      '</div>' +
       '<div class="menu-item" data-action="rename" role="button" tabindex="0">' +
         '<span>✎</span><span>\u91cd\u547d\u540d\u6587\u4ef6</span>' +
-      
+      '</div>' +
       '<div class="menu-item danger" data-action="delete" role="button" tabindex="0">' +
         '<span>⌫</span><span>\u5220\u9664\u6587\u4ef6</span>' +
-      
+      '</div>' +
       '<div class="menu-separator"></div>' +
       '<div class="menu-item" data-action="open" role="button" tabindex="0">' +
         '<span>📄</span><span>打开文件</span>' +
