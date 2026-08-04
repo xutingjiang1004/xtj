@@ -160,7 +160,10 @@ function checkHtmlHashes(htmlFile) {
   while ((match = metaRegex.exec(htmlContent)) !== null) {
     const name = match[1];
     const content = match[2];
-    if (content.includes('v=') && (content.endsWith('.js') || content.endsWith('.css'))) {
+    // G13 修复：content 形如 "js/xxx.min.js?v=hash"，必须先去掉 ?v= 部分再判断后缀，
+    // 旧逻辑 content.endsWith('.js') 永远为 false，导致 meta 资源从不参与 hash 校验。
+    const cleanContent = content.split('?')[0];
+    if (content.includes('v=') && (cleanContent.endsWith('.js') || cleanContent.endsWith('.css'))) {
       resourceRefs.push({ type: 'meta', fullPath: content, metaName: name, tag: 'meta' });
     }
   }

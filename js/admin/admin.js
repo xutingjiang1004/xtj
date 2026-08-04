@@ -1005,13 +1005,16 @@ async function initAdminClient() {
 
     function escapeHtml(s) {
         var d = document.createElement('div');
-        d.textContent = s || '';
-        return d.innerHTML;
+        d.textContent = s == null ? '' : String(s);
+        // DOM textContent 转义不覆盖引号（引号只在属性上下文危险），
+        // 手动补转义引号，保证 value="..."/data-*="..." 等属性拼接场景安全。
+        return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     function safeJsStr(s) {
-        if (!s) return '';
-        return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/</g, '\\x3C').replace(/>/g, '\\x3E').replace(/\n/g, '\\n');
+        if (s == null) return '';
+        // 对齐 core.js：先转义 &，再 \、'，双引号用 &quot;（HTML 属性解析器不认 \"）
+        return String(s).replace(/&/g, '&amp;').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '\\x3C').replace(/>/g, '\\x3E').replace(/\n/g, '\\n');
     }
 
     function getDisplayContent(content) {
@@ -2010,11 +2013,15 @@ async function initAdminClient() {
         });
     };
 
+    // G9 修复：in-flight 锁，防止慢网络下双击重复提交
+    var _respondReportLock = false;
     window.doRespondReport = async function(id) {
+        if (_respondReportLock) return;
         var textarea = document.getElementById('reportResponse_' + id);
         if (!textarea) return;
         var response = textarea.value.trim();
         if (!response) { showToast('请输入回复内容', 'error'); return; }
+        _respondReportLock = true;
         try {
             await apiCall('PUT', '/admin/report/' + id + '/respond', { response: response });
             await loadReportsData();
@@ -2022,6 +2029,7 @@ async function initAdminClient() {
             renderTab('reports');
             showToast('已回复并处理', 'success');
         } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+        finally { _respondReportLock = false; }
     };
 
     window.dismissReport = function(id) {
@@ -2152,11 +2160,15 @@ async function initAdminClient() {
         return hours + '小时';
     }
 
+    // G9 修复：in-flight 锁，防止双击重复禁言
+    var _addMuteLock = false;
     window.addMute = async function() {
+        if (_addMuteLock) return;
         var userName = document.getElementById('muteUserName').value.trim();
-        var duration = parseInt(document.getElementById('muteDuration').value);
+        var duration = parseInt(document.getElementById('muteDuration').value, 10);
         var reason = document.getElementById('muteReason').value.trim();
         if (!validateAdminTargetUser(userName, 'muteUserName')) return;
+        _addMuteLock = true;
         try {
             await apiCall('POST', '/admin/mute', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
@@ -2164,6 +2176,7 @@ async function initAdminClient() {
             renderTab('mutes');
             showToast('已禁言 ' + userName, 'success');
         } catch(e) { showToast('禁言失败: ' + e.message, 'error'); }
+        finally { _addMuteLock = false; }
     };
 
     window.liftMute = function(id) {
@@ -2217,11 +2230,15 @@ async function initAdminClient() {
         document.body.appendChild(modal);
     };
 
+    // G9 修复：in-flight 锁，防止双击重复添加黑名单
+    var _addBlacklistLock = false;
     window.addBlacklist = async function() {
+        if (_addBlacklistLock) return;
         var userName = document.getElementById('blacklistUserName').value.trim();
-        var duration = parseInt(document.getElementById('blacklistDuration').value);
+        var duration = parseInt(document.getElementById('blacklistDuration').value, 10);
         var reason = document.getElementById('blacklistReason').value.trim();
         if (!validateAdminTargetUser(userName, 'blacklistUserName')) return;
+        _addBlacklistLock = true;
         try {
             await apiCall('POST', '/admin/blacklist', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
@@ -2229,6 +2246,7 @@ async function initAdminClient() {
             renderTab('bans');
             showToast('已加入黑名单 ' + userName, 'success');
         } catch(e) { showToast('加入黑名单失败: ' + e.message, 'error'); }
+        finally { _addBlacklistLock = false; }
     };
 
     window.liftBlacklist = function(id) {
@@ -2536,7 +2554,11 @@ async function initAdminClient() {
     renderSecurityTab = function(el) {
         var alerts = allSecurityAlerts.slice();
         var now = new Date();
-        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        // G8 修复：created_at 是 UTC（ISO 字符串），比较前必须把"本地今日零点"转为
+        // 等价的 UTC 时刻；旧逻辑直接对本地 Date 调 toISOString()，UTC+8 下会把
+        // "今日"误算成昨天 16:00 起。用 getTimezoneOffset 修正时区偏移。
+        var localTodayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        var todayStart = new Date(localTodayMidnight.getTime() - localTodayMidnight.getTimezoneOffset() * 60000).toISOString();
 
         var todayAlerts = alerts.filter(function(a) { return a.created_at >= todayStart; });
         var highRiskCount = todayAlerts.filter(function(a) { return a.level === 'high'; }).length;
@@ -2730,9 +2752,11 @@ async function initAdminClient() {
     }
 
     window.buildUserTagMarkup = function(flags) {
+        // G11 修复：与 1292 行首个定义合并，补回丢失的"黑名单"标签分支
         var html = '';
         if (flags.isBanned) html += '<span class="tag tag-banned">封禁中</span>';
         if (flags.isMuted) html += '<span class="tag tag-muted">禁言中</span>';
+        if (flags.isBlacklisted) html += '<span class="tag tag-banned">黑名单</span>';
         return html;
     };
     buildUserTagMarkup = window.buildUserTagMarkup;
@@ -4748,7 +4772,8 @@ async function initAdminClient() {
       tag.className = 'email-manual-tag';
       tag.dataset.email = email;
       tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;';
-      tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
+      // XSS 修复：email 为用户可控输入（历史邮箱/手动添加），必须转义后再拼 innerHTML
+      tag.innerHTML = escapeHtml(email) + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
       list.appendChild(tag);
       emailUpdateCount();
     };

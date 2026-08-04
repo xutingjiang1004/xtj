@@ -194,7 +194,8 @@
             s && (s.textContent = i.views || "0");
             var c = document.getElementById("ppDeleteBtn");
             if (c) {
-                var d = "xxz" === window.currentUser, p = window.currentUser === i.username;
+                // L3 修复：移除硬编码管理员名 'xxz'，改用 isAdmin()（后端仍独立校验）
+                var d = typeof window.isAdmin === "function" && window.isAdmin(), p = window.currentUser === i.username;
                 d || p ? (c.style.display = "flex", c.title = "删除") : c.style.display = "none";
             }
         }
@@ -661,6 +662,12 @@
             } else re();
         } else window.showToast("暂无照片");
         function re() {
+            // G15 还原：re() 中的 Q 是 openPhotoPreview 作用域内（约 630 行）
+            // `var Q = !1` 声明的局部变量，遮蔽了外层 hoisted 的 function Q，
+            // 每次打开预览都会重新初始化为 false，因此 `Q || (...)` 每次打开
+            // 恰好执行一次收尾（O(b)/j(b)/F(b)：同步元信息/前后图/分页圆点）。
+            // 此前"G15 修复"误改用全局 window.__ppReExecuted 且从不重置，
+            // 导致第二次起 O(b)/j(b)/F(b) 不再执行（分页圆点等缺失），已还原。
             Q || (Q = !0, _ && _._cleanupOpenListeners && _._cleanupOpenListeners(), J && (J.style.transition = "", J.style.transform = "", J.style.transformOrigin = "",
             J.style.borderRadius = ""), _.style.transition = "", O(b), j(b), F(b), W && (W.style.transition = "",
             W.style.opacity = ""));
@@ -835,18 +842,12 @@
                 }
             });
         }
+    // G16 修复：删除失效的 ppRotatePhoto（查询全项目不存在的 .pp-active 类，
+    // 旋转功能实际由 preview-hotfix.js 的 window.ppRotatePhoto 提供）。此处只删除
+    // 原实现，保留 window.ppRotatePhoto 赋值占位，避免 hotfix 的 original 引用丢失。
     }, window.ppRotatePhoto = function() {
-        var slide = document.querySelector(".pp-slide-img.pp-active");
-        if (slide) {
-          var currentRotation = parseInt(slide.getAttribute('data-rotation') || '0', 10);
-          var nextRotation = (currentRotation + 90) % 360;
-          slide.setAttribute('data-rotation', nextRotation);
-          var currentTransform = slide.style.transform || '';
-          var scaleMatch = currentTransform.match(/scale\(([^)]+)\)/);
-          var scalePart = scaleMatch ? ' scale(' + scaleMatch[1] + ')' : '';
-          slide.style.transform = 'rotate(' + nextRotation + 'deg)' + scalePart;
-          window.showToast && window.showToast("已旋转 " + nextRotation + "°");
-        }
+        if (window.__xtjPhotoPreviewHotfixInstalled) return;
+        window.showToast && window.showToast("当前预览不支持旋转");
     }, window.ppCancelDownload = function() {
         try {
             te();

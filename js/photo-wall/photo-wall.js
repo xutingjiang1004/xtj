@@ -94,7 +94,6 @@
   window.__xtjPhotoWallForceSync = async function() {
     // ★ 增加 generation 废弃旧任务，但不手动清空 initializingPromise
     _initGeneration++;
-    var currentGen = _initGeneration;
     initialized = false;
     try {
       await window.initPhotoWall(true);

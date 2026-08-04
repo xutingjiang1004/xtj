@@ -496,7 +496,14 @@
     if (header) header.classList.remove('pw-header-hidden');
   };
   window.updateAmbientBackground = function(url){
+    // L8 修复：url 参数此前被忽略。改为安全版本——仅调整渐变强度作为预览切换的视觉反馈；
+    // 不使用 background url()（用户可控 URL 含 ) 或引号会破坏 CSS 值，有注入风险）。
     var bg = document.getElementById('ppAmbientBg');
-    if (bg && url) bg.style.background = 'radial-gradient(ellipse at center, rgba(100,160,140,.22) 0%, rgba(100,160,140,.06) 50%, transparent 80%)';
+    if (!bg) return;
+    if (url) {
+      bg.style.background = 'radial-gradient(ellipse at center, rgba(100,160,140,.30) 0%, rgba(100,160,140,.08) 55%, transparent 80%)';
+    } else {
+      bg.style.background = 'radial-gradient(ellipse at center, rgba(100,160,140,.22) 0%, rgba(100,160,140,.06) 50%, transparent 80%)';
+    }
   };
 })();

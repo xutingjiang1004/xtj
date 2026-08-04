@@ -144,7 +144,9 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
       return null;
     }
     // 每用户配额：保护共享 token 的 GitHub 小时配额不被单个用户耗尽
-    var quotaUser = String((req.userName || req.query && req.query.user_name || '') || '');
+    // G4 修复：配额 key 只认认证身份 req.userName，不接受 query 参数伪造
+    // （旧逻辑允许 ?user_name=xxx 刷新配额，且数组参数可完全绕过配额）。
+    var quotaUser = String((req.userName || '') || '').trim();
     if (quotaUser && !consumeGithubUserQuota(quotaUser)) {
       res.status(429).json({ ok: false, code: 'github_quota_exceeded', error: 'GitHub 请求过于频繁，请稍后再试' });
       return null;

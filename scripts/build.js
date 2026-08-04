@@ -255,7 +255,9 @@ const jsResults = JS_FILES.map(function(f) { return minifyJS(f, OPTIONAL_JS.inde
 console.log('\n--- Minifying CSS ---');
 const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
 
+// L5 修复：htmlAssetsUpdated 结果仅作日志用（原为未使用变量）
 const htmlAssetsUpdated = HTML_ENTRYPOINTS.map(updateHtmlAssetVersions).some(Boolean);
+if (htmlAssetsUpdated) console.log('[HASH] HTML asset versions were refreshed by this build');
 const htmlRefsValid = HTML_ENTRYPOINTS.map(validateHtmlMinifiedRefs).every(Boolean);
 
 const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length + (htmlRefsValid ? 0 : 1);
