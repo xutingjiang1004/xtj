@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   'use strict';
 
   if (window.__xtjCodeWorkspace) return;
@@ -5029,18 +5029,15 @@
     inputArea.innerHTML +=
       '<div class="code-composer-toolbar" aria-label="Code AI 控制栏">' +
         '<button type="button" class="code-composer-context-btn" id="codeComposerContextBtn" aria-label="菜单" aria-haspopup="menu" aria-expanded="false">＋</button>' +
+        '<select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select>' +
+        '<select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
+          '<option value="auto">自动</option><option value="off">快速</option><option value="low">轻度</option><option value="medium">标准</option><option value="high">深入</option><option value="max">极度</option>' +
+        '</select>' +
       '</div>' +
       '<span class="code-composer-runtime-status" id="codeComposerRuntimeStatus" role="status" aria-live="polite"></span>' +
       '<button type="button" class="code-model-retry" id="codeModelRetryBtn" hidden>重试在线模型</button>' +
       '<div class="code-context-details" id="codeContextDetails" role="status" aria-live="polite" hidden></div>' +
       '<div class="code-composer-menu" id="codeComposerContextMenu" role="menu">' +
-        '<div class="code-composer-menu-section">' +
-          '<div class="code-composer-menu-label">模型设置</div>' +
-          '<div class="code-composer-menu-item"><select id="codeModelSelect" class="code-composer-select" aria-label="选择模型" disabled><option>模型加载中…</option></select></div>' +
-          '<div class="code-composer-menu-item"><select id="codeThinkingSelect" class="code-composer-select" aria-label="选择思考程度">' +
-            '<option value="auto">自动思考</option><option value="off">快速 (关闭)</option><option value="low">轻度思考</option><option value="medium">标准思考</option><option value="high">深入思考</option><option value="max">极度深入</option>' +
-          '</select></div>' +
-        '</div>' +
         '<div class="code-composer-menu-section">' +
           '<div class="code-composer-menu-label">上下文附件</div>' +
           '<button type="button" role="menuitem" data-composer-action="upload">' + codeWorkspaceIcon('upload') + ' 上传资料文件</button>' +

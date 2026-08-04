@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    code-workspace.css — Code Workspace Panel
    IDE-style code workspace with file tree, editor, preview,
    AI context, chat/diff, and related UI components.
@@ -1768,9 +1768,9 @@
   padding: 6px;
   border: 1px solid var(--cw-border);
   border-radius: var(--cw-radius-sm);
-  background: color-mix(in srgb, var(--cw-bg-secondary) 92%, transparent);
+  background: var(--cw-bg-secondary);
   box-shadow: 0 10px 26px rgba(20, 51, 66, 0.13);
-  backdrop-filter: blur(12px);
+  will-change: transform;
 }
 
 .code-composer-menu.show { display: grid; }
@@ -1787,12 +1787,11 @@
   padding: 9px 10px;
   border: 1px solid var(--cw-border);
   border-radius: var(--cw-radius-sm);
-  background: color-mix(in srgb, var(--cw-bg-secondary) 94%, transparent);
+  background: var(--cw-bg-secondary);
   box-shadow: 0 10px 26px rgba(20, 51, 66, 0.13);
   color: var(--cw-text-secondary);
   font-size: 11px;
   line-height: 1.45;
-  backdrop-filter: blur(12px);
 }
 
 .code-context-details .code-context-warning {
@@ -1815,6 +1814,9 @@
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .code-composer-menu button:hover,
@@ -1822,6 +1824,7 @@
   background: var(--cw-accent-soft);
   color: var(--cw-accent);
   outline: none;
+  transition: background 0.08s ease, color 0.08s ease;
 }
 
 .code-composer-context-btn,
@@ -3534,9 +3537,9 @@ body.code-is-resizing *, body.code-is-resizing-row * {
 }
 
 #panelCode .code-chat-message.assistant .msg-content {
-  background: #ffffff !important;
+  background: #f3efe7 !important;
   color: #26231d !important;
-  border-color: #cbc7bd !important;
+  border-color: #d5d0c5 !important;
 }
 
 #panelCode .code-stream-status,
@@ -3558,7 +3561,7 @@ body.code-is-resizing *, body.code-is-resizing-row * {
    solid danger-colored card; Claude keeps the live surface quiet and uses a
    small accent rail for activity instead. */
 #panelCode .code-chat-message.assistant.streaming .msg-content {
-  background: var(--cw-popover, #ffffff) !important;
+  background: var(--cw-popover, #f3efe7) !important;
   background-image: none !important;
   color: var(--cw-text) !important;
   border: 1px solid var(--cw-border) !important;
