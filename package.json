@@ -31,7 +31,6 @@
   },
   "dependencies": {
    "@supabase/supabase-js": "^2.106.2",
-    "alipay-sdk": "^4.14.0",
     "cors": "^2.8.5",
     "csso-cli": "^4.0.2",
     "express": "^5.1.0",

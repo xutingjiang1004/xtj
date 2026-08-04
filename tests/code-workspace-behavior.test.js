@@ -140,7 +140,9 @@ test('Code stream recovery has a bounded polling budget', () => {
 
 test('Code SSE backpressure and malformed stream requests are guarded', () => {
   const sse = fs.readFileSync(__dirname + '/../render-api/ai-core/sse.js', 'utf8');
-  assert.match(sse, /return res\.write\(data\) !== false/);
+  // sse.js write() 用 var ok = res.write(data) 检查背压，超限入队/中止
+  assert.match(sse, /var ok = res\.write\(data\)/);
+  assert.match(sse, /MAX_SSE_BUFFER_BYTES/);
   assert.match(codeAgentSource, /String\(\(req\.body && req\.body\.client_request_id\) \|\| ''\)/);
   assert.match(codeAgentSource, /if \(!wrote && type !== 'done'/);
 });

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 构建一致性检查脚本
  * 
  * 检查:
@@ -150,7 +150,10 @@ function checkHtmlHashes(htmlFile) {
   linkRegex.lastIndex = 0;
   while ((match = linkRegex.exec(htmlContent)) !== null) {
     const href = match[1];
-    if (href.includes('v=') && href.endsWith('.css')) {
+    // H-16 修复：href 形如 "css/style.min.css?v=abc"，必须先去掉 ?v= 再判断后缀，
+    // 旧逻辑 href.endsWith('.css') 恒 false，导致所有 CSS link 从不参与 hash 校验。
+    const cleanHref = href.split('?')[0];
+    if (href.includes('v=') && (cleanHref.endsWith('.css') || cleanHref.endsWith('.js'))) {
       resourceRefs.push({ type: 'css', fullPath: href, tag: 'link' });
     }
   }

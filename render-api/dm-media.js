@@ -24,10 +24,16 @@ function validateDmStoragePath(value) {
 function validateDmMediaKind(kind, mimeType) {
   const normalizedKind = String(kind || '').trim().toLowerCase();
   const normalizedMime = String(mimeType || '').trim().toLowerCase();
-  if (!MEDIA_KINDS[normalizedKind]) return { ok: false, code: 'invalid_kind', error: 'Unsupported media kind' };
+  // M-7c: 用 hasOwnProperty 做白名单判定，防止 kind='constructor'/'__proto__'
+  // 沿原型链命中返回非字符串 actorPrefix
+  if (!Object.prototype.hasOwnProperty.call(MEDIA_KINDS, normalizedKind)) return { ok: false, code: 'invalid_kind', error: 'Unsupported media kind' };
   const prefix = normalizedKind + '/';
   if (!new RegExp('^' + normalizedKind + '/[a-z0-9][a-z0-9!#$&^_.+\\-]{0,126}$', 'i').test(normalizedMime)) {
     return { ok: false, code: 'mime_mismatch', error: 'MIME type does not match media kind' };
+  }
+  // M-9c: SVG 可内嵌脚本，直接打开即存储型 XSS 载体，DM 与照片墙一致显式排除
+  if (normalizedKind === 'image' && /^image\/svg(\+xml)?([;,]|$)/i.test(normalizedMime)) {
+    return { ok: false, code: 'mime_mismatch', error: 'SVG media is not allowed' };
   }
   return { ok: true, kind: normalizedKind, mimeType: normalizedMime, actorPrefix: MEDIA_KINDS[normalizedKind], mimePrefix: prefix };
 }
@@ -53,24 +59,19 @@ async function verifyStorageObject(supabase, storagePath, expected) {
   if (result && result.error) return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: result.error };
   let item = (result && Array.isArray(result.data) ? result.data : []).find(function (row) { return row && row.name === name; });
   if (!item) {
-    // list search 是模糊匹配且可能截断：用 download 做精确探测，避免合法媒体被误判不存在
+    // list search 是模糊匹配且可能截断：用 HEAD（info）做精确探测，避免合法媒体被误判不存在。
+    // M-6c: 不再用 download 兜底——全量拉取对象入内存只为读 size 是 DoS 向量。
     try {
-      const probe = await supabase.storage.from('uploads').download(parsed.storagePath);
+      const probe = await supabase.storage.from('uploads').info(parsed.storagePath);
       if (probe && !probe.error && probe.data) {
-        const probeData = probe.data;
-        // G3 修复：download 探测会拉取全量数据（最大 50MB+），只为读取 size 代价过高，
-        // 可能被超大文件拖垮内存（DoS 向量）。优先尝试 Range 头仅取首字节估算大小；
-        // Range 不可用时再回退到完整 arrayBuffer（受调用方大小校验约束）。
-        let probeSize = null;
-        try {
-          if (typeof probeData.arrayBuffer === 'function') {
-            probeSize = probeData.size != null ? Number(probeData.size) : null;
+        const probeMeta = probe.data;
+        item = {
+          name: name,
+          metadata: {
+            size: Number.isSafeInteger(probeMeta.size) ? probeMeta.size : null,
+            mimetype: String(probeMeta.content_type || probeMeta.mime_type || probeMeta.metadata && probeMeta.metadata.mimetype || '')
           }
-        } catch (e) { probeSize = null; }
-        if (probeSize == null && typeof probeData.arrayBuffer === 'function') {
-          try { probeSize = (await probeData.arrayBuffer()).byteLength; } catch (e) { probeSize = null; }
-        }
-        item = { name: name, metadata: { size: probeSize, mimetype: String(probeData.type || '') } };
+        };
       } else {
         return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };
       }
@@ -107,8 +108,9 @@ async function verifyStorageObject(supabase, storagePath, expected) {
   return { ok: true, state: 'found', storagePath: parsed.storagePath, name: name, size: size, metadata: metadata };
 }
 
-async function claimDmMediaUpload(supabase, options) {
+async function claimDmMediaUpload(supabase, options, _retry) {
   options = options || {};
+  const retry = Number(_retry || 0);
   const pathResult = validateDmStoragePath(options.storagePath);
   if (!pathResult.ok) return pathResult;
   const kindResult = validateDmMediaKind(options.kind, options.mimeType);
@@ -170,7 +172,13 @@ async function claimDmMediaUpload(supabase, options) {
     return { ok: false, state: 'query_failed', code: 'media_registry_insert_failed', error: error };
   }
   if (inserted && inserted.error) {
-    if (String(inserted.error.code || '') === '23505') return claimDmMediaUpload(supabase, options);
+    if (String(inserted.error.code || '') === '23505') {
+      // M-11: 并发 23505 冲突重试必须有深度上限，防止极端并发下无限递归栈溢出
+      if (retry >= 2) {
+        return { ok: false, state: 'conflict', code: 'media_registry_conflict', error: 'Media registry insert conflicted after retries' };
+      }
+      return claimDmMediaUpload(supabase, options, retry + 1);
+    }
     return { ok: false, state: 'query_failed', code: 'media_registry_insert_failed', error: inserted.error };
   }
   if (!inserted || !inserted.data) return { ok: false, state: 'query_failed', code: 'media_registry_insert_not_confirmed', error: 'Media registry insert was not confirmed' };
