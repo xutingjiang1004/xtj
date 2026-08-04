@@ -5491,8 +5491,8 @@
       });
       if (state._composerGlobalCleanup) state._composerGlobalCleanup();
       var onDocumentPointerDown = function(event) {
-        if (!contextMenu.hidden && !contextMenu.contains(event.target) && event.target !== contextButton) {
-          contextMenu.hidden = true;
+        if (contextMenu.classList.contains('show') && !contextMenu.contains(event.target) && event.target !== contextButton) {
+          contextMenu.classList.remove("show");
           state.composerMenu = null;
           contextButton.setAttribute('aria-expanded', 'false');
         }
@@ -5502,8 +5502,8 @@
         }
       };
       var onDocumentKeyDown = function(event) {
-        if (event.key === 'Escape' && !contextMenu.hidden) {
-          contextMenu.hidden = true;
+        if (event.key === 'Escape' && contextMenu.classList.contains('show')) {
+          contextMenu.classList.remove("show");
           state.composerMenu = null;
           contextButton.setAttribute('aria-expanded', 'false');
           contextButton.focus();
