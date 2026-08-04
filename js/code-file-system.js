@@ -1316,7 +1316,9 @@
   function readDocumentText(arrayBuffer, fileName, mimeType, options) {
     options = options || {};
     throwIfAborted(options.signal);
-    if (!arrayBuffer && !(arrayBuffer instanceof ArrayBuffer)) {
+    // 必须是 ArrayBuffer：null/非 ArrayBuffer 一律拒绝（原条件用 && 会放过
+    // truthy 的非 ArrayBuffer 值，导致 new Blob 行为异常而非清晰报错）
+    if (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer)) {
       return Promise.reject(new Error('readDocumentText: arrayBuffer is required'));
     }
     if (!mimeType) {
@@ -1674,12 +1676,22 @@
                   }
                 } else {
                   var fileType = getFileType(handle.name);
-                  allFiles.push({
+                  var fileEntry = {
                     path: entryPath,
                     name: handle.name,
                     type: fileType,
                     size: 0
-                  });
+                  };
+                  allFiles.push(fileEntry);
+                  // 异步读取真实文件大小（不阻塞目录扫描；Promise.all 会等待
+                  // 全部 getFile 完成后 listAllFiles 才 resolve，size 不会丢失）
+                  if (typeof handle.getFile === 'function') {
+                    (function (entry, h) {
+                      promises.push(h.getFile().then(function (f) {
+                        entry.size = (f && typeof f.size === 'number') ? f.size : 0;
+                      }).catch(function () {}));
+                    })(fileEntry, handle);
+                  }
                   if (allFiles.length >= maxFiles) break;
                 }
               }
