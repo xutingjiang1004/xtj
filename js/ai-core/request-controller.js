@@ -8,8 +8,11 @@
   var Errors = CORE.Errors;
 
   // ── Feature Flag ───────────────────────────────────────────────────────
+  // 默认启用共享请求控制器（超时/去重/遥测），显式设置 localStorage
+  // AI_SHARED_CORE_ENABLED = '0' 可关闭（旧逻辑是未设置即关闭，导致
+  // 普通用户请求无超时保护，可能无限挂起）
   var FEATURE_FLAG = (function () {
-    try { return localStorage.getItem('AI_SHARED_CORE_ENABLED') === '1'; } catch (e) { return false; }
+    try { return localStorage.getItem('AI_SHARED_CORE_ENABLED') !== '0'; } catch (e) { return true; }
   })();
 
   // ── Request states ─────────────────────────────────────────────────────

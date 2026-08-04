@@ -14101,7 +14101,8 @@ function renderProfileActivityList(kind) {
                     }
                     if (!apiRes.ok || !apiData || !apiData.ok) {
                         var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
-                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">' + errMsg + '</div>';
+                        // 错误消息来自服务端，先转义再拼 HTML，防 XSS 注入
+                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
                         return;
                     }
                     // S7 修复：响应落地前校验是否已被新请求替代
