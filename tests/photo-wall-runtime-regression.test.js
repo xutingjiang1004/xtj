@@ -275,3 +275,38 @@ test('realtime channel recovers properly after pagehide and visibility changes',
   assert.equal(unsubscribedCount, 2, '遇到 CHANNEL_ERROR 先取消订阅');
   assert.equal(subscribedCount, 3, '遇到 CHANNEL_ERROR 允许重新订阅');
 });
+
+// ---- P1 修复回归：删除失败恢复、重试单一绑定、级联分页 ----
+const uploadSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/upload-ui.js'), 'utf8');
+const renderSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/render.js'), 'utf8');
+
+test('cloud delete failure restores the card and re-renders unconditionally', () => {
+  // 修复前：失败分支调用 removePhotoLocal（移除而非恢复），且仅在 opts.render !== false 时重渲染；
+  // 预览弹窗删除传 {render:false}，导致 DOM 卡片消失但数据仍在。
+  const failBranch = dataSource.slice(dataSource.indexOf('if (!deleteResult)'), dataSource.indexOf('// 云端删除成功后才标记为已删除'));
+  assert.match(failBranch, /mergePhotoLists\(\[item\]\.concat\(window\.photoWallData \|\| \[\]\), \[\]\)/);
+  assert.doesNotMatch(failBranch, /removePhotoLocal\(id, opts\.render !== false\)/);
+  assert.doesNotMatch(failBranch, /opts\.render !== false &&/);
+  assert.match(failBranch, /if \(typeof window\.renderPhotoWallWithoutReload === 'function'\) window\.renderPhotoWallWithoutReload\(\)/);
+});
+
+test('retry-failed button has a single binding path and a concurrency guard', () => {
+  // 修复前：按钮同时被 attachPhotoUploadUi 直接绑定 + 父容器 data-action 委托监听，
+  // 一次点击并发执行两次 retryFailedUploads，产生孤儿 Storage 文件。
+  assert.doesNotMatch(uploadSource, /__xtjRetryBound/);
+  assert.doesNotMatch(uploadSource, /retryBtn\.addEventListener\('click', retryFailedUploads\)/);
+  // 并发守卫：state.retrying 锁 + try/finally 释放
+  assert.match(uploadSource, /if \(state\.uploading \|\| state\.retrying\)/);
+  assert.match(uploadSource, /state\.retrying = true;/);
+  assert.match(uploadSource, /finally \{\s*state\.retrying = false;\s*\}/);
+});
+
+test('load-more sentinel debounces cascade paging and offers retry on real failure', () => {
+  // 分组视图级联：新页照片不属于当前分组时停止自动加载
+  assert.match(renderSource, /_lastMoreLoadAt/);
+  assert.match(renderSource, /当前分组暂无更多照片/);
+  assert.match(renderSource, /groupByDate\(more\)\.some/);
+  // 失败重试：真实失败显示可点击重试，AbortError（被刷新/切换取代）静默恢复
+  assert.match(renderSource, /加载失败，点击重试/);
+  assert.match(renderSource, /err\.name === 'AbortError'/);
+});

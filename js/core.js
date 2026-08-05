@@ -4839,9 +4839,14 @@ function renderProfileActivityList(kind) {
                         showToast('like_operation_failed');
                     }
                 }).finally(function() {
+                    // ★ 修复：无条件复位 running——此前仅当 desired===confirmed 时才删除条目，
+                    // 若"请求在途时再点取消 → 第一次成功触发 re-flush → 第二次失败"，条目会永久
+                    // 残留在 running=true 状态，此后 toggleLike 不再发起任何请求，点赞态与服务器
+                    // 永久失同步（P1）。现在 running 始终复位：状态未同步时下次点击可重新 flush。
+                    operation.running = false;
+                    setPostLikePending(postId, false);
                     if (likeOperations[postId] === operation && operation.desired === operation.confirmed) {
                         delete likeOperations[postId];
-                        setPostLikePending(postId, false);
                     }
                 });
             }
@@ -9514,31 +9519,56 @@ function renderProfileActivityList(kind) {
                     try { sb.removeChannel(chatRealtime); } catch(e) {}
                     chatRealtime = null;
                 }
-                chatRealtime = sb.channel('chat-dms')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
-                        var m = payload.new || payload.old;
-                        if (m.media_type !== DM_MARKER) return;
-                        if (!window.currentUser) return;
-                        if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
-                        var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
-                        if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                            showNotification(m.user_name, getDockChatMessagePreview(m));
-                        }
-                        window.dockChatListCacheTime = 0;
-                        if (dockChatActiveUser && dockChatActiveUser === otherUser) {
-                            loadDockChatMessages(otherUser, false);
-                        } else if (!dockChatActiveUser) {
+                // ★ 修复：DM 订阅此前完全没有断线重连（对比 subscribeToComments），
+                //   CHANNEL_ERROR/TIMED_OUT/CLOSED 后永久失去实时推送，只能靠 5 分钟轮询兜底。
+                //   现与评论订阅对齐：指数退避自动重连（最多 10 次）。
+                var _dmReconnectAttempts = 0;
+                var _dmMaxReconnectAttempts = 10;
+
+                function createDmChannel() {
+                    chatRealtime = sb.channel('chat-dms')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
+                            var m = payload.new || payload.old;
+                            if (m.media_type !== DM_MARKER) return;
+                            if (!window.currentUser) return;
+                            if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
+                            var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                            if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
+                                showNotification(m.user_name, getDockChatMessagePreview(m));
+                            }
                             window.dockChatListCacheTime = 0;
-                            loadDockChatList();
-                            updateUnreadBadge();
-                        } else {
-                            updateUnreadBadge();
-                        }
-                    })
-                    .subscribe(function(status, err) {
-                        if (err) { console.error('[CHAT-REALTIME]', err); }
-                        else if (status === 'SUBSCRIBED') { console.log('[CHAT-REALTIME] 已连接'); }
-                    });
+                            if (dockChatActiveUser && dockChatActiveUser === otherUser) {
+                                loadDockChatMessages(otherUser, false);
+                            } else if (!dockChatActiveUser) {
+                                window.dockChatListCacheTime = 0;
+                                loadDockChatList();
+                                updateUnreadBadge();
+                            } else {
+                                updateUnreadBadge();
+                            }
+                        })
+                        .subscribe(function(status, err) {
+                            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                                console.warn('[CHAT-REALTIME]', status, err);
+                                if (_dmReconnectAttempts < _dmMaxReconnectAttempts) {
+                                    _dmReconnectAttempts++;
+                                    var backoff = Math.min(1000 * Math.pow(2, _dmReconnectAttempts), 30000);
+                                    setTimeout(function() {
+                                        if (chatRealtime) {
+                                            try { sb.removeChannel(chatRealtime); } catch(e) {}
+                                            chatRealtime = null;
+                                        }
+                                        createDmChannel();
+                                    }, backoff);
+                                }
+                            } else if (status === 'SUBSCRIBED') {
+                                _dmReconnectAttempts = 0;
+                            } else if (err) {
+                                console.error('[CHAT-REALTIME]', err);
+                            }
+                        });
+                }
+                createDmChannel();
             }
 
             function subscribeToComments() {
@@ -9627,6 +9657,11 @@ function renderProfileActivityList(kind) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
+                    // ★ 修复：DM 实时订阅同样需要在页面恢复可见时重建，
+                    //   此前只恢复评论订阅，DM 通道断开后无法自动恢复
+                    if (!chatRealtime || chatRealtime.state === 'closed') {
+                        subscribeToMessages();
+                    }
                     // ★ 恢复所有暂停的轮询
                     // Phase 3-P0-5: 原循环体为空，页面恢复可见时未触发立即轮询。
                     // 现遍历存活的轮询任务，从 __catAiPollStatus 取出 postId 后调用
@@ -9648,12 +9683,20 @@ function renderProfileActivityList(kind) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
+                    // ★ 修复：网络恢复时同时重建 DM 订阅
+                    if (!chatRealtime || chatRealtime.state === 'closed') {
+                        subscribeToMessages();
+                    }
                 }
             });
             window.addEventListener('pageshow', function() {
                 if (window.currentUser) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
+                    }
+                    // ★ 修复：页面重新显示时同时重建 DM 订阅
+                    if (!chatRealtime || chatRealtime.state === 'closed') {
+                        subscribeToMessages();
                     }
                 }
             });
