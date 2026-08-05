@@ -869,6 +869,150 @@ async function searchTavily(query, maxResults) {
   }
 }
 
+// Tavily Research 深度研究（多 agent 流式）— POST https://api.tavily.com/research，Bearer 鉴权
+// 上游为 SSE 流（tool_call / tool_response / done 等事件），这里标准化为：
+//   research_step（Planning=0 / WebSearch=1 / ResearchSubtopic=1 / Generating=2）
+//   research_content（content/answer 文本）
+//   research_sources（url + title + content 前 300 字）
+//   research_done（最终答案；流结束未收到 done 且无 error 时用已累积 content 补发）
+//   error（tavily_not_configured / tavily_status_xxx / 读取失败）
+var TAVILY_RESEARCH_PHASES = { Planning: 0, WebSearch: 1, ResearchSubtopic: 1, Generating: 2 };
+async function tavilyResearchStream(query, model, onEvent, signal) {
+  var apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    try { onEvent({ type: 'error', error: 'tavily_not_configured' }); } catch (_) {}
+    return;
+  }
+  // 10 分钟超时（Tavily pro 研究可能几分钟）；路由可传入 AbortSignal 支持客户端断开
+  var timeoutSignal = AbortSignal.timeout(600000);
+  var combinedSignal = (signal && typeof AbortSignal.any === 'function')
+    ? AbortSignal.any([timeoutSignal, signal])
+    : (signal || timeoutSignal);
+  var sentDone = false;
+  var sentError = false;
+  var accumulated = '';
+  var resp;
+  try {
+    resp = await fetch('https://api.tavily.com/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({ input: query, model: model || 'pro', stream: true }),
+      signal: combinedSignal
+    });
+  } catch (e) {
+    sentError = true;
+    try { onEvent({ type: 'error', error: 'tavily_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
+    return;
+  }
+  if (!resp.ok) {
+    sentError = true;
+    var errBody = '';
+    try { errBody = await resp.text(); } catch (_) {}
+    try { onEvent({ type: 'error', error: 'tavily_status_' + resp.status, message: errBody.slice(0, 200) }); } catch (_) {}
+    return;
+  }
+  if (!resp.body) {
+    sentError = true;
+    try { onEvent({ type: 'error', error: 'tavily_empty_stream' }); } catch (_) {}
+    return;
+  }
+  var reader = resp.body.getReader();
+  var decoder = new TextDecoder('utf-8');
+  var buffer = '';
+  var dataLines = [];
+
+  function handleChunk(chunk) {
+    var evType = String(chunk.type || '').toLowerCase();
+    // done/完成事件 → research_done（answer 取事件最终文本，缺省用已累积 content）
+    if (evType === 'done' || evType === 'end' || evType === 'complete' || chunk.done === true) {
+      sentDone = true;
+      var finalAnswer = (typeof chunk.answer === 'string' && chunk.answer.trim())
+        ? chunk.answer
+        : (typeof chunk.content === 'string' ? chunk.content : accumulated);
+      try { onEvent({ type: 'research_done', answer: finalAnswer }); } catch (_) {}
+      return;
+    }
+    // tool_call / tool_response → research_step（按 tool_name 映射阶段）
+    if (evType === 'tool_call' || evType === 'tool_response') {
+      var toolName = String(chunk.tool_name || chunk.tool || '').trim();
+      var phase = TAVILY_RESEARCH_PHASES[toolName];
+      if (phase !== undefined) {
+        try { onEvent({ type: 'research_step', tool: toolName, phase: phase }); } catch (_) {}
+        // tool_response 的 Planning 完成后发 phase 0 完成标记
+        if (evType === 'tool_response' && toolName === 'Planning') {
+          try { onEvent({ type: 'research_step', tool: 'Planning', phase: 0, status: 'done' }); } catch (_) {}
+        }
+      }
+    }
+    // content/answer 文本 → research_content
+    var text = typeof chunk.content === 'string' ? chunk.content : (typeof chunk.answer === 'string' ? chunk.answer : '');
+    if (text && text.trim()) {
+      accumulated += text;
+      try { onEvent({ type: 'research_content', text: text }); } catch (_) {}
+    }
+    // sources 数组 → research_sources（只保留 url + title + content 前 300 字）
+    if (Array.isArray(chunk.sources) && chunk.sources.length) {
+      var mapped = [];
+      for (var si = 0; si < chunk.sources.length; si++) {
+        var s = chunk.sources[si] || {};
+        var sUrl = String(s.url || s.link || '').trim();
+        if (!sUrl) continue;
+        mapped.push({
+          url: sUrl,
+          title: String(s.title || '').trim().slice(0, 200),
+          content: String(s.content || s.snippet || '').trim().slice(0, 300)
+        });
+      }
+      if (mapped.length) {
+        try { onEvent({ type: 'research_sources', sources: mapped }); } catch (_) {}
+      }
+    }
+  }
+
+  function flushDataLine() {
+    if (!dataLines.length) return;
+    var jsonStr = dataLines.join('\n');
+    dataLines = [];
+    var chunk;
+    try { chunk = JSON.parse(jsonStr); } catch (e) { return; } // 解析失败的行静默跳过
+    if (!chunk || typeof chunk !== 'object') return;
+    handleChunk(chunk);
+  }
+
+  try {
+    while (true) {
+      var readResult;
+      try {
+        readResult = await reader.read();
+      } catch (e) {
+        break; // 上游读取失败，走下方流结束兜底
+      }
+      if (readResult.done) break;
+      buffer += decoder.decode(readResult.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim(); // trim 同时处理 CRLF 的 
+        if (!line) { flushDataLine(); continue; }
+        if (line.indexOf('data:') === 0) {
+          dataLines.push(line.slice(5).trim()); // 多行 data 用 \n 拼接
+          continue;
+        }
+        // 非 data 行（event:/注释等）：先冲刷已累积的 data 再忽略
+        flushDataLine();
+      }
+    }
+    flushDataLine();
+  } catch (e) {
+    sentError = true;
+    try { onEvent({ type: 'error', error: 'tavily_stream_read_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
+  }
+  // 流结束：没发过 research_done 且没 error → 补发 done（用已累积 content）
+  if (!sentDone && !sentError) {
+    try { onEvent({ type: 'research_done', answer: accumulated.trim() }); } catch (_) {}
+  }
+}
+
 // Provider 2: Brave Search API
 async function searchBrave(query, maxResults) {
   var apiKey = process.env.BRAVE_SEARCH_API_KEY;
@@ -13108,6 +13252,10 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
           reasoner_model: normalizeDeepSeekUsageModel(config.model && config.model.reasoner_model, DEEPSEEK_MODEL_REASONER),
           default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max',
           probe: getDeepSeekProbeSnapshot()
+        },
+        tavily_research: {
+          enabled: !!process.env.TAVILY_API_KEY,
+          models: ['pro', 'mini', 'auto']
         }
       }
     });
@@ -15291,6 +15439,64 @@ app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async
   } catch (e) {
     return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [], diagnostics: { enabled_providers: [], missing_env: [], provider_results: [], provider_errors: [] } });
   }
+});
+
+// POST /api/agent/research/stream - Tavily Deep Research 多 agent 深度研究（SSE 流式代理）
+// 事件：research_step / research_content / research_sources / research_done / heartbeat / error
+app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10), async (req, res) => {
+  var aborted = false;
+  var _researchAbort = new AbortController();
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  try { res.flushHeaders(); } catch (_) {}
+
+  // 心跳保活：每 4s 检查一次，沉默 ≥8s 时发送 heartbeat（对齐 /api/agent/chat/stream 模式）
+  var _heartbeatTimer = null;
+  function clearStreamHeartbeat() {
+    if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; }
+  }
+  function startStreamHeartbeat() {
+    if (_heartbeatTimer) return;
+    _heartbeatTimer = setInterval(function() {
+      if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
+      var lastWrite = res._sseLastWriteAt || 0;
+      if (Date.now() - lastWrite >= 8000) {
+        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
+      }
+    }, 4000);
+  }
+  function safeEnd() { clearStreamHeartbeat(); if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
+
+  function markStreamDisconnected() {
+    if (aborted) return;
+    aborted = true;
+    clearStreamHeartbeat();
+    try { _researchAbort.abort(); } catch (_) {}
+  }
+  req.on('aborted', markStreamDisconnected);
+  res.on('close', function() { if (!res.writableEnded) markStreamDisconnected(); });
+
+  try {
+    var vq = validateString(req.body && req.body.query, 500, '研究主题');
+    if (!vq || vq.error) {
+      writeSse(res, { type: 'error', error: 'invalid_query', message: vq && vq.error || '研究主题不能为空（1-500 字）' });
+      return safeEnd();
+    }
+    var query = vq;
+    var model = String(req.body && req.body.model || 'pro').trim();
+    if (['pro', 'mini', 'auto'].indexOf(model) < 0) model = 'pro';
+    startStreamHeartbeat();
+    await tavilyResearchStream(query, model, function(ev) {
+      if (aborted) return;
+      if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
+    }, _researchAbort.signal);
+  } catch (e) {
+    if (!aborted) {
+      try { writeSse(res, { type: 'error', error: 'tavily_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
+    }
+  }
+  safeEnd();
 });
 
 // POST /api/agent/chat/delete - 删除用户指定的对话（软删除，管理员仍可查看）
