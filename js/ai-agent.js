@@ -31,7 +31,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // Keep the first network payload small; older messages remain available by scrolling.
   var HISTORY_PAGE_SIZE = 10;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
-  var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // 鈽?U3: 涓?TTL 涓€鑷? 閬垮厤姣忓垎閽熷仛鏃犵敤鍔?
+  var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 保持一致，避免每分钟做无用功
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
   var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
@@ -49,9 +49,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     sending: false,
     loading: false,
     loadingMore: false,
-    // 鈽?M: thinking_mode 榛樿浠?low 改成 max
+    // ★ M: thinking_mode 默认从 low 改成 max
     //   用户要求: 普通聊天默认就用 max 深度思考
-    //   绠＄悊鍛樺彲鍦ㄥ悗鍙?/admin/ai-agent/config 鍒囨崲涓?low/medium/high/max
+    //   管理员可在后台 /admin/ai-agent/config 切换为 low/medium/high/max
     //   鏅€氱敤鎴蜂笉鑳藉湪 UI 切换 (allow_user_thinking_switch: false)
     thinkingMode: 'low',
     // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
@@ -61,13 +61,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     deepThinkEffort: 'max',
     deepThinkEnabled: true,    // 后端 config.deep_think.enabled
     tavilyResearchEnabled: false, // 后端 config.tavily_research.enabled (Tavily Deep Research)
-    // 鈽?M: 深度思考冩ā寮?toggle 鐘舵€?
+    // ★ M: 深度思考模式 toggle 状态
     //   寮€鍚悗鏈細璇濇墍鏈夋秷鎭蛋 Planner鈫扺orkers鈫扴ynthesizer 澶?agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
     deepThinkProgressCard: null, // DOM node for progress card
-    dtConversationId: null,      // 深度思考冧簩绾ч〉闈㈠綋鍓嶄細璇?ID锛堜笌鏅€氳亰澶╁垎寮€锛?
+    dtConversationId: null,      // 深度思考二级页面当前会话 ID（与普通聊天分开）
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -134,7 +134,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (v === undefined || v === null) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
-        else if (k === 'html') node.textContent = v; // 鈽?瀹夊叏: 绂佹 innerHTML, 改用 textContent
+        else if (k === 'html') node.textContent = v; // ★ 安全: 禁用 innerHTML, 改用 textContent
         else if (k === 'style') node.style.cssText = v;
         else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
         else node.setAttribute(k, v);
@@ -171,7 +171,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   var _copyMenuActive = null;
-  var _menuAbort = null; // 鈽?U3: 绠＄悊澶嶅埗鑿滃崟鐨?document 鐩戝惉鍣?
+  var _menuAbort = null; // ★ U3: 管理复制菜单的 document 监听器
 
   function closeCopyMenu() {
     if (_copyMenuActive) {
@@ -524,7 +524,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
-    // 鈽?U3: 如果 version 鐩稿悓涓斿凡鏈夊唴瀹? 璺宠繃閲嶅缓 (閬垮厤姣忓垎閽熼噸鏂颁笅杞藉ご鍍?
+    // ★ U3: 如果 version 相同且已有内容，跳过重建 (避免每分钟重新下载头像)
     if (target._aiAvatarVersion === avatarVersion && target._aiAvatarUrl === avatarUrl && target.children.length > 0) {
       return;
     }
@@ -1120,7 +1120,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
       if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) {
-        // 鈽?U3: 鍔ㄦ€?currency 符号
+        // ★ U3: 动态 currency 符号
         var currency = usage.currency || 'CNY';
         var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : '';
         parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
@@ -1282,9 +1282,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return container;
   }
 
-  // 鈽?O 修复 Bug 4: 浠?history 恢复 think-card
+  // ★ O 修复 Bug 4: 从 history 恢复 think-card
   //   閫€鍑哄璇濇閲嶈繘鍚? deep_think=true 的消息渲染成 think-card
-  // 鈽?Q 閲嶅仛: 鏋佺畝鐗?(涓?handleSendDeepThink 涓€鑷寸粨鏋?
+  // ★ Q 重做: 极简版（与 handleSendDeepThink 一致结构）
   function buildThinkCardFromHistory(msg, messagesEl, simpleMode) {
     var thinkingLog = Array.isArray(msg.thinking_log) ? msg.thinking_log : [];
     var workerResults = Array.isArray(msg.worker_results) ? msg.worker_results : [];
@@ -1375,7 +1375,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
-        // 更新 summary 鏄剧ず鍚堝苟鍚庣殑步ユ暟锛堜袱绉嶆ā寮忛兘鏇存柊锛?
+        // 更新 summary 显示合并后的步数（两种模式都更新）
         var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
         if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
       }
@@ -1483,7 +1483,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         node.appendChild(searchBar);
       }
-      // 鎼滅储鍒版澶勭粨鏉?
+      // 搜索到此结束
       var thinkingMode = getMessageThinkingMode(msg);
       if (thinkingMode && thinkingMode !== 'off') {
         var badgeText = msg.thinking_elapsed_ms > 0 ? ('思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms)) : ('思考 ' + thinkingMode);
@@ -1643,7 +1643,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
-    // V5: 鍩轰簬鏃堕棿鎺ㄨ繘锛岄€傞厤涓嶅悓鍒锋柊鐜囷紱plainStream 鍗曟枃鏈妭鐐?+ 寰壒娆★紝閬垮厤姣忓抚寤鸿妭鐐瑰崱椤?
+    // V5: 基于时间推进，适配不同刷新率；plainStream 单文本节点 + 微批次，避免每帧建节点卡顿
     var lastFrameTime = 0;
     var charsPerMs = options.plainStream ? 0.55 : 0.7;
     // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
@@ -1943,7 +1943,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   // ===================== M: 深度思考模式 · 进度条 / toggle / cancel =====================
-  // 鍒囨崲深度思考冩ā寮忥細鏀逛负鎵撳紑鐙珛浜岀骇椤甸潰锛屼笉鍐嶅垏鎹㈡櫘閫氳亰澶╃殑 S.deepThink
+  // 切换深度思考模式：改为打开独立二级页面，不再切换普通聊天的 S.deepThink
   function toggleDeepThink() {
     if (!S.deepThinkEnabled) {
       notify('深度思考模式已被管理员关闭');
@@ -1969,13 +1969,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 深度思考冨凡鏀逛负鐙珛浜岀骇椤甸潰锛屾櫘閫氳亰澶╀笉鍐嶆仮澶?deepThink 鐘舵€?
+  // 深度思考已改为独立二级页面，普通聊天不再恢复 deepThink 状态
   function restoreDeepThinkState() {
     S.deepThink = false;
   }
 
   // 鏋勯€犳繁搴︽€濊€冭繘搴﹀崱鐗?(鏋佺畝椋庢牸)
-  // 鈽?U2 重做: 4 瑙掑嚬鏄?sparkle (ChatGPT/Claude 风格, 替代菱形)
+  // ★ U2 重做: 4 角凸起 sparkle (ChatGPT/Claude 风格, 替代菱形)
   var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
   var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
@@ -2551,7 +2551,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return card;
   }
 
-  // 鏇存柊杩涘害鍗?
+  // 更新进度卡
   function updateDeepThinkProgressCard(card, evt) {
     if (!card) return;
     if (isResearchCard(card)) {
@@ -2603,7 +2603,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return;
       }
     }
-    // 鈽?U3: 缓存 querySelector 结果, 避免每个事件都做 DOM 查询
+    // ★ U3: 缓存 querySelector 结果, 避免每个事件都做 DOM 查询
     if (!card._cached) {
       card._cached = {
         titleText: card.querySelector('.ai-progress-title'),
@@ -2657,7 +2657,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 鍙栨秷深度思考冿紙convId 鍙€夛紝浜岀骇椤甸潰浣跨敤 S.dtConversationId锛?
+  // 取消深度思考（convId 可选，二级页面使用 S.dtConversationId）
   function cancelDeepThink(convId) {
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
@@ -3768,9 +3768,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  // ===================== M: 深度思考冩ā寮忓彂閫?=====================
+  // ===================== M: 深度思考模式发送 =====================
   // 独立流程: 走 /api/agent/chat (deep_think=true) SSE 长连接
-  //   杩涘害鍗″疄鏃舵洿鏂?(1-10 涓?agent 鐘舵€?
+  //   进度卡实时更新 (1-10 个 agent 状态)
   //   done 后渲染最终答案 + [来源N] 标注 + 搜索徽章
   async function handleSendDeepThink(text, input, sendBtn, messagesEl) {
     var originalText = text;
@@ -3784,7 +3784,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) { S.sending = false; return; }
 
-    // 鈽?U3 P0-3 修复: 只有存在真实的旧请求时才 abort, 避免误杀自己
+    // ★ U3 P0-3 修复: 只有存在真实的旧请求时才 abort, 避免误杀自己
     if (S.abortController || S.deepThinkJob) {
       abortCurrentRequest();
       try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
@@ -3817,7 +3817,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
 
-    // 2. 鍒涘缓杩涘害鍗?(鑰屼笉鏄?typing node)
+    // 2. 创建进度卡 (而不是 typing node)
     var progressCard = buildDeepThinkProgressCard();
     progressCard.classList.add('dt-animate-in');
     S.deepThinkProgressCard = progressCard;
@@ -3854,7 +3854,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       client_request_id: reqId,
       deep_think: true,
       chat_mode: 'normal',
-      // 鈽?P 鏂板: 浼犳€濊€冪▼搴︾粰鍚庣 runMultiAgentFlow (后端会用这个, 不用 config)
+      // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
       thinking_mode: S.deepThinkEffort || 'max'
     });
 
@@ -3869,7 +3869,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // P5: using assistantBubble (single DOM node)
     var contentRenderer = null;
     var answerRenderer = null;  // V2: 流式答案渲染器 answer_chunk 用
-    var answerStarted = false; // V2: 鏄惁宸茶繘鍏ュ洖绛旈樁娈?
+    var answerStarted = false; // V2: 是否已进入回答阶段
     var doneReceived = false;
     var evtHandled = false;
 
@@ -3927,8 +3927,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return node;
     }
 
-    // 鈽?O 修复 Bug 4: 鏋勯€?think-card (鍙栦唬鏅€?ai-msg 节点)
-    //   鎶樺彔鎬? 澶撮儴鏄剧ず "鈿?已思考 38s 路 5 涓?agent" + 折叠按钮
+    // ★ O 修复 Bug 4: 构建 think-card (取代旧的 ai-msg 节点)
+    //   折叠性: 头部显示 "● 已思考 38s · 5 个 agent" + 折叠按钮
     //   展开式: 顶部思考过程日志 + 底部最终答案(markdown)
     //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
     function finishThinkCard(node, content, evt) {
@@ -3965,7 +3965,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         search_query: searchQuery,
         search_results: searchResults,
         search_expires_at: searchExpiresAt,
-        // 鈽?P 鏀? usage.thinking_mode 鍚屾瀹為檯鍊?
+        // ★ P 改: usage.thinking_mode 同步实际值
         usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount })
       };
       S.messages.push(aiMsg);
@@ -3980,7 +3980,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (answerEl) {
           if (answerRenderer) {
-            // V2: 流式渲染已在 answer_chunk 涓繘琛? done 时只 finish 鎴?markdown
+            // V2: 流式渲染已在 answer_chunk 进行，done 时只 finish 成 markdown
             answerRenderer.finish(contentForRender);
             answerRenderer = null;
             finalizeAnswer();
@@ -4244,7 +4244,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!authOk) return;
     if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
 
-    // 先从 localStorage 恢复会话 ID锛堝埛鏂伴〉闈㈠悗涔熻兘鎭㈠锛?
+    // 先从 localStorage 恢复会话 ID（刷新页面后也能恢复）
     if (!S.dtConversationId) {
       try { var saved = localStorage.getItem(DT_CONV_KEY); if (saved) S.dtConversationId = saved; } catch (e) {}
     }
@@ -4373,7 +4373,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 鏂囦欢涓婁紶鐘舵€?(dt 页面)
+  // 文件上传状态 (dt 页面)
   var _dtFileData = null;
 
   function consumeAiAttachment(fileData) {
@@ -4465,7 +4465,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     dtMessagesEl.appendChild(userNode);
     scrollToBottom(dtMessagesEl, true);
 
-    // 2. 鍒涘缓杩涘害鍗?
+    // 2. 创建进度卡
 
     // ===== Tavily Deep Research: 研究型问题优先走 Tavily 多 agent 深度研究 =====
     // 后端已启用 Tavily (config.tavily_research.enabled) 且消息长度 >= 6 时,
@@ -5001,7 +5001,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
 
-    // 鏆傚仠鎸夐挳锛氱湡步ｄ腑步)SSE 请求 + 暂停渲染
+    // 暂停按钮：真正中止（取消）SSE 请求 + 暂停渲染
     if (pauseBtn) {
       pauseBtn.addEventListener('click', function(ev) {
         ev.preventDefault();
@@ -5036,7 +5036,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       });
     }
 
-    // 娣卞害鐮旂┒椤甸潰婊氬姩鐩戝惉锛氱敤鎴峰悜涓婄炕鏃跺仠步㈣嚜鍔ㄦ粴鍔?
+    // 深度研究页面滚动监听：用户向上翻时停止自动滚动
     var dtMessagesEl = document.getElementById('dtMessages');
     if (dtMessagesEl) {
       addDtListener(dtMessagesEl, 'scroll', function() {
@@ -5678,7 +5678,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (liveSearchBar) {
             node.appendChild(liveSearchBar);
           } else if (searchCount > 0) {
-            // 娌℃湁鐩存挱鎼滅储鏉★紙濡傚巻鍙查噸寤猴級锛屽垱寤轰竴涓畝鐗?
+            // 没有直播搜索条（如历史重建），创建一个简版
             var sb = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + searchCount + ' 条结果' });
             var sq = searchQuery || '';
             if (sq) {
@@ -5849,7 +5849,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
           }
 
-          // 鎬濊€冨悗琛ュ厖鎼滅储锛氶噸缃唴瀹圭姸鎬佷互鎺ユ敹鏂颁竴杞?stream锛屼繚鐣欏凡鏄剧ず鐨勬€濊€冭繃绋?
+          // 思考后补充搜索：重置内容状态以接收新一轮 stream，保留已显示的思考过程
           if (evt.type === 'search_supplement') {
             var searchNote = el('div', { class: 'ai-search-supplement', text: '正在联网补充信息...' });
             if (assistantNode) assistantNode.insertBefore(searchNote, assistantBubble);
@@ -5867,7 +5867,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'search') {
-            // 鏄剧ず鎼滅储鐘舵€佹潯
+            // 显示搜索状态条
             var searchCount = evt.count;
             var searchDiag = evt.diagnostics;
             var searchBar = assistantNode.querySelector('.ai-search-status');
@@ -5881,14 +5881,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } else {
               summaryText = '联网搜索完成 · 没有找到相关结果';
             }
-            // 鏄剧ず浣跨敤鐨?provider
+            // 显示使用的 provider
             if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
               var firstProv = searchDiag.provider_results[0];
               if (firstProv && firstProv.provider) {
                 summaryText += ' (' + firstProv.provider + ')';
               }
             }
-            // 清空并重建（避免重复 append锛?
+            // 清空并重建（避免重复 append）
             searchBar.innerHTML = '';
             searchBar.textContent = summaryText;
             var resultsArr = evt.results;
@@ -5899,7 +5899,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               searchBar.style.cursor = 'pointer';
               var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
               searchBar.appendChild(detailPanel);
-              // 鏄剧ず鎼滅储鍏抽敭璇?
+              // 显示搜索关键词
               if (queryStr) {
                 detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
               }
@@ -5936,7 +5936,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               assistantNode.insertBefore(searchBar2, assistantBubble);
             }
             searchBar2.textContent = evt.error || '联网搜索失败';
-            // 鏄剧ず璇︾粏失败鍘熷洜锛堝彲灞曞紑锛?
+            // 显示详细失败原因（可展开）
             if (searchDiag2) {
               var errorDetail = el('div', { style: 'font-size:10px;color:#999;margin-top:2px;max-height:60px;overflow:hidden;text-overflow:ellipsis;line-height:1.3;' });
               if (searchDiag2.provider_errors && searchDiag2.provider_errors.length) {
@@ -6065,7 +6065,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureAssistantBubbleReady();
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
             } else {
-              // 娌℃湁鍐呭锛屽洖婊?
+              // 没有内容，回退
               notify(errMsg);
               try { assistantNode.remove(); } catch (e) {}
               S.messages.pop();
@@ -6111,7 +6111,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
-            // 如果 reasoning_start 浜嬩欢涓㈠け锛岄娆℃敹鍒?reasoning 也启动计时器
+            // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
             if (!reasoningStarted) {
               reasoningStarted = true;
               ensureReasoningNode();
@@ -6165,7 +6165,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               usageResult = evt.usage || null;
               finalModel = evt.model || '';
               finalThinkingMode = evt.thinking_mode || S.thinkingMode;
-              // sanitized_content 浼樺厛锛氬悗绔竻娲楀悗鐨勬鏂?
+              // sanitized_content 优先：后端清洗后的正文
               if (evt.sanitized_content) {
                 aiContent = evt.sanitized_content;
               } else if (evt.content) {
@@ -6206,7 +6206,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // successful terminal event; errors and aborts remain retryable.
             consumeAiAttachment(fileData);
             
-            // 涓柇/鏈繚瀛樻彁绀?
+            // 中断/未保存提示
             if (streamInterrupted && aiContent) {
               var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
               if (assistantNode) assistantNode.appendChild(interrNote);
@@ -6274,7 +6274,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       hideAssistantTyping();
       
       if (evtHandled) {
-        // 已在 done/error 浜嬩欢涓畬鎴愭覆鏌?
+        // 已在 done/error 事件中完成渲染
       } else if (assistantNode && (aiContent || aiReasoning)) {
         finishAiMessage(assistantNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
@@ -6465,7 +6465,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 鑾峰彇浼氳瘽鍒楄〃锛堟櫘閫氳亰澶╁彧鏄剧ず鏅€氫細璇濓紝娣卞害鐮旂┒浼氳瘽鍒嗗紑绠＄悊锛?
+  // 获取会话列表（普通聊天只显示普通会话，深度研究会话分开管理）
   async function fetchConversations() {
     try {
       var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal');
@@ -6536,9 +6536,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
       if (r && r.ok) {
         if (itemEl && itemEl.parentElement) itemEl.remove();
-        // 浠?S.conversations 涓Щ闄?
+        // 从 S.conversations 中移除
         S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
-        // 濡傛灉删除鐨勬槸褰撳墠瀵硅瘽锛岄噸缃?
+        // 如果删除的是当前对话，重置
         if (cid === S.conversationId) {
           S.conversationId = null;
           S.messages = [];
@@ -6983,7 +6983,7 @@ function showChatMessages() {
       notify('请先登录后再和小猫聊天');
       return;
     }
-    // 鈽?M: 鎭㈠深度思考冩ā寮忕姸鎬?
+    // ★ M: 恢复深度思考模式状态
     restoreDeepThinkState();
     S.active = true;
     var lifecycleId = ++S.lifecycleId;
@@ -7072,7 +7072,7 @@ function showChatMessages() {
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
 
-    // 鈽?P 鏂板: 鍚屾鍚庣深度思考冨瓙閰嶇疆 (鎬濊€冪▼搴?+ 鍚敤寮€鍏?
+    // ★ P 新增: 同步后端深度思考子配置 (思考程度 + 启用开关)
     try {
       if (cfg.deep_think) {
         if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
@@ -7088,7 +7088,7 @@ function showChatMessages() {
       }
     } catch (e) { /* 容错 */ }
 
-    // 鈽?P 鏂板: 濡傛灉鍚庣绂佺敤浜嗘繁搴︽€濊€? 寮哄埗鍏抽棴 toggle
+    // ★ P 新增: 如果后端禁用了深度思考，强制关闭 toggle
     if (!S.deepThinkEnabled && S.deepThink) {
     S.deepThink = false;
     try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
@@ -7108,7 +7108,7 @@ function showChatMessages() {
     clearReplyTimer();
     // 页面级关闭：完整清理主聊天 + 深度思考两套状态
     abortAllAiRequests();
-    // 鍏抽棴深度思考冧簩绾ч〉闈紝閬垮厤瀹冩畫鐣欏湪鏅€氳亰澶╀箣涓?
+    // 关闭深度思考二级页面，避免它残留在普通聊天之中
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
@@ -7281,7 +7281,7 @@ function showChatMessages() {
       if (tab !== 'chat' && S.active) {
         try { closeAiChat(); } catch (e) {}
       }
-      // 鍒囨崲鍑鸿亰澶?tab 鏃朵竴骞跺叧闂繁搴︽€濊€冧簩绾ч〉闈?
+      // 切换出聊天 tab 时一并关闭深度思考二级页面
       if (tab !== 'chat') {
         try { closeDeepThinkPage(); } catch (e) {}
       }
