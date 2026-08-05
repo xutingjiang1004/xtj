@@ -68,3 +68,14 @@ test('post tools menu closes when any scroll container, viewport, or page visibi
   assert.match(tools, /visualViewport\.addEventListener\('scroll',\s*closePostToolsMenu/);
   assert.match(tools, /document\.hidden\) closePostToolsMenu\(\)/);
 });
+
+test('like operation resets running flag so a failed sync never locks the button permanently', () => {
+  const like = between('function flushPostLikeOperation(postId, operation)', 'window.toggleLike = function');
+  // 修复前：operation.running 仅在 desired===confirmed 删除条目时隐式存在，失败竞态下永不复位，
+  // 导致该帖子点赞从此不再发请求（与服务器永久失同步）。
+  assert.match(like, /operation\.running = false;/);
+  assert.match(like, /setPostLikePending\(postId, false\);/);
+  assert.match(like, /if \(likeOperations\[postId\] === operation && operation\.desired === operation\.confirmed\) \{[\s\S]*?delete likeOperations\[postId\];/);
+  // 失败路径回滚 UI 后仍可重试（下次点击重新 flush）
+  assert.match(like, /if \(operation\.desired !== operation\.confirmed\) \{[\s\S]*?applyPostLikeIntent\(postId, operation\.confirmed\);/);
+});

@@ -186,3 +186,27 @@ test('hard-delete migration exposes no privileged cleanup surface to clients', (
   assert.match(hardDeleteMigration, /DELETE FROM public\.comments WHERE post_id = p_post_id/);
   assert.match(hardDeleteMigration, /DELETE FROM public\.posts WHERE id = p_post_id/);
 });
+
+test('DM send allows media-only messages (storage_path without text)', () => {
+  const source = routeSource('post', '/api/dm/send', "app.post('/api/dm/withdraw'");
+  // 前端支持只选图片/视频/音频就直接发送，后端此前强制要求文字导致纯媒体消息被拒
+  assert.match(source, /if \(!content && !storagePath\)/);
+  assert.match(source, /JSON\.stringify\(\{ text: content, read_at: null, media: mediaPayload \}\)/);
+  assert.doesNotMatch(source, /if \(!content\) \{[\s\S]{0,60}empty_content/);
+});
+
+test('DM realtime subscription auto-reconnects and restores on visibility/network events', () => {
+  const start = core.indexOf('function subscribeToMessages()');
+  const end = core.indexOf('function subscribeToComments()', start);
+  assert.ok(start >= 0 && end > start);
+  const dmSource = core.slice(start, end);
+  // 指数退避重连（对齐 subscribeToComments 模式）
+  assert.match(dmSource, /_dmReconnectAttempts/);
+  assert.match(dmSource, /_dmMaxReconnectAttempts = 10/);
+  assert.match(dmSource, /CHANNEL_ERROR[\s\S]*TIMED_OUT[\s\S]*CLOSED/);
+  assert.match(dmSource, /Math\.min\(1000 \* Math\.pow\(2, _dmReconnectAttempts\), 30000\)/);
+  // visibilitychange / online / pageshow 三个钩子都要恢复 DM 订阅（此前只恢复评论订阅）
+  assert.match(core, /visibilitychange[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+  assert.match(core, /addEventListener\('online'[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+  assert.match(core, /addEventListener\('pageshow'[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+});

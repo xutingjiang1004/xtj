@@ -329,6 +329,10 @@
 
   var loadMoreObserver = null;
   var loadingMore = false;
+  // ★ 修复：防级联防抖——渲染重建哨兵后若仍在视口（例如分组视图下新页照片
+  // 都不属于当前分组，网格高度不变），300ms 内不自动加载，改为点击触发，
+  // 避免"IO 立即回调 → 再翻页 → 再重建 → 再回调"的无限翻页循环。
+  var _lastMoreLoadAt = 0;
 
   function installLoadMoreSentinel(grid){
     if (loadMoreObserver) loadMoreObserver.disconnect();
@@ -337,23 +341,56 @@
     sentinel.className = 'pw-load-more-sentinel';
     sentinel.innerHTML = '<div class="pw-load-more-indicator">加载更多...</div>';
     grid.appendChild(sentinel);
-    loadMoreObserver = new IntersectionObserver(async function(entries){
+
+    function setSentinelText(text, retryable){
+      var ind = sentinel.querySelector('.pw-load-more-indicator');
+      if (ind) ind.textContent = text;
+      sentinel.classList.toggle('pw-load-more-error', !!retryable);
+      sentinel.onclick = retryable ? doLoadMore : null;
+    }
+
+    function doLoadMore(){
+      if (loadingMore) return;
+      loadingMore = true;
+      setSentinelText('加载中...', false);
+      Promise.resolve(window.loadMorePhotos()).then(function(more){
+        if (more && more.length) {
+          // ★ 分组视图下：若新页没有任何照片属于当前分组（group.photos 不增长），
+          // 停止自动加载并提示，避免整格重建后哨兵仍在视口触发级联翻页
+          if (window.pwAlbumGroupKey && !groupByDate(more).some(function(g){ return g.key === window.pwAlbumGroupKey; })) {
+            setSentinelText('当前分组暂无更多照片', false);
+            return;
+          }
+          renderPhotoWallWithoutReload();
+        } else {
+          setSentinelText('暂无更多', false);
+        }
+      }).catch(function(err){
+        var isAbort = !!(err && (err.name === 'AbortError' || /abort/i.test(String(err && err.code || '')) || /abort/i.test(String(err && err.message || ''))));
+        if (isAbort) {
+          // 被刷新/视图切换/新请求取代：静默恢复，不误报"加载失败"
+          setSentinelText('加载更多...', false);
+        } else {
+          // ★ 修复：真实失败给出可点击重试入口（此前只有一行"加载失败"文案，
+          // 且哨兵若仍在视口 IO 不会再次触发，用户无法恢复加载）
+          setSentinelText('加载失败，点击重试', true);
+        }
+      }).finally(function(){
+        loadingMore = false;
+      });
+    }
+
+    loadMoreObserver = new IntersectionObserver(function(entries){
       for (var i = 0; i < entries.length; i++) {
         if (!entries[i].isIntersecting || loadingMore) continue;
         if (!window.hasMorePhotos()) {
-          sentinel.querySelector('.pw-load-more-indicator').textContent = '暂无更多';
+          setSentinelText('暂无更多', false);
           continue;
         }
-        loadingMore = true;
-        sentinel.querySelector('.pw-load-more-indicator').textContent = '加载中...';
-        try {
-          var more = await window.loadMorePhotos();
-          if (more && more.length) renderPhotoWallWithoutReload();
-          else sentinel.querySelector('.pw-load-more-indicator').textContent = '暂无更多';
-        } catch (_) {
-          sentinel.querySelector('.pw-load-more-indicator').textContent = '加载失败';
-        }
-        loadingMore = false;
+        var now = Date.now();
+        if (now - _lastMoreLoadAt < 300) { setSentinelText('点击加载更多', false); continue; }
+        _lastMoreLoadAt = now;
+        doLoadMore();
       }
     }, { rootMargin:'400px 0px' });
     loadMoreObserver.observe(sentinel);

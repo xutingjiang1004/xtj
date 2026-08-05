@@ -540,14 +540,16 @@
     if (!deleteResult) {
       removePendingDeletedPhotoId(item.id);
       removePendingDeletedPhotoId(item.cloudId);
-      removePhotoLocal(id, opts.render !== false); // 撤销本地移除
-      // 注意：addDeletedPhotoId 只在云端删除成功后才调用，防止浏览器崩溃后永久丢失照片
+      // ★ 修复：原"撤销本地移除"调用的是 removePhotoLocal（移除而非恢复），
+      // 且只有 opts.render !== false 才重渲染；预览弹窗删除传 {render:false}，
+      // 导致云端删除失败后 DOM 卡片消失但数据仍在，UI 与数据不一致。
+      // 数据已在下行恢复（mergePhotoLists），无条件重渲染让卡片立即回到网格。
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
       // P4: 云端删除失败 — 更新 lastFailureAt（不更新 lastSuccessfulLoadedAt）
       lastFailureAt = Date.now();
       window.photoWallDataLoadedAt = lastFailureAt;
-      if (opts.render !== false && typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       // 云端删除失败，但本地已移除 —— 下次同步时会重新出现
       setPhotoWallSyncStatus('error', '删除同步失败');
       toast('云端删除失败，请稍后重试');

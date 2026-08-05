@@ -9485,8 +9485,10 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     if (targetUser === sender) {
       return res.status(400).json({ error: '不能给自己发送消息', code: 'self_send' });
     }
-    // 验证内容
-    if (!content) {
+    // 验证内容 — 允许"纯媒体消息"（有 storage_path 无文字），
+    // 前端已支持只选图片/视频/音频就直接发送，此前这里强制要求文字导致
+    // 纯媒体消息 100% 被拒（P1）。
+    if (!content && !storagePath) {
       return res.status(400).json({ error: '消息内容不能为空', code: 'empty_content' });
     }
     if (content.length > MAX_CONTENT_LEN) {
