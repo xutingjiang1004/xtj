@@ -162,7 +162,8 @@ test('GET /api/agent/research/history is authenticated, rate-limited and filters
   assert.match(source, /rateLimit\(60000,\s*30\)/);
   assert.match(source, /\.filter\('actor_key',\s*'like',\s*'ai_msg_conv_%'\)/);
   assert.match(source, /hParsed\.type !== 'tavily_research'/);
-  assert.match(source, /slice\(0,\s*200\)/);
+  // ★ 2026-08-05: 历史详情返回完整 answer（此前截断 200 字导致历史报告看不全）
+  assert.doesNotMatch(source, /String\(hParsed\.answer[^)]*\)\.slice\(0,\s*200\)/);
   assert.match(source, /research_history_failed/);
   assert.match(source, /created_at/);
   assert.match(source, /ascending:\s*false/);
