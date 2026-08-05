@@ -17,7 +17,11 @@
   var loading = false;
   var realtimeChannel = null;
   var bc = null;
-  var lastLoadedAt = 0;
+  // P4: 拆分缓存时间戳 — TTL 只依据 lastSuccessfulLoadedAt，
+  // lastAttemptAt 每次尝试都更新，lastFailureAt 仅失败时更新。
+  var lastSuccessfulLoadedAt = 0;
+  var lastAttemptAt = 0;
+  var lastFailureAt = 0;
   var LOAD_CACHE_TTL_MS = 20000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
@@ -263,11 +267,15 @@
 
   async function loadPhotoWallData(force){
     if (loading && !force) return window.photoWallData;
-    if (!force && Array.isArray(window.photoWallData) && window.photoWallData.length && lastLoadedAt && Date.now() - lastLoadedAt < LOAD_CACHE_TTL_MS) return window.photoWallData;
-    
+    // P4: 缓存 TTL 只依据 lastSuccessfulLoadedAt（失败不刷新 TTL）
+    if (!force && Array.isArray(window.photoWallData) && window.photoWallData.length && lastSuccessfulLoadedAt && Date.now() - lastSuccessfulLoadedAt < LOAD_CACHE_TTL_MS) return window.photoWallData;
+
+    // P4: 每次尝试都更新 lastAttemptAt
+    lastAttemptAt = Date.now();
+
     photoLoadGeneration++;
     var currentGen = photoLoadGeneration;
-    
+
     abortPhotoPageRequests();
     // 旧分页 Promise 已被作废；它的 finally 会通过 identity check 保持新请求不受影响。
     loadMorePromise = null;
@@ -275,7 +283,7 @@
     activePhotoLoadController = new AbortController();
     var loadController = activePhotoLoadController;
     var signal = loadController.signal;
-    
+
     loading = true;
     var local = [];
     var hasCache = false;
@@ -287,8 +295,7 @@
       hasCache = local.length > 0;
       if (hasCache && (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0)) {
         window.photoWallData = mergePhotoLists(local, []);
-        lastLoadedAt = Date.now();
-        window.photoWallDataLoadedAt = lastLoadedAt;
+        window.photoWallDataLoadedAt = Date.now();
         if (typeof window.renderPhotoWallWithoutReload === 'function') {
           window.renderPhotoWallWithoutReload();
         } else if (typeof window.renderPhotoWall === 'function') {
@@ -336,8 +343,9 @@
       // 合并云端和本地，按 id/cloudId 去重
       window.photoWallData = mergePhotoLists(cloud, window.photoWallData);
       saveLocalPhotoWallData();
-      lastLoadedAt = Date.now();
-      window.photoWallDataLoadedAt = lastLoadedAt;
+      // P4: 仅成功时更新 lastSuccessfulLoadedAt
+      lastSuccessfulLoadedAt = Date.now();
+      window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
       setPhotoWallSyncStatus('synced', '已同步');
       subscribePhotoWallRealtime();
       // 无闪烁刷新：云端数据加载完成后更新UI
@@ -357,8 +365,9 @@
       if (!Array.isArray(window.photoWallData) || window.photoWallData.length === 0) {
         window.photoWallData = mergePhotoLists(local, []);
       }
-      lastLoadedAt = Date.now();
-      window.photoWallDataLoadedAt = lastLoadedAt;
+      // P4: 失败时更新 lastFailureAt（不更新 lastSuccessfulLoadedAt，TTL 不刷新）
+      lastFailureAt = Date.now();
+      window.photoWallDataLoadedAt = lastFailureAt;
       if (!isAbort) {
         setPhotoWallSyncStatus('error', '同步失败');
       }
@@ -398,8 +407,9 @@
         page = nextPage;
         more = rows.length >= PAGE_SIZE;
         saveLocalPhotoWallData();
-        lastLoadedAt = Date.now();
-        window.photoWallDataLoadedAt = lastLoadedAt;
+        // P4: 仅成功时更新 lastSuccessfulLoadedAt
+        lastSuccessfulLoadedAt = Date.now();
+        window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
         return items;
       } catch (err) {
         console.warn('[PhotoWall] load more failed', err);
@@ -432,8 +442,9 @@
       return String(item.id) !== key && String(item.cloudId || '') !== key;
     });
     saveLocalPhotoWallData();
-    lastLoadedAt = Date.now();
-    window.photoWallDataLoadedAt = lastLoadedAt;
+    // P4: 本地删除是成功操作，更新 lastSuccessfulLoadedAt 保持数据新鲜度
+    lastSuccessfulLoadedAt = Date.now();
+    window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
     
     var removedDom = false;
     if (typeof document !== 'undefined' && document.querySelectorAll) {
@@ -533,8 +544,9 @@
       // 注意：addDeletedPhotoId 只在云端删除成功后才调用，防止浏览器崩溃后永久丢失照片
       window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
-      lastLoadedAt = Date.now();
-      window.photoWallDataLoadedAt = lastLoadedAt;
+      // P4: 云端删除失败 — 更新 lastFailureAt（不更新 lastSuccessfulLoadedAt）
+      lastFailureAt = Date.now();
+      window.photoWallDataLoadedAt = lastFailureAt;
       if (opts.render !== false && typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       // 云端删除失败，但本地已移除 —— 下次同步时会重新出现
       setPhotoWallSyncStatus('error', '删除同步失败');
