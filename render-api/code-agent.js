@@ -2223,11 +2223,10 @@ function replaceTextInParsedDoc(parsedDoc, startCharIdx, endCharIdx, newText) {
       // 确保不会因多个 run 导致重复写入
       // 如果该 text node 完全在替换范围内，且是第一个 text node，替换整个内容
       // 替换该 text node
-      var escapedNew = escapeXml(newTnText);
-      var newTXml = tn.fullMatch.replace(/>([\s\S]*?)<\/w:t>/, '>' + (newTnText.match(/^\s|[\s\xA0]$/) ? ' xml:space="preserve"' : '') + escapedNew.replace(/^xml:space="preserve"/, '') + '</w:t>');
-      // 简化：直接重建
-      newTXml = tn.fullMatch.replace(/^<w:t[^>]*>/, '<w:t xml:space="preserve">').replace(/>[\s\S]*?<\/w:t>$/, '>' + escapedNew + '</w:t>');
-      newRunXml = newRunXml.replace(tn.fullMatch, newTXml);
+      // 替换该 text node（\n 转为段内换行 <w:br/>，避免排版错乱）
+      var escapedNew = escapeXmlWithBreaks(newTnText);
+      var newTXml = '<w:t xml:space="preserve">' + escapedNew + '</w:t>';
+      newRunXml = newRunXml.replace(tn.fullMatch, function() { return newTXml; });
     }
     
     runModifications.push({
@@ -2246,6 +2245,103 @@ function flatTextAt(parsedDoc, idx) {
     return parsedDoc.flatText[idx];
   }
   return '';
+}
+
+// ── DOCX 换行与段落工具 ──────────────────────────────────────────────
+// OOXML 中 <w:t> 内的 \n（U+000A）不会被 Word 渲染为换行，直接塞入会导致
+// 排版错乱。以下辅助函数把多行文本正确转换为 Word 结构：
+// - 替换场景：\n → 段内换行 <w:br/>（保持在同一段落，内容完整可见）
+// - 插入场景：\n → 独立段落 <w:p>（空行保留为空段落，获得正确排版）
+
+function escapeXmlWithBreaks(str) {
+  var parts = String(str).split('\n');
+  var out = '';
+  for (var pi = 0; pi < parts.length; pi++) {
+    if (pi > 0) out += '</w:t></w:r><w:r><w:br/><w:t xml:space="preserve">';
+    out += escapeXml(parts[pi]);
+  }
+  return out;
+}
+
+// 把多行文本构建为一组 <w:p> 段落（每行一段，空行 → 空段落）
+function buildDocxParagraphsXml(text) {
+  var rawLines = String(text || '').split('\n');
+  var out = [];
+  for (var li = 0; li < rawLines.length; li++) {
+    var line = rawLines[li].replace(/\r/g, '');
+    if (!line) {
+      // 空行 → 空段落（用完整闭合标签，兼容 parseDocxDocumentXml 的解析）
+      out.push('<w:p></w:p>');
+    } else {
+      out.push('<w:p><w:r><w:t xml:space="preserve">' + escapeXml(line) + '</w:t></w:r></w:p>');
+    }
+  }
+  return out.join('');
+}
+
+// 在标记文本结束的字符之后插入段落块 blockXml。
+// 若标记文本恰好结束于段落文本末尾 → 直接段后插入；
+// 否则拆分段落：标记文本后的同段落内容移动到新段落（追加在 blockXml 之后），
+// 避免 <w:p> 嵌套在 <w:p> 内产生非法 XML。
+function insertDocxBlockAfterText(xml, parsedDoc, cmEnd, blockXml) {
+  var para = parsedDoc.paragraphs[cmEnd.pIdx];
+  if (!para) return { ok: false, error: '段落不存在' };
+  var run = para.runs[cmEnd.rIdx];
+  if (!run || !run.textNodes[cmEnd.tIdx]) return { ok: false, error: '文本节点不存在' };
+  var tn = run.textNodes[cmEnd.tIdx];
+
+  var isLastCharInT = cmEnd.charInT >= tn.text.length - 1;
+  var isLastTextNode = cmEnd.tIdx >= run.textNodes.length - 1;
+  var isLastRun = cmEnd.rIdx >= para.runs.length - 1;
+
+  if (isLastCharInT && isLastTextNode && isLastRun) {
+    // 标记文本结束于段落文本末尾：直接在段落之后插入段落块
+    return { ok: true, xml: xml.slice(0, para.end) + blockXml + xml.slice(para.end) };
+  }
+
+  // 需要拆分：收集标记文本之后的同段落内容
+  var remainder = '';
+  if (!isLastCharInT) remainder = tn.text.slice(cmEnd.charInT + 1);
+
+  var runRemainder = '';
+  if (!isLastTextNode) {
+    for (var ti = cmEnd.tIdx + 1; ti < run.textNodes.length; ti++) {
+      runRemainder += run.textNodes[ti].fullMatch;
+    }
+  }
+  var paraRemainder = '';
+  if (!isLastRun) {
+    for (var ri = cmEnd.rIdx + 1; ri < para.runs.length; ri++) {
+      paraRemainder += para.runs[ri].xml;
+    }
+  }
+
+  var hasTrailing = remainder !== '' || runRemainder !== '' || paraRemainder !== '';
+  var trailingPara = '';
+  if (hasTrailing) {
+    var rPrXml = run.rPr || '';
+    var trailRunXml = '';
+    if (remainder !== '') {
+      trailRunXml += '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + escapeXml(remainder) + '</w:t></w:r>';
+    }
+    trailRunXml += runRemainder + paraRemainder;
+    trailingPara = '<w:p>' + (para.pPr || '') + trailRunXml + '</w:p>';
+  }
+
+  // 截断当前 w:t 到标记文本结束处
+  var newTXml;
+  if (isLastCharInT) {
+    newTXml = tn.fullMatch; // 标记文本恰好到 w:t 末尾，保持不变
+  } else {
+    var tOpenIdx = tn.fullMatch.indexOf('>');
+    newTXml = tn.fullMatch.slice(0, tOpenIdx + 1) + escapeXml(tn.text.slice(0, cmEnd.charInT + 1)) + '</w:t>';
+  }
+  var newRunXml = run.xml.replace(tn.fullMatch, newTXml);
+
+  // 替换该 run 的绝对区间
+  var absStart = para.start + run.startInP;
+  var absEnd = para.start + run.endInP;
+  return { ok: true, xml: xml.slice(0, absStart) + newRunXml + blockXml + trailingPara + xml.slice(absEnd) };
 }
 
 // P0-2: 将 run 修改写回完整 XML
@@ -2292,10 +2388,10 @@ function modifyParagraphSingleRun(xml, paragraphs, pIdx, newText) {
   var run = paragraph.runs[firstTextRunIdx];
   var tn = run.textNodes[0];
   
-  // 只修改第一个 text node
-  var escapedNew = escapeXml(newText);
+  // 只修改第一个 text node（\n 转为段内换行 <w:br/>）
+  var escapedNew = escapeXmlWithBreaks(newText);
   var newTXml = '<w:t xml:space="preserve">' + escapedNew + '</w:t>';
-  var newRunXml = run.xml.replace(tn.fullMatch, newTXml);
+  var newRunXml = run.xml.replace(tn.fullMatch, function() { return newTXml; });
   
   // 清空其他 text nodes
   if (run.textNodes.length > 1) {
@@ -2390,10 +2486,10 @@ async function applyDocxOperations(buffer, operations, fileName) {
           if (insertText.length > MAX_DOCX_TEXT_LEN) { changes.push({ type: 'insert_text', error: '插入文本超过最大长度限制' }); continue; }
           
           if (!markerText) {
-            // Insert at end of body
+            // Insert at end of body（多段落排版）
             var bodyCloseIdx = xml.lastIndexOf('</w:body>');
             if (bodyCloseIdx === -1) { changes.push({ type: 'insert_text', error: 'DOCX 结构无效' }); continue; }
-            var paraXml = '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(insertText) + '</w:t></w:r></w:p>';
+            var paraXml = buildDocxParagraphsXml(insertText);
             xml = xml.slice(0, bodyCloseIdx) + paraXml + xml.slice(bodyCloseIdx);
             parsedDoc = parseDocxDocumentXml(xml);
           } else {
@@ -2402,22 +2498,21 @@ async function applyDocxOperations(buffer, operations, fileName) {
               changes.push({ type: 'insert_text', error: '未找到标记文本"' + markerText.slice(0, 50) + '"' });
               continue;
             }
-            // 在匹配文本之后插入
+            // 在匹配文本之后插入（多段落，正确处理换行排版）
             var insertPos = findResult2.endCharIdx;
-            var insertXml2 = escapeXml(insertText);
-            // 简化：在标记后添加新 run
             var cmEnd = parsedDoc.charMap[insertPos - 1];
-            if (cmEnd && cmEnd.pIdx >= 0 && cmEnd.rIdx >= 0) {
-              var para = parsedDoc.paragraphs[cmEnd.pIdx];
-              var run = para.runs[cmEnd.rIdx];
-              var absPos = para.start + run.endInP;
-              var newRunXml2 = '<w:r><w:rPr></w:rPr><w:t xml:space="preserve">' + insertXml2 + '</w:t></w:r>';
-              xml = xml.slice(0, absPos) + newRunXml2 + xml.slice(absPos);
+            if (cmEnd && cmEnd.pIdx >= 0 && cmEnd.rIdx >= 0 && cmEnd.tIdx >= 0) {
+              var blockXml = buildDocxParagraphsXml(insertText);
+              var insResult = insertDocxBlockAfterText(xml, parsedDoc, cmEnd, blockXml);
+              if (!insResult.ok) {
+                changes.push({ type: 'insert_text', markerText: markerText.slice(0, 50), error: insResult.error });
+                continue;
+              }
+              xml = insResult.xml;
               parsedDoc = parseDocxDocumentXml(xml);
             } else {
               // H-6: 标记文本位于段落/run 边界时 charMap 无对应项，
-              // 旧逻辑静默跳过却仍上报"成功"。改为显式失败，避免用户收到
-              // 成功通知而文件实际未修改。
+              // 显式失败，避免用户收到成功通知而文件实际未修改。
               changes.push({ type: 'insert_text', markerText: markerText.slice(0, 50), error: '标记文本位于段落边界，无法安全插入' });
               continue;
             }
