@@ -138,9 +138,13 @@ test('invisible shimmer and blur-heavy list entry animations are removed', funct
   assert.ok(/\.btn-primary:hover::before|\.btn-primary:focus-visible::before/.test(css), 'shimmer not gated by interaction');
 });
 
-test('ui-effects keeps only deprecated compatibility object', function(){
+test('ui-effects keeps only compatibility stubs with removed effect names absent', function(){
   var s = read('js/ui-effects.js');
-  assert.ok(s.indexOf('deprecated') >= 0);
+  // js/ui-effects.js is now an intentional empty shim: it must keep the
+  // XTJEffects / xtjHeartBurst compatibility API while the removed effect
+  // names (rippleButtonSelector, getPerfMode, motionReduced) stay absent.
+  assert.ok(s.indexOf('XTJEffects') >= 0, 'XTJEffects compatibility object missing');
+  assert.ok(s.indexOf('xtjHeartBurst') >= 0, 'xtjHeartBurst compatibility API missing');
   ['rippleButtonSelector','getPerfMode','motionReduced'].forEach(function(x){ assert.ok(s.indexOf(x)<0, x+' remains'); });
 });
 
@@ -706,7 +710,6 @@ test('照片墙云端请求失败时保留缓存', function(){
   var catchStart = s.indexOf('catch (err) {');
   var catchBlock = s.slice(catchStart, catchStart + 600);
   assert.ok(catchBlock.indexOf('window.photoWallData = mergePhotoLists(local, [])') >= 0, 'must keep cache on failure');
-  assert.ok(catchBlock.indexOf('window.photoWallData = mergePhotoLists(local, [])') >= 0, 'must fall back to local on failure');
 });
 test('照片墙合并时按 id/cloudId 去重', function(){
   var s = read('js/photo-wall/data.js');

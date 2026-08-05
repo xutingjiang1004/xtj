@@ -18,7 +18,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 let passed = 0;
@@ -32,12 +31,6 @@ function assert(condition, message) {
     failed++;
     console.error('  FAIL: ' + message);
   }
-}
-
-function contentHash(filePath) {
-  const fullPath = path.resolve(ROOT, filePath);
-  if (!fs.existsSync(fullPath)) return null;
-  return crypto.createHash('sha256').update(fs.readFileSync(fullPath)).digest('hex').slice(0, 10);
 }
 
 // ──────────────────────────────────────────────
