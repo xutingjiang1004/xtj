@@ -61,8 +61,6 @@
     viewportHeightCache: 0
   };
 
-  var photoSizeCache = Object.create(null);
-
   function cancelPendingMoveFrame() {
     if (state.moveRaf) {
       cancelAnimationFrame(state.moveRaf);
@@ -269,10 +267,6 @@
         forceClosePhotoPreview();
       }
     }, delay || 520);
-  }
-
-  function currentTransform() {
-    return 'translate3d(' + state.tx + 'px,' + state.ty + 'px,0) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
   }
 
   function toggleTimedClass(node, className, delay) {
@@ -1262,30 +1256,54 @@
     }, true);
   }
 
+  // 错误 UI 与 preview.js 原 3 次重试逻辑协调：
+  // preview.js 的 D() 对图片加载失败会自动重试（500/1000/1500ms 退避，最多 3 次）。
+  // 若错误 UI 立即显示，瞬时失败会直接盖住重试中的图片（且旧实现里 img.onload
+  // 属性处理器会被 preview.js 的 cleanup() 置空，导致重试成功后错误 UI 残留）。
+  // 因此这里：1) 用 addEventListener（preview.js 只清理属性处理器，不移除监听）；
+  // 2) 错误 UI 延迟到重试窗口之后才显示；3) 任意成功加载立即清除错误 UI。
+  var errorUiTimer = 0;
+  var ERROR_UI_DELAY_MS = 2500;
+
+  function clearErrorUiTimer() {
+    if (errorUiTimer) { clearTimeout(errorUiTimer); errorUiTimer = 0; }
+  }
+
   function installImageErrorHandler() {
     var img = previewImage();
     if (!img) return;
-    img.onerror = function () {
-      var root = overlay();
-      if (!root) return;
-      if (root.classList.contains('pp-img-error')) return;
-      root.classList.add('pp-img-error');
-      var slot = img.parentElement;
-      if (!slot) return;
-      var existing = root.querySelector('.pp-error-placeholder');
-      if (existing) return;
-      img.style.display = 'none';
-      var placeholder = document.createElement('div');
-      placeholder.className = 'pp-error-placeholder';
-      placeholder.textContent = '图片加载失败';
-      slot.appendChild(placeholder);
-    };
-    img.onload = function () {
+    if (img._ppHotfixErrorBound) return;
+    img._ppHotfixErrorBound = true;
+    img.addEventListener('error', function () {
+      clearErrorUiTimer();
+      errorUiTimer = window.setTimeout(function () {
+        errorUiTimer = 0;
+        if (!img || !img.isConnected) return;
+        // 延迟窗口内已成功加载则不需要错误 UI
+        if (img.complete && img.naturalWidth > 0) { clearImageError(); return; }
+        var root = overlay();
+        if (!root || !root.classList.contains('active')) return;
+        if (root.classList.contains('pp-img-error')) return;
+        root.classList.add('pp-img-error');
+        var slot = img.parentElement;
+        if (!slot) return;
+        var existing = root.querySelector('.pp-error-placeholder');
+        if (existing) return;
+        img.style.display = 'none';
+        var placeholder = document.createElement('div');
+        placeholder.className = 'pp-error-placeholder';
+        placeholder.textContent = '图片加载失败';
+        slot.appendChild(placeholder);
+      }, ERROR_UI_DELAY_MS);
+    });
+    img.addEventListener('load', function () {
+      clearErrorUiTimer();
       clearImageError();
-    };
+    });
   }
 
   function clearImageError() {
+    clearErrorUiTimer();
     var root = overlay();
     var img = previewImage();
     if (root) {

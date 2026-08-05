@@ -34,3 +34,20 @@ CREATE TABLE IF NOT EXISTS public.user_model_preferences (
 
 CREATE INDEX IF NOT EXISTS idx_user_model_prefs_user ON public.user_model_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_model_prefs_provider ON public.user_model_preferences(provider_id);
+
+-- ============================================================
+-- ★ 2026-08-05 安全修复：两张表此前无 RLS、无 REVOKE，
+--   anon 可读 provider_registry 的 api_key_encrypted/iv/tag（密文可被
+--   下载离线破解）并可篡改供应商配置把 AI 对话转发到攻击者服务器。
+--   修复：ENABLE RLS + 撤销 anon/authenticated 全部权限。
+--   后端 service_role 绕过 RLS，provider-registry.js 全部操作不受影响。
+-- ============================================================
+
+ALTER TABLE public.provider_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_model_preferences ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.provider_registry FROM anon, authenticated;
+REVOKE ALL ON public.user_model_preferences FROM anon, authenticated;
+REVOKE ALL ON public.provider_registry_id_seq FROM anon, authenticated;
+REVOKE ALL ON public.user_model_preferences_id_seq FROM anon, authenticated;
+

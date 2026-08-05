@@ -1377,7 +1377,7 @@ async function finishStream(res, opt) {
       var seqAssistant = (opt.streamSeq || 0) + 2;
       var userCreatedAt = new Date(nowSave).toISOString();
       var assistantCreatedAt = new Date(nowSave + 1).toISOString();
-      await supabase.from('posts').insert([
+      var saveResult = await supabase.from('posts').insert([
         {
           user_name: opt.userName,
           content: opt.message,
@@ -1395,7 +1395,13 @@ async function finishStream(res, opt) {
           created_at: assistantCreatedAt
         }
       ]);
-      saved = true;
+      // ★ P2 修复：insert 失败时不再谎报 saved:true——done 事件和会话摘要更新
+      // 都以 saved 为准，未落库必须如实上报。
+      if (saveResult && saveResult.error) {
+        console.error('[AGENT-STREAM] save failed:', saveResult.error && saveResult.error.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
+      } else {
+        saved = true;
+      }
       // console.log('[AGENT-STREAM] saved', 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'finish_reason:', finishReason);
     } catch (saveErr) {
       console.error('[AGENT-STREAM] save failed:', saveErr && saveErr.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
@@ -2162,10 +2168,10 @@ app.use(function(req, res, next) {
   // 路径穿越 / 反斜杠兜底（send 对 \ 也会做兼容处理）
   if (p.indexOf('..') !== -1 || p.indexOf('\\') !== -1) return res.status(404).end();
   // 精确文件匹配
-  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore'];
+  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/playwright.config.js', '/playwright.config.ts'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
   // 目录前缀匹配
-  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/.git/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.workbuddy/', '/.playwright-cli/', '/output/'];
+  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/.git/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/'];
   for (var i = 0; i < dirs.length; i++) { if (p.indexOf(dirs[i]) === 0) return res.status(404).end(); }
   // 后缀匹配
   if (p.endsWith('.bak') || p.endsWith('.md') || p.endsWith('.pem') || p.endsWith('.env') || p.endsWith('.log') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0) return res.status(404).end();
@@ -3021,47 +3027,6 @@ setInterval(async function() {
   } catch (_) {}
 }, 60000);
 
-// ===================== IP 解析健康检查与手动重试 =====================
-
-// GET /admin/ip-health - 查看 IP 解析 Provider 诊断信息
-app.get('/admin/ip-health', verifyToken, async (req, res) => {
-  try {
-    var result = { cache_size: ipLocationCache.size, cache_max: IP_LOCATION_CACHE_MAX, diagnostics: {} };
-    // 返回最近的诊断信息（最多 20 条）
-    var keys = Object.keys(ipProviderDiagnostics).slice(-20);
-    keys.forEach(function(ip) {
-      result.diagnostics[ip] = ipProviderDiagnostics[ip];
-    });
-    return res.json({ ok: true, data: result });
-  } catch (e) {
-    console.error('[API] ip-health:', e && e.message);
-    return res.status(500).json({ error: '健康检查失败', code: 'ip_health_error' });
-  }
-});
-
-// POST /admin/ip-retry - 手动重试指定 IP 解析
-app.post('/admin/ip-retry', verifyToken, rateLimit(60000, 20), async (req, res) => {
-  try {
-    var ip = String(req.body && req.body.ip || '').trim();
-    if (!ip || ip.length > 45) return res.status(400).json({ error: 'IP 地址无效', code: 'invalid_ip' });
-    // 清除该 IP 的缓存
-    ipLocationCache.delete(ip);
-    delete ipProviderDiagnostics[ip];
-    // 重新解析
-    var result = await resolveIpLocation(ip);
-    var diagnostics = ipProviderDiagnostics[ip] || [];
-    return res.json({
-      ok: true,
-      ip: ip,
-      location: result,
-      diagnostics: diagnostics
-    });
-  } catch (e) {
-    console.error('[API] ip-retry:', e && e.message);
-    return res.status(500).json({ error: 'IP 重试失败', code: 'ip_retry_error' });
-  }
-});
-
 // ===================== 安全检测逻辑 =====================
 
 // Phase 5-P0-3: 统一数据库结果契约。
@@ -3571,25 +3536,17 @@ async function runSecurityChecks(userName, deviceId, ip, ipLocation, source, cur
     }
   } catch(e) {}
   // 并行执行各项检查
-  await Promise.allSettled
-    ? await Promise.allSettled([
-        checkSameIpMultiUsers(userName, ip, ipLocation),
-        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation),
-        checkMultiIpSameUser(userName, ip, ipLocation),
-        checkGeoChange(userName, ipLocation, currentLoginAt),
-        checkHighFrequencyVisit(userName, source, ip, ipLocation),
-        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation),
-        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation)
-      ])
-    : await Promise.all([
-        checkSameIpMultiUsers(userName, ip, ipLocation).catch(function(){}),
-        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation).catch(function(){}),
-        checkMultiIpSameUser(userName, ip, ipLocation).catch(function(){}),
-        checkGeoChange(userName, ipLocation, currentLoginAt).catch(function(){}),
-        checkHighFrequencyVisit(userName, source, ip, ipLocation).catch(function(){}),
-        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation).catch(function(){}),
-        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation).catch(function(){})
-      ]);
+  // ★ P2 清理：Promise.allSettled 自 Node 12.9 起为内置（engines 要求 >=20.6.0），
+  // 原三元恒取真分支，fallback 分支为死代码，删除。
+  await Promise.allSettled([
+    checkSameIpMultiUsers(userName, ip, ipLocation),
+    checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation),
+    checkMultiIpSameUser(userName, ip, ipLocation),
+    checkGeoChange(userName, ipLocation, currentLoginAt),
+    checkHighFrequencyVisit(userName, source, ip, ipLocation),
+    checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation),
+    checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation)
+  ]);
 }
 
 function rateLimit(windowMs, maxRequests) {
@@ -3635,6 +3592,12 @@ setInterval(function() {
   expired.forEach(function(key) { persistenceRateLimitCache.delete(key); });
 }, 600000).unref();
 
+// 判断是否唯一索引冲突（Postgres 23505 / duplicate key）
+function isDuplicateKeyError(err) {
+  if (!err) return false;
+  return String(err.code) === '23505' || /duplicate key|unique constraint|23505/i.test(String(err.message || ''));
+}
+
 async function checkPersistentRateLimit(key, windowMs, maxRequests) {
   var now = Date.now();
   var cacheKey = key + '::' + windowMs;
@@ -3673,48 +3636,69 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
       return { limited: true, retryAfter: Math.ceil((resetAt - now) / 1000) };
     }
 
-    count++;
-    var newContent = JSON.stringify({ count: count, resetAt: resetAt });
-
-    if (existing) {
-      // 条件更新：仅当 content 未被并发修改时才递增，防止两个请求都读到 count=N 都写 N+1。
-      // Supabase update 支持 .eq('content', oldContent) 做乐观锁；更新 0 行说明被并发改写，
-      // 直接以失败路径让调用方下次重新读取（数据以 DB 为准，不会丢失计数）。
-      var upd = await supabase.from('posts').update({ content: newContent, created_at: new Date(resetAt).toISOString() })
-        .eq('id', existing.id)
-        .eq('content', existing.content || '')
-        .select('id');
-      if (!upd.error && upd.data && upd.data.length > 0) {
-        persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
-        return { limited: false };
+    // ★ P2 修复：并发下每个请求恰好递增一次，不丢计数。
+    // 旧实现新 key 用 .upsert(onConflict) 全列覆盖：两个并发请求都读到“无记录”后，
+    // 后写者用自己的 count=1 覆盖对方，丢一次计数。改为：
+    //   新 key  → insert ignoreDuplicates（唯一索引冲突=并发方已插入，重读后走自增）
+    //   已有 key → .eq('content', 旧值) 乐观锁自增，冲突则重读重试（有界 3 次）
+    var rowToUpdate = existing;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!rowToUpdate) {
+        var ins = await supabase.from('posts').insert([{
+          user_name: 'system',
+          content: JSON.stringify({ count: 1, resetAt: resetAt }),
+          media_type: DB_RATE_LIMIT_MARKER,
+          media_url: actorKey,
+          actor_key: actorKey,
+          created_at: new Date(resetAt).toISOString()
+        }], { onConflict: 'media_url', ignoreDuplicates: true }).select('content');
+        if (!ins.error && ins.data && ins.data.length > 0) {
+          // 本请求插入成功（count=1）
+          persistenceRateLimitCache.set(cacheKey, { count: 1, resetAt: resetAt });
+          return { limited: false };
+        }
+        // 唯一索引冲突（并发方已插入）→ 重读该行；其他错误降级不限流，避免误伤
+        if (ins.error && !isDuplicateKeyError(ins.error)) {
+          return { limited: false, degraded: true };
+        }
+        var reread = await supabase.from('posts')
+          .select('id, content, created_at')
+          .eq('media_type', DB_RATE_LIMIT_MARKER)
+          .eq('media_url', actorKey)
+          .maybeSingle();
+        if (reread.error) return { limited: false, degraded: true };
+        rowToUpdate = reread.data;
+        if (!rowToUpdate) continue; // 行被并发清理，重试插入
       }
-      // 并发更新冲突：本次不计入（对方已计入），返回未限流但不缓存，避免放大
-      return { limited: false };
-    }
-
-    // 新 key：原子插入，依赖 036 唯一索引去重；23505 表示并发已插入，按对方记录判断
-    var ins = await supabase.from('posts').upsert([{
-      user_name: 'system',
-      content: newContent,
-      media_type: DB_RATE_LIMIT_MARKER,
-      media_url: actorKey,
-      actor_key: actorKey,
-      created_at: new Date(resetAt).toISOString()
-    }], { onConflict: 'media_url' }).select('content');
-    if (!ins.error && ins.data && ins.data.length > 0) {
-      // 若并发请求抢先插入（content 是对方的计数），以最终行内容为准
+      // 条件自增：仅当 content 未被并发修改时递增（乐观锁），更新 0 行说明被并发
+      // 改写，重读后重试（数据以 DB 为准，不会丢失计数）。
+      var rowCount = 0;
+      var rowResetAt = now + windowMs;
       try {
-        var finalRow = JSON.parse(ins.data[0].content || '{}');
-        if (finalRow.resetAt && finalRow.resetAt > now && finalRow.count >= maxRequests) {
-          persistenceRateLimitCache.set(cacheKey, { count: finalRow.count, resetAt: finalRow.resetAt });
-          return { limited: true, retryAfter: Math.ceil((finalRow.resetAt - now) / 1000) };
+        var rowPrev = JSON.parse(rowToUpdate.content || '{}');
+        if (rowPrev.resetAt && rowPrev.resetAt > now) {
+          rowCount = rowPrev.count || 0;
+          rowResetAt = rowPrev.resetAt;
         }
       } catch(e) {}
-      persistenceRateLimitCache.set(cacheKey, { count: count, resetAt: resetAt });
-      return { limited: false };
+      if (rowCount >= maxRequests) {
+        persistenceRateLimitCache.set(cacheKey, { count: rowCount, resetAt: rowResetAt });
+        return { limited: true, retryAfter: Math.ceil((rowResetAt - now) / 1000) };
+      }
+      rowCount++;
+      var upd = await supabase.from('posts').update({ content: JSON.stringify({ count: rowCount, resetAt: rowResetAt }), created_at: new Date(rowResetAt).toISOString() })
+        .eq('id', rowToUpdate.id)
+        .eq('content', rowToUpdate.content || '')
+        .select('id');
+      if (!upd.error && upd.data && upd.data.length > 0) {
+        persistenceRateLimitCache.set(cacheKey, { count: rowCount, resetAt: rowResetAt });
+        return { limited: false };
+      }
+      // 乐观锁冲突：强制下一轮重读
+      rowToUpdate = null;
     }
-    // 插入失败（如唯一索引尚未部署）：降级为不限流，避免误伤
-    return { limited: false, degraded: true };
+    // 重试耗尽：本次不计入，避免放大；不缓存
+    return { limited: false };
   } catch(e) {
     // DB 不可用时降级为仅本地限流
     return { limited: false, degraded: true };
@@ -3894,65 +3878,6 @@ async function callDeepSeekAI(opts) {
     return jsonMode ? null : '';
   }
 }
-
-// ===================== 2. 异步 Job 队列 =====================
-// 用于 brain 整理、深度思考等后台任务
-async function enqueueJob(userName, jobType, refTable, refId) {
-  try {
-    await supabase.from('ai_jobs').insert({
-      user_name: userName, job_type: jobType,
-      ref_table: refTable, ref_id: refId,
-      status: 'queued', scheduled_at: new Date().toISOString()
-    });
-  } catch (e) { console.error('[JOBS] enqueue error:', e && e.message); }
-}
-
-async function processBrainJob(job) {
-  var refId = job.ref_id;
-  try {
-    await supabase.from('ai_jobs').update({ status: 'running' }).eq('id', job.id);
-    var { data: row } = await supabase.from('brain_nodes').select('*').eq('id', refId).single();
-    if (!row || !row.raw_content) throw new Error('记录不存在');
-
-    var prompt = '你是一个知识整理助手。分析以下内容，提取结构化信息。\n\n' +
-      '内容: "' + String(row.raw_content).slice(0, 2000) + '"\n\n' +
-      '严格按 JSON 格式返回，不要多余文字:\n' +
-      '{\n  "title": "简短标题（10字内）",\n  "summary": "一句话总结（20字内）",\n' +
-      '  "tags": ["标签1","标签2"],\n  "people": ["提到的人名"],\n' +
-      '  "type": "knowledge|idea|diary|plan|question",\n  "mood": "happy|sad|neutral|excited|anxious"\n}\n\n' +
-      '规则: tags 2-5个关键词；people 提取所有人名，没人则[]；type 判断内容类型；mood 判断情绪。';
-
-    var result = await callDeepSeekAI({ messages: [{ role: 'user', content: '' }], system: prompt, jsonMode: true, max_tokens: 1024 });
-    var updateData = {
-      status: result ? 'completed' : 'failed',
-      ai_title: (result && result.title) || '',
-      ai_summary: (result && result.summary) || '',
-      tags: (result && Array.isArray(result.tags)) ? result.tags : [],
-      people: (result && Array.isArray(result.people)) ? result.people : [],
-      node_type: (result && result.type) || 'note',
-      updated_at: new Date().toISOString()
-    };
-    await supabase.from('brain_nodes').update(updateData).eq('id', refId);
-    await supabase.from('ai_jobs').update({ status: 'succeeded', result: 'ok', updated_at: new Date().toISOString() }).eq('id', job.id);
-  } catch (e) {
-    console.error('[JOBS] process error for', refId, ':', e && e.message);
-    await supabase.from('ai_jobs').update({ status: 'failed', error: String(e && e.message || '').slice(0, 500), updated_at: new Date().toISOString() }).eq('id', job.id);
-    await supabase.from('brain_nodes').update({ status: 'failed' }).eq('id', refId);
-  }
-}
-
-async function processNextJob() {
-  try {
-    var { data: jobs } = await supabase.from('ai_jobs')
-      .select('*').eq('status', 'queued').order('scheduled_at', { ascending: true }).limit(1);
-    if (!jobs || !jobs.length) return;
-    var job = jobs[0];
-    if (job.job_type === 'organize' && job.ref_table === 'brain_nodes') await processBrainJob(job);
-  } catch (e) { console.error('[JOBS] processNext error:', e && e.message); }
-}
-
-// worker 轮询（每 5 秒）
-setInterval(function() { processNextJob().catch(function() {}); }, 5000);
 
 // ===================== 小猫 AI 评论区自动回复系统 =====================
 const CAT_AI_USERNAME = 'cat_ai';
@@ -4817,64 +4742,6 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
     console.error('[ai-reply-retry] error:', e && e.message);
     return res.status(503).json({ error: '服务器错误', retryable: true });
   }
-});
-
-// ===================== 3. Brain/Memory CRUD =====================
-app.post('/api/brain/add', authenticateUser, async (req, res) => {
-  try {
-    var userName = req.userName;
-    var rawContent = String(req.body && req.body.content || '').trim();
-    var isPublic = req.body && req.body.is_public === true;
-    if (!rawContent) return res.status(400).json({ error: '内容不能为空' });
-    if (rawContent.length > 10000) return res.status(400).json({ error: '内容太长' });
-
-    var { data, error } = await supabase.from('brain_nodes').insert({
-      user_name: userName, raw_content: rawContent, node_type: 'note', status: 'pending', is_public: isPublic
-    }).select('id').single();
-    if (error) return res.status(500).json({ error: '保存失败' });
-
-    await enqueueJob(userName, 'organize', 'brain_nodes', data.id);
-    res.json({ ok: true, id: data.id, status: 'pending' });
-  } catch (e) { res.status(500).json({ error: '服务器错误' }); }
-});
-
-app.get('/api/brain/list', authenticateUser, async (req, res) => {
-  try {
-    var userName = req.userName;
-    var tag = String(req.query.tag || '').trim();
-    var type = String(req.query.type || '').trim();
-    var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    var offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-
-    var query = supabase.from('brain_nodes').select('*', { count: 'exact' })
-      .eq('user_name', userName).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-    if (tag) query = query.contains('tags', [tag]);
-    if (type) query = query.eq('node_type', type);
-
-    var { data, count, error } = await query;
-    if (error) return res.status(500).json({ error: '查询失败' });
-    res.json({ ok: true, data: data || [], total: count || 0 });
-  } catch (e) { res.status(500).json({ error: '服务器错误' }); }
-});
-
-app.get('/api/brain/graph', authenticateUser, async (req, res) => {
-  try {
-    var userName = req.userName;
-    var { data } = await supabase.from('brain_nodes')
-      .select('tags, people').eq('user_name', userName).not('people', 'is', null).not('people', 'eq', '{}');
-
-    var personMap = {}, tagMap = {}, edges = [];
-    (data || []).forEach(function(row) {
-      (row.people || []).forEach(function(p) { personMap[p] = (personMap[p] || 0) + 1; });
-      (row.tags || []).forEach(function(t) { tagMap[t] = (tagMap[t] || 0) + 1; });
-      (row.people || []).forEach(function(p) { (row.tags || []).forEach(function(t) { edges.push({ source: p, target: t }); }); });
-    });
-
-    var nodes = [];
-    Object.keys(personMap).forEach(function(k) { nodes.push({ id: k, type: 'person', weight: personMap[k] }); });
-    Object.keys(tagMap).forEach(function(k) { nodes.push({ id: k, type: 'tag', weight: tagMap[k] }); });
-    res.json({ ok: true, nodes: nodes, edges: edges });
-  } catch (e) { res.status(500).json({ error: '查询失败' }); }
 });
 
 async function callDeepSeek(messages, options) {
@@ -6624,6 +6491,10 @@ function verifyUserRefreshToken(token) {
 
 // ===== Refresh Token 持久化存储（用于撤销检测） =====
 const REFRESH_TOKEN_MARKER = '__refresh_token__';
+// ★ P2 修复：进程内 refresh token 重用防护——轮换进行中的 jti 集合。
+// 同一 jti 在轮换完成前再次被使用（并发请求或已泄露 token 重放）即拒绝；
+// 跨实例/进程场景由 posts 表撤销记录（isRefreshTokenRevoked）兜底。
+var refreshTokenInUse = new Set();
 
 async function storeRefreshToken(userName, refreshToken) {
   try {
@@ -7165,15 +7036,6 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
   }
 });
 
-// 验证当前用户身份（基于 access token 返回规范 user_name）
-app.get('/api/user/me', authenticateUser, rateLimit(60000, 30), async (req, res) => {
-  try {
-    return res.json({ ok: true, user_name: req.userName });
-  } catch (e) {
-    return res.status(500).json({ error: '查询失败' });
-  }
-});
-
 // 限制状态只通过服务端按当前 access token 查询，避免公开 RPC 接口被用来
 // 枚举任意用户名的封禁、拉黑和禁言状态。
 app.get('/api/user/restrictions', authenticateUser, rateLimit(60000, 60), async (req, res) => {
@@ -7205,30 +7067,43 @@ app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
       res.clearCookie('xtj_user_refresh', { path: '/api/user' });
       return res.status(401).json({ error: 'refresh token 已撤销，请重新登录' });
     }
-    // 签发新的 access token + rotating refresh token
-    var newAccessToken = signUserAccessToken(payload.user_name);
-    var newRefreshToken = signUserRefreshToken(payload.user_name);
-    await storeRefreshToken(payload.user_name, newRefreshToken);
-    // 撤销旧的 refresh token
-    try {
-      var { error: delErr } = await supabase.from('posts').delete()
-        .eq('media_type', REFRESH_TOKEN_MARKER)
-        .eq('media_url', payload.jti);
-      if (delErr) throw delErr;
-    } catch(e) {
-      console.error('[auth] refresh token revoke failed:', e && e.message);
-      return res.status(500).json({ error: 'Failed to revoke old refresh token' });
+    // ★ P2 修复：重用检测——同一 refresh token 在轮换完成前再次被使用
+    //（并发请求或已泄露 token 重放），拒绝并强制重新登录。
+    if (refreshTokenInUse.has(payload.jti)) {
+      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+      return res.status(401).json({ error: 'refresh token 已使用，请重新登录', code: 'token_reused' });
     }
+    refreshTokenInUse.add(payload.jti);
+    try {
+      // 签发新的 access token + rotating refresh token
+      var newAccessToken = signUserAccessToken(payload.user_name);
+      var newRefreshToken = signUserRefreshToken(payload.user_name);
+      await storeRefreshToken(payload.user_name, newRefreshToken);
+      // 撤销旧的 refresh token
+      try {
+        var { error: delErr } = await supabase.from('posts').delete()
+          .eq('media_type', REFRESH_TOKEN_MARKER)
+          .eq('media_url', payload.jti);
+        if (delErr) throw delErr;
+      } catch(e) {
+        console.error('[auth] refresh token revoke failed:', e && e.message);
+        return res.status(500).json({ error: 'Failed to revoke old refresh token' });
+      }
 
-    res.cookie('xtj_user_refresh', newRefreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Strict',
-      maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
-      path: '/api/user'
-    });
+      res.cookie('xtj_user_refresh', newRefreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Strict',
+        maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
+        path: '/api/user'
+      });
 
-    return res.json({ ok: true, token: newAccessToken, user_name: payload.user_name, token_type: 'access' });
+      return res.json({ ok: true, token: newAccessToken, user_name: payload.user_name, token_type: 'access' });
+    } finally {
+      // 轮换完成（无论成败）释放内存锁；成功后旧 token 已从 DB 撤销，
+      // 重放会被 isRefreshTokenRevoked 拦截。
+      refreshTokenInUse.delete(payload.jti);
+    }
   } catch(e) {
     console.error('[API] 刷新 token 失败:', e.message);
     return res.status(500).json({ error: '刷新失败' });
@@ -9143,6 +9018,12 @@ app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res)
     if (!decodedName || decodedName.indexOf('..') >= 0 || decodedName.indexOf('\\') >= 0 || decodedName.indexOf('/') >= 0) {
       return res.status(400).json({ error: '图片地址无效', code: 'INVALID_INPUT' });
     }
+    // ★ P2 修复：与照片墙（photo-create.js IMAGE_MIME_TYPE）和 DM（dm-media.js）
+    // 一致拒绝 SVG——SVG 可内嵌 <script>/onload，头像 URL 被 <img> 直接引用即
+    // 存储型 XSS 载体（前端上传保留原始文件名，扩展名校验在注册端生效）。
+    if (/\.svgz?$/i.test(decodedName)) {
+      return res.status(400).json({ error: '不支持 SVG 头像，请上传位图图片', code: 'INVALID_INPUT' });
+    }
     var userName = req.userName;
     if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
     var insertRes = await supabase.from('posts').insert([{
@@ -9200,6 +9081,11 @@ app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (re
     if (!decodedName || decodedName.indexOf('..') >= 0 || decodedName.indexOf('\\') >= 0 || decodedName.indexOf('/') >= 0) {
       return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
     }
+    // ★ P2 修复：与 /api/avatar 一致拒绝 SVG（防存储型 XSS），
+    // 避免恢复查询把 SVG 头像误判为已提交。
+    if (/\.svgz?$/i.test(decodedName)) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    }
     var lookup = await supabase.from('posts')
       .select('id,media_url')
       .eq('user_name', req.userName)
@@ -9252,11 +9138,14 @@ app.get('/api/dm/messages', authenticateUser, async (req, res) => {
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
     // actor_key = dm_<user> 存储该用户发起的对话元数据
     // 真实私信内容每个消息都是一个 __dm__ 记录
+    // ★ P2 修复：双向查询都按 created_at 倒序取最新 limit 条。
+    // 旧实现 asc+limit 取的是每个方向最旧的 N 条——两边消息数都超过 N 时，
+    // 合并后 slice(-limit) 会漏掉真正的最新消息（前端仅传 limit，无游标支持）。
     function buildDirectionQuery(sender, recipient) {
       var query = supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
-      return query.order('created_at', { ascending: true }).limit(limit);
+      return query.order('created_at', { ascending: false }).limit(limit);
     }
     const [outboundResult, inboundResult] = await Promise.all([
       buildDirectionQuery(req.userName, targetUser),
@@ -11100,17 +10989,23 @@ async function processLocationTasks() {
   locationTaskRunning = true;
   try {
     // 批量拉取任务，在JS层过滤pending/processing，避免任务饥饿
-    // 先拉取50条，如果全部是completed/permanent_failed则继续拉取
+    // ★ P2 修复：旧实现每批固定取最旧 50 条且无游标——最旧一批全部终态时，
+    // 后几批重复拉同一批，更晚创建的 pending 任务永远轮不到。用已扫描 id
+    // 集合推进游标，保证每批都向前扫描（created_at 相同也不会漏）。
     var batchLimit = 50;
     var processedCount = 0;
     var maxBatches = 3; // 最多拉3批，防止无限循环
+    var scannedIds = [];
     for (var batch = 0; batch < maxBatches; batch++) {
-      var { data, error } = await supabase.from('posts')
+      var taskQuery = supabase.from('posts')
         .select('id, user_name, content, created_at')
-        .eq('media_type', LOCATION_TASK_MARKER)
+        .eq('media_type', LOCATION_TASK_MARKER);
+      if (scannedIds.length > 0) taskQuery = taskQuery.not('id', 'in', scannedIds);
+      var { data, error } = await taskQuery
         .order('created_at', { ascending: true })
         .limit(batchLimit);
       if (error || !data || !data.length) break;
+      for (var scanIdx = 0; scanIdx < data.length; scanIdx++) scannedIds.push(data[scanIdx].id);
       
       var hasPending = false;
       for (var i = 0; i < data.length; i++) {
@@ -14929,8 +14824,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ★ H-3 修复：多轮工具调用之间正文必须累积——原实现每轮 `var contentBuffer=''`
     //   把上一轮已推送的"前言"清空，最终 finishStream 落库只存最后一轮正文。
     //   var 声明提升到函数作用域，仅首轮初始化，后续轮不清空。
-    if (contentBuffer === undefined) { contentBuffer = ''; }
-    if (reasoningBuffer === undefined) { reasoningBuffer = persistentReasoning || ''; }
+    //   （★ 修复 2026-08-05：此前 H-3 只留了 if 检查、var 声明被误删，导致
+    //     读取未声明变量必抛 ReferenceError，/api/agent/chat/stream 主路径崩溃）
+    var contentBuffer = '';
+    var reasoningBuffer = persistentReasoning || '';
     var reasoningSent = false;
     var reasoningStartedAt = 0;
     var pendingToolCalls = {};
@@ -15718,7 +15615,9 @@ async function executeAiConfirmedAction(ownerName, actionName, args) {
 }
 
 app.post('/api/agent/actions/:id/confirm', authenticateUser, rateLimit(60000, 30), async (req, res) => {
-  return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
+  // ★ 2026-08-05：原为硬编码 410（3c8701a "enforce read-only" 安全决策）。
+  //   改为环境变量开关：默认保持禁用，设置 AI_WRITE_TOOLS_ENABLED=1 即恢复 AI 写工具。
+  if (!process.env.AI_WRITE_TOOLS_ENABLED) return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
   try {
     var id = aiSiteText(req.params.id, 80);
     var now = new Date().toISOString();
@@ -15731,7 +15630,8 @@ app.post('/api/agent/actions/:id/confirm', authenticateUser, rateLimit(60000, 30
 });
 
 app.post('/api/agent/actions/:id/cancel', authenticateUser, async (req, res) => {
-  return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
+  // ★ 2026-08-05：与 confirm 对齐，硬编码 410 改为环境变量开关（默认禁用）
+  if (!process.env.AI_WRITE_TOOLS_ENABLED) return res.status(410).json({ error: 'ai_write_tools_disabled', code: 'ai_write_tools_disabled' });
   try {
     var row = await supabase.from('ai_action_confirmations').update({ status: 'cancelled' }).eq('id', aiSiteText(req.params.id, 80)).eq('owner_name', req.userName).eq('status', 'pending').select('id').maybeSingle();
     if (row.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });

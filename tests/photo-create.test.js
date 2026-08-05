@@ -8,13 +8,6 @@ const ORIGIN = 'https://ithowxqignlhkwaykglt.supabase.co';
 const GOOD_URL = ORIGIN + '/storage/v1/object/public/uploads/photos/test.jpg';
 function valid(overrides) { return Object.assign({ media_url: GOOD_URL, file_size: 12, original_size: 12, mime_type: 'image/jpeg' }, overrides || {}); }
 
-function makeEmptyQuery() {
-  var q = { maybeSingle: async function() { return { data: null, error: { message: 'not found' } }; } };
-  q.eq = function() { return q; };
-  q.select = function() { return q; };
-  return q;
-}
-
 test('photo create rejects untrusted URLs and legacy fields', function() {
   [
     valid({ media_url: '' }), valid({ media_url: 'javascript:alert(1)' }), valid({ media_url: GOOD_URL.replace('https:', 'http:') }),

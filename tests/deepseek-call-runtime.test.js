@@ -16,6 +16,7 @@ function loadCallDeepSeek(fetchImpl) {
     AbortController,
     DOMException,
     TextDecoder,
+    process,
     setTimeout,
     clearTimeout,
     console: { log() {}, warn() {}, error() {} }

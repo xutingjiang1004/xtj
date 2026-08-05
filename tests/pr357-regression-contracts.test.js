@@ -22,7 +22,7 @@ function routeSource(method, route, nextRoute) {
 
 // 1 & 2: retry queries ai_comment_reply_jobs and uses source_comment_id
 test('retry endpoint queries ai_comment_reply_jobs with source_comment_id', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /supabase\.from\('ai_comment_reply_jobs'\)/);
   assert.match(retrySource, /\.eq\('source_comment_id', commentId\)/);
   assert.doesNotMatch(retrySource, /supabase\.from\('ai_reply_jobs'\)/);
@@ -30,7 +30,7 @@ test('retry endpoint queries ai_comment_reply_jobs with source_comment_id', () =
 
 // 3: bigint comment ID is preserved as string and not passed through Number or parseInt
 test('bigint comment ID is validated with regex and not converted with parseInt or Number', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /commentIdRaw/);
   assert.match(retrySource, /test\(commentIdRaw\)/);
   assert.doesNotMatch(retrySource, /parseInt\(String\(req\.body/);
@@ -39,7 +39,7 @@ test('bigint comment ID is validated with regex and not converted with parseInt 
 
 // 4: completed returns full cat_ai comment format
 test('retry completed status returns full cat_ai comment data structure', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /\.eq\('user_name', 'cat_ai'\)/);
   assert.match(retrySource, /\.eq\('generated_by_ai', true\)/);
   assert.match(retrySource, /data: aiReplyComment/);
@@ -47,7 +47,7 @@ test('retry completed status returns full cat_ai comment data structure', () => 
 
 // 5: failed transient error can retry
 test('failed status retries transient errors without resetting cumulative attempts', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /status: 'pending'/);
   assert.match(retrySource, /error_message: null/);
   assert.doesNotMatch(retrySource, /attempts:\s*0/);
@@ -56,21 +56,21 @@ test('failed status retries transient errors without resetting cumulative attemp
 
 // 6: safety blocked is non-retryable
 test('safety blocked or deleted resource returns non_retryable', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /code: 'non_retryable'/);
   assert.match(retrySource, /blocked by safety check/);
 });
 
 // 7: pending/processing returns status without duplicate task creation
 test('pending or processing status returns existing status without creating duplicate job', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /if \(existingJob && \(existingJob\.status === 'pending' || existingJob\.status === 'processing'\)\)/);
   assert.match(retrySource, /return res\.json\(\{ ok: true, status: existingJob\.status/);
 });
 
 // 8: no job creates via createCatReplyJob
 test('no existing job reuses createCatReplyJob', () => {
-  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "app.post('/api/brain/add'");
+  const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
   assert.match(retrySource, /createCatReplyJob\(commentId, sourceComment\.post_id, userName\)/);
 });
 

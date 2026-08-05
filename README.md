@@ -59,7 +59,7 @@ npm start
 
 ## Render 部署
 
-当前 Render 部署入口由 [render.yaml](/C:/Users/Administrator/Desktop/最新index/xtj/render.yaml:1) 定义：
+当前 Render 部署入口由 [render.yaml](render.yaml) 定义：
 
 - 服务类型：`web`
 - 运行时：`node`

@@ -838,9 +838,6 @@
         fetchError._pendingRetry = true;
         throw fetchError;
       }
-      fetchError.photoUploadStage = 'network';
-      await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
-      throw fetchError;
     }
     clearTimeout(timeoutTimer);
     if (!createRes.ok) {

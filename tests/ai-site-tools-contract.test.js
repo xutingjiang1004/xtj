@@ -41,7 +41,13 @@ test('new AI tables are RLS protected and service-role only', () => {
 test('AI cards are DOM-built and confirmation actions are protected API calls', () => {
   assert.match(client, /function renderAiToolCard/);
   assert.match(client, /evt\.type === 'card'/);
-  assert.match(client, /apiRequest\('POST', '\/actions\/'/);
+  // Confirm/cancel writes are server-protected: routes require authenticateUser
+  assert.match(server, /app\.post\('\/api\/agent\/actions\/:id\/confirm', authenticateUser/);
+  assert.match(server, /app\.post\('\/api\/agent\/actions\/:id\/cancel', authenticateUser/);
+  // Client-side protected fetch wrapper exists for authenticated writes
+  assert.match(core, /window\.xtjProtectedFetch = async function\(path, options\)/);
+  // No unauthenticated/bogus client-side actions call (dead if(false) block removed)
+  assert.doesNotMatch(client, /apiRequest\('POST', '\/actions\/'/);
   assert.doesNotMatch(client, /card\.title\s*\+/);
 });
 

@@ -642,11 +642,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return count + ' 条消息';
   }
 
-  function readConvId() {
-    try { return localStorage.getItem(CONV_ID_KEY) || null; }
-    catch (e) { return null; }
-  }
-
   function writeConvId(v) {
     try {
       if (v) localStorage.setItem(CONV_ID_KEY, v);
@@ -1394,7 +1389,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
-      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索?' + (msg.search_count || 0) }));
+      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索：' + (msg.search_count || 0) }));
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
         if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -1504,14 +1499,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
     if (footer.children.length > 0) node.appendChild(footer);
-    return node;
-  }
-
-  function buildTypingNode() {
-    var node = el('div', { class: 'ai-msg assistant typing' });
-    var bubble = el('div', { class: 'ai-msg-bubble ai-typing-bubble', 'aria-hidden': 'true' });
-    for (var i = 0; i < 3; i++) bubble.appendChild(el('span'));
-    node.appendChild(bubble);
     return node;
   }
 
@@ -2978,65 +2965,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }, 5000);
     function _resetIdle() { _lastDataTime = Date.now(); }
 
-    while (true) {
-      if (S._currentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
-        if (abortedRef) abortedRef.value = true;
-        if (reader) try { reader.cancel(); } catch (e) {}
-        break;
-      }
-      var readResult;
-      try { readResult = await reader.read(); } catch (e) {
-        if (!timedOut && isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
-          markResearchCardOutcome(progressCard, 'interrupted', '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u4e2d\u65ad\u3002');
-        }
-        break;
-      }
-      if (readResult.done) {
-        // ★ EOF: flush TextDecoder 剩余 buffer
-        if (buffer) {
-          buffer += decoder.decode();
-          var eofLines = buffer.split('\n');
-          for (var ei = 0; ei < eofLines.length; ei++) {
-            var eLine = eofLines[ei];
-            // 支持 CRLF
-            eLine = eLine.replace(/\r$/, '');
-            if (!eLine || eLine.startsWith(':')) continue;
-            if (eLine.startsWith('data: ')) {
-              var eEventStr = eLine.slice(6);
-              if (eEventStr.length > MAX_EVENT_SIZE) continue;
-              var eEvt;
-              try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
-              if (eEvt) _handleSseEvent(eEvt);
-            }
-          }
-          buffer = '';
-        }
-        break;
-      }
-      _resetIdle();
-      buffer += decoder.decode(readResult.value, { stream: true });
-      var lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li];
-        // 支持 CRLF
-        line = line.replace(/\r$/, '');
-        // 忽略空行和注释行（heartbeat comments）
-        if (!line || line.startsWith(':')) continue;
-        if (!line.startsWith('data: ')) continue;
-        var eventStr = line.slice(6);
-        // 大小限制
-        if (eventStr.length > MAX_EVENT_SIZE) continue;
-        var evt;
-        try { evt = JSON.parse(eventStr); } catch (e) {
-          // Malformed JSON - 跳过，不阻塞其他事件
-          continue;
-        }
-        if (!evt) continue;
-        _handleSseEvent(evt);
-      }
-
     // SSE 事件处理函数
     function _handleSseEvent(evt) {
       if (S._currentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
@@ -3159,28 +3087,106 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { clearInterval(_idleCheckTimer); } catch (e) {}
           return;
         }
-      }
-      // H-25: 45s 无数据超时 — 清理卡片、复位状态并提示，避免永久"处理中"
-      // research 卡片的超时由调用方（sseResult.timedOut）专门处理，这里跳过
-      if (timedOut && !isResearchCard(progressCard)) {
-        safeRemoveProgressCard();
-        if (aiContentRef.value) {
-          ensureThinkCardNode();
-          if (aiNodeRef.value) {
-            aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），请重试'));
+    }
+
+    while (true) {
+      if (S._currentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
+        if (abortedRef) abortedRef.value = true;
+        // 120s 绝对超时中止：标记 timedOut，让循环后的兜底逻辑统一收尾
+        if (controller && controller.signal.aborted && controller._abortReason === 'timeout') {
+          timedOut = true;
+          if (isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
           }
-          finishThinkCard(aiNodeRef.value, aiContentRef.value, null);
-        } else {
-          if (aiNodeRef.value) { try { aiNodeRef.value.remove(); } catch (e) {} }
-          aiNodeRef.value = null;
         }
-        if (opts.onResetSending) { try { opts.onResetSending(); } catch (e) {} }
-        notify('AI 响应超时（45 秒未收到数据），请重试');
-        try { clearInterval(_idleCheckTimer); } catch (e) {}
-        return;
+        if (reader) try { reader.cancel(); } catch (e) {}
+        break;
       }
+      var readResult;
+      try { readResult = await reader.read(); } catch (e) {
+        // 120s 绝对超时中止（reader.read() 被 abort 拒绝）：标记 timedOut 并给研究卡打超时状态
+        if (controller && controller.signal.aborted && controller._abortReason === 'timeout') {
+          timedOut = true;
+          if (isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
+          }
+        } else if (!timedOut && isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u4e2d\u65ad\u3002');
+        }
+        break;
+      }
+      if (readResult.done) {
+        // ★ EOF: flush TextDecoder 剩余 buffer
+        if (buffer) {
+          buffer += decoder.decode();
+          var eofLines = buffer.split('\n');
+          for (var ei = 0; ei < eofLines.length; ei++) {
+            var eLine = eofLines[ei];
+            // 支持 CRLF
+            eLine = eLine.replace(/\r$/, '');
+            if (!eLine || eLine.startsWith(':')) continue;
+            if (eLine.startsWith('data: ')) {
+              var eEventStr = eLine.slice(6);
+              if (eEventStr.length > MAX_EVENT_SIZE) continue;
+              var eEvt;
+              try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
+              if (eEvt) _handleSseEvent(eEvt);
+            }
+          }
+          buffer = '';
+        }
+        break;
+      }
+      _resetIdle();
+      buffer += decoder.decode(readResult.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        // 支持 CRLF
+        line = line.replace(/\r$/, '');
+        // 忽略空行和注释行（heartbeat comments）
+        if (!line || line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
+        var eventStr = line.slice(6);
+        // 大小限制
+        if (eventStr.length > MAX_EVENT_SIZE) continue;
+        var evt;
+        try { evt = JSON.parse(eventStr); } catch (e) {
+          // Malformed JSON - 跳过，不阻塞其他事件
+          continue;
+        }
+        if (!evt) continue;
+        _handleSseEvent(evt);
+      }
+
       if (doneReceivedRef && doneReceivedRef.value) return;
       if (abortedRef && abortedRef.value) return;
+    }
+    // H-25: 45s 无数据超时 / 120s 绝对超时 — 清理卡片、复位状态并提示，避免永久"处理中"
+    // research 卡片的超时由调用方（sseResult.timedOut）专门处理，这里跳过
+    if (timedOut && !isResearchCard(progressCard)) {
+      var timeoutMsg = (controller && controller._abortReason === 'timeout')
+        ? '思考超时（120 秒未完成），请重试'
+        : 'AI 响应超时（45 秒未收到数据），请重试';
+      safeRemoveProgressCard();
+      if (aiContentRef.value) {
+        ensureThinkCardNode();
+        if (aiNodeRef.value) {
+          aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, timeoutMsg));
+        }
+        finishThinkCard(aiNodeRef.value, aiContentRef.value, null);
+        // 已保留并渲染部分内容，标记 evtHandled 防止外层分支删除节点
+        if (evtHandledRef) evtHandledRef.value = true;
+      } else {
+        if (aiNodeRef.value) { try { aiNodeRef.value.remove(); } catch (e) {} }
+        aiNodeRef.value = null;
+      }
+      if (opts.onResetSending) { try { opts.onResetSending(); } catch (e) {} }
+      notify(timeoutMsg);
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+      return;
     }
     try { clearInterval(_idleCheckTimer); } catch (e) {}
     return {
@@ -3568,6 +3574,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if ((S._currentReqId !== reqId || ab.value) && !eh.value) {
         // ★ 修复：error 事件已渲染部分回答（evtHandledRef=true）时不得删除节点，
         // 否则已完成的思考卡片会闪现后消失（服务端也未保存）。
+        if (controller && controller._abortReason === 'timeout' && !isResearchCard(progressCard)) {
+          notify('思考超时，请重试');
+        }
         safeRemoveProgressCard(); if (ar.value) try { ar.value.cancel(); } catch(e){}
         if (r.value) try { r.value.remove(); } catch(e){} resetSendingIfCurrent(); return;
       }
@@ -3582,12 +3591,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
       safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
       S.paused = false; S.activeRenderers = [];
+      var dtTimeoutAbort = !!(controller && controller._abortReason === 'timeout');
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
         else { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('网络异常'); }
       } else {
+        // 120s 绝对超时（fetch 阶段被 abort）：给用户可见提示并正确收尾
+        if (dtTimeoutAbort) notify('思考超时，请重试');
         if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
-        else { S.messages.pop(); removeLastUserMessage(messagesEl); }
+        else {
+          S.messages.pop(); removeLastUserMessage(messagesEl);
+          if (dtTimeoutAbort) restoreInputText();
+        }
       }
     }
     resetSendingIfCurrent();
@@ -4179,6 +4194,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (S._currentReqId !== reqId || ab.value) {
         if (ab.value && isResearchCard(progressCard)) {
+          // ★ 修复：120s 绝对超时中止时标记卡片状态，避免卡在"深入研究中"
+          if (controller && controller._abortReason === 'timeout' && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
+          }
           safeRemoveProgressCard(false);
           if (ar.value) try { ar.value.cancel(); } catch(e){}
           resetSendingIfCurrent();
@@ -4218,11 +4237,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (c && c.value && !isResearchCard(progressCard)) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); restoreInputText(); notify('网络异常'); }
       } else {
+        // 120s 绝对超时（fetch 阶段被 abort）：标记超时状态并提示
+        var dtTimeoutAbort = !!(controller && controller._abortReason === 'timeout');
         if (isResearchCard(progressCard)) {
           preserveResearchAnswer(progressCard, c.value);
-          if (progressCard._researchState.state !== 'cancelled') markResearchCardOutcome(progressCard, 'interrupted', '本次研究已中断，请重试');
+          if (progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, dtTimeoutAbort ? 'timeout' : 'interrupted', dtTimeoutAbort ? '思考超时，请重试' : '本次研究已中断，请重试');
+          }
         } else if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
         else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); }
+        if (dtTimeoutAbort) notify('思考超时，请重试');
       }
     }
     resetSendingIfCurrent();
@@ -4278,7 +4302,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var f = this.files && this.files[0];
         if (!f) return;
         if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
-        if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB（data URL 编码后）?'); return; }
+        if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB（data URL 编码后）'); return; }
         var reader = new FileReader();
         reader.onload = function(e) {
           _dtFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
@@ -4491,21 +4515,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (summary.length) shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: summary.join('\n') }));
     } else if (data.task || data.draft || data.message || data.announcement) {
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
-    }
-    if (false && data.confirmation_id) {
-      var actions = el('div', { class: 'ai-tool-card-actions' });
-      ['cancel', 'confirm'].forEach(function(action) {
-        var button = el('button', { class: 'ai-tool-card-action ' + action, type: 'button', text: action === 'confirm' ? '确认' : '取消' });
-        button.addEventListener('click', async function() {
-          button.disabled = true;
-          var result = await apiRequest('POST', '/actions/' + encodeURIComponent(data.confirmation_id) + '/' + action, {});
-          if (!result.ok) { button.disabled = false; notify(result.error || '操作失败'); return; }
-          shell.classList.add('ai-tool-card-complete');
-          actions.textContent = action === 'confirm' ? '已确认并执行' : '已取消';
-        });
-        actions.appendChild(button);
-      });
-      shell.appendChild(actions);
     }
     messagesEl.appendChild(shell);
     scrollToBottom(messagesEl, false);
@@ -6567,7 +6576,6 @@ function showChatMessages() {
     } catch (e9) {
       scheduleInsertEntry();
     }
-    if (insertTimer) { try { clearTimeout(insertTimer); } catch(e) {} insertTimer = null; }
   }
 
   function removeAllAiEntries() {
@@ -6627,19 +6635,10 @@ function showChatMessages() {
     list.insertBefore(item, list.firstChild);
   }
 
-  var insertTimer = null;
   function scheduleInsertEntry() {
     // AI is launched only from the homepage tools menu. This keeps cached
     // chat-list DOM from retaining the retired AI pseudo-contact.
     removeAllAiEntries();
-    return;
-    if (insertTimer) {
-      try { clearTimeout(insertTimer); } catch (e) {}
-    }
-    insertTimer = setTimeout(function() {
-      insertTimer = null;
-      try { insertEntry(); } catch (e2) {}
-    }, 0);
   }
 
   function hookChatList() {

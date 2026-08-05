@@ -66,7 +66,10 @@ function validateHtmlMinifiedRefs(htmlFile) {
   localAssetRefs(html).forEach(function(ref) {
     const nextMin = minifiedPath(ref.assetPath);
     if (nextMin === ref.assetPath) return;
-    if (!fs.existsSync(path.resolve(ROOT, nextMin))) return;
+    if (!fs.existsSync(path.resolve(ROOT, nextMin))) {
+      console.warn('[CHECK] WARNING: ' + ref.assetPath + ' has no minified sibling ' + nextMin + '; if the source is referenced at runtime, add it to CSS_FILES/JS_FILES so the build produces the .min artifact');
+      return;
+    }
     errors.push(ref.assetPath + ' should use ' + nextMin);
   });
   if (!errors.length) {
@@ -155,7 +158,8 @@ const CSS_FILES = [
   'css/ai-agent.css',
   'css/ui-shell.css',
   'css/photo-preview.css',
-  'css/code-workspace.css'
+  'css/code-workspace.css',
+  'css/code-claude-style.css'
 ];
 
 function minifyJS(filePath, optional) {

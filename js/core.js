@@ -390,7 +390,7 @@ const ADMIN_NAME = "xxz";
             var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
 
             function getUserToken() {
-                // 仅从 sessionStorage 读取（本次会话）
+                // 仅从内存读取（会话内缓存；持久化令牌机制已移除）
                 var token = memoryUserToken || '';
                 // 检查是否过期
                 if (token) {
@@ -1262,6 +1262,8 @@ const ADMIN_NAME = "xxz";
         let delPostId = null, delOwnerKey = null;
         let activePostId = null;
         const viewTracked = new Set();
+        // 挂到 window：登出清理 clearAllAuthState 中 window.viewTracked.clear() 依赖此引用
+        window.viewTracked = viewTracked;
         let postVisibilityObserver = null;
         let postDwellObserver = null;
         const postDwellTimers = new Map();
@@ -2625,7 +2627,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         // 安全：管理员登录必须通过后端 API，禁止直连 Supabase
                         if (typeof API_BASE === 'undefined' || !API_BASE) {
                             showToast("管理员登录需要后端 API 服务，请确保服务器已配置");
-                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         try {
@@ -2635,18 +2636,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             });
                             if (!loginRes || !loginRes.ok) {
                                 showToast((loginRes && loginRes.error) || "管理员登录失败");
-                                btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
                             if (!loginRes.user_token) {
                                 showToast("管理员用户会话建立失败", "error");
-                                btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
                             setUserToken(loginRes.user_token);
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
-                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     }
@@ -2659,7 +2657,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
                             showToast(tokenData.error || "账号或密码错误", "error");
-                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         setUserToken(tokenData.token);
@@ -2669,7 +2666,6 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             // Token 身份与登录目标不一致，拒绝登录
                             clearAllAuthState({ revokeRemote: true });
                             showToast("账号认证状态异常，请重新登录", "error");
-                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     }
@@ -2690,17 +2686,13 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     showToast("登录成功，欢迎回来！" + confirmedUser);
                     closeModal('loginModal');
 
-                    // 登录 API 完成，立即恢复按钮状态，后续操作异步执行
-                    btn.disabled = false;
-                    btn.textContent = "登录";
-
                     // ★ 广播登录事件到其他标签页
                     try { if (typeof window.__xtjBroadcastAuthChange === 'function') window.__xtjBroadcastAuthChange(confirmedUser); } catch(e) {}
 
                     // 后台异步加载数据，不阻塞 UI
                     saveUserInfo(confirmedUser, false).catch(function() {});
                     initUI().catch(function() {});
-                    initialLoad(true);
+                    initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(confirmedUser);
 
@@ -2719,6 +2711,8 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     } catch (e) { console.warn('[ann_read_sync_login]', e); }
                 } catch (e) {
                     showToast("登录失败，请重试");
+                } finally {
+                    // 统一恢复按钮状态：与 doRegister 的 finally 模式一致，避免散落恢复点
                     btn.disabled = false;
                     btn.textContent = "登录";
                 }
@@ -2794,7 +2788,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                     await loadCurrentUserInfoSnapshot(currentUser);
 
                     await initUI();
-                    initialLoad(true);
+                    initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(currentUser);
 
@@ -2972,7 +2966,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         document.getElementById('profileDetailRegTime').textContent = '-';
                     }
                 } catch(e) {
-                    console.error("鑾峰彇用户淇℃伅失败:", e);
+                    console.error("获取用户信息失败:", e);
                     document.getElementById('profileDetailRegTime').textContent = '-';
                 }
                 
@@ -3376,7 +3370,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
                 showToast('已退出登录');
                 try { await initUI(); } catch (e) {}
-                try { initialLoad(true); } catch (e) {}
+                initialLoad(true).catch(function() {});
                 _isLoggingOut = false;
             };
 
@@ -3483,7 +3477,8 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 return post;
             }
 
-            function dedupeProfileLikes(items) {
+            // 返回列表副本（状态快照使用，避免外部数组被后续修改污染内部状态）
+            function cloneProfileLikes(items) {
                 return Array.isArray(items) ? items.slice() : [];
             }
 
@@ -3831,7 +3826,7 @@ function renderProfileActivityList(kind) {
                     if (postsCountRes.error) throw postsCountRes.error;
                     if (reportsRes && reportsRes.error) console.warn('reports load warning:', reportsRes.error);
 
-                    profileActivityState.likes = dedupeProfileLikes(likesRes && likesRes.data || []);
+                    profileActivityState.likes = cloneProfileLikes(likesRes && likesRes.data || []);
                     profileActivityState.comments = commentsRes.data || [];
                     profileActivityState.reports = (reportsRes && reportsRes.data || []).map(function(p) {
                         var c = {};
@@ -4613,7 +4608,7 @@ function renderProfileActivityList(kind) {
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
                     
-                    // 更新鎴戠殑椤甸潰显示
+                    // 更新我的页面显示
                     profileName.textContent = currentUser;
                     profileStatus.textContent = "查看资料";
                     
@@ -4848,7 +4843,7 @@ function renderProfileActivityList(kind) {
                     if (likeOperations[postId] !== operation) return;
                     if (operation.desired !== operation.confirmed) {
                         applyPostLikeIntent(postId, operation.confirmed);
-                        showToast('like_operation_failed');
+                        showToast("点赞失败，请重试");
                     }
                 }).finally(function() {
                     // ★ 修复：无条件复位 running——此前仅当 desired===confirmed 时才删除条目，
@@ -4864,13 +4859,13 @@ function renderProfileActivityList(kind) {
             }
 
             window.toggleLike = function (btn, postId) {
-                if (!currentUser) { showToast("login_required"); return; }
-                if (isUserMuted()) { showToast("interaction_unavailable"); return; }
+                if (!currentUser) { showToast("请先登录"); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法点赞"); return; }
                 var pid = String(postId || '');
                 if (!btn || !pid) return;
                 var normalizedPostId = pid.trim().toLowerCase();
                 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
-                    showToast('post_parameter_invalid');
+                    showToast("帖子参数无效");
                     return;
                 }
                 var operation = likeOperations[pid];
@@ -5984,6 +5979,8 @@ function renderProfileActivityList(kind) {
             // ===================== 浏览历史缓存 =====================
             // 帖子信息缓存：用于浏览历史与媒体标签
             const postInfoCache = {};
+            // 挂到 window：登出清理 clearAllAuthState 中 window.postInfoCache 清理依赖此引用
+            window.postInfoCache = postInfoCache;
             const VIEW_HISTORY_KEY = 'xtj_view_history';
             const VIEW_TRACK_TTL = 5 * 60 * 1000;
             const VIEW_HISTORY_MEDIA_LABEL = '(\u56fe\u7247/\u89c6\u9891)';
@@ -6142,6 +6139,9 @@ function renderProfileActivityList(kind) {
                 // 导致每次滚动浏览都报错刷屏，且删除节流标记造成无限重复触发）。
                 if (!currentUser || typeof window.xtjProtectedFetch !== 'function') return false;
                 viewTracked.add(postId);
+                // ★ 修复：请求发出前先写节流键，防止键仅成功后写入期间
+                // 1 秒内重复触发并发 POST（在途请求保护）
+                window.safeStorage.set(key, String(Date.now()));
                 setTimeout(async () => {
                     try {
                         if (!currentUser || typeof window.xtjProtectedFetch !== 'function') throw new Error('view_auth_required');
@@ -7659,6 +7659,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__user_visit__")
                     .neq("media_type", "__post_view__")
                     .neq("media_type", "__ann__")
+                    .neq("media_type", "__ann_read__")
                     .neq("media_type", "__vip__")
                     .neq("media_type", "__vip_order__")
                     .neq("media_type", "__vip_plan__")
@@ -7680,6 +7681,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "**ai_agent_conv_summary**")
                     .neq("media_type", "**ai_agent_memory_log**")
                     .neq("media_type", "__refresh_token__")
+                    .neq("media_type", "__revoked_token__")
                     .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
                     .neq("media_type", "__location_task__");
             }
@@ -8513,6 +8515,11 @@ function renderProfileActivityList(kind) {
             };
 
             loadFeed = async function(forceRefresh) {
+                // ★ 修复：loadFeed 语义为"重新加载 feed"——所有路径（缓存快路径/
+                //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
+                //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
+                //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
+                feedPage = 1;
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
@@ -9255,12 +9262,14 @@ function renderProfileActivityList(kind) {
                 if (!type) return;
                 if (!sb || typeof sb.from !== 'function') return; // Supabase SDK 未加载时返回，避免同步 TypeError
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }),
+                    // ★ 修复：统计查询统一走 applyVisiblePostQueryFilters 系统标记清单，避免三份黑名单漂移
+                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.media_type !== '__ai_english_learning__' && canViewPost(p); });
+                    // ★ 修复：客户端过滤统一走 isSystemPost 完整清单，避免三份黑名单漂移
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return !isSystemPost(p) && canViewPost(p); });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -9545,6 +9554,9 @@ function renderProfileActivityList(kind) {
                 if (getDMMessageReadAt(msg)) return true;
                 return ((msg && msg.views) || 0) > 0;
             }
+            // ★ 修复：导出到 window——此前仅同作用域可调用，而 9826/10652 行
+            //   通过 window.isMsgReadByMe 调用必然 TypeError，DM 未读角标恒为 0。
+            window.isMsgReadByMe = isMsgReadByMe;
 
             async function markMessagesRead(senderName, messages, pendingUpdates) {
                 if (!window.currentUser || !senderName) return;
@@ -10228,7 +10240,7 @@ function renderProfileActivityList(kind) {
                                 window.showToast('刷新失败');
                             });
                         } else if (tab === 'posts') {
-                            // 帖子椤靛埛??
+                            // 帖子页刷新
                             window.showToast('正在刷新...');
                             // 清除刷新状态
                             try {
@@ -10239,6 +10251,8 @@ function renderProfileActivityList(kind) {
                                     .then(function() {
                                         isRefreshing[tab] = false;
                                         return syncFeedDataInBackground();
+                                    }).then(function() {
+                                        window.showToast('刷新完成');
                                     })
                                     .catch(function(err) {
                                         isRefreshing[tab] = false;
@@ -10246,10 +10260,9 @@ function renderProfileActivityList(kind) {
                                         window.showToast('刷新失败');
                                     });
                             }
-                            // 鍥炲埌顶部
+                            // 回到顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
-                            window.showToast('刷新完成');
                         } else if (tab === 'chat') {
                             // 聊天 tab 刷新逻辑
                             window.showToast('正在刷新...');
@@ -10290,7 +10303,7 @@ function renderProfileActivityList(kind) {
                                 });
                             }
                         } else if (tab === 'profile') {
-                            // 鎴戠殑椤碉細鍥炲埌顶部
+                            // 我的页面：回到顶部
                             const panel = document.getElementById('panelProfile');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
@@ -10590,7 +10603,6 @@ function renderProfileActivityList(kind) {
                 dockChatActiveUser = userName;
                 // 清除渲染签名，确保缓存加载不会因签名匹配跳过（当前 innerHTML 是 loading 状态）
                 if (typeof _chatRenderSignature !== 'undefined') _chatRenderSignature[userName] = undefined;
-                document.getElementById('dockChatMessages').innerHTML = getXtjLoadingHtml('加载中..', '正在打开聊天通道', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中..',
                     subtitle: '正在打开聊天通道',
@@ -10728,11 +10740,9 @@ function renderProfileActivityList(kind) {
                                 if (v) {
                                     // P7: 有 URL → has_avatar
                                     if (getAvatarUrl(k) !== v) {
-                                        setAvatarCacheEntry(k, 'has_avatar', v);
                                         changed = true;
-                                    } else {
-                                        setAvatarCacheEntry(k, 'has_avatar', v);
                                     }
+                                    setAvatarCacheEntry(k, 'has_avatar', v);
                                 } else if (v === null) {
                                     // P7: null → 清除旧缓存并设为 confirmed_none（TTL 内不重查）
                                     var prevEntry = avatarCache[k];
@@ -13718,7 +13728,7 @@ function renderProfileActivityList(kind) {
                 if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';var parent=this.closest(\'.rc-thumb\');if(parent){parent.className=\'rc-thumb rc-thumb--text\';parent.innerHTML=\'<span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span>\'}">'
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
                     : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;
