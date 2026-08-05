@@ -466,6 +466,77 @@ test('Code agent document API test suite', async (t) => {
     assert.match(newText, /保持不变/);
   });
 
+  // Test 9b: insert_text 多行文本必须转换为独立段落（排版修复）
+  await t.test('DOCX insert_text converts multi-line text into separate paragraphs', async () => {
+    const zip = makeDocxZip(makeDocxBodyXml([
+      '<w:p><w:r><w:t>成都之行</w:t></w:r></w:p>',
+      '<w:p><w:r><w:t>东郊记忆 后续内容</w:t></w:r></w:p>',
+      '<w:p><w:r><w:t>结束</w:t></w:r></w:p>'
+    ]));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const insertBody = '\n========= 行程规划 =========\n\nDay 1 · 城市中心\n· 春熙路\n\nDay 2 · 熊猫线';
+    const res = await request(app)
+      .post('/api/code/document/apply')
+      .field('fileName', 'test.docx')
+      .field('mimeType', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      .field('documentType', 'docx')
+      .field('operations', JSON.stringify([{type: 'insert_text', marker_text: '东郊记忆 ', insert_text: insertBody}]))
+      .attach('file', buffer, 'test.docx')
+      .responseType('blob');
+    assert.equal(res.status, 200);
+    const zipOut = await JSZip.loadAsync(Buffer.isBuffer(res.body) ? res.body : Buffer.from(res.text, 'binary'));
+    const docXml = await zipOut.file('word/document.xml').async('string');
+
+    // 内容完整保留
+    assert.match(docXml, /========= 行程规划 =========/);
+    assert.match(docXml, /Day 1 · 城市中心/);
+    assert.match(docXml, /· 春熙路/);
+    assert.match(docXml, /Day 2 · 熊猫线/);
+    // 标记文本后的原内容仍在（段内拆分）
+    assert.match(docXml, /后续内容/);
+    // 每一行都是独立 w:p 段落（原始 3 段 + 插入 7 行 + 尾随 1 段 = 11）
+    const paraCount = (docXml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || []).length;
+    assert.ok(paraCount >= 8, '插入的每一行应生成独立段落, 实际段落数: ' + paraCount);
+    // w:t 内不得包含字面换行符（Word 不渲染 \n）
+    const tRE = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    let m;
+    let hasRawNewline = false;
+    while ((m = tRE.exec(docXml)) !== null) {
+      if (m[1].indexOf('\n') >= 0) hasRawNewline = true;
+    }
+    assert.ok(!hasRawNewline, 'w:t 内不应有原始换行符');
+    // 生成的文件仍是合法 DOCX（可重新解析 document.xml）
+    assert.match(docXml, /<w:body>/);
+    assert.match(docXml, /<\/w:body>/);
+  });
+
+  // Test 9c: insert_text 标记文本在段落中间时拆分段落保持顺序
+  await t.test('DOCX insert_text at mid-paragraph marker splits paragraph preserving order', async () => {
+    const zip = makeDocxZip(makeDocxBodyXml([
+      '<w:p><w:r><w:t>原文</w:t></w:r></w:p>',
+      '<w:p><w:r><w:t>前段标记后段</w:t></w:r></w:p>',
+      '<w:p><w:r><w:t>结尾</w:t></w:r></w:p>'
+    ]));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const res = await request(app)
+      .post('/api/code/document/apply')
+      .field('fileName', 'test.docx')
+      .field('mimeType', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      .field('documentType', 'docx')
+      .field('operations', JSON.stringify([{type: 'insert_text', marker_text: '标记', insert_text: '第一行\n第二行'}]))
+      .attach('file', buffer, 'test.docx')
+      .responseType('blob');
+    assert.equal(res.status, 200);
+    const zipOut = await JSZip.loadAsync(Buffer.isBuffer(res.body) ? res.body : Buffer.from(res.text, 'binary'));
+    const docXml = await zipOut.file('word/document.xml').async('string');
+    // 标记后的"后段"必须在插入内容之后（顺序保留）
+    const idxAfter = docXml.indexOf('后段');
+    const idxInsert1 = docXml.indexOf('第一行');
+    const idxInsert2 = docXml.indexOf('第二行');
+    assert.ok(idxInsert1 >= 0 && idxInsert2 >= 0, '插入行必须存在');
+    assert.ok(idxAfter > idxInsert2, '标记文本后的原内容应在插入内容之后, 后段位置: ' + idxAfter + ', 第二行位置: ' + idxInsert2);
+  });
+
   // Test 10: 纯文本提取情况下，AI 系统提示禁止编造字体/字号
   await t.test('P0-1: System prompt disallows font/size/layout claims from plain text', async () => {
     const source = fs.readFileSync(path.join(__dirname, '../render-api/code-agent.js'), 'utf8');
