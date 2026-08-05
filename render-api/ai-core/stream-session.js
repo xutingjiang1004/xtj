@@ -472,10 +472,28 @@ function createEventLogger(supabase, streamId, userId) {
     });
   }
 
+  // 长_delta 分片：每片最多 8000 字符，严格递增 event_id
+  var DELTA_SHARD_MAX_CHARS = 8000;
   function persistCombinedDelta(eventId, combined) {
-    return persistEvent(eventId, 'answer_delta', { delta: combined.slice(0, 10000) }).then(function(result) {
-      if (result && result.failed > 0) pendingDeltas.unshift(combined);
-      return result;
+    if (combined.length <= DELTA_SHARD_MAX_CHARS) {
+      return persistEvent(eventId, 'answer_delta', { delta: combined }).then(function(result) {
+        if (result && result.failed > 0) pendingDeltas.unshift(combined);
+        return result;
+      });
+    }
+    // 分片写入：每片独立 event_id，严格递增
+    var shards = [];
+    for (var i = 0; i < combined.length; i += DELTA_SHARD_MAX_CHARS) {
+      shards.push(combined.slice(i, i + DELTA_SHARD_MAX_CHARS));
+    }
+    var baseId = Number(eventId) || (lastPersistedEventId + 1);
+    var shardPromises = shards.map(function(shard, idx) {
+      return persistEvent(baseId + idx, 'answer_delta', { delta: shard });
+    });
+    return Promise.all(shardPromises).then(function(results) {
+      var totalFailed = results.reduce(function(n, r) { return n + (r && r.failed || 0); }, 0);
+      if (totalFailed > 0) pendingDeltas.unshift(combined);
+      return aggregateWriteResults(results, baseId + shards.length - 1);
     });
   }
 
@@ -616,19 +634,55 @@ function sanitizeEventData(type, data) {
 
 // ==================== Resume ====================
 
-function getEventsAfter(supabase, streamId, afterEventId) {
-  if (!isResumeEnabled() || !supabase) return Promise.resolve({ ok: true, events: [], retryable: false, error: null });
+var RESUME_PAGE_SIZE = 100;
+var RESUME_MAX_BYTES = 2 * 1024 * 1024; // 2MB 单次响应字节上限
+
+function getEventsAfter(supabase, streamId, afterEventId, pageSize) {
+  if (!isResumeEnabled() || !supabase) return Promise.resolve({ ok: true, events: [], retryable: false, error: null, next_after_event_id: null, has_more: false });
+  var limit = Math.min(Math.max(Number(pageSize) || RESUME_PAGE_SIZE, 1), 500);
   return runPersistenceQuery(function() {
     return supabase.from('ai_stream_events').select('event_id, event_type, event_data')
       .eq('stream_id', String(streamId))
       .gt('event_id', Number(afterEventId) || 0)
-      .order('event_id', { ascending: true });
+      .order('event_id', { ascending: true })
+      .limit(limit + 1); // 多取 1 条判断 has_more
   }).then(function(result) {
-    if (!result.ok) return { ok: false, events: null, retryable: true, error: result.error, attempts: result.attempts };
-    var events = normalizeRows(result.data).map(function(row) {
+    if (!result.ok) return { ok: false, events: null, retryable: true, error: result.error, attempts: result.attempts, next_after_event_id: null, has_more: false };
+    var rows = normalizeRows(result.data);
+    var hasMore = rows.length > limit;
+    if (hasMore) rows = rows.slice(0, limit);
+    var events = rows.map(function(row) {
       return { event_id: row.event_id, stream_id: streamId, type: row.event_type, data: row.event_data || {} };
     });
-    return { ok: true, events: events, retryable: false, error: null, attempts: result.attempts };
+    // 字节上限检查
+    var totalBytes = 0;
+    var truncated = false;
+    var originalLength = events.length;
+    for (var i = 0; i < events.length; i++) {
+      var evtSize = Buffer.byteLength(JSON.stringify(events[i].data || {}), 'utf8');
+      if (totalBytes + evtSize > RESUME_MAX_BYTES) {
+        events = events.slice(0, i);
+        truncated = true;
+        hasMore = true;
+        break;
+      }
+      totalBytes += evtSize;
+    }
+    var nextAfterEventId = null;
+    if (hasMore && events.length > 0) {
+      nextAfterEventId = events[events.length - 1].event_id;
+    }
+    return {
+      ok: true,
+      events: events,
+      retryable: false,
+      error: null,
+      attempts: result.attempts,
+      next_after_event_id: nextAfterEventId,
+      has_more: hasMore,
+      truncated: truncated,
+      original_length: originalLength
+    };
   });
 }
 

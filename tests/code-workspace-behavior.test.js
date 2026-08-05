@@ -98,6 +98,15 @@ test('Code composer sends real model and thinking selections instead of hard-cod
   assert.doesNotMatch(codeWorkspace, /thinking_mode:\s*'high'/);
 });
 
+test('Code composer gives unavailable providers an explicit state and recovery actions', () => {
+  assert.match(codeWorkspace, /function updateComposerControls\(\)/);
+  assert.match(codeWorkspace, /在线模型不可用/);
+  assert.match(codeWorkspace, /modelSelect\.addEventListener\('change'/);
+  assert.match(codeWorkspace, /thinkingSelect\.addEventListener\('change'/);
+  assert.match(codeWorkspace, /modelRetryButton\.addEventListener\('click'/);
+  assert.match(codeWorkspace, /capabilities\.error/);
+});
+
 
 test('Code chat panel mounts once and keeps draft/input updates local', () => {
   assert.match(codeWorkspace, /if \(state\.composerMounted\) \{[\s\S]{0,180}syncChatMessages\(\)/);

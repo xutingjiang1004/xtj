@@ -1721,8 +1721,29 @@
         if (window.monacoEditorInstance) window.monacoEditorInstance.layout();
       });
     }
-    }
+    updateLayoutRecoveryControl();
+  }
 
+  // Keep a persistent escape hatch outside the collapsible panes. The layout
+  // menu lives inside the chat pane, so hiding that pane must not also hide the
+  // only control that can restore it. This is a small status surface, not a
+  // modal overlay: it never blocks editor/chat interaction and stays keyboard
+  // reachable after a layout action.
+  function updateLayoutRecoveryControl() {
+    var control = _dom.layoutRecovery;
+    if (!control) return;
+    var hasFocusedPane = _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor';
+    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed ||
+      _layoutState.workbenchNavCollapsed || _layoutState.chatCollapsed || _layoutState.contextCollapsed;
+    control.hidden = !hasFocusedPane && !hasCollapsedPane;
+    if (control.hidden) return;
+    var label = control.querySelector('.code-layout-recovery-label');
+    if (label) {
+      label.textContent = hasFocusedPane
+        ? ('专注模式：' + (_layoutState.maximizedPanel === 'chat' ? 'AI 面板' : '编辑器') + ' · 可恢复完整工作台')
+        : '部分面板已收起 · 可恢复完整工作台';
+    }
+  }
 
   function toggleSidebar() {
     _layoutState.sidebarCollapsed = !_layoutState.sidebarCollapsed;
@@ -2100,6 +2121,20 @@
 
     _dom.panelCode.appendChild(shell);
     shell.appendChild(workspace);
+
+    // This control deliberately sits outside the collapsible workspace panes.
+    // If the chat pane (which owns the layout menu) is hidden, the user still
+    // needs a visible and keyboard-reachable way back to the full workbench.
+    var layoutRecovery = document.createElement('div');
+    layoutRecovery.className = 'code-layout-recovery';
+    layoutRecovery.hidden = true;
+    layoutRecovery.setAttribute('role', 'status');
+    layoutRecovery.innerHTML = '<span class="code-layout-recovery-label"></span><button type="button">恢复完整布局</button>';
+    layoutRecovery.querySelector('button').addEventListener('click', function () {
+      resetLayout('#codeChatInput');
+    });
+    _dom.panelCode.appendChild(layoutRecovery);
+    _dom.layoutRecovery = layoutRecovery;
 
 
     _dom.fileTree = fileTree;
@@ -4715,6 +4750,9 @@
         title: model + '；工具调用已启用；最多 ' + (capabilities.maxToolRounds || '?') + ' 轮'
       };
     }
+    if (capabilities.error) {
+      return { text: '在线不可用', title: '无法连接 Code AI 服务；可在下方重试模型探测' };
+    }
     if (capabilities.configured === false) {
       return { text: 'AI 未配置', title: '服务端尚未配置 Code AI' };
     }
@@ -5321,7 +5359,7 @@
 
 
 
-  function updateComposerControls() {
+  function updateComposerControlsLegacy() {
     var modelSelect = document.getElementById('codeModelSelect');
     var thinkingSelect = document.getElementById('codeThinkingSelect');
     var contextUsage = document.getElementById('codeContextUsage');
@@ -5384,6 +5422,91 @@
     }
   }
 
+  // Render the provider/model controls from one consistent state snapshot.
+  // In particular, a failed model probe must produce an explicit disabled
+  // option instead of an empty select, and the retry action must remain
+  // visible without relying on a hidden branch of the status renderer.
+  function updateComposerControls() {
+    var modelSelect = document.getElementById('codeModelSelect');
+    var thinkingSelect = document.getElementById('codeThinkingSelect');
+    var contextUsage = document.getElementById('codeContextUsage');
+    var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
+    var modelRetryButton = document.getElementById('codeModelRetryBtn');
+    var runtime = state.lastRuntime || {};
+    var modelHint = selectedCodeModel();
+
+    if (modelSelect) {
+      var current = state.selectedModelId;
+      modelSelect.innerHTML = '';
+      state.models.forEach(function(model) {
+        var option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name + (model.supports_tools ? ' · 工具' : '');
+        option.selected = model.id === current;
+        modelSelect.appendChild(option);
+      });
+      if (!state.models.length) {
+        var emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.disabled = true;
+        emptyOption.selected = true;
+        emptyOption.textContent = state.modelLoadError ? '在线模型不可用' : '正在加载在线模型…';
+        modelSelect.appendChild(emptyOption);
+      } else if (!modelHint) {
+        state.selectedModelId = state.models[0].id;
+        modelHint = state.models[0];
+        modelSelect.value = modelHint.id;
+        saveComposerPreferences();
+      }
+      modelSelect.disabled = !state.models.length;
+      modelSelect.title = modelHint ? (modelHint.description || ((modelHint.supports_thinking ? '支持思考' : '不支持思考') + (modelHint.supports_tools ? '；支持工具调用' : ''))) :
+        (state.modelLoadError ? '在线模型列表加载失败；点击“重试在线模型”重新探测' : '等待在线模型列表');
+    }
+
+    if (thinkingSelect) {
+      normalizeThinkingModeForSelectedModel();
+      thinkingSelect.value = state.thinkingMode || 'auto';
+      thinkingSelect.disabled = !modelHint;
+      Array.prototype.forEach.call(thinkingSelect.options, function(option) {
+        option.disabled = !!(modelHint && Array.isArray(modelHint.supported_thinking_modes) && modelHint.supported_thinking_modes.indexOf(option.value) < 0);
+      });
+    }
+
+    if (contextUsage) {
+      var used = Number(runtime.promptTokens || runtime.prompt_tokens || runtime.currentPromptTokens || 0);
+      var total = Number(runtime.configuredContextTokens || runtime.maxContextTokens || (state.capabilities && state.capabilities.maxContextTokens) || 0);
+      contextUsage.textContent = used > 0 && total > 0 ? '上下文 ' + Math.min(100, Math.round(used / total * 100)) + '%' : '上下文 未估算';
+      contextUsage.title = used > 0 && total > 0 ? ('约 ' + used + ' / ' + total + ' tokens') : '在收到首个模型运行数据后显示估算值';
+      if (runtime.thinkingFallback) contextUsage.title += '；思考模式已由 ' + (runtime.requestedThinkingMode || '请求值') + ' 降级为 ' + (runtime.effectiveThinkingMode || 'off');
+    }
+
+    if (runtimeStatus) {
+      delete runtimeStatus.dataset.availability;
+      runtimeStatus.removeAttribute('title');
+      var statusText = '';
+      var statusTitle = '';
+      if (state.modelLoadError) {
+        statusText = '在线不可用';
+        statusTitle = '在线模型：' + state.modelLoadError + '；点击“重试在线模型”重新探测';
+      } else if (runtime.thinkingFallback) {
+        statusText = '思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off');
+        statusTitle = '本次请求的思考模式已降级';
+      } else if (modelHint && modelHint.availability === 'degraded') {
+        statusText = '在线模型待确认';
+        statusTitle = '模型探测未完成，服务端会在发送时再次校验';
+        runtimeStatus.dataset.availability = 'degraded';
+      }
+      runtimeStatus.textContent = statusText;
+      runtimeStatus.title = statusTitle;
+      runtimeStatus.hidden = !statusText;
+    }
+
+    if (modelRetryButton) {
+      modelRetryButton.hidden = !state.modelLoadError;
+      modelRetryButton.disabled = !!state._modelsPromise;
+    }
+  }
+
   function bindComposerControls() {
     var modelSelect = document.getElementById('codeModelSelect');
     var thinkingSelect = document.getElementById('codeThinkingSelect');
@@ -5391,6 +5514,34 @@
     var contextMenu = document.getElementById('codeComposerContextMenu');
     var contextUsage = document.getElementById('codeContextUsage');
     var contextDetails = document.getElementById('codeContextDetails');
+    var modelRetryButton = document.getElementById('codeModelRetryBtn');
+    if (modelSelect && !modelSelect.dataset.bound) {
+      modelSelect.dataset.bound = '1';
+      modelSelect.addEventListener('change', function () {
+        if (!modelSelect.value) return;
+        state.selectedModelId = modelSelect.value;
+        normalizeThinkingModeForSelectedModel();
+        saveComposerPreferences();
+        updateComposerControls();
+        updateCapabilitiesBadge();
+      });
+    }
+    if (thinkingSelect && !thinkingSelect.dataset.bound) {
+      thinkingSelect.dataset.bound = '1';
+      thinkingSelect.addEventListener('change', function () {
+        state.thinkingMode = thinkingSelect.value;
+        saveComposerPreferences();
+      });
+    }
+    if (modelRetryButton && !modelRetryButton.dataset.bound) {
+      modelRetryButton.dataset.bound = '1';
+      modelRetryButton.addEventListener('click', function () {
+        if (state._modelsPromise) return;
+        state.modelLoadError = '';
+        updateComposerControls();
+        loadCodeModels();
+      });
+    }
     if (contextUsage && contextDetails && !contextUsage.dataset.bound) {
       contextUsage.dataset.bound = '1';
       contextUsage.addEventListener('click', function() {

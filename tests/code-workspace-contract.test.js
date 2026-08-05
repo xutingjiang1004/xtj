@@ -502,6 +502,15 @@ test('Code layout repair prevents persisted pane-collapse states from hiding eve
   assert.match(codeWorkspace, /if \(_layoutState\.chatCollapsed\) _layoutState\.editorCollapsed = false/);
 });
 
+test('Code layout exposes a persistent recovery control outside collapsible panes', () => {
+  assert.match(codeWorkspace, /function updateLayoutRecoveryControl\(\)/);
+  assert.match(codeWorkspace, /var layoutRecovery = document\.createElement\('div'\);/);
+  assert.match(codeWorkspace, /layoutRecovery\.className = 'code-layout-recovery'/);
+  assert.match(codeWorkspace, /_dom\.panelCode\.appendChild\(layoutRecovery\)/);
+  assert.match(codeWorkspace, /updateLayoutRecoveryControl\(\);/);
+  assert.match(codeWorkspace, /resetLayout\('#codeChatInput'\)/);
+});
+
 test('three-column layout: sidebar, editor-column, and chat-panel are separate children', () => {
   assert.match(codeWorkspace, /code-sidebar/);
   assert.match(codeWorkspace, /code-editor-column/);

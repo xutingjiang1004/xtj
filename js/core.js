@@ -173,8 +173,10 @@ window.safeParseDate = function(val) {
         }
     }
 
-    // 引用计数：每个 owner 独立计数，同一 owner 重复 open 幂等
-    var _openOwners = {}; // { ownerName: count }
+    // Owner 契约：同一 owner 真正幂等，open 多次只需一次 close
+    // 每个 owner 记录 { handle: releaseFn, domRef: WeakRef|null }
+    var _openOwners = {};
+    var _ownerSerial = 0;
 
     function applySecondaryPageState(locked) {
         try {
@@ -195,14 +197,36 @@ window.safeParseDate = function(val) {
     function getAllOpenOwners() {
         var owners = [];
         for (var k in _openOwners) {
-            if (Object.prototype.hasOwnProperty.call(_openOwners, k) && _openOwners[k] > 0) {
+            if (Object.prototype.hasOwnProperty.call(_openOwners, k) && _openOwners[k]) {
                 owners.push(k);
             }
         }
         return owners;
     }
 
+    // 清理 stale owner：DOM 不存在、已断开或隐藏时移除
+    function cleanStaleOwners() {
+        var changed = false;
+        for (var k in _openOwners) {
+            if (!Object.prototype.hasOwnProperty.call(_openOwners, k)) continue;
+            var entry = _openOwners[k];
+            if (!entry) { delete _openOwners[k]; changed = true; continue; }
+            // 检查 owner 关联的 DOM 是否仍然连接
+            if (entry.domRef) {
+                var el = entry.domRef.deref();
+                if (!el || !el.isConnected || el.hidden ||
+                    el.classList.contains('hidden') ||
+                    el.getAttribute('aria-hidden') === 'true') {
+                    delete _openOwners[k];
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
     function reconcile() {
+        cleanStaleOwners();
         var owners = getAllOpenOwners();
         if (owners.length > 0) {
             applySecondaryPageState(true);
@@ -213,26 +237,44 @@ window.safeParseDate = function(val) {
     }
 
     window.XTJSecondaryPageState = {
-        open: function(ownerName) {
-            if (!ownerName) return;
+        // open 真正幂等：同一 owner 已 open 时不重复计数
+        // 返回 release handle，调用后等同于 close(ownerName)
+        open: function(ownerName, domElement) {
+            if (!ownerName) return function(){};
             ownerName = String(ownerName);
-            // 幂等：同一 owner 重复 open 只增加引用计数
-            _openOwners[ownerName] = (_openOwners[ownerName] || 0) + 1;
+            // 已 open 的 owner 不重复计数
+            if (_openOwners[ownerName]) {
+                // 返回已存在的 release handle
+                return _openOwners[ownerName].handle;
+            }
+            var released = false;
+            var handle = function() {
+                if (released) return;
+                released = true;
+                if (_openOwners[ownerName]) delete _openOwners[ownerName];
+                reconcile();
+            };
+            _openOwners[ownerName] = {
+                handle: handle,
+                domRef: (domElement && typeof WeakRef !== 'undefined') ? new WeakRef(domElement) : null,
+                serial: ++_ownerSerial
+            };
             reconcile();
+            return handle;
         },
         close: function(ownerName) {
             if (!ownerName) return;
             ownerName = String(ownerName);
-            if (_openOwners[ownerName] && _openOwners[ownerName] > 0) {
-                _openOwners[ownerName]--;
-                if (_openOwners[ownerName] <= 0) delete _openOwners[ownerName];
-            }
-            // 未知 owner 不操作
+            if (_openOwners[ownerName]) delete _openOwners[ownerName];
             reconcile();
         },
         reset: function() {
             _openOwners = {};
             reconcile();
+        },
+        isActive: function(ownerName) {
+            if (!ownerName) return false;
+            return !!_openOwners[String(ownerName)];
         },
         hasVisibleSecondaryPage: hasVisibleSecondaryPage,
         getOpenOwners: getAllOpenOwners
@@ -258,7 +300,8 @@ window.safeParseDate = function(val) {
     document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') scheduleRestore();
     });
-    // 移除 window.error 作为导航事件（error 不应该触发导航状态恢复）
+    // 路由切换时重新对账（popstate 覆盖浏览器后退/前进）
+    window.addEventListener('popstate', function() { scheduleRestore(); });
 })();
 
 window.safeLocalStorageGetJSON = function(key, fallback) {

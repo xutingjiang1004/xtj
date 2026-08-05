@@ -14,6 +14,7 @@ const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = re
 const { applySecurityHeaders } = require('./security-headers');
 const registerCodeAgentRoutes = require('./code-agent');
 const registerCodeGitHubRoutes = require('./code-github');
+const registerProviderRegistryRoutes = require('./provider-registry');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -4128,18 +4129,28 @@ async function blockCatJobAfterCommentDelete(sourceCommentId, reason) {
 async function requeueCatJob(job, reason) {
   var attempts = Number(job && job.attempts || 0);
   var now = new Date().toISOString();
+  var maxAttempts = 3;
+  var shouldFail = attempts >= maxAttempts;
   var changes = {
-    status: attempts < 2 ? 'pending' : 'failed',
+    status: shouldFail ? 'failed' : 'pending',
     error_message: String(reason || 'retryable error').slice(0, 500),
     updated_at: now
   };
-  if (changes.status === 'failed') changes.completed_at = now;
-  if (changes.status === 'pending') {
+  if (shouldFail) {
+    changes.completed_at = now;
+  } else {
     changes.started_at = null;
     changes.completed_at = null;
+    // 指数退避 + 抖动：base * 2^attempt + random jitter
+    var baseDelayMs = 2000; // 2s base
+    var backoffMs = baseDelayMs * Math.pow(2, attempts) + Math.floor(Math.random() * 1000);
+    changes.retry_delay_ms = backoffMs;
+    changes.next_retry_at = new Date(Date.now() + backoffMs).toISOString();
+    changes.last_attempt_at = now;
+    changes.last_error_code = String(reason || '').slice(0, 100);
   }
   var result = await updateCatJobCAS(job.id, 'processing', changes);
-  logCatCAS('retry: ' + reason, result);
+  logCatCAS('retry: ' + reason + ' (attempt ' + (attempts + 1) + '/' + maxAttempts + ', delay=' + (changes.retry_delay_ms || 0) + 'ms)', result);
   return result;
 }
 
@@ -4175,7 +4186,7 @@ async function getCatPostContext(postId, sourceCommentId) {
       .limit(20);
     if (nearbyRes.error) return { ok: false, state: 'query_failed', error: nearbyRes.error, code: 'nearby_query_failed' };
     var nearbyComments = (nearbyRes.data || []).filter(function(c) {
-      return c.id !== sourceCommentId;
+      return String(c.id) !== String(sourceCommentId);
     });
 
     return {
@@ -4550,10 +4561,19 @@ async function processNextCatJob() {
   if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) return;
   currentCatAiWorkers++;
   try {
-    var { data: jobs } = await supabase.from('ai_comment_reply_jobs')
-      .select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(1);
-    if (!jobs || !jobs.length) return;
-    await processCatReplyJob(jobs[0]);
+    var nowIso = new Date().toISOString();
+    // 只领取到期任务：next_retry_at 为空或已过期
+    var queryResult = await supabase.from('ai_comment_reply_jobs')
+      .select('*').eq('status', 'pending')
+      .or('next_retry_at.is.null,next_retry_at.lte.' + nowIso)
+      .order('created_at', { ascending: true }).limit(1);
+    // 区分 query_failed / job_found / queue_empty
+    if (queryResult.error) {
+      console.error('[CAT_AI] processNext query failed:', queryResult.error.message);
+      return; // query_failed
+    }
+    if (!queryResult.data || !queryResult.data.length) return; // queue_empty
+    await processCatReplyJob(queryResult.data[0]); // job_found
   } catch (e) {
     console.error('[CAT_AI] processNext error:', e && e.message);
   } finally {
@@ -16579,6 +16599,14 @@ registerCodeAgentRoutes(app, {
 });
 registerCodeGitHubRoutes(app, {
   authenticateUser: authenticateUser
+});
+
+// ── Provider Registry routes ──
+registerProviderRegistryRoutes(app, {
+  supabase,
+  verifyToken,
+  rateLimit,
+  sanitizeError
 });
 
 // Keep API failures machine-readable even when a route or body parser throws.

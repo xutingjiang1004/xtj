@@ -3804,6 +3804,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         workspaceReadOnly: capabilities.workspaceReadOnly === true
       };
 
+      // Phase 6: 根据请求体的 workspace_mode / workspace_read_only 调整运行时能力
+      // - workspace_mode === 'github' 或 workspace_read_only === true 时，禁用代码写入与文件创建
+      var reqWorkspaceMode = body ? body.workspace_mode : null;
+      var reqWorkspaceReadOnly = !!(body && body.workspace_read_only);
+      if (reqWorkspaceMode === 'github' || reqWorkspaceReadOnly) {
+        runtimeCapabilities.canWriteCode = false;
+        runtimeCapabilities.canCreateFiles = false;
+        runtimeCapabilities.workspaceReadOnly = true;
+      }
+
       // Step 1: Build messages with initial estimate to get stable inputBudget
       var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
       var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
@@ -4809,6 +4819,16 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         workspaceReadOnly: capabilities.workspaceReadOnly === true
       };
 
+      // Phase 6: 根据请求体的 workspace_mode / workspace_read_only 调整运行时能力
+      // - workspace_mode === 'github' 或 workspace_read_only === true 时，禁用代码写入与文件创建
+      var reqWorkspaceMode = body ? body.workspace_mode : null;
+      var reqWorkspaceReadOnly = !!(body && body.workspace_read_only);
+      if (reqWorkspaceMode === 'github' || reqWorkspaceReadOnly) {
+        runtimeCapabilities.canWriteCode = false;
+        runtimeCapabilities.canCreateFiles = false;
+        runtimeCapabilities.workspaceReadOnly = true;
+      }
+
       var messages = buildAgentMessages(currentHistory, message, workspaceName, indexSummary, activePath, openFiles, attachments, capabilities, thinkingMode, null);
       var promptTokens = codeIndex.estimateTokens(JSON.stringify(messages)) + codeIndex.estimateTokens(JSON.stringify(CODE_AGENT_TOOLS));
       var inputBudget = Math.max(8192, CODE_AGENT_CONTEXT_TOKENS - CODE_AGENT_MAX_OUTPUT_TOKENS - promptTokens - 8192);
@@ -5164,6 +5184,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     var workspaceId = String(req.query.workspace_id || '').slice(0, 200);
     var workspaceGeneration = parseInt(req.query.workspace_generation, 10) || 0;
     var clientRequestId = String(req.query.client_request_id || '');
+    var pageSize = parseInt(req.query.page_size, 10) || 100;
 
     if (!streamId) {
       return res.status(400).json({ ok: false, code: 'INVALID_STREAM_ID', error: '缺少 stream_id' });
@@ -5206,8 +5227,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return res.status(410).json({ ok: false, code: 'STREAM_EXPIRED', error: '流式会话已过期' });
       }
 
-      // Get events after the given event_id
-      var eventsResult = await streamSession.getEventsAfter(supabase, streamId, afterEventId);
+      // Get events after the given event_id (分页)
+      var eventsResult = await streamSession.getEventsAfter(supabase, streamId, afterEventId, pageSize);
       if (eventsResult && eventsResult.ok === false) {
         return res.status(503).json({ ok: false, code: 'STREAM_EVENTS_QUERY_FAILED', error: 'Stream event query failed; retry later', retryable: true, details: eventsResult.error || null });
       }
@@ -5224,6 +5245,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         terminal: session.status !== 'running',
         last_event_id: session.last_event_id,
         events: events,
+        next_after_event_id: eventsResult.next_after_event_id || null,
+        has_more: !!eventsResult.has_more,
+        truncated: !!eventsResult.truncated,
+        original_length: eventsResult.original_length || events.length,
         started_at: session.started_at,
         completed_at: session.completed_at
       };

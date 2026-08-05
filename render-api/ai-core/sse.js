@@ -30,10 +30,11 @@ function createSSEWriter(res, req) {
   var _buffer = [];
   var _bufferBytes = 0;
   var _drainQueued = false;
+  var _draining = false; // 背压模式标志
   var MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024; // 4MB safety cap per stream
 
-  function markClosed() { closed = true; _buffer = []; _bufferBytes = 0; }
-  function markFinished() { finished = true; _buffer = []; _bufferBytes = 0; }
+  function markClosed() { closed = true; _buffer = []; _bufferBytes = 0; _draining = false; }
+  function markFinished() { finished = true; _buffer = []; _bufferBytes = 0; _draining = false; }
 
   if (res.on) {
     res.on('close', markClosed);
@@ -45,10 +46,11 @@ function createSSEWriter(res, req) {
 
   function flushBuffer() {
     if (_drainQueued) return;
-    if (_buffer.length === 0) return;
+    if (_buffer.length === 0) { _draining = false; return; }
     if (closed || finished || res.writableEnded || res.finished) {
       _buffer = [];
       _bufferBytes = 0;
+      _draining = false;
       return;
     }
     _drainQueued = true;
@@ -61,7 +63,7 @@ function createSSEWriter(res, req) {
         if (closed || finished || res.writableEnded || res.finished) break;
         try {
           if (res.write(pending[i]) === false) {
-            // Re-queue only the still-pending tail
+            // 当前帧已被 Node 接受，只 re-queue 之后的新帧
             _buffer = pending.slice(i + 1);
             _bufferBytes = _buffer.reduce(function (n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
             flushBuffer();
@@ -72,6 +74,7 @@ function createSSEWriter(res, req) {
           break;
         }
       }
+      if (_buffer.length === 0) _draining = false;
     });
   }
 
@@ -81,19 +84,22 @@ function createSSEWriter(res, req) {
       markFinished();
       return false;
     }
-    try {
-      var ok = res.write(data);
-      if (ok !== false) return true;
-      // Backpressure: queue the frame and flush on drain. Return true so the
-      // caller keeps producing content instead of aborting the stream.
+    // 背压模式：直接入队，不调用 res.write
+    if (_draining) {
       if ((_bufferBytes || 0) + Buffer.byteLength(data, 'utf8') > MAX_SSE_BUFFER_BYTES) {
-        // Safety cap: a client that cannot keep up for this long is effectively
-        // disconnected; stop rather than buffer unboundedly.
         markClosed();
         return false;
       }
       _buffer.push(data);
       _bufferBytes += Buffer.byteLength(data, 'utf8');
+      return true;
+    }
+    try {
+      var ok = res.write(data);
+      if (ok !== false) return true;
+      // 背压：当前帧已被 Node 内部缓冲，不要重新入队
+      // 只缓存之后产生的新帧
+      _draining = true;
       flushBuffer();
       return true;
     } catch (e) {

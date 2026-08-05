@@ -16,7 +16,7 @@
 //   api_key_tag      TEXT NOT NULL,              -- GCM 认证标签 (base64)
 //   base_url      TEXT,                           -- 自定义 API 端点（可选）
 //   models_config JSONB DEFAULT '[]'::jsonb,     -- 可用模型列表
-//   capabilities  JSONB DEFAULT '{}'::jsonb,     -- 能力标签（如 ["chat","thinking","tools"]）
+//   capabilities  JSONB DEFAULT '[]'::jsonb,     -- 能力标签字符串数组（如 ["chat","thinking","tools"]）
 //   enabled       BOOLEAN DEFAULT true,
 //   created_at    TIMESTAMPTZ DEFAULT now(),
 //   updated_at    TIMESTAMPTZ DEFAULT now()
@@ -110,6 +110,34 @@ function getDefaultConfig(providerType) {
   return PROVIDER_DEFAULTS[providerType] || PROVIDER_DEFAULTS.custom;
 }
 
+// URL 规范化：使用 URL 对象解析，要求 https，拒绝内网地址
+function normalizeProviderUrl(rawUrl) {
+  if (!rawUrl) return null;
+  var parsed;
+  try { parsed = new URL(rawUrl); } catch (_) { return { error: 'INVALID_BASE_URL' }; }
+  if (parsed.protocol !== 'https:') return { error: 'INVALID_BASE_URL' };
+  var hostname = parsed.hostname.toLowerCase();
+  // SSRF 防护：拒绝 localhost 和内网 IP
+  if (hostname === 'localhost' || hostname === '0.0.0.0' ||
+      /^10\./.test(hostname) || /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(hostname) ||
+      /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return { error: 'BLOCKED_BASE_URL' };
+  }
+  // 去除尾斜杠，保留路径
+  var normalized = parsed.origin + parsed.pathname.replace(/\/+$/, '');
+  return { url: normalized };
+}
+
+// capabilities 始终为字符串数组
+function normalizeCapabilities(caps) {
+  if (Array.isArray(caps)) return caps.map(String);
+  if (typeof caps === 'string') return [caps];
+  return [];
+}
+
 // ── Route registration ──────────────────────────────────────────────────
 
 module.exports = function registerProviderRegistryRoutes(app, deps) {
@@ -138,7 +166,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
           name: p.name,
           provider_type: p.provider_type,
           models: p.models_config || [],
-          capabilities: p.capabilities || {}
+          capabilities: normalizeCapabilities(p.capabilities)
           // base_url 不下发：避免泄露自定义内网端点
         };
       });
@@ -199,21 +227,30 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       // 填充默认值
       var defaults = getDefaultConfig(providerType);
       if (!baseUrl) baseUrl = defaults.base_url;
+      // URL 规范化 + SSRF 防护
+      if (baseUrl) {
+        var urlResult = normalizeProviderUrl(baseUrl);
+        if (!urlResult) { return res.status(400).json({ error: 'base_url 无效', code: 'INVALID_BASE_URL' }); }
+        if (urlResult.error) { return res.status(400).json({ error: urlResult.error === 'BLOCKED_BASE_URL' ? '不允许的 base_url 地址' : 'base_url 格式无效', code: urlResult.error }); }
+        baseUrl = urlResult.url;
+      }
       if (!modelsConfig || (Array.isArray(modelsConfig) && modelsConfig.length === 0)) {
         modelsConfig = defaults.models;
       }
-      if (!capabilities || (typeof capabilities === 'object' && Object.keys(capabilities).length === 0)) {
-        capabilities = defaults.capabilities;
-      }
+      capabilities = normalizeCapabilities(capabilities && capabilities.length ? capabilities : defaults.capabilities);
 
-      // 检查名称是否已存在
-      var { data: existing } = await supabase
+      // 检查名称是否已存在（处理 database error）
+      var nameCheck = await supabase
         .from('provider_registry')
         .select('id')
         .eq('name', name)
         .maybeSingle();
 
-      if (existing) {
+      if (nameCheck.error) {
+        return res.status(503).json({ error: '名称查询失败', code: 'NAME_QUERY_FAILED', details: sanitizeError(nameCheck.error) });
+      }
+
+      if (nameCheck.data) {
         return res.status(409).json({ error: '提供商名称已存在', code: 'DUPLICATE_NAME' });
       }
 
@@ -227,7 +264,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
           api_key_tag: encrypted.tag,
           base_url: baseUrl || null,
           models_config: Array.isArray(modelsConfig) ? modelsConfig : [],
-          capabilities: capabilities || {},
+          capabilities: capabilities,
           enabled: body.enabled !== false
         }])
         .select()
@@ -403,13 +440,22 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         updateData.api_key_tag = encrypted.tag;
       }
       if (body.base_url !== undefined) {
-        updateData.base_url = String(body.base_url).trim() || null;
+        var updateUrl = String(body.base_url).trim();
+        if (updateUrl) {
+          var updateUrlResult = normalizeProviderUrl(updateUrl);
+          if (!updateUrlResult || updateUrlResult.error) {
+            return res.status(400).json({ error: updateUrlResult && updateUrlResult.error === 'BLOCKED_BASE_URL' ? '不允许的 base_url 地址' : 'base_url 格式无效', code: updateUrlResult ? updateUrlResult.error : 'INVALID_BASE_URL' });
+          }
+          updateData.base_url = updateUrlResult.url;
+        } else {
+          updateData.base_url = null;
+        }
       }
       if (body.models_config !== undefined) {
         updateData.models_config = Array.isArray(body.models_config) ? body.models_config : [];
       }
       if (body.capabilities !== undefined) {
-        updateData.capabilities = body.capabilities;
+        updateData.capabilities = normalizeCapabilities(body.capabilities);
       }
       if (body.enabled !== undefined) {
         updateData.enabled = Boolean(body.enabled);
