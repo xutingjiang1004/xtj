@@ -2738,7 +2738,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // ===================== Tavily Deep Research =====================
   // 前端集成: POST /api/agent/research/stream (SSE) → 研究报告 + 来源列表
-  //   事件: research_step / research_content / research_sources / research_done / error / heartbeat
+  //   事件: research_step / research_stage / research_content(流式) / research_sources / research_done / error / heartbeat
   //   45s 无任何事件 → reject timeout; 支持取消 (promise.cancel / AbortController)
 
   // Tavily 来源列表: 渲染为引用链接列表 (escapeHtml 转义 + safeSearchUrl 白名单)
@@ -2774,9 +2774,198 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return box;
   }
 
+  // ===== 深度研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
+
+  // 将研究结果渲染进研究卡 (Tavily 流程与历史回看共用)
+  function renderTavilyResearchReport(card, answerText, sourcesList, startedAtMs, labelText) {
+    if (!isResearchCard(card)) return;
+    var srcs = Array.isArray(sourcesList) ? sourcesList : [];
+    var durationMs = Date.now() - (startedAtMs || Date.now());
+    card._researchState.durationMs = durationMs;
+    card._researchState.searchCount = srcs.length;
+
+    var answerEl = card.querySelector('.ai-think-answer');
+    if (answerEl && answerText) {
+      try { answerEl.innerHTML = renderMarkdown(String(answerText)); } catch (e) {}
+      if (!answerEl.querySelector('.ai-tavily-note')) {
+        var noteEl = document.createElement('div');
+        noteEl.className = 'ai-tavily-note';
+        noteEl.style.cssText = 'font-size:11px;color:#999;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(127,127,127,.25);';
+        noteEl.textContent = labelText || '由 Tavily Deep Research 生成';
+        answerEl.appendChild(noteEl);
+      }
+    }
+
+    var sourcesBox = buildTavilySourcesBox(srcs);
+    if (sourcesBox) {
+      var thinkBody = card.querySelector('.ai-think-body');
+      var answerEl2 = card.querySelector('.ai-think-answer');
+      if (thinkBody) {
+        if (answerEl2) thinkBody.insertBefore(sourcesBox, answerEl2);
+        else thinkBody.appendChild(sourcesBox);
+      }
+    }
+
+    var footer = card.querySelector('.ai-msg-footer');
+    if (footer) {
+      footer.innerHTML = '';
+      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+      footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: 'Tavily Deep Research' }));
+      if (srcs.length > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + srcs.length + ' 个来源' }));
+    }
+
+    setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
+    setResearchSteps(card, -1, 4);
+  }
+
+  // 二级页研究强度选择器 (快速 mini / 深度 pro / 自动 auto), 选中值存 S.dtResearchMode
+  function initDeepThinkResearchUi() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel || panel._dtResearchUiReady) return;
+    panel._dtResearchUiReady = true;
+    if (!S.dtResearchMode) S.dtResearchMode = 'pro';
+
+    // 历史入口按钮 (dt-title 旁 → dt-actions 首位)
+    var actions = panel.querySelector('.dt-actions');
+    if (actions && !panel.querySelector('.dt-research-history-btn')) {
+      var histBtn = el('button', { type: 'button', class: 'dt-action-btn dt-research-history-btn', text: '历史' });
+      histBtn.addEventListener('click', function() { toggleResearchHistoryPanel(); });
+      actions.insertBefore(histBtn, actions.firstChild);
+    }
+
+    // 研究强度选择器 (输入框上方, 动态插入 dt-input-bar 之前)
+    var inputBar = panel.querySelector('.dt-input-bar');
+    if (inputBar && !panel.querySelector('.dt-research-mode-bar')) {
+      var modeBar = el('div', { class: 'dt-research-mode-bar', style: 'display:flex;align-items:center;gap:8px;padding:8px 16px 0;flex:0 0 auto;' });
+      modeBar.appendChild(el('span', { text: '研究强度', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      var seg = el('div', { style: 'display:inline-flex;gap:2px;padding:2px;border:1px solid rgba(140,196,158,.3);border-radius:12px;background:rgba(140,196,158,.14);' });
+      var modes = [['mini', '快速'], ['pro', '深度'], ['auto', '自动']];
+      for (var mi = 0; mi < modes.length; mi++) {
+        (function(modeVal, modeText) {
+          var opt = el('button', { type: 'button', class: 'dt-research-mode-opt', text: modeText });
+          opt._mode = modeVal;
+          opt.addEventListener('click', function() {
+            S.dtResearchMode = modeVal;
+            syncResearchModeUi(panel);
+          });
+          seg.appendChild(opt);
+        })(modes[mi][0], modes[mi][1]);
+      }
+      modeBar.appendChild(seg);
+      inputBar.parentNode.insertBefore(modeBar, inputBar);
+    }
+    syncResearchModeUi(panel);
+  }
+
+  function syncResearchModeUi(panel) {
+    if (!panel) return;
+    var isDark = isDeepThinkDarkTheme();
+    var opts = panel.querySelectorAll('.dt-research-mode-opt');
+    for (var i = 0; i < opts.length; i++) {
+      var active = opts[i]._mode === S.dtResearchMode;
+      opts[i].style.cssText = active
+        ? 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:linear-gradient(135deg,rgba(64,167,116,.95),rgba(82,182,160,.95));color:#fff;font-weight:600;'
+        : 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:transparent;color:' + (isDark ? 'rgba(214,236,229,.92)' : 'rgba(66,95,85,.95)') + ';';
+    }
+  }
+
+  function isDeepThinkDarkTheme() {
+    try {
+      var dtAttr = document.documentElement.getAttribute('data-theme') || '';
+      return dtAttr.indexOf('dark') !== -1 || document.documentElement.classList.contains('dark');
+    } catch (e) { return false; }
+  }
+
+  // ===== 历史研究回看 =====
+  function toggleResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+    if (panel.querySelector('.dt-research-history-panel')) { closeResearchHistoryPanel(); return; }
+    openResearchHistoryPanel();
+  }
+
+  function openResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel || panel.querySelector('.dt-research-history-panel')) return;
+    var isDark = isDeepThinkDarkTheme();
+    var wrap = el('div', { class: 'dt-research-history-panel', style: 'position:absolute;top:64px;right:16px;z-index:1200;width:min(420px,92vw);max-height:min(60vh,480px);overflow:auto;border:1px solid rgba(140,196,158,.3);border-radius:16px;background:' + (isDark ? 'rgba(20,42,36,.98)' : 'rgba(255,255,255,.98)') + ';box-shadow:0 18px 40px rgba(61,113,99,.18);padding:10px;' });
+    var head = el('div', { style: 'display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px;font-size:13px;font-weight:700;color:' + (isDark ? 'rgba(224,241,235,.95)' : '#35544b') + ';' });
+    head.appendChild(el('span', { text: '历史研究' }));
+    var closeBtn = el('button', { type: 'button', text: '关闭', style: 'border:1px solid rgba(140,196,158,.32);border-radius:10px;background:rgba(255,255,255,.7);color:#46715f;font-size:11px;padding:3px 10px;cursor:pointer;' });
+    closeBtn.addEventListener('click', closeResearchHistoryPanel);
+    head.appendChild(closeBtn);
+    wrap.appendChild(head);
+    var body = el('div', { class: 'dt-research-history-body', text: '加载中...', style: 'padding:12px 8px;font-size:12px;color:' + (isDark ? 'rgba(180,206,198,.85)' : '#7a8f89') + ';text-align:center;' });
+    wrap.appendChild(body);
+    panel.appendChild(wrap);
+    loadResearchHistoryList(body);
+  }
+
+  function loadResearchHistoryList(bodyEl) {
+    var items = [];
+    fetch(API_BASE + '/research/history?limit=10', { method: 'GET', credentials: 'include' })
+      .then(function(resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(data) {
+        if (Array.isArray(data)) items = data;
+        else if (data && Array.isArray(data.data)) items = data.data;
+        renderResearchHistoryList(bodyEl, items);
+      })
+      .catch(function() {
+        renderResearchHistoryList(bodyEl, items);
+      });
+  }
+
+  function renderResearchHistoryList(bodyEl, items) {
+    if (!bodyEl || !bodyEl.isConnected) return;
+    bodyEl.innerHTML = '';
+    if (!items.length) {
+      bodyEl.textContent = '暂无历史研究';
+      return;
+    }
+    var isDark = isDeepThinkDarkTheme();
+    for (var hi = 0; hi < items.length; hi++) {
+      (function(item) {
+        var row = el('button', { type: 'button', style: 'display:block;width:100%;text-align:left;border:1px solid rgba(140,196,158,.2);border-radius:12px;background:' + (isDark ? 'rgba(28,60,52,.75)' : 'rgba(248,252,250,.85)') + ';padding:9px 11px;margin-bottom:8px;cursor:pointer;font:inherit;' });
+        var qText = String(item.query || '未命名研究');
+        var tText = item.created_at ? fmtTime(item.created_at) : '';
+        var absText = String(item.answer || '').slice(0, 60);
+        row.appendChild(el('div', { text: qText, style: 'font-size:13px;font-weight:600;color:' + (isDark ? 'rgba(226,243,237,.95)' : '#2f4d44') + ';line-height:1.4;' }));
+        row.appendChild(el('div', { text: (tText ? tText + ' · ' : '') + '摘要: ' + absText, style: 'font-size:11px;color:' + (isDark ? 'rgba(185,211,203,.8)' : '#7a918a') + ';margin-top:4px;line-height:1.5;' }));
+        row.addEventListener('click', function() { showResearchHistoryItem(item); });
+        bodyEl.appendChild(row);
+      })(items[hi]);
+    }
+  }
+
+  function showResearchHistoryItem(item) {
+    var dtMessagesEl = document.getElementById('dtMessages');
+    if (!dtMessagesEl) return;
+    closeResearchHistoryPanel();
+    var empty = dtMessagesEl.querySelector('.dt-empty');
+    if (empty) { try { empty.remove(); } catch (e) {} }
+    var card = buildDeepThinkProgressCard({ variant: 'research' });
+    card.classList.add('dt-animate-in');
+    dtMessagesEl.appendChild(card);
+    scrollToBottom(dtMessagesEl, true);
+    var label = '历史研究记录' + (item.query ? '：' + String(item.query).slice(0, 48) : '');
+    renderTavilyResearchReport(card, item.answer, item.sources, null, label);
+    try { card._done = true; } catch (e) {}
+    scrollToBottom(dtMessagesEl, true);
+  }
+
+  function closeResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var hp = panel.querySelector('.dt-research-history-panel');
+    if (hp) { try { hp.remove(); } catch (e) {} }
+  }
+
   // Tavily Deep Research SSE 调用
-  //   resolve({ answer, sources }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
-  function runTavilyResearch(query, onProgress) {
+  //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
+  function runTavilyResearch(query, onProgress, opts) {
     var controller = new AbortController();
     var MAX_EVENT_SIZE = 512 * 1024;
     var settled = false;
@@ -2846,9 +3035,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var srcs = Array.isArray(evt.sources) ? evt.sources : (Array.isArray(evt.data) ? evt.data : []);
         if (srcs.length) sources = srcs;
         if (onProgress) { try { onProgress({ sources: sources }); } catch (e) {} }
+      } else if (evt.type === 'research_stage') {
+        if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
       } else if (evt.type === 'research_done') {
         var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
-        succeed({ answer: finalAnswer, sources: sources });
+        succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id != null ? evt.message_id : undefined });
       } else if (evt.type === 'error') {
         var ee = new Error(evt.error || '研究失败');
         ee.tavilyError = true;
@@ -2865,7 +3056,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ query: String(query || ''), model: 'pro' }),
+            body: JSON.stringify({
+              query: String(query || ''),
+              model: (opts && opts.model) || 'pro',
+              mode: (opts && opts.mode) || 'hybrid',
+              rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true
+            }),
             signal: controller.signal
           });
         } catch (e) {
@@ -2983,6 +3179,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var answer = '';
     var sources = [];
     var responding = false;
+    var researchModel = opts.model || 'pro';
 
     function setStep(stepIdx) {
       if (!isResearchCard(progressCard)) return;
@@ -2997,41 +3194,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     function renderResearchResult() {
+      renderTavilyResearchReport(progressCard, answer, sources, startedAt);
+    }
+
+    // 三阶段状态展示 (新协议 research_stage 事件; 未知 stage 忽略, 保持原行为)
+    function handleResearchStage(stage, message) {
       if (!isResearchCard(progressCard)) return;
-      var durationMs = Date.now() - startedAt;
-      progressCard._researchState.durationMs = durationMs;
-      progressCard._researchState.searchCount = sources.length;
+      if (stage === 'rewrite') {
+        setResearchCardState(progressCard, 'thinking', { statusText: '正在优化研究问题…', progress: 0.25 });
+        setResearchSteps(progressCard, 0, 0);
+      } else if (stage === 'rewrite_done') {
+        setResearchCardState(progressCard, 'thinking', { statusText: '问题已优化，开始多智能体研究…', progress: 0.32 });
+        setResearchSteps(progressCard, 0, 0);
+      } else if (stage === 'collect') {
+        if (progressCard._researchState) progressCard._researchState.researchTick = 0;
+        setResearchCardState(progressCard, 'researching', { statusText: '多智能体并行研究中…', progress: 0.5 });
+        setResearchSteps(progressCard, 1, 1);
+      } else if (stage === 'synthesize') {
+        responding = true;
+        setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: false, progress: 0.96 });
+        var synthStatus = progressCard.querySelector('.ai-research-status');
+        if (synthStatus) synthStatus.textContent = '正在综合生成中文报告…';
+        setResearchSteps(progressCard, 3, 3);
+      }
+    }
 
+    // 流式渲染: research_content 小块实时追加到报告区 (纯文本; done 后整体 markdown 替换)
+    function appendStreamChunk(chunk) {
+      if (!chunk || !isResearchCard(progressCard)) return;
       var answerEl = progressCard.querySelector('.ai-think-answer');
-      if (answerEl && answer) {
-        try { answerEl.innerHTML = renderMarkdown(String(answer)); } catch (e) {}
-        var noteEl = document.createElement('div');
-        noteEl.className = 'ai-tavily-note';
-        noteEl.style.cssText = 'font-size:11px;color:#999;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(127,127,127,.25);';
-        noteEl.textContent = '由 Tavily Deep Research 生成';
-        answerEl.appendChild(noteEl);
-      }
-
-      var sourcesBox = buildTavilySourcesBox(sources);
-      if (sourcesBox) {
-        var thinkBody = progressCard.querySelector('.ai-think-body');
-        var answerEl2 = progressCard.querySelector('.ai-think-answer');
-        if (thinkBody) {
-          if (answerEl2) thinkBody.insertBefore(sourcesBox, answerEl2);
-          else thinkBody.appendChild(sourcesBox);
-        }
-      }
-
-      var footer = progressCard.querySelector('.ai-msg-footer');
-      if (footer) {
-        footer.innerHTML = '';
-        footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
-        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: 'Tavily Deep Research' }));
-        if (sources.length > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + sources.length + ' 个来源' }));
-      }
-
-      setResearchCardState(progressCard, 'done', { durationMs: durationMs, searchCount: sources.length, expanded: false, progress: 1 });
-      setResearchSteps(progressCard, -1, 4);
+      if (!answerEl) return;
+      answerEl.textContent = (answerEl.textContent || '') + String(chunk);
+      scrollToBottom(dtMessagesEl, false);
     }
 
     function removeTavilyCard() {
@@ -3066,9 +3260,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           return;
         }
         if (!prog) return;
+        if (prog.stage) handleResearchStage(prog.stage, prog.message);
         if (typeof prog.step === 'number') setStep(prog.step);
         if (prog.content) {
           answer += String(prog.content);
+          appendStreamChunk(String(prog.content));
           if (!responding) {
             responding = true;
             if (isResearchCard(progressCard)) {
@@ -3078,7 +3274,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      });
+      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false });
       var result = await researchPromise;
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
@@ -4042,6 +4238,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     panel.classList.remove('hidden');
     panel.classList.add('active');
     updateSecondaryPageState(true);
+    initDeepThinkResearchUi();
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
@@ -4289,7 +4486,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           text: text,
           originalUserText: originalUserText,
           fileData: fileData,
-          reqId: reqId
+          reqId: reqId,
+          model: S.dtResearchMode || 'pro',
+          mode: 'hybrid',
+          rewrite: true
         });
       } catch (eTavily) {
         console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);

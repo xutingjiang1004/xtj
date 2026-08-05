@@ -877,6 +877,106 @@ async function searchTavily(query, maxResults) {
 //   research_done（最终答案；流结束未收到 done 且无 error 时用已累积 content 补发）
 //   error（tavily_not_configured / tavily_status_xxx / 读取失败）
 var TAVILY_RESEARCH_PHASES = { Planning: 0, WebSearch: 1, ResearchSubtopic: 1, Generating: 2 };
+
+// ===================== Tavily Research 增强流水线 =====================
+// A. 24h 内存缓存（LRU，上限 50 条）：key = sha256(query+model+mode)
+//    命中后按原事件序列回放：research_step(0/1/2) → research_content（300 字切块）→ research_sources → research_done
+var researchCache = new Map();
+var RESEARCH_CACHE_MAX = 50;
+var RESEARCH_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+function researchCacheKey(query, model, mode) {
+  try {
+    return crypto.createHash('sha256').update(String(query || '') + '|' + String(model || '') + '|' + String(mode || '')).digest('hex');
+  } catch (e) {
+    return 'k_' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '');
+  }
+}
+
+function researchCacheGet(key) {
+  var entry = researchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > RESEARCH_CACHE_TTL) { researchCache.delete(key); return null; }
+  // LRU touch：删除后重插，保持 Map 迭代顺序 = 访问顺序（最旧在前）
+  researchCache.delete(key);
+  researchCache.set(key, entry);
+  return entry;
+}
+
+function researchCacheSet(key, answer, sources) {
+  if (researchCache.has(key)) researchCache.delete(key);
+  researchCache.set(key, { answer: String(answer || ''), sources: Array.isArray(sources) ? sources : [], ts: Date.now() });
+  if (researchCache.size > RESEARCH_CACHE_MAX) {
+    var oldestKey = researchCache.keys().next().value;
+    if (oldestKey !== undefined) researchCache.delete(oldestKey);
+  }
+}
+
+// B. 查询改写：DeepSeek 非流式调用（8s 超时），失败静默回退原 query
+async function rewriteResearchQuery(query) {
+  if (!DEEPSEEK_API_KEY) return query;
+  try {
+    var rewriteResp = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+      body: JSON.stringify({
+        model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
+        messages: [
+          { role: 'system', content: '你是研究问题优化助手。把用户提问改写成适合深度网络研究的高质量中文研究查询：提取关键实体、明确时间/地域/维度。直接输出 20-60 字改写结果，不要解释、不要引号。' },
+          { role: 'user', content: String(query || '') }
+        ],
+        max_tokens: 100,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!rewriteResp.ok) return query;
+    var rewriteData = await rewriteResp.json();
+    var rewritten = rewriteData && rewriteData.choices && rewriteData.choices[0] && rewriteData.choices[0].message && rewriteData.choices[0].message.content;
+    if (typeof rewritten === 'string' && rewritten.trim()) {
+      var cleaned = rewritten.trim().replace(/^["'「『]+|["'」』]+$/g, '').slice(0, 200);
+      if (cleaned) return cleaned;
+    }
+  } catch (e) {
+    // 静默 fallback：保持原 query
+  }
+  return query;
+}
+
+// D. 研究记录持久化：posts 表（media_type=AI_AGENT_MESSAGE_MARKER, actor_key=ai_msg_conv_<convId>_<ts>）
+//    content 存 JSON {type:'tavily_research', query, answer, sources}；失败不阻断流（console.warn）
+//    返回插入 id；失败时返回 actor_key，异常时返回 null
+async function persistResearchRecord(userName, convId, query, answer, sources) {
+  if (!userName || !convId) return null;
+  try {
+    var nowTs = Date.now();
+    var payload = JSON.stringify({
+      type: 'tavily_research',
+      query: String(query || ''),
+      answer: String(answer || ''),
+      sources: Array.isArray(sources) ? sources : []
+    });
+    var actorKey = 'ai_msg_conv_' + convId + '_' + nowTs;
+    var insertResult = await supabase.from('posts').insert({
+      user_name: userName,
+      content: payload,
+      media_type: AI_AGENT_MESSAGE_MARKER,
+      media_url: JSON.stringify({ role: 'assistant', convId: convId, type: 'tavily_research' }),
+      actor_key: actorKey,
+      created_at: new Date(nowTs).toISOString()
+    }).select('id');
+    if (insertResult && insertResult.error) {
+      console.warn('[RESEARCH] persist failed:', insertResult.error && insertResult.error.message);
+      return actorKey;
+    }
+    var inserted = insertResult && insertResult.data && insertResult.data[0];
+    return (inserted && inserted.id) ? inserted.id : actorKey;
+  } catch (e) {
+    console.warn('[RESEARCH] persist error:', e && e.message);
+    return null;
+  }
+}
+
 async function tavilyResearchStream(query, model, onEvent, signal) {
   var apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
@@ -15442,7 +15542,13 @@ app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async
 });
 
 // POST /api/agent/research/stream - Tavily Deep Research 多 agent 深度研究（SSE 流式代理）
-// 事件：research_step / research_content / research_sources / research_done / heartbeat / error
+// 增强流水线（2026-08）：
+//   1) rewrite=true（默认）→ DeepSeek 查询改写（research_stage: rewrite → rewrite_done），失败静默回退原 query
+//   2) mode='hybrid'（默认）→ Tavily 收集 + DeepSeek 流式中文综合（research_stage: collect → synthesize）
+//      mode='direct' → 保持原有行为（Tavily 报告直接返回）
+//   3) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
+//   4) 最终报告持久化到 posts（actor_key=ai_msg_conv_<convId>_<ts>），research_done 携带 message_id
+// 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
 app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10), async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
@@ -15486,17 +15592,210 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
     var query = vq;
     var model = String(req.body && req.body.model || 'pro').trim();
     if (['pro', 'mini', 'auto'].indexOf(model) < 0) model = 'pro';
+    // mode：默认 hybrid（Tavily 收集 → DeepSeek 中文综合）；direct 保持原有直接返回行为
+    var mode = String(req.body && req.body.mode || 'hybrid').trim();
+    if (mode !== 'direct') mode = 'hybrid';
+    // rewrite：默认 true（DeepSeek 查询改写预处理）
+    var rewrite = !(req.body && req.body.rewrite === false);
+    var userName = req.userName || '';
+    // 会话持久化：沿用请求 conversation_id（合法时），否则生成新的（对齐 /api/agent/chat/new 的 genConvId）
+    var convId = String(req.body && req.body.conversation_id || '').trim();
+    if (!convId || !/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
     startStreamHeartbeat();
-    await tavilyResearchStream(query, model, function(ev) {
+
+    var cacheKey = researchCacheKey(query, model, mode);
+
+    // A. 缓存命中 → 按原事件序列回放（research_step 0/1/2 → content 300 字切块 → sources → done）
+    var cached = researchCacheGet(cacheKey);
+    if (cached) {
+      var cachedAnswer = String(cached.answer || '');
+      if (!aborted) writeSse(res, { type: 'research_step', tool: 'Planning', phase: 0 });
+      if (!aborted) writeSse(res, { type: 'research_step', tool: 'WebSearch', phase: 1 });
+      if (!aborted) writeSse(res, { type: 'research_step', tool: 'Generating', phase: 2 });
+      for (var cci = 0; !aborted && cci < cachedAnswer.length; cci += 300) {
+        var cPiece = cachedAnswer.slice(cci, cci + 300);
+        if (!writeSse(res, { type: 'research_content', text: cPiece, content: cPiece })) { aborted = true; break; }
+      }
+      if (!aborted) writeSse(res, { type: 'research_sources', sources: cached.sources });
+      if (!aborted) {
+        var cachedMsgId = await persistResearchRecord(userName, convId, query, cachedAnswer, cached.sources);
+        if (!aborted) writeSse(res, { type: 'research_done', answer: cachedAnswer, sources: cached.sources, message_id: cachedMsgId, cached: true });
+      }
+      return safeEnd();
+    }
+
+    // B. 查询改写预处理（失败静默回退原 query）
+    var researchQuery = query;
+    if (rewrite && !aborted) {
+      writeSse(res, { type: 'research_stage', stage: 'rewrite', message: '正在优化研究问题…' });
+      researchQuery = await rewriteResearchQuery(query);
+      if (!aborted && researchQuery !== query) {
+        writeSse(res, { type: 'research_stage', stage: 'rewrite_done', message: '问题已优化' });
+      }
+    }
+
+    var tavilyAnswer = '';
+    var tavilySources = [];
+    var tavilyDoneReceived = false;
+
+    if (mode === 'direct') {
+      // 原有行为：Tavily 报告直接返回（拦截 research_done 以补 message_id，事件顺序不变）
+      await tavilyResearchStream(researchQuery, model, function(ev) {
+        if (aborted) return;
+        if (ev.type === 'research_done') {
+          tavilyDoneReceived = true;
+          if (typeof ev.answer === 'string') tavilyAnswer = ev.answer;
+          return; // done 在持久化后补发（带 message_id）
+        }
+        if (ev.type === 'research_content' && typeof ev.text === 'string') tavilyAnswer += ev.text;
+        if (ev.type === 'research_sources' && Array.isArray(ev.sources)) tavilySources = ev.sources;
+        if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
+      }, _researchAbort.signal);
+      if (aborted) return safeEnd();
+      if (tavilyDoneReceived) {
+        if (!tavilyAnswer) tavilyAnswer = '（研究完成，未返回正文）';
+        var directMsgId = await persistResearchRecord(userName, convId, query, tavilyAnswer, tavilySources);
+        if (!aborted) {
+          researchCacheSet(cacheKey, tavilyAnswer, tavilySources);
+          writeSse(res, { type: 'research_sources', sources: tavilySources });
+          writeSse(res, { type: 'research_done', answer: tavilyAnswer, sources: tavilySources, message_id: directMsgId });
+        }
+      }
+      return safeEnd();
+    }
+
+    // C. 混合模式：Tavily 收集 → DeepSeek 中文综合（流式）
+    writeSse(res, { type: 'research_stage', stage: 'collect', message: '多智能体并行研究中…' });
+    await tavilyResearchStream(researchQuery, model, function(ev) {
       if (aborted) return;
+      if (ev.type === 'research_done') {
+        // 拦截 Tavily 的 done：不结束流，保留完整 answer 供综合
+        tavilyDoneReceived = true;
+        if (typeof ev.answer === 'string') tavilyAnswer = ev.answer;
+        return;
+      }
+      if (ev.type === 'research_content' && typeof ev.text === 'string') tavilyAnswer += ev.text;
+      if (ev.type === 'research_sources' && Array.isArray(ev.sources)) tavilySources = ev.sources;
       if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
     }, _researchAbort.signal);
+    if (aborted || !tavilyDoneReceived) return safeEnd();
+
+    writeSse(res, { type: 'research_stage', stage: 'synthesize', message: '正在综合生成中文报告…' });
+
+    // DeepSeek 流式综合（复用 /api/agent/chat/stream 的 SSE 读取模式：fetch stream:true + 读 delta.content）
+    var synthText = '';
+    var synthOk = false;
+    if (!aborted && DEEPSEEK_API_KEY) {
+      try {
+        var synthPrompt = '你是深度研究综合专家。下面是一份多智能体网络研究的原始报告和来源列表。请用中文写一份结构清晰的最终研究报告：保留关键事实与数据，来源处标注编号[N]，语言自然流畅。长度 600-1200 字。\n\n原始报告：\n' + tavilyAnswer + '\n\n来源：\n' + tavilySources.map(function(s, i) { return '[' + (i + 1) + '] ' + (s.title || '') + ' ' + (s.url || ''); }).join('\n');
+        var synthTimeoutSignal = AbortSignal.timeout(180000);
+        var synthSignal = (typeof AbortSignal.any === 'function') ? AbortSignal.any([synthTimeoutSignal, _researchAbort.signal]) : _researchAbort.signal;
+        var synthResp = await fetch(DEEPSEEK_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+          body: JSON.stringify({
+            model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
+            messages: [{ role: 'user', content: synthPrompt }],
+            stream: true,
+            max_tokens: 2000
+          }),
+          signal: synthSignal
+        });
+        if (synthResp && synthResp.ok && synthResp.body) {
+          var synthReader = synthResp.body.getReader();
+          var synthDecoder = new TextDecoder('utf-8');
+          var synthBuffer = '';
+          while (!aborted) {
+            var synthRead;
+            try { synthRead = await synthReader.read(); } catch (e) { break; }
+            if (synthRead.done) break;
+            synthBuffer += synthDecoder.decode(synthRead.value, { stream: true });
+            var synthLines = synthBuffer.split('\n');
+            synthBuffer = synthLines.pop() || '';
+            for (var sli = 0; sli < synthLines.length; sli++) {
+              var synthLine = synthLines[sli].trim();
+              if (!synthLine || synthLine === 'data: [DONE]' || synthLine.indexOf('data: ') !== 0) continue;
+              var synthChunk;
+              try { synthChunk = JSON.parse(synthLine.slice(6)); } catch (e) { continue; }
+              if (!synthChunk || !synthChunk.choices || !synthChunk.choices[0]) continue;
+              var delta = synthChunk.choices[0].delta || {};
+              if (typeof delta.content === 'string' && delta.content) {
+                synthText += delta.content;
+                if (!writeSse(res, { type: 'research_content', text: delta.content, content: delta.content })) { aborted = true; break; }
+              }
+            }
+          }
+          if (synthText && synthText.trim()) synthOk = true;
+        }
+      } catch (e) {
+        console.warn('[RESEARCH] synthesis failed, falling back to Tavily answer:', e && e.message);
+      }
+    }
+    if (aborted) return safeEnd();
+
+    var finalAnswer;
+    if (synthOk) {
+      finalAnswer = synthText;
+    } else {
+      // fallback：DeepSeek 不可用/失败 → 直接把 Tavily 原始 answer 作为 research_content 分块发出
+      finalAnswer = tavilyAnswer || '（研究未返回可用内容）';
+      for (var fci = 0; !aborted && fci < finalAnswer.length; fci += 300) {
+        var fPiece = finalAnswer.slice(fci, fci + 300);
+        if (!writeSse(res, { type: 'research_content', text: fPiece, content: fPiece })) { aborted = true; break; }
+      }
+    }
+    if (aborted) return safeEnd();
+
+    // D. 持久化 + 缓存写入 + 结束事件
+    var msgId = await persistResearchRecord(userName, convId, query, finalAnswer, tavilySources);
+    if (aborted) return safeEnd();
+    researchCacheSet(cacheKey, finalAnswer, tavilySources);
+    writeSse(res, { type: 'research_sources', sources: tavilySources });
+    writeSse(res, { type: 'research_done', answer: finalAnswer, sources: tavilySources, message_id: msgId });
+    return safeEnd();
   } catch (e) {
     if (!aborted) {
       try { writeSse(res, { type: 'error', error: 'tavily_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
     }
   }
   safeEnd();
+});
+
+// GET /api/agent/research/history - 当前用户最近的研究记录（content JSON type=tavily_research，最多 10 条）
+app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var limit = Math.min(Math.max(parseInt(req.query && req.query.limit, 10) || 10, 1), 50);
+    var { data: rows, error } = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('user_name', req.userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .filter('actor_key', 'like', 'ai_msg_conv_%')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error('[RESEARCH] history query error:', error.message);
+      return res.status(500).json({ error: 'research_history_failed' });
+    }
+    // 服务端无法按 content JSON 字段过滤，取回后 JS 过滤 type === 'tavily_research'
+    var items = [];
+    for (var hi = 0; hi < (rows || []).length && items.length < limit; hi++) {
+      var hRow = rows[hi];
+      var hParsed = null;
+      try { hParsed = JSON.parse(hRow.content || ''); } catch (e) { hParsed = null; }
+      if (!hParsed || hParsed.type !== 'tavily_research') continue;
+      items.push({
+        id: hRow.id,
+        query: hParsed.query || '',
+        answer: String(hParsed.answer || '').slice(0, 200),
+        sources: Array.isArray(hParsed.sources) ? hParsed.sources : [],
+        created_at: hRow.created_at
+      });
+    }
+    return res.json({ ok: true, items: items });
+  } catch (e) {
+    console.error('[RESEARCH] history error:', e && e.message);
+    return res.status(500).json({ error: 'research_history_failed' });
+  }
 });
 
 // POST /api/agent/chat/delete - 删除用户指定的对话（软删除，管理员仍可查看）
