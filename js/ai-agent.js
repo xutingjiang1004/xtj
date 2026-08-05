@@ -5212,6 +5212,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             continue;
           }
           
+          // 服务端心跳保活事件：仅用于保持连接与重置 idle 看门狗，无 UI 副作用
+          if (evt.type === 'heartbeat') {
+            continue;
+          }
+          
           if (evt.type === 'multi_agent') {
             var maStatus = assistantNode.querySelector('.ai-search-status');
             if (!maStatus) {
@@ -5659,7 +5664,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { assistantNode.remove(); } catch (e) {}
         S.messages.pop();
         removeLastUserMessage(messagesEl);
-        notify('AI 暂时没有回应，请稍后再试');
+        restoreInputText();
+        // 流意外结束且未收到任何内容：多半是连接被代理/网络切断（而非 AI 拒绝回答）。
+        // 用户消息已回填输入框，可直接重发。
+        notify('AI 连接中断或长时间未响应，请重试');
       }
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) { try { clearInterval(_idleCheckTimer); } catch (e) {} return; }
