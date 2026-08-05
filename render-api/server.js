@@ -1291,6 +1291,8 @@ const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 function writeSse(res, payload) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
+      // 记录最近一次 SSE 写入时间，供路由级心跳定时器判断"沉默期"
+      try { res._sseLastWriteAt = Date.now(); } catch (_) {}
       var data = 'data: ' + JSON.stringify(payload) + '\n\n';
       if (!res._sseBuffer) { res._sseBuffer = []; res._sseBufferBytes = 0; }
       // A slow/disconnected client must not turn one stream into an unbounded
@@ -14155,11 +14157,31 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var streamSeq = 0;
   
   var _controller, _reader, _timer, _fcTimer;
-  function safeEnd() { if (!res.writableEnded) res.end(); }
+  // ★ 心跳保活：普通聊天与深度思考不同，此前没有任何 keep-alive 事件。
+  //   DeepSeek 思考模型（尤其 high/max effort）首个 token 前可能沉默 20-60s，
+  //   期间代理/网络会切断空闲 SSE 连接 → 前端收到干净 EOF 且无任何事件 →
+  //   落入"AI 暂时没有回应，请稍后再试"兜底。每 4s 检查一次，沉默 ≥8s 时
+  //   发送 heartbeat 事件保活，同时重置前端 45s idle 看门狗。
+  var _heartbeatTimer = null;
+  function clearStreamHeartbeat() {
+    if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; }
+  }
+  function startStreamHeartbeat() {
+    if (_heartbeatTimer) return;
+    _heartbeatTimer = setInterval(function() {
+      if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
+      var lastWrite = res._sseLastWriteAt || 0;
+      if (Date.now() - lastWrite >= 8000) {
+        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
+      }
+    }, 4000);
+  }
+  function safeEnd() { clearStreamHeartbeat(); if (!res.writableEnded) res.end(); }
   
   function markStreamDisconnected() {
     if (aborted) return;
     aborted = true;
+    clearStreamHeartbeat();
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
     try { _controller && _controller.abort(); } catch (e) {}
     try { _reader && _reader.cancel(); } catch (e) {}
@@ -14218,6 +14240,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     writeSse(res, { type: 'meta', conversation_id: convId });
     if (aborted) return safeEnd();
+    startStreamHeartbeat();
     
     // 立即发送思考开始信号, 让前端显示"思考中..."而非干等
     writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
@@ -14929,10 +14952,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         controller.abort();
         return safeEnd();
       }
-      // idle timeout: 60 秒无 chunk 则中断(深度思考需要更长时间思考, 不应误判)
+      // idle timeout: 思考模式(useThinking)放宽到 90 秒无 chunk 才中断，
+      //   因为 reasoning 模型思考阶段可能长时间无输出（心跳已保证客户端连接存活）；
+      //   非思考模式保持 60 秒。
       var idleElapsed = Date.now() - lastChunkTime;
-      if (idleElapsed > 60000) {
-        console.log('[AGENT-STREAM] idle timeout 60s, aborting');
+      if (idleElapsed > (useThinking ? 90000 : 60000)) {
+        console.log('[AGENT-STREAM] idle timeout ' + (useThinking ? '90s' : '60s') + ', aborting');
         controller.abort();
         if (!aborted) {
           if (contentBuffer && contentBuffer.length > 0) {
