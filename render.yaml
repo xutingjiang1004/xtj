@@ -58,7 +58,7 @@ services:
         value: https://ithowxqignlhkwaykglt.supabase.co
       
       - key: ADMIN_USERNAME
-        sync: false
+        value: xxz
       
       # CORS 白名单（逗号分隔）。留空则自动检测：
       # 放行 Render 同域、localhost 及 *.vercel.app 前端（M-2）。

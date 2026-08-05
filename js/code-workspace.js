@@ -1737,20 +1737,13 @@
   // only control that can restore it. This is a small status surface, not a
   // modal overlay: it never blocks editor/chat interaction and stays keyboard
   // reachable after a layout action.
+  // 用户要求：Code 页面不显示"专注模式：AI 面板 · 可恢复完整工作台"提示条。
+  // 布局恢复能力保留在布局菜单中（data-code-layout-action），此状态条永久隐藏。
   function updateLayoutRecoveryControl() {
     var control = _dom.layoutRecovery;
     if (!control) return;
-    var hasFocusedPane = _layoutState.maximizedPanel === 'chat' || _layoutState.maximizedPanel === 'editor';
-    var hasCollapsedPane = _layoutState.sidebarCollapsed || _layoutState.editorCollapsed ||
-      _layoutState.workbenchNavCollapsed || _layoutState.chatCollapsed || _layoutState.contextCollapsed;
-    control.hidden = !hasFocusedPane && !hasCollapsedPane;
-    if (control.hidden) return;
-    var label = control.querySelector('.code-layout-recovery-label');
-    if (label) {
-      label.textContent = hasFocusedPane
-        ? ('专注模式：' + (_layoutState.maximizedPanel === 'chat' ? 'AI 面板' : '编辑器') + ' · 可恢复完整工作台')
-        : '部分面板已收起 · 可恢复完整工作台';
-    }
+    control.hidden = true;
+    return;
   }
 
   function toggleSidebar() {
@@ -2105,9 +2098,16 @@
       else if (action === 'nav') toggleWorkbenchNav();
       else if (action === 'reset') resetLayout();
       setLayoutMenuOpen(false);
-      var recoveryButton = document.querySelector('.code-layout-recovery:not([hidden]) button');
-      if (action === 'chat' && recoveryButton) recoveryButton.focus();
-      else layoutTrigger.focus();
+      // 布局恢复控件已按要求隐藏；恢复完整布局后焦点回到聊天输入框，
+      // 保持与原 recovery 按钮一致的键盘可达性。
+      if (action === 'reset') {
+        requestAnimationFrame(function () {
+          var chatInput = document.querySelector('#codeChatInput');
+          if (chatInput && chatInput.offsetParent !== null && typeof chatInput.focus === 'function') chatInput.focus();
+        });
+      } else {
+        layoutTrigger.focus();
+      }
     });
     var closeLayoutMenuOnOutsidePointer = function (event) {
       if (!layoutPopover.hidden && !layoutMenu.contains(event.target)) setLayoutMenuOpen(false);
