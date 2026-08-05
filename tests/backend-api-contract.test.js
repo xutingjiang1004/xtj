@@ -40,7 +40,8 @@ test('DM messages uses exact two-way participant filters and UUID-safe ordering'
   assert.match(source, /buildDirectionQuery\(req\.userName, targetUser\)/);
   assert.match(source, /buildDirectionQuery\(targetUser, req\.userName\)/);
   assert.match(source, /\.eq\('user_name', sender\)\.eq\('media_url', recipient\)/);
-  assert.match(source, /order\('created_at', \{ ascending: true \}\)/);
+  // ★ 2026-08-05 修复：分页改为取最新消息（此前 asc 取最旧 N 条，长会话永远取不到新消息）
+  assert.match(source, /order\('created_at', \{ ascending: false \}\)/);
   assert.doesNotMatch(source, /parseInt\(req\.query\.after_id|\.gt\('id'/);
   assert.match(source, /new Map\(\)/);
   assert.doesNotMatch(source, /\.or\(`/);

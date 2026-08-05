@@ -199,21 +199,6 @@
         } catch(e) { return ''; }
     }
 
-    // ===================== 密码哈希（前端不再验证密码，仅保留供其他场景使用） =====================
-    // 注意：管理员密码验证只发生在后端 /admin/login
-    // 以下函数保留但不用于管理员登录验证
-    async function adminPbkdf2Hash(password, salt) {
-        var enc = new TextEncoder();
-        var keyMaterial = await crypto.subtle.importKey(
-            'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
-        );
-        var bits = await crypto.subtle.deriveBits(
-            { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
-            keyMaterial, 256
-        );
-        return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-    }
-
     // ===================== Session 超时管理（24小时无操作自动登出） =====================
     var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
     var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
@@ -252,6 +237,10 @@
     }
     var userFilterStatus = 'all';
     var userSortBy = 'reg';
+    // 筛选/排序状态只能通过暴露的 setter 修改：内联 onclick/onchange 运行在全局作用域，
+    // 直接赋值会写 window.userFilterStatus（全局），而 IIFE 闭包变量不会变，导致筛选/排序失效。
+    window.setUserFilterStatus = function(v) { userFilterStatus = v; };
+    window.setUserSortBy = function(v) { userSortBy = v; };
     var confirmCallback = null;
     var currentTab = 'ann';
     var registerAlertState = {
@@ -1426,11 +1415,11 @@ async function initAdminClient() {
         h += '<div class="filter-bar">';
         h += '<div class="search-wrap"><span class="search-icon">🔍</span><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '"></div>';
         h += '<div class="filter-chips">';
-        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">拉黑封禁中</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="setUserFilterStatus(\'all\');renderTab(\'users\')">全部</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="setUserFilterStatus(\'banned\');renderTab(\'users\')">拉黑封禁中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="setUserFilterStatus(\'muted\');renderTab(\'users\')">禁言中</span>';
         h += '</div>';
-        h += '<select onchange="userSortBy=this.value;renderTab(\'users\')">';
+        h += '<select onchange="setUserSortBy(this.value);renderTab(\'users\')">';
         h += '<option value="reg"' + (userSortBy === 'reg' ? ' selected' : '') + '>按注册时间</option>';
         h += '<option value="login"' + (userSortBy === 'login' ? ' selected' : '') + '>按最近登录</option>';
         h += '<option value="posts"' + (userSortBy === 'posts' ? ' selected' : '') + '>按帖子数</option>';
@@ -1599,81 +1588,6 @@ async function initAdminClient() {
             showToast('删除用户失败：' + e.message, 'error');
         }
     };
-
-    async function renderPostsTab(el) {
-        if (API_BASE && (!allPosts.length || !annList.length)) {
-            try {
-                var apiData = await apiCall('GET', '/admin/data');
-                var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
-                annList = apiData.announcements || [];
-                allLikes = apiData.likes || [];
-                allComments = apiData.comments || [];
-                bansData = apiData.bans || [];
-            } catch(e) {}
-        }
-        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
-        var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
-        h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
-        var filtered = visiblePosts;
-        if (searchPost) {
-            var q = searchPost.toLowerCase();
-            filtered = visiblePosts.filter(function(p) {
-                return (p.user_name || '').toLowerCase().includes(q) || (p.content || '').toLowerCase().includes(q);
-            });
-        }
-        if (!filtered.length) { h += '<div class="empty">无匹配帖子</div>'; }
-        else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
-            filtered.forEach(function(p) {
-                var summary = getAdminPostSummary(p);
-                var content = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 60);
-                if (summary.text && summary.text.length > 60) content += '...';
-                // 图片预览
-                var imgHtml = '';
-                if (p.media_url && p.media_url.indexOf('http') === 0) {
-                    imgHtml = '<img src="' + escapeHtml(p.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + safeJsStr(p.media_url) + '\',\'' + safeJsStr(p.user_name || '') + '\',\'' + safeJsStr(p.created_at || '') + '\')" title="点击预览大图">';
-                } else if (p.media_url) {
-                    imgHtml = '📎';
-                }
-                h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
-                h += '<td>' + escapeHtml(content) + '</td>';
-                h += '<td>' + (imgHtml || '-') + '</td>';
-                h += '<td>' + (p.views || 0) + '</td>';
-                h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + String(p.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
-            });
-            h += '</tbody></table></div>';
-        }
-        h += '</div>';
-        el.innerHTML = h;
-    }
-
-    async function renderLikesTab(el) {
-        if (API_BASE && (!allLikes || !allLikes.length || !allPosts || !allPosts.length)) {
-            try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
-        }
-        var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
-        if (!allLikes.length) { h += '<div class="empty">暂无点赞数据</div>'; }
-        else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>帖子作者</th><th>帖子内容</th><th>时间</th></tr></thead><tbody>';
-            var recentLikes = allLikes.slice(0, 500);
-            recentLikes.forEach(function(l) {
-                var post = allPosts.find(function(p) { return p.id === l.post_id; });
-                var displayText = post ? getDisplayContent(post.content) : '(已删除)';
-                var postContent = (displayText || '').slice(0, 30);
-                if (displayText && displayText.length > 30) postContent += '...';
-                h += '<tr><td>' + escapeHtml(l.user_name || '') + '</td>';
-                h += '<td>' + escapeHtml((post && post.user_name) || '') + '</td>';
-                h += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(postContent) + '</td>';
-                h += '<td>' + formatTime(l.created_at) + '</td></tr>';
-            });
-            h += '</tbody></table></div>';
-            if (allLikes.length > 500) h += '<div class="empty">仅显示最近500条记录</div>';
-        }
-        h += '</div>';
-        el.innerHTML = h;
-    }
 
     async function renderCommentsTab(el) {
         var h = '<div class="card"><h3>评论记录（' + allComments.length + '条）</h3>';
@@ -2336,178 +2250,8 @@ async function initAdminClient() {
     window.statsDateEnd = window.statsDateEnd || '';
     window.statsChartMode = window.statsChartMode || 'visits'; // visits | attacks | posts | comments | likes
 
-    async function renderStatsTab(el) {
-        // ===== 先渲染骨架屏 =====
-        var skeletonHtml = '<div class="card"><div class="date-filter-row">';
-        skeletonHtml += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
-        skeletonHtml += '<input type="date" value="' + escapeHtml(window.statsDateStart) + '" disabled>';
-        skeletonHtml += '<span style="color:var(--text-muted);">至</span>';
-        skeletonHtml += '<input type="date" value="' + escapeHtml(window.statsDateEnd) + '" disabled>';
-        skeletonHtml += '</div></div>';
-        skeletonHtml += '<div class="stats-row">';
-        var labels = ['用户数量','帖子数量','评论数量','点赞数量','照片数量','访问总次数'];
-        labels.forEach(function(l) {
-            skeletonHtml += '<div class="stat-box skeleton-pulse"><div class="val" style="height:28px;width:60%;background:rgba(255,255,255,0.08);border-radius:6px;">&nbsp;</div><div class="lbl">' + l + '</div></div>';
-        });
-        skeletonHtml += '</div>';
-        skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:60px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
-        el.innerHTML = skeletonHtml;
-
-        try {
-            var summary, dailyData;
-
-            if (API_BASE) {
-                // 通过后端 API
-                var dailyQuery = '/admin/stats/daily';
-                var summaryQuery = '/admin/stats';
-                if (window.statsDateStart) dailyQuery += '?start=' + window.statsDateStart;
-                if (window.statsDateEnd) dailyQuery += (window.statsDateStart ? '&' : '?') + 'end=' + window.statsDateEnd;
-
-                // summary也支持日期筛选
-                if (window.statsDateStart || window.statsDateEnd) {
-                    summaryQuery += '?';
-                    if (window.statsDateStart) summaryQuery += 'start=' + window.statsDateStart;
-                    if (window.statsDateEnd) summaryQuery += (window.statsDateStart ? '&' : '') + 'end=' + window.statsDateEnd;
-                }
-
-                var summaryR = apiCall('GET', summaryQuery);
-                var dailyR = apiCall('GET', dailyQuery);
-                summary = await summaryR;
-                dailyData = await dailyR;
-            }
-
-            if (!summary) {
-                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：API返回为空</div><div style="font-size:12px;color:var(--text-muted);margin-top:8px;">请检查后端服务是否正常运行</div></div>';
-                return;
-            }
-
-            var daily = (dailyData && dailyData.daily) || [];
-
-            // ===== 渲染真实内容 =====
-            var h = '<div class="card"><div class="date-filter-row">';
-            h += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
-            h += '<input type="date" id="statsDateStart" value="' + escapeHtml(window.statsDateStart) + '" onchange="window.statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
-            h += '<span style="color:var(--text-muted);">至</span>';
-            h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(window.statsDateEnd) + '" onchange="window.statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
-            if (window.statsDateStart || window.statsDateEnd) {
-                h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
-            }
-            if (API_BASE) {
-                h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
-            }
-            h += '</div></div>';
-
-            // ===== 总览数据卡片 =====
-            h += '<div class="stats-row">';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_users || 0) + '</div><div class="lbl">用户数量</div></div>';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_posts || 0) + '</div><div class="lbl">帖子数量</div></div>';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_comments || 0) + '</div><div class="lbl">评论数量</div></div>';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_likes || 0) + '</div><div class="lbl">点赞数量</div></div>';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
-            h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
-            h += '</div>';
-
-            // ===== 用户访问明细占位（异步加载） =====
-            h += '<div id="userVisitStatsContainer"></div>';
-
-            if (summary.cached_at) {
-                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
-            }
-
-            el.innerHTML = h;
-
-            // ===== 异步加载用户访问明细 =====
-            loadUserVisitStats(el);
-        } catch(e) {
-            el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
-        }
-    }
-
-    // ===================== 用户访问明细（异步加载） =====================
-    async function loadUserVisitStats(el) {
-        var container = document.createElement('div');
-        container.className = 'card';
-        container.innerHTML = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载用户访问数据中...</div>';
-        el.appendChild(container);
-
-        try {
-            var userData;
-
-            if (API_BASE) {
-                userData = await apiCall('GET', '/admin/stats/users');
-            }
-
-            if (!userData || !userData.users) {
-                container.innerHTML = '<h3>用户访问明细</h3><div class="empty">暂无用户访问数据</div>';
-                return;
-            }
-
-            var users = userData.users;
-            var totalUsers = userData.total || 0;
-
-            var h = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + totalUsers + ' 个用户</span></h3>';
-
-            if (users.length === 0) {
-                h += '<div class="empty">暂无用户访问数据</div>';
-            } else {
-                h += '<div class="table-wrap"><table><thead><tr>';
-                h += '<th>用户</th><th>总访问次数</th><th>今日访问</th><th>最近登录</th><th>注册时间</th>';
-                h += '</tr></thead><tbody>';
-
-                var today = new Date().toISOString().slice(0, 10);
-                users.forEach(function(u) {
-                    var todayVisits = u.daily_visits && u.daily_visits[today] ? u.daily_visits[today] : 0;
-                    var lastLogin = u.last_login || u.last_visit || '';
-                    var regTime = u.reg_time || '';
-
-                    h += '<tr>';
-                    h += '<td><strong>' + escapeHtml(u.user_name) + '</strong></td>';
-                    h += '<td><span style="color:var(--primary);font-weight:600;">' + u.total_visits + '</span></td>';
-                    h += '<td>' + (todayVisits > 0 ? '<span style="color:#059669;font-weight:600;">' + todayVisits + '</span>' : '0') + '</td>';
-                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (lastLogin ? formatTime(lastLogin) : '--') + '</td>';
-                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (regTime ? formatTime(regTime) : '--') + '</td>';
-                    h += '</tr>';
-                });
-
-                h += '</tbody></table></div>';
-            }
-
-            container.innerHTML = h;
-        } catch(e) {
-            container.innerHTML = '<h3>用户访问明细</h3><div class="empty">用户访问数据加载失败: ' + escapeHtml(e.message) + '</div>';
-        }
-    }
-
-    window.quickBlacklistUser = function(userName) {
-        var hours = prompt('请输入拉黑时长（小时），0=永久拉黑：', '24');
-        if (hours === null) return;
-        hours = parseInt(hours, 10);
-        if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
-        showConfirm('加入黑名单', '确认将 ' + userName + (hours > 0 ? ' 拉黑 ' + hours + ' 小时' : ' 永久拉黑') + '？', '确认拉黑', async function() {
-            try {
-                await apiCall('POST', '/admin/blacklist', {
-                    user_name: userName,
-                    duration_hours: hours,
-                    reason: '管理员操作'
-                });
-                await loadBlacklistData();
-                renderTab('bans');
-                showToast('已拉黑 ' + userName, 'success');
-            } catch(e) {
-                showToast('拉黑失败: ' + e.message, 'error');
-            }
-        });
-    };
-
     // 安全设置
     var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, security_alerts: true };
-
-    async function loadSecuritySettings() {
-        try {
-            var res = await apiCall('GET', '/admin/security-settings');
-            if (res && res.settings) securitySettings = res.settings;
-        } catch(e) {}
-    }
 
     window.saveSecuritySetting = async function(key, value) {
         var body = {};
@@ -2699,49 +2443,6 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    function buildAdminStackItemV2(config) {
-        return [
-            '<div class="admin-stack-item' + (config.itemClass ? ' ' + config.itemClass : '') + '">',
-            '<div class="admin-stack-main">',
-            '<div class="admin-stack-title"><strong>' + config.title + '</strong>' + (config.tags || '') + '</div>',
-            '<div class="admin-stack-metrics">' + (config.metrics || '') + '</div>',
-            '<div class="admin-stack-meta">' + (config.meta || '') + '</div>',
-            '</div>',
-            '<div class="admin-stack-side">',
-            config.badge || '',
-            '<div class="admin-stack-actions">' + (config.actions || '') + '</div>',
-            '</div>',
-            '</div>'
-        ].join('');
-    }
-
-    function buildAdminModerationRecordListV2(kind, records) {
-        if (!records.length) return '<div class="empty">暂无记录</div>';
-        return '<div class="admin-stack-list">' + records.map(function(record) {
-            var isBan = kind === 'ban';
-            var reason = escapeHtml((isBan ? record.ban_reason : record.reason) || '-');
-            var duration = isBan
-                ? (record.ban_type === 'permanent' ? '永久' : formatDuration(record.ban_duration_hours || 0))
-                : ((record.duration_hours || 0) > 0 ? formatDuration(record.duration_hours) : '永久');
-            var startTime = isBan ? formatTime(record.banned_at) : formatTime(record.created_at);
-            var operator = escapeHtml((isBan ? record.banned_by : record.muted_by) || '-');
-            var badge = record.is_active
-                ? '<span class="badge badge-red">' + (isBan ? '封禁中' : '禁言中') + '</span>'
-                : '<span class="badge badge-green">已解除</span>';
-            var actions = record.is_active
-                ? '<button class="btn-sm' + (isBan ? ' del' : '') + '" onclick="' + (isBan ? 'liftBan' : 'liftMute') + '(' + "'" + escapeHtml(String(record.id || '')) + "'" + ')">解除</button>'
-                : '<span style="color:var(--text-muted);font-size:12px;">' + escapeHtml(record.lifted_at ? formatTime(record.lifted_at) : '已结束') + '</span>';
-            return buildAdminStackItemV2({
-                itemClass: record.is_active ? (isBan ? 'is-banned' : 'is-muted') : '',
-                title: escapeHtml(record.user_name || '-'),
-                metrics: '<span>时长：' + escapeHtml(duration) + '</span><span>原因：' + reason + '</span>',
-                meta: '<span>操作人：' + operator + '</span><span>' + (isBan ? '封禁时间：' : '开始时间：') + escapeHtml(startTime) + '</span><span>到期时间：' + escapeHtml(record.expires_at ? formatTime(record.expires_at) : '永久') + '</span>',
-                badge: badge,
-                actions: actions
-            });
-        }).join('') + '</div>';
-    }
-
     window.buildUserTagMarkup = function(flags) {
         // G11 修复：与 1292 行首个定义合并，补回丢失的"黑名单"标签分支
         var html = '';
@@ -2781,10 +2482,15 @@ async function initAdminClient() {
         h += '<div class="card"><h3>用户列表（' + filtered.length + '位）</h3>';
         h += '<div class="search-bar"><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '" /></div>';
         h += '<div class="filter-chips" style="margin-bottom:10px;">';
-        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">封禁中</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="setUserFilterStatus(\'all\');renderTab(\'users\')">全部</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="setUserFilterStatus(\'banned\');renderTab(\'users\')">封禁中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="setUserFilterStatus(\'muted\');renderTab(\'users\')">禁言中</span>';
         h += '</div>';
+        h += '<select onchange="setUserSortBy(this.value);renderTab(\'users\')" style="margin-left:12px;">';
+        h += '<option value="reg"' + (userSortBy === 'reg' ? ' selected' : '') + '>按注册时间</option>';
+        h += '<option value="login"' + (userSortBy === 'login' ? ' selected' : '') + '>按最近登录</option>';
+        h += '<option value="posts"' + (userSortBy === 'posts' ? ' selected' : '') + '>按帖子数</option>';
+        h += '</select>';
         if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
         else {
             h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>地区</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
@@ -5721,12 +5427,6 @@ async function initAdminClient() {
             loadProfileDirectory();
         }
     }
-
-    window.showProfileDirectory = function() {
-        profileCurrentUser = '';
-        var panel = document.getElementById('tabProfile');
-        if (panel) renderProfileTab(panel);
-    };
 
     async function loadProfileDirectory() {
         var target = document.getElementById('profileDirectory');

@@ -497,6 +497,7 @@ test.describe('在线 API E2E 验证', function () {
       });
       // 服务器使用 express.json，如果没有 Content-Type 可能返回 400
       reportResult('错误处理', '缺少 Content-Type', res.status >= 400, '状态码: ' + res.status);
+      expect(res.status >= 400).toBe(true);
     });
 
     test('未知路径应返回 404', async function () {
@@ -510,6 +511,7 @@ test.describe('在线 API E2E 验证', function () {
       var largeBody = { message: 'x'.repeat(1024 * 1024 * 10) }; // 10MB
       var res = await post('/api/code/chat', largeBody, authToken);
       reportResult('错误处理', '请求体过大', res.status === 413 || res.status === 400, '状态码: ' + res.status);
+      expect(res.status === 413 || res.status === 400).toBe(true);
     });
   });
 
@@ -670,5 +672,6 @@ test.describe('Cat AI 聊天验证', function () {
     var isDisabled = await sendBtn.isDisabled();
 
     reportResult('Cat AI', '空消息时发送按钮禁用', isDisabled, 'disabled: ' + isDisabled);
+    expect(isDisabled).toBe(true);
   });
 });

@@ -12,7 +12,7 @@
     directoryHandle: null,
     workspaceName: '',
     workspaceMode: 'local', // 'local' or 'github'
-    fileHandles: {},
+    fileHandles: {}, // TODO: write-only field (verified 0 readers in repo) — safe to remove with its writes
     openTabs: [],
     activePath: '',
     pinnedFiles: [], // Replaces contextPaths — only priority hints, not full uploads
@@ -79,7 +79,7 @@
     _layoutMenuCleanup: null,
     _isReadOnly: false,
     _phoneMode: false, // Phase 6: 手机端只读聊天模式
-    _persistenceFailed: false, // P0-9: 标记 IndexedDB 持久化是否失败
+    _persistenceFailed: false, // TODO: write-only field (verified 0 readers in repo) — safe to remove with its writes
     workspaceGeneration: 0,
     restoreGeneration: 0
   };
@@ -159,23 +159,6 @@
     });
   }
 
-  function idbGet(storeName, key) {
-    return openIndexedDB().then(function (db) {
-      if (!db) return null;
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(storeName, 'readonly');
-        var store = tx.objectStore(storeName);
-        var req = store.get(key);
-        req.onsuccess = function () { resolve(req.result || null); };
-        req.onerror = function (e) {
-          var err = e.target.error || new Error('IndexedDB get failed');
-          console.warn('[CODE-INDEXEDDB] idbGet error:', storeName, key, err && err.name);
-          reject(err);
-        };
-      });
-    });
-  }
-
   function idbPut(storeName, value) {
     return openIndexedDB().then(function (db) {
       if (!db) return;
@@ -231,28 +214,6 @@
         tx.onabort = function (e) {
           var err = e.target.error || new Error('IndexedDB delete aborted');
           console.warn('[CODE-INDEXEDDB] idbDelete abort:', storeName, key, err && err.name);
-          reject(err);
-        };
-      });
-    });
-  }
-
-  function idbClear(storeName) {
-    return openIndexedDB().then(function (db) {
-      if (!db) return;
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(storeName, 'readwrite');
-        var store = tx.objectStore(storeName);
-        store.clear();
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function (e) {
-          var err = e.target.error || new Error('IndexedDB clear failed');
-          console.warn('[CODE-INDEXEDDB] idbClear error:', storeName, err && err.name);
-          reject(err);
-        };
-        tx.onabort = function (e) {
-          var err = e.target.error || new Error('IndexedDB clear aborted');
-          console.warn('[CODE-INDEXEDDB] idbClear abort:', storeName, err && err.name);
           reject(err);
         };
       });
@@ -424,14 +385,6 @@
       '.gitignore': 'ignore', '.editorconfig': 'ini'
     };
     return map[ext] || 'plaintext';
-  }
-
-  function formatSize(bytes) {
-    if (bytes == null || isNaN(bytes)) return '0 B';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    return (bytes / 1073741824).toFixed(2) + ' GB';
   }
 
   function showToast(msg, type) {
@@ -1723,12 +1676,6 @@
       _dom.panelCode.classList.remove('is-narrow-viewport');
     }
     
-    if (window.monacoEditorInstance) {
-      // Defer layout slightly so DOM is ready
-      requestAnimationFrame(function() {
-        if (window.monacoEditorInstance) window.monacoEditorInstance.layout();
-      });
-    }
     updateLayoutRecoveryControl();
   }
 
@@ -2401,20 +2348,6 @@
       state._resizerCleanup = null;
     };
   }
-
-  function renderPhoneOnlyNotice() {
-    if (!_dom.panelCode) return;
-    _dom.panelCode.replaceChildren();
-    var notice = document.createElement('section');
-    notice.className = 'code-phone-notice';
-    notice.setAttribute('role', 'status');
-    notice.setAttribute('aria-live', 'polite');
-    notice.innerHTML = '<div class="code-phone-notice-icon" aria-hidden="true">💻</div>' +
-      '<h2>请在桌面或平板使用 Code</h2>' +
-      '<p>Code 工作区需要更宽的编辑空间。请使用屏幕宽度至少 768px 的设备继续。</p>';
-    _dom.panelCode.appendChild(notice);
-  }
-
 
   // ──────────────────────────────────────────────
   // restoreTabs() — restore open tabs after cleanup
@@ -4016,6 +3949,9 @@
           content: file.content || ''
         });
       }
+      // Keep the full scan for manifest persistence — `files` is later
+      // filtered to changed files by the incremental manifest comparison.
+      var allFiles = files;
 
       ctx.status = 'uploading';
       ctx.scannedFiles = sourceFiles.length;
@@ -4168,8 +4104,12 @@
 
       // Phase 4: Save manifest to IndexedDB after successful build
       if (CODE_PERSISTENT_INDEX_ENABLED && !buildResult.unchanged) {
-        // Re-get the files list from the scan result to save to IDB
-        // (The files variable is already filtered, so we save from the original scan)
+        // Save from the original scan (files may have been filtered to
+        // changed files by the incremental manifest comparison).
+        saveFileManifestToIDB(allFiles).catch(function (err) {
+          state._persistenceFailed = true;
+          console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
+        });
         saveWorkspaceToIDB(workspaceId).catch(function (err) {
           state._persistenceFailed = true;
           console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
@@ -5434,69 +5374,6 @@
 
 
 
-  function updateComposerControlsLegacy() {
-    var modelSelect = document.getElementById('codeModelSelect');
-    var thinkingSelect = document.getElementById('codeThinkingSelect');
-    var contextUsage = document.getElementById('codeContextUsage');
-    var runtimeStatus = document.getElementById('codeComposerRuntimeStatus');
-    var modelRetryButton = document.getElementById('codeModelRetryBtn');
-    if (modelSelect) {
-      var current = state.selectedModelId;
-      modelSelect.innerHTML = '';
-      state.models.forEach(function(model) {
-        var option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = model.name + (model.supports_tools ? ' · 工具' : '');
-        option.selected = model.id === current;
-        modelSelect.appendChild(option);
-      });
-      modelSelect.disabled = false;
-      var selectedModel = selectedCodeModel();
-      modelSelect.title = selectedModel ? (selectedModel.description || ((selectedModel.supports_thinking ? '支持思考' : '不支持思考') + (selectedModel.supports_tools ? '；支持工具调用' : ''))) : '';
-    }
-    if (thinkingSelect) {
-      normalizeThinkingModeForSelectedModel();
-      thinkingSelect.value = state.thinkingMode || 'auto';
-      var model = selectedCodeModel();
-      Array.prototype.forEach.call(thinkingSelect.options, function(option) {
-        option.disabled = !!(model && Array.isArray(model.supported_thinking_modes) && model.supported_thinking_modes.indexOf(option.value) < 0);
-      });
-    }
-    if (contextUsage) {
-      var runtime = state.lastRuntime || {};
-      var used = Number(runtime.promptTokens || runtime.prompt_tokens || runtime.currentPromptTokens || 0);
-      var total = Number(runtime.configuredContextTokens || runtime.maxContextTokens || (state.capabilities && state.capabilities.maxContextTokens) || 0);
-      contextUsage.textContent = used > 0 && total > 0 ? '上下文 ' + Math.min(100, Math.round(used / total * 100)) + '%' : '上下文 未估算';
-      contextUsage.title = used > 0 && total > 0 ? ('约 ' + used + ' / ' + total + ' tokens') : '在收到首个模型运行数据后显示估算值';
-      if (runtime.thinkingFallback) contextUsage.title += '；思考模式已由 ' + (runtime.requestedThinkingMode || '请求值') + ' 降级为 ' + (runtime.effectiveThinkingMode || 'off');
-    }
-    if (runtimeStatus) {
-      var modelHint = selectedCodeModel();
-      } else {
-        if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
-          runtimeStatus.dataset.availability = 'degraded'; /*
-          runtimeStatus.title = '模型检测未完成，服务器会在请求时再次校验';
-        */ } else if (runtimeStatus.dataset.availability) {
-          delete runtimeStatus.dataset.availability;
-          runtimeStatus.removeAttribute('title');
-        }
-        runtimeStatus.textContent = runtime.thinkingFallback ? ('思考：' + (runtime.requestedThinkingMode || 'auto') + ' → ' + (runtime.effectiveThinkingMode || 'off')) : (state.modelLoadError ? '在线不可用' : (modelHint && modelHint.description) || '');
-        runtimeStatus.title = state.modelLoadError ? ('在线模型：' + state.modelLoadError + '；点击“重试在线模型”重新探测') : runtimeStatus.title;
-        runtimeStatus.hidden = !runtime.thinkingFallback && !state.modelLoadError && !(modelHint && (modelHint.description || modelHint.availability === 'degraded'));
-        if (modelRetryButton) {
-          modelRetryButton.hidden = !state.modelLoadError;
-          modelRetryButton.disabled = !!state._modelsPromise;
-        }
-        if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
-          runtimeStatus.title = 'Model probe is still running; the server will verify it when you send a request.';
-        }
-      }
-    if (modelRetryButton) {
-      modelRetryButton.hidden = !state.modelLoadError;
-      modelRetryButton.disabled = !!state._modelsPromise;
-    }
-  }
-
   // Render the provider/model controls from one consistent state snapshot.
   // In particular, a failed model probe must produce an explicit disabled
   // option instead of an empty select, and the retry action must remain
@@ -6124,6 +6001,7 @@
         mimeType: candidate.mimeType,
         content: content,
         sha256: candidate.sha256,
+        contentVersion: candidate.contentVersion,
         source: 'open'
       });
       usedChars += content.length;
@@ -8377,20 +8255,6 @@
     return false;
   }
 
-  function showTypingIndicator() {
-    var container = document.getElementById('codeChatMessages');
-    if (!container) return;
-    var el = document.createElement('div');
-    el.className = 'code-chat-typing';
-    el.id = 'codeTypingIndicator';
-    el.innerHTML =
-      '<span class="typing-dot"></span>' +
-      '<span class="typing-dot"></span>' +
-      '<span class="typing-dot"></span>';
-    container.appendChild(el);
-    scrollChatToBottom();
-  }
-
   function removeTypingIndicator() {
     var el = document.getElementById('codeTypingIndicator');
     if (el) {
@@ -8737,9 +8601,21 @@
       return Promise.reject(new Error('File system not available'));
     }
 
+    // P2: Capture generation at apply start; re-check inside every async
+    // continuation to abort mid-flight if the user switches workspace while
+    // readFileByPath / backend apply are in flight (mirrors the text-path
+    // assertGenerationUnchanged guard in applyOperation).
+    var applyWsGen = state.workspaceGeneration;
+    function assertGenerationUnchanged() {
+      if (applyWsGen !== state.workspaceGeneration) {
+        throw new Error('工作区已切换，操作中止');
+      }
+    }
+
     // Read original file as ArrayBuffer
     var createdSnapshotForApply = false;
     return fs.readFileByPath(op.path).then(function (result) {
+      assertGenerationUnchanged();
       if (!result || !result.content) {
         throw new Error('无法读取文件');
       }
@@ -8776,6 +8652,7 @@
       }
 
       return apiCall.then(function (resp) {
+        assertGenerationUnchanged();
         if (!resp.ok) {
           return resp.json().then(function (data) {
             throw new Error(data.error || '文档操作失败');
@@ -8800,6 +8677,7 @@
            };
         });
       }).then(function (data) {
+        assertGenerationUnchanged();
         if (!data || !data.newFileBuffer) {
           throw new Error('文档操作返回数据无效');
         }
@@ -8836,6 +8714,7 @@
         // P2 #10: if file already exists, generate unique name (e.g., _AI修改版_2.xlsx)
         return findAvailableBinaryPath(fs, newPath).then(function (availablePath) {
           return fs.createBinaryFileByPath(availablePath, data.newFileBuffer).then(function () {
+            assertGenerationUnchanged();
             // Remove operation from pending
             state.pendingOperations.splice(index, 1);
 

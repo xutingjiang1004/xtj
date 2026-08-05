@@ -66,12 +66,6 @@
     }
   }
 
-  function removeDeletedPhotoId(id){
-    if (id == null) return;
-    var key = String(id);
-    writeJson(DELETED_KEY, getDeletedIds().filter(function(item){ return item !== key; }));
-  }
-
   function addPendingDeletedPhotoId(id){
     if (id != null) pendingDeletedPhotoIds.add(String(id));
   }
@@ -721,7 +715,6 @@
   window.setPhotoWallSyncStatus = setPhotoWallSyncStatus;
   window.addDeletedPhotoId = addDeletedPhotoId;
   window.pendingDeletedPhotoIds = pendingDeletedPhotoIds;
-  window.cleanDeletedIds = function(){ try { window.safeStorage.remove(DELETED_KEY); } catch (_) {} };
   window.saveLocalPhotoWallData = saveLocalPhotoWallData;
   window.normalizePhotoWallRow = normalizePhotoWallRow;
   window.extractStoragePath = extractStoragePath;
