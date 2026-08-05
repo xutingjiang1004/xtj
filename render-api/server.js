@@ -46,15 +46,17 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 // ===================== 配置 =====================
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-if (!ADMIN_USERNAME) {
-  console.error('[FATAL] ADMIN_USERNAME 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 ADMIN_USERNAME。');
-  process.exit(1);
+// ★ 审计回退（P0-6/P0-7 修正）：强制校验 ADMIN_USERNAME/ADMIN_PASSWORD 会导致
+// Render 上环境变量缺失时整站拒绝启动（2026-08-05 生产宕机事故）。
+// 恢复"默认值 + 警告"策略：登录仍需要正确凭据，缺失时服务可启动但管理后台
+// 无法通过默认凭据访问。生产环境建议在 Render Dashboard 显式设置这两个变量。
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
+if (!process.env.ADMIN_USERNAME) {
+  console.warn('[WARN] ADMIN_USERNAME 环境变量未设置，使用默认值。建议在 Render Dashboard 中设置 ADMIN_USERNAME。');
 }
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
-  console.error('[FATAL] ADMIN_PASSWORD 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 ADMIN_PASSWORD。');
-  process.exit(1);
+  console.warn('[WARN] ADMIN_PASSWORD is not configured.');
 }
 const API_SECRET = process.env.API_SECRET;
 if (!API_SECRET) {
@@ -14908,6 +14910,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var reasoningStartedAt = 0;
     var pendingToolCalls = {};
     var finishReason = '';
+    var _streamReadFailed = false;
     
     var lastChunkTime = Date.now();
     // ★ H-2 修复：chunk 读取超时定时器必须复用，避免每轮 while 循环新建一个
@@ -14959,8 +14962,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
       var readResult;
       try {
+        // ★ 竞态安全：reader.read() 的 rejection 先捕获，避免 chunk 超时后
+        // read() 的 rejection 成为 unhandledRejection（Node 新版默认终止进程，
+        // 会让整条 AI 流以"流式读取错误"收场）。捕获后包装为 _readError，
+        // 让下方 catch 统一走流结束逻辑（有内容则保存，无内容则提示）。
+        var _readP = reader.read().catch(function(rdErr) { return { _readError: rdErr || true }; });
         readResult = await Promise.race([
-          reader.read(),
+          _readP,
           startChunkTimer()
         ]);
       } catch (e) {
@@ -14980,6 +14988,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         break;
       }
       if (readResult && readResult.done) { clearChunkTimer(); break; }
+      if (readResult && readResult._readError) {
+        // ★ 上游读取失败（连接中断/网络重置）：清除定时器并退出循环，
+        // 走下方"流意外结束"逻辑（有内容则保存，无内容则提示连接中断）。
+        clearChunkTimer();
+        _streamReadFailed = true;
+        break;
+      }
       lastChunkTime = Date.now();
       clearChunkTimer();
       
@@ -15143,7 +15158,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var contentHasSomething = contentBuffer && contentBuffer.length > 0;
       var reasoningHasSomething = reasoningBuffer && reasoningBuffer.length > 0;
       
-      if (!contentHasSomething && !reasoningHasSomething) {
+      if (_streamReadFailed && !contentHasSomething && !reasoningHasSomething) {
+        // 上游连接中断且无任何产出
+        console.error('[AGENT-STREAM] upstream stream read failed with no content, reqId:', clientReqId || '?');
+        writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' });
+      } else if (!contentHasSomething && !reasoningHasSomething) {
         writeSse(res, { type: 'error', error: 'AI 没有返回内容，请稍后重试' });
       } else if (!contentHasSomething && reasoningHasSomething) {
         writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
@@ -15180,8 +15199,36 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     return safeEnd();
   } catch (streamErr) {
     if (aborted) return safeEnd();
-    console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
-    writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
+    var serrText = streamErr && streamErr.message ? String(streamErr.message) : 'unknown';
+    console.error('[AGENT-STREAM] stream read error:', serrText, 'reqId:', clientReqId || '?');
+    // 已有部分内容时先保存，避免已生成的回复丢失（finishStream 发送 interrupted done）
+    if (!aborted && contentBuffer && contentBuffer.length > 0) {
+      try {
+        await finishStream(res, {
+          contentBuffer: contentBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
+          thinkingMode: thinkingMode,
+          useThinking: useThinking,
+          usedModel: usedModel,
+          usage: usageInStream || null,
+          searchMeta: _toolSearchMeta || _sharedSearchMeta,
+          siteCards: siteToolCards,
+          finishReason: 'upstream_error',
+          userName: userName,
+          convId: convId,
+          message: message,
+          streamSeq: streamSeq,
+          ctx: ctx,
+          reasoningStartedAt: reasoningStartedAt,
+          startTime: T0
+        });
+      } catch (finishErr) {
+        console.error('[AGENT-STREAM] finishStream after stream error failed:', finishErr && finishErr.message);
+        try { writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' }); } catch (_) {}
+      }
+      return safeEnd();
+    }
+    writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' });
     return safeEnd();
   }
 });

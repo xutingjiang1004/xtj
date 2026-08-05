@@ -192,9 +192,12 @@ test.describe('Code Workspace', () => {
 
     await trigger.click();
     await page.locator('[data-code-layout-action="chat"]').click();
-    const recovery = page.locator('.code-layout-recovery button');
-    await expect(recovery).toBeVisible();
-    await recovery.click();
+    // 用户要求：不再显示"可恢复完整工作台"状态条，recovery 控件始终隐藏
+    await expect(page.locator('.code-chat-panel')).toBeHidden();
+    await expect(page.locator('.code-layout-recovery')).toBeHidden();
+    // 恢复完整布局仍可通过布局菜单完成，且焦点回到聊天输入框
+    await trigger.click();
+    await page.locator('[data-code-layout-action="reset"]').click();
     await expect(page.locator('.code-sidebar')).toBeVisible();
     await expect(page.locator('.code-editor-column')).toBeVisible();
     await expect(page.locator('.code-chat-panel')).toBeVisible();
