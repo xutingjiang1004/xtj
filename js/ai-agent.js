@@ -2966,7 +2966,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // Tavily Deep Research SSE 调用
   //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
   function runTavilyResearch(query, onProgress, opts) {
-    var controller = new AbortController();
+    // ★ 2026-08-05: 支持外部传入 controller（flow 的 S.deepThinkJob），
+    //   否则 cancelDeepThink 的 abort 无法中断内部 fetch（取消链断裂）
+    var controller = (opts && opts.controller) || new AbortController();
     var MAX_EVENT_SIZE = 512 * 1024;
     var settled = false;
     var idleTimer = null;
@@ -3028,7 +3030,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (evt.type === 'research_step') {
         if (onProgress) { try { onProgress({ step: Math.max(0, Math.min(2, Number(evt.step) || 0)) }); } catch (e) {} }
       } else if (evt.type === 'research_content') {
-        var chunk = evt.content != null ? String(evt.content) : '';
+        var chunk = evt.content != null ? String(evt.content) : (evt.text != null ? String(evt.text) : '');
         if (chunk) content += chunk;
         if (onProgress) { try { onProgress({ content: chunk }); } catch (e) {} }
       } else if (evt.type === 'research_sources') {
@@ -3274,7 +3276,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false });
+      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller });
       var result = await researchPromise;
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
