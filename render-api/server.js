@@ -1048,7 +1048,7 @@ async function tavilyResearchStream(query, model, onEvent, signal) {
     var text = typeof chunk.content === 'string' ? chunk.content : (typeof chunk.answer === 'string' ? chunk.answer : '');
     if (text && text.trim()) {
       accumulated += text;
-      try { onEvent({ type: 'research_content', text: text }); } catch (_) {}
+      try { onEvent({ type: 'research_content', text: text, content: text }); } catch (_) {}
     }
     // sources 数组 → research_sources（只保留 url + title + content 前 300 字）
     if (Array.isArray(chunk.sources) && chunk.sources.length) {
@@ -15674,7 +15674,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
         if (typeof ev.answer === 'string') tavilyAnswer = ev.answer;
         return;
       }
-      if (ev.type === 'research_content' && typeof ev.text === 'string') tavilyAnswer += ev.text;
+      if (ev.type === 'research_content' && typeof ev.text === 'string') {
+        // ★ 2026-08-05: 中间原始报告不转发给前端（只累积），避免与最终综合报告叠加展示
+        tavilyAnswer += ev.text;
+        return;
+      }
       if (ev.type === 'research_sources' && Array.isArray(ev.sources)) tavilySources = ev.sources;
       if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
     }, _researchAbort.signal);
@@ -15697,7 +15701,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
             model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
             messages: [{ role: 'user', content: synthPrompt }],
             stream: true,
-            max_tokens: 2000
+            max_tokens: 4000
           }),
           signal: synthSignal
         });
@@ -15786,7 +15790,7 @@ app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), a
       items.push({
         id: hRow.id,
         query: hParsed.query || '',
-        answer: String(hParsed.answer || '').slice(0, 200),
+        answer: String(hParsed.answer || ''),
         sources: Array.isArray(hParsed.sources) ? hParsed.sources : [],
         created_at: hRow.created_at
       });
