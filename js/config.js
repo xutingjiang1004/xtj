@@ -15,7 +15,7 @@
         // 后端 API 地址：始终优先使用当前页面的 origin，支持任何自定义域名
         API_BASE: window.location.port === '4173' ? 'http://127.0.0.1:10000' : window.location.origin,
         SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
-        SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA"
+        SUPABASE_ANON_KEY: "eyJhbG...yDDA"
     };
     // 全局 API_BASE 兼容（部分旧模块直接引用 window.API_BASE）
     window.API_BASE = window.XTJ_CONFIG.API_BASE;

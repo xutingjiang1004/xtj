@@ -122,6 +122,30 @@ const JS_FILES = [
   'js/ai-core/telemetry.js'
 ];
 
+// ★ 修复（Bug 2）：前端直连 Supabase 的 ANON key 注入。
+// 仓库是 public repo，config.js 中仅保留占位符（eyJhbG...yDDA）作为安全默认；
+// 构建时若设置了 SUPABASE_ANON_KEY 环境变量，则替换占位符后压缩，
+// 使 feed 失败回退 / 浏览统计 RPC / 照片墙统计等直连功能在生产可用。
+// 未设置时保持占位符（功能静默降级，但绝不泄露真实 key 到源码）。
+var CONFIG_ANON_PLACEHOLDER = 'eyJhbG...yDDA';
+function injectConfigSecrets(source, filePath) {
+  if (filePath !== 'js/config.js') return source;
+  var anonKey = process.env.SUPABASE_ANON_KEY || '';
+  anonKey = String(anonKey).trim();
+  if (!anonKey || anonKey.indexOf('...') !== -1 || anonKey === CONFIG_ANON_PLACEHOLDER) {
+    return source;
+  }
+  var occurrences = source.split(CONFIG_ANON_PLACEHOLDER).length - 1;
+  if (occurrences > 0) {
+    var injected = source.split(CONFIG_ANON_PLACEHOLDER).join(anonKey);
+    console.log('[INJECT] SUPABASE_ANON_KEY: replaced ' + occurrences + ' placeholder occurrence(s) in js/config.js (from env)');
+    return injected;
+  }
+  // 占位符不存在时绝不能假装成功：源文件可能已被误写入真实 key（泄漏风险）
+  console.warn('[INJECT] WARNING: placeholder (' + CONFIG_ANON_PLACEHOLDER + ') NOT found in js/config.js - nothing injected; check that js/config.js still holds the placeholder');
+  return source;
+}
+
 const CSS_FILES = [
   'css/style.css',
   'css/ui-enhance.css',
@@ -149,7 +173,9 @@ function minifyJS(filePath, optional) {
   const statsBefore = fs.statSync(fullPath).size;
   console.log(`[MINIFY] ${filePath} (${(statsBefore / 1024).toFixed(0)}KB)`);
   try {
-    var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\r\n?/g, '\n');
+    var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\x0d\n?/g, '\n');
+    // ★ 修复（Bug 2）：config.js 构建时注入 SUPABASE_ANON_KEY（若有设置）
+    normalizedSource = injectConfigSecrets(normalizedSource, filePath);
     var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-js-'));
     normalizedInputPath = path.join(tempDir, path.basename(fullPath));
     fs.writeFileSync(normalizedInputPath, normalizedSource, 'utf8');

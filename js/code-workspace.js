@@ -5475,7 +5475,7 @@
       } else {
         if (modelHint && modelHint.availability === 'degraded' && !state.modelLoadError && !runtime.thinkingFallback) {
           runtimeStatus.dataset.availability = 'degraded'; /*
-          runtimeStatus.title = '妯″瀷妫€娴嬫湭瀹屾垚锛屾湇鍔″櫒浼氬湪璇锋眰鏃跺啀娆℃牎楠?;
+          runtimeStatus.title = '模型检测未完成，服务器会在请求时再次校验';
         */ } else if (runtimeStatus.dataset.availability) {
           delete runtimeStatus.dataset.availability;
           runtimeStatus.removeAttribute('title');
