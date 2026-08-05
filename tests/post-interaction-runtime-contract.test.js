@@ -79,3 +79,27 @@ test('like operation resets running flag so a failed sync never locks the button
   // 失败路径回滚 UI 后仍可重试（下次点击重新 flush）
   assert.match(like, /if \(operation\.desired !== operation\.confirmed\) \{[\s\S]*?applyPostLikeIntent\(postId, operation\.confirmed\);/);
 });
+
+test('feed load-more failure shows a retry entry and pauses the sentinel loop', () => {
+  const loadMore = between('loadMoreFeedPosts = async function', 'appendMorePosts = function');
+  // 失败后置位 feedLoadMoreFailed，哨兵不再自动重复触发
+  assert.match(loadMore, /feedLoadMoreFailed = true;/);
+  assert.match(loadMore, /加载更多失败，点击重试/);
+  assert.match(loadMore, /feedLoadMoreFailed = false;[\s\S]*?loadMoreFeedPosts\(\)/);
+  // 入口处与哨兵回调都检查失败标记
+  assert.match(core, /feedPageFetchPending \|\| feedLoadMoreFailed\) return;/);
+  assert.match(core, /!feedEndReached && !feedLoadMoreFailed/);
+});
+
+test('like button keeps the same emoji shape between first render and toggles', () => {
+  const actions = between('function buildPostActionHtml(post, isLiked, canDelete)', 'var activePostToolsMenu = null;');
+  // 初次渲染与 setLikeButtonState 统一使用 emoji（修复前初渲染是中文"点赞/已赞"，点击后变 emoji）
+  assert.match(actions, /isLiked \? '❤️' : '🤍'/);
+  assert.match(core, /btn\.textContent = liked \? '❤️' : '🤍'/);
+});
+
+test('geolocation fallback button text is not mojibake', () => {
+  // 修复前：备用定位失败后按钮显示乱码"馃搷 娣诲姞浣嶇疆"
+  assert.doesNotMatch(core, /馃搷/);
+  assert.match(core, /📍 添加位置/);
+});
