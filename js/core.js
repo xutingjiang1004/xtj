@@ -370,7 +370,9 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
 const ADMIN_NAME = "xxz";
             const AVATAR_CACHE_KEY = "xtj_avatars_v2";
             const AVATAR_CACHE_VERSION = 2;
-            const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小时
+            const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小时 — localStorage 中 has_avatar 的有效期
+            // P7: 显式四态头像缓存的内存有效期（has_avatar 重查间隔、confirmed_none/fetch_failed 的 TTL）
+            const AVATAR_FETCH_TTL_MS = 5 * 60 * 1000; // 5 分钟
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -719,25 +721,84 @@ const ADMIN_NAME = "xxz";
                 return response;
             };
 
+            // P7: 头像缓存改为显式四态结构。
+            // 每个条目形如 { state, url, fetched_at }：
+            //   state: 'has_avatar' | 'confirmed_none' | 'fetch_failed' | 'not_fetched'
+            //   url:   有头像时为 URL 字符串；confirmed_none 为 null；
+            //          fetch_failed 保留上一次成功获取的 URL（降级用，可能为 null）
+            //   fetched_at: 写入时间戳（ms）
             let avatarCache = {};
-            // P6: track when each avatar was fetched, so fetchAvatarUrl can
-            // expire stale entries instead of permanently returning old URLs.
-            let avatarFetchedAt = {};
             let lastUserSessionWriteAt = 0;
 
+            // 读取内存缓存中的头像 URL（用于展示）。返回 string 或 null。
+            // - has_avatar     → entry.url
+            // - confirmed_none → null（TTL 内不重查）
+            // - fetch_failed   → entry.url（旧 URL 降级，可能为 null）
+            // - not_fetched    → null
+            function getAvatarUrl(userName) {
+                if (!userName) return null;
+                var entry = avatarCache[userName];
+                if (!entry) return null;
+                return entry.url || null;
+            }
+
+            // 内存缓存是否仍处于 TTL 内（调用方不应重新查询后端）。
+            function hasFreshAvatarCache(userName) {
+                if (!userName) return false;
+                var entry = avatarCache[userName];
+                if (!entry || entry.state === 'not_fetched') return false;
+                var age = Date.now() - (entry.fetched_at || 0);
+                return age < AVATAR_FETCH_TTL_MS;
+            }
+
+            // 写入内存缓存条目。fetch_failed 时若 url 为空则保留旧 URL（降级）。
+            function setAvatarCacheEntry(userName, state, url) {
+                if (!userName) return;
+                var now = Date.now();
+                var prevUrl = (avatarCache[userName] && avatarCache[userName].url) || null;
+                var resolvedUrl;
+                if (state === 'has_avatar') {
+                    resolvedUrl = url || null;
+                } else if (state === 'fetch_failed') {
+                    resolvedUrl = url || prevUrl;
+                } else {
+                    resolvedUrl = null;
+                }
+                avatarCache[userName] = {
+                    state: state,
+                    url: resolvedUrl,
+                    fetched_at: now
+                };
+            }
+
             // ★ 头像缓存版本化读写（含 TTL 和 fetched_at）
+            // 返回 { username: { state, url, fetched_at } } 对象映射。
             function readAvatarCacheFromStorage() {
                 try {
                     var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
+                    var now = Date.now();
                     if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
-                        var now = Date.now();
                         var result = {};
                         var keys = Object.keys(raw.data);
                         for (var i = 0; i < keys.length; i++) {
                             var entry = raw.data[keys[i]];
-                            if (entry && entry.url && (now - (entry.fetched_at || 0)) < AVATAR_CACHE_TTL_MS) {
-                                result[keys[i]] = entry.url;
-                            }
+                            if (!entry || typeof entry !== 'object') continue;
+                            // 迁移旧格式：无 state 字段但有 url → 视为 has_avatar
+                            var state = entry.state || (entry.url ? 'has_avatar' : null);
+                            if (!state) continue;
+                            // fetch_failed 不持久化（仅内存），防御性跳过
+                            if (state === 'fetch_failed') continue;
+                            var fetchedAt = entry.fetched_at || 0;
+                            // TTL 按状态区分：has_avatar 24h，confirmed_none 5min
+                            var ttl = state === 'confirmed_none' ? AVATAR_FETCH_TTL_MS : AVATAR_CACHE_TTL_MS;
+                            if ((now - fetchedAt) >= ttl) continue;
+                            // has_avatar 必须有 url
+                            if (state === 'has_avatar' && !entry.url) continue;
+                            result[keys[i]] = {
+                                state: state,
+                                url: entry.url || null,
+                                fetched_at: fetchedAt
+                            };
                         }
                         return result;
                     }
@@ -748,7 +809,11 @@ const ADMIN_NAME = "xxz";
                         var oldKeys = Object.keys(old);
                         for (var j = 0; j < oldKeys.length; j++) {
                             if (typeof old[oldKeys[j]] === 'string') {
-                                migrated.data[oldKeys[j]] = { url: old[oldKeys[j]], fetched_at: Date.now() };
+                                migrated.data[oldKeys[j]] = {
+                                    state: 'has_avatar',
+                                    url: old[oldKeys[j]],
+                                    fetched_at: Date.now()
+                                };
                             }
                         }
                         window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(migrated));
@@ -757,29 +822,49 @@ const ADMIN_NAME = "xxz";
                         var mResult = {};
                         var mKeys = Object.keys(migrated.data);
                         for (var k = 0; k < mKeys.length; k++) {
-                            mResult[mKeys[k]] = migrated.data[mKeys[k]].url;
+                            mResult[mKeys[k]] = migrated.data[mKeys[k]];
                         }
                         return mResult;
                     }
                 } catch(e) {}
                 return {};
             }
+            // data 为 { username: { state, url, fetched_at } } 对象映射。
+            // 只持久化 has_avatar 与 confirmed_none；fetch_failed 不写入 localStorage。
             function writeAvatarCacheToStorage(data) {
                 try {
                     var now = Date.now();
                     var wrapped = { version: AVATAR_CACHE_VERSION, data: {} };
-                    var keys = Object.keys(data);
+                    var keys = Object.keys(data || {});
                     for (var i = 0; i < keys.length; i++) {
-                        if (data[keys[i]]) {
-                            wrapped.data[keys[i]] = { url: data[keys[i]], fetched_at: now };
-                        }
+                        var entry = data[keys[i]];
+                        if (!entry || typeof entry !== 'object') continue;
+                        // 只持久化 has_avatar 和 confirmed_none
+                        if (entry.state !== 'has_avatar' && entry.state !== 'confirmed_none') continue;
+                        // 跳过已过期的 confirmed_none（5min TTL）
+                        if (entry.state === 'confirmed_none' &&
+                            (now - (entry.fetched_at || 0)) >= AVATAR_FETCH_TTL_MS) continue;
+                        // has_avatar 必须有 url
+                        if (entry.state === 'has_avatar' && !entry.url) continue;
+                        wrapped.data[keys[i]] = {
+                            state: entry.state,
+                            url: entry.url || null,
+                            fetched_at: entry.fetched_at || now
+                        };
                     }
                     window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(wrapped));
                 } catch(e) {}
             }
             function invalidateAvatarCacheEntry(username) {
                 if (!username) return;
-                delete avatarCache[username];
+                // P7: 上传头像后立即失效 confirmed_none 缓存（设置为 not_fetched），
+                // 这样下次 fetchAvatarUrl 会重新查询后端获取新头像。
+                // 清除 url（与原 delete 行为一致），避免 onerror 后重渲染复用已失效的 URL。
+                avatarCache[username] = {
+                    state: 'not_fetched',
+                    url: null,
+                    fetched_at: 0
+                };
                 try {
                     var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
                     if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
@@ -794,37 +879,43 @@ const ADMIN_NAME = "xxz";
             };
 
             // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
+            // P7: 显式四态 — has_avatar / confirmed_none / fetch_failed / not_fetched
             async function fetchAvatarUrl(userName) {
                 if (!userName) return null;
-                // P6: 检查缓存是否过期 — 不再无条件短路返回旧值。
-                // 如果缓存超过 5 分钟，重新查后端，以便在用户删除头像后能及时更新。
-                var FETCH_TTL = 5 * 60 * 1000; // 5 分钟
-                if (avatarCache[userName]) {
-                    var age = avatarFetchedAt[userName] ? (Date.now() - avatarFetchedAt[userName]) : FETCH_TTL + 1;
-                    if (age < FETCH_TTL) return avatarCache[userName];
+                // P7: TTL 内的缓存直接返回，不重新查询后端。
+                // - has_avatar     → 返回 url
+                // - confirmed_none → 返回 null（TTL 内不重查）
+                // - fetch_failed   → 返回旧 url（降级，可能为 null）
+                if (hasFreshAvatarCache(userName)) {
+                    return getAvatarUrl(userName);
                 }
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
                     if (!resp.ok) {
-                        // P6: 网络失败时降级返回旧缓存
-                        return avatarCache[userName] || null;
+                        // P7: 网络失败 — 设置 fetch_failed，不缓存为无头像。
+                        // 保留旧 URL 用于降级展示。
+                        setAvatarCacheEntry(userName, 'fetch_failed', null);
+                        return getAvatarUrl(userName);
                     }
                     var result = await resp.json();
                     if (result.ok && result.avatar_url) {
-                        avatarCache[userName] = result.avatar_url;
-                        avatarFetchedAt[userName] = Date.now();
+                        setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
                         return result.avatar_url;
                     }
-                    // P6: 后端返回 null（用户无头像）— 清除内存中的旧缓存
-                    if (result.ok && result.avatar_url === null && avatarCache[userName]) {
-                        delete avatarCache[userName];
-                        delete avatarFetchedAt[userName];
-                    }
-                } catch(e) {
-                    // P6: 网络异常时降级返回旧缓存
-                    return avatarCache[userName] || null;
+                    if (result.ok && result.avatar_url === null) {
+                    // P7: 后端确认无头像 — 清除旧缓存并设置 confirmed_none，TTL 内有效。
+                    delete avatarCache[userName];
+                    setAvatarCacheEntry(userName, 'confirmed_none', null);
+                    return null;
                 }
-                return null;
+                    // 后端返回非预期结构 — 视为失败
+                    setAvatarCacheEntry(userName, 'fetch_failed', null);
+                    return getAvatarUrl(userName);
+                } catch(e) {
+                    // P7: 网络异常 — 设置 fetch_failed，降级返回旧缓存 URL。
+                    setAvatarCacheEntry(userName, 'fetch_failed', null);
+                    return getAvatarUrl(userName);
+                }
             }
 
         function readUserSession() {
@@ -2728,13 +2819,13 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 // localStorage 取头像缓存，失败用字母占位
-                var showAvatar = avatarCache[userName];
+                var showAvatar = getAvatarUrl(userName);
                 if (!showAvatar && userName === currentUser) {
                     try {
                         var cachedAvatars = readAvatarCacheFromStorage();
                         if (cachedAvatars[currentUser]) {
-                            showAvatar = cachedAvatars[currentUser];
                             avatarCache[currentUser] = cachedAvatars[currentUser];
+                            showAvatar = cachedAvatars[currentUser].url || null;
                         }
                     } catch(e) {}
                 }
@@ -2770,30 +2861,30 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser])) + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
                     }
-                    
+
                     var avatarUrl = await fetchAvatarUrl(userName);
-                    
+
                     // S7 修复：响应落地前校验目标用户是否已切换，旧响应不得覆盖新资料
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
-                    
+
                     if (avatarUrl) {
                         if (userName !== currentUser) {
-                            avatarCache[userName] = avatarUrl;
-                        } else if (!avatarCache[currentUser]) {
-                            avatarCache[currentUser] = avatarUrl;
+                            setAvatarCacheEntry(userName, 'has_avatar', avatarUrl);
+                        } else if (!getAvatarUrl(currentUser)) {
+                            setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
-                            var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarUrl;
+                            var url = (userName === currentUser && getAvatarUrl(currentUser)) ? getAvatarUrl(currentUser) : avatarUrl;
                             var imgHtml = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
                             avatarEl.innerHTML = imgHtml;
                             // 写入本地缓存
                             if (userName === currentUser) {
-                                try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = url; writeAvatarCacheToStorage(cv); } catch(_) {}
+                                try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = { state: 'has_avatar', url: url, fetched_at: Date.now() }; writeAvatarCacheToStorage(cv); } catch(_) {}
                             }
                         }
                     }
@@ -2885,32 +2976,33 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 // localStorage鏉冿拷鈻夐敓鏂ゆ嫹閿熸枻鎷烽敍姘帥濡澁鎷烽弻銉︽拱閸︽壆绱﹂敓?
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[currentUser]) {
+                    if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
-                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" alt="头像">';
+                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser].url)) + '" alt="头像">';
                         return;
                     }
                 } catch(e) {}
-                
+
                 // 鍏煎牏锟姐倝宕橀崨顓犳憼缂傛挸鐡ㄩ弰鍓э拷?
-                if (avatarCache[currentUser]) {
-                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarCache[currentUser])) + '" alt="头像">';
+                var memUrl = getAvatarUrl(currentUser);
+                if (memUrl) {
+                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(memUrl)) + '" alt="头像">';
                 }
-                
+
                 try {
                     var avatarUrl = await fetchAvatarUrl(currentUser);
-                    
+
                     if (avatarUrl) {
                         var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                         avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" alt="头像">';
-                        avatarCache[currentUser] = avatarUrl;
+                        setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
                             var cv = readAvatarCacheFromStorage();
-                            cv[currentUser] = avatarUrl;
+                            cv[currentUser] = { state: 'has_avatar', url: avatarUrl, fetched_at: Date.now() };
                             writeAvatarCacheToStorage(cv);
                         } catch(e) {}
-                    } else if (!avatarCache[currentUser]) {
+                    } else if (!getAvatarUrl(currentUser)) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
                 } catch(e) {
@@ -3030,10 +3122,10 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                             avatarCommitted = !!(statusResp.ok && statusData && statusData.committed);
                         } catch (statusErr) {}
                         if (avatarCommitted) {
-                            avatarCache[currentUser] = avatarUrl;
+                            setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {
                                 var committedCache = readAvatarCacheFromStorage();
-                                committedCache[currentUser] = avatarUrl;
+                                committedCache[currentUser] = { state: 'has_avatar', url: avatarUrl, fetched_at: Date.now() };
                                 writeAvatarCacheToStorage(committedCache);
                             } catch (cacheErr) {}
                             updateAllAvatarElements(avatarUrl);
@@ -3047,19 +3139,19 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         return;
                     }
                     
-                    avatarCache[currentUser] = avatarUrl;
+                    setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                     // 保存到localStorage持久化存储
                     try {
                         var cachedAvatars = readAvatarCacheFromStorage();
-                        cachedAvatars[currentUser] = avatarUrl;
+                        cachedAvatars[currentUser] = { state: 'has_avatar', url: avatarUrl, fetched_at: Date.now() };
                         writeAvatarCacheToStorage(cachedAvatars);
                     } catch(e) {}
                     updateAllAvatarElements(avatarUrl);
-                    
+
                     showToast('头像更新成功');
                     window.safeStorage.remove(CACHE_KEY);
                     await loadFeed(true);
-                    avatarCache[currentUser] = avatarUrl;
+                    setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                     updateAllAvatarElements(avatarUrl);
                 } catch(e) {
                     console.error("上传头像失败:", e);
@@ -3113,16 +3205,16 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 // 闁哄洤鐡ㄩ弻濠囧箣閹寸姵鐣卞銈囨暬濞间即鏌ｉ妸銉ヮ仼闁靛洦妫冨畷鎾圭疀閵壯咁槱localStorage闂佸搫顦崯顐﹀煝婢跺鍠橀柛蹇撶墳缁?
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[currentUser]) {
+                    if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         const profileAvatar = document.getElementById('profileAvatar');
                         if (profileAvatar) {
-                            profileAvatar.innerHTML = renderAvatarContent(currentUser, cachedAvatars[currentUser]);
+                            profileAvatar.innerHTML = renderAvatarContent(currentUser, cachedAvatars[currentUser].url);
                         }
                         return;
                     }
                 } catch(e) {}
-                
+
                 try {
                     const avatarRes = await sb.from("posts")
                         .select("media_url")
@@ -3131,15 +3223,15 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                         .eq("actor_key", "__avatar__")
                         .order("created_at", { ascending: false })
                         .limit(1);
-                    
+
                     const profileAvatar = document.getElementById('profileAvatar');
                     if (profileAvatar) {
                         if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
                             profileAvatar.innerHTML = renderAvatarContent(currentUser, avatarRes.data[0].media_url);
-                            avatarCache[currentUser] = avatarRes.data[0].media_url;
+                            setAvatarCacheEntry(currentUser, 'has_avatar', avatarRes.data[0].media_url);
                             try {
                                 var cv = readAvatarCacheFromStorage();
-                                cv[currentUser] = avatarRes.data[0].media_url;
+                                cv[currentUser] = { state: 'has_avatar', url: avatarRes.data[0].media_url, fetched_at: Date.now() };
                                 writeAvatarCacheToStorage(cv);
                             } catch(e) {}
                         } else {
@@ -4552,16 +4644,16 @@ function renderProfileActivityList(kind) {
             async function loadUserAvatar() {
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[currentUser]) {
+                    if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
-                        updateAllAvatarElements(cachedAvatars[currentUser]);
+                        updateAllAvatarElements(cachedAvatars[currentUser].url);
                     } else {
                         // localStorage濞屸剝婀侀敍灞藉晙娴犲孩鏆熼幑顔肩氨閿熸枻鎷烽敓鏂ゆ嫹
                         var avatarUrl = await fetchAvatarUrl(currentUser);
                         if (avatarUrl) {
-                            avatarCache[currentUser] = avatarUrl;
+                            setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {
-                                cachedAvatars[currentUser] = avatarUrl;
+                                cachedAvatars[currentUser] = { state: 'has_avatar', url: avatarUrl, fetched_at: Date.now() };
                                 writeAvatarCacheToStorage(cachedAvatars);
                             } catch(e) {}
                             updateAllAvatarElements(avatarUrl);
@@ -6186,8 +6278,10 @@ function renderProfileActivityList(kind) {
                     });
                 } catch (e) {}
 
+                // P7: 只为没有新鲜缓存（TTL 内）的用户发起批量请求。
+                // confirmed_none / has_avatar / fetch_failed 在 TTL 内均不重查。
                 var uncached = normalizedUsers.filter(function(username) {
-                    return !avatarCache[username];
+                    return !hasFreshAvatarCache(username);
                 });
                 if (uncached.length === 0) return;
                 try {
@@ -6203,20 +6297,38 @@ function renderProfileActivityList(kind) {
                         var keys = Object.keys(avatars);
                         for (var ki = 0; ki < keys.length; ki++) {
                             var k = keys[ki];
-                            if (avatars[k]) avatarCache[k] = avatars[k];
+                            // P7: null → confirmed_none；有 URL → has_avatar
+                            if (avatars[k]) {
+                                setAvatarCacheEntry(k, 'has_avatar', avatars[k]);
+                            } else if (avatars[k] === null) {
+                                setAvatarCacheEntry(k, 'confirmed_none', null);
+                            }
                         }
                         // 写入本地缓存，避免下次访问重新请求
                         try {
                             var cachedAvatars = readAvatarCacheFromStorage();
                             for (var ki2 = 0; ki2 < keys.length; ki2++) {
                                 var k2 = keys[ki2];
-                                if (avatars[k2]) cachedAvatars[k2] = avatars[k2];
+                                if (avatars[k2]) {
+                                    cachedAvatars[k2] = { state: 'has_avatar', url: avatars[k2], fetched_at: Date.now() };
+                                } else if (avatars[k2] === null) {
+                                    cachedAvatars[k2] = { state: 'confirmed_none', url: null, fetched_at: Date.now() };
+                                }
                             }
                             writeAvatarCacheToStorage(cachedAvatars);
                         } catch(e) {}
+                    } else {
+                        // P7: 批量接口失败时降级到旧缓存（与单用户接口一致）
+                        uncached.forEach(function(username) {
+                            setAvatarCacheEntry(username, 'fetch_failed', null);
+                        });
                     }
                 } catch(e) {
-                    console.error('??????:', e);
+                    // P7: 网络异常时降级到旧缓存（与单用户接口一致）
+                    uncached.forEach(function(username) {
+                        setAvatarCacheEntry(username, 'fetch_failed', null);
+                    });
+                    console.error('批量头像加载失败:', e);
                 }
             }
 
@@ -6238,13 +6350,15 @@ function renderProfileActivityList(kind) {
             function getAvatarHtml(username, post) {
                 var safeUser = String(username || '').trim();
                 var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
-                var avatarUrl = avatarCache[safeUser] || '';
+                var avatarUrl = getAvatarUrl(safeUser) || '';
 
                 if (!avatarUrl && safeUser) {
                     try {
                         var cachedAvatars = readAvatarCacheFromStorage();
-                        avatarUrl = cachedAvatars[safeUser] || '';
-                        if (avatarUrl) avatarCache[safeUser] = avatarUrl;
+                        if (cachedAvatars[safeUser] && cachedAvatars[safeUser].url) {
+                            avatarCache[safeUser] = cachedAvatars[safeUser];
+                            avatarUrl = cachedAvatars[safeUser].url;
+                        }
                     } catch (e) {}
                 }
 
@@ -6271,15 +6385,15 @@ function renderProfileActivityList(kind) {
             // DEPRECATED_DO_NOT_EDIT ====== [??????]
             function getPostFilterUserAvatar(username) {
                 var safeName = escapeHtml(username || "");
-                var avatarUrl = avatarCache[username];
+                var avatarUrl = getAvatarUrl(username);
                 if (avatarUrl) {
                     return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
                 }
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[username]) {
+                    if (cachedAvatars[username] && cachedAvatars[username].url) {
                         avatarCache[username] = cachedAvatars[username];
-                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username]) + '" alt="' + safeName + '"></span>';
+                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username].url) + '" alt="' + safeName + '"></span>';
                     }
                 } catch(e) {}
                 return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
@@ -8619,7 +8733,7 @@ function renderProfileActivityList(kind) {
                             if (!username || username === onclick) username = '';
                         }
                         if (!username) return;
-                        var avatarUrl = avatarCache[username];
+                        var avatarUrl = getAvatarUrl(username);
                         if (avatarUrl) {
                             avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
                         }
@@ -9101,7 +9215,7 @@ function renderProfileActivityList(kind) {
                 const bubble = document.createElement('div');
                 bubble.className = 'notification-bubble';
 
-                const safeAvatarUrl = avatarCache[userName] ? sanitizeUrl(avatarCache[userName]) : '';
+                const safeAvatarUrl = getAvatarUrl(userName) ? sanitizeUrl(getAvatarUrl(userName)) : '';
                 const avatarHtml = safeAvatarUrl ? 
                     `<img loading="lazy" decoding="async" src="${escapeHtml(safeAvatarUrl)}" alt="${escapeHtml(userName)}">` : 
                     escapeHtml(String(userName)[0] || '').toUpperCase();
@@ -10472,10 +10586,27 @@ function renderProfileActivityList(kind) {
                     if (typeof onReady === 'function') onReady(false);
                     return Promise.resolve(false);
                 }
+                // P7: 先从 localStorage 补全内存缓存
+                try {
+                    var storedAvatars = readAvatarCacheFromStorage();
+                    users.forEach(function(username) {
+                        if (storedAvatars[username] && !avatarCache[username]) {
+                            avatarCache[username] = storedAvatars[username];
+                        }
+                    });
+                } catch (e) {}
+                // P7: 只为没有新鲜缓存（TTL 内）的用户发起批量请求
+                var uncached = users.filter(function(username) {
+                    return !hasFreshAvatarCache(username);
+                });
+                if (!uncached.length) {
+                    if (typeof onReady === 'function') onReady(false);
+                    return Promise.resolve(false);
+                }
                 return window.xtjProtectedFetch('/api/avatar/batch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ users: users })
+                    body: JSON.stringify({ users: uncached })
                 })
                     .then(function(resp) { return resp.json(); })
                     .then(function(result) {
@@ -10485,14 +10616,24 @@ function renderProfileActivityList(kind) {
                             for (var ki = 0; ki < keys.length; ki++) {
                                 var k = keys[ki];
                                 var v = result.avatars[k];
-                                if (v && avatarCache[k] !== v) {
-                                    avatarCache[k] = v;
-                                    changed = true;
-                                } else if (v === null && avatarCache[k]) {
-                                    // P6: null 表示用户已删除头像 — 清除内存中的旧缓存，
-                                    // 避免持续显示已不存在的头像 URL。
-                                    delete avatarCache[k];
-                                    changed = true;
+                                if (v) {
+                                    // P7: 有 URL → has_avatar
+                                    if (getAvatarUrl(k) !== v) {
+                                        setAvatarCacheEntry(k, 'has_avatar', v);
+                                        changed = true;
+                                    } else {
+                                        setAvatarCacheEntry(k, 'has_avatar', v);
+                                    }
+                                } else if (v === null) {
+                                    // P7: null → 清除旧缓存并设为 confirmed_none（TTL 内不重查）
+                                    var prevEntry = avatarCache[k];
+                                    if (v === null && avatarCache[k]) {
+                                        delete avatarCache[k];
+                                    }
+                                    if (!prevEntry || prevEntry.state !== 'confirmed_none') {
+                                        changed = true;
+                                    }
+                                    setAvatarCacheEntry(k, 'confirmed_none', null);
                                 }
                             }
                             // 写入本地缓存
@@ -10501,19 +10642,28 @@ function renderProfileActivityList(kind) {
                                 for (var ki2 = 0; ki2 < keys.length; ki2++) {
                                     var k2 = keys[ki2];
                                     if (result.avatars[k2]) {
-                                        cachedAvatars[k2] = result.avatars[k2];
+                                        cachedAvatars[k2] = { state: 'has_avatar', url: result.avatars[k2], fetched_at: Date.now() };
                                     } else if (result.avatars[k2] === null) {
-                                        // P6: null — 清除 localStorage 旧缓存
                                         delete cachedAvatars[k2];
+                                        cachedAvatars[k2] = { state: 'confirmed_none', url: null, fetched_at: Date.now() };
                                     }
                                 }
                                 writeAvatarCacheToStorage(cachedAvatars);
                             } catch(e) {}
+                        } else {
+                            // P7: 批量接口失败时降级到旧缓存（与单用户接口一致）
+                            uncached.forEach(function(username) {
+                                setAvatarCacheEntry(username, 'fetch_failed', null);
+                            });
                         }
-                        if (typeof onReady === 'function') onReady(changed || users.length > 0);
-                        return changed || users.length > 0;
+                        if (typeof onReady === 'function') onReady(changed || uncached.length > 0);
+                        return changed || uncached.length > 0;
                     })
                     .catch(function() {
+                        // P7: 网络异常时降级到旧缓存（与单用户接口一致）
+                        uncached.forEach(function(username) {
+                            setAvatarCacheEntry(username, 'fetch_failed', null);
+                        });
                         if (typeof onReady === 'function') onReady(false);
                         return false;
                     });
@@ -10553,7 +10703,7 @@ function renderProfileActivityList(kind) {
             }
 
             function getDockChatAvatarMarkup(userName) {
-                var avatarUrl = avatarCache[userName];
+                var avatarUrl = getAvatarUrl(userName);
                 if (avatarUrl) {
                     var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     if (safeAvatarUrl) {
@@ -10593,7 +10743,7 @@ function renderProfileActivityList(kind) {
                     conversation && conversation.last_message ? conversation.last_message : '',
                     conversation && conversation.last_time ? conversation.last_time : '',
                     conversation && conversation.unread ? conversation.unread : 0,
-                    avatarCache[conversation && conversation.other_user ? conversation.other_user : ''] || ''
+                    getAvatarUrl(conversation && conversation.other_user ? conversation.other_user : '') || ''
                 ].join('~');
             }
 
@@ -11787,7 +11937,7 @@ function renderProfileActivityList(kind) {
                 // 设置发布閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
                 if (userInfoEl) {
-                    var avUrl = avatarCache[ann.user_name] ? sanitizeUrl(avatarCache[ann.user_name]) : '';
+                    var avUrl = getAvatarUrl(ann.user_name) ? sanitizeUrl(getAvatarUrl(ann.user_name)) : '';
                     var avatarHtml = avUrl
                         ? '<div class="announcement-detail-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
                         : '<div class="announcement-detail-avatar">' + escapeHtml(String(ann.user_name).charAt(0) || '').toUpperCase() + '</div>';
