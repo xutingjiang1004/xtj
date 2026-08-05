@@ -1,4 +1,4 @@
-﻿/* ===================== AI agent scoped UI ===================== */
+/* ===================== AI agent scoped UI ===================== */
 
 #panelChat.ai-mode #dockChatListView { display: none !important; }
 #panelChat.ai-mode .chat-header { display: none !important; }
@@ -4632,3 +4632,11 @@
     grid-column: 1;
   }
 }
+
+/* 流式光标 */
+.ai-stream-cursor { display: inline-block; width: 2px; height: 1em; background: var(--primary); margin-left: 2px; vertical-align: text-bottom; animation: ai-cursor-blink 1s step-end infinite; }
+@keyframes ai-cursor-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* 新内容提示横幅 */
+.ai-new-content-banner { text-align: center; padding: 8px 16px; margin: 4px 0; font-size: 12px; color: var(--text-muted); background: var(--bg-secondary); border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+.ai-new-content-banner:hover { background: var(--bg-hover); }
