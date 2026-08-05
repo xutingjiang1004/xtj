@@ -6188,6 +6188,9 @@ function renderProfileActivityList(kind) {
             let feedNextOffset = 0;
             let feedLoadedPages = [];
             let feedPageFetchPending = false;
+            // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
+            // 需用户点击错误提示"重试"才清除并重新加载
+            let feedLoadMoreFailed = false;
 
             function markFeedStateChanged() {
                 feedStateVersion += 1;
@@ -6221,7 +6224,7 @@ function renderProfileActivityList(kind) {
                 const feed = document.getElementById('feed');
                 const observer = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
-                        if (entry.isIntersecting && !feedEndReached) {
+                        if (entry.isIntersecting && !feedEndReached && !feedLoadMoreFailed) {
                             loadMoreFeedPosts();
                         }
                     });
@@ -6978,7 +6981,7 @@ function renderProfileActivityList(kind) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
@@ -8282,7 +8285,7 @@ function renderProfileActivityList(kind) {
                         requestPostLocationFix({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }, function(fallbackError) {
                             postLocationRequesting = false;
                             btn.disabled = false;
-                            btn.textContent = '馃搷 娣诲姞浣嶇疆';
+                            btn.textContent = '📍 添加位置';
                             showToast('定位失败，请重试');
                         });
                         return;
@@ -8601,7 +8604,7 @@ function renderProfileActivityList(kind) {
             window.loadFeed = loadFeed;
 
             loadMoreFeedPosts = async function() {
-                if (feedEndReached || feedPageFetchPending) return;
+                if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
                 var pageLoading = document.createElement("div");
                 pageLoading.className = "feed-page-loading";
@@ -8628,6 +8631,30 @@ function renderProfileActivityList(kind) {
                     filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 }
                 pageLoading.remove();
+                if (fetchFailed) {
+                    // ★ 修复：加载更多失败必须给用户可感知反馈 + 可点击重试入口。
+                    // 此前静默失败且 feedEndReached 不置位，哨兵每次进入视口都会
+                    // 无限重复触发请求。失败后置位 feedLoadMoreFailed 暂停自动触发，
+                    // 用户点击"重试"后清除并重新加载。
+                    feedLoadMoreFailed = true;
+                    var failEl = document.getElementById('feedLoadMoreError');
+                    if (!failEl) {
+                        failEl = document.createElement('div');
+                        failEl.id = 'feedLoadMoreError';
+                        failEl.className = 'loading feed-load-more-error';
+                        failEl.setAttribute('role', 'button');
+                        failEl.setAttribute('tabindex', '0');
+                        failEl.textContent = '加载更多失败，点击重试';
+                        failEl.addEventListener('click', function() {
+                            feedLoadMoreFailed = false;
+                            var errEl = document.getElementById('feedLoadMoreError');
+                            if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
+                            loadMoreFeedPosts();
+                        });
+                        feed.appendChild(failEl);
+                    }
+                    return;
+                }
                 if (startIdx >= filteredPosts.length && !fetchFailed) {
                     feedEndReached = true;
                     var noMore = document.getElementById("feedNoMore");

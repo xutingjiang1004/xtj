@@ -137,6 +137,13 @@
     if (typeof window.openPhotoPreview !== 'function') return;
     if (nextIndex < 0) nextIndex = 0;
     if (nextIndex >= list.length) nextIndex = list.length - 1;
+    // ★ 修复：浏览统计接线——syncPhotoViewCount 此前定义了却从未被调用，
+    // 照片"浏览"数永远停留在初始值。打开预览时统计一次
+    //（函数内部有 5 分钟节流 + RPC 失败回滚，无副作用）。
+    var previewTarget = list[nextIndex];
+    if (previewTarget && typeof window.syncPhotoViewCount === 'function') {
+      try { window.syncPhotoViewCount(previewTarget); } catch (_) {}
+    }
     window.openPhotoPreview(nextIndex, { photos: list });
   }
 
