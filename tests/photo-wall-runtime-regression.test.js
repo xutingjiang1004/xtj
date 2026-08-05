@@ -310,3 +310,18 @@ test('load-more sentinel debounces cascade paging and offers retry on real failu
   assert.match(renderSource, /加载失败，点击重试/);
   assert.match(renderSource, /err\.name === 'AbortError'/);
 });
+
+test('upload progress percentage is actually written to the stats row', () => {
+  // 修复前：pwUploadProgressPct 只在 index.html 中出现一次，从未被 JS 更新，恒显示 0%
+  assert.match(uploadSource, /pwUploadProgressPct/);
+  assert.match(uploadSource, /pctEl\.textContent = \(typeof pct === 'number'\) \? Math\.round\(pct\) \+ '%' : '0%'/);
+  assert.match(uploadSource, /if \(pctEl\) pctEl\.textContent = '0%';/);
+});
+
+test('photo view count is wired when the preview opens', () => {
+  // 修复前：syncPhotoViewCount 定义并导出但从未被调用，"浏览"数永远不涨
+  assert.match(dataSource, /window\.syncPhotoViewCount = syncPhotoViewCount/);
+  const openPreview = renderSource.slice(renderSource.indexOf('function openPhotoWallPreviewAt'), renderSource.indexOf('function photoCardHtml'));
+  assert.match(openPreview, /window\.syncPhotoViewCount/);
+  assert.match(openPreview, /previewTarget/);
+});

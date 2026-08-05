@@ -677,6 +677,8 @@
     var fillEl = byId('pwUploadProgressFill');
     var stageEl = byId('pwUploadProgressStage');
     var cancelBtn = byId('pwUploadProgressCancel');
+    // ★ 修复：pwUploadProgressPct（统计行"进度 X%"）此前从未被更新，恒显示 0%
+    var pctEl = byId('pwUploadProgressPct');
     if (!text) {
       overlay.style.display = 'none';
       overlay.classList.remove('upload-overlay-visible');
@@ -684,6 +686,7 @@
       if (trackEl) trackEl.hidden = true;
       if (fillEl) fillEl.style.width = '0%';
       if (cancelBtn) cancelBtn.hidden = true;
+      if (pctEl) pctEl.textContent = '0%';
       return;
     }
     overlay.style.display = 'flex';
@@ -691,6 +694,7 @@
     overlay.setAttribute('aria-hidden', 'false');
     if (textEl) textEl.textContent = text || '';
     if (statusEl) statusEl.textContent = (typeof pct === 'number') ? ('当前进度 ' + Math.round(pct) + '%') : '正在准备上传任务。';
+    if (pctEl) pctEl.textContent = (typeof pct === 'number') ? Math.round(pct) + '%' : '0%';
     if (trackEl) trackEl.hidden = !(typeof pct === 'number');
     if (fillEl && typeof pct === 'number') fillEl.style.width = Math.round(pct) + '%';
     if (stageEl) {
