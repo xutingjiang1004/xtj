@@ -64,6 +64,12 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       
+      # ⚠️ Tavily API Key — 在 Render Dashboard 手动设置
+      # 用途：小猫AI 深入研究（Tavily Deep Research 多agent报告）+ 联网搜索
+      # 获取：https://app.tavily.com → API Keys
+      - key: TAVILY_API_KEY
+        sync: false
+      
       - key: ADMIN_USERNAME
         value: xxz
       
