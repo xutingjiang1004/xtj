@@ -32,22 +32,21 @@
   "dependencies": {
    "@supabase/supabase-js": "^2.106.2",
     "cors": "^2.8.5",
-    "csso-cli": "^4.0.2",
     "express": "^5.1.0",
-    "iconv-lite": "^0.7.2",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "multer": "^2.2.0",
     "nodemailer": "^6.9.16",
     "pdf-parse": "^2.4.5",
     "sharp": "^0.34.5",
-    "terser": "^5.48.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "csso-cli": "^4.0.2",
     "playwright": "^1.45.3",
     "playwright-core": "^1.45.3",
-    "supertest": "^7.2.2"
+    "supertest": "^7.2.2",
+    "terser": "^5.48.0"
   }
 }

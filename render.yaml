@@ -7,7 +7,7 @@ services:
     name: xtj
     runtime: node
     repo: https://github.com/xutingjiang1004/xtj
-    plan: free
+    plan: starter
     region: singapore
     # PR 已合并到 main；生产部署跟随默认主分支，避免继续跟随已合并的临时 hotfix 分支。
     branch: main
@@ -58,7 +58,7 @@ services:
         value: https://ithowxqignlhkwaykglt.supabase.co
       
       - key: ADMIN_USERNAME
-        value: xxz
+        sync: false
       
       # CORS 白名单（逗号分隔）。留空则自动检测：
       # 放行 Render 同域、localhost 及 *.vercel.app 前端（M-2）。

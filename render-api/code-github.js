@@ -419,11 +419,14 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
   app.get('/api/code/github/repos/:owner/:repo/file', authenticateUser, fileHandler);
 };
 
-module.exports._test = {
-  parseAllowedRepos: parseAllowedRepos,
-  parseRepo: parseRepo,
-  validateRef: validateRef,
-  validatePath: validatePath,
-  encodeRepoPath: encodeRepoPath,
-  mimeForFile: mimeForFile
-};
+// 测试辅助：仅在非生产环境暴露内部函数
+if (String(process.env.NODE_ENV || '').toLowerCase() !== 'production' && !process.env.RENDER) {
+  module.exports._test = {
+    parseAllowedRepos: parseAllowedRepos,
+    parseRepo: parseRepo,
+    validateRef: validateRef,
+    validatePath: validatePath,
+    encodeRepoPath: encodeRepoPath,
+    mimeForFile: mimeForFile
+  };
+}

@@ -911,7 +911,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // 仅本地开发或显式开启 ai_debug 参数时挂载诊断钩子：生产环境普通用户
   // 从控制台调用会泄露 API Base 与凭据上下文
-  var _isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || /[?&]ai_debug=1/.test(window.location.search);
+  var _isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   if (_isLocalDev) {
     window.__xtjAiAuthDiag = function() {
       return diagRun('manual');
