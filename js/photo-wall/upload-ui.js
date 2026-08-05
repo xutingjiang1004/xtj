@@ -990,7 +990,10 @@
   }
 
   async function retryFailedUploads(){
-    if (state.uploading) { toast('正在上传，请等待'); return; }
+    // ★ 修复：并发守卫——即使双监听路径已移除，仍防止快速连点/跨路径并发
+    if (state.uploading || state.retrying) { toast('正在上传，请等待'); return; }
+    state.retrying = true;
+    try {
     var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded; });
     if (!jobs.length) { toast('没有可重试的失败项'); return; }
     state.skippedFiles = [];
@@ -1065,6 +1068,9 @@
     if (uploadJobs.length) await performUpload(uploadJobs);
     state.failedJobs = (state.failedJobs || []).concat(pendingJobs);
     if (!uploadJobs.length && pendingJobs.length) toast('照片状态仍在确认中，请稍后重试');
+    } finally {
+      state.retrying = false;
+    }
   }
 
   function attachPhotoUploadUi(){
@@ -1114,10 +1120,10 @@
         setTimeout(function(){ cancelBtn.disabled = false; cancelBtn.textContent = '取消上传'; }, 500);
       });
     }
-    if (retryBtn && !retryBtn.__xtjRetryBound) {
-      retryBtn.__xtjRetryBound = true;
-      retryBtn.addEventListener('click', retryFailedUploads);
-    }
+    // ★ 修复：不再在此处给 pwUploadResultRetry 绑定直接 click——该按钮同时受
+    // bindUploadResultActions 的父容器 data-action 委托监听（596-609 行），
+    // 双监听导致一次点击并发执行两次 retryFailedUploads，产生孤儿 Storage 文件
+    // 与双倍流量。只保留父容器委托这一条路径。
   }
 
   function triggerPhotoUpload(){
