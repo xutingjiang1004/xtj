@@ -885,11 +885,11 @@ var researchCache = new Map();
 var RESEARCH_CACHE_MAX = 50;
 var RESEARCH_CACHE_TTL = 24 * 60 * 60 * 1000;
 
-function researchCacheKey(query, model, mode) {
+function researchCacheKey(userName, query, model, mode) {
   try {
-    return crypto.createHash('sha256').update(String(query || '') + '|' + String(model || '') + '|' + String(mode || '')).digest('hex');
+    return crypto.createHash('sha256').update(String(userName || '') + '|' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '')).digest('hex');
   } catch (e) {
-    return 'k_' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '');
+    return 'k_' + String(userName || '') + '|' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '');
   }
 }
 
@@ -15603,7 +15603,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
     if (!convId || !/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
     startStreamHeartbeat();
 
-    var cacheKey = researchCacheKey(query, model, mode);
+    var cacheKey = researchCacheKey(userName, query, model, mode);
 
     // A. 缓存命中 → 按原事件序列回放（research_step 0/1/2 → content 300 字切块 → sources → done）
     var cached = researchCacheGet(cacheKey);
