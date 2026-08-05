@@ -116,3 +116,18 @@ test('AI routes do not treat a normally completed request body as a disconnect',
   assert.match(aiRoutes, /req\.on\(['"]aborted['"]/);
   assert.match(aiRoutes, /res\.on\(['"]close['"]/);
 });
+
+test('normal chat stream keeps the SSE connection alive with heartbeats', () => {
+  // 普通聊天路由必须有心跳保活：DeepSeek 思考模型首个 token 前可能沉默 20-60s，
+  // 若无 keep-alive，代理/网络切断空闲连接后前端只会看到"AI 暂时没有回应"。
+  const routeStart = serverSource.indexOf("app.post('/api/agent/chat/stream'");
+  const routeEnd = serverSource.indexOf('app.get(\'/api/agent/chat/conversations\'', routeStart);
+  const route = serverSource.slice(routeStart, routeEnd);
+  assert.match(route, /startStreamHeartbeat\(\)/);
+  assert.match(route, /type: 'heartbeat'/);
+  assert.match(route, /_sseLastWriteAt/);
+  assert.match(route, /clearStreamHeartbeat\(\)/);
+  assert.match(route, /safeEnd\(\) \{ clearStreamHeartbeat\(\)/);
+  // 前端显式忽略 heartbeat，避免未来事件类型解析冲突
+  assert.match(source, /if \(evt\.type === 'heartbeat'\) \{[\s\S]{0,80}continue;/);
+});
