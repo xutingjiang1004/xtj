@@ -78,6 +78,7 @@
     _resizerCleanup: null,
     _layoutMenuCleanup: null,
     _isReadOnly: false,
+    _phoneMode: false, // Phase 6: 手机端只读聊天模式
     _persistenceFailed: false, // P0-9: 标记 IndexedDB 持久化是否失败
     workspaceGeneration: 0,
     restoreGeneration: 0
@@ -727,9 +728,10 @@
     }
 
     if (window.innerWidth <= CODE_PHONE_MAX_WIDTH) {
-      _dom.panelCode = panelCode;
-      renderPhoneOnlyNotice();
-      return Promise.resolve({ status: 'phone-unsupported' });
+      // Phase 6: 手机端不再完全禁用。标记 phone 模式继续初始化，
+      // 仅显示聊天面板（只读），隐藏文件树与编辑器。
+      state._phoneMode = true;
+      state._isReadOnly = true;
     }
 
     state.active = true;
@@ -742,7 +744,12 @@
     }
 
     // P0: 先立即显示欢迎页，IndexedDB 恢复在后台进行
-    renderWelcome();
+    // Phase 6: 手机端直接渲染聊天工作区（仅聊天面板），跳过欢迎页
+    if (state._phoneMode) {
+      renderWorkspace();
+    } else {
+      renderWelcome();
+    }
 
     // P0: 后台尝试恢复工作区，使用 restoreGeneration 防止覆盖用户新选择
     var restoreGeneration = ++state.restoreGeneration;
@@ -755,10 +762,11 @@
         state.directoryHandle = result.handle;
         state.workspaceName = result.handle.name;
         state.workspaceMode = 'local';
-        state._isReadOnly = false;
+        // Phase 6: 手机端保持只读，不覆盖 phone 模式标记
+        state._isReadOnly = state._phoneMode ? true : false;
         renderWorkspace();
         checkStreamRecovery();
-        if (result.kind === 'file') {
+        if (result.kind === 'file' && !state._phoneMode) {
           window.setTimeout(function () { openFile(state.workspaceName); }, 0);
         }
       }
@@ -2136,6 +2144,22 @@
     _dom.panelCode.appendChild(layoutRecovery);
     _dom.layoutRecovery = layoutRecovery;
 
+    // Phase 6: 手机端隐藏文件树、编辑器、分隔条与布局恢复控件，仅显示聊天面板
+    if (state._phoneMode) {
+      sidebar.style.display = 'none';
+      resizerLeft.style.display = 'none';
+      editorColumn.style.display = 'none';
+      resizerRight.style.display = 'none';
+      resizerContext.style.display = 'none';
+      layoutRecovery.style.display = 'none';
+      // 隐藏聊天头部布局/最大化按钮，避免误操作折叠唯一可见的聊天面板
+      var chatHeaderActions = chatHeader.querySelector('.code-panel-actions');
+      if (chatHeaderActions) chatHeaderActions.style.display = 'none';
+      chatPanel.style.flex = '1 1 100%';
+      chatPanel.style.width = '100%';
+      chatPanel.style.maxWidth = '100%';
+      shell.classList.add('code-phone-mode');
+    }
 
     _dom.fileTree = fileTree;
     _dom.contextPanel = contextPanel;
@@ -2155,22 +2179,31 @@
     renderProjectStatus();
     restoreComposerPreferences();
     renderChatPanel();
-    
-    initResizerDragLogic();
-    applyLayoutToDOM();
+
+    // Phase 6: 手机端不需要分隔条拖拽与布局应用，跳过以避免在隐藏元素上绑定监听
+    if (!state._phoneMode) {
+      initResizerDragLogic();
+      applyLayoutToDOM();
+    }
 
     loadProjectIndexStatus();
     loadCodeModels();
     restorePersistedTabs();
-    var tabRestore = restoreTabs();
-    tabRestore.catch(function (error) {
-      // The shell has already been mounted. Keep it interactive even if an
-      // individual restored file or browser handle is malformed.
-      console.warn('[code-workspace] restoring saved tabs failed', error);
+    if (state._phoneMode) {
+      // 手机端不恢复文件标签页，避免在隐藏的编辑器区域初始化 Monaco
       renderTabs();
       renderEmptyState();
-      showToast('部分上次文件未能恢复，请重新打开需要的文件。', 'warning');
-    });
+    } else {
+      var tabRestore = restoreTabs();
+      tabRestore.catch(function (error) {
+        // The shell has already been mounted. Keep it interactive even if an
+        // individual restored file or browser handle is malformed.
+        console.warn('[code-workspace] restoring saved tabs failed', error);
+        renderTabs();
+        renderEmptyState();
+        showToast('部分上次文件未能恢复，请重新打开需要的文件。', 'warning');
+      });
+    }
   }
 
   // Pointer Events Drag Logic
@@ -3399,38 +3432,59 @@
 
     var wsGen = state.workspaceGeneration;
     var saveKey = wsGen + ':' + path;
-    if (state._savePromises[saveKey]) return state._savePromises[saveKey];
-    var promise = fs.writeFileByPath(path, content).then(function (result) {
-      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) return false;
-      var currentContent = tab._currentContent;
-      if (state._monacoEditor && state.activePath === path) currentContent = state._monacoEditor.getValue();
-      var unchanged = currentContent === undefined || currentContent === content;
-      tab.content = content;
-      tab.sha256 = result.sha256 || '';
-      if (unchanged) {
-        tab.modified = false;
-        tab._currentContent = undefined;
-        tab._contentVersion = 0;
-      } else {
-        tab.modified = true;
-      }
-      renderTabs();
-      showToast(unchanged ? 'File saved' : 'Previous version saved; newer edits remain unsaved', unchanged ? 'success' : 'warning');
-      return true;
-    }).catch(function (err) {
-      // A save belonging to a replaced workspace must not surface an error
-      // toast in the new workspace. The operation is stale UI work.
-      if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+    // Phase 6: 同一路径不得并发写入（saveKey 去重保留）。保存进行中时，若
+    // 又有新的 Ctrl+S，将最新内容记录到 _pendingSaveContent，A 完成后检查
+    // 并写入。多次排队只保留最新内容，A 完成后只写一次。
+    if (state._savePromises[saveKey]) {
+      tab._pendingSaveContent = content;
+      return state._savePromises[saveKey];
+    }
+
+    return performSave(content);
+
+    function performSave(contentToWrite) {
+      var promise = fs.writeFileByPath(path, contentToWrite).then(function (result) {
+        if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) return false;
+        var currentContent = tab._currentContent;
+        if (state._monacoEditor && state.activePath === path) currentContent = state._monacoEditor.getValue();
+        var unchanged = currentContent === undefined || currentContent === contentToWrite;
+        tab.content = contentToWrite;
+        tab.sha256 = result.sha256 || '';
+        if (unchanged) {
+          tab.modified = false;
+          tab._currentContent = undefined;
+          tab._contentVersion = 0;
+        } else {
+          tab.modified = true;
+        }
+        renderTabs();
+        showToast(unchanged ? 'File saved' : 'Previous version saved; newer edits remain unsaved', unchanged ? 'success' : 'warning');
+        return true;
+      }).catch(function (err) {
+        // A save belonging to a replaced workspace must not surface an error
+        // toast in the new workspace. The operation is stale UI work.
+        if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) {
+          return false;
+        }
+        showToast('保存失败: ' + (err && err.message ? err.message : String(err)), 'error');
         return false;
-      }
-      showToast('保存失败: ' + (err && err.message ? err.message : String(err)), 'error');
-      return false;
-    }).then(function (result) {
-      if (state._savePromises[saveKey] === promise) delete state._savePromises[saveKey];
-      return result;
-    });
-    state._savePromises[saveKey] = promise;
-    return promise;
+      }).then(function (result) {
+        if (state._savePromises[saveKey] === promise) delete state._savePromises[saveKey];
+        // Phase 6: 保存完成后检查是否有排队的内容（保存期间又有新的 Ctrl+S），
+        // 若有则写入最新内容。此时 saveKey 已清空，不会并发写入。
+        if (tab._pendingSaveContent !== undefined && wsGen === state.workspaceGeneration && state.openTabs.indexOf(tab) !== -1) {
+          var pending = tab._pendingSaveContent;
+          tab._pendingSaveContent = undefined;
+          // Phase 6: 排队内容与刚写入内容相同时跳过重复写入（去重保留）
+          if (pending !== contentToWrite) {
+            performSave(pending);
+          }
+        }
+        return result;
+      });
+      state._savePromises[saveKey] = promise;
+      return promise;
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -3547,7 +3601,28 @@
     }
     
     if (tab._extractError) {
-      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML(tab._extractError) + '</p></div>';
+      preview.innerHTML = '<div class="doc-preview-error"><span class="doc-icon">📄</span><p>文档提取失败: ' + escapeHTML(tab._extractError) + '</p><button type="button" class="doc-reparse-btn" id="docReparseBtn" style="margin-top:10px;padding:6px 16px;border:1px solid var(--cw-border,#d1d5db);border-radius:6px;background:var(--cw-bg,#fff);color:var(--text-color);cursor:pointer;font-size:13px;">重新解析</button></div>';
+      // Phase 6: 绑定"重新解析"按钮 — 清除旧的提取状态后重新触发提取流程
+      var reparseBtn = preview.querySelector('#docReparseBtn');
+      if (reparseBtn) {
+        reparseBtn.addEventListener('click', function () {
+          // 终止可能残留的提取请求
+          try { if (tab._extractAbortController) tab._extractAbortController.abort(); } catch (_) {}
+          // 清除旧的提取状态
+          tab._extractError = null;
+          tab._extractId = null;
+          tab._extractPromise = null;
+          tab._extractAbortController = null;
+          tab._docState = 'pending';
+          tab._parseReady = false;
+          state._documentStates[tab.path] = { state: 'pending', generation: state.workspaceGeneration, extractionId: null, error: null };
+          // 重新渲染预览，会进入提取流程并创建新的 extractionId
+          if (_dom.editorArea) {
+            _dom.editorArea.innerHTML = '';
+            renderDocumentPreview(tab);
+          }
+        });
+      }
       // P0 Fix: 解析失败时也要同步更新状态面板
       renderProjectStatus();
       updateChatRequestControls();
@@ -6199,7 +6274,10 @@
           sha256: attachment.sha256 || '',
           source: 'attachment'
         };
-      })
+      }),
+      // Phase 6: 工作区模式与只读标记，供后端调整 runtimeCapabilities
+      workspace_mode: state.workspaceMode,
+      workspace_read_only: !!(state._isReadOnly || state._phoneMode)
     };
     if (warnings.length > 0) {
       body.context_warnings = warnings;

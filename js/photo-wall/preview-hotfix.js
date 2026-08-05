@@ -1249,6 +1249,17 @@
       state.mouseDown = false;
       clearInteractionState();
     }, true);
+
+    // P4: orientationchange 时清理交互状态并重置缩放/位移，避免旋转后视觉错位
+    window.addEventListener('orientationchange', function () {
+      state.mouseDown = false;
+      clearInteractionState();
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        // 重置缩放/位移状态（保留旋转角度），适配新视口尺寸
+        resetPreviewState({ animate: false, resetRotation: false, keepSuppressTap: true });
+      }
+    }, true);
   }
 
   function installImageErrorHandler() {

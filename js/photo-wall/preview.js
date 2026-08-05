@@ -141,8 +141,14 @@
             c = !0;
             var t = Math.abs(l - e), o = Math.min(Math.max(.5 * t, 150), 400);
             s.classList.add("snapping"), s.style.transition = "transform " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
-            var r = function() {
-                s.removeEventListener("transitionend", r), s.classList.remove("snapping"), c = !1,
+            // P4: 幂等 finish — transitionend 与 setTimeout 谁先触发都只执行一次，
+            // 防止 transitionend 未触发时动画锁 c 永久卡死（与函数 R 一致）。
+            var _done = !1, _fallback = null, r = function() {
+                if (_done) return;
+                _done = !0;
+                s.removeEventListener("transitionend", r);
+                if (_fallback) { clearTimeout(_fallback); _fallback = null; }
+                s.classList.remove("snapping"), c = !1,
                 Y(10);
                 var e = i, t = n, o = document.getElementById("ppPrevImg"), a = (document.getElementById("photoPreviewImage"),
                 document.getElementById("ppNextImg"));
@@ -152,6 +158,8 @@
                 }, 500);
             };
             s.addEventListener("transitionend", r);
+            // P4: setTimeout 兜底（transition 时长 + 120ms，与 R 的 320+120=440 模式一致）
+            _fallback = setTimeout(r, o + 120);
             var d = -a + e;
             s.style.transform = "translate3d(" + d + "px, 0, 0)";
         }
@@ -446,6 +454,8 @@
                     h = null), m.clear(), v = null, y = null, B.isActive = !1;
                     // 移除 resize 监听器，防止内存泄漏
                     if (d._ppResizeHandler) { window.removeEventListener("resize", d._ppResizeHandler); d._ppResizeHandler = null; }
+                    // P4: 移除 orientationchange 监听器
+                    if (d._ppOrientationHandler) { window.removeEventListener("orientationchange", d._ppOrientationHandler); d._ppOrientationHandler = null; }
                 }
                 d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
                     var n = e.target, i = n.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
@@ -613,6 +623,21 @@
                 // 将 resize handler 存为具名引用，便于 _cleanupPreview 时移除，防止内存泄漏
                 d._ppResizeHandler = function() { e && (M(), O(i), q()); };
                 window.addEventListener("resize", d._ppResizeHandler);
+                // P4: orientationchange 时释放动画锁（c）并清理交互状态
+                d._ppOrientationHandler = function() {
+                    if (!e) return;
+                    // 释放动画锁，防止旋转时 transitionend 丢失导致 c 卡死
+                    c = !1;
+                    if (s) {
+                        s.classList.remove("snapping");
+                        s.style.transition = "";
+                    }
+                    // 重新计算视口尺寸并重置滑动轨道位置
+                    M();
+                    O(i);
+                    q();
+                };
+                window.addEventListener("orientationchange", d._ppOrientationHandler);
             }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
             var S = n[b];
             S && S.imageUrl && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");

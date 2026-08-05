@@ -144,6 +144,9 @@
         }).then(function (response) {
           return response.json().catch(function () { return {}; }).then(function (data) {
             if (response.ok && data && data.ok === true) return { ok: true, data: data };
+            // ★ fetch 请求失败（503/非 ok 响应）时保存 durable pending 记录，
+            // 等待后续 reconcile 重试清理，避免 Storage 残留孤儿文件。
+            if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path });
             return { ok: false, status: response.status, data: data };
           });
         }).finally(function () {
@@ -151,26 +154,56 @@
         });
       });
     }).catch(function (error) {
+      // ★ 网络异常/超时也保存 durable pending 记录
+      if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path });
       console.error('[photo-upload] Backend cleanup could not be confirmed', error);
       return { ok: false, error: error };
     });
   }
 
   // ★ 保存 pending 上传状态（状态不确定时不删除 Storage，等待后续查询）
+  // P4: upsert 语义 — 同 uploadId 的记录合并 path 到 allPaths（不丢失历史路径），
+  // 更新 activePath / updatedAt / attempt；新记录则 allPaths 初始化为 [path]。
   function savePendingPhotoUpload(info) {
     try {
       var pending = readJson('xtj_photo_upload_pending', []);
-      // ★ 按 uploadId 去重，不重复 push
-      var exists = pending.some(function(p) { return p.uploadId === info.uploadId; });
-      if (!exists) {
+      var now = Date.now();
+      var newPath = info.path || info.activePath;
+      var existingIdx = -1;
+      for (var i = 0; i < pending.length; i++) {
+        var p = pending[i];
+        if (p && p.uploadId === info.uploadId) { existingIdx = i; break; }
+      }
+      if (existingIdx >= 0) {
+        // ★ upsert：合并新 path 到 allPaths（不丢失旧路径），更新 activePath / updatedAt
+        var existing = pending[existingIdx];
+        var allPaths = Array.isArray(existing.allPaths) ? existing.allPaths.slice() : (existing.path ? [existing.path] : []);
+        if (newPath && allPaths.indexOf(newPath) < 0) allPaths.push(newPath);
+        existing.allPaths = allPaths;
+        existing.activePath = newPath || existing.activePath || existing.path;
+        // 维持向后兼容：path 字段同步为 activePath
+        existing.path = existing.activePath;
+        existing.attempt = (typeof existing.attempt === 'number' ? existing.attempt : 0) + 1;
+        existing.updatedAt = now;
+        // 更新可选字段（如调用方提供则覆盖）
+        if (info.publicUrl) existing.publicUrl = info.publicUrl;
+        if (info.fileName) existing.fileName = info.fileName;
+        if (info.fileSize != null) existing.fileSize = info.fileSize;
+        if (info.mimeType) existing.mimeType = info.mimeType;
+      } else {
+        // ★ 新记录：allPaths 初始化为 [path]
         pending.push({
           uploadId: info.uploadId,
-          path: info.path,
+          path: newPath,
+          activePath: newPath,
+          allPaths: newPath ? [newPath] : [],
           publicUrl: info.publicUrl,
           fileName: info.fileName,
           fileSize: info.fileSize,
           mimeType: info.mimeType,
-          createdAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
+          attempt: 0,
           // P4: track retry state for real expiry, backoff, and stale detection
           retryCount: 0,
           lastQueriedAt: 0,
