@@ -56,6 +56,13 @@ services:
       
       - key: SUPABASE_URL
         value: https://ithowxqignlhkwaykglt.supabase.co
+
+      # ⚠️ Supabase Anon Key（前端直连用）— 在 Render Dashboard 手动设置
+      # 去 https://supabase.com/dashboard → Settings → API → anon public key
+      # 构建时注入 js/config.min.js：feed 失败回退 / 浏览统计 / 照片墙统计依赖它。
+      # 不设置则前端直连功能保持占位符降级（其余功能不受影响）。
+      - key: SUPABASE_ANON_KEY
+        sync: false
       
       - key: ADMIN_USERNAME
         value: xxz
