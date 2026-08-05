@@ -78,7 +78,7 @@
   }
 
   function safeUrl(value){
-    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '&#92;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;');
   }
 
   function findPhotoById(id, list){

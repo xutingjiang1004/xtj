@@ -65,6 +65,14 @@ async function apiRequest(method, path, body = null) {
 }
 
 async function ensureLoggedIn() {
+  if (authToken) {
+    // P0: 检查 token 是否过期（24小时强制过期）
+    var tokenAge = Date.now() - authTokenAt;
+    if (tokenAge > 24 * 60 * 60 * 1000) {
+      authToken = null;
+      authTokenAt = 0;
+    }
+  }
   if (!authToken) {
     if (adminUser && adminPass) {
       const data = await apiRequest("POST", "/admin/login", { username: adminUser, password: adminPass });
@@ -428,6 +436,20 @@ server.tool("admin_read_register_alerts", "标记注册提醒为已读", { ids: 
   await apiRequest("POST", "/admin/users/register-alerts/read", { ids });
   return { content: [{ type: "text", text: "✅ 注册提醒已标记为已读" }] };
 });
+
+server.tool(
+  "admin_audit_log",
+  "查看 MCP 审计日志",
+  {},
+  async () => {
+    await ensureLoggedIn();
+    return {
+      content: [{ type: "text", text: auditLog.length > 0 
+        ? auditLog.map(e => `[${e.time}] ${e.action}: ${e.detail}`).join('\n')
+        : "暂无审计日志" }]
+    };
+  }
+);
 
 // ===================== 启动 =====================
 const transport = new StdioServerTransport();

@@ -48,7 +48,7 @@ function isRecipientAllowed(to) {
 let sendFn = null;
 
 async function initProvider() {
-  if (sendFn && PROVIDER !== "smtp") return;
+  if (sendFn) return sendFn;  // P0: 防止重复初始化
   if (PROVIDER === "sendgrid") {
     const sgMail = (await import("@sendgrid/mail")).default;
     if (!process.env.SENDGRID_API_KEY) throw new Error("需要 SENDGRID_API_KEY");

@@ -1472,6 +1472,10 @@
     .email-section .send-result.success { background: rgba(5,150,105,0.08); border: 1px solid rgba(5,150,105,0.2); }
     .email-section .send-result.error { background: rgba(232,91,58,0.08); border: 1px solid rgba(232,91,58,0.2); }
     [data-theme="dark"] .email-section .user-list { border-color: rgba(255,255,255,0.1); }
+
+    .send-result { margin-top: 12px; padding: 12px; border-radius: 8px; font-size: 13px; }
+    .send-result.success { background: rgba(5,150,105,0.08); border: 1px solid rgba(5,150,105,0.2); }
+    .send-result.error { background: rgba(232,91,58,0.08); border: 1px solid rgba(232,91,58,0.2); }
     [data-theme="dark"] .email-section .user-list .user-item:hover { background: rgba(255,255,255,0.05); }
     [data-theme="dark"] .email-section .form-group input, [data-theme="dark"] .email-section .form-group textarea { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: #e5e5e5; }
 
@@ -1902,7 +1906,7 @@
         color: #ef4444;
     }
 
-/* 优化指纹和 IP 等代码信息展示 */
+/* 锟脚伙拷指锟狡猴拷 IP 锟饺达拷锟斤拷锟斤拷息展示 */
 .ip-text, .code-hash {
     font-family: Consolas, "Courier New", monospace !important;
     font-size: 13px !important;
@@ -2058,3 +2062,6 @@
         box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18) !important;
     }
 }
+
+/* 涓炬姤璇︽儏寮圭獥 */
+.report-detail-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 10000; background: var(--bg-primary); border-radius: 12px; padding: 24px; max-width: 600px; width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }

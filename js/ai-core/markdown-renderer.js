@@ -165,11 +165,6 @@
 
     // 12. Ordered lists
     s = s.replace(/^\d+\.\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
-    // Fix: wrap ordered lists that weren't already caught by unordered
-    s = s.replace(/<li>([\s\S]*?)<\/li>/g, function (match) {
-      // Only wrap if not already inside a list
-      return match;
-    });
 
     // 13. Paragraphs: double newlines
     var paragraphs = s.split(/\n\n+/);

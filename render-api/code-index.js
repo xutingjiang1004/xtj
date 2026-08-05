@@ -1588,7 +1588,6 @@ module.exports = {
   configureRegistry: configureRegistry,
   getRegistryStats: getRegistryStats,
   cleanupExpired: cleanupRegistry,
-  _resetRegistryForTests: resetRegistryForTests,
 
   // Content utilities
   chunkContent: chunkContent,
@@ -1606,3 +1605,8 @@ module.exports = {
   MAX_INDEX_FILES: MAX_INDEX_FILES,
   MAX_INDEX_TOTAL_BYTES: MAX_INDEX_TOTAL_BYTES
 };
+
+// 测试辅助：仅在非生产环境暴露索引重置函数
+if (String(process.env.NODE_ENV || '').toLowerCase() !== 'production' && !process.env.RENDER) {
+  module.exports._resetRegistryForTests = resetRegistryForTests;
+}

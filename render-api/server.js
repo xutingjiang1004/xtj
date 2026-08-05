@@ -46,8 +46,16 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 // ===================== 配置 =====================
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+if (!ADMIN_USERNAME) {
+  console.error('[FATAL] ADMIN_USERNAME 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 ADMIN_USERNAME。');
+  process.exit(1);
+}
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  console.error('[FATAL] ADMIN_PASSWORD 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 ADMIN_PASSWORD。');
+  process.exit(1);
+}
 const API_SECRET = process.env.API_SECRET;
 if (!API_SECRET) {
   console.error('[FATAL] API_SECRET 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 API_SECRET。');
@@ -142,8 +150,8 @@ let deepseekModelCatalog = {
 let deepseekModelProbePromise = null;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
-const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
-const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
+const AI_AGENT_DAILY_LIMIT = parseInt(process.env.AI_AGENT_DAILY_LIMIT || '300', 10) || 300; // 每用户每天 AI 调用次数
+const AI_AGENT_HOURLY_LIMIT = parseInt(process.env.AI_AGENT_HOURLY_LIMIT || '50', 10) || 50; // 每用户每小时 AI 调用次数
 // 文件解析库按需加载，避免服务启动阶段加载大体积解析依赖
 function extractDeepSeekModels(payload) {
   var source = [];

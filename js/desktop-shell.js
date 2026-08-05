@@ -887,6 +887,9 @@
     // P0: 安装全局错误监听器
     _installCodeErrorListeners();
 
+    // P0: 存储 MutationObserver 引用，页面切换时断开防止内存泄漏
+    var _observers = [];
+
     // ★ 双击刷新处理
     document.addEventListener('dblclick', function (event) {
       var tabButton = event.target.closest('[data-desktop-tab]');
@@ -953,30 +956,48 @@
 
     var panels = document.getElementById('dockPanels');
     if (panels && window.MutationObserver) {
-      new MutationObserver(syncActiveTab).observe(panels, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      var obs1 = new MutationObserver(syncActiveTab);
+      obs1.observe(panels, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      _observers.push(obs1);
     }
     var aiPanel = document.getElementById('panelAiChat');
     if (aiPanel && window.MutationObserver) {
-      new MutationObserver(syncActiveTab).observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
+      var obs2 = new MutationObserver(syncActiveTab);
+      obs2.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
+      _observers.push(obs2);
     }
     var auth = document.querySelector('.nav-auth');
     if (auth && window.MutationObserver) {
-      new MutationObserver(syncUser).observe(auth, { attributes: true, childList: true, subtree: true, characterData: true });
+      var obs3 = new MutationObserver(syncUser);
+      obs3.observe(auth, { attributes: true, childList: true, subtree: true, characterData: true });
+      _observers.push(obs3);
     }
     var badge = document.getElementById('navChatBadge');
     if (badge && window.MutationObserver) {
-      new MutationObserver(syncChatBadge).observe(badge, { attributes: true, childList: true, characterData: true });
+      var obs4 = new MutationObserver(syncChatBadge);
+      obs4.observe(badge, { attributes: true, childList: true, characterData: true });
+      _observers.push(obs4);
     }
     var chatList = document.getElementById('dockChatList');
     if (chatList && window.MutationObserver) {
-      new MutationObserver(scheduleContactsSync).observe(chatList, {
+      var obs5 = new MutationObserver(scheduleContactsSync);
+      obs5.observe(chatList, {
         attributes: true,
         childList: true,
         subtree: true,
         characterData: true,
         attributeFilter: ['data-chat-user']
       });
+      _observers.push(obs5);
     }
+
+    // P0: 在页面卸载时断开所有 Observer
+    window.addEventListener('beforeunload', function() {
+      for (var i = 0; i < _observers.length; i++) {
+        try { _observers[i].disconnect(); } catch (e) {}
+      }
+      _observers.length = 0;
+    });
     syncActiveTab();
     syncUser();
     syncChatBadge();
