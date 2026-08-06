@@ -5491,7 +5491,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       client_request_id: reqId,
       thinking_mode: S.thinkingMode || 'max',
       response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
-      attachments: attachmentPayload || undefined
+      attachments: attachmentPayload || undefined,
+      web_search: S.webSearchEnabled
     });
     
     try {
@@ -6796,55 +6797,194 @@ function showChatMessages() {
     root.appendChild(convList);
     S.conversationsEl = convList;
 
-    // 模型选择器 (小猫 AI)
-    var modelSelectorWrap = el('div', { class: 'ai-chat-model-selector-wrap', style: 'padding: 8px 12px 0 12px;' });
-    var modelSelector = el('select', { class: 'ai-chat-model-selector', style: 'padding: 4px; border: 1px solid var(--border, #ccc); border-radius: 4px; background: var(--bg, #fff); color: var(--text, #333);' });
-    modelSelector.appendChild(el('option', { value: 'online', text: '在线 DeepSeek' }));
-    
-    var savedAiModel = '';
-    try { savedAiModel = localStorage.getItem('xtj_ai_model'); } catch (e) {}
-    if (savedAiModel) {
-      modelSelector.value = savedAiModel;
+    // ★ 网页搜索改造：+ 号按钮展开面板，整合上传文件/模型/思考/网页搜索
+    // 初始化 web_search 状态（持久化到 localStorage）
+    if (typeof S.webSearchEnabled === 'undefined') {
+      try {
+        var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
+        S.webSearchEnabled = savedWebSearch === 'true';
+      } catch (e) {
+        S.webSearchEnabled = false;
+      }
     }
-    modelSelectorWrap.appendChild(modelSelector);
 
-    var responseProfileSelector = el('select', {
-      class: 'ai-chat-response-profile',
-      'aria-label': '小猫 AI 回复档位',
-      title: '增强思考会先梳理问题，必要时联网查证；不会进入深度研究。',
-      style: 'margin-left:8px;padding:4px;border:1px solid var(--border, #ccc);border-radius:4px;background:var(--bg, #fff);color:var(--text, #333);'
+    // 创建 + 号按钮
+    var plusBtn = el('button', {
+      type: 'button',
+      class: 'ai-plus-btn',
+      id: 'aiPlusBtn',
+      'aria-label': '更多选项',
+      title: '上传文件、切换模型、思考程度、网页搜索'
     });
-    responseProfileSelector.appendChild(el('option', { value: 'normal', text: '常规回复' }));
-    responseProfileSelector.appendChild(el('option', { value: 'enhanced', text: '增强思考 · 查证后回答' }));
-    try {
-      var savedResponseProfile = localStorage.getItem('xtj_ai_response_profile');
-      if (savedResponseProfile === 'enhanced') S.responseProfile = 'enhanced';
-    } catch (eResponseProfile) {}
-    responseProfileSelector.value = S.responseProfile;
-    responseProfileSelector.addEventListener('change', function () {
-      S.responseProfile = responseProfileSelector.value === 'enhanced' ? 'enhanced' : 'normal';
-      try { localStorage.setItem('xtj_ai_response_profile', S.responseProfile); } catch (eSaveProfile) {}
+    plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+    // 创建展开面板（液态玻璃效果）
+    var expandPanel = el('div', {
+      class: 'ai-plus-panel',
+      id: 'aiPlusPanel',
+      style: 'display:none'
     });
-    modelSelectorWrap.appendChild(responseProfileSelector);
-    modelSelector.addEventListener('change', function() {
-      try { localStorage.setItem('xtj_ai_model', modelSelector.value); } catch (e) {}
-  
+
+    // 面板选项：上传文件
+    var panelFileBtn = el('button', {
+      type: 'button',
+      class: 'ai-panel-option',
+      'aria-label': '上传文件',
+      title: '上传图片或文件'
     });
-    root.appendChild(modelSelectorWrap);
+    panelFileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>上传文件</span>';
+
+    // 面板选项：模型选择
+    var panelModelBtn = el('button', {
+      type: 'button',
+      class: 'ai-panel-option',
+      'aria-label': '切换模型',
+      title: '选择 AI 模型'
+    });
+    panelModelBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>模型</span>';
+
+    // 面板选项：思考程度
+    var panelThinkBtn = el('button', {
+      type: 'button',
+      class: 'ai-panel-option',
+      id: 'aiPanelThinkBtn',
+      'aria-label': '思考程度',
+      title: '切换思考模式'
+    });
+    panelThinkBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>思考程度</span>';
+
+    // 面板选项：网页搜索（带开关状态）
+    var panelSearchBtn = el('button', {
+      type: 'button',
+      class: 'ai-panel-option',
+      id: 'aiPanelSearchBtn',
+      'aria-label': '网页搜索',
+      title: '开启后结合 DeepSeek 内置搜索与 Tavily 搜索结果'
+    });
+    panelSearchBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>网页搜索</span><span class="ai-search-status" id="aiSearchStatus">' + (S.webSearchEnabled ? '● 开' : '○ 关') + '</span>';
+
+    function updateSearchStatus() {
+      var statusEl = document.getElementById('aiSearchStatus');
+      if (statusEl) {
+        statusEl.textContent = S.webSearchEnabled ? '● 开' : '○ 关';
+        statusEl.className = 'ai-search-status' + (S.webSearchEnabled ? ' on' : '');
+      }
+      var btn = document.getElementById('aiPanelSearchBtn');
+      if (btn) {
+        if (S.webSearchEnabled) btn.classList.add('active');
+        else btn.classList.remove('active');
+      }
+    }
+
+    // 上传文件点击 — 触发隐藏的 file input
+    panelFileBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      fileInput.click();
+    });
+
+    // 网页搜索点击切换
+    panelSearchBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      S.webSearchEnabled = !S.webSearchEnabled;
+      try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (eSave) {}
+      updateSearchStatus();
+      notify(S.webSearchEnabled ? '网页搜索已开启 · 将结合 DeepSeek 内置搜索与 Tavily 结果' : '网页搜索已关闭 · 仅使用模型内置搜索');
+    });
+
+    // 思考程度点击切换
+    panelThinkBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var modes = ['off', 'low', 'medium', 'high', 'max'];
+      var currentIdx = modes.indexOf(S.thinkingMode);
+      if (currentIdx < 0) currentIdx = 1;
+      var nextIdx = (currentIdx + 1) % modes.length;
+      S.thinkingMode = modes[nextIdx];
+      try { localStorage.setItem('xtj_ai_thinking_mode', S.thinkingMode); } catch (eSave) {}
+      var labels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
+      var thinkLabel = panelThinkBtn.querySelector('span');
+      if (thinkLabel) thinkLabel.textContent = '思考程度 · ' + (labels[S.thinkingMode] || S.thinkingMode);
+      notify('思考程度: ' + (labels[S.thinkingMode] || S.thinkingMode));
+    });
+
+    // 模型切换点击
+    panelModelBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var models = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+      var savedModel = '';
+      try { savedModel = localStorage.getItem('xtj_ai_model') || ''; } catch (e) {}
+      var currentIdx = models.indexOf(savedModel);
+      if (currentIdx < 0) currentIdx = 0;
+      var nextIdx = (currentIdx + 1) % models.length;
+      var nextModel = models[nextIdx];
+      try { localStorage.setItem('xtj_ai_model', nextModel); } catch (e) {}
+      var modelLabel = panelModelBtn.querySelector('span');
+      if (modelLabel) modelLabel.textContent = '模型 · ' + nextModel.replace('deepseek-', '');
+      notify('模型切换: ' + nextModel);
+    });
+
+    // 初始化面板标签状态
+    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
+    var thinkLabel = panelThinkBtn.querySelector('span');
+    if (thinkLabel) thinkLabel.textContent = '思考程度 · ' + (thinkLabels[S.thinkingMode] || S.thinkingMode);
+
+    var savedModel = '';
+    try { savedModel = localStorage.getItem('xtj_ai_model') || 'deepseek-v4-flash'; } catch (e) {}
+    var modelLabel = panelModelBtn.querySelector('span');
+    if (modelLabel) modelLabel.textContent = '模型 · ' + savedModel.replace('deepseek-', '');
+
+    updateSearchStatus();
+
+    // 组装面板
+    expandPanel.appendChild(panelFileBtn);
+    expandPanel.appendChild(panelModelBtn);
+    expandPanel.appendChild(panelThinkBtn);
+    expandPanel.appendChild(panelSearchBtn);
+
+    // + 号按钮点击展开/收起
+    var panelOpen = false;
+    plusBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      panelOpen = !panelOpen;
+      if (panelOpen) {
+        expandPanel.style.display = 'flex';
+        plusBtn.classList.add('active');
+        // 动画：从 + 旋转为 ×
+        plusBtn.querySelector('svg').style.transform = 'rotate(45deg)';
+      } else {
+        expandPanel.style.display = 'none';
+        plusBtn.classList.remove('active');
+        plusBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+      }
+    });
+
+    // 点击面板外部关闭
+    document.addEventListener('click', function(e) {
+      if (panelOpen && !expandPanel.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
+        panelOpen = false;
+        expandPanel.style.display = 'none';
+        plusBtn.classList.remove('active');
+        if (plusBtn.querySelector('svg')) plusBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+      }
+    });
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
-    // 文件上传按钮 (左边)
+    // 文件上传按钮 (隐藏，通过 + 面板触发)
     var fileBtn = el('button', {
       type: 'button',
       class: 'ai-chat-file-btn',
       id: 'aiChatFileBtn',
       'aria-label': '上传文件',
-      title: '上传图片或文件'
+      title: '上传图片或文件',
+      style: 'display:none'
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
     var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.docx,.txt,.csv,.xlsx', style: 'display:none' });
-    // 文件预览区域
     var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
       class: 'ai-chat-input',
@@ -6955,6 +7095,8 @@ function showChatMessages() {
       reader.readAsDataURL(f);
     });
 
+    inputBar.appendChild(plusBtn);
+    inputBar.appendChild(expandPanel);
     inputBar.appendChild(fileBtn);
     inputBar.appendChild(fileInput);
     inputBar.appendChild(filePreview);

@@ -154,6 +154,10 @@ let deepseekModelCatalog = {
 };
 let deepseekModelProbePromise = null;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
+// ★ 网页搜索改造：DeepSeek 内置 web_search 仅在 Responses API（/responses）可用，
+//   且目前仅支持 deepseek-v4-flash 模型（v4-pro 预计 2026-08 初支持）。
+const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/responses';
+const DEEPSEEK_RESPONSES_MODEL = 'deepseek-v4-flash';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = parseInt(process.env.AI_AGENT_DAILY_LIMIT || '300', 10) || 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = parseInt(process.env.AI_AGENT_HOURLY_LIMIT || '50', 10) || 50; // 每用户每小时 AI 调用次数
@@ -653,6 +657,50 @@ const AI_TOOLS = [
     }
   }
 ];
+
+// ===================== Responses API（内置 web_search）辅助函数 =====================
+// ★ 网页搜索改造：Responses API 的 function 工具格式与 OpenAI Chat 不同
+//   （无 function 嵌套），且内置 web_search 是独立 tool type、服务端执行。
+function toResponsesFunctionTool(openaiTool) {
+  var fn = openaiTool && openaiTool.function ? openaiTool.function : {};
+  return {
+    type: 'function',
+    name: fn.name || '',
+    description: fn.description || '',
+    parameters: fn.parameters || { type: 'object', properties: {} }
+  };
+}
+
+// 构建 Responses API 的 tools 数组：
+// - 内置 web_search（服务端执行，模型自主决定是否搜索）
+// - 保留天气/时间等非搜索工具
+// - 搜索开启时保留 tavily_search 作为第二通道（与内置搜索"一起抓取"）
+// - 去掉 search_web（第三方 provider 链，与内置 web_search 重复）
+function buildResponsesTools() {
+  var tools = [{ type: 'web_search' }];
+  for (var i = 0; i < AI_TOOLS.length; i++) {
+    var name = AI_TOOLS[i] && AI_TOOLS[i].function ? AI_TOOLS[i].function.name : '';
+    if (name === 'search_web') continue;
+    tools.push(toResponsesFunctionTool(AI_TOOLS[i]));
+  }
+  return tools;
+}
+
+// 将 OpenAI 风格 messages 数组转换为 Responses API 的 input items：
+// - instructions 单独传（首条 system 即 corePrompt，跳过避免重复）
+// - system 消息直接保留为 message item（Responses 协议允许 system 角色）
+// - 空内容跳过；tool 消息（工具轮历史）由工具轮逻辑单独追加，这里忽略
+function buildResponsesInput(messagesArr, instructionsContent) {
+  var items = [];
+  for (var i = 0; i < messagesArr.length; i++) {
+    var m = messagesArr[i];
+    if (!m || !m.role || m.role === 'tool') continue;
+    if (m.role === 'system' && instructionsContent && m.content === instructionsContent) continue;
+    if (m.content === null || m.content === undefined || m.content === '') continue;
+    items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: String(m.content) });
+  }
+  return items;
+}
 
 // Function Calling 工具执行器
 async function executeToolCall(toolCall, context) {
@@ -5028,6 +5076,11 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
 });
 
 async function callDeepSeek(messages, options) {
+  // ★ 网页搜索改造：当 use_responses_api 为 true 时，走 Responses API 路径
+  if (options && options.use_responses_api === true) {
+    return callDeepSeekViaResponses(messages, options);
+  }
+
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('AI 调用参数无效');
   }
@@ -5879,6 +5932,365 @@ async function callDeepSeek(messages, options) {
     }
     if (e && e.message && (e.message.indexOf('AI 调用失败') === 0 || e.message.indexOf('AI 返回格式') === 0)) throw e;
     console.error('[DEEPSEEK] unexpected error:', e && e.message);
+    throw new Error('AI 调用异常，请稍后再试');
+  } finally {
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
+    if (externalSignal && externalAbortHandler) {
+      try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
+    }
+  }
+}
+
+// ===================== Responses API（内置 web_search） =====================
+// ★ 网页搜索改造：使用 /responses 端点，支持内置 web_search + 自定义 function tools
+// 将 OpenAI Chat 格式的 messages 转换为 Responses API 的 input/instructions 格式
+async function callDeepSeekViaResponses(messages, options) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('AI 调用参数无效');
+  }
+  if (!DEEPSEEK_API_KEY) {
+    var missingKeyError = new Error('AI 服务未配置');
+    missingKeyError.code = 'AI_NOT_CONFIGURED';
+    missingKeyError.status = 503;
+    throw missingKeyError;
+  }
+
+  var thinkingLevel = (options && options.thinking_mode) || 'off';
+  var useThinking = thinkingLevel !== 'off';
+  var model = DEEPSEEK_RESPONSES_MODEL;
+  var useStream = !!(options && (typeof options.onThinkingChunk === 'function' || typeof options.onContentChunk === 'function'));
+  var hasThinkCb = options && typeof options.onThinkingChunk === 'function';
+  var hasContentCb = options && typeof options.onContentChunk === 'function';
+  var toolExecutor = (options && typeof options.tool_executor === 'function') ? options.tool_executor : executeToolCall;
+  var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
+  var externalSignal = options && options.signal ? options.signal : null;
+
+  // 分离 instructions（system 消息）和 input（非 system 消息）
+  var instructions = '';
+  var inputItems = [];
+  for (var i = 0; i < messages.length; i++) {
+    var m = messages[i];
+    if (!m || !m.role) continue;
+    if (m.role === 'system') {
+      if (m.content) instructions += (instructions ? '\n\n' : '') + String(m.content);
+    } else {
+      if (m.content === null || m.content === undefined || m.content === '') continue;
+      inputItems.push({ type: 'message', role: m.role, content: String(m.content) });
+    }
+  }
+
+  // 构建 tools 数组：内置 web_search + 自定义 function tools
+  var tools = [{ type: 'web_search' }];
+  if (options && options.tools && Array.isArray(options.tools)) {
+    for (var ti = 0; ti < options.tools.length; ti++) {
+      var t = options.tools[ti];
+      var fn = t && t.function ? t.function : {};
+      var name = fn.name || '';
+      if (!name || name === 'search_web') continue;
+      tools.push({
+        type: 'function',
+        name: name,
+        description: fn.description || '',
+        parameters: fn.parameters || { type: 'object', properties: {} }
+      });
+    }
+  }
+
+  var controller = new AbortController();
+  var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000);
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000;
+  var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000;
+  var firstTokenReceived = false;
+  var totalTimer = null;
+  var idleTimer = null;
+  var timeoutReason = '';
+
+  function refreshIdleTimeout() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function() {
+      timeoutReason = 'idle_timeout';
+      try { controller.abort(); } catch (e) {}
+    }, IDLE_TIMEOUT_MS);
+  }
+  function onProgress() {
+    if (!firstTokenReceived) firstTokenReceived = true;
+    refreshIdleTimeout();
+  }
+
+  totalTimer = setTimeout(function() {
+    timeoutReason = 'total_timeout';
+    try { controller.abort(); } catch (e) {}
+  }, TOTAL_TIMEOUT_MS);
+  var firstTokenTimer = setTimeout(function() {
+    if (!firstTokenReceived) {
+      timeoutReason = 'first_token_timeout';
+      try { controller.abort(); } catch (e) {}
+    }
+  }, FIRST_TOKEN_TIMEOUT_MS);
+  refreshIdleTimeout();
+
+  var externalAbortHandler = null;
+  if (externalSignal) {
+    externalAbortHandler = function() { try { controller.abort(); } catch (e) {} };
+    if (externalSignal.aborted) {
+      try { controller.abort(); } catch (e) {}
+    } else {
+      externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+    }
+  }
+
+  var toolCallsInfo = [];
+  var totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  var finalContent = '';
+  var finalReasoning = '';
+  var finalModel = model;
+
+  try {
+    var workingInput = inputItems.slice();
+    var workingInstructions = instructions;
+
+    for (var round = 0; round < maxToolRounds; round++) {
+      onProgress();
+      if (round > 0) useStream = false;
+
+      var apiBody = {
+        model: model,
+        input: workingInput,
+        tools: tools,
+        stream: useStream
+      };
+      if (workingInstructions) apiBody.instructions = workingInstructions;
+      if (useStream) apiBody.stream_options = { include_usage: true };
+      if (useThinking) {
+        apiBody.reasoning = { effort: thinkingLevel };
+      }
+      if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
+        apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
+      }
+
+      var resp = await fetch(DEEPSEEK_RESPONSES_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+        },
+        body: JSON.stringify(apiBody),
+        signal: controller.signal
+      });
+
+      if (!resp.ok) {
+        var errTxt = '';
+        var errCode = '';
+        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 500) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; } catch (e) {}
+        console.error('[RESPONSES] API error', resp.status, errTxt, 'round', round);
+        var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
+        apiErr.code = 'PROVIDER_HTTP_' + resp.status;
+        apiErr.status = resp.status;
+        throw apiErr;
+      }
+
+      var content = '';
+      var roundReasoning = '';
+      var functionCalls = [];
+      var lastUsage = null;
+
+      if (useStream) {
+        // ===== 流式解析 Responses API SSE =====
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var sBuffer = '';
+        var streamDone = false;
+        var currentEventType = '';
+
+        while (!streamDone) {
+          var rd;
+          try { rd = await reader.read(); } catch (e) { throw e; }
+          if (rd.done) {
+            sBuffer += decoder.decode();
+            if (!sBuffer) break;
+            sBuffer += '\n';
+          } else {
+            sBuffer += decoder.decode(rd.value, { stream: true });
+          }
+          var sLines = sBuffer.split('\n');
+          sBuffer = sLines.pop() || '';
+
+          for (var sl = 0; sl < sLines.length; sl++) {
+            var sLine = sLines[sl].trim();
+            if (!sLine) { currentEventType = ''; continue; }
+            if (sLine.indexOf('event: ') === 0) {
+              currentEventType = sLine.slice(7).trim();
+              continue;
+            }
+            if (sLine.indexOf('data: ') !== 0) continue;
+            var sData = sLine.slice(6);
+            if (sData === '[DONE]') { streamDone = true; break; }
+            var sJson;
+            try { sJson = JSON.parse(sData); } catch (e) { continue; }
+            if (!sJson) continue;
+
+            var evtType = sJson.type || currentEventType || '';
+
+            // 文本增量
+            if (evtType === 'response.output_text.delta' || evtType === 'output_text.delta') {
+              var delta = sJson.delta || '';
+              content += delta;
+              onProgress();
+              try { if (hasContentCb) options.onContentChunk(String(delta)); } catch (e) {}
+            }
+            // 推理增量
+            if (evtType === 'response.reasoning_text.delta' || evtType === 'reasoning_text.delta') {
+              var rDelta = sJson.delta || '';
+              roundReasoning += rDelta;
+              onProgress();
+              try { if (hasThinkCb) options.onThinkingChunk(String(rDelta)); } catch (e) {}
+            }
+            // 函数调用开始
+            if (evtType === 'response.output_item.added' && sJson.item && sJson.item.type === 'function_call') {
+              functionCalls.push({
+                id: sJson.item.id || '',
+                name: sJson.item.name || '',
+                arguments: sJson.item.arguments || ''
+              });
+            }
+            // 函数调用参数增量
+            if (evtType === 'response.function_call_arguments.delta') {
+              if (functionCalls.length > 0) {
+                functionCalls[functionCalls.length - 1].arguments += (sJson.delta || '');
+              }
+            }
+            // 完成事件
+            if (evtType === 'response.completed') {
+              if (sJson.response && sJson.response.usage) {
+                lastUsage = sJson.response.usage;
+                totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
+                totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
+                totalUsage.total_tokens += lastUsage.total_tokens || 0;
+              }
+            }
+            // 通用 usage
+            if (sJson.usage && !lastUsage) {
+              lastUsage = sJson.usage;
+              totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
+              totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
+              totalUsage.total_tokens += lastUsage.total_tokens || 0;
+            }
+          }
+          if (rd.done) break;
+        }
+        try { reader.cancel(); } catch (e) {}
+        finalReasoning = roundReasoning;
+      } else {
+        // ===== 非流式 =====
+        var data = await resp.json().catch(function() { return {}; });
+        if (data.usage) {
+          lastUsage = data.usage;
+          totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
+          totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
+          totalUsage.total_tokens += lastUsage.total_tokens || 0;
+        }
+        if (data.output && Array.isArray(data.output)) {
+          for (var oi = 0; oi < data.output.length; oi++) {
+            var item = data.output[oi];
+            if (item.type === 'message' && item.role === 'assistant') {
+              if (item.content && Array.isArray(item.content)) {
+                for (var ci = 0; ci < item.content.length; ci++) {
+                  var c = item.content[ci];
+                  if (c.type === 'output_text' && c.text) content += c.text;
+                }
+              }
+            }
+            if (item.type === 'function_call') {
+              functionCalls.push({
+                id: item.id || '',
+                name: item.name || '',
+                arguments: item.arguments || '{}'
+              });
+            }
+            if (item.type === 'reasoning' && item.text) {
+              roundReasoning += item.text;
+            }
+          }
+        }
+        finalReasoning = roundReasoning;
+      }
+
+      // 没 function_calls：最终回复
+      if (!functionCalls || functionCalls.length === 0) {
+        finalContent = content;
+        break;
+      }
+
+      // 有 function_calls：执行工具调用
+      // 添加 assistant 消息到 input
+      var assistantInput = { type: 'message', role: 'assistant', content: content || '' };
+      workingInput.push(assistantInput);
+
+      // 并行执行工具调用
+      var toolResults = await Promise.all(functionCalls.map(async function(fc, fi) {
+        var tStart = Date.now();
+        var toolResult = null;
+        try {
+          toolResult = await toolExecutor({ function: { name: fc.name, arguments: fc.arguments } }, { userName: (options && options._userName) || '' });
+        } catch (e) {
+          if (externalSignal && externalSignal.aborted) throw e;
+          toolResult = { tool_name: fc.name, error: (e && e.message) || '工具执行失败' };
+        }
+        var tElapsed = Date.now() - tStart;
+        return { fcId: fc.id, fcName: fc.name, fcArgs: fc.arguments, toolResult: toolResult, tElapsed: tElapsed };
+      }));
+
+      toolResults.forEach(function(r) {
+        toolCallsInfo.push({ id: r.fcId, name: r.fcName, args: r.fcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
+        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 8000) : '{}';
+        workingInput.push({ type: 'function_call_output', call_id: r.fcId, output: toolContent });
+      });
+    }
+
+    if (!finalContent) {
+      finalContent = '（AI 工具调用已达上限，请简化问题重试）';
+    }
+    if (!useThinking) finalReasoning = '';
+
+    var usage = null;
+    if (lastUsage || totalUsage.total_tokens > 0) {
+      usage = {
+        prompt_tokens: totalUsage.prompt_tokens || (lastUsage && lastUsage.prompt_tokens) || 0,
+        completion_tokens: totalUsage.completion_tokens || (lastUsage && lastUsage.completion_tokens) || 0,
+        total_tokens: totalUsage.total_tokens || (lastUsage && lastUsage.total_tokens) || 0,
+        tool_call_count: toolCallsInfo.length
+      };
+    }
+
+    return {
+      content: finalContent,
+      reasoning: finalReasoning,
+      usage: usage,
+      model: finalModel,
+      tool_calls_info: toolCallsInfo
+    };
+  } catch (e) {
+    clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(firstTokenTimer);
+    if (e && e.name === 'AbortError') {
+      if (externalSignal && externalSignal.aborted) {
+        var cancelledError = new Error('AI 调用已取消');
+        cancelledError.code = 'AI_CANCELLED';
+        throw cancelledError;
+      }
+      var timeoutMsg = 'AI 响应超时，请稍后再试';
+      if (timeoutReason === 'first_token_timeout') timeoutMsg = 'AI 响应超时（首包等待超时），请稍后再试';
+      else if (timeoutReason === 'idle_timeout') timeoutMsg = 'AI 响应超时（长时间无进度），请稍后再试';
+      else if (timeoutReason === 'total_timeout') timeoutMsg = 'AI 响应超时（任务总时长超时），请简化问题后重试';
+      var timeoutErr = new Error(timeoutMsg);
+      timeoutErr.code = 'AI_TIMEOUT';
+      throw timeoutErr;
+    }
+    if (e && e.code) throw e;
+    console.error('[RESPONSES] unexpected error:', e && e.message);
     throw new Error('AI 调用异常，请稍后再试');
   } finally {
     clearTimeout(totalTimer);
@@ -14190,20 +14602,91 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     }
     messages.push({ role: 'user', content: message });
 
-    // 8. 调用 DeepSeek
-    //    ★ P0 关键修复：启用 tools（search_web / get_weather / get_current_time）
-    //       AI 可以自己决定是否调用搜索
+    // ★ 网页搜索改造：当 web_search 参数存在时，走 Responses API 路径
     var reply = '';
     var usage = null;
-        // ★ M: fallback 从 max 改成 low
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var reasoning = '';
     var toolCallsInfo = [];
-    var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
-    // 收集 search_web 的真实 results（用于 1 天后徽章 + 结果列表展示）
     var searchResultsCollected = [];
     var searchQueriesCollected = [];
+    var webSearchEnabled = req.body && typeof req.body.web_search === 'boolean' ? req.body.web_search : null;
+    if (webSearchEnabled !== null && !aborted) {
+      // Tavily 并行搜索（仅当 web_search 开启时）
+      var tavilyPromise = null;
+      var tavilyResults = null;
+      if (webSearchEnabled === true) {
+        var tavilyQuery = message.slice(0, 150);
+        tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
+          if (r && Array.isArray(r.results)) tavilyResults = r.results;
+          return r;
+        }).catch(function(e) {
+          console.error('[AGENT-CHAT] Tavily search error:', e && e.message);
+          return null;
+        });
+      }
+
+      var deepSeekOptions = {
+        use_responses_api: true,
+        thinking_mode: thinkingMode,
+        tools: AI_TOOLS,
+        tool_choice: 'auto',
+        max_tool_rounds: 4,
+        signal: requestAbortCtrl.signal,
+        _userName: userName,
+        tool_executor: async function(toolCall) {
+          var res = await executeToolCall(toolCall, { userName: userName });
+          if (res && (res.tool_name === 'tavily_search' || res.tool_name === 'get_weather' || res.tool_name === 'get_current_time')) {
+            if (res.content) {
+              try {
+                var parsedResults = JSON.parse(res.content);
+                if (Array.isArray(parsedResults)) searchResultsCollected = searchResultsCollected.concat(parsedResults);
+              } catch (e) {}
+            }
+            try {
+              var argsStr = toolCall && toolCall.function && toolCall.function.arguments;
+              if (argsStr) {
+                var parsed = JSON.parse(argsStr);
+                if (parsed && parsed.query) searchQueriesCollected.push(String(parsed.query).slice(0, 100));
+              }
+            } catch (e) {}
+          }
+          return res;
+        }
+      };
+
+      try {
+        var result = await callDeepSeek(messages, deepSeekOptions);
+        if (aborted) return;
+        reply = result.content;
+        usage = result.usage;
+        toolCallsInfo = result.tool_calls_info || [];
+        if (thinkingMode !== 'off') reasoning = result.reasoning || '';
+      } catch (e) {
+        if (aborted) return;
+        console.error('[AGENT-CHAT] Responses API failed:', e && e.message);
+        return res.status(502).json({
+          error: 'AI 调用失败，请稍后再试',
+          detail: e && e.message ? String(e.message).slice(0, 200) : ''
+        });
+      }
+
+      // 等待 Tavily 结果
+      if (tavilyPromise) {
+        try { await tavilyPromise; } catch (e) {}
+        if (tavilyResults && tavilyResults.length > 0) {
+          searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
+        }
+      }
+
+      if (typeof reply !== 'string' || !reply) reply = '（AI 没有回复，请稍后再试）';
+      if (reply.length > 24000) reply = reply.slice(0, 24000) + '\n…（已截断）';
+      reply = sanitizeAssistantVisibleText(reply);
+    } else {
+    // 8. 调用 DeepSeek（旧 Chat Completions 路径）
+    //    ★ P0 关键修复：启用 tools（search_web / get_weather / get_current_time）
+    //       AI 可以自己决定是否调用搜索
     var deepSeekOptions = {
       thinking_mode: thinkingMode,
       tools: AI_TOOLS,
@@ -14249,35 +14732,28 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       });
     }
     if (typeof reply !== 'string' || !reply) reply = '（AI 没有回复，请稍后再试）';
-    // 非流式端点也允许长回复：代码/长文回答远超 4000 字符，仅对异常超长
-    // 内容做保护性截断（DeepSeek 单次输出上限约 8K token ≈ 24K 字符）
     if (reply.length > 24000) reply = reply.slice(0, 24000) + '\n…（已截断）';
     reply = sanitizeAssistantVisibleText(reply);
+    } // end else (old Chat Completions path)
 
     // 9. 保存消息（含 conversation_id，不物理删除旧数据）
     if (aborted) return;
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
-    // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
     var usedModel = normalizeDeepSeekUsageModel((result && result.model) || DEEPSEEK_MODEL_REASONER, (result && result.model) || DEEPSEEK_MODEL_REASONER);
     var usageToStore = Object.assign({}, usage || {}, {
       thinking_mode: thinkingMode,
       model: usedModel
     });
-    // ★ P1 关键修复：构造 searchMeta 存到消息 meta
-    //   1 天过期策略：search_expires_at = now + 86400000
-    //   1 天内：完整 results 数组
-    //   1 天后：前端只显示"已联网搜索 · N 条"徽章
     var searchMetaToStore = null;
     if (searchResultsCollected && searchResultsCollected.length > 0) {
       searchMetaToStore = {
         count: searchResultsCollected.length,
         query: searchQueriesCollected.length > 0 ? searchQueriesCollected[0] : '',
         queries: searchQueriesCollected.slice(0, 10),
-        results: searchResultsCollected.slice(0, 50),  // 最多 50 条
-        expires_at: nowTs + 86400000  // 1 天后过期
+        results: searchResultsCollected.slice(0, 50),
+        expires_at: nowTs + 86400000
       };
-      // 把搜索次数也记到 usage（方便后台统计）
       try { usageToStore.search_call_count = (toolCallsInfo || []).filter(function(t) { return t && t.name === 'search_web'; }).length; } catch (e) {}
     }
     try {
@@ -14286,14 +14762,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal' }),
+          media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
           actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
         },
         {
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal' }),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -14301,8 +14777,6 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       console.error('[AGENT-CHAT] save messages failed:', e.message);
     }
 
-    // 10. 返回
-    //     ★ 返回时带 tool_calls_info 和 search_count，前端可以立即渲染徽章（不等下次 loadHistory）
     var respBody = {
       ok: true,
       reply: reply,
@@ -14317,7 +14791,6 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       remaining: { hour: rl.remainingHour, day: rl.remainingDay }
     };
     if (searchResultsCollected.length > 0) {
-      // 1 天内返回完整 results 给前端立即渲染
       respBody.search_results = searchResultsCollected.slice(0, 50);
       respBody.search_expires_at = nowTs + 86400000;
     }
@@ -14542,6 +15015,146 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     if (timeContext) {
       messages.push({ role: 'user', content: timeContext });
+    }
+
+    // ★ 网页搜索改造：当 web_search 参数存在时，走 Responses API 路径（内置 web_search）
+    var webSearchEnabled = req.body && typeof req.body.web_search === 'boolean' ? req.body.web_search : null;
+    if (webSearchEnabled !== null && !aborted) {
+      // ===== Responses API 路径（内置 web_search + 可选 Tavily 并行） =====
+      var responsesContent = '';
+      var responsesReasoning = '';
+      var responsesUsage = null;
+      var responsesToolCallsInfo = [];
+      var searchResultsCollected = [];
+      var searchQueriesCollected = [];
+
+      // Tavily 并行搜索（仅当 web_search 开启时）
+      var tavilyPromise = null;
+      var tavilyResults = null;
+      if (webSearchEnabled === true) {
+        var tavilyQuery = message.slice(0, 150);
+        tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
+          if (r && Array.isArray(r.results)) tavilyResults = r.results;
+          return r;
+        }).catch(function(e) {
+          console.error('[AGENT-STREAM] Tavily search error:', e && e.message);
+          return null;
+        });
+      }
+
+      // 构建 callDeepSeek options（使用 Responses API 路径）
+      var responsesOptions = {
+        use_responses_api: true,
+        thinking_mode: thinkingMode,
+        tools: AI_TOOLS,
+        tool_choice: 'auto',
+        max_tool_rounds: 4,
+        signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
+        _userName: userName,
+        onThinkingChunk: function(chunk) {
+          if (aborted) return;
+          responsesReasoning += chunk;
+          try { writeSse(res, { type: 'reasoning', text: String(chunk).slice(0, 4000) }); } catch (e) {}
+        },
+        onContentChunk: function(chunk) {
+          if (aborted) return;
+          responsesContent += chunk;
+          try { writeSse(res, { type: 'content', text: String(chunk) }); } catch (e) {}
+        },
+        tool_executor: async function(toolCall) {
+          var tcResult = await executeToolCall(toolCall, { userName: userName });
+          if (tcResult && (tcResult.tool_name === 'tavily_search' || tcResult.tool_name === 'get_weather' || tcResult.tool_name === 'get_current_time')) {
+            try {
+              if (tcResult.content) {
+                var parsed = JSON.parse(tcResult.content);
+                if (Array.isArray(parsed)) searchResultsCollected = searchResultsCollected.concat(parsed);
+              }
+            } catch (e) {}
+            try {
+              var argsStr = toolCall && toolCall.function && toolCall.function.arguments;
+              if (argsStr) {
+                var parsedArgs = JSON.parse(argsStr);
+                if (parsedArgs && parsedArgs.query) searchQueriesCollected.push(String(parsedArgs.query).slice(0, 100));
+              }
+            } catch (e) {}
+          }
+          return tcResult;
+        }
+      };
+
+      var responsesResult;
+      try {
+        responsesResult = await callDeepSeek(messages, responsesOptions);
+      } catch (e) {
+        if (aborted) return safeEnd();
+        console.error('[AGENT-STREAM] Responses API failed:', e && e.message);
+        writeSse(res, { type: 'error', error: 'AI 调用失败，请稍后再试' });
+        return safeEnd();
+      }
+      if (aborted) return safeEnd();
+
+      responsesContent = responsesResult.content || '';
+      responsesReasoning = responsesResult.reasoning || '';
+      responsesUsage = responsesResult.usage;
+      responsesToolCallsInfo = responsesResult.tool_calls_info || [];
+
+      // 等待 Tavily 结果（如果开启了）
+      if (tavilyPromise) {
+        try { await tavilyPromise; } catch (e) {}
+        if (tavilyResults && tavilyResults.length > 0) {
+          searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
+          writeSse(res, { type: 'search', count: tavilyResults.length, source: 'tavily', results: tavilyResults.slice(0, 5), query: message.slice(0, 100) });
+        }
+      }
+
+      // 清理并保存
+      responsesContent = sanitizeAssistantVisibleText(responsesContent);
+      if (!responsesContent) responsesContent = '（AI 没有回复，请稍后再试）';
+      if (responsesContent.length > 24000) responsesContent = responsesContent.slice(0, 24000) + '\n…（已截断）';
+
+      var nowIso = new Date().toISOString();
+      var nowTs = Date.now();
+      var usedModel = DEEPSEEK_RESPONSES_MODEL;
+      var usageToStore = Object.assign({}, responsesUsage || {}, {
+        thinking_mode: thinkingMode,
+        model: usedModel,
+        web_search: webSearchEnabled
+      });
+
+      var searchMetaToStore = null;
+      if (searchResultsCollected && searchResultsCollected.length > 0) {
+        searchMetaToStore = {
+          count: searchResultsCollected.length,
+          query: searchQueriesCollected.length > 0 ? searchQueriesCollected[0] : message.slice(0, 100),
+          queries: searchQueriesCollected.slice(0, 10),
+          results: searchResultsCollected.slice(0, 50),
+          expires_at: nowTs + 86400000
+        };
+      }
+
+      try {
+        await supabase.from('posts').insert([
+          {
+            user_name: userName,
+            content: message,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
+            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+          },
+          {
+            user_name: userName,
+            content: responsesContent,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
+            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+          }
+        ]);
+      } catch (e) {
+        console.error('[AGENT-STREAM] save messages failed:', e.message);
+      }
+
+      writeSse(res, { type: 'done', conversation_id: convId, model: usedModel, usage: responsesUsage, thinking_mode: thinkingMode, search_count: searchResultsCollected.length, web_search: webSearchEnabled });
+      return safeEnd();
     }
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
