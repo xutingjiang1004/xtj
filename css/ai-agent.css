@@ -1099,25 +1099,25 @@
   border-radius: 16px;
   border: 1px solid rgba(140, 196, 158, 0.28);
   background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 4px 14px rgba(117, 160, 146, 0.08);
   color: rgba(66, 155, 122, 0.9);
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(117, 160, 146, 0.08);
+  z-index: 6;
+  position: relative;
   transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
               background 0.22s ease,
               border-color 0.22s ease,
               box-shadow 0.22s ease,
               color 0.22s ease;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-user-select: none;
-  position: relative;
-  z-index: 6;
 }
 
 .ai-plus-btn svg {
   transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
   pointer-events: none;
+}
+
+.ai-plus-btn.active svg {
+  transform: rotate(45deg);
 }
 
 .ai-plus-btn:hover {
@@ -1128,7 +1128,7 @@
 }
 
 .ai-plus-btn:active {
-  transform: scale(0.94);
+  background: rgba(66, 155, 122, 0.12);
 }
 
 .ai-plus-btn.active {
@@ -1138,42 +1138,122 @@
   color: rgba(50, 138, 108, 0.95);
 }
 
-/* 展开面板 — 液态玻璃效果 */
-.ai-plus-panel {
+.ai-plus-btn:focus-visible {
+  outline: 2px solid rgba(66, 155, 122, 0.5);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   面板外壳 — 玻璃 + 动画容器
+   ============================================================ */
+.ai-plus-panel-shell {
   position: absolute;
   left: 10px;
   bottom: calc(100% + 10px);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  min-width: 180px;
-  border-radius: 18px;
-  border: 1px solid rgba(140, 196, 158, 0.18);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  width: 236px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.55) 0%, rgba(248, 255, 250, 0.42) 40%, rgba(240, 252, 245, 0.32) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(240, 252, 245, 0.38) 50%, rgba(235, 250, 242, 0.28) 100%);
+  backdrop-filter: blur(26px) saturate(165%) contrast(103%);
+  -webkit-backdrop-filter: blur(26px) saturate(165%) contrast(103%);
   box-shadow:
     0 4px 24px rgba(66, 155, 122, 0.1),
-    0 12px 48px rgba(0, 0, 0, 0.06),
+    0 12px 48px rgba(0, 0, 0, 0.05),
+    0 0 0 0.5px rgba(255, 255, 255, 0.35) inset,
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
   z-index: 20;
-  animation: aiPanelIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
   transform-origin: bottom left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(8px);
+  clip-path: inset(100% 82% 0 0 round 24px);
+  transition:
+    opacity 240ms ease-out,
+    visibility 0ms 240ms,
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-@keyframes aiPanelIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.94);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.ai-plus-panel-shell.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  clip-path: inset(0 round 24px);
+  transition:
+    opacity 280ms ease-out,
+    visibility 0ms 0ms,
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* 面板选项按钮 */
+.ai-plus-panel-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ai-plus-panel-shell::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 23px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 面板内容 */
+.ai-plus-panel-content {
+  position: relative;
+  overflow: hidden;
+  padding: 8px;
+  z-index: 1;
+}
+
+/* ============================================================
+   面板页面
+   ============================================================ */
+.ai-panel-page {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-panel-page-primary {
+  /* 默认可见 */
+}
+
+.ai-panel-page-secondary {
+  display: none;
+  transform: translateX(18px);
+  opacity: 0;
+  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 200ms ease-out;
+}
+
+.ai-panel-page-primary.slide-out {
+  transform: translateX(-18px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 200ms ease-out;
+}
+
+.ai-panel-page-secondary.slide-in {
+  display: flex;
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* ============================================================
+   选项按钮
+   ============================================================ */
 .ai-panel-option {
   display: flex;
   align-items: center;
@@ -1181,60 +1261,149 @@
   width: 100%;
   padding: 10px 14px;
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   background: transparent;
   color: rgba(44, 55, 51, 0.88);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
   text-align: left;
-  white-space: nowrap;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-user-select: none;
   font-family: inherit;
-}
-
-.ai-panel-option svg {
-  flex: 0 0 auto;
-  opacity: 0.7;
-  transition: opacity 0.18s ease;
-}
-
-.ai-panel-option span {
-  flex: 1 0 auto;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 
 .ai-panel-option:hover {
-  background: rgba(66, 155, 122, 0.08);
+  background: rgba(66, 155, 122, 0.07);
   color: rgba(30, 48, 42, 0.95);
 }
 
-.ai-panel-option:hover svg {
-  opacity: 0.9;
-}
-
 .ai-panel-option:active {
-  background: rgba(66, 155, 122, 0.14);
-  transform: scale(0.97);
+  background: rgba(66, 155, 122, 0.13);
 }
 
-.ai-panel-option.active {
+.ai-panel-option.active,
+.ai-panel-option[aria-checked="true"] {
   background: rgba(66, 155, 122, 0.1);
   color: rgba(38, 108, 82, 0.95);
 }
 
-/* 网页搜索状态指示器 */
+/* ============================================================
+   分隔线
+   ============================================================ */
+.ai-panel-separator {
+  height: 1px;
+  margin: 4px 12px;
+  background: rgba(66, 155, 122, 0.08);
+}
+
+/* ============================================================
+   返回按钮
+   ============================================================ */
+.ai-panel-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: rgba(100, 115, 110, 0.8);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.ai-panel-back:hover {
+  background: rgba(66, 155, 122, 0.07);
+  color: rgba(30, 48, 42, 0.95);
+}
+
+/* ============================================================
+   选项值标签
+   ============================================================ */
+.ai-panel-option-value {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(66, 155, 122, 0.7);
+  margin-left: auto;
+}
+
+/* ============================================================
+   右箭头
+   ============================================================ */
+.ai-panel-chevron {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  opacity: 0.4;
+  margin-left: 2px;
+}
+
+/* ============================================================
+   选项组
+   ============================================================ */
+.ai-panel-options-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ============================================================
+   选项主体
+   ============================================================ */
+.ai-panel-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 0 auto;
+}
+
+/* ============================================================
+   选项标签
+   ============================================================ */
+.ai-panel-option-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ============================================================
+   选项描述
+   ============================================================ */
+.ai-panel-option-desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(100, 110, 120, 0.7);
+}
+
+/* ============================================================
+   选中图标
+   ============================================================ */
+.ai-panel-check {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.ai-panel-option[aria-checked="true"] .ai-panel-check {
+  opacity: 1;
+  color: rgba(66, 155, 122, 0.9);
+}
+
+/* ============================================================
+   网页搜索状态
+   ============================================================ */
 .ai-search-status {
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 8px;
-  background: rgba(120, 130, 140, 0.1);
-  color: rgba(100, 110, 120, 0.8);
+  background: rgba(120, 130, 140, 0.08);
+  color: rgba(100, 110, 120, 0.75);
   transition: background 0.22s ease, color 0.22s ease;
 }
 
@@ -1260,6 +1429,10 @@
   color: rgba(160, 216, 196, 0.92);
 }
 
+[data-theme="dark"] .ai-plus-btn:active {
+  background: rgba(66, 155, 122, 0.16);
+}
+
 [data-theme="dark"] .ai-plus-btn.active {
   border-color: rgba(127, 187, 172, 0.5);
   background: rgba(66, 155, 122, 0.16);
@@ -1267,15 +1440,25 @@
   color: rgba(160, 216, 196, 0.92);
 }
 
-[data-theme="dark"] .ai-plus-panel {
+[data-theme="dark"] .ai-plus-panel-shell {
   border-color: rgba(127, 187, 172, 0.14);
-  background: rgba(18, 30, 29, 0.78);
-  backdrop-filter: blur(28px) saturate(1.3);
-  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(40, 60, 55, 0.5) 0%, rgba(18, 30, 29, 0.45) 40%, rgba(14, 24, 22, 0.38) 100%),
+    linear-gradient(180deg, rgba(22, 36, 35, 0.65) 0%, rgba(16, 28, 27, 0.45) 50%, rgba(12, 22, 20, 0.35) 100%);
+  backdrop-filter: blur(26px) saturate(165%) contrast(103%);
+  -webkit-backdrop-filter: blur(26px) saturate(165%) contrast(103%);
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.28),
     0 12px 48px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .ai-plus-panel-shell::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 50%, transparent 100%);
+}
+
+[data-theme="dark"] .ai-plus-panel-shell::after {
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="dark"] .ai-panel-option {
@@ -1291,9 +1474,27 @@
   background: rgba(127, 187, 172, 0.16);
 }
 
-[data-theme="dark"] .ai-panel-option.active {
+[data-theme="dark"] .ai-panel-option.active,
+[data-theme="dark"] .ai-panel-option[aria-checked="true"] {
   background: rgba(66, 155, 122, 0.16);
   color: rgba(160, 220, 196, 0.94);
+}
+
+[data-theme="dark"] .ai-panel-back {
+  color: rgba(160, 190, 180, 0.7);
+}
+
+[data-theme="dark"] .ai-panel-back:hover {
+  background: rgba(127, 187, 172, 0.1);
+  color: rgba(210, 228, 222, 0.94);
+}
+
+[data-theme="dark"] .ai-panel-option-desc {
+  color: rgba(140, 160, 155, 0.6);
+}
+
+[data-theme="dark"] .ai-panel-option-value {
+  color: rgba(127, 187, 172, 0.7);
 }
 
 [data-theme="dark"] .ai-search-status {
@@ -1304,6 +1505,41 @@
 [data-theme="dark"] .ai-search-status.on {
   background: rgba(66, 155, 122, 0.2);
   color: rgba(140, 210, 182, 0.9);
+}
+
+[data-theme="dark"] .ai-panel-separator {
+  background: rgba(127, 187, 172, 0.08);
+}
+
+[data-theme="dark"] .ai-panel-option[aria-checked="true"] .ai-panel-check {
+  color: rgba(140, 210, 182, 0.9);
+}
+
+/* ============================================================
+   性能与动画降级
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .ai-plus-panel-shell,
+  .ai-plus-panel-shell.open,
+  .ai-panel-page,
+  .ai-plus-btn svg,
+  .ai-plus-btn {
+    transition-duration: 0.01ms !important;
+  }
+  .ai-panel-page-primary.slide-out,
+  .ai-panel-page-secondary.slide-in {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   移动端适配
+   ============================================================ */
+@media (max-width: 600px) {
+  .ai-plus-panel-shell {
+    width: 220px;
+    left: 4px;
+  }
 }
 
 

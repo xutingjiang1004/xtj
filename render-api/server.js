@@ -5959,7 +5959,7 @@ async function callDeepSeekViaResponses(messages, options) {
 
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
-  var model = DEEPSEEK_RESPONSES_MODEL;
+  var model = (options && options.model) ? getPreferredDeepSeekModel(options.model) : DEEPSEEK_RESPONSES_MODEL;
   var useStream = !!(options && (typeof options.onThinkingChunk === 'function' || typeof options.onContentChunk === 'function'));
   var hasThinkCb = options && typeof options.onThinkingChunk === 'function';
   var hasContentCb = options && typeof options.onContentChunk === 'function';
@@ -14607,16 +14607,19 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var usage = null;
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    var requestedModel = req.body && req.body.model;
+    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     var reasoning = '';
     var toolCallsInfo = [];
     var searchResultsCollected = [];
     var searchQueriesCollected = [];
-    var webSearchEnabled = req.body && typeof req.body.web_search === 'boolean' ? req.body.web_search : null;
-    if (webSearchEnabled !== null && !aborted) {
-      // Tavily 并行搜索（仅当 web_search 开启时）
+    var webSearchEnabled = req.body && req.body.web_search === true;
+    if (webSearchEnabled && !aborted) {
+      // Tavily 并行搜索
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (webSearchEnabled === true) {
+      if (webSearchEnabled) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
@@ -14629,6 +14632,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
       var deepSeekOptions = {
         use_responses_api: true,
+        model: validatedModel,
         thinking_mode: thinkingMode,
         tools: AI_TOOLS,
         tool_choice: 'auto',
@@ -14688,6 +14692,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //    ★ P0 关键修复：启用 tools（search_web / get_weather / get_current_time）
     //       AI 可以自己决定是否调用搜索
     var deepSeekOptions = {
+      model: validatedModel,
       thinking_mode: thinkingMode,
       tools: AI_TOOLS,
       tool_choice: 'auto',
@@ -14939,6 +14944,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         // ★ M: fallback 从 max 改成 low
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    var requestedModel = req.body && req.body.model;
+    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     // DeepSeek cannot safely combine reasoning mode with tools. Station actions
     // are routed through function calling, so select the non-thinking path.
     if (/搜索|查找|找一下|私信|发送消息|草稿|公告|维修任务/i.test(message)) thinkingMode = 'off';
@@ -15017,9 +15025,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       messages.push({ role: 'user', content: timeContext });
     }
 
-    // ★ 网页搜索改造：当 web_search 参数存在时，走 Responses API 路径（内置 web_search）
-    var webSearchEnabled = req.body && typeof req.body.web_search === 'boolean' ? req.body.web_search : null;
-    if (webSearchEnabled !== null && !aborted) {
+    // ★ 网页搜索改造：仅当 web_search 明确为 true 时，走 Responses API 路径（内置 web_search）
+    var webSearchEnabled = req.body && req.body.web_search === true;
+    if (webSearchEnabled && !aborted) {
       // ===== Responses API 路径（内置 web_search + 可选 Tavily 并行） =====
       var responsesContent = '';
       var responsesReasoning = '';
@@ -15031,7 +15039,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // Tavily 并行搜索（仅当 web_search 开启时）
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (webSearchEnabled === true) {
+      if (webSearchEnabled) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
@@ -15045,6 +15053,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // 构建 callDeepSeek options（使用 Responses API 路径）
       var responsesOptions = {
         use_responses_api: true,
+        model: validatedModel,
         thinking_mode: thinkingMode,
         tools: AI_TOOLS,
         tool_choice: 'auto',
@@ -15114,7 +15123,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
       var nowIso = new Date().toISOString();
       var nowTs = Date.now();
-      var usedModel = DEEPSEEK_RESPONSES_MODEL;
+      var usedModel = validatedModel;
       var usageToStore = Object.assign({}, responsesUsage || {}, {
         thinking_mode: thinkingMode,
         model: usedModel,
