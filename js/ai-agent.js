@@ -106,7 +106,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lifecycleId: 0,
     lastSendFingerprint: '',
     lastSendAt: 0,
-    webSearchEnabled: false
+    webSearchEnabled: false,
+    thinkingMode: 'medium',
+    selectedModel: 'deepseek-v4-flash'
   };
 
   function getAiStatusText() {
@@ -3859,7 +3861,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       chat_mode: 'normal',
       // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
       thinking_mode: S.deepThinkEffort || 'max',
-      web_search: S.webSearchEnabled
+      web_search: S.webSearchEnabled,
+      model: S.selectedModel
     });
 
     var aborted = false;
@@ -4553,7 +4556,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // Omit the field for ordinary messages so the server's response cache
       // remains eligible; an empty attachments array is truthy in JS.
       attachments: attachmentPayload || undefined,
-      web_search: S.webSearchEnabled
+      web_search: S.webSearchEnabled,
+      model: S.selectedModel
     });
 
     var aborted = false;
@@ -5495,7 +5499,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       thinking_mode: S.thinkingMode || 'max',
       response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
       attachments: attachmentPayload || undefined,
-      web_search: S.webSearchEnabled
+      web_search: S.webSearchEnabled,
+      model: S.selectedModel
     });
     
     try {
@@ -6805,9 +6810,25 @@ function showChatMessages() {
     try {
       var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
       S.webSearchEnabled = savedWebSearch === 'true';
-    } catch (e) {
-      // keep default false
-    }
+    } catch (e) {}
+
+    // 初始化模型选择
+    S.selectedModel = 'deepseek-v4-flash';
+    try {
+      var savedModel = localStorage.getItem('xtj_ai_model');
+      if (savedModel === 'deepseek-v4-flash' || savedModel === 'deepseek-v4-pro') {
+        S.selectedModel = savedModel;
+      }
+    } catch (e) {}
+
+    // 初始化思考程度
+    if (!S.thinkingMode) S.thinkingMode = 'medium';
+    try {
+      var savedThink = localStorage.getItem('xtj_ai_thinking_mode');
+      if (savedThink && ['off','low','medium','high','max'].indexOf(savedThink) >= 0) {
+        S.thinkingMode = savedThink;
+      }
+    } catch (e) {}
 
     // 创建 + 号按钮
     var plusBtn = el('button', {
@@ -6815,163 +6836,310 @@ function showChatMessages() {
       class: 'ai-plus-btn',
       id: 'aiPlusBtn',
       'aria-label': '更多选项',
+      'aria-expanded': 'false',
+      'aria-controls': 'aiPlusPanelShell',
       title: '上传文件、切换模型、思考程度、网页搜索'
     });
     plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
-    // 创建展开面板（液态玻璃效果）
-    var expandPanel = el('div', {
-      class: 'ai-plus-panel',
-      id: 'aiPlusPanel',
-      style: 'display:none'
+    // 创建面板外壳（玻璃 + 动画容器）
+    var panelShell = el('div', {
+      class: 'ai-plus-panel-shell',
+      id: 'aiPlusPanelShell'
+    });
+    panelShell.innerHTML = '<div class="ai-plus-panel-content">' +
+      '<div class="ai-panel-page ai-panel-page-primary" id="aiPanelPrimary">' +
+      '<button class="ai-panel-option" role="menuitem" data-action="upload">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>上传文件</span>' +
+      '</button>' +
+      '<div class="ai-panel-separator"></div>' +
+      '<button class="ai-panel-option" role="menuitem" data-action="model">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>模型</span>' +
+      '<span class="ai-panel-option-value">V4 Flash</span>' +
+      '<svg class="ai-panel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' +
+      '</button>' +
+      '<button class="ai-panel-option" role="menuitem" data-action="think">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>思考程度</span>' +
+      '<span class="ai-panel-option-value">深度</span>' +
+      '<svg class="ai-panel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' +
+      '</button>' +
+      '<div class="ai-panel-separator"></div>' +
+      '<button class="ai-panel-option" role="menuitem" data-action="search">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>网页搜索</span>' +
+      '<span class="ai-search-status" id="aiSearchStatus">○ 关</span>' +
+      '</button>' +
+      '</div>' +
+      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelModel" style="display:none">' +
+      '<button class="ai-panel-back" aria-label="返回">' +
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>模型</span>' +
+      '</button>' +
+      '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择模型">' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="deepseek-v4-flash">' +
+      '<div class="ai-panel-option-body">' +
+      '<span class="ai-panel-option-label">DeepSeek V4 Flash</span>' +
+      '<span class="ai-panel-option-desc">速度较快，适合普通聊天</span>' +
+      '</div>' +
+      '<svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
+      '</button>' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="deepseek-v4-pro">' +
+      '<div class="ai-panel-option-body">' +
+      '<span class="ai-panel-option-label">DeepSeek V4 Pro</span>' +
+      '<span class="ai-panel-option-desc">能力更强，适合复杂任务</span>' +
+      '</div>' +
+      '<svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
+      '</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelThink" style="display:none">' +
+      '<button class="ai-panel-back" aria-label="返回">' +
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>思考程度</span>' +
+      '</button>' +
+      '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择思考程度">' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="off"><span>关闭</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="low"><span>轻度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="medium"><span>中度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="high"><span>深度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
+      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="max"><span>极致</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
+      '</div>' +
+      '</div>' +
+      '</div>';
+
+    // 面板打开/关闭逻辑
+    var panelOpen = false;
+    var panelClosing = false;
+    var closeTimer = null;
+
+    function openPanel() {
+      if (panelOpen) return;
+      panelOpen = true;
+      panelClosing = false;
+      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      panelShell.classList.add('open');
+      plusBtn.classList.add('active');
+      plusBtn.setAttribute('aria-expanded', 'true');
+      goToPrimaryPage(false);
+    }
+
+    function closePanel(animate) {
+      if (!panelOpen || panelClosing) return;
+      panelClosing = true;
+      panelOpen = false;
+      panelShell.classList.remove('open');
+      plusBtn.classList.remove('active');
+      plusBtn.setAttribute('aria-expanded', 'false');
+      if (animate !== false) {
+        closeTimer = setTimeout(function() {
+          panelClosing = false;
+          closeTimer = null;
+          goToPrimaryPage(false);
+        }, 260);
+      } else {
+        panelClosing = false;
+        goToPrimaryPage(false);
+      }
+    }
+
+    // 二级页面导航
+    var currentSecondaryPage = null;
+
+    function goToSecondaryPage(pageId) {
+      var primary = document.getElementById('aiPanelPrimary');
+      var secondary = document.getElementById(pageId);
+      if (!primary || !secondary) return;
+      primary.classList.add('slide-out');
+      secondary.style.display = '';
+      secondary.offsetHeight;
+      secondary.classList.add('slide-in');
+      currentSecondaryPage = pageId;
+    }
+
+    function goToPrimaryPage(animate) {
+      var primary = document.getElementById('aiPanelPrimary');
+      if (!primary) return;
+      if (animate !== false) {
+        primary.classList.remove('slide-out');
+      } else {
+        primary.classList.remove('slide-out');
+        var secondaries = document.querySelectorAll('.ai-panel-page-secondary');
+        for (var i = 0; i < secondaries.length; i++) {
+          secondaries[i].classList.remove('slide-in');
+          secondaries[i].style.display = 'none';
+        }
+        currentSecondaryPage = null;
+      }
+      if (currentSecondaryPage) {
+        var sec = document.getElementById(currentSecondaryPage);
+        if (sec) {
+          sec.addEventListener('transitionend', function handler() {
+            sec.removeEventListener('transitionend', handler);
+            sec.classList.remove('slide-in');
+            sec.style.display = 'none';
+          });
+        }
+        currentSecondaryPage = null;
+      }
+    }
+
+    // 模型选择逻辑
+    var modelLabels = {
+      'deepseek-v4-flash': 'V4 Flash',
+      'deepseek-v4-pro': 'V4 Pro'
+    };
+
+    function updateModelUI() {
+      var modelValue = panelShell.querySelector('[data-action="model"] .ai-panel-option-value');
+      if (modelValue) modelValue.textContent = modelLabels[S.selectedModel] || S.selectedModel;
+      var radios = panelShell.querySelectorAll('#aiPanelModel [role="radio"]');
+      for (var i = 0; i < radios.length; i++) {
+        var val = radios[i].getAttribute('data-value');
+        radios[i].setAttribute('aria-checked', val === S.selectedModel ? 'true' : 'false');
+      }
+    }
+
+    panelShell.querySelector('[data-action="model"]').addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      goToSecondaryPage('aiPanelModel');
     });
 
-    // 面板选项：上传文件
-    var panelFileBtn = el('button', {
-      type: 'button',
-      class: 'ai-panel-option',
-      'aria-label': '上传文件',
-      title: '上传图片或文件'
-    });
-    panelFileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>上传文件</span>';
+    var modelRadios = panelShell.querySelectorAll('#aiPanelModel [role="radio"]');
+    for (var mi = 0; mi < modelRadios.length; mi++) {
+      modelRadios[mi].addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        var newModel = this.getAttribute('data-value');
+        if (newModel && newModel !== S.selectedModel) {
+          S.selectedModel = newModel;
+          try { localStorage.setItem('xtj_ai_model', newModel); } catch (e) {}
+          updateModelUI();
+          notify('模型切换: ' + (modelLabels[newModel] || newModel));
+        }
+        goToPrimaryPage();
+      });
+    }
 
-    // 面板选项：模型选择
-    var panelModelBtn = el('button', {
-      type: 'button',
-      class: 'ai-panel-option',
-      'aria-label': '切换模型',
-      title: '选择 AI 模型'
-    });
-    panelModelBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>模型</span>';
+    // 思考程度选择逻辑
+    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
 
-    // 面板选项：思考程度
-    var panelThinkBtn = el('button', {
-      type: 'button',
-      class: 'ai-panel-option',
-      id: 'aiPanelThinkBtn',
-      'aria-label': '思考程度',
-      title: '切换思考模式'
-    });
-    panelThinkBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>思考程度</span>';
+    function updateThinkUI() {
+      var thinkValue = panelShell.querySelector('[data-action="think"] .ai-panel-option-value');
+      if (thinkValue) thinkValue.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
+      var radios = panelShell.querySelectorAll('#aiPanelThink [role="radio"]');
+      for (var i = 0; i < radios.length; i++) {
+        var val = radios[i].getAttribute('data-value');
+        radios[i].setAttribute('aria-checked', val === S.thinkingMode ? 'true' : 'false');
+      }
+    }
 
-    // 面板选项：网页搜索（带开关状态）
-    var panelSearchBtn = el('button', {
-      type: 'button',
-      class: 'ai-panel-option',
-      id: 'aiPanelSearchBtn',
-      'aria-label': '网页搜索',
-      title: '开启后结合 DeepSeek 内置搜索与 Tavily 搜索结果'
+    panelShell.querySelector('[data-action="think"]').addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      goToSecondaryPage('aiPanelThink');
     });
-    panelSearchBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>网页搜索</span><span class="ai-search-status" id="aiSearchStatus">' + (S.webSearchEnabled ? '● 开' : '○ 关') + '</span>';
 
+    var thinkRadios = panelShell.querySelectorAll('#aiPanelThink [role="radio"]');
+    for (var ti = 0; ti < thinkRadios.length; ti++) {
+      thinkRadios[ti].addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        var newMode = this.getAttribute('data-value');
+        if (newMode && newMode !== S.thinkingMode) {
+          S.thinkingMode = newMode;
+          try { localStorage.setItem('xtj_ai_thinking_mode', newMode); } catch (e) {}
+          updateThinkUI();
+          notify('思考程度: ' + (thinkLabels[newMode] || newMode));
+        }
+        goToPrimaryPage();
+      });
+    }
+
+    // 返回按钮逻辑
+    var backBtns = panelShell.querySelectorAll('.ai-panel-back');
+    for (var bi = 0; bi < backBtns.length; bi++) {
+      backBtns[bi].addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        goToPrimaryPage();
+      });
+    }
+
+    // 网页搜索开关
     function updateSearchStatus() {
       var statusEl = document.getElementById('aiSearchStatus');
       if (statusEl) {
         statusEl.textContent = S.webSearchEnabled ? '● 开' : '○ 关';
         statusEl.className = 'ai-search-status' + (S.webSearchEnabled ? ' on' : '');
       }
-      var btn = document.getElementById('aiPanelSearchBtn');
+      var btn = panelShell.querySelector('[data-action="search"]');
       if (btn) {
         if (S.webSearchEnabled) btn.classList.add('active');
         else btn.classList.remove('active');
       }
     }
 
-    // 上传文件点击 — 触发隐藏的 file input
-    panelFileBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
+    panelShell.querySelector('[data-action="search"]').addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      S.webSearchEnabled = !S.webSearchEnabled;
+      try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (e) {}
+      updateSearchStatus();
+      notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
+    });
+
+    // 上传文件
+    panelShell.querySelector('[data-action="upload"]').addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      closePanel();
       fileInput.click();
     });
 
-    // 网页搜索点击切换
-    panelSearchBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      S.webSearchEnabled = !S.webSearchEnabled;
-      try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (eSave) {}
-      updateSearchStatus();
-      notify(S.webSearchEnabled ? '网页搜索已开启 · 将结合 DeepSeek 内置搜索与 Tavily 结果' : '网页搜索已关闭 · 仅使用模型内置搜索');
-    });
-
-    // 思考程度点击切换
-    panelThinkBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      var modes = ['off', 'low', 'medium', 'high', 'max'];
-      var currentIdx = modes.indexOf(S.thinkingMode);
-      if (currentIdx < 0) currentIdx = 1;
-      var nextIdx = (currentIdx + 1) % modes.length;
-      S.thinkingMode = modes[nextIdx];
-      try { localStorage.setItem('xtj_ai_thinking_mode', S.thinkingMode); } catch (eSave) {}
-      var labels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
-      var thinkLabel = panelThinkBtn.querySelector('span');
-      if (thinkLabel) thinkLabel.textContent = '思考程度 · ' + (labels[S.thinkingMode] || S.thinkingMode);
-      notify('思考程度: ' + (labels[S.thinkingMode] || S.thinkingMode));
-    });
-
-    // 模型切换点击
-    panelModelBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      var models = ['deepseek-v4-flash', 'deepseek-v4-pro'];
-      var savedModel = '';
-      try { savedModel = localStorage.getItem('xtj_ai_model') || ''; } catch (e) {}
-      var currentIdx = models.indexOf(savedModel);
-      if (currentIdx < 0) currentIdx = 0;
-      var nextIdx = (currentIdx + 1) % models.length;
-      var nextModel = models[nextIdx];
-      try { localStorage.setItem('xtj_ai_model', nextModel); } catch (e) {}
-      var modelLabel = panelModelBtn.querySelector('span');
-      if (modelLabel) modelLabel.textContent = '模型 · ' + nextModel.replace('deepseek-', '');
-      notify('模型切换: ' + nextModel);
-    });
-
-    // 初始化面板标签状态
-    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
-    var thinkLabel = panelThinkBtn.querySelector('span');
-    if (thinkLabel) thinkLabel.textContent = '思考程度 · ' + (thinkLabels[S.thinkingMode] || S.thinkingMode);
-
-    var savedModel = '';
-    try { savedModel = localStorage.getItem('xtj_ai_model') || 'deepseek-v4-flash'; } catch (e) {}
-    var modelLabel = panelModelBtn.querySelector('span');
-    if (modelLabel) modelLabel.textContent = '模型 · ' + savedModel.replace('deepseek-', '');
-
-    updateSearchStatus();
-
-    // 组装面板
-    expandPanel.appendChild(panelFileBtn);
-    expandPanel.appendChild(panelModelBtn);
-    expandPanel.appendChild(panelThinkBtn);
-    expandPanel.appendChild(panelSearchBtn);
-
-    // + 号按钮点击展开/收起
-    var panelOpen = false;
+    // + 号按钮点击
     plusBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      panelOpen = !panelOpen;
+      e.preventDefault(); e.stopPropagation();
       if (panelOpen) {
-        expandPanel.style.display = 'flex';
-        plusBtn.classList.add('active');
-        // 动画：从 + 旋转为 ×
-        plusBtn.querySelector('svg').style.transform = 'rotate(45deg)';
+        closePanel();
       } else {
-        expandPanel.style.display = 'none';
-        plusBtn.classList.remove('active');
-        plusBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+        openPanel();
       }
     });
 
-    // 点击面板外部关闭
+    // 事件清理（使用 AbortController）
+    var panelAbortController = new AbortController();
+    var panelSignal = panelAbortController.signal;
+
     document.addEventListener('click', function(e) {
-      if (panelOpen && !expandPanel.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
-        panelOpen = false;
-        expandPanel.style.display = 'none';
-        plusBtn.classList.remove('active');
-        if (plusBtn.querySelector('svg')) plusBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+      if (panelOpen && !panelShell.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
+        closePanel();
       }
-    });
+    }, { signal: panelSignal });
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        if (currentSecondaryPage) {
+          goToPrimaryPage();
+        } else if (panelOpen) {
+          closePanel();
+          try { plusBtn.focus(); } catch (e2) {}
+        }
+      }
+    }, { signal: panelSignal });
+
+    S._panelAbortController = panelAbortController;
+
+    // 移动端位置适配
+    function adjustPanelPosition() {
+      if (!panelShell) return;
+      var rect = panelShell.getBoundingClientRect();
+      var vw = window.innerWidth;
+      if (rect.right > vw - 8) {
+        panelShell.style.left = 'auto';
+        panelShell.style.right = '4px';
+        panelShell.style.transformOrigin = 'bottom right';
+      } else {
+        panelShell.style.left = '10px';
+        panelShell.style.right = 'auto';
+        panelShell.style.transformOrigin = 'bottom left';
+      }
+    }
+
+    window.addEventListener('resize', adjustPanelPosition);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', adjustPanelPosition);
+    }
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
@@ -7097,7 +7265,12 @@ function showChatMessages() {
     });
 
     inputBar.appendChild(plusBtn);
-    inputBar.appendChild(expandPanel);
+    inputBar.appendChild(panelShell);
+
+    // 初始化 UI
+    updateModelUI();
+    updateThinkUI();
+    updateSearchStatus();
     inputBar.appendChild(fileBtn);
     inputBar.appendChild(fileInput);
     inputBar.appendChild(filePreview);
