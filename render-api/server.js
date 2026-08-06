@@ -14968,6 +14968,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var enhancedSearchAllowed = responseProfile === 'enhanced' && !(config && config.enhanced && config.enhanced.allow_web_search === false);
     var allowSearch = enhancedSearchAllowed || !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
 
+    // ★ 网页搜索改造：前端 + 号面板的"网页搜索"开关
+    //   - web_search === true  → 走 DeepSeek Responses API 内置 web_search（服务端执行）
+    //     + Tavily 预搜注入（双通道"一起抓取"，结果统一整理后回答）
+    //   - web_search === false → 强制关闭所有外部搜索，仅用模型自身能力
+    //   - 未传（旧客户端/深度思考页）→ 保持原有 allowSearch 行为，向后兼容
+    var webSearchPref = req.body && req.body.web_search;
+    if (webSearchPref === false) {
+      allowSearch = false;
+    }
+
     // ★ P3 修复 bug 3: 提前预加载 useThinking 模式下的搜索结果, 与后续 fetch DeepSeek 完全并行
     //   之前在 line 8560-8595 才 await searchWeb, 阻塞 5-15s, 导致首字延迟 = searchWeb + max 思考 = 15-25s
     //   现在在思考模式决定后立即 fire (不 await), 跟 config/ctx 加载 + 后续 fetch DeepSeek 同时进行
@@ -15027,6 +15037,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // ★ 网页搜索改造：仅当 web_search 明确为 true 时，走 Responses API 路径（内置 web_search）
     var webSearchEnabled = req.body && req.body.web_search === true;
+    if (webSearchEnabled && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+      // Responses API 目前仅支持 deepseek-v4-flash（v4-pro 预计 2026-08 初支持），
+      // 用户在前端面板选了 V4 Pro 时强制回退 flash，避免 400。
+      validatedModel = DEEPSEEK_RESPONSES_MODEL;
+    }
     if (webSearchEnabled && !aborted) {
       // ===== Responses API 路径（内置 web_search + 可选 Tavily 并行） =====
       var responsesContent = '';
