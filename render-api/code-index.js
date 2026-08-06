@@ -118,6 +118,9 @@ function deleteRegistryEntry(key) {
   return true;
 }
 
+// cleanupRegistry — 管理 indexRegistry、pendingIndexBatches、latestGenerations 三个 Map。
+// 迭代中删除条目是安全的（Map.forEach 允许在迭代中 delete）。
+// 注意：三个 Map 各自独立管理，未来可考虑抽取为统一的缓存管理器。
 function cleanupRegistry(now) {
   now = typeof now === 'number' ? now : Date.now();
   indexRegistry.forEach(function(entry, key) {
@@ -466,6 +469,8 @@ function pushUniqueKeyword(keywords, value) {
 
 function extractKeywords(message) {
   if (!message) return [];
+  // 安全防护：限制输入长度防止 ReDoS，正则均为固定模式不拼接用户输入
+  message = String(message).slice(0, 5000);
   var keywords = [];
 
   // Extract quoted strings
