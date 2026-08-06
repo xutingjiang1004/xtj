@@ -56,8 +56,8 @@ function getEncryptionKey() {
   if (process.env.API_SECRET) {
     return crypto.createHash('sha256').update('provider-key-derivation:' + process.env.API_SECRET).digest();
   }
-  // 兜底（生产环境不应到达这里，因为 server.js 已要求 API_SECRET）
-  return crypto.createHash('sha256').update('xtj-fallback-key-do-not-use-in-production').digest();
+  // 密钥缺失：server.js 已要求 API_SECRET，此处不应到达。若到达则拒绝启动以保安全。
+  throw new Error('ENCRYPTION_KEY 和 API_SECRET 均未设置，无法初始化加密模块。请在环境变量中设置 ENCRYPTION_KEY 或 API_SECRET。');
 }
 
 function encryptApiKey(plaintext) {

@@ -17,6 +17,8 @@ function generateConversationId() {
   return 'conv_' + crypto.randomBytes(12).toString('hex');
 }
 
+// 返回一个工厂函数，每次调用返回递增的事件ID。
+// 用法：var nextEventId = generateEventId(); var id = nextEventId();
 function generateEventId() {
   var id = 0;
   return function () { return ++id; };

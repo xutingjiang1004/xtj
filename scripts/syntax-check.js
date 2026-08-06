@@ -1,17 +1,17 @@
-﻿'use strict';
+'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
 const DIRS = ['js', 'render-api', 'scripts'];
-const EXCLUDE = ['node_modules', '.git', 'dist', 'build', 'coverage'];
+const EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'coverage'];
 
 function walk(dir, files) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    if (EXCLUDE.some(e => fullPath.includes(e))) continue;
+    if (EXCLUDE_DIRS.some(e => fullPath.includes(path.sep + e + path.sep) || fullPath.startsWith(e + path.sep))) continue;
     if (entry.isDirectory()) {
       walk(fullPath, files);
     } else if (entry.name.endsWith('.js') && !entry.name.endsWith('.min.js')) {
