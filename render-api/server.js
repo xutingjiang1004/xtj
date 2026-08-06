@@ -621,6 +621,25 @@ const AI_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'tavily_search',
+      description: '使用 Tavily 搜索引擎进行普通网页搜索（区别于深度研究：这是单次快速搜索，返回标题/链接/摘要列表，不是长篇研究报告）。结果来自 Tavily API，质量高、结构清晰，适合需要精确来源与最新信息的查询。使用原则：\n- 必须搜：最新新闻/实时数据/价格汇率/天气/人物动态/具体事件\n- 不要搜：常识问答/简单计算/闲聊寒暄\n- 复杂问题拆成 3-5 个不同关键词分别搜索\n返回结果包含标题、链接、摘要和来源。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索关键词，要精准、具体。一个复杂问题可以拆成多个关键词分多次搜索，每次搜索一个具体方面' },
+          max_results: { type: 'integer', description: '返回结果数量，默认 5，最大 10', default: 5 },
+          search_depth: { type: 'string', enum: ['basic', 'advanced'], description: '搜索深度：basic 快速、advanced 更深入（默认 basic）', default: 'basic' },
+          include_answer: { type: 'boolean', description: '是否在结果中包含 Tavily 生成的综合答案摘要（默认 false）', default: false },
+          time_range: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '限定结果时间范围（如新闻类查询用 day/week）' },
+          topic: { type: 'string', enum: ['general', 'news'], description: '搜索主题：general 通用 / news 新闻', default: 'general' }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_weather',
       description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。只有在用户明确询问天气时才使用。',
       parameters: {
@@ -673,6 +692,31 @@ async function executeToolCall(toolCall, context) {
         };
       } catch (e) {
         return { tool_name: name, query: q, error: e && e.message || '搜索失败' };
+      }
+    }
+    case 'tavily_search': {
+      var tq = String(args.query || '').trim().slice(0, 200);
+      var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
+      if (!tq) return { tool_name: name, error: '搜索关键词为空' };
+      if (!process.env.TAVILY_API_KEY) return { tool_name: name, query: tq, error: 'Tavily 未配置（缺少 TAVILY_API_KEY 环境变量）' };
+      try {
+        var tavilyResult = await searchTavily(tq, tMax, {
+          search_depth: args.search_depth,
+          include_answer: !!args.include_answer,
+          time_range: ['day', 'week', 'month', 'year'].indexOf(args.time_range) >= 0 ? args.time_range : null,
+          topic: args.topic === 'news' ? 'news' : null
+        });
+        if (tavilyResult.error) return { tool_name: name, query: tq, error: tavilyResult.error };
+        var tArr = tavilyResult.results || [];
+        return {
+          tool_name: name,
+          query: tq,
+          results_count: tArr.length,
+          content: JSON.stringify(tArr.slice(0, 10)),
+          diagnostics: { provider: 'Tavily', search_depth: args.search_depth === 'advanced' ? 'advanced' : 'basic' }
+        };
+      } catch (e) {
+        return { tool_name: name, query: tq, error: e && e.message || 'Tavily 搜索失败' };
       }
     }
     case 'get_weather': {
@@ -831,20 +875,24 @@ setInterval(function() {
 // results 每条为 { title, url, snippet, source, published_at }
 
 // Provider 1: Tavily API
-async function searchTavily(query, maxResults) {
+async function searchTavily(query, maxResults, extraOpts) {
   var apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) return { results: [], error: null }; // 未配置，跳过
   try {
+    extraOpts = extraOpts || {};
+    var tavilyBody = {
+      api_key: apiKey,
+      query: query,
+      max_results: Math.min(maxResults || 5, 20),
+      search_depth: extraOpts.search_depth === 'advanced' ? 'advanced' : 'basic',
+      include_answer: !!extraOpts.include_answer
+    };
+    if (extraOpts.time_range) tavilyBody.time_range = extraOpts.time_range;
+    if (extraOpts.topic === 'news') tavilyBody.topic = 'news';
     var resp = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query: query,
-        max_results: Math.min(maxResults || 5, 20),
-        search_depth: 'basic',
-        include_answer: false
-      }),
+      body: JSON.stringify(tavilyBody),
       signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) {
@@ -14174,7 +14222,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       // ★ wrapper：拦截 search_web 的真实 results 数组
       tool_executor: async function(toolCall) {
         var res = await executeToolCall(toolCall, { userName: userName });
-        if (res && res.tool_name === 'search_web') {
+        if (res && (res.tool_name === 'search_web' || res.tool_name === 'tavily_search')) {
           if (res.content) {
             try {
               var parsedResults = JSON.parse(res.content);
@@ -15283,7 +15331,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         var toolResult = toolResults[ti].result;
         
         // 捕获 search_web 工具的搜索结果元数据
-        if (toolResult.tool_name === 'search_web' && !toolResult.error && toolResult.results_count > 0) {
+        if ((toolResult.tool_name === 'search_web' || toolResult.tool_name === 'tavily_search') && !toolResult.error && toolResult.results_count > 0) {
           var _parsedResults = null;
           try { _parsedResults = JSON.parse(toolResult.content || '[]'); } catch (e) {}
           _toolSearchMeta = {
