@@ -14676,6 +14676,27 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         }
       };
 
+      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜（最多 6s）并注入上下文，
+      //   与内置 web_search 结果统一整理后作答（超时则放弃，工具兜底）。
+      if (tavilyPromise) {
+        try {
+          var _chatTavilyRes = await Promise.race([
+            tavilyPromise,
+            new Promise(function(_resolve2) { setTimeout(function() { _resolve2(null); }, 6000); })
+          ]);
+          if (_chatTavilyRes && Array.isArray(_chatTavilyRes.results) && _chatTavilyRes.results.length > 0) {
+            messages.push({
+              role: 'system',
+              content: '【Tavily 联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message.slice(0, 150) + '\n\n' +
+                _chatTavilyRes.results.slice(0, 20).map(function(sr, _si2) { return (_si2 + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                '\n\n要求：结合以上 Tavily 搜索结果与内置网页搜索获取的信息一起作答，优先使用检索到的实时信息，不要编造新闻、价格、天气、日期。'
+            });
+          }
+        } catch (e) {
+          try { console.error('[AGENT-CHAT] tavily inject error:', e && e.message); } catch (_) {}
+        }
+      }
+
       try {
         var result = await callDeepSeek(messages, deepSeekOptions);
         if (aborted) return;
@@ -15126,6 +15147,29 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           return tcResult;
         }
       };
+
+      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜（最多 6s），结果注入上下文，
+      //   与 DeepSeek 内置 web_search 获取的信息统一整理后作答。
+      //   超时则放弃（内置 web_search / tavily_search 工具仍会兜底）。
+      if (tavilyPromise) {
+        try {
+          var _tavilyRes = await Promise.race([
+            tavilyPromise,
+            new Promise(function(_resolve) { setTimeout(function() { _resolve(null); }, 6000); })
+          ]);
+          if (_tavilyRes && Array.isArray(_tavilyRes.results) && _tavilyRes.results.length > 0) {
+            var _tavilyItems = _tavilyRes.results.slice(0, 20);
+            messages.push({
+              role: 'system',
+              content: '【Tavily 联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message.slice(0, 150) + '\n\n' +
+                _tavilyItems.map(function(sr, _si) { return (_si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                '\n\n要求：结合以上 Tavily 搜索结果与内置网页搜索获取的信息一起作答，优先使用检索到的实时信息，不要编造新闻、价格、天气、日期。'
+            });
+          }
+        } catch (e) {
+          try { console.error('[AGENT-STREAM] tavily inject error:', e && e.message); } catch (_) {}
+        }
+      }
 
       var responsesResult;
       try {
