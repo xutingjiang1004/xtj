@@ -7035,6 +7035,7 @@ function showChatMessages() {
     var currentPage = 'primary';
     var closeTimer = null;
     var closeFallbackTimer = null;
+    var openFallbackTimer = null;
     var pageTransitionTimers = {};   // pageId -> timeout id（页面切换兜底）
     var panelResizeRaf = 0;
     var pageRafQueue = [];            // 跟踪所有 showPage 的 rAF，cleanup 时取消
@@ -7414,13 +7415,15 @@ function showChatMessages() {
       if (rect.right > vw - 8) {
         panelShell.style.left = 'auto';
         panelShell.style.right = '4px';
-        // 右边对齐: clip-path 从右下角 (按钮位置) 展开
-        panelShell.style.clipPath = 'inset(100% 0 0 75% round 22px)';
+        // 右边对齐: clip-path 起点从右下角 (按钮位置) 展开
+        // ★ 用 CSS 变量而非 inline clip-path：inline 会覆盖 .open 规则的 clip-path: inset(0)，
+        //   导致面板打开后仍被完全裁剪（菜单打不开的根因）
+        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 0 0 75% round 22px)');
       } else {
         panelShell.style.left = '10px';
         panelShell.style.right = 'auto';
-        // 左边对齐: clip-path 从左下角 (按钮位置) 展开
-        panelShell.style.clipPath = 'inset(100% 75% 0 0 round 22px)';
+        // 左边对齐: clip-path 起点从左下角 (按钮位置) 展开
+        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 75% 0 0 round 22px)');
       }
     }
 
