@@ -5996,6 +5996,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             continue;
           }
 
+          if (evt.type === 'search_status') {
+            // DeepSeek 内置 web_search 状态（黑盒：结果不外吐，仅提示状态）
+            var stBar = assistantNode.querySelector('.ai-search-status');
+            if (!stBar) {
+              stBar = el('div', { class: 'ai-search-status' });
+              assistantNode.insertBefore(stBar, assistantBubble);
+            }
+            if (evt.status === 'searching') {
+              stBar.textContent = '正在联网搜索…';
+            } else if (evt.status === 'completed') {
+              stBar.textContent = '已联网（内置搜索）';
+            }
+            continue;
+          }
+
           if (evt.type === 'search') {
             // 显示搜索状态条
             var searchCount = evt.count;
@@ -6943,7 +6958,9 @@ function showChatMessages() {
       'aria-controls': 'aiPlusPanelShell',
       title: '上传文件、切换模型、思考程度、网页搜索'
     });
-    plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    // ★ SVG 修复: 加 display:block, 明确的 xmlns 和 stroke-linejoin:round，
+    //   避免 inline svg 在 flex 容器内的 baseline 对齐问题（之前会渲染成小点）
+    plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" display="block" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
     // 创建面板外壳（玻璃 + 动画容器）
     var panelShell = el('div', {
@@ -7155,6 +7172,22 @@ function showChatMessages() {
       navigateTo(pageId);
     }
 
+    // Apple 风格打开/关闭动画 — will-change 生命周期管理
+    // 在 transitionend 移除 is-opening / is-closing class（避免永久合成层）
+    function onPanelOpenEnd(ev) {
+      if (ev && ev.target !== panelShell) return;
+      // 接受 transform / opacity / clip-path 任一过渡结束即移除 класс
+      if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
+      panelShell.removeEventListener('transitionend', onPanelOpenEnd);
+      panelShell.classList.remove('is-opening');
+    }
+    function onPanelCloseEnd(ev) {
+      if (ev && ev.target !== panelShell) return;
+      if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
+      panelShell.removeEventListener('transitionend', onPanelCloseEnd);
+      panelShell.classList.remove('is-closing');
+    }
+
     function openPanel() {
       if (panelOpen) return;
       // P0-3: 动画未结束时重新打开，取消旧关闭任务并保持正确页面
@@ -7164,17 +7197,26 @@ function showChatMessages() {
       panelOpen = true;
       // 重置到主页（即时，无动画）
       goToPrimaryPage(false);
-      panelShell.classList.add('open');
+      // ★ 同步设置 clip-path 内联样式（设定动画起点），再添加 .open 触发 CSS transition
+      adjustPanelPosition();
+      // 标记 opening 状态，提升合成层；动画结束后移除
+      panelShell.classList.remove('is-closing');
+      panelShell.classList.add('is-opening', 'open');
       plusBtn.classList.add('active');
       plusBtn.setAttribute('aria-expanded', 'true');
-      // 打开时主动定位一次
-      schedulePanelPosition();
+      // 监听 transitionend，移除 is-opening
+      panelShell.addEventListener('transitionend', onPanelOpenEnd);
+      // 兜底 400ms 后强制移除（clip-path 最长 380ms + 余量）
+      if (openFallbackTimer) clearTimeout(openFallbackTimer);
+      openFallbackTimer = setTimeout(function() {
+        panelShell.classList.remove('is-opening');
+        openFallbackTimer = null;
+      }, 400);
     }
 
-    // P0-3 + 交互修复: 关闭面板
-    // 修复: 如果当前在二级页面，二级页的离场动画与外壳的关闭动画并行
-    // 而不是先即时跳回 primary 再关闭外壳（会造成"二级页消失，primary 闪一下，外壳消失"的撕裂感）
-    // 完成信号：外壳 opacity/transform transitionend + 380ms 兜底
+    // P0-3 + 交互修复 + Apple 风格关闭动画: 关闭面板
+    // 关闭动画: clip-path + translateY + opacity 回到关闭状态
+    // 完成信号: 面板外壳 transitionend + 400ms 兜底
     function closePanel(animate) {
       if (!panelOpen || panelClosing) return;
       panelClosing = true;
@@ -7189,35 +7231,43 @@ function showChatMessages() {
       } else {
         goToPrimaryPage(false);
       }
+      // 标记 closing 状态提升合成层
+      panelShell.classList.remove('is-opening');
+      panelShell.classList.add('is-closing');
       panelShell.classList.remove('open');
       plusBtn.classList.remove('active');
       plusBtn.setAttribute('aria-expanded', 'false');
       if (animate === false) {
+        panelShell.classList.remove('is-closing');
         panelClosing = false;
         return;
       }
       var done = false;
       function onShellEnd(ev) {
         if (done) return;
-        // 只响应外壳自身的 opacity/transform（避免子元素冒泡干扰）
+        // 只响应外壳自身的 opacity/transform/clip-path（避免子元素冒泡干扰）
         if (ev && ev.target !== panelShell) return;
+        if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
         done = true;
         panelShell.removeEventListener('transitionend', onShellEnd);
+        panelShell.removeEventListener('transitionend', onPanelCloseEnd);
         if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+        panelShell.classList.remove('is-closing');
         panelClosing = false;
         // 关闭后强制重置所有页面到 primary（防止二级页 is-leaving 卡住）
         goToPrimaryPage(false);
       }
       panelShell.addEventListener('transitionend', onShellEnd);
-      // 兜底 380ms
+      // 兜底 400ms（clip-path 最长 380ms + 余量）
       closeTimer = setTimeout(function() {
         if (done) return;
         done = true;
         panelShell.removeEventListener('transitionend', onShellEnd);
         closeTimer = null;
+        panelShell.classList.remove('is-closing');
         panelClosing = false;
         goToPrimaryPage(false);
-      }, 380);
+      }, 400);
     }
 
     // 模型选择逻辑
@@ -7312,6 +7362,11 @@ function showChatMessages() {
         if (S.webSearchEnabled) btn.classList.add('active');
         else btn.classList.remove('active');
       }
+      // 开启态：+ 号按钮显示绿色状态光点，输入区可一眼看到网页搜索处于开启
+      if (plusBtn) {
+        if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
+        else plusBtn.classList.remove('ws-on');
+      }
     }
 
     panelShell.querySelector('[data-action="search"]').addEventListener('click', function(e) {
@@ -7353,17 +7408,19 @@ function showChatMessages() {
     }
 
     function adjustPanelPosition() {
-      if (!panelShell || !panelShell.classList.contains('open')) return;
+      if (!panelShell) return;
       var rect = panelShell.getBoundingClientRect();
       var vw = window.innerWidth;
       if (rect.right > vw - 8) {
         panelShell.style.left = 'auto';
         panelShell.style.right = '4px';
-        panelShell.style.transformOrigin = 'bottom right';
+        // 右边对齐: clip-path 从右下角 (按钮位置) 展开
+        panelShell.style.clipPath = 'inset(100% 0 0 75% round 22px)';
       } else {
         panelShell.style.left = '10px';
         panelShell.style.right = 'auto';
-        panelShell.style.transformOrigin = 'bottom left';
+        // 左边对齐: clip-path 从左下角 (按钮位置) 展开
+        panelShell.style.clipPath = 'inset(100% 75% 0 0 round 22px)';
       }
     }
 
