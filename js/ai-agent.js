@@ -39,6 +39,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
   var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
 
+  // ★ P0-1 修复: 唯一默认思考程度常量。状态优先级固定为
+  //   后端配置 (applyConfigToUI) > localStorage > DEFAULT_THINKING_MODE
+  //   之前 S 对象内出现两个 thinkingMode 字段 (low/medium)，后者静默覆盖前者，
+  //   注释却又声称默认 max。此处删除重复字段，建立唯一真源。
+  var DEFAULT_THINKING_MODE = 'max';
+  var DEFAULT_AI_MODEL = 'deepseek-v4-flash';
+  var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
+  var ALLOWED_AI_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+
+  // 初始化思考程度：localStorage > 默认值（后端配置在 applyConfigToUI 中再覆盖）
+  //   注意：初始化只发生一次；后端配置到达后会通过 applyConfigToUI 显式赋值，
+  //   不会被这里的旧默认值再次覆盖（applyConfigToUI 在每次 config 刷新时执行）。
+  function resolveInitialThinkingMode() {
+    try {
+      var saved = localStorage.getItem('xtj_ai_thinking_mode');
+      if (saved && ALLOWED_THINKING_MODES.indexOf(saved) >= 0) return saved;
+    } catch (e) {}
+    return DEFAULT_THINKING_MODE;
+  }
+  function resolveInitialModel() {
+    try {
+      var saved = localStorage.getItem('xtj_ai_model');
+      if (saved && ALLOWED_AI_MODELS.indexOf(saved) >= 0) return saved;
+    } catch (e) {}
+    return DEFAULT_AI_MODEL;
+  }
+
   var S = {
     config: null,
     configFetchedAt: 0,
@@ -49,11 +76,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     sending: false,
     loading: false,
     loadingMore: false,
-    // ★ M: thinking_mode 默认从 low 改成 max
-    //   用户要求: 普通聊天默认就用 max 深度思考
-    //   管理员可在后台 /admin/ai-agent/config 切换为 low/medium/high/max
-    //   鏅€氱敤鎴蜂笉鑳藉湪 UI 切换 (allow_user_thinking_switch: false)
-    thinkingMode: 'low',
+    thinkingMode: resolveInitialThinkingMode(),
     // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
     // separate from deep research so the latter remains a dedicated flow.
     responseProfile: 'normal',
@@ -107,8 +130,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendFingerprint: '',
     lastSendAt: 0,
     webSearchEnabled: false,
-    thinkingMode: 'medium',
-    selectedModel: 'deepseek-v4-flash'
+    selectedModel: resolveInitialModel(),
+    _userPickedThinkingMode: false,
+    _userPickedModel: false
   };
 
   function getAiStatusText() {
@@ -1646,6 +1670,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
+
+    // P1-4: 检测用户选区是否落在目标元素内，若是则跳过 innerHTML 替换
+    function isSelectionInTarget(el) {
+      try {
+        var sel = window.getSelection && window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+        var range = sel.getRangeAt(0);
+        if (!range) return false;
+        return el && el.contains(range.commonAncestorContainer);
+      } catch (e) { return false; }
+    }
     // V5: 基于时间推进，适配不同刷新率；plainStream 单文本节点 + 微批次，避免每帧建节点卡顿
     var lastFrameTime = 0;
     var charsPerMs = options.plainStream ? 0.55 : 0.7;
@@ -1718,8 +1753,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // 用 data 设置文本，高效
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
+        // P1-4 优化: Markdown 重新渲染节流从 50ms 提升到 200ms，避免长文本越来越卡
+        //   且用户正在选中文本时跳过 innerHTML 替换，防止选区被破坏
         var now = Date.now();
-        if (!targetEl._lastRender || now - targetEl._lastRender > 50 || !pending) {
+        var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > 200 || !pending);
+        if (shouldRender && !isSelectionInTarget(targetEl)) {
           targetEl.innerHTML = renderMarkdown(rendered);
           targetEl._lastRender = now;
         }
@@ -2108,9 +2146,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!profile && root.classList.contains('perf-lite')) profile = 'lite';
     if (!profile && root.classList.contains('perf-balanced')) profile = 'balanced';
     if (!profile) profile = 'full';
-    if (profile === 'lite') return { mode: 'lite', canvas: false, minNodes: 0, maxNodes: 0, fps: 0, dpr: 1, shadowBlurBase: 0, shadowBlurBoost: 0 };
-    if (profile === 'balanced') return { mode: 'balanced', canvas: true, minNodes: 32, maxNodes: 40, fps: 30, dpr: 1.35, shadowBlurBase: 5, shadowBlurBoost: 8 };
-    return { mode: 'full', canvas: true, minNodes: 40, maxNodes: 56, fps: 45, dpr: 1.65, shadowBlurBase: 7, shadowBlurBoost: 10 };
+    // P1-5: 降低渲染成本 — 节点数/FPS/DPR 全部降档
+    if (profile === 'lite') return { mode: 'lite', canvas: false, minNodes: 0, maxNodes: 0, fps: 0, dpr: 1 };
+    if (profile === 'balanced') return { mode: 'balanced', canvas: true, minNodes: 18, maxNodes: 24, fps: 24, dpr: 1 };
+    return { mode: 'full', canvas: true, minNodes: 28, maxNodes: 32, fps: 30, dpr: 1.25 };
   }
 
   function armResearchMotionWindow(card) {
@@ -2261,8 +2300,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var ctx = canvas.getContext('2d');
     if (!ctx) return null;
     var profile = getResearchAnimationProfile();
-    var state = { running: true, paused: false, rafId: 0, nodes: [], width: 0, height: 0, dpr: 1, profile: profile, lastFrameTs: 0, isOffscreen: false, observer: null };
+    var state = { running: true, paused: false, rafId: 0, nodes: [], width: 0, height: 0, dpr: 1, profile: profile, lastFrameTs: 0, isOffscreen: false, observer: null, resizeObserver: null, glowSprite: null };
     card.classList.toggle('ai-research-static', !profile.canvas);
+
+    // P1-5: 预渲染发光粒子贴图，替代每帧每节点 shadowBlur（成本极高）
+    //   离屏 canvas 绘制一次径向渐变圆点，draw 时只需 drawImage
+    function buildGlowSprite() {
+      try {
+        var size = 24;
+        var off = document.createElement('canvas');
+        off.width = size; off.height = size;
+        var octx = off.getContext('2d');
+        if (!octx) return null;
+        var cx = size / 2, cy = size / 2;
+        var grad = octx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+        grad.addColorStop(0, 'rgba(150, 245, 232, 0.95)');
+        grad.addColorStop(0.35, 'rgba(132, 234, 236, 0.55)');
+        grad.addColorStop(1, 'rgba(132, 234, 236, 0)');
+        octx.fillStyle = grad;
+        octx.fillRect(0, 0, size, size);
+        return off;
+      } catch (e) { return null; }
+    }
+    state.glowSprite = buildGlowSprite();
 
     function scheduleFrame() {
       if (!state.running || state.paused || !state.profile.canvas) return;
@@ -2283,8 +2343,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         ctx.clearRect(0, 0, state.width, state.height);
         return;
       }
-      var baseCount = state.width < 360 ? state.profile.minNodes : Math.min(state.profile.maxNodes, state.profile.minNodes + 8);
-      var targetCount = Math.max(state.profile.minNodes, Math.min(state.profile.maxNodes, baseCount + Math.floor((state.width * state.height) / 24000)));
+      var targetCount = Math.max(state.profile.minNodes, Math.min(state.profile.maxNodes, state.profile.minNodes + Math.floor((state.width * state.height) / 24000)));
       state.nodes = Array.from({ length: targetCount }, function() {
         return {
           x: Math.random() * state.width,
@@ -2294,6 +2353,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           p: Math.random() * Math.PI * 2
         };
       });
+    }
+
+    // P1-5: 空间网格 — 每个节点只连接最近的 2-3 个邻居，替代 O(n²) 全两两连线
+    function buildSpatialGrid() {
+      var cellSize = Math.max(40, Math.min(state.width, state.height) / 4);
+      var cols = Math.max(1, Math.ceil(state.width / cellSize));
+      var rows = Math.max(1, Math.ceil(state.height / cellSize));
+      var grid = [];
+      for (var i = 0; i < cols * rows; i++) grid.push([]);
+      for (var n = 0; n < state.nodes.length; n++) {
+        var node = state.nodes[n];
+        var cx = Math.max(0, Math.min(cols - 1, Math.floor(node.x / cellSize)));
+        var cy = Math.max(0, Math.min(rows - 1, Math.floor(node.y / cellSize)));
+        grid[cy * cols + cx].push(n);
+      }
+      return { grid: grid, cols: cols, rows: rows, cellSize: cellSize };
     }
 
     function draw(ts) {
@@ -2306,6 +2381,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ctx.clearRect(0, 0, state.width, state.height);
       var mx = state.width / 2 + Math.cos(ts * 0.00055) * state.width * 0.12;
       var my = state.height / 2 + Math.sin(ts * 0.00085) * state.height * 0.12;
+      // 更新节点位置
       for (var i = 0; i < state.nodes.length; i++) {
         var node = state.nodes[i];
         node.x += node.vx;
@@ -2314,38 +2390,71 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (node.x < 0 || node.x > state.width) node.vx *= -1;
         if (node.y < 0 || node.y > state.height) node.vy *= -1;
       }
-      var lineLimit = Math.min(122, Math.max(96, state.width * 0.22));
+      // P1-5: 空间网格邻居连线（每节点最多连 3 个最近邻居），替代 O(n²)
+      var sp = buildSpatialGrid();
+      var lineLimit = Math.min(122, Math.max(80, state.width * 0.2));
+      var drawn = {}; // 去重 "a-b" 边
+      ctx.lineWidth = 0.8;
       for (var a = 0; a < state.nodes.length; a++) {
-        for (var b = a + 1; b < state.nodes.length; b++) {
-          var n1 = state.nodes[a];
-          var n2 = state.nodes[b];
-          var dx = n1.x - n2.x;
-          var dy = n1.y - n2.y;
-          var dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < lineLimit) {
-            var alpha = (1 - dist / lineLimit) * 0.24;
-            ctx.strokeStyle = 'rgba(124, 255, 227, ' + alpha.toFixed(3) + ')';
-            ctx.lineWidth = 0.8;
-            ctx.beginPath();
-            ctx.moveTo(n1.x, n1.y);
-            ctx.lineTo(n2.x, n2.y);
-            ctx.stroke();
+        var n1 = state.nodes[a];
+        var cx = Math.max(0, Math.min(sp.cols - 1, Math.floor(n1.x / sp.cellSize)));
+        var cy = Math.max(0, Math.min(sp.rows - 1, Math.floor(n1.y / sp.cellSize)));
+        // 检查 3x3 邻域单元格
+        var neighbors = [];
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            var ncx = cx + dx, ncy = cy + dy;
+            if (ncx < 0 || ncx >= sp.cols || ncy < 0 || ncy >= sp.rows) continue;
+            var cell = sp.grid[ncy * sp.cols + ncx];
+            for (var ci = 0; ci < cell.length; ci++) {
+              var b = cell[ci];
+              if (b === a) continue;
+              var n2 = state.nodes[b];
+              var ddx = n1.x - n2.x, ddy = n1.y - n2.y;
+              var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (dist < lineLimit) neighbors.push({ idx: b, dist: dist });
+            }
           }
         }
+        // 按距离排序，只连最近 3 个
+        neighbors.sort(function(p, q) { return p.dist - q.dist; });
+        var maxConn = Math.min(3, neighbors.length);
+        for (var k = 0; k < maxConn; k++) {
+          var bIdx = neighbors[k].idx;
+          var key = a < bIdx ? (a + '-' + bIdx) : (bIdx + '-' + a);
+          if (drawn[key]) continue;
+          drawn[key] = true;
+          var n2b = state.nodes[bIdx];
+          var alpha = (1 - neighbors[k].dist / lineLimit) * 0.24;
+          ctx.strokeStyle = 'rgba(124, 255, 227, ' + alpha.toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.moveTo(n1.x, n1.y);
+          ctx.lineTo(n2b.x, n2b.y);
+          ctx.stroke();
+        }
       }
+      // P1-5: 用预渲染贴图 drawImage 绘制粒子，替代每节点 shadowBlur
+      var sprite = state.glowSprite;
       for (var j = 0; j < state.nodes.length; j++) {
         var dot = state.nodes[j];
         var glowDx = dot.x - mx;
         var glowDy = dot.y - my;
         var glow = Math.max(0, 1 - Math.sqrt(glowDx * glowDx + glowDy * glowDy) / 210);
-        ctx.beginPath();
-        ctx.shadowColor = 'rgba(135,255,229,0.55)';
-        ctx.shadowBlur = state.profile.shadowBlurBase + glow * state.profile.shadowBlurBoost;
-        ctx.fillStyle = 'rgba(' + Math.round(132 + glow * 26) + ', ' + Math.round(234 + glow * 18) + ', 236, ' + (0.22 + glow * 0.42).toFixed(3) + ')';
-        ctx.arc(dot.x, dot.y, 1.4 + Math.sin(dot.p) * 0.4 + glow, 0, Math.PI * 2);
-        ctx.fill();
+        var radius = 1.4 + Math.sin(dot.p) * 0.4 + glow;
+        if (sprite) {
+          // 贴图方式：根据 glow 调整尺寸和透明度
+          var spriteSize = 6 + glow * 10;
+          ctx.globalAlpha = 0.5 + glow * 0.5;
+          ctx.drawImage(sprite, dot.x - spriteSize / 2, dot.y - spriteSize / 2, spriteSize, spriteSize);
+          ctx.globalAlpha = 1;
+        } else {
+          // 降级：简单渐变圆点（无 shadowBlur）
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(' + Math.round(132 + glow * 26) + ', ' + Math.round(234 + glow * 18) + ', 236, ' + (0.4 + glow * 0.5).toFixed(3) + ')';
+          ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      ctx.shadowBlur = 0;
       state.rafId = requestAnimationFrame(draw);
     }
 
@@ -2387,6 +2496,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { window.removeEventListener('resize', throttledResize); } catch (e) {}
       try { document.removeEventListener('visibilitychange', handleVisibility); } catch (e2) {}
       try { if (state.observer) state.observer.disconnect(); } catch (e3) {}
+      // P1-5: 清理 ResizeObserver
+      try { if (state.resizeObserver) state.resizeObserver.disconnect(); } catch (e4) {}
+      state.resizeObserver = null;
       ctx.clearRect(0, 0, state.width, state.height);
     }
 
@@ -2407,6 +2519,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (window.IntersectionObserver) {
       state.observer = new IntersectionObserver(handleIntersection, { threshold: 0.08 });
       state.observer.observe(card);
+    }
+    // P1-5: 用 ResizeObserver 监听卡片尺寸变化（替代仅 window resize）
+    if (window.ResizeObserver) {
+      try {
+        state.resizeObserver = new ResizeObserver(throttledResize);
+        state.resizeObserver.observe(card);
+      } catch (e) {}
     }
     state.paused = !shouldResearchCardAnimate(card);
     if (state.profile.canvas && !state.paused) scheduleFrame();
@@ -6805,29 +6924,13 @@ function showChatMessages() {
     root.appendChild(convList);
     S.conversationsEl = convList;
 
-    // ★ 网页搜索改造：+ 号按钮展开面板，整合上传文件/模型/思考/网页搜索
-    // 初始化 web_search 状态（从 localStorage 恢复，默认 false）
+    // ★ P0-1 修复: 状态初始化已在 S 对象声明时通过 resolveInitial* 完成一次。
+    //   此处仅恢复 web_search（因其默认 false 且未在 S 声明中读取 localStorage）。
+    //   不再重复赋值 selectedModel / thinkingMode，避免后端 config 到达前的二次覆盖。
+    //   后端配置优先级由 applyConfigToUI 保证。
     try {
       var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
       S.webSearchEnabled = savedWebSearch === 'true';
-    } catch (e) {}
-
-    // 初始化模型选择
-    S.selectedModel = 'deepseek-v4-flash';
-    try {
-      var savedModel = localStorage.getItem('xtj_ai_model');
-      if (savedModel === 'deepseek-v4-flash' || savedModel === 'deepseek-v4-pro') {
-        S.selectedModel = savedModel;
-      }
-    } catch (e) {}
-
-    // 初始化思考程度
-    if (!S.thinkingMode) S.thinkingMode = 'medium';
-    try {
-      var savedThink = localStorage.getItem('xtj_ai_thinking_mode');
-      if (savedThink && ['off','low','medium','high','max'].indexOf(savedThink) >= 0) {
-        S.thinkingMode = savedThink;
-      }
     } catch (e) {}
 
     // 创建 + 号按钮
@@ -6848,7 +6951,7 @@ function showChatMessages() {
       id: 'aiPlusPanelShell'
     });
     panelShell.innerHTML = '<div class="ai-plus-panel-content">' +
-      '<div class="ai-panel-page ai-panel-page-primary" id="aiPanelPrimary">' +
+      '<div class="ai-panel-page ai-panel-page-primary is-active" id="aiPanelPrimary" aria-hidden="false">' +
       '<button class="ai-panel-option" role="menuitem" data-action="upload">' +
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>上传文件</span>' +
       '</button>' +
@@ -6869,7 +6972,7 @@ function showChatMessages() {
       '<span class="ai-search-status" id="aiSearchStatus">○ 关</span>' +
       '</button>' +
       '</div>' +
-      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelModel" style="display:none">' +
+      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelModel" hidden aria-hidden="true">' +
       '<button class="ai-panel-back" aria-label="返回">' +
       '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>模型</span>' +
       '</button>' +
@@ -6890,7 +6993,7 @@ function showChatMessages() {
       '</button>' +
       '</div>' +
       '</div>' +
-      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelThink" style="display:none">' +
+      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelThink" hidden aria-hidden="true">' +
       '<button class="ai-panel-back" aria-label="返回">' +
       '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>思考程度</span>' +
       '</button>' +
@@ -6904,22 +7007,158 @@ function showChatMessages() {
       '</div>' +
       '</div>';
 
-    // 面板打开/关闭逻辑
+    // ★ P0-2/3/4 重写: 面板状态机 + 关闭动画 + 事件清理
+    //   状态机: currentPage ∈ {'primary','model','think'}
+    //   CSS Grid 重叠所有页面到同一 grid-area，用 is-active/is-entering/is-leaving 管理动画
+    //   离场完成后设置 hidden + aria-hidden，进入页面设置 aria-hidden=false 并聚焦首个可操作项
+    //   所有 DOM 查询限定在 panelShell 内
+    //   动画超时兜底（不依赖 transitionend），双层 rAF 启动动画（不读 offsetHeight 强制回流）
     var panelOpen = false;
     var panelClosing = false;
+    var currentPage = 'primary';
     var closeTimer = null;
+    var closeFallbackTimer = null;
+    var pageTransitionTimers = {};   // pageId -> timeout id（页面切换兜底）
+    var panelResizeRaf = 0;
+
+    // 页面元素引用（全部限定在 panelShell 内）
+    var pageEls = {
+      primary: panelShell.querySelector('#aiPanelPrimary'),
+      model: panelShell.querySelector('#aiPanelModel'),
+      think: panelShell.querySelector('#aiPanelThink')
+    };
+
+    function clearPageTransitionTimer(pageId) {
+      if (pageTransitionTimers[pageId]) {
+        clearTimeout(pageTransitionTimers[pageId]);
+        delete pageTransitionTimers[pageId];
+      }
+    }
+    function clearAllPageTransitionTimers() {
+      Object.keys(pageTransitionTimers).forEach(function(k) {
+        clearTimeout(pageTransitionTimers[k]);
+        delete pageTransitionTimers[k];
+      });
+    }
+
+    // 双层 requestAnimationFrame 启动动画，替代 offsetHeight 强制回流
+    function nextFrame(cb) {
+      requestAnimationFrame(function() { requestAnimationFrame(cb); });
+    }
+
+    // 设置页面为隐藏终态（离场动画完成后调用）
+    function setHiddenPage(pageEl) {
+      if (!pageEl) return;
+      pageEl.classList.remove('is-entering', 'is-leaving', 'is-active');
+      pageEl.setAttribute('hidden', '');
+      pageEl.setAttribute('aria-hidden', 'true');
+    }
+    // 显示页面（进入动画）
+    function showPage(pageEl, focusFirst) {
+      if (!pageEl) return;
+      pageEl.removeAttribute('hidden');
+      pageEl.setAttribute('aria-hidden', 'false');
+      pageEl.classList.add('is-entering');
+      // 双层 rAF 触发 transition，避免强制回流
+      nextFrame(function() {
+        pageEl.classList.remove('is-entering');
+        pageEl.classList.add('is-active');
+      });
+      if (focusFirst) {
+        nextFrame(function() {
+          try {
+            var focusable = pageEl.querySelector('button, [role="radio"], [tabindex]:not([tabindex="-1"])');
+            if (focusable) focusable.focus();
+          } catch (e) {}
+        });
+      }
+    }
+
+    // 切换到指定页面（支持向前进入和向后返回）
+    // target: 'primary' | 'model' | 'think'
+    function navigateTo(target) {
+      if (!pageEls[target]) return;
+      if (currentPage === target) return;
+      var fromPage = pageEls[currentPage];
+      var toPage = pageEls[target];
+      if (!fromPage || !toPage) return;
+
+      // 清理目标页的旧过渡计时器
+      clearPageTransitionTimer(target);
+      clearPageTransitionTimer(currentPage);
+
+      // 离场：fromPage
+      fromPage.classList.remove('is-entering', 'is-active');
+      fromPage.classList.add('is-leaving');
+      // 兜底：280ms 后强制隐藏（防止 transitionend 不触发）
+      var fromId = currentPage;
+      pageTransitionTimers[fromId] = setTimeout(function() {
+        setHiddenPage(fromPage);
+        clearPageTransitionTimer(fromId);
+      }, 300);
+
+      // 进入：toPage
+      showPage(toPage, true);
+
+      // 监听离场 transitionend（opacity/transform）以提前隐藏
+      var done = false;
+      function onLeaveEnd(ev) {
+        if (done) return;
+        // 只响应 fromPage 自身的 transform/opacity 过渡
+        if (ev && ev.target !== fromPage) return;
+        done = true;
+        fromPage.removeEventListener('transitionend', onLeaveEnd);
+        setHiddenPage(fromPage);
+        clearPageTransitionTimer(fromId);
+      }
+      fromPage.addEventListener('transitionend', onLeaveEnd);
+
+      currentPage = target;
+    }
+
+    function goToPrimaryPage(animate) {
+      if (animate === false) {
+        // 即时重置（无动画）：关闭后或打开时初始化
+        clearAllPageTransitionTimers();
+        Object.keys(pageEls).forEach(function(key) {
+          var p = pageEls[key];
+          if (!p) return;
+          if (key === 'primary') {
+            p.removeAttribute('hidden');
+            p.setAttribute('aria-hidden', 'false');
+            p.classList.remove('is-entering', 'is-leaving');
+            p.classList.add('is-active');
+          } else {
+            setHiddenPage(p);
+          }
+        });
+        currentPage = 'primary';
+        return;
+      }
+      navigateTo('primary');
+    }
+
+    function goToSecondaryPage(pageId) {
+      navigateTo(pageId);
+    }
 
     function openPanel() {
       if (panelOpen) return;
-      panelOpen = true;
-      panelClosing = false;
+      // P0-3: 动画未结束时重新打开，取消旧关闭任务并保持正确页面
       if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      if (closeFallbackTimer) { clearTimeout(closeFallbackTimer); closeFallbackTimer = null; }
+      panelClosing = false;
+      panelOpen = true;
+      // 重置到主页（即时，无动画）
+      goToPrimaryPage(false);
       panelShell.classList.add('open');
       plusBtn.classList.add('active');
       plusBtn.setAttribute('aria-expanded', 'true');
-      goToPrimaryPage(false);
+      // 打开时主动定位一次
+      schedulePanelPosition();
     }
 
+    // P0-3: 关闭完成信号 = 面板外壳 opacity/transform transitionend + 380ms 兜底
     function closePanel(animate) {
       if (!panelOpen || panelClosing) return;
       panelClosing = true;
@@ -6927,57 +7166,32 @@ function showChatMessages() {
       panelShell.classList.remove('open');
       plusBtn.classList.remove('active');
       plusBtn.setAttribute('aria-expanded', 'false');
-      if (animate !== false) {
-        closeTimer = setTimeout(function() {
-          panelClosing = false;
-          closeTimer = null;
-          goToPrimaryPage(false);
-        }, 260);
-      } else {
+      if (animate === false) {
+        panelClosing = false;
+        goToPrimaryPage(false);
+        return;
+      }
+      var done = false;
+      function onShellEnd(ev) {
+        if (done) return;
+        // 只响应外壳自身的 opacity/transform
+        if (ev && ev.target !== panelShell) return;
+        done = true;
+        panelShell.removeEventListener('transitionend', onShellEnd);
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
         panelClosing = false;
         goToPrimaryPage(false);
       }
-    }
-
-    // 二级页面导航
-    var currentSecondaryPage = null;
-
-    function goToSecondaryPage(pageId) {
-      var primary = document.getElementById('aiPanelPrimary');
-      var secondary = document.getElementById(pageId);
-      if (!primary || !secondary) return;
-      primary.classList.add('slide-out');
-      secondary.style.display = '';
-      secondary.offsetHeight;
-      secondary.classList.add('slide-in');
-      currentSecondaryPage = pageId;
-    }
-
-    function goToPrimaryPage(animate) {
-      var primary = document.getElementById('aiPanelPrimary');
-      if (!primary) return;
-      if (animate !== false) {
-        primary.classList.remove('slide-out');
-      } else {
-        primary.classList.remove('slide-out');
-        var secondaries = document.querySelectorAll('.ai-panel-page-secondary');
-        for (var i = 0; i < secondaries.length; i++) {
-          secondaries[i].classList.remove('slide-in');
-          secondaries[i].style.display = 'none';
-        }
-        currentSecondaryPage = null;
-      }
-      if (currentSecondaryPage) {
-        var sec = document.getElementById(currentSecondaryPage);
-        if (sec) {
-          sec.addEventListener('transitionend', function handler() {
-            sec.removeEventListener('transitionend', handler);
-            sec.classList.remove('slide-in');
-            sec.style.display = 'none';
-          });
-        }
-        currentSecondaryPage = null;
-      }
+      panelShell.addEventListener('transitionend', onShellEnd);
+      // 兜底 380ms
+      closeTimer = setTimeout(function() {
+        if (done) return;
+        done = true;
+        panelShell.removeEventListener('transitionend', onShellEnd);
+        closeTimer = null;
+        panelClosing = false;
+        goToPrimaryPage(false);
+      }, 380);
     }
 
     // 模型选择逻辑
@@ -6998,7 +7212,7 @@ function showChatMessages() {
 
     panelShell.querySelector('[data-action="model"]').addEventListener('click', function(e) {
       e.preventDefault(); e.stopPropagation();
-      goToSecondaryPage('aiPanelModel');
+      goToSecondaryPage('model');
     });
 
     var modelRadios = panelShell.querySelectorAll('#aiPanelModel [role="radio"]');
@@ -7008,6 +7222,7 @@ function showChatMessages() {
         var newModel = this.getAttribute('data-value');
         if (newModel && newModel !== S.selectedModel) {
           S.selectedModel = newModel;
+          S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', newModel); } catch (e) {}
           updateModelUI();
           notify('模型切换: ' + (modelLabels[newModel] || newModel));
@@ -7031,7 +7246,7 @@ function showChatMessages() {
 
     panelShell.querySelector('[data-action="think"]').addEventListener('click', function(e) {
       e.preventDefault(); e.stopPropagation();
-      goToSecondaryPage('aiPanelThink');
+      goToSecondaryPage('think');
     });
 
     var thinkRadios = panelShell.querySelectorAll('#aiPanelThink [role="radio"]');
@@ -7041,6 +7256,7 @@ function showChatMessages() {
         var newMode = this.getAttribute('data-value');
         if (newMode && newMode !== S.thinkingMode) {
           S.thinkingMode = newMode;
+          S._userPickedThinkingMode = true;
           try { localStorage.setItem('xtj_ai_thinking_mode', newMode); } catch (e) {}
           updateThinkUI();
           notify('思考程度: ' + (thinkLabels[newMode] || newMode));
@@ -7060,7 +7276,7 @@ function showChatMessages() {
 
     // 网页搜索开关
     function updateSearchStatus() {
-      var statusEl = document.getElementById('aiSearchStatus');
+      var statusEl = panelShell.querySelector('#aiSearchStatus');
       if (statusEl) {
         statusEl.textContent = S.webSearchEnabled ? '● 开' : '○ 关';
         statusEl.className = 'ai-search-status' + (S.webSearchEnabled ? ' on' : '');
@@ -7097,32 +7313,21 @@ function showChatMessages() {
       }
     });
 
-    // 事件清理（使用 AbortController）
+    // P0-4: 统一事件清理 — AbortController + window/visualViewport 监听 + 计时器 + 页面切换回调
     var panelAbortController = new AbortController();
     var panelSignal = panelAbortController.signal;
+    var _vvResizeHandler = null;
 
-    document.addEventListener('click', function(e) {
-      if (panelOpen && !panelShell.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
-        closePanel();
-      }
-    }, { signal: panelSignal });
+    function schedulePanelPosition() {
+      if (panelResizeRaf) return;
+      panelResizeRaf = requestAnimationFrame(function() {
+        panelResizeRaf = 0;
+        adjustPanelPosition();
+      });
+    }
 
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        if (currentSecondaryPage) {
-          goToPrimaryPage();
-        } else if (panelOpen) {
-          closePanel();
-          try { plusBtn.focus(); } catch (e2) {}
-        }
-      }
-    }, { signal: panelSignal });
-
-    S._panelAbortController = panelAbortController;
-
-    // 移动端位置适配
     function adjustPanelPosition() {
-      if (!panelShell) return;
+      if (!panelShell || !panelShell.classList.contains('open')) return;
       var rect = panelShell.getBoundingClientRect();
       var vw = window.innerWidth;
       if (rect.right > vw - 8) {
@@ -7136,10 +7341,45 @@ function showChatMessages() {
       }
     }
 
-    window.addEventListener('resize', adjustPanelPosition);
+    document.addEventListener('click', function(e) {
+      if (panelOpen && !panelShell.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
+        closePanel();
+      }
+    }, { signal: panelSignal });
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        if (currentPage !== 'primary') {
+          goToPrimaryPage();
+        } else if (panelOpen) {
+          closePanel();
+          try { plusBtn.focus(); } catch (e2) {}
+        }
+      }
+    }, { signal: panelSignal });
+
+    // P0-4: window resize / visualViewport resize 通过 AbortController 统一清理
+    window.addEventListener('resize', schedulePanelPosition, { signal: panelSignal });
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', adjustPanelPosition);
+      _vvResizeHandler = schedulePanelPosition;
+      window.visualViewport.addEventListener('resize', _vvResizeHandler, { signal: panelSignal });
     }
+
+    S._panelAbortController = panelAbortController;
+
+    // P0-4: 统一面板清理函数 — 关闭聊天/重建 UI/登出时调用
+    //   确保 20 次重开聊天后无重复监听、无旧 DOM 引用
+    function panelCleanup() {
+      try { if (panelAbortController) panelAbortController.abort(); } catch (e) {}
+      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      if (closeFallbackTimer) { clearTimeout(closeFallbackTimer); closeFallbackTimer = null; }
+      clearAllPageTransitionTimers();
+      if (panelResizeRaf) { try { cancelAnimationFrame(panelResizeRaf); } catch (e) {} panelResizeRaf = 0; }
+      panelOpen = false;
+      panelClosing = false;
+      currentPage = 'primary';
+    }
+    S._panelCleanup = panelCleanup;
 
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
@@ -7390,7 +7630,10 @@ function showChatMessages() {
       if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
     }
 
-    // ★ P 新增: 同步后端深度思考子配置 (思考程度 + 启用开关)
+    // ★ P0-1 修复: 同步后端思考程度配置。
+    //   优先级：后端配置 > localStorage > 默认值（仅作用于"首次加载"或"配置版本变更"）。
+    //   一旦用户通过 UI 显式选择思考程度，则用户选择优先，避免 config 定时刷新
+    //   把用户选择重置回后端默认值。
     try {
       if (cfg.deep_think) {
         if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
@@ -7400,9 +7643,13 @@ function showChatMessages() {
         // ★ Tavily Deep Research: 同步后端配置 (config.tavily_research.enabled)
         S.tavilyResearchEnabled = !!(cfg.tavily_research && cfg.tavily_research.enabled);
       }
-      // 鏅€氳亰澶╃殑 thinkingMode 涔熷悓步)(浠?model.default_thinking_mode 璇?
-      if (cfg.model && ['low', 'medium', 'high', 'max', 'off'].indexOf(cfg.model.default_thinking_mode) >= 0) {
-        S.thinkingMode = cfg.model.default_thinking_mode;
+      var cfgVer = (cfg && cfg.config_version) || 0;
+      var backendDefaultMode = cfg.model && cfg.model.default_thinking_mode;
+      var backendModeValid = backendDefaultMode && ALLOWED_THINKING_MODES.indexOf(backendDefaultMode) >= 0;
+      // 仅在 (a) 首次应用配置 或 (b) 配置版本变化 且 用户未在本轮显式选择 时，才用后端默认覆盖
+      if (backendModeValid && cfgVer !== S._lastConfigVersion && !S._userPickedThinkingMode) {
+        S.thinkingMode = backendDefaultMode;
+        try { localStorage.setItem('xtj_ai_thinking_mode', backendDefaultMode); } catch (e3) {}
       }
     } catch (e) { /* 容错 */ }
 
@@ -7449,6 +7696,12 @@ function showChatMessages() {
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e2) {}
       S.viewportCleanup = null;
+    }
+    // P0-4: 释放加号面板的所有 document/window/visualViewport 监听与计时器
+    if (S._panelCleanup) {
+      try { S._panelCleanup(); } catch (ePanel) {}
+      S._panelCleanup = null;
+      S._panelAbortController = null;
     }
     if (S.statusTimer) {
       try { clearInterval(S.statusTimer); } catch (e3) {}

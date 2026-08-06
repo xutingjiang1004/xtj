@@ -27,6 +27,17 @@
   --ai-user-end: rgba(82, 182, 160, 0.95);
   --ai-assistant-start: rgba(255, 255, 255, 0.9);
   --ai-assistant-end: rgba(244, 252, 249, 0.84);
+  /* ★ P2 统一动画/玻璃变量 */
+  --ai-motion-fast: 140ms;
+  --ai-motion-base: 210ms;
+  --ai-motion-panel: 240ms;
+  --ai-ease-standard: cubic-bezier(.22, 1, .36, 1);
+  /* 玻璃变量（默认桌面 full） */
+  --ai-glass-blur: 16px;
+  --ai-glass-saturation: 122%;
+  --ai-glass-bg: rgba(248, 253, 251, .72);
+  --ai-glass-border: rgba(255, 255, 255, .40);
+  --ai-glass-shadow: 0 14px 32px rgba(53, 102, 88, .11);
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -557,23 +568,28 @@
 }
 
 .ai-thinking-panel {
-  display: block;
-  max-height: 0;
+  /* P1-3: 移除 max-height: 2000px 动画，改用 grid-template-rows: 0fr/1fr
+     内部 .ai-thinking-body 设置 min-height:0; overflow:hidden */
+  display: grid;
+  grid-template-rows: 0fr;
   opacity: 0.3;
   transform: translateY(-6px);
   width: fit-content;
   max-width: min(82vw, 680px);
-  overflow: hidden;
   box-sizing: border-box;
   transition:
-    max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 220ms ease,
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: auto;
+    grid-template-rows var(--ai-motion-panel) var(--ai-ease-standard),
+    opacity var(--ai-motion-base) ease,
+    transform var(--ai-motion-panel) var(--ai-ease-standard);
 }
 
-.ai-thinking.ai-motion-window {
-  will-change: max-height, opacity, transform;
+/* P0-5 修复: JS 把 ai-motion-window 加到 .ai-think-thinking (details) 上，
+   CSS 之前却匹配 .ai-thinking.ai-motion-window（永不命中）。
+   统一选择器到 .ai-think-thinking.ai-motion-window。
+   不再永久 will-change: max-height，只允许动画开始前短暂设置 transform, opacity，
+   动画结束后立即移除（由 JS clearTimeout 移除 class 实现） */
+.ai-think-thinking.ai-motion-window {
+  will-change: transform, opacity;
 }
 
 .ai-thinking.expanded {
@@ -586,10 +602,15 @@
 }
 
 .ai-thinking.expanded .ai-thinking-panel {
-  max-height: 2000px;
-  overflow-y: auto;
+  grid-template-rows: 1fr;
   opacity: 1;
   transform: translateY(0);
+}
+
+/* grid-template-rows 动画的内部容器：min-height:0 允许收缩 */
+.ai-thinking-panel > .ai-thinking-body {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .ai-thinking.expanded .ai-thinking-body {
@@ -1144,37 +1165,36 @@
 }
 
 /* ============================================================
-   面板外壳 — 玻璃 + 动画容器
+   面板外壳 — 玻璃 + 动画容器 (P1-1 重做液态玻璃)
+   外壳只负责 opacity + translateY 动画；删除 clip-path 展开动画
+   不对包含文字的菜单执行 scale 动画
    ============================================================ */
 .ai-plus-panel-shell {
   position: absolute;
   left: 10px;
   bottom: calc(100% + 10px);
   width: 236px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.52);
+  border-radius: 22px;
+  border: 1px solid var(--ai-glass-border);
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.55) 0%, rgba(248, 255, 250, 0.42) 40%, rgba(240, 252, 245, 0.32) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(240, 252, 245, 0.38) 50%, rgba(235, 250, 242, 0.28) 100%);
-  backdrop-filter: blur(26px) saturate(165%) contrast(103%);
-  -webkit-backdrop-filter: blur(26px) saturate(165%) contrast(103%);
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.42) 0%, rgba(248, 255, 250, 0.28) 40%, rgba(240, 252, 245, 0.18) 100%),
+    var(--ai-glass-bg);
+  backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
+  -webkit-backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
+  /* 只保留两层阴影 + 一层内描边 + 一层顶部高光（伪元素） */
   box-shadow:
-    0 4px 24px rgba(66, 155, 122, 0.1),
-    0 12px 48px rgba(0, 0, 0, 0.05),
-    0 0 0 0.5px rgba(255, 255, 255, 0.35) inset,
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    var(--ai-glass-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
   z-index: 20;
   transform-origin: bottom left;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transform: translateY(8px);
-  clip-path: inset(100% 82% 0 0 round 24px);
   transition:
-    opacity 240ms ease-out,
-    visibility 0ms 240ms,
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    opacity var(--ai-motion-panel) var(--ai-ease-standard),
+    visibility 0ms var(--ai-motion-panel),
+    transform var(--ai-motion-panel) var(--ai-ease-standard);
 }
 
 .ai-plus-panel-shell.open {
@@ -1182,73 +1202,86 @@
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0);
-  clip-path: inset(0 round 24px);
   transition:
-    opacity 280ms ease-out,
+    opacity 200ms var(--ai-ease-standard),
     visibility 0ms 0ms,
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    transform 200ms var(--ai-ease-standard);
 }
 
+/* 顶部高光（一层），独立伪元素，pointer-events:none */
 .ai-plus-panel-shell::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.04) 50%, transparent 100%);
   pointer-events: none;
   z-index: 0;
 }
 
+/* 内描边（一层） */
 .ai-plus-panel-shell::after {
   content: '';
   position: absolute;
   inset: 1px;
-  border-radius: 23px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 21px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
   pointer-events: none;
   z-index: 0;
 }
 
-/* 面板内容 */
+/* 面板内容（双层结构：外壳负责动画，内容承载文字，避免模糊）
+   作为 grid 容器，让所有 .ai-panel-page 重叠到同一格子 */
 .ai-plus-panel-content {
   position: relative;
+  display: grid;
   overflow: hidden;
   padding: 8px;
   z-index: 1;
 }
 
 /* ============================================================
-   面板页面
+   面板页面 — CSS Grid 重叠到同一 grid-area (P0-2)
+   用 is-active / is-entering / is-leaving 管理动画
+   hidden 属性确保离场后不占布局
    ============================================================ */
 .ai-panel-page {
-  display: flex;
+  display: grid;
+  grid-area: 1 / 1;          /* 所有页面重叠到同一格子 */
   flex-direction: column;
   gap: 2px;
-}
-
-.ai-panel-page-primary {
-  /* 默认可见 */
-}
-
-.ai-panel-page-secondary {
-  display: none;
+  /* 默认状态：隐藏 */
+  opacity: 0;
   transform: translateX(18px);
-  opacity: 0;
-  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 200ms ease-out;
-}
-
-.ai-panel-page-primary.slide-out {
-  transform: translateX(-18px);
-  opacity: 0;
   pointer-events: none;
-  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 200ms ease-out;
+  transition:
+    opacity var(--ai-motion-panel) var(--ai-ease-standard),
+    transform var(--ai-motion-panel) var(--ai-ease-standard);
 }
 
-.ai-panel-page-secondary.slide-in {
-  display: flex;
-  transform: translateX(0);
+/* 进入起始态（即将动画进入） */
+.ai-panel-page.is-entering {
+  opacity: 0;
+  transform: translateX(18px);
+}
+
+/* 活动态（可见） */
+.ai-panel-page.is-active {
   opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* 离场态（动画退出中） */
+.ai-panel-page.is-leaving {
+  opacity: 0;
+  transform: translateX(-18px);
+  pointer-events: none;
+}
+
+/* hidden 属性兜底（离场完成后） */
+.ai-panel-page[hidden] {
+  display: none !important;
 }
 
 /* ============================================================
@@ -1261,7 +1294,7 @@
   width: 100%;
   padding: 10px 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: 13px;
   background: transparent;
   color: rgba(44, 55, 51, 0.88);
   font-size: 13px;
@@ -1269,7 +1302,8 @@
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  transition: background 0.18s ease, color 0.18s ease;
+  /* P1-2/P2: 按钮反馈 140ms；hover 只改背景/色，不缩放文字避免模糊 */
+  transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
 }
 
 .ai-panel-option:hover {
@@ -1306,14 +1340,14 @@
   width: 100%;
   padding: 10px 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: 13px;
   background: transparent;
   color: rgba(100, 115, 110, 0.8);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
 }
 
 .ai-panel-back:hover {
@@ -1441,15 +1475,18 @@
 }
 
 [data-theme="dark"] .ai-plus-panel-shell {
-  border-color: rgba(127, 187, 172, 0.14);
+  /* P1-1: 暗色模式单独调整透明度和边框，不复用浅色白色玻璃 */
+  --ai-glass-bg: rgba(20, 32, 30, .68);
+  --ai-glass-border: rgba(127, 187, 172, .16);
+  --ai-glass-shadow: 0 14px 32px rgba(0, 0, 0, .32);
+  border-color: var(--ai-glass-border);
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(40, 60, 55, 0.5) 0%, rgba(18, 30, 29, 0.45) 40%, rgba(14, 24, 22, 0.38) 100%),
-    linear-gradient(180deg, rgba(22, 36, 35, 0.65) 0%, rgba(16, 28, 27, 0.45) 50%, rgba(12, 22, 20, 0.35) 100%);
-  backdrop-filter: blur(26px) saturate(165%) contrast(103%);
-  -webkit-backdrop-filter: blur(26px) saturate(165%) contrast(103%);
+    radial-gradient(ellipse at 50% 0%, rgba(40, 60, 55, 0.32) 0%, rgba(18, 30, 29, 0.26) 40%, rgba(14, 24, 22, 0.18) 100%),
+    var(--ai-glass-bg);
+  backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
+  -webkit-backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.28),
-    0 12px 48px rgba(0, 0, 0, 0.2),
+    var(--ai-glass-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -1516,20 +1553,60 @@
 }
 
 /* ============================================================
-   性能与动画降级
+   性能与动画降级 (P3: prefers-reduced-motion + P1-1 perf 分级 + @supports 降级)
    ============================================================ */
+/* P1-1: balanced 模式 — 中等模糊 */
+.perf-balanced .ai-chat-root,
+.perf-balanced .ai-plus-panel-shell {
+  --ai-glass-blur: 11px;
+  --ai-glass-saturation: 118%;
+}
+/* P1-1: lite 模式 — 关闭 backdrop-filter，使用半透明实色背景 */
+.perf-lite .ai-chat-root,
+.perf-lite .ai-plus-panel-shell {
+  --ai-glass-blur: 0px;
+  --ai-glass-saturation: 100%;
+  --ai-glass-bg: rgba(248, 253, 251, .92);
+  --ai-glass-border: rgba(180, 210, 198, .5);
+}
+.perf-lite .ai-plus-panel-shell {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* P1-1: 不支持 backdrop-filter 的浏览器降级为半透明实色背景 */
+@supports not (backdrop-filter: blur(1px)) {
+  .ai-plus-panel-shell {
+    --ai-glass-bg: rgba(248, 253, 251, .94);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  [data-theme="dark"] .ai-plus-panel-shell {
+    --ai-glass-bg: rgba(20, 32, 30, .94);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* P3: 禁用菜单位移、页面滑动、思考展开动画、Canvas、呼吸、旋转、光标闪烁 */
   .ai-plus-panel-shell,
   .ai-plus-panel-shell.open,
   .ai-panel-page,
   .ai-plus-btn svg,
   .ai-plus-btn {
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
-  .ai-panel-page-primary.slide-out,
-  .ai-panel-page-secondary.slide-in {
+  .ai-panel-page {
+    transform: none !important;
+  }
+  .ai-panel-page.is-entering,
+  .ai-panel-page.is-leaving,
+  .ai-panel-page.is-active {
+    transform: none !important;
     transition-duration: 0.01ms !important;
   }
+  /* 禁用 smooth scroll */
+  html { scroll-behavior: auto !important; }
 }
 
 /* ============================================================
@@ -2737,23 +2814,23 @@
 #panelDeepThink .ai-think-thinking[open] .ai-thinking-chevron {
   transform: rotate(180deg);
 }
-/* 思考过程展开/收起的平滑动画（仅针对 details 内的版本） */
+/* P1-3: 思考过程展开/收起 — 移除 max-height: 6000px 动画
+   该容器有多个 .ai-thought-entry 子元素，无法用 grid 0fr/1fr（会重叠）。
+   改为：收起时 display:none（原生 details 行为），展开时仅 opacity 过渡，
+   不再用巨大 max-height 驱动动画，避免回流和卡顿。 */
 #panelDeepThink .ai-think-thinking > .ai-think-thinking-body {
   display: block !important;
-  max-height: 0 !important;
   height: auto !important;
   opacity: 0;
   overflow: hidden !important;
   padding-top: 0 !important;
   padding-bottom: 0 !important;
   margin: 0 !important;
-  transition: max-height .32s cubic-bezier(.22, 1, .36, 1),
-              opacity .25s ease,
+  transition: opacity var(--ai-motion-base) ease,
               padding .3s ease,
               margin .3s ease;
 }
 #panelDeepThink .ai-think-thinking[open] > .ai-think-thinking-body {
-  max-height: 6000px !important;
   opacity: 1;
   padding: 6px 6px 6px 10px !important;
   margin: 0 0 8px !important;
