@@ -105,7 +105,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     conversationRequestId: 0,
     lifecycleId: 0,
     lastSendFingerprint: '',
-    lastSendAt: 0
+    lastSendAt: 0,
+    webSearchEnabled: false
   };
 
   function getAiStatusText() {
@@ -3857,7 +3858,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       deep_think: true,
       chat_mode: 'normal',
       // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
-      thinking_mode: S.deepThinkEffort || 'max'
+      thinking_mode: S.deepThinkEffort || 'max',
+      web_search: S.webSearchEnabled
     });
 
     var aborted = false;
@@ -4550,7 +4552,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       thinking_mode: S.deepThinkEffort || 'max',
       // Omit the field for ordinary messages so the server's response cache
       // remains eligible; an empty attachments array is truthy in JS.
-      attachments: attachmentPayload || undefined
+      attachments: attachmentPayload || undefined,
+      web_search: S.webSearchEnabled
     });
 
     var aborted = false;
@@ -6798,14 +6801,12 @@ function showChatMessages() {
     S.conversationsEl = convList;
 
     // ★ 网页搜索改造：+ 号按钮展开面板，整合上传文件/模型/思考/网页搜索
-    // 初始化 web_search 状态（持久化到 localStorage）
-    if (typeof S.webSearchEnabled === 'undefined') {
-      try {
-        var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
-        S.webSearchEnabled = savedWebSearch === 'true';
-      } catch (e) {
-        S.webSearchEnabled = false;
-      }
+    // 初始化 web_search 状态（从 localStorage 恢复，默认 false）
+    try {
+      var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
+      S.webSearchEnabled = savedWebSearch === 'true';
+    } catch (e) {
+      // keep default false
     }
 
     // 创建 + 号按钮
