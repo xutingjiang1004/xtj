@@ -1171,6 +1171,26 @@
   outline-offset: 2px;
 }
 
+/* 网页搜索开启态：+ 号按钮右上角绿色状态光点（输入区一眼可见） */
+.ai-plus-btn.ws-on::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f9e74;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(47, 158, 116, 0.22), 0 2px 6px rgba(47, 158, 116, 0.35);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .ai-plus-btn.ws-on::after {
+  border-color: rgba(30, 40, 36, 0.9);
+  box-shadow: 0 0 0 2px rgba(82, 200, 155, 0.28), 0 2px 6px rgba(82, 200, 155, 0.4);
+}
+
 /* ============================================================
    面板外壳 — Apple 风格展开/关闭动画（精确从 + 按钮中心展开）
    面板 left:10px 紧贴 + 按钮左边缘，按钮宽 38px
