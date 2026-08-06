@@ -198,8 +198,8 @@ test('photo preview css is sourced from css file rather than features injection'
 test('research card animator honors perf profiles and viewport visibility', function(){
   var s = read('js/ai-agent.js');
   assert.ok(s.indexOf("mode: 'lite'") >= 0 && s.indexOf('canvas: false') >= 0, 'lite research profile missing');
-  assert.ok(s.indexOf("mode: 'balanced'") >= 0 && s.indexOf('maxNodes: 40') >= 0 && s.indexOf('fps: 30') >= 0, 'balanced research profile missing');
-  assert.ok(s.indexOf("mode: 'full'") >= 0 && s.indexOf('maxNodes: 56') >= 0, 'full research profile missing');
+  assert.ok(s.indexOf("mode: 'balanced'") >= 0 && s.indexOf('maxNodes: 24') >= 0 && s.indexOf('fps: 24') >= 0, 'balanced research profile missing');
+  assert.ok(s.indexOf("mode: 'full'") >= 0 && s.indexOf('maxNodes: 32') >= 0, 'full research profile missing');
   assert.ok(s.indexOf('IntersectionObserver') >= 0, 'viewport observer missing');
   assert.ok(s.indexOf('state.canToggle && card.classList.contains(\'collapsed\')') >= 0, 'collapsed-card pause guard missing');
 });
