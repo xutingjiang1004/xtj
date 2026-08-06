@@ -15101,6 +15101,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           responsesContent += chunk;
           try { writeSse(res, { type: 'content', text: String(chunk) }); } catch (e) {}
         },
+        // 内置 web_search 状态透传：前端显示"正在联网搜索 / 已联网"
+        onSearchStatus: function(status) {
+          if (aborted) return;
+          try { writeSse(res, { type: 'search_status', status: status }); } catch (e) {}
+        },
         tool_executor: async function(toolCall) {
           var tcResult = await executeToolCall(toolCall, { userName: userName });
           if (tcResult && (tcResult.tool_name === 'tavily_search' || tcResult.tool_name === 'get_weather' || tcResult.tool_name === 'get_current_time')) {
