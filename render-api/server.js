@@ -6151,6 +6151,14 @@ async function callDeepSeekViaResponses(messages, options) {
               onProgress();
               try { if (hasThinkCb) options.onThinkingChunk(String(rDelta)); } catch (e) {}
             }
+            // 内置 web_search 状态透传（黑盒：搜索结果由服务端注入上下文，不外吐，
+            // 仅告知前端"正在联网搜索 / 已联网"，避免用户混淆数据来源）
+            if (evtType === 'response.web_search_call.in_progress' || evtType === 'response.web_search_call.searching') {
+              try { if (options.onSearchStatus) options.onSearchStatus('searching'); } catch (e) {}
+            }
+            if (evtType === 'response.web_search_call.completed') {
+              try { if (options.onSearchStatus) options.onSearchStatus('completed'); } catch (e) {}
+            }
             // 函数调用开始
             if (evtType === 'response.output_item.added' && sJson.item && sJson.item.type === 'function_call') {
               functionCalls.push({
