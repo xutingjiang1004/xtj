@@ -32,6 +32,7 @@
   --ai-motion-base: 210ms;
   --ai-motion-panel: 240ms;
   --ai-ease-standard: cubic-bezier(.22, 1, .36, 1);
+  --ai-ease-spring: cubic-bezier(.18, .89, .32, 1.18);
   /* 玻璃变量（默认桌面 full） */
   --ai-glass-blur: 16px;
   --ai-glass-saturation: 122%;
@@ -1133,6 +1134,12 @@
 }
 
 .ai-plus-btn svg {
+  /* 修复: display:block 避免 inline svg 在 flex 容器内 baseline 对齐问题
+     之前会渲染成小点（看起来像"+消失了"） */
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
   transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
   pointer-events: none;
 }
@@ -1165,17 +1172,17 @@
 }
 
 /* ============================================================
-   面板外壳 — 玻璃 + 动画容器 (P1-1 重做液态玻璃 + 修 hover 模糊)
-   关键修复: backdrop-filter 移到 ::before 背景层，外壳本体无 backdrop-filter
-   原因: 选项 hover 改 background 时，外壳的 backdrop-filter 区域被识别为内容变化
-   而重做一次。鼠标在面板内移动时 hover 在多行间跳变，backdrop-filter 反复重做
-   视觉上"鼠标走到哪糊到哪"。把 backdrop-filter 放到独立背景层后，hover 变化不会
-   触发 backdrop-filter 重做。
+   面板外壳 — Apple 风格展开/关闭动画（精确从 + 按钮中心展开）
+   面板 left:10px 紧贴 + 按钮左边缘，按钮宽 38px
+   中心相对面板左边缘 = 19px，bottom = 面板底部（按钮高度处）
+   关闭时面板 scale(1) → scale(0.04) 收回 + 按钮中心
+   打开时面板从按钮中心 scale(0.04) → scale(1) 展开
+   纯 scale 缩放（不混 translateY），符合 Apple app 风格
    ============================================================ */
 .ai-plus-panel-shell {
   position: absolute;
   left: 10px;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% + 8px);
   width: 236px;
   border-radius: 22px;
   border: 1px solid var(--ai-glass-border);
@@ -1185,16 +1192,18 @@
     var(--ai-glass-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   z-index: 20;
-  transform-origin: bottom left;
+  /* clip-path 由 JS 根据面板对齐方向动态设置 (inline style):
+     左侧: inset(100% 75% 0 0 round 22px) — 从按钮位置 (左下) 展开
+     右侧: inset(100% 0 0 75% round 22px) — 从按钮位置 (右下) 展开 */
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(8px);
+  transform: translateY(6px);
   transition:
-    opacity var(--ai-motion-panel) var(--ai-ease-standard),
-    visibility 0ms var(--ai-motion-panel),
-    transform var(--ai-motion-panel) var(--ai-ease-standard);
-  /* 隔离层：让 ::before 的 backdrop-filter 不会反向影响外壳 */
+    opacity 210ms ease,
+    visibility 0ms linear 300ms,
+    transform 280ms var(--ai-ease-standard),
+    clip-path 320ms var(--ai-ease-standard);
   isolation: isolate;
 }
 
@@ -1202,11 +1211,23 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  clip-path: inset(0 round 22px);
   transform: translateY(0);
   transition:
-    opacity 200ms var(--ai-ease-standard),
-    visibility 0ms 0ms,
-    transform 200ms var(--ai-ease-standard);
+    opacity 190ms ease,
+    visibility 0ms linear 0ms,
+    transform 360ms var(--ai-ease-spring),
+    clip-path 380ms var(--ai-ease-spring);
+}
+
+/* Apple 风格打开时短暂提升合成层（JS 在 transitionend 移除 class） */
+.ai-plus-panel-shell.is-opening {
+  will-change: transform, opacity, clip-path;
+}
+
+/* 关闭时也提升合成层（避免动画过程中内容闪烁） */
+.ai-plus-panel-shell.is-closing {
+  will-change: transform, opacity, clip-path;
 }
 
 /* 玻璃背景层 — 独立承担 backdrop-filter，避免选项 hover 触发重做 */
@@ -1238,10 +1259,15 @@
 }
 
 /* 面板内容（双层结构：外壳负责动画，内容承载文字，避免模糊）
-   作为 grid 容器，让所有 .ai-panel-page 重叠到同一格子 */
+   作为 grid 容器，让所有 .ai-panel-page 重叠到同一格子
+   固定 grid-template-rows: 1fr 让所有 page stretch 到同一高度，
+   避免切换二级页时面板高度突变、位置跳动（切换时 grid item 高度由 grid track 决定而非 max(items)）
+   min-height 256px = 思考页 (5 选项 + 1 返回 + gap) 的最大高度 */
 .ai-plus-panel-content {
   position: relative;
   display: grid;
+  grid-template-rows: 1fr;
+  min-height: 256px;
   overflow: hidden;
   padding: 8px;
   z-index: 1;
@@ -1279,11 +1305,17 @@
   pointer-events: auto;
 }
 
-/* 离场态（动画退出中） */
+/* 离场态（动画退出中）
+   立即脱离布局贡献：position: absolute + visibility hidden + pointer-events none
+   否则 grid-area 1/1 重叠的离场页仍占高度，导致面板高度突变、位置错位
+   透明度 + transform 仍保留动画效果 */
 .ai-panel-page.is-leaving {
   opacity: 0;
   transform: translateX(-18px);
   pointer-events: none;
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
 }
 
 /* hidden 属性兜底（离场完成后） */
