@@ -6058,13 +6058,17 @@ async function callDeepSeekViaResponses(messages, options) {
       var apiBody = {
         model: model,
         input: workingInput,
-        tools: tools,
         stream: useStream
       };
+      // ★ 思考模式下不带 tools：DeepSeek reasoning 模式与 tools 并存会返回 400，
+      //   该模式下搜索由调用方的 Tavily 并行注入承担；非思考模式才挂内置
+      //   web_search + function 工具（模型自主决定是否搜索）。
+      if (!useThinking) apiBody.tools = tools;
       if (workingInstructions) apiBody.instructions = workingInstructions;
       if (useStream) apiBody.stream_options = { include_usage: true };
       if (useThinking) {
-        apiBody.reasoning = { effort: thinkingLevel };
+        // Responses API 的 reasoning effort 取值到 high 为止，max 映射为 high
+        apiBody.reasoning = { effort: thinkingLevel === 'max' ? 'high' : thinkingLevel };
       }
       if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
         apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
@@ -14615,6 +14619,10 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var searchResultsCollected = [];
     var searchQueriesCollected = [];
     var webSearchEnabled = req.body && req.body.web_search === true;
+    if (webSearchEnabled && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+      // ★ 网页搜索改造：Responses API 目前仅支持 deepseek-v4-flash，强制回退避免 400
+      validatedModel = DEEPSEEK_RESPONSES_MODEL;
+    }
     if (webSearchEnabled && !aborted) {
       // Tavily 并行搜索
       var tavilyPromise = null;
