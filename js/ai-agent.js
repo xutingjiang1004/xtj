@@ -5957,7 +5957,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
             var toolDesc = toolList.map(function(t) {
-              var nameMap = { search_web: '联网搜索', get_weather: '查询天气', get_current_time: '获取时间' };
+              var nameMap = { search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气', get_current_time: '获取时间' };
               var label = nameMap[t.name] || t.name;
               if (t.args && t.args.query) return label + ' "' + t.args.query + '"';
               if (t.args && t.args.location) return label + ' ' + t.args.location;
@@ -6007,7 +6007,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               toolBar2 = el('div', { class: 'ai-tool-status' });
               assistantNode.insertBefore(toolBar2, assistantBubble);
             }
-            var nameMap = { search_web: '已联网搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
+            var nameMap = { search_web: '已联网搜索', tavily_search: '已Tavily搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
             var label = nameMap[evt.tool_name] || evt.tool_name;
             var summaryText = '';
             if (evt.success) {
