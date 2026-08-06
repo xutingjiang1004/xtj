@@ -7020,6 +7020,24 @@ function showChatMessages() {
     var closeFallbackTimer = null;
     var pageTransitionTimers = {};   // pageId -> timeout id（页面切换兜底）
     var panelResizeRaf = 0;
+    var pageRafQueue = [];            // 跟踪所有 showPage 的 rAF，cleanup 时取消
+
+    // 双层 requestAnimationFrame 启动动画，替代 offsetHeight 强制回流
+    function nextFrame(cb) {
+      var id = requestAnimationFrame(function() {
+        // 从队列移除
+        var idx = pageRafQueue.indexOf(id);
+        if (idx >= 0) pageRafQueue.splice(idx, 1);
+        id = requestAnimationFrame(function() {
+          idx = pageRafQueue.indexOf(id);
+          if (idx >= 0) pageRafQueue.splice(idx, 1);
+          try { cb(); } catch (e) { /* 防止 callback 抛错导致后续动画卡死 */ }
+        });
+        pageRafQueue.push(id);
+      });
+      pageRafQueue.push(id);
+      return id;
+    }
 
     // 页面元素引用（全部限定在 panelShell 内）
     var pageEls = {
@@ -7039,11 +7057,6 @@ function showChatMessages() {
         clearTimeout(pageTransitionTimers[k]);
         delete pageTransitionTimers[k];
       });
-    }
-
-    // 双层 requestAnimationFrame 启动动画，替代 offsetHeight 强制回流
-    function nextFrame(cb) {
-      requestAnimationFrame(function() { requestAnimationFrame(cb); });
     }
 
     // 设置页面为隐藏终态（离场动画完成后调用）
@@ -7158,28 +7171,41 @@ function showChatMessages() {
       schedulePanelPosition();
     }
 
-    // P0-3: 关闭完成信号 = 面板外壳 opacity/transform transitionend + 380ms 兜底
+    // P0-3 + 交互修复: 关闭面板
+    // 修复: 如果当前在二级页面，二级页的离场动画与外壳的关闭动画并行
+    // 而不是先即时跳回 primary 再关闭外壳（会造成"二级页消失，primary 闪一下，外壳消失"的撕裂感）
+    // 完成信号：外壳 opacity/transform transitionend + 380ms 兜底
     function closePanel(animate) {
       if (!panelOpen || panelClosing) return;
       panelClosing = true;
       panelOpen = false;
+      // 二级页面 → 走回退动画（不立即跳），与外壳关闭动画并行
+      if (currentPage !== 'primary') {
+        if (animate !== false) {
+          navigateTo('primary');
+        } else {
+          goToPrimaryPage(false);
+        }
+      } else {
+        goToPrimaryPage(false);
+      }
       panelShell.classList.remove('open');
       plusBtn.classList.remove('active');
       plusBtn.setAttribute('aria-expanded', 'false');
       if (animate === false) {
         panelClosing = false;
-        goToPrimaryPage(false);
         return;
       }
       var done = false;
       function onShellEnd(ev) {
         if (done) return;
-        // 只响应外壳自身的 opacity/transform
+        // 只响应外壳自身的 opacity/transform（避免子元素冒泡干扰）
         if (ev && ev.target !== panelShell) return;
         done = true;
         panelShell.removeEventListener('transitionend', onShellEnd);
         if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
         panelClosing = false;
+        // 关闭后强制重置所有页面到 primary（防止二级页 is-leaving 卡住）
         goToPrimaryPage(false);
       }
       panelShell.addEventListener('transitionend', onShellEnd);
@@ -7375,6 +7401,11 @@ function showChatMessages() {
       if (closeFallbackTimer) { clearTimeout(closeFallbackTimer); closeFallbackTimer = null; }
       clearAllPageTransitionTimers();
       if (panelResizeRaf) { try { cancelAnimationFrame(panelResizeRaf); } catch (e) {} panelResizeRaf = 0; }
+      // 取消所有 showPage 待执行的 rAF（防止 detached DOM 上操作）
+      if (pageRafQueue && pageRafQueue.length) {
+        pageRafQueue.forEach(function(id) { try { cancelAnimationFrame(id); } catch (e2) {} });
+        pageRafQueue = [];
+      }
       panelOpen = false;
       panelClosing = false;
       currentPage = 'primary';
