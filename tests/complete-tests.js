@@ -315,6 +315,8 @@ test('Dock changes stay inside the approved selection-feedback scope', function(
     if (/\.dock-bar\s+\.dock-tab\s*\{/.test(line)) return false;
     if (/\.dock-bar\s+\.dock-tab\.active\s*\{/.test(line)) return false;
     if (/\.dock-bar\s+\.dock-tab\[data-tab="ai"\]/.test(line)) return false;
+    // 清理过期浏览器前缀（Firefox 已不再需要 ::-moz-focus-inner）
+    if (/:?-moz-focus-inner/.test(line)) return false;
     return /\.dock-(?:bar|tab|indicator|liquid-lens|liquid-shine)\b|data-tab/.test(line);
   });
   assert.deepStrictEqual(forbidden, [], 'Dock structure, geometry or navigation selector changed');

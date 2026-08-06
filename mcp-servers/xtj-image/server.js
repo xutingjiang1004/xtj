@@ -66,8 +66,8 @@ server.tool("image_compress", "压缩图片文件", { filepath: z.string(), qual
   const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
   var suffix = String(args.output_suffix || '_compressed');
-  // 防止路径遍历：移除 ../ 和 ..\
-  suffix = suffix.replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_');
+  // 防止路径遍历：移除所有路径分隔符和危险字符，仅保留安全字符
+  suffix = suffix.replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_').replace(/[^a-zA-Z0-9_-]/g, '_');
   const out = `${fp.slice(0, -ext.length)}${suffix}${ext}`;
   const q = args.quality ?? 80;
   const fmt = ext.toLowerCase().replace('.', '');

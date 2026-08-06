@@ -73,6 +73,8 @@ async function fetchPhotoWallRows(supabase) {
 }
 
 async function main() {
+  const dryRun = process.argv.includes('--dry-run');
+  if (dryRun) console.log('[DRY-RUN] 仅预览，不执行实际删除操作。');
   loadRuntimeEnv();
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_KEY;
@@ -108,7 +110,11 @@ async function main() {
   };
 
   const fileList = Array.from(storagePaths);
-  for (let i = 0; i < fileList.length; i += 100) {
+  if (dryRun) {
+    console.log('[DRY-RUN] 将删除 ' + fileList.length + ' 个存储文件:');
+    fileList.forEach(f => console.log('  ' + f));
+  } else {
+    for (let i = 0; i < fileList.length; i += 100) {
     const chunk = fileList.slice(i, i + 100);
     if (!chunk.length) continue;
     const { data, error } = await supabase.storage.from('uploads').remove(chunk);
@@ -125,14 +131,19 @@ async function main() {
       summary.failedFilePaths.push.apply(summary.failedFilePaths, unresolved.map((item) => item + ' :: not confirmed removed'));
     }
   }
+  } // end if (!dryRun) for storage deletion
 
-  for (const row of targets) {
-    const { error } = await supabase.from('posts').delete().eq('id', row.id);
-    if (error) {
-      summary.failedRows += 1;
-      summary.failedRowIds.push(String(row.id) + ' :: ' + error.message);
-    } else {
-      summary.deletedRows += 1;
+  if (dryRun) {
+    console.log('[DRY-RUN] 将删除 ' + targets.length + ' 条 posts 记录');
+  } else {
+    for (const row of targets) {
+      const { error } = await supabase.from('posts').delete().eq('id', row.id);
+      if (error) {
+        summary.failedRows += 1;
+        summary.failedRowIds.push(String(row.id) + ' :: ' + error.message);
+      } else {
+        summary.deletedRows += 1;
+      }
     }
   }
 

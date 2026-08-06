@@ -1499,46 +1499,8 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   };
 }
 
-var pdfParser = null, mammothParser = null, xlsxParser = null;
-var pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
-
-function loadFileParser(name) {
-  try { return require(name); } catch(e) { console.warn('[code-agent] ' + name + ' not available'); return null; }
-}
-
-function getPdfParser() {
-  if (!pdfParserLoaded) { pdfParser = loadFileParser('pdf-parse'); pdfParserLoaded = true; }
-  return pdfParser;
-}
-
-async function parsePdfBuffer(buffer) {
-  var library = getPdfParser();
-  if (!library) throw new Error('PDF 解析库不可用');
-  // pdf-parse v1 exported a callable function; v2 exports PDFParse.
-  if (typeof library === 'function') return library(buffer);
-  if (typeof library.PDFParse !== 'function') throw new Error('PDF 解析库版本不兼容');
-  var parser = new library.PDFParse({ data: new Uint8Array(buffer) });
-  try {
-    var result = await parser.getText();
-    return {
-      text: result && result.text || '',
-      numpages: result && Number(result.total) || 0,
-      info: {}
-    };
-  } finally {
-    try { await parser.destroy(); } catch (_) {}
-  }
-}
-
-function getMammothParser() {
-  if (!mammothParserLoaded) { mammothParser = loadFileParser('mammoth'); mammothParserLoaded = true; }
-  return mammothParser;
-}
-
-function getXlsxParser() {
-  if (!xlsxParserLoaded) { xlsxParser = loadFileParser('xlsx'); xlsxParserLoaded = true; }
-  return xlsxParser;
-}
+// 文件解析器 — 共用模块（与 server.js 共享，避免重复定义）
+const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer } = require('./file-parsers');
 
 function getExtFromMime(mimeType) {
   var map = {
@@ -1632,7 +1594,8 @@ async function extractDocumentText(buffer, mimeType, fileName) {
       mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()
     ) {
       await validateOfficeArchive(buffer, 'docx');
-      var mammothResult = await mammothParser.extractRawText({ buffer: buffer });
+      var mammoth = getMammothParser();
+      var mammothResult = await mammoth.extractRawText({ buffer: buffer });
       text = mammothResult.value || '';
       metadata = mammothResult.messages || [];
     } else if (
@@ -1645,13 +1608,14 @@ async function extractDocumentText(buffer, mimeType, fileName) {
         var xlsMagic = buffer.subarray(0, 8).toString('hex');
         if (xlsMagic !== 'd0cf11e0a1b11ae1') throw new Error('XLS 文件结构无效');
       }
-      var workbook = xlsxParser.read(buffer, { type: 'buffer' });
+      var xlsx = getXlsxParser();
+      var workbook = xlsx.read(buffer, { type: 'buffer' });
       if (workbook.SheetNames.length > MAX_WORKBOOK_SHEETS) throw new Error('工作表数量超过 ' + MAX_WORKBOOK_SHEETS + ' 个');
       var sheets = [];
       metadata = { sheetNames: workbook.SheetNames, sheetCount: workbook.SheetNames.length };
       workbook.SheetNames.forEach(function(sName) {
         var sheet = workbook.Sheets[sName];
-        var csv = xlsxParser.utils.sheet_to_csv(sheet, { blankrows: false });
+        var csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false });
         sheets.push('【工作表: ' + sName + '】\n' + csv);
       });
       text = sheets.join('\n\n');

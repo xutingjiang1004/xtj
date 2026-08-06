@@ -42,6 +42,16 @@
     { "source": "/.git/(.*)", "destination": "/404" },
     { "source": "/node_modules/(.*)", "destination": "/404" },
     { "source": "/.env", "destination": "/404" },
-    { "source": "/.env.*", "destination": "/404" }
+    { "source": "/.env.*", "destination": "/404" },
+    { "source": "/.codex/(.*)", "destination": "/404" },
+    { "source": "/.cursor/(.*)", "destination": "/404" },
+    { "source": "/.agents/(.*)", "destination": "/404" },
+    { "source": "/.trae/(.*)", "destination": "/404" },
+    { "source": "/.workbuddy/(.*)", "destination": "/404" },
+    { "source": "/.playwright-cli/(.*)", "destination": "/404" },
+    { "source": "/.playwright/(.*)", "destination": "/404" },
+    { "source": "/output/(.*)", "destination": "/404" },
+    { "source": "/playwright-report/(.*)", "destination": "/404" },
+    { "source": "/test-results/(.*)", "destination": "/404" }
   ]
 }

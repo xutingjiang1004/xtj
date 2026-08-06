@@ -121,8 +121,9 @@ test('installed pdf-parse API shape is supported by code-agent', () => {
     typeof pdfParseModule === 'function' || typeof pdfParseModule.PDFParse === 'function',
     'pdf-parse must expose either the v1 callable API or the v2 PDFParse class'
   );
-  const source = fs.readFileSync(path.join(__dirname, '../render-api/code-agent.js'), 'utf8');
   if (typeof pdfParseModule.PDFParse === 'function') {
+    // PDF 解析逻辑已迁移到 file-parsers.js 共享模块
+    const source = fs.readFileSync(path.join(__dirname, '../render-api/file-parsers.js'), 'utf8');
     assert.match(source, /new library\.PDFParse/);
     assert.match(source, /await parser\.destroy\(\)/);
   }

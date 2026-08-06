@@ -53,6 +53,9 @@ app.disable('x-powered-by');
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
 if (!process.env.ADMIN_USERNAME) {
   console.warn('[WARN] ADMIN_USERNAME 环境变量未设置，使用默认值。建议在 Render Dashboard 中设置 ADMIN_USERNAME。');
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[CRITICAL] 生产环境未设置 ADMIN_USERNAME，默认用户名可被预测！请在 Render Dashboard 环境变量中设置 ADMIN_USERNAME。');
+  }
 }
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
@@ -275,23 +278,8 @@ function getDeepSeekCapabilitySnapshot() {
     apiFormat: 'openai-chat-completions'
   };
 }
-let pdfParser = null, mammothParser = null, xlsxParser = null;
-let pdfParserLoaded = false, mammothParserLoaded = false, xlsxParserLoaded = false;
-function loadFileParser(name) {
-  try { return require(name); } catch(e) { console.warn('[FILE] ' + name + ' not available'); return null; }
-}
-function getPdfParser() {
-  if (!pdfParserLoaded) { pdfParser = loadFileParser('pdf-parse'); pdfParserLoaded = true; }
-  return pdfParser;
-}
-function getMammothParser() {
-  if (!mammothParserLoaded) { mammothParser = loadFileParser('mammoth'); mammothParserLoaded = true; }
-  return mammothParser;
-}
-function getXlsxParser() {
-  if (!xlsxParserLoaded) { xlsxParser = loadFileParser('xlsx'); xlsxParserLoaded = true; }
-  return xlsxParser;
-}
+// 文件解析器 — 共用模块（与 code-agent.js 共享，避免重复定义）
+const { getPdfParser, getMammothParser, getXlsxParser } = require('./file-parsers');
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
@@ -318,6 +306,8 @@ const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, co
 
 // 简单 exact-match 缓存 (TTL 5 分钟)
 // 安全规则：有历史、搜索、附件、外部上下文、时效性问题时不缓存
+// 注意：项目中存在多个独立缓存（aiResponseCache、persistenceRateLimitCache、agentSessionCache、
+// rateLimitStore、searchCache 等），各自独立管理。未来可考虑抽取统一的缓存管理器以简化维护。
 const aiResponseCache = new Map();
 const AI_CACHE_TTL_MS = 5 * 60 * 1000;
 const AI_CACHE_MAX_SIZE = 500;
@@ -1462,6 +1452,9 @@ async function searchWeb(query, maxResults) {
 // 策略：
 //   1. 删除所有独立成行的括号内容（（...）、(...)、【...】）
 //   2. 删除以明显动作描述词开头的行
+// sanitizeAssistantVisibleText — 过滤 AI 回复中的舞台动作描述，保留合法括号内容。
+// 注意：此函数约 50 行，包含大量中文动作正则。修改时注意正则性能（ReDoS），
+// 新增动作描述请在 actionSets 数组中追加，避免增加正则复杂度。
 //   3. 删除正文中内联的括号舞台动作
 //   保留合法的括号内容：API 说明、价格、编号、技术术语、英文缩写
 function sanitizeAssistantVisibleText(text) {
@@ -1515,6 +1508,7 @@ function sanitizeAssistantVisibleText(text) {
 }
 
 // Open-Meteo 免费天气查询（无需 API Key）
+// 城市坐标映射 — 用于天气查询。如需扩展，可考虑迁移到外部配置文件或数据库。
 var CITY_COORDS = {
   '北京': { lat: 39.9042, lon: 116.4074 },
   '上海': { lat: 31.2304, lon: 121.4737 },
@@ -1694,7 +1688,6 @@ async function finishStream(res, opt) {
       } else {
         saved = true;
       }
-      // console.log('[AGENT-STREAM] saved', 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'finish_reason:', finishReason);
     } catch (saveErr) {
       console.error('[AGENT-STREAM] save failed:', saveErr && saveErr.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
     }
@@ -1730,8 +1723,6 @@ async function finishStream(res, opt) {
     search_expires_at: searchMeta && typeof searchMeta.expires_at === 'number' ? searchMeta.expires_at : undefined,
     total_ms: totalMs || undefined
   });
-
-  // console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
 
   // 异步更新会话摘要（仅成功保存时）
   if (hasContent && saved) {
@@ -14552,8 +14543,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (timeContext) {
       messages.push({ role: 'user', content: timeContext });
     }
-
-    // console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
