@@ -256,42 +256,57 @@ function extractSymbols(content, language) {
 
   if (!content || !language) return symbols;
 
+  // Bounded extraction: caps symbol count per kind (avoids O(n^2) dedup blow-up
+  // and unbounded memory on symbol-dense files) and parses at most 256KB.
+  var MAX_SYMBOLS_PER_KIND = 500;
+  var MAX_PARSE_CHARS = 262144;
+
   try {
+    var parseContent = content.length > MAX_PARSE_CHARS ? content.slice(0, MAX_PARSE_CHARS) : content;
+
     // JavaScript / TypeScript
     if (language === 'javascript' || language === 'typescript') {
       // Functions: function name, const name = () =>, name() {
       var funcRe = /(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(|(\w+)\s*\([^)]*\)\s*\{)/g;
+      var seenFuncs = Object.create(null);
       var fm;
-      while ((fm = funcRe.exec(content)) !== null) {
+      while ((fm = funcRe.exec(parseContent)) !== null) {
         var fname = fm[1] || fm[2] || fm[3];
-        if (fname && symbols.functions.indexOf(fname) === -1) {
-          symbols.functions.push(fname);
+        if (fname && !seenFuncs[fname]) {
+          seenFuncs[fname] = 1;
+          if (symbols.functions.length < MAX_SYMBOLS_PER_KIND) symbols.functions.push(fname);
         }
       }
       // Classes: class ClassName
       var classRe = /class\s+(\w+)/g;
+      var seenClasses = Object.create(null);
       var cm;
-      while ((cm = classRe.exec(content)) !== null) {
-        if (symbols.classes.indexOf(cm[1]) === -1) {
-          symbols.classes.push(cm[1]);
+      while ((cm = classRe.exec(parseContent)) !== null) {
+        if (!seenClasses[cm[1]]) {
+          seenClasses[cm[1]] = 1;
+          if (symbols.classes.length < MAX_SYMBOLS_PER_KIND) symbols.classes.push(cm[1]);
         }
       }
       // Exports: export default, export const/function/class, module.exports
       var exportRe = /(?:export\s+(?:default\s+(?:class|function)\s+)?(\w+)|module\.exports\s*=\s*(\w+)|exports\.(\w+)\s*=)/g;
+      var seenExports = Object.create(null);
       var em;
-      while ((em = exportRe.exec(content)) !== null) {
+      while ((em = exportRe.exec(parseContent)) !== null) {
         var ename = em[1] || em[2] || em[3];
-        if (ename && symbols.exports.indexOf(ename) === -1) {
-          symbols.exports.push(ename);
+        if (ename && !seenExports[ename]) {
+          seenExports[ename] = 1;
+          if (symbols.exports.length < MAX_SYMBOLS_PER_KIND) symbols.exports.push(ename);
         }
       }
       // Imports: import { X } from, require('X')
       var importRe = /(?:import\s+(?:\{[^}]*\}|(\w+))\s*from\s*['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g;
+      var seenImports = Object.create(null);
       var im;
-      while ((im = importRe.exec(content)) !== null) {
+      while ((im = importRe.exec(parseContent)) !== null) {
         var ipath = im[2] || im[3];
-        if (ipath && symbols.imports.indexOf(ipath) === -1) {
-          symbols.imports.push(ipath);
+        if (ipath && !seenImports[ipath]) {
+          seenImports[ipath] = 1;
+          if (symbols.imports.length < MAX_SYMBOLS_PER_KIND) symbols.imports.push(ipath);
         }
       }
     }
@@ -299,19 +314,25 @@ function extractSymbols(content, language) {
     // Python
     if (language === 'python') {
       var pyFuncRe = /(?:def\s+(\w+)|class\s+(\w+))/g;
+      var seenPy = Object.create(null);
       var pm;
-      while ((pm = pyFuncRe.exec(content)) !== null) {
+      while ((pm = pyFuncRe.exec(parseContent)) !== null) {
         var pname = pm[1] || pm[2];
-        if (pname) {
-          if (pm[1] && symbols.functions.indexOf(pname) === -1) symbols.functions.push(pname);
-          if (pm[2] && symbols.classes.indexOf(pname) === -1) symbols.classes.push(pname);
+        if (pname && !seenPy[pname]) {
+          seenPy[pname] = 1;
+          if (pm[1] && symbols.functions.length < MAX_SYMBOLS_PER_KIND) symbols.functions.push(pname);
+          if (pm[2] && symbols.classes.length < MAX_SYMBOLS_PER_KIND) symbols.classes.push(pname);
         }
       }
       var pyImportRe = /(?:import\s+(\w+)|from\s+(\S+)\s+import)/g;
+      var seenPyImports = Object.create(null);
       var pim;
-      while ((pim = pyImportRe.exec(content)) !== null) {
+      while ((pim = pyImportRe.exec(parseContent)) !== null) {
         var pipath = pim[1] || pim[2];
-        if (pipath && symbols.imports.indexOf(pipath) === -1) symbols.imports.push(pipath);
+        if (pipath && !seenPyImports[pipath]) {
+          seenPyImports[pipath] = 1;
+          if (symbols.imports.length < MAX_SYMBOLS_PER_KIND) symbols.imports.push(pipath);
+        }
       }
     }
   } catch (e) {
@@ -887,9 +908,9 @@ function searchCode(scope, query, options) {
   var resolved = resolveIndex(scope);
   if (!resolved.ok) return resolved;
   var projectIndex = resolved.index;
-  if (!query) return { ok: false, error: 'Query is required' };
+  if (!query) return { ok: false, error: 'Query is required', code: 'QUERY_REQUIRED' };
 
-  var maxResults = (options && options.maxResults) || 20;
+  var maxResults = Math.min(Math.max(Number((options && options.maxResults) || 20) || 20, 1), 50);
   var pathFilter = (options && options.path) || null;
   var extFilter = (options && options.extensions) || null;
 
@@ -904,7 +925,7 @@ function searchCode(scope, query, options) {
       var pathMatched = pathNorm === filterNorm ||
         pathNorm.indexOf(filterNorm + '/') === 0 ||
         pathNorm.indexOf('/' + filterNorm + '/') >= 0 ||
-        pathNorm.indexOf('/' + filterNorm) === pathNorm.length - filterNorm.length - 1;
+        pathNorm.endsWith('/' + filterNorm);
       if (!pathMatched) return;
     }
     if (extFilter) {
@@ -1127,7 +1148,7 @@ function readFileRange(scope, path, startLine, endLine) {
   endLine = Number.isSafeInteger(endLine) && endLine >= startLine ? endLine : startLine + 999999;
 
   var entry = projectIndex.files.get(path);
-  if (!entry) return { ok: false, error: 'File not found in index: ' + path };
+  if (!entry) return { ok: false, error: 'File not found in index: ' + path, code: 'FILE_NOT_IN_INDEX' };
 
   // Find matching chunks
   var matchingChunks = [];
@@ -1216,7 +1237,8 @@ function listFiles(scope, directory, depth, pattern) {
   var MAX_LIST_FILES = 200;
 
   // First pass: collect directories to build a tree summary
-  var dirMap = {};
+  // 用 Map 而非裸对象，避免目录名为 constructor/__proto__ 等原型链键时抛错
+  var dirMap = new Map();
   projectIndex.files.forEach(function (entry) {
     if (dirPrefix && !entry.path.startsWith(dirPrefix)) return;
 
@@ -1247,8 +1269,8 @@ function listFiles(scope, directory, depth, pattern) {
     // Build directory tree
     for (var d = 0; d < parts.length - 1; d++) {
       var dirPath = dirPrefix + parts.slice(0, d + 1).join('/');
-      if (!dirMap[dirPath]) dirMap[dirPath] = [];
-      dirMap[dirPath].push(entry.path);
+      if (!dirMap.has(dirPath)) dirMap.set(dirPath, []);
+      dirMap.get(dirPath).push(entry.path);
     }
   });
 
@@ -1261,8 +1283,8 @@ function listFiles(scope, directory, depth, pattern) {
   }
 
   // Build directory summary
-  var directories = Object.keys(dirMap).sort().map(function (dir) {
-    return { path: dir, fileCount: dirMap[dir].length };
+  var directories = Array.from(dirMap.keys()).sort().map(function (dir) {
+    return { path: dir, fileCount: (dirMap.get(dir) || []).length };
   });
 
   var resultObj = {

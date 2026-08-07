@@ -1,10 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const vercel = JSON.parse(fs.readFileSync('vercel.json', 'utf8'));
+const path = require('node:path');
+const ROOT = path.resolve(__dirname, '..');
+const vercel = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
 
-const source = fs.readFileSync('render-api/server.js', 'utf8');
-const authMigration = fs.readFileSync('supabase/migrations/011_auth_record_uniqueness.sql', 'utf8');
+const source = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
+const authMigration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/011_auth_record_uniqueness.sql'), 'utf8');
 // CSP 已统一收敛到共享模块 security-headers.js（server.js 与 serve-static.js 共用一份）
 const sharedSecurityHeaders = require('../render-api/security-headers.js');
 const csp = sharedSecurityHeaders.CSP;
@@ -92,7 +94,8 @@ test('CSP script-src allows self, unsafe-inline, jsDelivr, and excludes user-wri
   assert.ok(scriptSrc, 'script-src directive must exist');
   assert.match(scriptSrc, /'self'/);
   assert.match(scriptSrc, /'unsafe-inline'/);
-  assert.match(scriptSrc, /'unsafe-eval'/, 'WebLLM requires eval in its worker runtime');
+  // H-16: 'unsafe-eval' 已移除（WebLLM 的 WASM 编译由 'wasm-unsafe-eval' 覆盖），
+  // 前端 js/ 与 index.html/admin.html 无 eval()/new Function 使用
   assert.match(scriptSrc, /'wasm-unsafe-eval'/, 'WebLLM requires WebAssembly compilation');
   assert.match(scriptSrc, /https:\/\/cdn\.jsdelivr\.net/);
   // H-9: script-src 不得放行 supabase.co——public 桶是用户可写源，可上传 JS 当

@@ -65,7 +65,10 @@
     }
 
     function finalize(state, err) {
-      metrics.totalDurationMs = Date.now() - metrics.requestStartTime;
+      // ★ 幂等守卫：重复 finalize 不再放大耗时统计
+      if (metrics.finalState !== 'pending') return;
+      // ★ 未 start 时 requestStartTime 为 0，缺失记 0 而非产生 ~1.7e12ms 巨值
+      metrics.totalDurationMs = Date.now() - (metrics.requestStartTime || 0);
       metrics.finalState = state || 'done';
       if (state === 'error' || state === 'cancelled') {
         metrics.errorPhase = err ? err.phase || '' : '';

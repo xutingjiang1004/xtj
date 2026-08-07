@@ -15,52 +15,22 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
-const INDEX_HTML = path.join(ROOT, 'index.html');
 
 // ─── 配置：源码 → 产物映射 ──────────────────────────────
-const SOURCE_TO_MIN = {
-  'js/desktop-shell.js': 'js/desktop-shell.min.js',
-  'js/code-file-system.js': 'js/code-file-system.min.js',
-  'js/code-workspace.js': 'js/code-workspace.min.js',
-  'css/code-workspace.css': 'css/code-workspace.min.css',
-  'js/core.js': 'js/core.min.js',
-  'js/features.js': 'js/features.min.js',
-  'js/core-animations.js': 'js/core-animations.min.js',
-  'js/ui-effects.js': 'js/ui-effects.min.js',
-  'js/theme-toggle.js': 'js/theme-toggle.min.js',
-  'js/login-device.js': 'js/login-device.min.js',
-  'js/ai-agent.js': 'js/ai-agent.min.js',
-  'js/performance.js': 'js/performance.min.js',
-  'js/config.js': 'js/config.min.js',
-   'js/admin/admin.js': 'js/admin/admin.min.js',
-  'js/ai-core/errors.js': 'js/ai-core/errors.min.js',
-  'js/ai-core/request-controller.js': 'js/ai-core/request-controller.min.js',
-  'js/ai-core/transport.js': 'js/ai-core/transport.min.js',
-  'js/ai-core/markdown-renderer.js': 'js/ai-core/markdown-renderer.min.js',
-  'js/ai-core/scroll-controller.js': 'js/ai-core/scroll-controller.min.js',
-  'js/ai-core/stream-renderer.js': 'js/ai-core/stream-renderer.min.js',
-  'js/ai-core/telemetry.js': 'js/ai-core/telemetry.min.js',
-  'css/style.css': 'css/style.min.css',
-  'css/desktop.css': 'css/desktop.min.css',
-  'css/ai-agent.css': 'css/ai-agent.min.css',
-  'css/visual-refinements.css': 'css/visual-refinements.min.css',
-  'css/ui-enhance.css': 'css/ui-enhance.min.css',
-  'css/ui-shell.css': 'css/ui-shell.min.css',
-  'css/photo-preview.css': 'css/photo-preview.min.css',
-  'css/admin.css': 'css/admin.min.css',
-};
+// 清单与 build.js 共享（require build.js 导出的 JS_FILES/CSS_FILES），
+// 避免两处维护导致遗漏（如 css/code-claude-style.css）。
+const buildManifest = require('./build.js');
+const JS_FILES = buildManifest.JS_FILES || [];
+const CSS_FILES = buildManifest.CSS_FILES || [];
+const OPTIONAL_JS = buildManifest.OPTIONAL_JS || [];
+const HTML_FILES = buildManifest.HTML_ENTRYPOINTS || ['index.html', 'admin.html'];
 
-// photo-wall 特殊映射
-const PHOTO_WALL_SOURCES = {
-  'js/photo-wall/data.js': 'js/photo-wall/data.min.js',
-  'js/photo-wall/render.js': 'js/photo-wall/render.min.js',
-  'js/photo-wall/photo-wall.js': 'js/photo-wall/photo-wall.min.js',
-  'js/photo-wall/upload-ui.js': 'js/photo-wall/upload-ui.min.js',
-  'js/photo-wall/preview.js': 'js/photo-wall/preview.min.js',
-  'js/photo-wall/preview-hotfix.js': 'js/photo-wall/preview-hotfix.min.js',
-};
+const SOURCE_TO_MIN = {};
+JS_FILES.forEach(function (f) { SOURCE_TO_MIN[f] = f.replace(/\.js$/, '.min.js'); });
+CSS_FILES.forEach(function (f) { SOURCE_TO_MIN[f] = f.replace(/\.css$/, '.min.css'); });
 
-Object.assign(SOURCE_TO_MIN, PHOTO_WALL_SOURCES);
+// 可选对：源与 min 同时缺失（或 min 缺失）时降级 warn，不 exit 1
+const OPTIONAL_PAIRS = new Set(OPTIONAL_JS);
 
 let errors = [];
 let warnings = [];
@@ -84,46 +54,83 @@ function fileExists(filePath) {
   }
 }
 
+function lfNormalize(content) {
+  return String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function fileSha256(filePath) {
-  const content = fs.readFileSync(filePath);
-  return crypto.createHash('sha256').update(content).digest('hex');
+  // 与 build.js contentHash 一致：对 LF 归一化内容计算，行尾不参与指纹
+  return crypto.createHash('sha256').update(lfNormalize(fs.readFileSync(filePath, 'utf8'))).digest('hex');
 }
 
 function fileSha256Short(filePath) {
   return fileSha256(filePath).substring(0, 10).toLowerCase();
 }
 
-// ─── 1. 检查源码 → 产物时间戳 ──────────────────────────────
-console.log('\n=== 1. 源码 vs 产物时间戳检查 ===');
+// 解析 build.js 写入产物末尾的指纹注释：/*# src=<64位LF归一化源码sha256> */
+function parseSrcFingerprint(minContent) {
+  const m = /\/\*#\s+src=([0-9a-f]{64})\s*\*\//.exec(minContent);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// ─── 1. 检查源码 → 产物内容指纹 ──────────────────────────────
+console.log('\n=== 1. 源码 vs 产物指纹检查 ===');
 for (const [src, min] of Object.entries(SOURCE_TO_MIN)) {
   const srcPath = path.join(ROOT, src);
   const minPath = path.join(ROOT, min);
+  const isOptional = OPTIONAL_PAIRS.has(src);
 
   if (!fileExists(srcPath)) {
+    // 可选文件源与 min 同时缺失时降级 warn（不 exit 1）
     warn('Source file not found: ' + src);
     continue;
   }
   if (!fileExists(minPath)) {
-    error('Min file not found: ' + min + ' (source: ' + src + ')');
+    if (isOptional) {
+      warn('Optional min file not found: ' + min + ' (source: ' + src + '; run build.js to produce it)');
+    } else {
+      error('Min file not found: ' + min + ' (source: ' + src + '; run build.js)');
+    }
     continue;
   }
 
-  const srcStat = fs.statSync(srcPath);
-  const minStat = fs.statSync(minPath);
-
-  // FAT/exFAT 时间戳粒度 2 秒，容忍 2.5s 以内的差值避免误报
-  if (srcStat.mtimeMs - minStat.mtimeMs > 2500) {
-    error('Source newer than min file: ' + src + ' (' + srcStat.mtime.toISOString() + ') > ' + min + ' (' + minStat.mtime.toISOString() + ')');
+  // 基于 build.js 写入的 /*# src=<sha256> */ 指纹注释校验产物新鲜度（mtime 不可靠）
+  const minContent = fs.readFileSync(minPath, 'utf8');
+  const fingerprint = parseSrcFingerprint(minContent);
+  if (!fingerprint) {
+    error('Min file has no src fingerprint comment (unable to verify; run build.js first): ' + min);
+    continue;
+  }
+  const srcHash = fileSha256(srcPath);
+  if (fingerprint !== srcHash) {
+    error('Source changed since min was built: ' + src + ' (min src=' + fingerprint + ', current source=' + srcHash + '; run build.js)');
   } else {
-    console.log('  OK: ' + src + ' -> ' + min);
+    console.log('  OK: ' + src + ' -> ' + min + ' (fingerprint matches)');
   }
 }
 
 // ─── 2. 检查 HTML 引用的 Hash ─────────────────────────
-const HTML_FILES = ['index.html', 'admin.html'];
 const scriptRegex = /<script[^>]+src=["']([^"']+)["'][^>]*>/g;
 const linkRegex = /<link[^>]+href=["']([^"']+)["'][^>]*>/g;
 const metaRegex = /<meta[^>]+name=["']([^"']+)["'][^>]+content=["']([^"']+)["'][^>]*>/g;
+
+// 准入条件：本地 css/js 路径（非 http(s) 外链、非 data:）
+function isLocalAsset(assetUrlPath) {
+  return /^(?:css|js)\//.test(assetUrlPath.replace(/^\/+/, ''));
+}
+
+// 用 URL 解析取 v 参数（不再依赖字符串搜索 '?v='）
+function parseAssetRef(rawRef) {
+  try {
+    const u = new URL(rawRef, 'http://127.0.0.1');
+    return {
+      urlPath: u.pathname, // 规范化后的路径（含前导 /，保留原百分号编码）
+      version: u.searchParams.get('v')
+    };
+  } catch (_) {
+    return null;
+  }
+}
 
 function checkHtmlHashes(htmlFile) {
   console.log('\n=== 2.' + (HTML_FILES.indexOf(htmlFile) + 1) + '. ' + htmlFile + ' Hash 一致性检查 ===');
@@ -136,56 +143,59 @@ function checkHtmlHashes(htmlFile) {
 
   const resourceRefs = [];
 
-  // 从 script 标签提取
+  // 从 script 标签提取（仅本地 .js 路径）
   let match;
   scriptRegex.lastIndex = 0;
   while ((match = scriptRegex.exec(htmlContent)) !== null) {
     const src = match[1];
-    if (src.includes('v=')) {
-      resourceRefs.push({ type: 'script', fullPath: src, tag: 'script' });
-    }
+    const parsed = parseAssetRef(src);
+    if (!parsed) continue;
+    const urlPath = parsed.urlPath.replace(/^\/+/, '');
+    if (!isLocalAsset(urlPath) || !urlPath.endsWith('.js')) continue;
+    resourceRefs.push({ type: 'script', fullPath: src, urlPath: urlPath, version: parsed.version, tag: 'script' });
   }
 
-  // 从 link 标签提取
+  // 从 link 标签提取（仅本地 css/js 路径）
   linkRegex.lastIndex = 0;
   while ((match = linkRegex.exec(htmlContent)) !== null) {
     const href = match[1];
-    // H-16 修复：href 形如 "css/style.min.css?v=abc"，必须先去掉 ?v= 再判断后缀，
-    // 旧逻辑 href.endsWith('.css') 恒 false，导致所有 CSS link 从不参与 hash 校验。
-    const cleanHref = href.split('?')[0];
-    if (href.includes('v=') && (cleanHref.endsWith('.css') || cleanHref.endsWith('.js'))) {
-      resourceRefs.push({ type: 'css', fullPath: href, tag: 'link' });
-    }
+    const parsed = parseAssetRef(href);
+    if (!parsed) continue;
+    const urlPath = parsed.urlPath.replace(/^\/+/, '');
+    if (!isLocalAsset(urlPath) || !(urlPath.endsWith('.css') || urlPath.endsWith('.js'))) continue;
+    resourceRefs.push({ type: 'css', fullPath: href, urlPath: urlPath, version: parsed.version, tag: 'link' });
   }
 
-  // 从 meta 标签提取
+  // 从 meta 标签提取（仅本地 css/js 路径）
   metaRegex.lastIndex = 0;
   while ((match = metaRegex.exec(htmlContent)) !== null) {
     const name = match[1];
     const content = match[2];
-    // G13 修复：content 形如 "js/xxx.min.js?v=hash"，必须先去掉 ?v= 部分再判断后缀，
-    // 旧逻辑 content.endsWith('.js') 永远为 false，导致 meta 资源从不参与 hash 校验。
-    const cleanContent = content.split('?')[0];
-    if (content.includes('v=') && (cleanContent.endsWith('.js') || cleanContent.endsWith('.css'))) {
-      resourceRefs.push({ type: 'meta', fullPath: content, metaName: name, tag: 'meta' });
-    }
+    const parsed = parseAssetRef(content);
+    if (!parsed) continue;
+    const urlPath = parsed.urlPath.replace(/^\/+/, '');
+    if (!isLocalAsset(urlPath) || !(urlPath.endsWith('.js') || urlPath.endsWith('.css'))) continue;
+    resourceRefs.push({ type: 'meta', fullPath: content, urlPath: urlPath, version: parsed.version, metaName: name, tag: 'meta' });
   }
 
   for (const ref of resourceRefs) {
-    const urlPart = ref.fullPath.split('?v=')[0];
-    const hashPart = ref.fullPath.split('?v=')[1];
-    const filePath = path.join(ROOT, urlPart);
+    // 本地 css/js 引用必须带 ?v= 版本号
+    if (!ref.version) {
+      error('Local asset not versioned (no ?v=): ' + ref.fullPath + ' (from ' + ref.tag + ', ' + htmlFile + ')');
+      continue;
+    }
+    const filePath = path.join(ROOT, ref.urlPath);
 
     if (!fileExists(filePath)) {
-      error('File referenced in ' + htmlFile + ' not found: ' + urlPart + ' (from ' + ref.tag + ')');
+      error('File referenced in ' + htmlFile + ' not found: ' + ref.urlPath + ' (from ' + ref.tag + ')');
       continue;
     }
 
     const actualHash = fileSha256Short(filePath);
-    if (actualHash !== hashPart) {
-      error('Hash mismatch for ' + urlPart + ': expected ' + actualHash + ' but got ' + hashPart + ' (from ' + ref.tag + ', ' + htmlFile + ')');
+    if (actualHash !== ref.version) {
+      error('Hash mismatch for ' + ref.urlPath + ': expected ' + actualHash + ' but got ' + ref.version + ' (from ' + ref.tag + ', ' + htmlFile + ')');
     } else {
-      console.log('  OK: ' + urlPart + '?v=' + hashPart);
+      console.log('  OK: ' + ref.urlPath + '?v=' + ref.version);
     }
   }
 

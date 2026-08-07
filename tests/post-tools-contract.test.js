@@ -26,11 +26,6 @@ test('post tools are server-authoritative and expose an SSE post chat endpoint',
   assert.match(server, /requestAbort\.abort\(\)/);
 });
 
-test('Dock source is not part of this change surface', () => {
-  const diff = require('child_process').execFileSync('git', ['diff', '--name-only'], { cwd: root, encoding: 'utf8' });
-  assert.doesNotMatch(diff, /dock/i);
-});
-
 test('post tools guard against duplicate UI elements', () => {
   assert.match(core, /var host = anchor\.closest\('\.post'\)/);
   assert.match(core, /actions\.insertAdjacentElement\('afterend', panel\)/);

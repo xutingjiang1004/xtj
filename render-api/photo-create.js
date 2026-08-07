@@ -62,12 +62,24 @@ async function storageObjectExists(supabase, bucket, path) {
       } catch (_) {}
       return { ok: true, exists: true, error: null, size: fileSize };
     }
-    // 精确名未命中（list search 是模糊匹配，可能截断），再尝试 download HEAD 级验证
-    var probe = await supabase.storage.from(bucket).download(cleanPath);
+    // 精确名未命中（list search 是模糊匹配，可能截断），再尝试 info() 做 HEAD 级验证。
+    // info() 只取对象元数据，禁止 download() 全量下载仅为了判存在（超大对象会拖垮内存）。
+    var probe = await supabase.storage.from(bucket).info(cleanPath);
     if (probe && probe.error) {
       var code = String(probe.error.statusCode || probe.error.code || probe.error.message || '');
       if (/404|not.?found|NoSuchKey/i.test(code)) return { ok: true, exists: false, error: null };
       return { ok: false, exists: false, error: probe.error };
+    }
+    if (probe && probe.data) {
+      // 顺带返回真实文件大小，供调用方在下载前做体积预检（避免全量下载导致 OOM）
+      var probeSize = null;
+      try {
+        var probeMeta = probe.data;
+        var nestedMeta = probeMeta.metadata && typeof probeMeta.metadata === 'object' ? probeMeta.metadata : null;
+        if (nestedMeta && Number.isSafeInteger(nestedMeta.size)) probeSize = nestedMeta.size;
+        else if (Number.isSafeInteger(probeMeta.size)) probeSize = probeMeta.size;
+      } catch (_) {}
+      return { ok: true, exists: true, error: null, size: probeSize };
     }
     return { ok: true, exists: true, error: null };
   } catch (e) {
@@ -261,7 +273,23 @@ async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
     if (typeof userName === 'string' && userName) query = query.eq('user_name', userName);
     const result = await query.maybeSingle();
     if (result && result.error) return { ok: false, found: false, error: result.error };
-    return { ok: true, found: !!(result && result.data), data: (result && result.data) || null, error: null };
+    if (result && result.data) return { ok: true, found: true, data: result.data, error: null };
+    // ★ 存量兼容：新格式 photo_<ns>_<uploadId> 未命中时，回退匹配旧格式 photo_<uploadId>
+    // （升级前已存在的记录仍是旧格式，避免同 uploadId 重试插入重复照片）
+    if (typeof actorKey === 'string' && actorKey.indexOf('photo_') === 0) {
+      var secondUnderscore = actorKey.indexOf('_', 6);
+      if (secondUnderscore > 0) {
+        var legacyKey = 'photo_' + actorKey.slice(secondUnderscore + 1);
+        if (legacyKey !== actorKey) {
+          var legacyQuery = supabase.from('posts').select('id,user_name,media_url,content,created_at,views,actor_key').eq('actor_key', legacyKey);
+          if (typeof userName === 'string' && userName) legacyQuery = legacyQuery.eq('user_name', userName);
+          const legacyResult = await legacyQuery.maybeSingle();
+          if (legacyResult && legacyResult.error) return { ok: false, found: false, error: legacyResult.error };
+          if (legacyResult && legacyResult.data) return { ok: true, found: true, data: legacyResult.data, error: null };
+        }
+      }
+    }
+    return { ok: true, found: false, data: null, error: null };
   } catch (err) {
     return { ok: false, found: false, error: err };
   }
@@ -273,22 +301,32 @@ async function findExistingPhotoByActorKey(supabase, actorKey, userName) {
 // 的）帖子引用，防止借幂等分支把受害者原图当重复上传删除。
 async function findStoragePathRefs(supabase, storagePath, excludeId) {
   try {
-    if (!storagePath) return { ok: true, refs: [], error: null };
+    if (!storagePath) return { ok: true, refs: [], total: 0, truncated: false, error: null };
     var cleanPath = String(storagePath).replace(/^\/+/, '');
     // content JSON 中序列化为 "storagePath":"photos/xxx"，用带引号的 token 精确匹配
     var contentToken = '"' + cleanPath + '"';
-    var query = supabase.from('posts').select('id,user_name').ilike('content', '%' + contentToken + '%');
+    // ILIKE 通配符 %/_ 与转义符 \ 在拼接前必须转义，否则路径中的这些字符会扩大/破坏匹配
+    var escapedToken = String(contentToken).replace(/[\\%_]/g, function (m) { return '\\' + m; });
+    var pattern = '%' + escapedToken + '%';
+    // count:'exact' 让 total 反映全部命中数（limit 只截断 data，不截断计数）
+    var query = supabase.from('posts').select('id,user_name', { count: 'exact' }).ilike('content', pattern);
     if (excludeId) query = query.neq('id', excludeId);
     var result = await query.limit(50);
     if (result && result.error) return { ok: false, refs: [], error: result.error };
-    return { ok: true, refs: (result && result.data) || [], error: null };
+    var refs = (result && result.data) || [];
+    var total = Number.isSafeInteger(result.count) ? result.count : refs.length;
+    return { ok: true, refs: refs, total: total, truncated: refs.length < total, error: null };
   } catch (err) {
     return { ok: false, refs: [], error: err };
   }
 }
 
-function hasOtherOwnerRef(refs, userName) {
-  return (refs || []).some(function (ref) { return ref && ref.user_name !== userName; });
+function hasOtherOwnerRef(refResult, userName) {
+  if (!refResult) return false;
+  // 引用数超过采样上限（limit 50）：截断后无法确认其余引用是否属于他人，
+  // 保守判定"存在他人引用"，防止截断掩盖他人对受害者文件的引用导致误删。
+  if (refResult.truncated === true) return true;
+  return (refResult.refs || []).some(function (ref) { return ref && ref.user_name !== userName; });
 }
 
 async function cleanupPhotoPaths(options, paths) {
@@ -323,7 +361,9 @@ async function createPhotoRecord(options) {
   }
   const uploadId = validated.uploadId;
   const createActorKeyFn = typeof options.createActorKey === 'function' ? options.createActorKey : (crypto.randomUUID ? function() { return crypto.randomUUID(); } : function() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }); });
-  const actorKey = 'photo_' + (uploadId || createActorKeyFn());
+  // ★ actorKey 带用户命名空间前缀：不同用户即使提交相同 uploadId，幂等键也不会互相冲突/串号
+  const userNamespace = crypto.createHash('sha256').update(String(options.userName)).digest('hex').slice(0, 12);
+  const actorKey = 'photo_' + userNamespace + '_' + (uploadId || createActorKeyFn());
   const storagePath = validated.storagePath;
 
   // 若提供了 upload_id, 先查询是否已存在 (幂等)
@@ -357,7 +397,7 @@ async function createPhotoRecord(options) {
           if (!repairRefs.ok) {
             return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
           }
-          if (hasOtherOwnerRef(repairRefs.refs, options.userName)) {
+          if (hasOtherOwnerRef(repairRefs, options.userName)) {
             return { status: 409, body: { ok: false, error: '图片已被其他帖子使用，无法关联', code: 'PHOTO_ALREADY_REFERENCED' } };
           }
           // 旧文件丢失，使用新文件路径更新记录
@@ -411,7 +451,7 @@ async function createPhotoRecord(options) {
       if (!duplicateRefs.ok) {
         return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
       }
-      if (hasOtherOwnerRef(duplicateRefs.refs, options.userName)) {
+      if (hasOtherOwnerRef(duplicateRefs, options.userName)) {
         // 该文件属于其他用户的帖子，禁止删除；仅返回现有记录（幂等语义）
         return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
       }
@@ -438,7 +478,7 @@ async function createPhotoRecord(options) {
   if (!createRefs.ok) {
     return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
   }
-  if (hasOtherOwnerRef(createRefs.refs, options.userName)) {
+  if (hasOtherOwnerRef(createRefs, options.userName)) {
     return { status: 409, body: { ok: false, error: '图片已被其他帖子使用，请重新上传', code: 'PHOTO_ALREADY_REFERENCED' } };
   }
 
@@ -511,18 +551,24 @@ async function createPhotoRecord(options) {
     return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
   }
 
+  const isConflict = insertResult && insertResult.error && insertResult.error.code === '23505';
+  if (isConflict) {
+    // ★ 23505 冲突：本次提交的文件路径很可能已被他人（或己方先前）的记录引用，
+    //   绝不对其执行 cleanupPhotoPaths——删除会连带破坏引用该文件的帖子。
+    //   归属他人、归属本人或无法确认时统一保留文件，仅返回冲突错误。
+    return { status: 500, body: { ok: false, error: '数据已存在', code: 'CONFLICT' } };
+  }
+
   // 真正失败: 清理 storage (幂等)
   var cleanupResult = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
     thumbnail && thumbnail.path,
     thumbnail && thumbnail.rotatedPath,
     storagePath
   ]);
-  const isConflict = insertResult && insertResult.error && insertResult.error.code === '23505';
-  const code = isConflict ? 'CONFLICT' : 'UPSTREAM_ERROR';
   if (cleanupResult.queue_failed) {
     return { status: 503, body: { ok: false, error: 'Photo save failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true, cleanup_pending: false } };
   }
-  return { status: 500, body: { ok: false, error: isConflict ? '数据已存在' : '照片保存失败', code: code } };
+  return { status: 500, body: { ok: false, error: '照片保存失败', code: 'UPSTREAM_ERROR' } };
 }
 
 module.exports = {

@@ -492,19 +492,7 @@
             throw new Error('网络连接失败，请检查: ' + (fetchErr.message || '未知错误'));
         }
         clearTimeout(at);
-        var contentType = res.headers.get('content-type') || '';
-        var data;
-        if (contentType.indexOf('application/json') !== -1) {
-            try {
-                data = await res.json();
-            } catch (jsonErr) {
-                throw new Error('后端返回格式异常（HTTP ' + res.status + '），请检查API地址');
-            }
-        } else {
-            var text = await res.text().catch(function() { return ''; });
-            if (!res.ok) throw new Error('请求失败 (' + res.status + '): ' + text.substring(0, 50));
-            data = {};
-        }
+        // ★ 401 会话清理前置：后端返回非 JSON（HTML 网关错误页）时也能正确清理会话
         if (res.status === 401 && !useUserAccessToken) {
             clearSession();
             try {
@@ -531,11 +519,22 @@
     }
 
     window.showConfirm = function(title, msg, btnText, cb) {
-        document.getElementById('confirmTitle').textContent = title || '确认操作';
-        document.getElementById('confirmMsg').textContent = msg || '确定要执行此操作吗？';
-        document.getElementById('confirmOkBtn').textContent = btnText || '确认删除';
+        // ★ DOM 缺失时降级原生 confirm，避免管理页局部渲染失败导致完全无法操作
+        var _titleEl = document.getElementById('confirmTitle');
+        var _msgEl = document.getElementById('confirmMsg');
+        var _okBtn = document.getElementById('confirmOkBtn');
+        var _modal = document.getElementById('confirmModal');
+        if (!_titleEl || !_msgEl || !_okBtn || !_modal) {
+            if (typeof window.confirm === 'function' && window.confirm(title + '\n\n' + msg)) {
+                if (typeof cb === 'function') cb();
+            }
+            return;
+        }
+        _titleEl.textContent = title || '确认操作';
+        _msgEl.textContent = msg || '确定要执行此操作吗？';
+        _okBtn.textContent = btnText || '确认删除';
         confirmCallback = cb;
-        document.getElementById('confirmModal').classList.add('active');
+        _modal.classList.add('active');
     };
 
     window.closeConfirm = function() {
@@ -1107,7 +1106,7 @@ async function initAdminClient() {
             if (adminAvatarCache[userName] === undefined) {
                 fetchAdminAvatar(userName).then(function(url) {
                     if (url && el && el.parentNode) {
-                        el.innerHTML = '<img src="' + escapeHtml(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml((userName || '?').slice(0, 1).toUpperCase()) + '\'">';
+                        el.innerHTML = '<img src="' + escapeHtml(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr((userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                         adminAvatarCache[userName] = url;
                     } else {
                         // API不可用时fallback：显示首字母
@@ -1649,13 +1648,8 @@ async function initAdminClient() {
         
         showConfirm('删除公告', '您确定要删除此公告吗？\n\n' + (preview ? '公告内容：' + preview + '\n\n' : '') + '删除后所有用户将无法查看此公告，此操作不可恢复。', '确认删除', async function() {
             try {
-                if (API_BASE) {
-                    await apiCall('DELETE', '/admin/announcement/' + id);
-                } else if (typeof sb !== 'undefined' && sb && sb.rpc) {
-                    var key = ann ? ann.actor_key : 'admin_' + Date.now();
-                    var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
-                    if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
-                }
+                if (!API_BASE) throw new Error('未配置 API_BASE，无法删除');
+                await apiCall('DELETE', '/admin/announcement/' + encodeURIComponent(id));
                 await loadAllData(true);
                 showToast('公告已成功删除', 'success');
             } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
@@ -1670,13 +1664,8 @@ async function initAdminClient() {
         
         showConfirm('删除帖子', '您确定要删除此帖子吗？\n\n' + (post ? '发布者：' + (post.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '删除后此帖子及相关的点赞和评论都会被移除，此操作不可恢复。', '确认删除', async function() {
             try {
-                if (API_BASE) {
-                    await apiCall('DELETE', '/admin/post/' + id);
-                } else {
-                    var key = post ? post.actor_key : 'admin_' + Date.now();
-                    var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
-                    if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
-                }
+                if (!API_BASE) throw new Error('未配置 API_BASE，无法删除');
+                await apiCall('DELETE', '/admin/post/' + encodeURIComponent(id));
                 await loadAllData(true);
                 showToast('帖子已成功删除', 'success');
             } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
@@ -1691,12 +1680,8 @@ async function initAdminClient() {
         
         showConfirm('删除评论', '您确定要删除此评论吗？\n\n' + (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '评论将标记为删除，但记录会保留在数据库中。', '确认删除', async function() {
             try {
-                if (API_BASE) {
-                    await apiCall('DELETE', '/admin/comment/' + encodeURIComponent(idStr));
-                } else {
-                    var { data, error } = await sb.rpc('delete_comment_v2', { p_comment_id: id, p_deleted_by: ADMIN });
-                    if (error) { showToast('删除失败: ' + error.message, 'error'); return; }
-                }
+                if (!API_BASE) throw new Error('未配置 API_BASE，无法删除');
+                await apiCall('DELETE', '/admin/comment/' + encodeURIComponent(idStr));
                 await loadAllData(true);
                 showToast('评论已标记为删除', 'success');
             } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
@@ -2226,7 +2211,7 @@ async function initAdminClient() {
         modal.style.display = 'flex';
     };
 
-    window.closePhotoPreview = function() {
+    window.adminClosePhotoPreview = function() {
         var modal = document.getElementById('photoPreviewModal');
         if (modal) {
             modal.style.display = 'none';
@@ -2237,7 +2222,7 @@ async function initAdminClient() {
     window.deleteAdminPhoto = function(id) {
         showConfirm('彻底删除照片', '删除后将从全站照片墙、数据库和存储中移除，且无法恢复。', '确认删除', async function() {
             try {
-                await apiCall('DELETE', '/admin/photo/' + id);
+                await apiCall('DELETE', '/admin/photo/' + encodeURIComponent(id));
                 await loadPhotosAdminData();
                 renderTab('photos');
                 showToast('照片已删除', 'success');
