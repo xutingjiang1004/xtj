@@ -213,7 +213,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xtj-cleanup-expired-rate-limits') THEN
       PERFORM cron.unschedule('xtj-cleanup-expired-rate-limits');
     END IF;
-    -- ★ 内层用 $job$ 定界符：与外层 DO $$ 区分，避免美元引号提前闭合导致语法错误
+    -- 内层任务体用带标签的美元引号，与外层空标签定界符区分，避免提前闭合
     PERFORM cron.schedule('xtj-cleanup-expired-rate-limits', '0 * * * *',
       $job$SELECT public.cleanup_expired_cat_rate_limits()$job$);
 
