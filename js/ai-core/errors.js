@@ -90,7 +90,13 @@
     if (/timeout|超时|TIMEOUT/i.test(msg)) {
       return buildError(ERROR_CODES.PROVIDER_TIMEOUT, USER_MESSAGES[ERROR_CODES.PROVIDER_TIMEOUT], true, options);
     }
-    if (/cancel|abort|取消|中止/i.test(msg)) {
+    // ★ cancel 判定：保留对"订单取消"类业务文案的排除（整词边界防误伤），
+    // 同时恢复常见词形（cancelled/canceled/aborted）与中文"已取消/已中止"的覆盖——
+    // 后端 REQUEST_CANCELLED 官方文案恰是"请求已取消"，中文无词间空白，
+    // 纯 (^|\s) 前缀会把真实取消误分类为 UNKNOWN
+    var cancelledMsg = /(^|\s)(cancel(?:l?ed|l?ing|s)?|abort(?:ed|ing|s)?)(\s|$|[,.;:!?])/i.test(msg)
+      || /(已取消|已中止|用户已取消|用户取消)/.test(msg);
+    if (cancelledMsg) {
       return buildError(ERROR_CODES.REQUEST_CANCELLED, USER_MESSAGES[ERROR_CODES.REQUEST_CANCELLED], false, options);
     }
     if (/network|fetch|网络|连接/i.test(msg)) {
@@ -102,14 +108,14 @@
       }
       return buildError(ERROR_CODES.INDEX_NOT_FOUND, USER_MESSAGES[ERROR_CODES.INDEX_NOT_FOUND], true, options);
     }
-    if (/tool|工具/i.test(msg)) {
-      return buildError(ERROR_CODES.TOOL_FAILED, msg, true, options);
-    }
     if (/rate|limit|频繁|429/i.test(msg)) {
       return buildError(ERROR_CODES.RATE_LIMITED, USER_MESSAGES[ERROR_CODES.RATE_LIMITED], true, options);
     }
     if (/auth|login|登录|认证|token/i.test(msg)) {
       return buildError(ERROR_CODES.AUTH_FAILED, USER_MESSAGES[ERROR_CODES.AUTH_FAILED], false, options);
+    }
+    if (/tool|工具/i.test(msg)) {
+      return buildError(ERROR_CODES.TOOL_FAILED, msg, true, options);
     }
 
     return buildError(ERROR_CODES.UNKNOWN, msg || '操作失败，请稍后重试', false, options);
@@ -128,6 +134,17 @@
     };
   }
 
+  // ★ 透传结构化字段：二次分类（format 系列）不再丢失 requestId/phase/httpStatus
+  function errToOptions(err) {
+    return {
+      requestId: err && err.request_id,
+      clientRequestId: err && err.client_request_id,
+      phase: err && err.phase,
+      httpStatus: err && err.httpStatus,
+      toolTrace: err && err.toolTrace
+    };
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────
   CORE.Errors = {
     CODES: ERROR_CODES,
@@ -136,7 +153,7 @@
     build: buildError,
     // 用户可见消息：不显示错误码
     formatUserMessage: function (err) {
-      var classified = classifyError(err, {});
+      var classified = classifyError(err, errToOptions(err));
       if (classified.code === ERROR_CODES.INDEX_REBUILD_REQUIRED) {
         return '项目索引尚未建立，但文档内容已可用。您可以继续提问，系统会使用文档正文回答。';
       }
@@ -166,7 +183,7 @@
     },
     // 调试详情：显示错误码和 request_id
     formatDebugDetails: function (err) {
-      var classified = classifyError(err, {});
+      var classified = classifyError(err, errToOptions(err));
       var details = [];
       if (classified.code && classified.code !== ERROR_CODES.UNKNOWN) {
         details.push('错误码: ' + classified.code);
@@ -182,7 +199,7 @@
     },
     // 格式化显示（保留向后兼容，但不再自动添加错误码前缀）
     formatDisplay: function (err) {
-      var classified = classifyError(err, {});
+      var classified = classifyError(err, errToOptions(err));
       return classified.message;
     }
   };

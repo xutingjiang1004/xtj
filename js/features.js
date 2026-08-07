@@ -27,7 +27,9 @@
   var patterns = [];
 
   MOJIBAKE_PAIRS.forEach(function (pair) {
-    if (!pair[0] || pair[0] === pair[1] || replacements[pair[0]]) return;
+    // ★ 仅剔除单字映射（如 '淇'→'修复'，会误伤人名/地名如"淇河"）；
+    // 双字乱码组合（如 '閿欒'→'错误'）在合法中文中几乎不可能出现，保留以维持修复能力
+    if (!pair[0] || pair[0] === pair[1] || replacements[pair[0]] || pair[0].length < 2) return;
     replacements[pair[0]] = pair[1];
     patterns.push(pair[0]);
   });

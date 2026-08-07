@@ -3,10 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
+const ROOT = path.resolve(__dirname, '..');
 
-const server = fs.readFileSync('render-api/server.js', 'utf8');
-const core = fs.readFileSync('js/core.js', 'utf8');
-const migration = fs.readFileSync('supabase/migrations/012_harden_pro_claim_and_interactions.sql', 'utf8');
+const server = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
+const core = fs.readFileSync(path.join(ROOT, 'js/core.js'), 'utf8');
+const migration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/012_harden_pro_claim_and_interactions.sql'), 'utf8');
 
 function routeBlock(start, end) {
   const from = server.indexOf(start);
@@ -19,7 +21,7 @@ function routeBlock(start, end) {
 test('Pro HTTP endpoints and standalone assets stay retired', () => {
   assert.doesNotMatch(server, /['"]\/(?:api\/vip|api\/pro-gifts|admin\/pro-gifts)/);
   for (const asset of ['js/pro-upgrade.js', 'js/pro-style.js', 'css/pro-style.css']) {
-    assert.equal(fs.existsSync(asset), false, `${asset} must not be shipped`);
+    assert.equal(fs.existsSync(path.join(ROOT, asset)), false, `${asset} must not be shipped`);
   }
 });
 
@@ -53,7 +55,7 @@ test('comment deletion is rendered only for its author or an administrator and s
   assert.match(core, /feedAllComments = \(feedAllComments \|\| \[\]\)\.filter/);
   assert.match(core, /subscribeToComments\(\)/);
   assert.match(migration, /REVOKE INSERT, UPDATE, DELETE ON public\.comments FROM PUBLIC, anon, authenticated/);
-  assert.match(fs.readFileSync('supabase/migrations/022_enable_comment_delete_realtime.sql', 'utf8'), /REPLICA IDENTITY FULL/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'supabase/migrations/022_enable_comment_delete_realtime.sql'), 'utf8'), /REPLICA IDENTITY FULL/);
 });
 
 test('profile interactions use protected APIs instead of anonymous Data API writes', () => {

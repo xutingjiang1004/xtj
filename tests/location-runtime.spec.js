@@ -1,5 +1,10 @@
 const { test, expect } = require('@playwright/test');
 
+// 移动视口：桌面 CSS（>=900px）会隐藏底部 dock，而这些用例通过 dock 切换面板
+test.beforeEach(async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+});
+
 test('precise location is sent only after the user enables sharing', async ({ page, context }) => {
   await context.grantPermissions(['geolocation'], { origin: 'http://127.0.0.1:4173' });
   await context.setGeolocation({ latitude: 31.2304, longitude: 121.4737, accuracy: 18 });

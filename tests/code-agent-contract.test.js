@@ -217,9 +217,9 @@ test('system prompt enforces replace_range, create and document only', () => {
 // 15. 用户消息构建
 // ============================================================
 test('code-agent builds user message with code context', () => {
-  assert.match(codeAgent, /function buildUserMessage/);
-  assert.match(codeAgent, /项目代码/);
-  assert.match(codeAgent, /SHA256/);
+  assert.match(codeAgent, /function buildAgentMessages/);
+  assert.match(codeAgent, /【本轮工作区状态】/);
+  assert.match(codeAgent, /SHA256_HEX_RE/);
 });
 
 test('code-agent warns the model when the project index is partial', () => {

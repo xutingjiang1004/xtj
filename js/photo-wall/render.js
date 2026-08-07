@@ -66,7 +66,7 @@
   }
 
   function emptyHtml(){
-    return '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">' + icon('empty', 'photo-wall-empty-svg') + '</div><div>还没有照片</div><div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">' + icon('upload') + '<span>成为第一个分享照片的人</span></div></div>';
+    return '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">' + icon('empty', 'photo-wall-empty-svg') + '</div><div>还没有照片</div><div class="photo-wall-empty-cta" data-xtj-trigger-upload>' + icon('upload') + '<span>成为第一个分享照片的人</span></div></div>';
   }
 
   function applyPhotoWallAspect(img){

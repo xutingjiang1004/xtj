@@ -11,11 +11,16 @@ var CSP = [
   // H-9: script-src 不放行 supabase.co——public 桶是用户可写源（可上传 JS 脚本），
   // 放进 script-src 等于允许「上传 JS → 白名单源加载」；supabase 仅用于 API 调用，
   // 由 connect-src 放行。jsdelivr/npmmirror 承载 supabase-js/Monaco/GSAP，必须保留。
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
+  // H-16: 已移除 'unsafe-eval'（WebLLM 的 WASM 编译由 'wasm-unsafe-eval' 覆盖）。
+  // 'unsafe-inline' 因存在内联脚本暂留，后续改为 nonce 白名单后再移除。
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
   "worker-src 'self' blob:",
+  "object-src 'none'",
+  // frame-src 放行同源与 blob:——Code 工作台用 iframe + blob URL 渲染 PDF 预览（js/code-workspace.js renderPdfPreview）
+  "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
   // Monaco loads its codicon font from the same npm mirror allowed for its script/style assets.
@@ -33,10 +38,12 @@ var CSP_LOCAL = CSP.replace(
 
 var SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
-  'X-XSS-Protection': '1; mode=block',
+  // X-XSS-Protection 已被现代浏览器废弃（Chrome 90+ 已移除该头），
+  // 保留 mode=block 反而可能在旧版浏览器引入额外 XSS 向量，故删除。
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Content-Security-Policy': CSP
 };
 

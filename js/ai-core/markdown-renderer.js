@@ -17,19 +17,21 @@
   };
 
   var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|details|summary|video|audio|source)\b/gi;
-  // 事件处理属性：必须覆盖紧贴引号/斜杠/标签边界的情况（如 <img src="x"onerror="alert(1)">，
-  // HTML 解析会把引号后的 onerror 当作独立属性，原正则要求属性名前有空白导致漏删）
-  var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])on[a-z0-9_]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+  // 事件处理属性 + style（防 style="position:fixed" 全屏钓鱼）；首组捕获保留边界字符
+  var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])(?:on[a-z0-9_]+|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>&\/=]+)/gi;
   // 实体编码的事件属性名（onerror → &#111;nerror）
-  var BLOCKED_ATTRS_ENTITY_RE = /(^|[\s"'>\/])((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\/=]+)/gi;
+  var BLOCKED_ATTRS_ENTITY_RE = /(^|[\s"'>\/])((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>&\/=]+)/gi;
 
-  // 危险协议检测（对属性值先解码 HTML 实体，再剥离空白，最后校验 scheme）：
-  // 覆盖 jav&#x61;script:、java&#x09;script:、data:text/html 等实体编码/空白分隔绕过。
-  var DANGEROUS_SCHEME_RE = /^(?:javascript|vbscript|livescript|mocha)\s*[:\\]|^data\s*:\s*(?:text\/html|text\/javascript|application\/xhtml\+xml|image\/svg)/i;
+  // 危险协议检测由 sanitizeHtml 中对解码后 URL 用 new URL(...).protocol 白名单判定
+  // （http/https/mailto，另放行 data:image 非 svg），覆盖 jav&#x61;script:、
+  // java&#x09;script:、data:text/html 等实体编码/空白分隔绕过。
+  var _decodeTa = null;
   function decodeHtmlEntities(str) {
-    return String(str)
-      .replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
-      .replace(/&#(\d+);/g, function (_, d) { return String.fromCharCode(parseInt(d, 10)); });
+    if (!str) return '';
+    // 走浏览器原生解码：完整支持数字/命名实体（&#x61;、&colon; 等），RCDATA 下不执行标签
+    if (!_decodeTa) _decodeTa = document.createElement('textarea');
+    _decodeTa.innerHTML = String(str);
+    return _decodeTa.value;
   }
   // DSML / tool_calls / reasoning_content — never show raw protocol to user
   var DSML_RE = /<[|\uff5c]DSML[|\uff5c][\s\S]*?<[|\uff5c]\/DSML[|\uff5c]>/gi;
@@ -41,17 +43,24 @@
     var s = String(html);
     // Strip dangerous tags
     s = s.replace(BLOCKED_TAGS_RE, '');
-    // Strip event handlers (quoted and unquoted values, incl. no-space boundary)
-    s = s.replace(BLOCKED_ATTRS_RE, '');
-    // Strip entity-encoded event handler attribute names
-    s = s.replace(BLOCKED_ATTRS_ENTITY_RE, '');
+    // Strip event handlers / style attrs (quoted and unquoted values, incl. no-space boundary)
+    // 保留边界字符：避免 <img src="x"onerror="a"onload="b"> 时连边界一起删导致相邻属性存活
+    s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return p1 || ''; });
+    // Strip entity-encoded event handler attribute names（同样保留边界字符）
+    s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return p1 || ''; });
     // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离空白
-    // （java&#x09;script → javascript），命中危险 scheme 一律降级为 '#'
+    // （java&#x09;script → javascript），最后用 new URL 取 protocol 做白名单判定，
+    // 非 http/https/mailto（及 data:image 非 svg）一律降级为 '#'
     s = s.replace(/(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, function (match, attr, dq, sq, unq) {
       var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
       var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
-      if (DANGEROUS_SCHEME_RE.test(decoded)) return attr + '="#"';
-      return match;
+      var protocol = '';
+      try { protocol = new URL(decoded, location.origin).protocol.toLowerCase(); } catch (e) { protocol = ''; }
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return match;
+      if (protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(decoded)) return match;
+      // 无显式协议（相对路径/锚点）视为安全
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) return match;
+      return attr + '="#"';
     });
     // Strip CSS expressions（防 style 内 expression() 历史漏洞）
     s = s.replace(/\bexpression\s*\(/gi, '');
@@ -72,12 +81,17 @@
 
     // 1. Fenced code blocks: ```lang ... ```
     var codeBlocks = [];
-    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
+    function fencedCodeToPlaceholder(_, lang, code) {
       var idx = codeBlocks.length;
       var escaped = _escapeHtml(code.replace(/\n$/, ''));
       codeBlocks.push('<pre><code class="language-' + _escapeHtml(lang || '') + '">' + escaped + '</code></pre>');
       return '\x00CODE' + idx + '\x00';
-    });
+    }
+    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, fencedCodeToPlaceholder);
+    // 流式场景：围栏未闭合（仍在输出中的代码块）同样转义后放入 codeBlocks，
+    // 避免"正在输出的代码块"内容原样注入 HTML；要求 ``` 后紧跟换行，
+    // 防止正文中孤立 ``` 吞掉后续整段（子代理修复）
+    s = s.replace(/```(\w*)\n([\s\S]*)$/g, fencedCodeToPlaceholder);
 
     // 2. Inline code: `code`
     s = s.replace(/`([^`]+)`/g, function (_, code) {
@@ -134,7 +148,8 @@
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i].trim();
         if (/^\|[-: |]+\|$/.test(row)) continue; // separator row
-        var cells = row.split('|').filter(function (c) { return c.trim(); });
+        // 只裁掉首尾管道符，保留中间空单元格，避免 |a||b| 列错位
+        var cells = row.replace(/^\|/, '').replace(/\|$/, '').split('|');
         var tag = i === 0 ? 'th' : 'td';
         html += '<tr>';
         for (var j = 0; j < cells.length; j++) {
@@ -159,21 +174,35 @@
     // 10. Horizontal rule
     s = s.replace(/^(---|\*\*\*|___)\s*$/gm, '<hr>');
 
-    // 11. Unordered lists
+    // 11/12. Lists — 先统一生成项（有序项打 data-ol 标记），
+    // 全部生成完后再分别包裹 <ul>/<ol>，最后去掉标记
     s = s.replace(/^[\*\-]\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
+    s = s.replace(/^\d+\.\s+(.+)$/gm, function (_, t) { return '<li data-ol="1">' + _escapeHtml(t) + '</li>'; });
     s = s.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-    // 12. Ordered lists
-    s = s.replace(/^\d+\.\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
+    s = s.replace(/(<li data-ol="1">.*<\/li>\n?)+/g, '<ol>$&</ol>');
+    s = s.replace(/<li data-ol="1">/g, '<li>');
 
     // 13. Paragraphs: double newlines
+    // ★ 修复（XSS）：p 必须先 _escapeHtml 再拼入，防止把用户文本当 HTML 解析。
+    //   段落内已生成的 <code>/<a>/<img>/<strong> 等内联与块级 HTML 先临时收纳为占位符，
+    //   转义后再还原，既堵住注入又不破坏已有渲染。
+    var paragraphHtmlStore = [];
+    function stashParagraphHtml(m) {
+      var idx = paragraphHtmlStore.length;
+      paragraphHtmlStore.push(m);
+      return '\x00PH' + idx + '\x00';
+    }
+    var PARAGRAPH_HTML_RE = /<h[1-6]>[\s\S]*?<\/h[1-6]>|<blockquote>[\s\S]*?<\/blockquote>|<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|<li>[\s\S]*?<\/li>|<table>[\s\S]*?<\/table>|<pre>[\s\S]*?<\/pre>|<div>[\s\S]*?<\/div>|<code>[\s\S]*?<\/code>|<a\b[^>]*>[\s\S]*?<\/a>|<span\b[^>]*>[\s\S]*?<\/span>|<img\b[^>]*\/?>|<hr\b[^>]*>/gi;
     var paragraphs = s.split(/\n\n+/);
     s = paragraphs.map(function (p) {
       p = p.trim();
       if (!p) return '';
       // Skip if already wrapped in a block element
       if (/^<(h[1-6]|ul|ol|li|table|blockquote|pre|hr|div)/.test(p)) return p;
-      return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+      p = p.replace(PARAGRAPH_HTML_RE, stashParagraphHtml);
+      p = _escapeHtml(p).replace(/\n/g, '<br>');
+      p = p.replace(/\x00PH(\d+)\x00/g, function (_, idx) { return paragraphHtmlStore[parseInt(idx, 10)] || ''; });
+      return '<p>' + p + '</p>';
     }).join('\n');
 
     // 14. Restore inline (bold/italic) placeholders — 先于代码块还原，

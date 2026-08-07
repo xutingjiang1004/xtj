@@ -94,6 +94,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
         try {
           merged = await supabase.from('storage_cleanup_jobs').update({
             status: 'pending',
+            attempts: 0,
             paths: normalizePaths((existing.data.paths || []).concat(paths)),
             last_error: payload.last_error,
             updated_at: payload.updated_at,
@@ -112,7 +113,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
         // 终态 job 允许重新排队重试
         let update;
         try {
-          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: 0, paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
         } catch (error) {
           return { ok: false, queued: false, failed: true, paths: paths, error: error };
         }
@@ -123,7 +124,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
       // pending / 其他状态：M-2b 幂等合并必须做并集，不能整体覆盖（否则旧路径被丢弃）
       let update;
       try {
-        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: 0, paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
       } catch (error) {
         return { ok: false, queued: false, failed: true, paths: paths, error: error };
       }
@@ -160,16 +161,32 @@ async function removeStorageWithQueue(supabase, options) {
   }
   if (removal && !removal.error) {
     // M-3b: 校验实际删除结果——remove 对不存在对象不报错，部分失败仅返回已删列表。
-    // 若 data 长度小于请求路径数，剩余路径重新入队，避免永远不再重试。
-    const removedNames = new Set((Array.isArray(removal.data) ? removal.data : []).map(function(item) {
-      return String(item && (item.name || item.path) || '').trim().replace(/^\/+/, '');
-    }));
+    // data 为空数组（对象本就不存在）视为全部成功，不应视为部分失败去重排队。
+    const removedEntries = Array.isArray(removal.data) ? removal.data : [];
+    if (!removedEntries.length) {
+      return { ok: true, removed: true, cleanup_pending: false, paths: paths };
+    }
+    // remove 返回项可能只含 basename（如 "abc.webp"）也可能含完整路径，
+    // 比对同时接受两种形态；每个返回项最多抵消一个请求路径，避免同名 basename
+    // 把未删掉的路径误判为已删。
+    const removedMatches = removedEntries.map(function(item) {
+      const raw = String(item && (item.name || item.path) || '').trim().replace(/^\/+/, '');
+      if (!raw) return null;
+      return { full: raw, base: raw.split('/').pop() };
+    }).filter(Boolean);
     const remaining = paths.filter(function(p) {
-      return !removedNames.has(String(p).trim().replace(/^\/+/, ''));
+      const clean = String(p).trim().replace(/^\/+/, '');
+      const idx = removedMatches.findIndex(function(m) {
+        return m.full === clean || m.base === clean.split('/').pop();
+      });
+      if (idx === -1) return true;
+      removedMatches.splice(idx, 1);
+      return false;
     });
     if (!remaining.length) {
       return { ok: true, removed: true, cleanup_pending: false, paths: paths };
     }
+    // 仅真正未删掉的路径才重新入队
     const queue = await enqueueStorageCleanupJob(supabase, {
       bucket: options.bucket || 'uploads',
       paths: remaining,

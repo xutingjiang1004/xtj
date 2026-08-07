@@ -1080,9 +1080,10 @@
               reject(wrapError(err, 'readFile.text'));
             });
           } else if (fileType === 'image' || fileType === 'pdf') {
+            var blobUrl = null;
             file.arrayBuffer().then(function (buffer) {
               var blob = new Blob([buffer], { type: file.type || 'application/octet-stream' });
-              var blobUrl = URL.createObjectURL(blob);
+              blobUrl = URL.createObjectURL(blob);
               trackUrl(blobUrl);
               return getSHA256(buffer).then(function (sha256) {
                 throwIfAborted(signal);
@@ -1097,6 +1098,8 @@
                 });
               });
             }).catch(function (err) {
+              // ★ 中止/哈希失败路径回收 blob URL，避免 ArrayBuffer 无法 GC
+              try { if (blobUrl) revokeUrl(blobUrl); } catch (_) {}
               reject(wrapError(err, 'readFile.arrayBuffer'));
             });
           } else if (fileType === 'document') {

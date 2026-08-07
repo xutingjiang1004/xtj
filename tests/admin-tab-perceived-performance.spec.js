@@ -2,6 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test('admin tabs activate before data resolves and deduplicate concurrent loads', async ({ page }) => {
   const counts = Object.create(null);
+  const seenAuth = [];
   const json = (route, body) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -15,7 +16,11 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
     if (!key.startsWith('/admin/')) return route.continue();
     counts[key] = (counts[key] || 0) + 1;
 
-    if (key === '/admin/login') return json(route, { ok: true, user_user_token: 'test-admin-token' });
+    const auth = route.request().headers().authorization;
+    if (auth) seenAuth.push(auth);
+
+    // admin.js:726 实际读取 data.user_token（而非 user_user_token）
+    if (key === '/admin/login') return json(route, { ok: true, user_token: 'test-admin-token' });
     if (key === '/admin/data') return json(route, {
       posts: [], likes: [], comments: [], announcements: [], bans: []
     });
@@ -38,6 +43,8 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
   await page.locator('#loginPw').fill('test-password');
   await page.evaluate(() => window.doAdminLogin());
   await expect(page.locator('#dashboard')).toBeVisible();
+  // dashboard 渲染依赖登录返回的 user_token：后续 admin 数据请求必须携带该 token
+  expect(seenAuth).toContain('Bearer test-admin-token');
   await expect(page.locator('#tabAnn')).toHaveClass(/active/);
 
   const activatedInMs = await page.evaluate(() => {
@@ -46,7 +53,9 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
     if (!document.querySelector('#tabUsers').classList.contains('active')) return -1;
     return performance.now() - start;
   });
-  expect(activatedInMs).toBeGreaterThanOrEqual(0);
+  // -1 表示点击后未同步激活；原 toBeGreaterThanOrEqual(0) 恒真，无法捕获该哨兵值。
+  // 改为有意义的边界：激活必须真实发生，且发生在 100ms 内。
+  expect(activatedInMs).not.toBe(-1);
   expect(activatedInMs).toBeLessThan(100);
   await expect(page.locator('#tabUsers')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#tabUsers .admin-tab-loading')).toBeVisible();
