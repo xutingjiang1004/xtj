@@ -1,9 +1,10 @@
-const API = process.env.API_BASE || 'https://xtj.onrender.com';
-const USERNAME = process.env.ADMIN_USERNAME || 'xxz';
+const API = process.env.API_BASE;
+const USERNAME = process.env.ADMIN_USERNAME;
 const PASSWORD = process.env.ADMIN_PASSWORD;
 
-if (!PASSWORD) {
-  console.error('请设置环境变量 ADMIN_PASSWORD 再运行此脚本');
+if (!API || !USERNAME || !PASSWORD) {
+  console.error('请设置环境变量 API_BASE / ADMIN_USERNAME / ADMIN_PASSWORD 再运行此脚本');
+  console.error('本脚本仅用于手动验证，且仅限非生产环境；禁止默认指向生产服务器或硬编码凭据。');
   process.exit(1);
 }
 

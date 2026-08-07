@@ -2,12 +2,14 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const ROOT = path.resolve(__dirname, '..');
 
-const shellCss = fs.readFileSync('css/ui-shell.css', 'utf8');
-const codeCss = fs.readFileSync('css/code-workspace.css', 'utf8');
-const codeJs = fs.readFileSync('js/code-workspace.js', 'utf8');
-const aiCss = fs.readFileSync('css/ai-agent.css', 'utf8');
+const shellCss = fs.readFileSync(path.join(ROOT, 'css/ui-shell.css'), 'utf8');
+const codeCss = fs.readFileSync(path.join(ROOT, 'css/code-workspace.css'), 'utf8');
+const codeJs = fs.readFileSync(path.join(ROOT, 'js/code-workspace.js'), 'utf8');
+const aiCss = fs.readFileSync(path.join(ROOT, 'css/ai-agent.css'), 'utf8');
 
 test('desktop workbench keeps its padded content inside the viewport', () => {
   assert.match(shellCss, /grid-template-rows:\s*minmax\(0,\s*1fr\)/);

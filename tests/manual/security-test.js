@@ -6,6 +6,15 @@
  *  用法: node tests/security-test.js
  *  前提: 后端 server.js 已启动在 localhost:3000
  * ============================================
+ *
+ * ⚠️ 镜像副本声明：
+ *   本文件中 escapeHtml / safeJsStr / sanitizeUrl / sanitizeStorageFileName /
+ *   sanitizeStorageFileNameForUpload / validateString / pbkdf2Hash /
+ *   _obfuscateToken / _deobfuscateToken 等函数均为对生产/前端实现的本地重写副本
+ *   （部分依赖浏览器全局如 btoa/atob，无法直接 require）。
+ *   生产实现变更时需同步更新此处；凡可从模块导出 require 的真实实现，
+ *   应优先改为 require 真实实现，避免测试与被测代码漂移。
+ * ============================================
  */
 
 const http = require('http');
@@ -231,7 +240,7 @@ pathTraversalPayloads.forEach((payload) => {
   const hasDangerous = clean.includes('<script') || clean.includes('.exe') || clean.includes('.bat') || clean.includes('.php');
   logResult(
     `sanitizeStorageFileName "${payload.slice(0, 40)}"`,
-    !hasTraversal,
+    !hasTraversal && !hasDangerous,
     `清洗后: "${clean}"`
   );
 });
@@ -261,7 +270,7 @@ async function testApiEndpoints() {
   ];
   for (const [method, path, body] of noAuthEndpoints) {
     const res = await apiRequest(method, path, { body });
-    const blocked = res.status === 401 || res.status === 403 || res.status === 400;
+    const blocked = res.status === 401 || res.status === 403;
     logResult(
       `${method} ${path} (无token)`,
       blocked,
@@ -321,22 +330,14 @@ async function testApiEndpoints() {
   const csrfBlocked = csrfRes.status === 403 || csrfRes.status === 400 || (csrfRes.body?.error && csrfRes.body.error.includes('不允许'));
   logResult('CORS 拒绝恶意 Origin', csrfBlocked, `状态: ${csrfRes.status}`);
 
-  // 3.7 登录限流测试
-  console.log('\n  --- 3.7 登录限流测试 (连续15次请求) ---');
-  let rateLimited = false;
-  for (let i = 0; i < 15; i++) {
-    const res = await apiRequest('POST', '/admin/login', {
-      body: { username: 'xxz', password: 'wrong' + i }
-    });
-    if (res.status === 429) {
-      rateLimited = true;
-      logResult(`登录限流生效 (第${i + 1}次返回429)`, true);
-      break;
-    }
-    if (i === 14) {
-      logResult(`登录限流 (15次未触发429)`, rateLimited, '可能需要更快发送');
-    }
-  }
+  // 3.7 管理员登录正常测试（置于限流测试之前，避免被后续暴力请求污染限流状态）
+  console.log('\n  --- 3.7 管理员登录测试 ---');
+  const loginRes = await apiRequest('POST', '/admin/login', {
+    body: { username: 'xxz', password: 'test' }
+  });
+  // 密码错误应被拒绝：401（未授权）或 403（被风控拦截）；
+  // 不得再用「!=200」宽松断言，否则会被限流返回的 429 误判为通过。
+  logResult('管理员登录受保护', loginRes.status === 401 || loginRes.status === 403, `状态: ${loginRes.status}`);
 
   // 3.8 举报接口匿名测试
   console.log('\n  --- 3.8 举报接口鉴权 ---');
@@ -352,12 +353,23 @@ async function testApiEndpoints() {
   });
   logResult('/api/report 匿名提交被拒绝', reportRes.status !== 200 && reportRes.status !== 201, `状态: ${reportRes.status}`);
 
-  // 3.9 管理员登录正常测试
-  console.log('\n  --- 3.9 管理员登录测试 ---');
-  const loginRes = await apiRequest('POST', '/admin/login', {
-    body: { username: 'xxz', password: 'test' }
-  });
-  logResult('管理员登录受保护', loginRes.status !== 200, `状态: ${loginRes.status}`);
+  // 3.9 登录限流测试（注意：15 次暴力请求可能让 /admin/login 持续限流一段时间，
+  //     因此本段必须放在 3.7 管理员登录测试之后）
+  console.log('\n  --- 3.9 登录限流测试 (连续15次请求) ---');
+  let rateLimited = false;
+  for (let i = 0; i < 15; i++) {
+    const res = await apiRequest('POST', '/admin/login', {
+      body: { username: 'xxz', password: 'wrong' + i }
+    });
+    if (res.status === 429) {
+      rateLimited = true;
+      logResult(`登录限流生效 (第${i + 1}次返回429)`, true);
+      break;
+    }
+    if (i === 14) {
+      logResult(`登录限流 (15次未触发429)`, rateLimited, '可能需要更快发送');
+    }
+  }
 
   // 3.10 请求体大小限制
   console.log('\n  --- 3.10 请求体大小限制 ---');
@@ -386,7 +398,11 @@ async function testRateLimiting() {
   const successCount = results.filter(r => r.status === 200 || r.status === 201).length;
 
   console.log(`  耗时: ${elapsed}ms, 成功: ${successCount}, 被限流: ${blockedCount}`);
-  logResult('高频请求限流保护', blockedCount > 0 || successCount < 30, `30个请求中 ${blockedCount} 个被限流`);
+  // 断言收紧为「存在被限流的请求」单条件：successCount<30 因 30 次并发中总会有
+  // 请求失败/超时等原因而恒真，无法证明限流生效。
+  // 注意：本测试会向 /api/report 写入 reporter_name=test_bot 的记录，
+  // 运行后建议在数据库中清理，避免污染后续测试数据。
+  logResult('高频请求限流保护', blockedCount > 0, `30个请求中 ${blockedCount} 个被限流`);
 }
 
 // ==================== 测试5: 隐私数据泄漏测试 ====================
@@ -460,7 +476,9 @@ function testInputValidation() {
 logSection('测试7: CSP 策略验证');
 
 function testCSP() {
-  const csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; worker-src 'self' blob:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+  // 读取真实 CSP 常量（render-api/security-headers.js），避免对硬编码字符串自证。
+  // 生产服务与本地静态服务共用此常量，可防止测试与实际配置漂移。
+  const { CSP: csp } = require('../../render-api/security-headers.js');
 
   const checks = [
     { name: '禁止 iframe 嵌入', directive: 'frame-ancestors', value: "'none'", passed: csp.includes("frame-ancestors 'none'") },
@@ -485,7 +503,11 @@ function testCSP() {
 }
 
 // ==================== 测试8: 密码哈希测试 (PBKDF2) ====================
-logSection('测试8: 密码哈希安全测试 (PBKDF2)');
+// ⚠️ 已过时：生产实现已改用 scrypt（render-api/server.js 中
+//    AUTH_VERIFIER_PREFIX = 'scrypt:v1:'，crypto.scrypt N=16384 r=8 p=1）。
+//    PBKDF2 仅在服务端用于校验旧版浏览端记录（向后兼容）。下方为镜像副本，
+//    仅验证格式与算法自洽性，不代表生产当前使用的哈希算法。
+logSection('测试8: 密码哈希安全测试 (PBKDF2) [镜像副本，生产已改用 scrypt]');
 
 async function testPasswordHash() {
   // 模拟前端 PBKDF2 实现 - 使用 Node.js crypto.pbkdf2
@@ -526,7 +548,7 @@ async function testPasswordHash() {
   logResult('PBKDF2 不同密码不同哈希', pwHash1 !== pwHash3, '差异验证');
   logResult('PBKDF2 格式 salt:hash', pwHash1.indexOf(':') > 0, '格式正确');
 
-  // 向后兼容测试 (SHA-256 旧格式)
+  // 向后兼容测试 (SHA-256 旧格式，生产 server.js 对旧记录同样兼容)
   const sha256Hash = crypto.createHash('sha256').update('oldpass').digest('hex');
   logResult('SHA-256 旧格式兼容', sha256Hash.length === 64, '向后兼容');
 }
@@ -740,8 +762,10 @@ function testServerSecurityConfig() {
     await testRateLimiting();
     await testPrivacy();
   } else {
-    console.log(`  ⚠️  服务器未运行 (${API_BASE})，跳过 API 测试`);
-    console.log('  如需完整测试，请先启动: cd render-api && node server.js');
+    console.error(`  ❌ 服务器不可达 (${API_BASE})，无法执行 API 测试`);
+    console.error('  请先启动: cd render-api && node server.js');
+    console.error('  服务器未运行时禁止以通过状态退出');
+    process.exit(2);
   }
 
   // 汇总

@@ -37,7 +37,7 @@ test('pollCatAiReply uses AbortController for request timeout', () => {
 });
 
 test('subscribeToComments handles AI comments via INSERT', () => {
-  assert.match(core, /generated_by_ai && row\.parent_comment_id/);
+  assert.match(core, /row\.generated_by_ai === true && row\.user_name === 'cat_ai' && row\.parent_comment_id/);
   assert.match(core, /insertCatAiCommentIntoDOM/);
   assert.match(core, /removeCatAiStatus/);
 });

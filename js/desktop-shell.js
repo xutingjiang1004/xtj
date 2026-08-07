@@ -396,7 +396,7 @@
       if (msg.indexOf('code-fs') !== -1 ||
           msg.indexOf('code-workspace') !== -1 ||
           msg.indexOf('code-css') !== -1 ||
-          msg.indexOf('Code') !== -1) {
+          /^Code\b/.test(msg)) {
         console.error('[CODE-LOADER] Unhandled rejection:');
         console.error('  Message: ' + msg);
         if (reason && reason.stack) {
@@ -901,7 +901,9 @@
         }
         return;
       }
-      var actionButton = event.target.closest('[data-desktop-action="ai-chat"]');
+      var _t = event.target;
+      if (!_t || typeof _t.closest !== 'function') return;
+      var actionButton = _t.closest('[data-desktop-action="ai-chat"]');
       if (actionButton && actionButton.classList.contains('is-active')) {
         event.preventDefault();
         refreshTab('ai');
@@ -909,7 +911,9 @@
     });
 
     document.addEventListener('click', function (event) {
-      var tabButton = event.target.closest('[data-desktop-tab]');
+      var _t2 = event.target;
+      if (!_t2 || typeof _t2.closest !== 'function') return;
+      var tabButton = _t2.closest('[data-desktop-tab]');
       if (tabButton) {
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
@@ -968,8 +972,17 @@
     }
     var auth = document.querySelector('.nav-auth');
     if (auth && window.MutationObserver) {
-      var obs3 = new MutationObserver(syncUser);
-      obs3.observe(auth, { attributes: true, childList: true, subtree: true, characterData: true });
+      // ★ rAF 合并防抖：一帧内多次变更只同步一次用户状态
+      var _userSyncRaf = 0;
+      function scheduleUserSync() {
+        if (_userSyncRaf) return;
+        _userSyncRaf = requestAnimationFrame(function () {
+          _userSyncRaf = 0;
+          syncUser();
+        });
+      }
+      var obs3 = new MutationObserver(scheduleUserSync);
+      obs3.observe(auth, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'data-user', 'data-username'] });
       _observers.push(obs3);
     }
     var badge = document.getElementById('navChatBadge');

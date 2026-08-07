@@ -606,7 +606,9 @@
     if (state._monacoEditor) {
       try {
         if (window.monaco) {
-          monaco.editor.getModels().forEach(function(m) { m.dispose(); });
+          // ★ 只销毁当前编辑器 model，避免遍历销毁全局 model 连带破坏 diff/预览
+          var curModel = state._monacoEditor.getModel();
+          if (curModel && typeof curModel.dispose === 'function') curModel.dispose();
         }
         state._monacoEditor.dispose();
       } catch (e) { /* ignore */ }
@@ -3260,6 +3262,12 @@
             tab._currentContent = newContent;
             tab._contentVersion = (tab._contentVersion || 0) + 1;
             renderTabs();
+          } else {
+            // ★ 恢复原文时复位 modified（对比基准为最近一次保存内容）
+            tab.modified = false;
+            tab._currentContent = undefined;
+            tab._contentVersion = 0;
+            renderTabs();
           }
         });
 
@@ -3304,6 +3312,12 @@
         tab.modified = true;
         tab._currentContent = newContent;
         tab._contentVersion = (tab._contentVersion || 0) + 1;
+        renderTabs();
+      } else {
+        // ★ 恢复原文时复位 modified（对比基准为最近一次保存内容）
+        tab.modified = false;
+        tab._currentContent = undefined;
+        tab._contentVersion = 0;
         renderTabs();
       }
     });
@@ -3376,7 +3390,29 @@
     return performSave(content);
 
     function performSave(contentToWrite) {
-      var promise = fs.writeFileByPath(path, contentToWrite).then(function (result) {
+      // ★ 磁盘冲突检测：打开文件时记录的 tab.sha256 是基线，写入前重新读取磁盘
+      // 内容比对；若外部（Git/其他编辑器）已修改，则提示用户而不是静默覆盖。
+      var baselineHash = tab.sha256 || '';
+      var conflictCheck = baselineHash && typeof fs.readFileByPath === 'function'
+        ? fs.readFileByPath(path).then(function (disk) {
+            var diskSha = disk && disk.sha256;
+            if (diskSha && diskSha !== baselineHash) return { __conflict: true };
+            return null;
+          }).catch(function () { return null; })
+        : Promise.resolve(null);
+
+      var promise = conflictCheck.then(function (conflict) {
+        if (conflict && conflict.__conflict) {
+          var proceed = false;
+          try { proceed = window.confirm('文件已在外部被修改（Git 检出/其他编辑器）。\n\n选择"确定"用当前内容覆盖磁盘，选择"取消"放弃本次保存。'); } catch (e) {}
+          if (!proceed) {
+            showToast('已放弃保存（检测到外部修改冲突）', 'warning');
+            return { __aborted: true };
+          }
+        }
+        return fs.writeFileByPath(path, contentToWrite);
+      }).then(function (result) {
+        if (result && result.__aborted) return false;
         if (wsGen !== state.workspaceGeneration || state.openTabs.indexOf(tab) === -1) return false;
         var currentContent = tab._currentContent;
         if (state._monacoEditor && state.activePath === path) currentContent = state._monacoEditor.getValue();

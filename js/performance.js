@@ -104,13 +104,18 @@
         var cores = (typeof navigator.hardwareConcurrency !== 'undefined') ? navigator.hardwareConcurrency : 0;
         var firefox = /firefox/i.test(navigator.userAgent || '');
 
-        if (reduced || (coarse && (mem > 0 && mem <= 4 || cores > 0 && cores <= 6)) || (mem > 0 && mem <= 2) || (cores > 0 && cores <= 4)) {
+        if (reduced || (coarse && (mem > 0 && mem <= 4 || cores > 0 && cores <= 6)) || (mem > 0 && mem < 2) || (cores > 0 && cores <= 4)) {
             return 'lite';
         }
-        if (coarse || firefox || (mem > 0 && mem <= 8) || (cores > 0 && cores <= 8)) {
+        // ★ 触屏/Firefox 保守降档（即使高配也不开 full，避免动画开销）
+        if (coarse || firefox) {
             return 'balanced';
         }
-        return 'full';
+        // ★ 修复 L4：navigator.deviceMemory 规范钳制最大 8，mem>=8 即高端设备
+        if (mem >= 8 || cores > 8) {
+            return 'full';
+        }
+        return 'balanced';
     }
 
     function markRefreshRate(hz) {

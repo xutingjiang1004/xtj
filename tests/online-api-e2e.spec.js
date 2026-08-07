@@ -407,15 +407,17 @@ test.describe('在线 API E2E 验证', function () {
           open_files: []
         }, authToken);
 
-        // 没有 API key 时，服务器应返回 503
-        var isExpectedError = res.status === 503 || res.status === 500 || res.status === 200;
+        // 未配置 API key 时，服务器应返回 503，且响应带 error 码
+        var isExpectedError = res.status === 503;
+        var hasErrorCode = isExpectedError && !!(res.body && res.body.error);
         var detail = '状态码: ' + res.status;
         if (res.body && res.body.error) detail += ', 错误: ' + res.body.error;
-        // 如果服务器没有配置 API key，会返回 503
-        // 如果服务器配置了 API key，但 key 无效，可能返回 500
-        // 如果服务器配置了有效 API key，返回 200
-        reportResult('简单聊天', '请求格式正确', isExpectedError, detail);
+        reportResult('简单聊天', '未配置 key 时返回 503', isExpectedError, detail);
+        if (isExpectedError) {
+          reportResult('简单聊天', '503 响应包含 error 码', hasErrorCode, 'code: ' + (res.body && res.body.code || '') + ', error: ' + (res.body && res.body.error || ''));
+        }
         expect(isExpectedError).toBe(true);
+        expect(hasErrorCode).toBe(true);
       } else {
         // 真实 API key 测试 - 需要服务器也配置了相同的 key
         // 由于服务器在 Playwright 的 webServer 中启动，它有自己的环境变量
@@ -426,13 +428,17 @@ test.describe('在线 API E2E 验证', function () {
           open_files: []
         }, authToken);
 
-        var isAcceptable = res.status === 200 || res.status === 503 || res.status === 500;
-        if (res.status === 200) {
-          reportResult('简单聊天', '真实 API 调用成功', true, '回复: ' + (res.body && res.body.reply || '').slice(0, 50));
-        } else {
-          reportResult('简单聊天', 'API 响应', true, '状态码: ' + res.status + ' (服务器配置可能与测试环境不同)');
+        // 已配置 API key 时，服务器应返回 200 且 reply 非空
+        var isOk = res.status === 200;
+        var hasReply = isOk && !!(res.body && res.body.reply);
+        var detail = '状态码: ' + res.status;
+        if (isOk) detail += ', 回复: ' + (res.body && res.body.reply || '').slice(0, 50);
+        reportResult('简单聊天', '真实 API 调用成功', isOk, detail);
+        if (isOk) {
+          reportResult('简单聊天', '响应包含非空 reply', hasReply, '');
         }
-        expect(isAcceptable).toBe(true);
+        expect(isOk).toBe(true);
+        expect(hasReply).toBe(true);
       }
     });
 
@@ -455,12 +461,28 @@ test.describe('在线 API E2E 验证', function () {
         open_files: []
       }, authToken);
 
-      // 没有 API key 时返回 503，有 key 时可能返回 200（SSE 流）或 503
-      var isAcceptable = res.status === 200 || res.status === 503 || res.status === 500;
+      // 未配置 API key 时返回 503（带 error 码）；配置后返回 200 SSE 流（含 data: 帧）
       var detail = '状态码: ' + res.status;
       if (res.body && res.body.error) detail += ', 错误: ' + res.body.error;
-      reportResult('流式聊天', '端点响应', isAcceptable, detail);
-      expect(isAcceptable).toBe(true);
+      if (!useRealApi) {
+        var is503 = res.status === 503;
+        var hasErrorCode = is503 && !!(res.body && res.body.error);
+        reportResult('流式聊天', '未配置 key 时返回 503', is503, detail);
+        if (is503) {
+          reportResult('流式聊天', '503 响应包含 error 码', hasErrorCode, 'code: ' + (res.body && res.body.code || ''));
+        }
+        expect(is503).toBe(true);
+        expect(hasErrorCode).toBe(true);
+      } else {
+        var is200 = res.status === 200;
+        var hasStreamData = is200 && typeof res.raw === 'string' && res.raw.indexOf('data:') >= 0;
+        reportResult('流式聊天', '真实 API 流式响应', is200, detail);
+        if (is200) {
+          reportResult('流式聊天', 'SSE 流包含 data 帧', hasStreamData, '');
+        }
+        expect(is200).toBe(true);
+        expect(hasStreamData).toBe(true);
+      }
     });
 
     test('流式端点应拒绝空消息', async function () {
@@ -618,7 +640,8 @@ test.describe('Cat AI 聊天验证', function () {
     await expect(sendBtn).toBeVisible();
     await expect(chatMessages).toBeVisible();
 
-    reportResult('Cat AI', '界面元素存在', true, '');
+    var uiOk = (await chatInput.count()) > 0 && (await sendBtn.count()) > 0 && (await chatMessages.count()) > 0;
+    reportResult('Cat AI', '界面元素存在', uiOk, '输入框/发送按钮/消息列表可见');
   });
 
   test('Cat AI 应能发送消息并显示用户消息', async function ({ page }) {
@@ -642,13 +665,11 @@ test.describe('Cat AI 聊天验证', function () {
 
     // 验证用户消息出现在聊天中
     var userMessage = page.locator('.chat-message.user, .ai-chat-message.user, .msg-user');
-    // 等待用户消息显示
-    await expect(async function () {
-      var count = await userMessage.count();
-      return count > 0;
-    }).toPass({ timeout: 5000 });
+    // 等待用户消息显示（真实验证首个匹配元素可见，而非恒通过的 toPass 回调）
+    await expect(userMessage.first()).toBeVisible({ timeout: 5000 });
 
-    reportResult('Cat AI', '用户消息可发送', true, '');
+    var userCount = await userMessage.count();
+    reportResult('Cat AI', '用户消息可发送', userCount > 0, '用户消息数: ' + userCount);
   });
 
   test('Cat AI 空消息应被阻止', async function ({ page }) {

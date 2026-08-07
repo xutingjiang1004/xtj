@@ -1,0 +1,6 @@
+# 修复 Windows core.autocrlf 击穿产物 hash 指纹的问题：
+# 构建产物（min.js/min.css）必须始终以 LF 入库/检出，
+# 否则同一内容在 Windows 上会被自动转 CRLF，导致 ?v= 指纹与 CI 不一致。
+*.min.js text eol=lf
+*.min.css text eol=lf
+js/vendor/supabase.min.js eol=lf

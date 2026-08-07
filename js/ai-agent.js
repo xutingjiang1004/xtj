@@ -823,7 +823,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (inFlight && inFlight.isActive()) {
         try { inFlight.cancel('aborted'); } catch (e) {}
       }
-      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai');
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', inFlight);
     }
     if (S.abortController) {
       try {
@@ -6498,7 +6498,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     
     if (sharedCtrl) {
-      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai');
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl);
       sharedCtrl.dispose();
     }
     resetSendingIfCurrent();
