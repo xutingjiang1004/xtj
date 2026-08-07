@@ -209,18 +209,19 @@ GRANT EXECUTE ON FUNCTION public.atomic_increment_rate_limit(TEXT, TEXT, INTEGER
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-    -- 幂等：先删同名 job 再建
-    PERFORM cron.unschedule('xtj-cleanup-expired-rate-limits') WHERE EXISTS (
-      SELECT 1 FROM cron.job WHERE jobname = 'xtj-cleanup-expired-rate-limits'
-    );
+    -- 幂等：已存在同名 job 先删再建（PERFORM 不支持 WHERE，用 IF EXISTS 包裹）
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xtj-cleanup-expired-rate-limits') THEN
+      PERFORM cron.unschedule('xtj-cleanup-expired-rate-limits');
+    END IF;
+    -- ★ 内层用 $job$ 定界符：与外层 DO $$ 区分，避免美元引号提前闭合导致语法错误
     PERFORM cron.schedule('xtj-cleanup-expired-rate-limits', '0 * * * *',
-      $$SELECT public.cleanup_expired_cat_rate_limits()$$);
+      $job$SELECT public.cleanup_expired_cat_rate_limits()$job$);
 
-    PERFORM cron.unschedule('xtj-expire-stream-sessions') WHERE EXISTS (
-      SELECT 1 FROM cron.job WHERE jobname = 'xtj-expire-stream-sessions'
-    );
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xtj-expire-stream-sessions') THEN
+      PERFORM cron.unschedule('xtj-expire-stream-sessions');
+    END IF;
     PERFORM cron.schedule('xtj-expire-stream-sessions', '*/5 * * * *',
-      $$SELECT public.expire_stream_sessions()$$);
+      $job$SELECT public.expire_stream_sessions()$job$);
   END IF;
 END $$;
 
