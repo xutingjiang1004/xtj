@@ -8,6 +8,7 @@ node_modules/
 .DS_Store
 
 .codex/
+.workbuddy/
 
 # Playwright CLI debug artifacts
 .playwright-cli/
