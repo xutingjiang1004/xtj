@@ -5756,7 +5756,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         setAiRootState('ai-idle');
         
         if (thinking && finalThinkingMode !== 'off') {
-          var rNode = reasoningContainer || (node ? node.querySelector('.ai-thinking') : null);
+          // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
+          //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
+          //   sanitized_content 替换 innerHTML 等场景），代码误以为按钮已存在而跳过创建，
+          //   导致"已思考"折叠按钮消失。现在双重校验：变量非空 + 节点仍连接在文档中。
+          var rNode = (reasoningContainer && reasoningContainer.isConnected) ? reasoningContainer : (node ? node.querySelector('.ai-thinking') : null);
           if (!rNode && node) {
             rNode = buildReasoningNode(thinking, messagesEl);
             node.insertBefore(rNode, node.firstChild);
@@ -6960,7 +6964,7 @@ function showChatMessages() {
     });
     // ★ SVG 修复: 加 display:block, 明确的 xmlns 和 stroke-linejoin:round，
     //   避免 inline svg 在 flex 容器内的 baseline 对齐问题（之前会渲染成小点）
-    plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" display="block" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
     // 创建面板外壳（玻璃 + 动画容器）
     var panelShell = el('div', {
@@ -7355,7 +7359,7 @@ function showChatMessages() {
     function updateSearchStatus() {
       var statusEl = panelShell.querySelector('#aiSearchStatus');
       if (statusEl) {
-        statusEl.textContent = S.webSearchEnabled ? '● 开' : '○ 关';
+        statusEl.textContent = S.webSearchEnabled ? '开' : '关';
         statusEl.className = 'ai-search-status' + (S.webSearchEnabled ? ' on' : '');
       }
       var btn = panelShell.querySelector('[data-action="search"]');
