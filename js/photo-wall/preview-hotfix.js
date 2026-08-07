@@ -1390,10 +1390,9 @@
     var prevSorted = window.pwCurrentSortedPhotos;
     var prevWall = window.photoWallData;
     window.__xtjPreviewExplicitPhotos = photos.slice();
-    window.pwCurrentSortedPhotos = photos.slice();
-    window.photoWallData = photos.slice();
     try {
-      return withPreviewGuardDisabled(original.openPhotoPreview, window, [index]);
+      // ★ 不再临时改写全局数组（会污染 Realtime 回调），直接以参数传入
+      return withPreviewGuardDisabled(original.openPhotoPreview, window, [index, photos.slice()]);
     } finally {
       var root = overlay();
       if (root && originEl && originRect) {

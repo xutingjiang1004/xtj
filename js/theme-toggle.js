@@ -112,20 +112,21 @@
   }
 
   function switchTheme() {
-    if (switchTimer) {
-      window.clearTimeout(switchTimer);
-      switchTimer = 0;
-    }
+    // ★ 真正的节流闸门：连点期间只接受第一次，避免并发 startViewTransition
+    if (switchTimer) return;
     var currentMode = resolveThemeMode();
     var currentTheme = resolveTheme(currentMode);
     var nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
 
     if (supportsTransitionAnimation()) {
       try {
-        document.startViewTransition(function () {
+        var transition = document.startViewTransition(function () {
           applyThemeMode(nextTheme);
           persistTheme(nextTheme);
         });
+        // ★ 显式吞掉 .finished/.ready 的未处理 Promise 拒绝
+        if (transition && transition.finished) transition.finished.catch(function () {});
+        if (transition && transition.ready) transition.ready.catch(function () {});
         startThemeSwitching();
         switchTimer = window.setTimeout(function () {
           switchTimer = 0;

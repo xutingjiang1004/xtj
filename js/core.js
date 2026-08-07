@@ -95,10 +95,22 @@ window.safeParseDate = function(val) {
                     return false;
                 }
             }
-            // ★ 修复 M6：检查配置完整性，避免静默失败
-            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-                console.error('[XTJ] Supabase 配置缺失，请检查 config.js 或环境变量');
+            // ★ 修复 M6：检查配置完整性，避免静默失败。
+            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志——
+            // 本地开发/静态托管时降级继续（REST 主流程可用），不硬失败；其余格式错误 fail-fast
+            var _anonKey = String(SUPABASE_ANON_KEY || '');
+            var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
+              /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
+              || /^sb_publishable_/.test(_anonKey)
+              || _anonKey.indexOf('...') > -1
+            );
+            if (!_sbConfigOk) {
+                console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
                 sb = null;
+                document.addEventListener('DOMContentLoaded', function () {
+                    var _feedEl = document.getElementById('feed');
+                    if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
+                });
             } else if (typeof window.supabase !== 'undefined') {
                 initSupabaseClient();
             } else {
@@ -1395,7 +1407,7 @@ const ADMIN_NAME = "xxz";
             return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
         }
 
-function isAdmin() { return currentUser === ADMIN_NAME; }
+function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; }
         function clearFeedCache() {
             try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
             feedVisiblePostsCache = null;
@@ -2360,11 +2372,11 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
             }
 
             function isUserMuted() {
-                return userRestrictions.is_muted && currentUser !== ADMIN_NAME;
+                return userRestrictions.is_muted && (currentUser || window.currentUser) !== ADMIN_NAME;
             }
 
             function isUserBlocked() {
-                return (userRestrictions.is_blacklisted || userRestrictions.is_banned) && currentUser !== ADMIN_NAME;
+                return (userRestrictions.is_blacklisted || userRestrictions.is_banned) && (currentUser || window.currentUser) !== ADMIN_NAME;
             }
 
             function startRestrictionPolling() {
@@ -2824,6 +2836,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 document.getElementById('upcLogin').textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
+                if (!avatarEl) return;
                 // localStorage 取头像缓存，失败用字母占位
                 var showAvatar = getAvatarUrl(userName);
                 if (!showAvatar && userName === currentUser) {
@@ -2838,7 +2851,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
                 if (showAvatar) {
                     avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
-                    avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(userName[0].toUpperCase()) + '</span>';
+                    avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
                 
                 var msgBtn = document.getElementById('upcMsgBtn');
@@ -2978,6 +2991,7 @@ function isAdmin() { return currentUser === ADMIN_NAME; }
 
             async function loadProfileAvatar() {
                 const avatarEl = document.getElementById('profileDetailAvatar');
+                if (!avatarEl) return;
                 
                 // localStorage 兼容处理
                 try {

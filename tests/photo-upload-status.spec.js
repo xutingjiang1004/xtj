@@ -19,7 +19,7 @@ test('upload status query failure does not delete Storage', () => {
 test('upload only deletes Storage for explicit not_found or failed', () => {
   assert.match(upload, /status === 'not_found'/);
   assert.match(upload, /status === 'failed'/);
-  assert.match(upload, /cleanupStorage\(path\)/);
+  assert.match(upload, /cleanupStorage\(path, uploadId/);
 });
 
 test('savePendingPhotoUpload saves upload state', () => {

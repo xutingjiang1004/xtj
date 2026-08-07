@@ -393,6 +393,9 @@ test('saveFile coalesces duplicate writes and preserves edits made during an in-
   const second = loaded.hooks.saveFile('src/app.js');
   assert.equal(first, second);
   loaded.state.openTabs[0]._currentContent = 'v2';
+  // saveFile 现在先做异步磁盘冲突检测（conflictCheck.then(...)），
+  // writeFileByPath 在微任务中才被调用；让微任务队列先跑完再 resolve。
+  await new Promise((resolve) => setImmediate(resolve));
   resolveWrite();
   assert.equal(await first, true);
   assert.equal(writes, 1);

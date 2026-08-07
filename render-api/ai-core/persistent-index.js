@@ -40,20 +40,24 @@ function upsertWorkspace(supabase, params) {
     .then(function(r) {
       if (r.error) return null;
       if (r.data && r.data.length > 0) {
-        // Update existing
+        // Update existing — generation 只允许单向前进：用 CAS（.eq）保证只有
+        // 当前 generation 仍等于读取时的旧值才更新；若并发/重启已把 generation
+        // 抬得更高（20 >= 10 恒真），旧写入者必须失败而不是用旧值覆盖新索引。
+        var oldGeneration = Number(r.data[0].generation) || 0;
         return supabase.from('code_workspaces').update({
           workspace_name: String(params.workspaceName || '').slice(0, 200),
           generation: Number(params.generation || 0),
           index_status: String(params.indexStatus || 'ready'),
           last_opened_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        }).eq('id', r.data[0].id).then(function(u) {
+        }).eq('id', r.data[0].id).eq('generation', oldGeneration).then(function(u) {
           if (u.error) return null;
           return r.data[0];
         });
       }
-      // Insert new
-      return supabase.from('code_workspaces').insert({
+      // Insert new — 用 upsert 以 (user_id, workspace_key) 冲突兜底，
+      // 防止并发双插入触发 23505 而误判失败。
+      return supabase.from('code_workspaces').upsert({
         user_id: String(params.userId),
         workspace_key: workspaceKey,
         workspace_name: String(params.workspaceName || '').slice(0, 200),
@@ -66,6 +70,9 @@ function upsertWorkspace(supabase, params) {
         total_chunks: Number(params.totalChunks || 0),
         total_bytes: Number(params.totalBytes || 0),
         truncated: params.truncated === true
+      }, {
+        onConflict: 'user_id,workspace_key',
+        ignoreDuplicates: false
       }).select('id').then(function(ins) {
         if (ins.error) return null;
         return ins.data && ins.data[0] ? ins.data[0] : null;
@@ -136,26 +143,58 @@ function upsertIndexFile(supabase, userId, workspaceId, file) {
   }).catch(function(e) { console.error('[persistent-index] upsertFile error:', e.message); return null; });
 }
 
+var INDEX_PAGE_SIZE = 500;
+
+// supabase-js 的 PostgrestFilterBuilder 支持 .range(from, to)；对不支持
+// range 的 builder（如部分测试 fake）回退为单次全量查询，语义仍正确。
+function applyRange(query, offset, pageSize) {
+  if (query && typeof query.range === 'function') {
+    // ★ 稳定排序：range 分页依赖确定顺序，否则并发写入时页间行漂移导致漏/重
+    var ordered = query;
+    if (ordered && typeof ordered.order === 'function') {
+      try { ordered = ordered.order('id', { ascending: true }); } catch (e) {}
+    }
+    if (typeof ordered.range === 'function') return ordered.range(offset, offset + pageSize - 1);
+    return ordered;
+  }
+  return query;
+}
+
 function getIndexFiles(supabase, workspaceId) {
   if (!isPersistEnabled() || !supabase) return Promise.resolve([]);
-  return supabase.from('code_index_files').select('*')
-    .eq('workspace_id', String(workspaceId))
-    .eq('index_status', 'active')
-    .then(function(r) {
-      if (r.error) return [];
-      return (r.data || []).map(function(row) {
-        return {
-          id: row.id,
-          path: row.path,
-          name: row.name,
-          language: row.language,
-          size: row.size_bytes,
-          modifiedAt: row.modified_at,
-          sha256: row.sha256,
-          contentHash: row.content_hash
-        };
+  // range 分页循环拉取，直到返回行数小于页大小（旧逻辑单次查询，大仓库丢数据）
+  var all = [];
+  var offset = 0;
+  function fetchPage() {
+    return applyRange(
+      supabase.from('code_index_files').select('*')
+        .eq('workspace_id', String(workspaceId))
+        .eq('index_status', 'active'),
+      offset, INDEX_PAGE_SIZE
+    ).then(function(r) {
+        if (r.error) return null;
+        var rows = r.data || [];
+        all = all.concat(rows);
+        if (rows.length < INDEX_PAGE_SIZE) return all;
+        offset += INDEX_PAGE_SIZE;
+        return fetchPage();
       });
-    }).catch(function() { return []; });
+  }
+  return fetchPage().then(function(rows) {
+    if (!Array.isArray(rows)) return [];
+    return rows.map(function(row) {
+      return {
+        id: row.id,
+        path: row.path,
+        name: row.name,
+        language: row.language,
+        size: row.size_bytes,
+        modifiedAt: row.modified_at,
+        sha256: row.sha256,
+        contentHash: row.content_hash
+      };
+    });
+  }).catch(function() { return []; });
 }
 
 function deleteIndexFile(supabase, workspaceId, path) {
@@ -194,42 +233,65 @@ function upsertChunks(supabase, userId, workspaceId, fileId, chunks) {
   if (!isPersistEnabled() || !supabase) return Promise.resolve();
   if (!Array.isArray(chunks) || chunks.length === 0) return Promise.resolve();
 
-  // Delete old chunks for this file, then insert new ones
-  return supabase.from('code_index_chunks').delete().eq('file_id', String(fileId))
-    .then(function() {
-      var rows = chunks.map(function(chunk) {
-        return {
-          user_id: String(userId),
-          workspace_id: String(workspaceId),
-          file_id: String(fileId),
-          chunk_key: String(chunk.chunkKey || chunk.id || '').slice(0, 500),
-          start_line: Number(chunk.startLine || 0),
-          end_line: Number(chunk.endLine || 0),
-          content: String(chunk.content || '').slice(0, 10000),
-          token_estimate: Number(chunk.tokenEstimate || 0),
-          content_hash: String(chunk.contentHash || '').slice(0, 64)
-        };
+  // 敏感内容 chunk（密钥/凭据）不入库
+  var rows = chunks.filter(function(chunk) {
+    return !isSensitiveContent(String(chunk.content || ''));
+  }).map(function(chunk) {
+    return {
+      user_id: String(userId),
+      workspace_id: String(workspaceId),
+      file_id: String(fileId),
+      chunk_key: String(chunk.chunkKey || chunk.id || '').slice(0, 500),
+      start_line: Number(chunk.startLine || 0),
+      end_line: Number(chunk.endLine || 0),
+      content: String(chunk.content || '').slice(0, 10000),
+      token_estimate: Number(chunk.tokenEstimate || 0),
+      content_hash: String(chunk.contentHash || '').slice(0, 64)
+    };
+  });
+
+  // H-15: 不再"先删后插"。先写新数据，成功后再删旧 chunk；任一步失败都不删旧数据，
+  // 并把工作区索引置 stale 强制重建，避免静默损坏索引（code_index_files 的 CHECK
+  // 约束仅允许 active/deleted，因此 stale 标记落在 code_workspaces 层面）。
+  var batchSize = 50;
+  var insertBatch = function(index) {
+    if (index >= rows.length) return Promise.resolve();
+    var batch = rows.slice(index, index + batchSize);
+    return supabase.from('code_index_chunks').upsert(batch, {
+      onConflict: 'file_id, chunk_key',
+      ignoreDuplicates: false
+    }).then(function(r) {
+      // H-14: 批次写入失败不再静默继续，抛错中止整个持久化
+      if (r && r.error) throw new Error(r.error.message || 'chunk batch upsert failed');
+      return insertBatch(index + batchSize);
+    });
+  };
+
+  return insertBatch(0).then(function() {
+    // 删除该文件下不在新 chunk_key 集合中的旧 chunk（写新成功后才删旧）
+    return supabase.from('code_index_chunks').select('chunk_key').eq('file_id', String(fileId)).then(function(r) {
+      if (r && r.error) throw new Error(r.error.message || 'fetch old chunk keys failed');
+      var existingKeys = (r.data || []).map(function(row) { return row.chunk_key; });
+      var newKeySet = new Set(rows.map(function(row) { return row.chunk_key; }));
+      var staleKeys = existingKeys.filter(function(k) { return !newKeySet.has(k); });
+      if (staleKeys.length === 0) return Promise.resolve();
+      return supabase.from('code_index_chunks').delete().eq('file_id', String(fileId)).in('chunk_key', staleKeys).then(function(del) {
+        // ★ 删旧失败必须抛错：否则 stale 标记不会触发，旧 chunk 残留 = 静默索引脏数据
+        if (del && del.error) throw new Error(del.error.message || 'delete stale chunks failed');
       });
-      // Batch insert in groups of 50
-      var batchSize = 50;
-      var insertBatch = function(index) {
-        if (index >= rows.length) return Promise.resolve();
-        var batch = rows.slice(index, index + batchSize);
-        return supabase.from('code_index_chunks').upsert(batch, {
-          onConflict: 'file_id, chunk_key',
-          ignoreDuplicates: false
-        }).then(function(r) {
-          // H-14: 旧逻辑忽略 r.error，批次写入失败仍继续，导致文件记录标记
-          // active 但 chunks 缺失（静默损坏索引）。失败即抛错中止整个持久化。
-          if (r && r.error) throw new Error(r.error.message || 'chunk batch upsert failed');
-          return insertBatch(index + batchSize);
-        });
-      };
-      return insertBatch(0);
-    }).catch(function(e) {
-      console.error('[persistent-index] upsertChunks error:', e.message);
+    });
+  }).catch(function(e) {
+    console.error('[persistent-index] upsertChunks error:', e.message);
+    // 失败时把工作区索引标记为 stale，强制下一次重建
+    var markStale = typeof supabase.rpc === 'function'
+      ? supabase.rpc('mark_workspace_index_stale', { p_workspace_id: String(workspaceId) })
+      : Promise.resolve();
+    return markStale.catch(function(rpcErr) {
+      console.error('[persistent-index] markWorkspaceStale error:', rpcErr && rpcErr.message);
+    }).then(function() {
       throw e;
     });
+  });
 }
 
 function getChunksByFileId(supabase, fileId) {
@@ -255,28 +317,43 @@ function getChunksByFileId(supabase, fileId) {
 
 function getAllChunks(supabase, workspaceId) {
   if (!isPersistEnabled() || !supabase) return Promise.resolve([]);
-  return supabase.from('code_index_chunks').select('*, code_index_files!inner(path, name, language, sha256)')
-    .eq('workspace_id', String(workspaceId))
-    .then(function(r) {
-      if (r.error) return [];
-      return (r.data || []).map(function(row) {
-        var fileInfo = row.code_index_files || {};
-        return {
-          id: row.chunk_key,
-          chunkKey: row.chunk_key,
-          fileId: row.file_id,
-          path: fileInfo.path || '',
-          name: fileInfo.name || '',
-          language: fileInfo.language || '',
-          startLine: row.start_line,
-          endLine: row.end_line,
-          content: row.content,
-          tokenEstimate: row.token_estimate,
-          contentHash: row.content_hash,
-          sha256: fileInfo.sha256 || ''
-        };
+  // range 分页循环拉取，直到返回行数小于页大小
+  var all = [];
+  var offset = 0;
+  function fetchPage() {
+    return applyRange(
+      supabase.from('code_index_chunks').select('*, code_index_files!inner(path, name, language, sha256)')
+        .eq('workspace_id', String(workspaceId)),
+      offset, INDEX_PAGE_SIZE
+    ).then(function(r) {
+        if (r.error) return null;
+        var rows = r.data || [];
+        all = all.concat(rows);
+        if (rows.length < INDEX_PAGE_SIZE) return all;
+        offset += INDEX_PAGE_SIZE;
+        return fetchPage();
       });
-    }).catch(function() { return []; });
+  }
+  return fetchPage().then(function(rows) {
+    if (!Array.isArray(rows)) return [];
+    return rows.map(function(row) {
+      var fileInfo = row.code_index_files || {};
+      return {
+        id: row.chunk_key,
+        chunkKey: row.chunk_key,
+        fileId: row.file_id,
+        path: fileInfo.path || '',
+        name: fileInfo.name || '',
+        language: fileInfo.language || '',
+        startLine: row.start_line,
+        endLine: row.end_line,
+        content: row.content,
+        tokenEstimate: row.token_estimate,
+        contentHash: row.content_hash,
+        sha256: fileInfo.sha256 || ''
+      };
+    });
+  }).catch(function() { return []; });
 }
 
 // ── Build Tracking ────────────────────────────────────────────────────────
@@ -502,13 +579,21 @@ function isSensitiveContent(content) {
 
 function isSensitivePath(path) {
   if (!path) return false;
-  var name = path.split('/').pop().toLowerCase();
+  var lower = String(path).toLowerCase();
+  // 只对 basename 判定（兼容 Windows 反斜杠）：旧实现用 /credential|secret/ 匹配
+  // 完整路径子串，误伤 src/secret.ts、utils/credential-store.js、src/SecretManager.ts
+  // 等合法代码文件；改为 basename 精确名单 + basename 敏感扩展名。
+  var base = lower.split(/[\\/]/).pop();
+  // 敏感扩展名：*.env*、*.pem、*.key、*.p12、*.pfx、*.jks、*.keystore
+  if (/\.(pem|key|p12|pfx|jks|keystore)$/.test(base)) return true;
+  if (/^\.env(?:[.-].*)?$/.test(base)) return true;
+  // GCP 服务账号凭据：basename 含 service-account 且以 .json 结尾
+  if (base.indexOf('service-account') >= 0 && /\.json$/.test(base)) return true;
+  // 保留原有精确文件名兜底，避免遗漏无扩展名的凭据文件（id_rsa 等）
   var sensitiveNames = [
-    '.env', '.env.local', '.env.production', '.env.development',
-    'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519',
-    '.npmrc', '.pypirc', 'config.json', 'secrets.json'
+    'id_rsa', 'id_ed25519', '.npmrc', '.pypirc', 'config.json', 'secrets.json'
   ];
-  return sensitiveNames.indexOf(name) !== -1;
+  return sensitiveNames.indexOf(base) !== -1;
 }
 
 // ── Default Ignore Rules ──────────────────────────────────────────────────
@@ -542,9 +627,13 @@ function shouldIgnoreFile(path, size) {
     if (DEFAULT_IGNORE_PATTERNS[i].test(path)) return true;
   }
 
-  // Check extensions
-  var ext = path.slice(path.lastIndexOf('.')).toLowerCase();
-  if (DEFAULT_IGNORE_EXTENSIONS.indexOf(ext) !== -1) return true;
+  // Check extensions — 用 endsWith 匹配完整后缀（.min.js/.min.css/.map 等）。
+  // 旧的 path.lastIndexOf('.') 只取最后一段（foo.min.js 得到 .js），
+  // 永远匹配不到多段后缀，导致 .min.js/.min.css 从未被忽略。
+  var lowerPath = path.toLowerCase();
+  for (var j = 0; j < DEFAULT_IGNORE_EXTENSIONS.length; j++) {
+    if (lowerPath.endsWith(DEFAULT_IGNORE_EXTENSIONS[j])) return true;
+  }
 
   // Skip large binary files
   if (size > 2 * 1024 * 1024) return true;

@@ -112,7 +112,7 @@ test('successful write uses a server-generated actor key', async function() {
     }
   };
   const result = await createPhotoRecord({ body: valid(), userName: 'user', supabase: supabase, supabaseUrl: ORIGIN, logger: { error: function() {} }, createActorKey: function() { return 'server-uuid'; } });
-  assert.strictEqual(inserted.actor_key, 'photo_server-uuid');
+  assert.match(inserted.actor_key, /^photo_[a-f0-9]{12}_server-uuid$/);
   assert.strictEqual(result.status, 200);
 });
 

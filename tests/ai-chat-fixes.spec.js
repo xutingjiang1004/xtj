@@ -53,12 +53,11 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     await page.evaluate(() => { if (window.__xtjOpenAiChat) window.__xtjOpenAiChat(); });
     await page.waitForTimeout(500); // 稍等渲染
 
-    // 检查小猫称呼
+    // 检查小猫称呼（无条件断言：空标题本身就是缺陷）
     const emptyTitle = await page.locator('.ai-chat-empty-title').textContent().catch(() => '');
-    if (emptyTitle) {
-      expect(emptyTitle).toContain('小猫');
-      expect(emptyTitle).not.toContain('徐旭泽');
-    }
+    expect(emptyTitle).toBeTruthy();
+    expect(emptyTitle).toContain('小猫');
+    expect(emptyTitle).not.toContain('徐旭泽');
   });
 
   test('首次普通打开只发一次无ID的历史请求', async ({ page }) => {
@@ -181,8 +180,39 @@ test.describe('AI Agent Chat Fixes Validation', () => {
   });
   
   test('监听器无泄漏', async ({ page }) => {
-    // 我们无法直接统计页面的真实 listener，但可以在 Node 侧逻辑保证这一点。
-    expect(true).toBeTruthy();
+    // 通过包装 EventTarget.prototype.addEventListener/removeEventListener 统计净监听器数，
+    // 重复打开/关闭 AI 聊天后净增量应近似为 0；无法直接调用 DevTools getEventListeners，
+    // 用探针计数是最可靠的方式。
+    await page.addInitScript(() => {
+      if (window.__xtjListenerStats) return;
+      window.__xtjListenerStats = { added: 0, removed: 0 };
+      const proto = EventTarget.prototype;
+      const origAdd = proto.addEventListener;
+      const origRemove = proto.removeEventListener;
+      proto.addEventListener = function (type, fn, opts) {
+        window.__xtjListenerStats.added += 1;
+        return origAdd.call(this, type, fn, opts);
+      };
+      proto.removeEventListener = function (type, fn, opts) {
+        window.__xtjListenerStats.removed += 1;
+        return origRemove.call(this, type, fn, opts);
+      };
+    });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__xtjOpenAiChat === 'function' || typeof window.__xtjAiAgent !== 'undefined');
+
+    const readBalance = () => page.evaluate(() => window.__xtjListenerStats.added - window.__xtjListenerStats.removed);
+
+    const baseline = await readBalance();
+    for (let i = 0; i < 2; i++) {
+      await page.evaluate(() => { if (window.__xtjOpenAiChat) window.__xtjOpenAiChat(); });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => { if (window.__xtjCloseAiChat) window.__xtjCloseAiChat(); });
+      await page.waitForTimeout(200);
+    }
+    const afterCycles = await readBalance();
+    // 允许少量框架级容差：多轮开合后监听器不应持续累积
+    expect(afterCycles - baseline).toBeLessThanOrEqual(4);
   });
   
 });

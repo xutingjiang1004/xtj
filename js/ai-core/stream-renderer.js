@@ -6,7 +6,21 @@
   'use strict';
 
   var CORE = window.XtjAiCore = window.XtjAiCore || {};
-  var Markdown = CORE.Markdown;
+
+  // ★ 惰性读取 Markdown：脚本加载顺序不可控时优雅降级为纯文本，而非模块加载期崩溃
+  function getMarkdown() {
+    return CORE.Markdown;
+  }
+  function renderRich(content) {
+    var md = getMarkdown();
+    if (md && typeof md.render === 'function') {
+      return md.render(content);
+    }
+    // 降级：纯文本节点（不注入 HTML）
+    var div = document.createElement('div');
+    div.textContent = content;
+    return div.innerHTML;
+  }
 
   function createStreamRenderer(targetEl, options) {
     options = options || {};
@@ -108,7 +122,7 @@
       } else {
         var now = Date.now();
         if (!targetEl._lastRender || now - targetEl._lastRender > 50 || !pending) {
-          targetEl.innerHTML = Markdown.render(rendered);
+          targetEl.innerHTML = renderRich(rendered);
           targetEl._lastRender = now;
         }
       }
@@ -186,7 +200,7 @@
           var pNode = ensurePlainTextNode();
           try { pNode.data = rendered; } catch (e3) { pNode.textContent = rendered; }
         } else {
-          targetEl.innerHTML = Markdown.render(rendered);
+          targetEl.innerHTML = renderRich(rendered);
         }
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
@@ -200,6 +214,10 @@
         if (cancelled) return;
         clearFrame();
         if (pending) emitText(true);
+        // ★ 停止时补移除光标并复位状态，避免流式结束光标残留
+        finished = true;
+        removeCursor();
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
       },
       cancel: function () {
         if (cancelled) return;
@@ -210,7 +228,20 @@
         if (!finished) {
           try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
         }
-        targetEl = null;
+        // ★ 保留 targetEl 引用（cancelled 标志已使 append/flush/finish 短路）
+      },
+      // ★ 新增：供调用方感知取消/重建实例
+      isCancelled: function () { return cancelled; },
+      reset: function () {
+        cancelled = false;
+        finished = false;
+        paused = false;
+        pending = '';
+        rendered = '';
+        plainTextBuffer = '';
+        lastFrameTime = 0;
+        removeCursor();
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
       }
     };
     return api;

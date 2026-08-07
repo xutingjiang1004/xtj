@@ -247,7 +247,7 @@
     }
     function V() {
         if (e) {
-            if (window.__xtjPhotoPreviewHotfixInstalled) return e = !1, window.closePhotoPreview && window.closePhotoPreview();
+            if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.closePhotoPreview === 'function') return e = !1, window.closePhotoPreview();
             e = !1;
             var t = document.getElementById("photoPreviewOverlay");
             if (t) {
@@ -685,7 +685,19 @@
                     }, 8e3);
                 }
             } else re();
-        } else window.showToast("暂无照片");
+        } else if (e) {
+            // ★ 已打开时切换到目标 index（不再静默 no-op）
+            if (Array.isArray(L)) n = L.slice();
+            else if (window.pwCurrentSortedPhotos && window.pwCurrentSortedPhotos.length) n = window.pwCurrentSortedPhotos.slice();
+            else if (window.photoWallData && window.photoWallData.length) n = window.photoWallData.slice();
+            if (n && n.length) {
+                b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
+                i = b, t = n[b] || null, window.photoPreviewCurrent = t;
+                var S = n[b];
+                S && S.imageUrl && U(S.imageUrl);
+                M(), O(b), q();
+            }
+        }
         function re() {
             // G15 还原：re() 中的 Q 是 openPhotoPreview 作用域内（约 630 行）
             // `var Q = !1` 声明的局部变量，遮蔽了外层 hoisted 的 function Q，
@@ -797,7 +809,7 @@
             }, 320);
         }
     }, window.shareCurrentPhoto = function() {
-        if (window.__xtjPhotoPreviewHotfixInstalled) return window.shareCurrentPhoto && window.shareCurrentPhoto();
+        if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.shareCurrentPhoto === 'function') return window.shareCurrentPhoto();
         var e = t;
         if (e && e.imageUrl) {
             if ("vibrate" in navigator && "function" == typeof navigator.vibrate) try {
@@ -833,7 +845,7 @@
         window.deletePhotoFromPreview();
     }, window.deletePhotoFromPreview = function() {
         if (e) {
-            if (window.__xtjPhotoPreviewHotfixInstalled) return window.deletePhotoFromPreview && window.deletePhotoFromPreview();
+            if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.deletePhotoFromPreview === 'function') return window.deletePhotoFromPreview();
             Y(10);
             var t = document.getElementById("ppDeleteBtn"), o = t ? t.getBoundingClientRect() : null;
             if (o) {

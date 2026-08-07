@@ -72,8 +72,12 @@ async function verifyStorageObject(supabase, storagePath, expected) {
             mimetype: String(probeMeta.content_type || probeMeta.mime_type || probeMeta.metadata && probeMeta.metadata.mimetype || '')
           }
         };
-      } else {
+      } else if (probe && probe.error && (String(probe.error.statusCode) === '404' || String(probe.error.status) === '404' || /not.?found/i.test(String(probe.error.message || probe.error.error || '')))) {
         return { ok: false, state: 'not_found', code: 'media_not_found', error: 'Media object does not exist' };
+      } else {
+        // ★ 非 404 的失败（5xx 网关错误/网络抖动）不能视为"对象不存在"，
+        //   否则毒化行清理会误删合法注册行（含 sending 租约行）
+        return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: probe && probe.error };
       }
     } catch (probeError) {
       return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: probeError };
@@ -146,8 +150,27 @@ async function claimDmMediaUpload(supabase, options, _retry) {
       mimeType: row.mime_type,
       sizeBytes: row.size_bytes
     });
-    if (!existingStorage.ok) return existingStorage;
-    return { ok: true, state: 'found', data: row, idempotent: String(row.status || '') === 'attached' };
+    if (!existingStorage.ok) {
+      // 注册行仍在但存储对象已被删除：该路径已被"毒化"。若属主本人且状态非
+      // attached（尚未绑定已发送消息），删除注册行并落回下方全新 claim 流程
+      // 重新登记，避免后续请求命中这条死行而永久失败。attached 行或删除失败时
+      // 保守返回原状态。
+      if (existingStorage.state === 'not_found' && String(row.status || '') !== 'attached') {
+        try {
+          const invalidation = await supabase.from('dm_media_uploads').delete().eq('id', row.id).eq('status', String(row.status || ''));
+          if (invalidation && invalidation.error) {
+            return { ok: false, state: 'query_failed', code: 'media_registry_invalidate_failed', error: invalidation.error };
+          }
+        } catch (error) {
+          return { ok: false, state: 'query_failed', code: 'media_registry_invalidate_failed', error: error };
+        }
+        // 落空删除后走全新 claim 流程（下方 insert 分支）
+      } else {
+        return existingStorage;
+      }
+    } else {
+      return { ok: true, state: 'found', data: row, idempotent: String(row.status || '') === 'attached' };
+    }
   }
 
   const storageResult = await verifyStorageObject(supabase, pathResult.storagePath, {

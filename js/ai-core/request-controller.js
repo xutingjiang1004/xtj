@@ -63,7 +63,9 @@
     }
 
     function start() {
-      if (finalized) return false;
+      // ★ 防重入：已 ACTIVE 直接返回，避免重复启动超时定时器误杀进行中请求
+      if (finalized || state === STATE.ACTIVE) return false;
+      clearTimers();
       state = STATE.ACTIVE;
       startTime = Date.now();
       if (timeoutMs > 0) {
@@ -129,10 +131,18 @@
   // Track in-flight requests by a key to prevent double-send
   var inFlight = {};
   function registerInFlight(key, controller) {
-    unregisterInFlight(key);
+    // ★ 取消被替换的旧请求（新请求接管该 key）
+    var existing = getInFlight(key);
+    if (existing && existing !== controller) {
+      try { existing.cancel('superseded'); } catch (e) {}
+      try { existing.dispose(); } catch (e) {}
+    }
     inFlight[key] = controller;
   }
-  function unregisterInFlight(key) {
+  function unregisterInFlight(key, controller) {
+    // ★ 身份校验：旧请求收尾不得移除新请求刚注册的 controller
+    var existing = getInFlight(key);
+    if (existing && controller && existing !== controller) return;
     if (inFlight[key]) {
       inFlight[key] = null;
       delete inFlight[key];

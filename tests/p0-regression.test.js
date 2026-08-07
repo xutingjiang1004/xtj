@@ -81,12 +81,21 @@ assert(
   'clearWorkspaceRecord 清理 localStorage'
 );
 
+// 切出 restoreHandle 函数体（从 restoreHandle 定义到下一个函数定义之间），
+// 断言其内部不再检查权限；避免对两个不同字符串的 indexOf 比较（恒真）
+const restoreHandleStart = fsSrc.indexOf('function restoreHandle');
+const restoreHandleEnd = fsSrc.indexOf('function sha256ToHex', restoreHandleStart);
 assert(
-  !fsSrc.includes('queryPermission({ mode: \'readwrite\' })') ||
-  fsSrc.indexOf('queryPermission({ mode: \'readwrite\' })') !==
-  fsSrc.indexOf('function restoreHandle'),
-  'restoreHandle 不再内部检查权限'
+  restoreHandleStart !== -1 && restoreHandleEnd !== -1,
+  'restoreHandle 与 sha256ToHex 函数均可定位'
 );
+if (restoreHandleStart !== -1 && restoreHandleEnd !== -1) {
+  const restoreHandleBody = fsSrc.slice(restoreHandleStart, restoreHandleEnd);
+  assert(
+    !restoreHandleBody.includes('queryPermission'),
+    'restoreHandle 函数体不再内部检查权限'
+  );
+}
 
 assert(
   fsSrc.includes('var _fileLocks = {}'),

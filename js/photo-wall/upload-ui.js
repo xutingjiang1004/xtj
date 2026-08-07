@@ -7,6 +7,7 @@
     photoUrls: [],
     skippedFiles: [],
     uploading: false,
+    retrying: false,
     cancelRequested: false,
     batchController: null,
     batchJobs: [],
@@ -533,6 +534,9 @@
       var subtitle = byId('pwUploadSubtitle');
       if (subtitle) subtitle.textContent = '最多 ' + MAX_BATCH_COUNT + ' 张图片，单张不超过 50MB';
       setUploadResult('', false);
+    } else {
+      // force 分支（如开始上传时）也要回收预览 URL，避免 Blob 内存泄漏
+      revoke('photoUrls');
     }
     
     if (options.restoreFocus !== false) focusUploadButton();
@@ -756,7 +760,8 @@
     var controller = new AbortController();
     var timeoutTimer = setTimeout(function() { controller.abort(); }, PHOTO_UPLOAD_TIMEOUT_MS);
     var timedOut = false;
-    if (signal) signal.addEventListener('abort', function(){ controller.abort(); }, { once: true });
+    var onAbort = function(){ controller.abort(); };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
     var createRes;
     try {
       createRes = await fetch(apiUrl('/api/photo/create'), {
@@ -785,14 +790,19 @@
         try {
           var statusController = typeof AbortController !== 'undefined' ? new AbortController() : null;
           var statusTimeout = statusController ? setTimeout(function() { statusController.abort(); }, 10000) : null;
-          var statusRes = await fetch(apiUrl('/api/photo/status'), {
-            method: 'POST',
-            headers: buildPhotoCreateHeaders(headers),
-            body: JSON.stringify({ upload_id: uploadId }),
-            signal: statusController ? statusController.signal : undefined
-          });
-          if (statusTimeout) clearTimeout(statusTimeout);
-          var statusData = await statusRes.json().catch(function(){ return {}; });
+          var statusData;
+          try {
+            var statusRes = await fetch(apiUrl('/api/photo/status'), {
+              method: 'POST',
+              headers: buildPhotoCreateHeaders(headers),
+              body: JSON.stringify({ upload_id: uploadId }),
+              signal: statusController ? statusController.signal : undefined
+            });
+            statusData = await statusRes.json().catch(function(){ return {}; });
+          } finally {
+            // 无论 fetch / json 解析是否抛错，都统一清理 statusTimeout
+            if (statusTimeout) clearTimeout(statusTimeout);
+          }
           if (statusData && statusData.status === 'committed' && statusData.data) {
             // 服务端已提交，视为成功，不删除 Storage
             return statusData.data;
@@ -838,6 +848,9 @@
         fetchError._pendingRetry = true;
         throw fetchError;
       }
+    } finally {
+      // 显式移除 abort 监听，避免批量 signal 上残留闭包监听
+      if (signal) signal.removeEventListener('abort', onAbort);
     }
     clearTimeout(timeoutTimer);
     if (!createRes.ok) {
@@ -859,8 +872,13 @@
     return createData.data;
   }
 
+  function isBusy(){
+    // 统一并发守卫：上传中或重试中都视为 busy
+    return !!(state.uploading || state.retrying);
+  }
+
   function cancelCurrentUpload(){
-    if (!state.uploading) return;
+    if (!isBusy()) return;
     state.cancelRequested = true;
     if (state.batchController) { try { state.batchController.abort(); } catch (_) {} }
   }
@@ -925,6 +943,9 @@
       setProgress('');
       state.uploading = false;
       state.batchController = null;
+      // 取消按钮文案由实际取消完成（本 finally）驱动复位，不再固定 500ms
+      var _cancelBtn = byId('pwUploadProgressCancel');
+      if (_cancelBtn) { _cancelBtn.disabled = false; _cancelBtn.textContent = '取消上传'; }
     }
     jobs.forEach(function(j){
       if (j.status === 'failed' && j.error) {
@@ -937,24 +958,31 @@
     });
     state.failedJobs = failures.map(function(f){ return f.job; }).filter(Boolean);
     var refreshFailed = false;
+    var insertedAny = false;
     try {
       if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
-      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
-      else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
     } catch (e) { refreshFailed = true; }
+    // ★ 修复：先归一化回填（unshift）再渲染，避免"先渲染后回填"导致新照片不出现
     jobs.filter(function(j){ return j.succeeded && j.result; }).forEach(function(j){
       var row = j.result;
       if (row && typeof window.normalizePhotoWallRow === 'function') {
-        var item = window.normalizePhotoWallRow(row);
-        if (item && item.imageUrl) {
-          window.photoWallData = Array.isArray(window.photoWallData) ? window.photoWallData : [];
-          var newId = item.id || item.cloudId;
-          var exists = window.photoWallData.some(function(p) { return (p.id && newId && String(p.id) === String(newId)) || (p.cloudId && newId && String(p.cloudId) === String(newId)); });
-          if (!exists) window.photoWallData.unshift(item);
-        }
+        try {
+          var item = window.normalizePhotoWallRow(row);
+          if (item && item.imageUrl) {
+            window.photoWallData = Array.isArray(window.photoWallData) ? window.photoWallData : [];
+            var newId = item.id || item.cloudId;
+            var exists = window.photoWallData.some(function(p) { return (p.id && newId && String(p.id) === String(newId)) || (p.cloudId && newId && String(p.cloudId) === String(newId)); });
+            if (!exists) { window.photoWallData.unshift(item); insertedAny = true; }
+          }
+        } catch (e) {}
       }
       if (window.broadcastSync && row && row.id) window.broadcastSync('photo_added', { photoId: row.id });
     });
+    try {
+      // 若确实新增了条目，渲染在回填之后补一次（刷新前已加载的数据也会一并显示）
+      if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+      else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
+    } catch (e) { refreshFailed = true; }
     if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
     var summary = buildSummary(total, ok, fail);
     if (refreshFailed) summary += '。照片已上传，但列表刷新失败，请点击重试';
@@ -972,7 +1000,7 @@
   }
 
   async function uploadPhotoWallFiles(){
-    if (state.uploading) { toast('正在上传，请等待'); return; }
+    if (isBusy()) { toast('正在上传，请等待'); return; }
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
     if (!window.sb) { toast('Supabase 未加载，请刷新页面'); return; }
@@ -983,16 +1011,20 @@
     state.batchJobs = jobs;
     state.failedJobs = [];
     closeSheet({ force: true, restoreFocus: false });
-    await performUpload(jobs);
-    state.photoFiles = [];
-    var input = byId('photoFileInput');
-    if (input) input.value = '';
-    revoke('photoUrls');
+    try {
+      await performUpload(jobs);
+    } finally {
+      // 无论上传成功/失败/异常，都清理选择状态，避免 Blob URL 泄漏与残留
+      state.photoFiles = [];
+      var input = byId('photoFileInput');
+      if (input) input.value = '';
+      revoke('photoUrls');
+    }
   }
 
   async function retryFailedUploads(){
     // ★ 修复：并发守卫——即使双监听路径已移除，仍防止快速连点/跨路径并发
-    if (state.uploading || state.retrying) { toast('正在上传，请等待'); return; }
+    if (isBusy()) { toast('正在上传，请等待'); return; }
     state.retrying = true;
     try {
     var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded; });
@@ -1036,7 +1068,9 @@
         pendingJobs.push(j);
         continue;
       }
-      if (statusData.status !== 'failed' && statusData.status !== 'not_found') {
+      // ★ 修复：status 字段缺失（响应不完整）时不落入"暂不可确认"死分支，
+      // 走下方重试流程（新 uploadId + previousUploadId 对账）
+      if (!statusData || !statusData.status || (statusData.status !== 'failed' && statusData.status !== 'not_found')) {
         j.status = 'pending';
         j.error = new Error('照片状态暂不可确认');
         j.error.photoUploadStage = 'pending';
@@ -1063,6 +1097,10 @@
       }
       j.status = 'pending';
       j.error = null;
+      // ★ 修复：重试生成新 uploadId（保留 previousUploadId 供对账），
+      // 避免复用同一 uploadId 触发服务端幂等冲突
+      j.previousUploadId = j.uploadId;
+      j.uploadId = genUploadId();
       retryJobs.push(j);
     }
     var uploadJobs = settledJobs.concat(retryJobs);
@@ -1072,6 +1110,20 @@
     } finally {
       state.retrying = false;
     }
+  }
+
+  // ★ 空状态 CTA 事件委托（render.js 改为 data-xtj-trigger-upload，不再依赖全局函数）
+  if (!document.__xtjUploadDelegateBound) {
+    document.__xtjUploadDelegateBound = true;
+    document.addEventListener('click', function (e) {
+      var target = e && e.target;
+      var trigger = target && target.closest ? target.closest('[data-xtj-trigger-upload]') : null;
+      if (trigger) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadPhotoWallFiles();
+      }
+    });
   }
 
   function attachPhotoUploadUi(){

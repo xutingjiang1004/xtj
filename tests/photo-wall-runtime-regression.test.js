@@ -295,8 +295,9 @@ test('retry-failed button has a single binding path and a concurrency guard', ()
   // 一次点击并发执行两次 retryFailedUploads，产生孤儿 Storage 文件。
   assert.doesNotMatch(uploadSource, /__xtjRetryBound/);
   assert.doesNotMatch(uploadSource, /retryBtn\.addEventListener\('click', retryFailedUploads\)/);
-  // 并发守卫：state.retrying 锁 + try/finally 释放
-  assert.match(uploadSource, /if \(state\.uploading \|\| state\.retrying\)/);
+  // 并发守卫：isBusy() 封装 uploading/retrying 锁 + try/finally 释放
+  assert.match(uploadSource, /function isBusy\(\)/);
+  assert.match(uploadSource, /state\.uploading \|\| state\.retrying/);
   assert.match(uploadSource, /state\.retrying = true;/);
   assert.match(uploadSource, /finally \{\s*state\.retrying = false;\s*\}/);
 });
