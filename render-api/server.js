@@ -14982,6 +14982,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var T_stage = {};
   var userName = req.userName;
   var aborted = false;
+  // 客户端断开时 abort 底层 DeepSeek Responses API 调用（开启"网页搜索"/工具调用时走此路径）。
+  // 此前 requestAbortCtrl 仅在 POST /api/agent/chat 处理器（14680）声明，本处理器内未声明，
+  // 导致开启网页搜索的流式请求在 15235 行引用未定义变量，抛出 ReferenceError，
+  // 被外层 catch 包装成 "AI 连接中断，请稍后重试"。
+  var requestAbortCtrl = new AbortController();
   var clientReqId = req.body && req.body.client_request_id;
   var streamSeq = 0;
   
@@ -15013,6 +15018,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     clearStreamHeartbeat();
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
     try { _controller && _controller.abort(); } catch (e) {}
+    try { requestAbortCtrl && requestAbortCtrl.abort(); } catch (e) {}
     try { _reader && _reader.cancel(); } catch (e) {}
     try { clearTimeout(_timer); } catch (e) {}
     try { clearTimeout(_fcTimer); } catch (e) {}
