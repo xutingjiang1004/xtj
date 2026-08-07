@@ -7689,7 +7689,11 @@ function showChatMessages() {
         ensureConfig().then(function(cfg) {
           if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
         }),
-        loadHistory(r.messagesEl, null)
+        loadHistory(r.messagesEl, null),
+        // 打开面板时预拉取会话列表，修复"历史对话"点开后才加载、易误判为列表消失的问题
+        fetchConversations().catch(function(e) {
+          try { console.warn('[AI-CONV] 预拉取会话列表失败:', e && e.message); } catch (ee) {}
+        })
       ]);
     }).then(function() {
       if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
