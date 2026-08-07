@@ -5435,7 +5435,7 @@ async function callDeepSeek(messages, options) {
       // for reasoning-capable models; omitting `thinking` would make the UI's
       // "off" selection ambiguous and can also change tool-call behaviour.
       apiBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
-      if (useThinking) apiBody.reasoning_effort = thinkingLevel;
+      if (useThinking) apiBody.reasoning_effort = thinkingLevel === 'max' ? 'high' : thinkingLevel;
       if (options && options.response_format) {
         apiBody.response_format = options.response_format;
       }
@@ -5747,7 +5747,7 @@ async function callDeepSeek(messages, options) {
             stream: false
           };
           noToolBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
-          if (useThinking) noToolBody.reasoning_effort = thinkingLevel;
+          if (useThinking) noToolBody.reasoning_effort = thinkingLevel === 'max' ? 'high' : thinkingLevel;
           if (requestedMaxTokens !== null) noToolBody.max_tokens = requestedMaxTokens;
           if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
             noToolBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
@@ -15751,7 +15751,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     };
     if (useThinking) {
       apiBody.thinking = { type: 'enabled' };
-      apiBody.reasoning_effort = thinkingMode;
+      // DeepSeek API reasoning_effort 仅接受 low/medium/high，max 映射为 high
+      apiBody.reasoning_effort = thinkingMode === 'max' ? 'high' : thinkingMode;
     }
     // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
     // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
