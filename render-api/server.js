@@ -689,6 +689,22 @@ function buildResponsesTools() {
   return tools;
 }
 
+// 根据是否开启第三方集群搜索，返回 Responses API 可用的 function 工具列表：
+// - 始终排除 search_web（与内置 web_search 重复）
+// - 关闭（includeTavily=false）时额外排除 tavily_search（第三方），仅保留
+//   内置 web_search + 天气/时间工具，确保"搜索关"绝不调用第三方搜索引擎
+function aiToolsForSearch(includeTavily) {
+  var filtered = [];
+  for (var i = 0; i < AI_TOOLS.length; i++) {
+    var fn = AI_TOOLS[i] && AI_TOOLS[i].function ? AI_TOOLS[i].function : {};
+    var name = fn.name || '';
+    if (!name || name === 'search_web') continue;
+    if (name === 'tavily_search' && !includeTavily) continue;
+    filtered.push(AI_TOOLS[i]);
+  }
+  return filtered;
+}
+
 // 将 OpenAI 风格 messages 数组转换为 Responses API 的 input items：
 // - instructions 单独传（首条 system 即 corePrompt，跳过避免重复）
 // - system 消息直接保留为 message item（Responses 协议允许 system 角色）
@@ -14756,16 +14772,22 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var toolCallsInfo = [];
     var searchResultsCollected = [];
     var searchQueriesCollected = [];
-    var webSearchEnabled = req.body && req.body.web_search === true;
-    if (webSearchEnabled && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+    // ★ 网页搜索改造（重构）：同 /chat/stream 路径逻辑
+    //   web_search 明确为 true 或 false → 走 Responses API 启用内置 web_search；
+    //   true 时再叠加 Tavily 第三方集群搜索；未传 → 走原标准路径（向后兼容）。
+    var webSearchPref = req.body && req.body.web_search;
+    var useBuiltInSearch = (webSearchPref === true || webSearchPref === false);
+    var useTavilyCluster = (webSearchPref === true);
+    var webSearchEnabled = (webSearchPref === true);
+    if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       // ★ 网页搜索改造：Responses API 目前仅支持 deepseek-v4-flash，强制回退避免 400
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
-    if (webSearchEnabled && !aborted) {
+    if (useBuiltInSearch && !aborted) {
       // Tavily 并行搜索
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (webSearchEnabled) {
+      if (useTavilyCluster) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
@@ -14780,7 +14802,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         use_responses_api: true,
         model: validatedModel,
         thinking_mode: thinkingMode,
-        tools: AI_TOOLS,
+        tools: aiToolsForSearch(useTavilyCluster),
         tool_choice: 'auto',
         max_tool_rounds: 4,
         signal: requestAbortCtrl.signal,
@@ -15200,15 +15222,31 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       messages.push({ role: 'user', content: timeContext });
     }
 
-    // ★ 网页搜索改造：仅当 web_search 明确为 true 时，走 Responses API 路径（内置 web_search）
-    var webSearchEnabled = req.body && req.body.web_search === true;
-    if (webSearchEnabled && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+    // ★ 网页搜索改造（重构）：
+    //   useBuiltInSearch —— 新面板已明确选择（web_search 为 true 或 false），一律走
+    //     Responses API 路径并启用 DeepSeek 官方内置 web_search（模型内部搜索能力）；
+    //     旧客户端/深度思考页未传 web_search 时保持 false，回退原标准 Chat Completions 路径。
+    //   useTavilyCluster —— 仅当 web_search 明确为 true（搜索"开"）时，叠加 Tavily 第三方
+    //     集群搜索（双通道"一起抓取"，约 3000 次额度），实现海量全网搜索。
+    //   webSearchEnabled —— 仅用于消息元数据 / done 事件，反映用户开关状态（向后兼容前端）。
+    var useBuiltInSearch = (webSearchPref === true || webSearchPref === false);
+    var useTavilyCluster = (webSearchPref === true);
+    var webSearchEnabled = (webSearchPref === true);
+    if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       // Responses API 目前仅支持 deepseek-v4-flash（v4-pro 预计 2026-08 初支持），
       // 用户在前端面板选了 V4 Pro 时强制回退 flash，避免 400。
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
-    if (webSearchEnabled && !aborted) {
+    if (useBuiltInSearch && !aborted) {
       // ===== Responses API 路径（内置 web_search + 可选 Tavily 并行） =====
+      // ★ 修复：与标准流式路径对齐，先发 reasoning_start 让前端提前创建
+      //   思考过程折叠按钮。此前此路径不发 reasoning_start，前端只能靠首条
+      //   reasoning 事件兜底创建，在 done 紧随 / search_supplement 重置等场景下，
+      //   reasoningContainer 可能持有脱离 DOM 的陈旧引用，导致 finishAiMessage
+      //   误跳过创建 → "已思考"按钮消失。
+      writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+      if (aborted) return safeEnd();
+
       var responsesContent = '';
       var responsesReasoning = '';
       var responsesUsage = null;
@@ -15216,10 +15254,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var searchResultsCollected = [];
       var searchQueriesCollected = [];
 
-      // Tavily 并行搜索（仅当 web_search 开启时）
+      // Tavily 并行搜索（仅当搜索"开"时叠加第三方集群；"关"时只用内置 web_search）
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (webSearchEnabled) {
+      if (useTavilyCluster) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
@@ -15235,7 +15273,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         use_responses_api: true,
         model: validatedModel,
         thinking_mode: thinkingMode,
-        tools: AI_TOOLS,
+        tools: aiToolsForSearch(useTavilyCluster),
         tool_choice: 'auto',
         max_tool_rounds: 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
