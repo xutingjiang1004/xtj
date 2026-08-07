@@ -20,13 +20,18 @@
             return Promise.resolve(cachedSecuritySettings);
         }
         return fetch(API_BASE + '/api/security-settings')
-            .then(function(res) { return res.json(); })
+            .then(function(res) {
+                if (!res.ok) throw new Error('security-settings status: ' + res.status);
+                return res.json();
+            })
             .then(function(data) {
                 cachedSecuritySettings = (data && data.settings) || { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
                 settingsLastFetch = now;
                 return cachedSecuritySettings;
             })
             .catch(function() {
+                // 负缓存：写入失败时间，防止故障期间对同一端点请求放大
+                settingsLastFetch = now;
                 return { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
             });
     }
@@ -43,7 +48,7 @@
         } else {
             id = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
         }
-        window.safeStorage.set('xtj_device_id', id);
+        try { window.safeStorage.set('xtj_device_id', id); } catch(e) {}
         return id;
     }
 
@@ -637,13 +642,13 @@
                     }
 
                     if (promises.length > 0) {
-                        Promise.all(promises).then(function() { sendReq(); }).catch(function() { sendReq(); });
+                        Promise.allSettled(promises).then(function() { sendReq(); });
                     } else {
                         sendReq();
                     }
                 };
                 collectAndSend();
-            }).catch(function() { sendReq(); });
+            });
         } catch(e) {}
     }
 
@@ -663,7 +668,7 @@
         var src = source || 'login_success';
         // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
         var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
-        window.safeStorage.set(visitKey, String(Date.now()));
+        try { window.safeStorage.set(visitKey, String(Date.now())); } catch(e) {}
         doSend(userName, deviceId, sentKey, src);
     };
 
@@ -687,7 +692,7 @@
             var lastAt = 0;
             try { lastAt = parseInt(window.safeStorage.get(visitKey)) || 0; } catch(e) {}
             if (Date.now() - lastAt < VISIT_COOLDOWN_MS) return;
-            window.safeStorage.set(visitKey, String(Date.now()));
+            try { window.safeStorage.set(visitKey, String(Date.now())); } catch(e) {}
 
             var sentKey = 'xtj_login_visit_' + userName + '_' + deviceId;
             doSend(userName, deviceId, sentKey, 'page_visit');
@@ -800,7 +805,7 @@
             return;
         }
         // 所有验证通过，locationSentForPage已在函数开头设置，无需重复
-        window.safeStorage.set('xtj_location_sharing_enabled', '1');
+        try { window.safeStorage.set('xtj_location_sharing_enabled', '1'); } catch (e) {}
         var resolutionStatus = data.resolution_status || 'pending';
         var accuracyText = Math.round(Number(coords.accuracy) || 0) + ' 米';
         if (resolutionStatus === 'resolved' && data.address) {
@@ -1085,7 +1090,7 @@
         }
         // 剩余未发送的保存到 localStorage，下次页面打开时恢复
         if (behaviorQueue.length) {
-            window.safeStorage.set('xtj_pending_behavior', JSON.stringify(behaviorQueue));
+            try { window.safeStorage.set('xtj_pending_behavior', JSON.stringify(behaviorQueue)); } catch (e) {}
         }
     }
     // 页面加载时恢复上次未发送的行为
@@ -1363,9 +1368,21 @@
     try {
         var _origSetItem = localStorage.setItem.bind(localStorage);
         localStorage.setItem = function(key, value) {
-            _origSetItem(key, value);
-            if (key === 'xtj_user') {
-                trySendPageVisit();
+            try {
+                // 始终执行原始方法，并返回其结果
+                var _result = _origSetItem(key, value);
+                try {
+                    if (key === 'xtj_user') {
+                        trySendPageVisit();
+                    }
+                } catch (_hookErr) {
+                    // 钩子自身异常不影响原始写入结果
+                }
+                return _result;
+            } catch (_origErr) {
+                // 原始方法异常：记录并传播，避免调用方误以为写入成功
+                console.warn('[login-device] localStorage.setItem failed', _origErr);
+                throw _origErr;
             }
         };
     } catch(e) {}
@@ -1460,6 +1477,7 @@
 
         // Fetch failure monitoring (intercept fetch)
         try {
+            var _fetchFailCount = 0;
             var _origFetch = window.fetch;
             window.fetch = function(input, init) {
                 // P0 修复: 正确捕获 URL, inner function 的 arguments 是它自己的
@@ -1469,13 +1487,20 @@
                     else if (input && typeof input.url === 'string') _url = input.url;
                     else if (input && typeof Request !== 'undefined' && input instanceof Request) _url = input.url;
                 } catch (_e) {}
-                return _origFetch.apply(this, arguments).catch(function(err) {
+                return _origFetch.apply(this, arguments).then(function(_res) {
+                    // 成功即清零熔断计数
+                    _fetchFailCount = 0;
+                    return _res;
+                }).catch(function(err) {
                     // 跳过 AbortError (Supabase SDK 5s timeout / page unload 自动 abort, 不是真错误)
                     if (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')))) {
                         throw err;
                     }
                     // 跳过我们自己上报错误的端点
                     if (_url.indexOf('/client-error-log') >= 0) throw err;
+                    // ★ 熔断：连续失败达到上限后不再上报，防止故障期间打爆上报端点
+                    if (_fetchFailCount >= 10) throw err;
+                    _fetchFailCount++;
                     sendClientError('fetch_error', (err && err.message) || 'fetch failed', '', _url, null, null);
                     throw err;
                 });
@@ -1483,9 +1508,16 @@
         } catch(e) {}
 
         // Image load failure
+        var IMG_ERROR_MAX_PER_SESSION = 10;
+        var _imgErrorCount = 0;
         document.addEventListener('error', function(event) {
             var target = event && event.target;
             if (target && target.tagName === 'IMG') {
+                // ★ data-xtj-fallback 标记的图片跳过（预期失败图）
+                if (target.getAttribute && target.getAttribute('data-xtj-fallback')) return;
+                // ★ 熔断：本会话最多上报 10 次 img_error，超出后静默
+                if (_imgErrorCount >= IMG_ERROR_MAX_PER_SESSION) return;
+                _imgErrorCount++;
                 var imgSrc = sanitizeUrl((target.src || '').slice(0, 200));
                 sendClientError('img_error', 'Image load failed: ' + imgSrc, '', '', null, null);
             }

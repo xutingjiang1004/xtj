@@ -19,8 +19,10 @@ function generateConversationId() {
 
 // 返回一个工厂函数，每次调用返回递增的事件ID。
 // 用法：var nextEventId = generateEventId(); var id = nextEventId();
-function generateEventId() {
-  var id = 0;
+// startFrom：计数器起始值（取自 session.last_event_id 或 DB 中该 stream 的最大
+// event_id），避免进程重启后重新从 1 递增与已持久化的事件 ID 冲突。
+function generateEventId(startFrom) {
+  var id = Math.max(Number(startFrom) || 0, 0);
   return function () { return ++id; };
 }
 

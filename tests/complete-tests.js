@@ -9,8 +9,9 @@ var ROOT = path.resolve(__dirname, '..');
 
 var passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log('  ✅ ' + name); } catch(e) { failed++; console.log('  ❌ ' + name + ': ' + e.message); } }
-function read(p){ return fs.readFileSync(p,'utf8'); }
-function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0,10); }
+// ★ 所有读取都相对仓库根，避免依赖进程 cwd（在子目录/CI 中运行导致假通过/假失败）
+function read(p){ return fs.readFileSync(path.join(ROOT, p),'utf8'); }
+function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT, p))).digest('hex').slice(0,10); }
 
 console.log('\n=== Syntax Checks ===');
 ['render-api/server.js','render-api/db-result.js','render-api/code-agent.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/code-file-system.js','js/code-workspace.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
@@ -294,7 +295,8 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf('processed += 1;') >= 0, 'every settled item must advance progress');
   assert.ok(source.indexOf('updateUploadBatchProgress(processed, total, ok, fail') >= 0, 'batch progress helper unused');
   assert.ok(source.indexOf('uploadBatchPercent(processed, total)') >= 0, 'progress must not be success-based');
-  assert.ok(source.indexOf("if (state.uploading) { toast('正在上传，请等待'); return; }") >= 0, 'duplicate start feedback missing');
+  // 守卫已升级为 isBusy()（覆盖 uploading 与 retrying 双重状态，防止重试期间并发新批次）
+  assert.ok(source.indexOf("if (isBusy()) { toast('正在上传，请等待'); return; }") >= 0, 'duplicate start feedback missing');
   assert.ok(source.indexOf("setUploadResult(summary") >= 0, 'persistent batch result missing');
   assert.ok(source.indexOf("'文件类型不支持'") >= 0, 'safe type failure reason missing');
   assert.ok(source.indexOf("'图片已上传，但记录保存失败'") >= 0, 'safe record failure reason missing');

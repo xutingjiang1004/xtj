@@ -14,6 +14,7 @@
 //   api_key_encrypted TEXT NOT NULL,             -- AES-256-GCM 加密后的 API Key
 //   api_key_iv       TEXT NOT NULL,              -- 加密使用的 IV (base64)
 //   api_key_tag      TEXT NOT NULL,              -- GCM 认证标签 (base64)
+//   key_version      TEXT NOT NULL DEFAULT 'v1', -- 加密密钥版本（v1 = sha256(ENCRYPTION_KEY)）
 //   base_url      TEXT,                           -- 自定义 API 端点（可选）
 //   models_config JSONB DEFAULT '[]'::jsonb,     -- 可用模型列表
 //   capabilities  JSONB DEFAULT '[]'::jsonb,     -- 能力标签字符串数组（如 ["chat","thinking","tools"]）
@@ -45,19 +46,39 @@ const crypto = require('crypto');
 // ── Encryption ──────────────────────────────────────────────────────────
 // AES-256-GCM requires: 32-byte key, 12-byte IV, produces 16-byte auth tag.
 
+// 密钥版本说明：provider 行内 api_key_* 字段配合 key_version 使用，
+// v1 = sha256(ENCRYPTION_KEY) 派生的 32 字节密钥。未来轮换密钥时写入新版本号。
 function getEncryptionKey() {
-  // 优先使用专门的 ENCRYPTION_KEY，否则从 API_SECRET 派生
+  // 优先使用专门的 ENCRYPTION_KEY：统一用 sha256 派生 32 字节。
+  // 不再对明文前 32 字节做 slice 截断——截断会破坏密钥熵并造成"长密钥等于短密钥"的歧义。
   if (process.env.ENCRYPTION_KEY) {
-    var key = Buffer.from(process.env.ENCRYPTION_KEY, 'utf8');
-    if (key.length >= 32) return key.slice(0, 32);
-    // 如果不足 32 字节，用 SHA-256 派生
     return crypto.createHash('sha256').update(process.env.ENCRYPTION_KEY).digest();
   }
   if (process.env.API_SECRET) {
+    // 降级路径：从 API_SECRET 派生，但提示配置独立密钥以便轮换与隔离。
+    console.warn('[PROVIDER] ENCRYPTION_KEY 未设置，正在使用 API_SECRET 派生加密密钥；建议配置独立的 ENCRYPTION_KEY。');
     return crypto.createHash('sha256').update('provider-key-derivation:' + process.env.API_SECRET).digest();
   }
   // 密钥缺失：server.js 已要求 API_SECRET，此处不应到达。若到达则拒绝启动以保安全。
   throw new Error('ENCRYPTION_KEY 和 API_SECRET 均未设置，无法初始化加密模块。请在环境变量中设置 ENCRYPTION_KEY 或 API_SECRET。');
+}
+
+// 旧版密钥派生（兼容存量数据）：ENCRYPTION_KEY >= 32 字节时曾直接取明文前 32 字节，
+// < 32 字节时才是 sha256（此时与新版派生一致）。API_SECRET 路径新旧派生完全相同，
+// 无需兼容。返回 null 表示旧派生与当前派生一致或不存在。
+function getLegacyEncryptionKey() {
+  if (process.env.ENCRYPTION_KEY) {
+    var raw = Buffer.from(process.env.ENCRYPTION_KEY, 'utf8');
+    if (raw.length >= 32) return raw.slice(0, 32);
+  }
+  return null;
+}
+
+function gcmDecrypt(key, encrypted, ivB64, tagB64) {
+  var decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+  var decrypted = Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]);
+  return decrypted.toString('utf8');
 }
 
 function encryptApiKey(plaintext) {
@@ -69,16 +90,34 @@ function encryptApiKey(plaintext) {
   return {
     encrypted: encrypted.toString('base64'),
     iv: iv.toString('base64'),
-    tag: tag.toString('base64')
+    tag: tag.toString('base64'),
+    key_version: 'v1'
   };
 }
 
-function decryptApiKey(encrypted, ivB64, tagB64) {
-  var key = getEncryptionKey();
-  var decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-  var decrypted = Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]);
-  return decrypted.toString('utf8');
+function decryptApiKey(encrypted, ivB64, tagB64, keyVersion) {
+  // 优先使用新版派生（sha256）密钥解密
+  var primaryKey = getEncryptionKey();
+  var primaryError = null;
+  try {
+    return gcmDecrypt(primaryKey, encrypted, ivB64, tagB64);
+  } catch (e) {
+    primaryError = e;
+  }
+  // 存量数据兼容：旧版对 >=32 字节的 ENCRYPTION_KEY 取明文前 32 字节作为密钥。
+  // 仅当旧派生结果与当前派生不同时才重试（避免同一密钥重复尝试）；
+  // key_version 为未知版本时不回退，避免将来轮换密钥后误用旧派生。
+  if (keyVersion === undefined || keyVersion === null || keyVersion === 'v1') {
+    var legacyKey = getLegacyEncryptionKey();
+    if (legacyKey && !legacyKey.equals(primaryKey)) {
+      try {
+        var decrypted = gcmDecrypt(legacyKey, encrypted, ivB64, tagB64);
+        console.warn('[PROVIDER] 检测到旧版密钥派生（slice）加密的存量数据，已兼容解密；建议重新保存该 API Key 以迁移到新版派生。');
+        return decrypted;
+      } catch (_) { /* 新/旧派生均失败，走下方统一报错 */ }
+    }
+  }
+  throw primaryError;
 }
 
 // ── Provider type defaults ──────────────────────────────────────────────
@@ -110,20 +149,63 @@ function getDefaultConfig(providerType) {
   return PROVIDER_DEFAULTS[providerType] || PROVIDER_DEFAULTS.custom;
 }
 
+// ── SSRF hostname 判定 ─────────────────────────────────────────────────
+// 提取 IPv6 中内嵌的 IPv4 地址，无内嵌 IPv4 时返回 null。
+// 覆盖两种形式：
+//   1) IPv4-mapped  ::ffff:xxxx:xxxx / ::ffff:a.b.c.d
+//   2) IPv4-compatible ::xxxx:xxxx / ::a.b.c.d（RFC 4291 已废弃）
+// 只处理 :: 或 ::ffff: 前缀的短尾形式（尾部恰好 2 个 hextet 或点分四段），
+// 不触碰 2606:4700::a00:1 这类"全局前缀 + 巧合十六进制尾"的地址，避免误伤。
+function extractMappedIpv4(hostname) {
+  var m = hostname.match(/^::(?:ffff:)?(.+)$/);
+  if (!m) return null;
+  var tail = m[1];
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(tail)) return tail; // 点分四段（兜底）
+  var parts = tail.split(':');
+  if (parts.length !== 2) return null;
+  var hi = parseInt(parts[0], 16);
+  var lo = parseInt(parts[1], 16);
+  if (isNaN(hi) || isNaN(lo) || hi > 0xffff || lo > 0xffff) return null;
+  var v = hi * 65536 + lo;
+  return ((v >>> 24) & 255) + '.' + ((v >>> 16) & 255) + '.' + ((v >>> 8) & 255) + '.' + (v & 255);
+}
+
+// 统一的 SSRF hostname 黑名单判定（IPv4 / IPv6 / localhost / 保留域名）。
+// 传入的 hostname 应为去除方括号、小写化后的主机名。
+function isHostBlocked(hostname) {
+  if (hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '::1' ||
+      hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+    return true;
+  }
+  // 直接 IPv4 字面量一律拒绝（含 127.0.0.1、169.254.169.254 等，强制走 DNS 域名）
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return true;
+  if (hostname.indexOf(':') < 0) return false; // 其余纯域名放行
+  // IPv6 保留段：未指定 ::、链路本地 fe80::/10（fe80-febf 全段）、
+  // 唯一本地地址 fc00::/7、NAT64 64:ff9b::/96（含 64:ff9b:1::/48 本地 NAT64）
+  if (/^::$/.test(hostname) || /^fe[89ab][0-9a-f]:/.test(hostname) ||
+      /^f[cd][0-9a-f]{2}:/.test(hostname) || /^64:ff9b:/.test(hostname)) {
+    return true;
+  }
+  // 尾部点分四段内嵌 IPv4（::ffff:10.0.0.1、::10.0.0.1、0:0:0:0:0:ffff:169.254.169.254 等）：
+  // 内嵌 IPv4 按字面量一律拒绝
+  var tail = hostname.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (tail && /^\d+\.\d+\.\d+\.\d+$/.test(tail[1])) return true;
+  // IPv4-mapped/compatible 十六进制内嵌（::ffff:a00:1 = 10.0.0.1 等）：
+  // ::/96 与 ::ffff:0:0/96 均为保留空间，不会承载真实单播主机，内嵌 IPv4 一律按字面量拒绝
+  if (extractMappedIpv4(hostname)) return true;
+  return false; // 其余全局 IPv6 放行
+}
+
 // URL 规范化：使用 URL 对象解析，要求 https，拒绝内网地址
 function normalizeProviderUrl(rawUrl) {
   if (!rawUrl) return null;
   var parsed;
   try { parsed = new URL(rawUrl); } catch (_) { return { error: 'INVALID_BASE_URL' }; }
   if (parsed.protocol !== 'https:') return { error: 'INVALID_BASE_URL' };
-  var hostname = parsed.hostname.toLowerCase();
-  // SSRF 防护：拒绝 localhost 和内网 IP
-  if (hostname === 'localhost' || hostname === '0.0.0.0' ||
-      /^10\./.test(hostname) || /^192\.168\./.test(hostname) ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
-      /^169\.254\./.test(hostname) ||
-      /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(hostname) ||
-      /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+  // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
+  var hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  // SSRF 防护：拒绝 localhost、内网 IP、IPv4-mapped/NAT64/链路本地等 IPv6 保留段
+  if (isHostBlocked(hostname)) {
     return { error: 'BLOCKED_BASE_URL' };
   }
   // 去除尾斜杠，保留路径
@@ -147,12 +229,13 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
   var sanitizeError = deps.sanitizeError;
 
   // ── GET /api/provider/models ──────────────────────────────────────────
-  // 返回所有已启用的提供商及其可用模型（公开接口，无需管理员权限）
-  app.get('/api/provider/models', async function(req, res) {
+  // 返回所有已启用的提供商及其可用模型（公开接口，无需管理员权限，需 IP 限流）
+  app.get('/api/provider/models', rateLimit(60000, 60), async function(req, res) {
     try {
+      // base_url 等内部字段不下发，避免泄露自定义内网端点
       var { data, error } = await supabase
         .from('provider_registry')
-        .select('id, name, provider_type, models_config, capabilities, base_url, enabled')
+        .select('id, name, provider_type, models_config, capabilities, enabled')
         .eq('enabled', true)
         .order('name');
 
@@ -262,6 +345,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
           api_key_encrypted: encrypted.encrypted,
           api_key_iv: encrypted.iv,
           api_key_tag: encrypted.tag,
+          key_version: encrypted.key_version,
           base_url: baseUrl || null,
           models_config: Array.isArray(modelsConfig) ? modelsConfig : [],
           capabilities: capabilities,
@@ -328,14 +412,11 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       if (parsedTestUrl.protocol !== 'https:') {
         return res.status(400).json({ error: '仅支持 https:// 的 base_url', code: 'INVALID_BASE_URL' });
       }
-      var hostname = parsedTestUrl.hostname.toLowerCase();
-      var hostIsBlocked = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
-        || hostname.endsWith('.localhost') || hostname.endsWith('.local')
-        || hostname === '169.254.169.254' || hostname.endsWith('.internal')
-        || /^10\./.test(hostname) || /^192\.168\./.test(hostname)
-        || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
-        || /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(hostname)
-        || /^\d+\.\d+\.\d+\.\d+$/.test(hostname); // 直接 IP 字面量一律拒绝
+      // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
+      var hostname = parsedTestUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      // SSRF 防护：拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据 /
+      // IPv4-mapped(::ffff:x.x.x.x) / NAT64(64:ff9b::/96) / 链路本地(fe80::/10)
+      var hostIsBlocked = isHostBlocked(hostname);
       if (hostIsBlocked) {
         return res.status(400).json({ error: 'base_url 指向不允许的主机', code: 'BLOCKED_BASE_URL' });
       }
@@ -357,7 +438,9 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
             'Authorization': 'Bearer ' + apiKey,
             'Content-Type': 'application/json'
           },
-          signal: controller.signal
+          signal: controller.signal,
+          // 不跟随重定向：3xx 一律视为失败，防止重定向到内网/云元数据地址
+          redirect: 'manual'
         };
 
         // Anthropic 使用 x-api-key 头
@@ -374,7 +457,32 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
         if (response.ok) {
           var modelsData = null;
-          try { modelsData = await response.json(); } catch (_) {}
+          // 响应体设字节上限（256KB），超限即丢弃，防止超大响应体拖垮进程
+          try {
+            var maxBodyBytes = 256 * 1024;
+            var bodyBytes = 0;
+            var chunks = [];
+            var reader = response.body && typeof response.body.getReader === 'function' ? response.body.getReader() : null;
+            if (reader) {
+              var overLimit = false;
+              while (true) {
+                var chunk = await reader.read();
+                if (chunk.done) break;
+                bodyBytes += chunk.value ? chunk.value.byteLength : 0;
+                if (bodyBytes > maxBodyBytes) { overLimit = true; break; }
+                chunks.push(Buffer.from(chunk.value));
+              }
+              if (!overLimit) {
+                var bodyText = Buffer.concat(chunks).toString('utf8');
+                try { modelsData = JSON.parse(bodyText); } catch (_) {}
+              }
+            } else {
+              var fullText = await response.text();
+              if (Buffer.byteLength(fullText, 'utf8') <= maxBodyBytes) {
+                try { modelsData = JSON.parse(fullText); } catch (_) {}
+              }
+            }
+          } catch (_) { modelsData = null; }
 
           var models = [];
           if (modelsData && modelsData.data && Array.isArray(modelsData.data)) {
@@ -438,6 +546,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         updateData.api_key_encrypted = encrypted.encrypted;
         updateData.api_key_iv = encrypted.iv;
         updateData.api_key_tag = encrypted.tag;
+        updateData.key_version = encrypted.key_version;
       }
       if (body.base_url !== undefined) {
         var updateUrl = String(body.base_url).trim();

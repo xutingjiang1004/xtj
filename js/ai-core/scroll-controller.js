@@ -10,6 +10,8 @@
 
   function createScrollController(container, options) {
     options = options || {};
+    // ★ 复用缓存实例：重复 create 不再重复挂 scroll 监听与 banner DOM
+    if (container && container._xtjScrollCtrl) return container._xtjScrollCtrl;
     var pinned = true; // user is at bottom, auto-scroll active
     var newContentBanner = null;
     var bannerVisible = false;
@@ -101,6 +103,9 @@
         try { newContentBanner.parentNode.removeChild(newContentBanner); } catch (e) {}
       }
       newContentBanner = null;
+      // ★ 清理缓存引用，允许后续重新创建
+      if (container._xtjScrollCtrl === api) container._xtjScrollCtrl = null;
+      container = null;
     }
 
     function reset() {
@@ -114,7 +119,7 @@
     // Auto-attach
     attach();
 
-    return {
+    var api = {
       scrollToBottom: scrollToBottom,
       onNewContent: onNewContent,
       isPinned: isPinned,
@@ -122,6 +127,9 @@
       detach: detach,
       isNearBottom: function () { return isNearBottom(container); }
     };
+    // ★ 缓存实例供重复 create 复用
+    if (container) container._xtjScrollCtrl = api;
+    return api;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────

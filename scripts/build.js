@@ -1,19 +1,34 @@
-﻿const { execSync } = require('child_process');
+﻿const { execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const TERSER = path.resolve(ROOT, 'node_modules', '.bin', 'terser');
-const CSSO = path.resolve(ROOT, 'node_modules', '.bin', 'csso');
-const CLEAN_CSS = path.resolve(ROOT, 'node_modules', '.bin', 'cleancss');
+// 直接用 node + 真实 JS 入口执行压缩器（数组参数方式），彻底规避 cmd.exe 转义/引号问题。
+// csso v5+ 已将 CLI 拆分到 csso-cli 包，.bin shim 实际指向 csso-cli/bin/csso。
+function resolveNodeBin(pkgEntry, binPath) {
+  try {
+    return path.resolve(path.dirname(require.resolve(pkgEntry + '/package.json')), binPath);
+  } catch (_) {
+    return null;
+  }
+}
+const TERSER = resolveNodeBin('terser', 'bin/terser');
+const CSSO = resolveNodeBin('csso-cli', 'bin/csso');
+const CLEAN_CSS = resolveNodeBin('clean-css', 'bin/cleancss');
 
+
+function lfNormalize(content) {
+  return String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
 
 function contentHash(filePath) {
   const fullPath = path.resolve(ROOT, filePath);
   if (!fs.existsSync(fullPath)) return null;
-  return crypto.createHash('sha256').update(fs.readFileSync(fullPath)).digest('hex').slice(0, 10);
+  // 对 LF 归一化后的内容计算 hash，使指纹与行尾（CRLF/LF）无关，
+  // 避免 Windows core.autocrlf 击穿产物 hash 指纹。
+  return crypto.createHash('sha256').update(lfNormalize(fs.readFileSync(fullPath, 'utf8'))).digest('hex').slice(0, 10);
 }
 
 function minifiedPath(filePath) {
@@ -22,6 +37,10 @@ function minifiedPath(filePath) {
 }
 
 const HTML_ENTRYPOINTS = ['index.html', 'admin.html'];
+
+// 引用了但缺失的资产清单：contentHash 返回 null 时记录，最终升级为 error，
+// 不静默保留旧 hash（避免 minify 失败/文件缺失时 HTML 仍带着过期指纹上线）。
+const missingAssets = [];
 
 function localAssetRefs(html) {
   const refs = [];
@@ -39,7 +58,10 @@ function updateHtmlAssetVersions(htmlFile) {
   let changed = false;
   html = html.replace(/\b(href|src|content)="((?:css|js)\/[^"?#]+\.(?:css|js))(?:\?v=[^"#]*)?"/g, function(match, attr, assetPath) {
     const hash = contentHash(assetPath);
-    if (!hash) return match;
+    if (!hash) {
+      missingAssets.push(assetPath + ' (referenced by ' + htmlFile + ')');
+      return match;
+    }
     const next = attr + '="' + assetPath + '?v=' + hash + '"';
     if (next !== match) changed = true;
     return next;
@@ -67,7 +89,7 @@ function validateHtmlMinifiedRefs(htmlFile) {
     const nextMin = minifiedPath(ref.assetPath);
     if (nextMin === ref.assetPath) return;
     if (!fs.existsSync(path.resolve(ROOT, nextMin))) {
-      console.warn('[CHECK] WARNING: ' + ref.assetPath + ' has no minified sibling ' + nextMin + '; if the source is referenced at runtime, add it to CSS_FILES/JS_FILES so the build produces the .min artifact');
+      errors.push(ref.assetPath + ' references the source file but has no minified sibling ' + nextMin + '; add it to JS_FILES/CSS_FILES so the build produces the .min artifact');
       return;
     }
     errors.push(ref.assetPath + ' should use ' + nextMin);
@@ -80,20 +102,6 @@ function validateHtmlMinifiedRefs(htmlFile) {
     console.error('[CHECK] ' + msg);
   });
   return false;
-}
-
-function quote(value) {
-  return '"' + String(value).replace(/"/g, '\\"') + '"';
-}
-
-function cliCommand(binPath, args) {
-  const quotedArgs = args.map(quote).join(' ');
-  if (process.platform === 'win32') {
-    var cmdPath = binPath.endsWith('.cmd') ? binPath : binPath + '.cmd';
-    if (!fs.existsSync(cmdPath)) cmdPath = binPath;
-    return quote(cmdPath) + (quotedArgs ? ' ' + quotedArgs : '');
-  }
-  return quote(binPath) + (quotedArgs ? ' ' + quotedArgs : '');
 }
 
 const JS_FILES = [
@@ -173,25 +181,38 @@ function minifyJS(filePath, optional) {
     return false;
   }
   const outPath = fullPath.replace(/\.js$/, '.min.js');
-  var normalizedInputPath = null;
+  var tempInputPath = null;
+  var tempOutPath = null;
   const statsBefore = fs.statSync(fullPath).size;
   console.log(`[MINIFY] ${filePath} (${(statsBefore / 1024).toFixed(0)}KB)`);
   try {
+    if (!TERSER) throw new Error('terser binary not found (run npm install)');
     var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\x0d\n?/g, '\n');
+    // 指纹注释记录 LF 归一化源码哈希（注入前），供 check-build-consistency 校验产物新鲜度
+    var fingerprint = crypto.createHash('sha256').update(normalizedSource).digest('hex');
     // ★ 修复（Bug 2）：config.js 构建时注入 SUPABASE_ANON_KEY（若有设置）
     normalizedSource = injectConfigSecrets(normalizedSource, filePath);
     var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-js-'));
-    normalizedInputPath = path.join(tempDir, path.basename(fullPath));
-    fs.writeFileSync(normalizedInputPath, normalizedSource, 'utf8');
-    execSync(
-      cliCommand(TERSER, [normalizedInputPath, '--compress', '--mangle', '--output', outPath]),
+    tempInputPath = path.join(tempDir, path.basename(fullPath));
+    // 临时输出放目标同目录，rename 才能同卷原子替换（跨盘 rename 会抛 EXDEV）
+    tempOutPath = outPath + '.tmp-' + process.pid;
+    fs.writeFileSync(tempInputPath, normalizedSource, 'utf8');
+    // execFileSync(process.execPath, [真实JS入口, ...args]) 数组参数方式，规避 cmd.exe 转义问题
+    execFileSync(
+      process.execPath,
+      [TERSER, tempInputPath, '--compress', '--mangle', '--output', tempOutPath],
       { stdio: 'pipe', timeout: 30000 }
     );
-    if (fs.existsSync(outPath)) {
-      var outRaw = fs.readFileSync(outPath, 'utf8');
+    if (fs.existsSync(tempOutPath)) {
+      var outRaw = fs.readFileSync(tempOutPath, 'utf8');
       var outNormalized = outRaw.replace(/\r\n?/g, '\n');
       if (!outNormalized.endsWith('\n')) outNormalized += '\n';
-      fs.writeFileSync(outPath, outNormalized, 'utf8');
+      outNormalized += '/*# src=' + fingerprint + ' */\n';
+      fs.writeFileSync(tempOutPath, outNormalized, 'utf8');
+      // 全部成功后再原子替换；失败时保留旧产物（不 unlink），
+      // 缺失/陈旧引用由 contentHash 返回 null 时升级为 error。
+      fs.renameSync(tempOutPath, outPath);
+      tempOutPath = null;
       const statsAfter = fs.statSync(outPath).size;
       const saved = ((statsBefore - statsAfter) / statsBefore * 100).toFixed(0);
       console.log(`  => ${(statsAfter / 1024).toFixed(0)}KB (压缩 ${saved}%)`);
@@ -199,12 +220,14 @@ function minifyJS(filePath, optional) {
     return true;
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
-    // Minify 失败时删除旧产物：保留旧 .min 文件会让非 CI 部署静默上线旧代码
-    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
+    if (e.stderr) console.error('  stderr: ' + e.stderr.toString());
     return false;
   } finally {
-    if (normalizedInputPath) {
-      try { fs.rmSync(path.dirname(normalizedInputPath), { recursive: true, force: true }); } catch (_) {}
+    if (tempOutPath) {
+      try { fs.unlinkSync(tempOutPath); } catch (_) {}
+    }
+    if (tempInputPath) {
+      try { fs.rmSync(path.dirname(tempInputPath), { recursive: true, force: true }); } catch (_) {}
     }
   }
 }
@@ -220,7 +243,8 @@ function minifyCSS(filePath, optional) {
     return false;
   }
   const outPath = fullPath.replace(/\.css$/, '.min.css');
-  var normalizedInputPath = null;
+  var tempInputPath = null;
+  var tempOutPath = null;
   const statsBefore = fs.statSync(fullPath).size;
   console.log(`[MINIFY-CSS] ${filePath} (${(statsBefore / 1024).toFixed(0)}KB)`);
   try {
@@ -229,30 +253,32 @@ function minifyCSS(filePath, optional) {
     // on Windows and Linux, which makes cache hashes and CI non-deterministic.
     // Always minify an LF-normalized temporary input and remove it afterward.
     var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\r\n?/g, '\n');
+    // 指纹注释记录 LF 归一化源码哈希，供 check-build-consistency 校验产物新鲜度
+    var fingerprint = crypto.createHash('sha256').update(normalizedSource).digest('hex');
     var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-css-'));
-    normalizedInputPath = path.join(tempDir, path.basename(fullPath));
-    fs.writeFileSync(normalizedInputPath, normalizedSource, 'utf8');
-    if (!fs.existsSync(CSSO)) {
+    tempInputPath = path.join(tempDir, path.basename(fullPath));
+    // 临时输出放目标同目录，rename 才能同卷原子替换（跨盘 rename 会抛 EXDEV）
+    tempOutPath = outPath + '.tmp-' + process.pid;
+    fs.writeFileSync(tempInputPath, normalizedSource, 'utf8');
+    if (!CSSO || !fs.existsSync(CSSO)) {
       console.log('  csso not installed, trying clean-css...');
-      if (!fs.existsSync(CLEAN_CSS)) {
+      if (!CLEAN_CSS || !fs.existsSync(CLEAN_CSS)) {
         console.log('  No CSS minifier available, skipping CSS minification.');
         return false;
       }
-      execSync(
-        cliCommand(CLEAN_CSS, ['-o', outPath, normalizedInputPath]),
-        { stdio: 'pipe', timeout: 30000 }
-      );
+      execFileSync(process.execPath, [CLEAN_CSS, '-o', tempOutPath, tempInputPath], { stdio: 'pipe', timeout: 30000 });
     } else {
-      execSync(
-        cliCommand(CSSO, [normalizedInputPath, '--output', outPath]),
-        { stdio: 'pipe', timeout: 30000 }
-      );
+      execFileSync(process.execPath, [CSSO, tempInputPath, '--output', tempOutPath], { stdio: 'pipe', timeout: 30000 });
     }
-    if (fs.existsSync(outPath)) {
-      var cssRaw = fs.readFileSync(outPath, 'utf8');
+    if (fs.existsSync(tempOutPath)) {
+      var cssRaw = fs.readFileSync(tempOutPath, 'utf8');
       var cssNormalized = cssRaw.replace(/\r\n?/g, '\n');
       if (!cssNormalized.endsWith('\n')) cssNormalized += '\n';
-      fs.writeFileSync(outPath, cssNormalized, 'utf8');
+      cssNormalized += '/*# src=' + fingerprint + ' */\n';
+      fs.writeFileSync(tempOutPath, cssNormalized, 'utf8');
+      // 全部成功后再原子替换；失败时保留旧产物（不 unlink）
+      fs.renameSync(tempOutPath, outPath);
+      tempOutPath = null;
       const statsAfter = fs.statSync(outPath).size;
       const saved = ((statsBefore - statsAfter) / statsBefore * 100).toFixed(0);
       console.log(`  => ${(statsAfter / 1024).toFixed(0)}KB (压缩 ${saved}%)`);
@@ -260,41 +286,63 @@ function minifyCSS(filePath, optional) {
     return true;
   } catch (e) {
     console.error(`  => ERROR: ${e.message}`);
-    // Minify 失败时删除旧产物：保留旧 .min 文件会让非 CI 部署静默上线旧代码
-    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
+    if (e.stderr) console.error('  stderr: ' + e.stderr.toString());
     return false;
   } finally {
-    if (normalizedInputPath) {
-      try { fs.rmSync(path.dirname(normalizedInputPath), { recursive: true, force: true }); } catch (_) {}
+    if (tempOutPath) {
+      try { fs.unlinkSync(tempOutPath); } catch (_) {}
+    }
+    if (tempInputPath) {
+      try { fs.rmSync(path.dirname(tempInputPath), { recursive: true, force: true }); } catch (_) {}
     }
   }
 }
-
-console.log('=== xtj Build Script ===\n');
-console.log(`Source: ${ROOT}\n`);
 
 // 可选文件（缺失不报错）
 const OPTIONAL_JS = ['js/photo-wall/upload-ui.js', 'js/photo-wall/preview.js', 'js/photo-wall/preview-hotfix.js'];
 const OPTIONAL_CSS = [];
 
-// Minify JS
-console.log('--- Minifying JS ---');
-const jsResults = JS_FILES.map(function(f) { return minifyJS(f, OPTIONAL_JS.indexOf(f) >= 0); });
+// 供 check-build-consistency.js 复用构建清单（避免两处维护导致遗漏）
+module.exports = {
+  JS_FILES: JS_FILES,
+  CSS_FILES: CSS_FILES,
+  OPTIONAL_JS: OPTIONAL_JS,
+  OPTIONAL_CSS: OPTIONAL_CSS,
+  HTML_ENTRYPOINTS: HTML_ENTRYPOINTS,
+  contentHash: contentHash
+};
 
-// Minify CSS
-console.log('\n--- Minifying CSS ---');
-const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
+// 只有作为主入口直接运行 build.js 时才执行构建，
+// require('./build.js')（check-build-consistency）不产生副作用。
+if (require.main === module) {
+  console.log('=== xtj Build Script ===\n');
+  console.log(`Source: ${ROOT}\n`);
 
-// L5 修复：htmlAssetsUpdated 结果仅作日志用（原为未使用变量）
-const htmlAssetsUpdated = HTML_ENTRYPOINTS.map(updateHtmlAssetVersions).some(Boolean);
-if (htmlAssetsUpdated) console.log('[HASH] HTML asset versions were refreshed by this build');
-const htmlRefsValid = HTML_ENTRYPOINTS.map(validateHtmlMinifiedRefs).every(Boolean);
+  // Minify JS
+  console.log('--- Minifying JS ---');
+  const jsResults = JS_FILES.map(function(f) { return minifyJS(f, OPTIONAL_JS.indexOf(f) >= 0); });
 
-const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length + (htmlRefsValid ? 0 : 1);
+  // Minify CSS
+  console.log('\n--- Minifying CSS ---');
+  const cssResults = CSS_FILES.map(function(f) { return minifyCSS(f, OPTIONAL_CSS.indexOf(f) >= 0); });
 
-if (failed > 0) {
-  console.error(`\n=== Build Complete with ${failed} failed/skipped item(s) ===`);
-  process.exitCode = 1;
-} else {
-  console.log('\n=== Build Complete ===');
+  // L5 修复：htmlAssetsUpdated 结果仅作日志用（原为未使用变量）
+  const htmlAssetsUpdated = HTML_ENTRYPOINTS.map(updateHtmlAssetVersions).some(Boolean);
+  if (htmlAssetsUpdated) console.log('[HASH] HTML asset versions were refreshed by this build');
+  if (missingAssets.length > 0) {
+    console.error('[HASH] ERROR: ' + missingAssets.length + ' referenced asset(s) missing; refusing to keep stale hash:');
+    missingAssets.forEach(function(a) { console.error('  - ' + a); });
+  }
+  const htmlRefsValid = HTML_ENTRYPOINTS.map(validateHtmlMinifiedRefs).every(Boolean);
+
+  const failed = jsResults.concat(cssResults).filter(function(r) { return r === false; }).length
+    + (htmlRefsValid ? 0 : 1)
+    + missingAssets.length;
+
+  if (failed > 0) {
+    console.error(`\n=== Build Complete with ${failed} failed/skipped item(s) ===`);
+    process.exitCode = 1;
+  } else {
+    console.log('\n=== Build Complete ===');
+  }
 }

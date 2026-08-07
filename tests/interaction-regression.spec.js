@@ -10,6 +10,8 @@ async function openApp(page, reducedMotion = 'no-preference') {
     });
   });
   await page.emulateMedia({ reducedMotion });
+  // 移动视口：桌面 CSS（>=900px）会隐藏底部 dock，而这些用例全部通过 dock 切换面板
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.switchDockTab === 'function');
   // Let startup hydration and lazy enhancement scheduling settle before timing

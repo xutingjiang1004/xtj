@@ -3,10 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
+const ROOT = path.resolve(__dirname, '..');
 
-const server = fs.readFileSync('render-api/server.js', 'utf8');
-const migration = fs.readFileSync('supabase/migrations/014_atomic_user_info_merge.sql', 'utf8');
-const privacyMigration = fs.readFileSync('supabase/migrations/015_lock_private_post_markers.sql', 'utf8');
+const server = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
+const migration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/014_atomic_user_info_merge.sql'), 'utf8');
+const privacyMigration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/015_lock_private_post_markers.sql'), 'utf8');
 
 test('private user info has one row and a service-role-only atomic merge', () => {
   assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS posts_one_user_info_per_user/);
