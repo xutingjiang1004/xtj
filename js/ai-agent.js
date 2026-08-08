@@ -2899,10 +2899,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ===== 深度研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
 
   // 将研究结果渲染进研究卡 (Tavily 流程与历史回看共用)
-  function renderTavilyResearchReport(card, answerText, sourcesList, startedAtMs, labelText) {
+  function renderTavilyResearchReport(card, answerText, sourcesList, startedAtMs, labelText, researchMode) {
     if (!isResearchCard(card)) return;
     var srcs = Array.isArray(sourcesList) ? sourcesList : [];
-    var durationMs = Date.now() - (startedAtMs || Date.now());
+    var modeVal = researchMode || S.dtResearchMode || 'pro';
+    var modeLabelMap = { mini: '快速模式', pro: '深度模式', auto: '自动模式' };
+    var modeLabel = modeLabelMap[modeVal] || '深度模式';
+    // 研究总时长：实时研究用 startedAt 计算；历史回显无 startedAt 时回退到卡片已存时长
+    var durationMs = startedAtMs
+      ? (Date.now() - startedAtMs)
+      : ((card._researchState && card._researchState.durationMs) || 0);
+    if (durationMs < 0) durationMs = 0;
     card._researchState.durationMs = durationMs;
     card._researchState.searchCount = srcs.length;
 
@@ -2913,7 +2920,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var noteEl = document.createElement('div');
         noteEl.className = 'ai-tavily-note';
         noteEl.style.cssText = 'font-size:11px;color:#999;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(127,127,127,.25);';
-        noteEl.textContent = labelText || '由 Tavily Deep Research 生成';
+        // 脚注带强度档位 + 研究总时长（如 15min）
+        var footnote = (labelText || '由 XTJ 多智能体深入研究生成') + ' · ' + modeLabel;
+        if (durationMs > 0) footnote += ' · 用时 ' + formatThinkingElapsed(durationMs);
+        noteEl.textContent = footnote;
         answerEl.appendChild(noteEl);
       }
     }
@@ -2932,8 +2942,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (footer) {
       footer.innerHTML = '';
       footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
-      footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: 'Tavily Deep Research' }));
-      if (srcs.length > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + srcs.length + ' 个来源' }));
+      footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '深入研究' }));
+      // 搜索数量：网页搜索 N（如 网页搜索 100）
+      footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '网页搜索 ' + srcs.length }));
     }
 
     setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
@@ -3073,7 +3084,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     dtMessagesEl.appendChild(card);
     scrollToBottom(dtMessagesEl, true);
     var label = '历史研究记录' + (item.query ? '：' + String(item.query).slice(0, 48) : '');
-    renderTavilyResearchReport(card, item.answer, item.sources, null, label);
+    renderTavilyResearchReport(card, item.answer, item.sources, null, label, item.mode || S.dtResearchMode);
     try { card._done = true; } catch (e) {}
     scrollToBottom(dtMessagesEl, true);
   }
@@ -3318,7 +3329,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     function renderResearchResult() {
-      renderTavilyResearchReport(progressCard, answer, sources, startedAt);
+      renderTavilyResearchReport(progressCard, answer, sources, startedAt, undefined, researchModel);
     }
 
     // 三阶段状态展示 (新协议 research_stage 事件; 未知 stage 忽略, 保持原行为)
@@ -5755,8 +5766,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         setAiRootState('ai-idle');
         
-        if (thinking && finalThinkingMode !== 'off') {
+        if (thinking && finalThinkingMode !== 'off' && S.thinkingMode !== 'off') {
           // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
+          //   C 修复：额外用用户意图 S.thinkingMode 判断——即便后端未 Honor 'off' 仍回 reasoning，
+          //   只要用户关了思考，收尾也强制不渲染思考节点（走下方 else 分支移除）。
           //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
           //   sanitized_content 替换 innerHTML 等场景），代码误以为按钮已存在而跳过创建，
           //   导致"已思考"折叠按钮消失。现在双重校验：变量非空 + 节点仍连接在文档中。
@@ -5915,13 +5928,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return assistantBubble;
       }
       
-      // H-25: 普通对话 idle 看门狗 — 45s 无数据视为超时，中止等待并清理，
-      // 避免服务端/provider 挂起时界面永久停在"处理中"
+      // H-25: 普通对话 idle 看门狗 — 无数据视为超时，中止等待并清理，
+      // 避免服务端/provider 挂起时界面永久停在"处理中"。
+      // B 修复：收到首个数据块前用 45s（防连接假死）；一旦收到任何事件（含 reasoning/content），
+      // 说明连接存活、AI 正在工作，放宽到 120s，容忍慢模型在思考阶段的静默，避免误判"AI中断"。
       var _lastDataTime = Date.now();
       var timedOut = false;
+      var _receivedAny = false;
       var _idleCheckTimer = setInterval(function() {
         if (timedOut || !S.active) return;
-        if (Date.now() - _lastDataTime > 45000) {
+        var idleThreshold = _receivedAny ? 120000 : 45000;
+        if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
           if (reader) { try { reader.cancel(); } catch (e) {} }
@@ -5944,6 +5961,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var lines = buffer.split('\n');
         buffer = lines.pop() || '';
         _lastDataTime = Date.now();
+        _receivedAny = true; // B 修复：已收到任意数据，放宽 idle 阈值到 120s
         
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li].trim();
@@ -6253,6 +6271,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
+            // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
+            if (S.thinkingMode === 'off') continue;
             ensureReasoningNode();
             ensureThinkingTimer();
             continue;
@@ -6260,6 +6280,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
+            // C 修复：用户关闭思考时，跳过流式渲染（仅静默累积，收尾由 finishAiMessage 统一隐藏）
+            if (S.thinkingMode === 'off') continue;
             // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
             if (!reasoningStarted) {
               reasoningStarted = true;

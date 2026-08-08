@@ -974,14 +974,6 @@ async function searchTavily(query, maxResults, extraOpts) {
   }
 }
 
-// Tavily Research 深度研究（多 agent 流式）— POST https://api.tavily.com/research，Bearer 鉴权
-// 上游为 SSE 流（tool_call / tool_response / done 等事件），这里标准化为：
-//   research_step（Planning=0 / WebSearch=1 / ResearchSubtopic=1 / Generating=2）
-//   research_content（content/answer 文本）
-//   research_sources（url + title + content 前 300 字）
-//   research_done（最终答案；流结束未收到 done 且无 error 时用已累积 content 补发）
-//   error（tavily_not_configured / tavily_status_xxx / 读取失败）
-var TAVILY_RESEARCH_PHASES = { Planning: 0, WebSearch: 1, ResearchSubtopic: 1, Generating: 2 };
 
 // ===================== Tavily Research 增强流水线 =====================
 // A. 24h 内存缓存（LRU，上限 50 条）：key = sha256(query+model+mode)
@@ -1082,141 +1074,6 @@ async function persistResearchRecord(userName, convId, query, answer, sources) {
   }
 }
 
-async function tavilyResearchStream(query, model, onEvent, signal) {
-  var apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) {
-    try { onEvent({ type: 'error', error: 'tavily_not_configured' }); } catch (_) {}
-    return;
-  }
-  // 10 分钟超时（Tavily pro 研究可能几分钟）；路由可传入 AbortSignal 支持客户端断开
-  var timeoutSignal = AbortSignal.timeout(600000);
-  var combinedSignal = (signal && typeof AbortSignal.any === 'function')
-    ? AbortSignal.any([timeoutSignal, signal])
-    : (signal || timeoutSignal);
-  var sentDone = false;
-  var sentError = false;
-  var accumulated = '';
-  var resp;
-  try {
-    resp = await fetch('https://api.tavily.com/research', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({ input: query, model: model || 'pro', stream: true }),
-      signal: combinedSignal
-    });
-  } catch (e) {
-    sentError = true;
-    try { onEvent({ type: 'error', error: 'tavily_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
-    return;
-  }
-  if (!resp.ok) {
-    sentError = true;
-    var errBody = '';
-    try { errBody = await resp.text(); } catch (_) {}
-    try { onEvent({ type: 'error', error: 'tavily_status_' + resp.status, message: errBody.slice(0, 200) }); } catch (_) {}
-    return;
-  }
-  if (!resp.body) {
-    sentError = true;
-    try { onEvent({ type: 'error', error: 'tavily_empty_stream' }); } catch (_) {}
-    return;
-  }
-  var reader = resp.body.getReader();
-  var decoder = new TextDecoder('utf-8');
-  var buffer = '';
-  var dataLines = [];
-
-  function handleChunk(chunk) {
-    var evType = String(chunk.type || '').toLowerCase();
-    // done/完成事件 → research_done（answer 取事件最终文本，缺省用已累积 content）
-    if (evType === 'done' || evType === 'end' || evType === 'complete' || chunk.done === true) {
-      sentDone = true;
-      var finalAnswer = (typeof chunk.answer === 'string' && chunk.answer.trim())
-        ? chunk.answer
-        : (typeof chunk.content === 'string' ? chunk.content : accumulated);
-      try { onEvent({ type: 'research_done', answer: finalAnswer }); } catch (_) {}
-      return;
-    }
-    // tool_call / tool_response → research_step（按 tool_name 映射阶段）
-    if (evType === 'tool_call' || evType === 'tool_response') {
-      var toolName = String(chunk.tool_name || chunk.tool || '').trim();
-      var phase = TAVILY_RESEARCH_PHASES[toolName];
-      if (phase !== undefined) {
-        try { onEvent({ type: 'research_step', tool: toolName, phase: phase }); } catch (_) {}
-        // tool_response 的 Planning 完成后发 phase 0 完成标记
-        if (evType === 'tool_response' && toolName === 'Planning') {
-          try { onEvent({ type: 'research_step', tool: 'Planning', phase: 0, status: 'done' }); } catch (_) {}
-        }
-      }
-    }
-    // content/answer 文本 → research_content
-    var text = typeof chunk.content === 'string' ? chunk.content : (typeof chunk.answer === 'string' ? chunk.answer : '');
-    if (text && text.trim()) {
-      accumulated += text;
-      try { onEvent({ type: 'research_content', text: text, content: text }); } catch (_) {}
-    }
-    // sources 数组 → research_sources（只保留 url + title + content 前 300 字）
-    if (Array.isArray(chunk.sources) && chunk.sources.length) {
-      var mapped = [];
-      for (var si = 0; si < chunk.sources.length; si++) {
-        var s = chunk.sources[si] || {};
-        var sUrl = String(s.url || s.link || '').trim();
-        if (!sUrl) continue;
-        mapped.push({
-          url: sUrl,
-          title: String(s.title || '').trim().slice(0, 200),
-          content: String(s.content || s.snippet || '').trim().slice(0, 300)
-        });
-      }
-      if (mapped.length) {
-        try { onEvent({ type: 'research_sources', sources: mapped }); } catch (_) {}
-      }
-    }
-  }
-
-  function flushDataLine() {
-    if (!dataLines.length) return;
-    var jsonStr = dataLines.join('\n');
-    dataLines = [];
-    var chunk;
-    try { chunk = JSON.parse(jsonStr); } catch (e) { return; } // 解析失败的行静默跳过
-    if (!chunk || typeof chunk !== 'object') return;
-    handleChunk(chunk);
-  }
-
-  try {
-    while (true) {
-      var readResult;
-      try {
-        readResult = await reader.read();
-      } catch (e) {
-        break; // 上游读取失败，走下方流结束兜底
-      }
-      if (readResult.done) break;
-      buffer += decoder.decode(readResult.value, { stream: true });
-      var lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim(); // trim 同时处理 CRLF 的 
-        if (!line) { flushDataLine(); continue; }
-        if (line.indexOf('data:') === 0) {
-          dataLines.push(line.slice(5).trim()); // 多行 data 用 \n 拼接
-          continue;
-        }
-        // 非 data 行（event:/注释等）：先冲刷已累积的 data 再忽略
-        flushDataLine();
-      }
-    }
-    flushDataLine();
-  } catch (e) {
-    sentError = true;
-    try { onEvent({ type: 'error', error: 'tavily_stream_read_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
-  }
-  // 流结束：没发过 research_done 且没 error → 补发 done（用已累积 content）
-  if (!sentDone && !sentError) {
-    try { onEvent({ type: 'research_done', answer: accumulated.trim() }); } catch (_) {}
-  }
-}
 
 // Provider 2: Brave Search API
 async function searchBrave(query, maxResults) {
@@ -6051,6 +5908,10 @@ async function callDeepSeekViaResponses(messages, options) {
 
   var controller = new AbortController();
   var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000);
+  // 允许调用方按场景放宽总时长（如深入研究的海量检索阶段），上限 15 分钟
+  if (options && Number.isFinite(Number(options.total_timeout_ms))) {
+    TOTAL_TIMEOUT_MS = Math.min(Math.max(Number(options.total_timeout_ms), 60000), 900000);
+  }
   var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000;
   var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000;
   var firstTokenReceived = false;
@@ -6205,9 +6066,11 @@ async function callDeepSeekViaResponses(messages, options) {
             // 内置 web_search 状态透传（黑盒：搜索结果由服务端注入上下文，不外吐，
             // 仅告知前端"正在联网搜索 / 已联网"，避免用户混淆数据来源）
             if (evtType === 'response.web_search_call.in_progress' || evtType === 'response.web_search_call.searching') {
+              onProgress(); // ★ 联网检索期间可能长时间无文本增量，必须刷新空闲计时，否则多轮搜索会被 idle_timeout 掐断
               try { if (options.onSearchStatus) options.onSearchStatus('searching'); } catch (e) {}
             }
             if (evtType === 'response.web_search_call.completed') {
+              onProgress();
               try { if (options.onSearchStatus) options.onSearchStatus('completed'); } catch (e) {}
             }
             // 函数调用开始
@@ -16448,17 +16311,413 @@ app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async
   }
 });
 
-// POST /api/agent/research/stream - Tavily Deep Research 多 agent 深度研究（SSE 流式代理）
-// 增强流水线（2026-08）：
+// ===================== 自托管多智能体深度研究（主agent + 1-5 子agent 并行） =====================
+// 架构：主智能体(大哥) 收到任务 → Planner 拆 1-5 个子任务 → 子智能体 Promise.all 真·并行调研
+//        （使用 DeepSeek 内置 web_search，不依赖 Tavily）→ 主智能体 Synthesizer 汇总最终报告。
+// 事件契约与旧 Tavily 代理完全一致（research_stage/content/sources/done），前端 runTavilyResearch 无需改动。
+
+const SELF_RESEARCH_PLANNER_PROMPT = `你是 XTJ AI 深入研究模式的"总指挥"(主智能体).
+你的职责: 收到用户的研究问题后, 把它拆解成 1-5 个并行研究子任务, 派出子智能体同时调研, 最后由你汇总.
+目标是像顶尖研究总监 —— 拆解清晰、方向互补不重叠、该搜就搜.
+
+输出严格 JSON (无 markdown 代码块, 无任何额外文字):
+{
+  "direction": "一句话概括本次研究主线 (30 字内)",
+  "agents": [
+    {
+      "role": "子智能体角色 (2-6字中文, 如'市场分析'、'技术原理'、'风险研判')",
+      "task_description": "该子智能体具体研究什么 (60 字内)",
+      "need_search": true|false,
+      "search_angle": "若该方向需联网检索, 给出 1-2 个搜索切入点关键词"
+    }
+  ]
+}
+
+**拆解规则:**
+1. 至少 1 个、最多 5 个子智能体; 各方向之间互补、不重叠.
+2. 涉及实时数据/事实/事件/价格/最新进展的方向, need_search = true, 并给出 search_angle.
+3. 纯概念/推理/常识方向, need_search = false.
+4. 复杂问题多拆 (3-5 个), 简单问题少拆 (1-2 个).
+5. 每个子智能体会并行独立调研, 你只负责拆解, 不要写最终总结 (总指挥最后会汇总).`;
+
+// 总指挥汇总提示词（深度档）：批判性多源整合，产出"有脑子"的独立研判报告
+const SELF_RESEARCH_SYNTH_PROMPT_DEEP = `你是 XTJ AI 深入研究模式的首席研究员(总指挥). 你刚刚收到 {{AGENT_COUNT}} 路并行调研的原始材料.
+
+**你的定位: 你不是复读机, 你是有独立判断力的研究者.**
+禁止把各路材料"分块粘贴"或"逐条罗列"; 你必须重新组织、交叉推理、独立研判, 输出一份属于你自己的研究报告.
+
+**核心工作方法(必须真实执行, 而不是嘴上说):**
+1. **多源交叉验证** — 把不同方向的信息放在一起比对: 哪些结论被多方印证? 哪些互相矛盾? 矛盾处必须明确指出.
+2. **证据权重判断** — 区分"有数据/有出处的硬事实"与"观点、预测、传闻". 采信强证据, 对弱证据明确降权.
+3. **主动推理** — 不止说"是什么", 更要回答"为什么会这样""接下来会怎样", 给出可追溯的因果链与逻辑推演.
+4. **批判性评估** — 主动质疑: 数据口径是否可比? 样本是否有偏? 是否存在利益相关方的立场偏见? 有没有被忽略的反面证据?
+5. **独立研判** — 在冲突信息面前必须表态并给出理由, 不许和稀泥. 用"综合判断""我倾向认为""更可信的解释是"明确亮出你的结论.
+6. **诚实标注边界** — 明确写出哪些还不确定、哪些数据缺失、哪些结论可能被推翻.
+
+**报告结构(Markdown 二级标题, 按此顺序):**
+## 核心结论
+先给判断. 3-5 条, 每条一句话说清结论 + 一句话说清依据. 不要铺垫.
+## 关键发现
+分点展开最重要的事实与数据, 必须带时间/数值/口径/来源主体. 适合对比的内容用 Markdown 表格.
+## 交叉验证与分歧
+哪些被多源印证(列出印证路径); 哪些存在冲突(冲突双方各自说法 + 你采信哪一方 + 为什么).
+## 深度分析
+机制与因果推演: 为什么形成当前局面, 关键变量是什么, 不同变量变化会导致什么不同走向.
+## 批判性评估
+证据强弱、口径局限、潜在偏见、反面观点与被忽视的视角.
+## 不确定性与风险
+明确列出未证实项、数据缺口、可能推翻结论的因素.
+## 结论与建议
+收敛为可执行/可决策的判断, 必要时给出分情形建议.
+
+**硬性要求:**
+- 全文中文, 1500-3500 字, 信息密度高, 不写废话不凑字数.
+- 严禁出现"子智能体""agent""调研员""材料一/材料二"等内部流程术语, 对用户而言这是一份浑然一体的报告.
+- 严禁"作为 AI""众所周知""在当今社会"这类套话开头.
+- 不要在正文里贴来源链接列表.
+- 数据必须标注时间与口径; 无法确认的必须写明"未获确认".
+- 如果材料明显不足以支撑某个方向, 直接说明信息不足, 不要编造.`;
+
+// 总指挥汇总提示词（快速档）：仍要求整合与研判, 但收敛篇幅
+const SELF_RESEARCH_SYNTH_PROMPT_FAST = `你是 XTJ AI 深入研究模式的首席研究员(总指挥). 你收到 {{AGENT_COUNT}} 路调研材料.
+请整合成一份简洁但有判断力的中文研究报告 —— 整合与研判, 而不是罗列材料.
+
+结构(Markdown 二级标题):
+## 核心结论  (3-4 条, 结论 + 依据各一句)
+## 关键发现  (带时间/数值/出处主体的要点)
+## 需要注意的分歧与不确定性  (冲突信息如何取舍 + 尚未确认的部分)
+
+硬性要求: 全文中文 600-1200 字; 严禁出现"子智能体/agent/调研员"等内部术语; 严禁套话开头; 不贴来源链接; 冲突信息必须表态并说明理由; 材料不足时直说, 不编造.`;
+
+// 单个研究子智能体：使用 DeepSeek /responses 内置 web_search 调研（thinking 必须为 off 才能挂内置搜索工具）
+async function runResearchSubAgent(opts) {
+  var agent = opts.agent;
+  var originalMessage = opts.originalMessage;
+  var sharedPrefix = opts.sharedPrefix || '';
+  var cancelToken = opts.cancelToken || { cancelled: false };
+  var onSearch = opts.onSearch || function () {};
+  var deep = opts.deep !== false; // pro/auto 走双阶段(海量检索→自主深度思考)；mini 走单阶段(检索→简要结论)
+
+  var sources = [];
+  var queries = [];
+
+  // 阶段一：海量联网检索，多源收集资料（thinking 必须 off 才能挂内置 web_search）
+  var searchSystem = sharedPrefix + '\n\n---\n\n你是 XTJ 深入研究模式派出的 [' + agent.role + '] 调研员。\n' +
+    '研究任务: ' + agent.task_description + '\n' +
+    '请围绕该方向主动联网检索，从多个不同角度/关键词收集尽可能多的资料（政策、数据、案例、观点、争议都要覆盖）。\n' +
+    '要求:\n' +
+    '1. 至少发起 5-8 次不同角度的联网搜索，不要只搜一次\n' +
+    '2. 重点收集可验证的事实、数据、时间、出处，而非泛泛而谈\n' +
+    '3. 留意并记录相互矛盾或存疑的信息\n' +
+    '4. 检索完成后，用中文整理你收集到的核心资料要点（只呈现实料，先不下结论）';
+  var searchMessages = [
+    { role: 'system', content: searchSystem },
+    { role: 'user', content: '用户研究主题: ' + originalMessage + '\n你的子方向: ' + agent.task_description + '\n\n请开始联网检索并整理资料。' }
+  ];
+  var rawMaterial = '';
+  var searchCount = 0;
+  try {
+    var r1 = await callDeepSeekViaResponses(searchMessages, {
+      thinking_mode: 'off',
+      max_tokens: 6000,
+      max_tool_rounds: 8,
+      total_timeout_ms: 420000, // 海量多轮检索阶段放宽到 7 分钟
+      onContentChunk: function (c) { rawMaterial += c; },
+      onSearchStatus: function (s) { if (s === 'completed') { searchCount++; onSearch(); } }
+    });
+    if (!rawMaterial && r1 && r1.content) rawMaterial = r1.content;
+  } catch (e) {
+    console.error('[SELF-RESEARCH] sub-agent search failed:', agent.role, e && e.message);
+  }
+
+  // 快速模式：阶段一资料即收束为简要结论，不再二次思考
+  if (!deep) {
+    var quick = '';
+    try {
+      var rq = await callDeepSeekViaResponses([
+        { role: 'system', content: sharedPrefix + '\n\n你是 [' + agent.role + '] 调研员，基于已收集资料给出简要结论（200-400 字，结构：【结论】→【依据】→【不确定点】）。' },
+        { role: 'user', content: '已收集资料要点:\n' + (rawMaterial || '(无)').slice(0, 4000) + '\n\n请给出简要分析。' }
+      ], { thinking_mode: 'off', max_tokens: 1200, onContentChunk: function (c) { quick += c; } });
+      if (!quick && rq && rq.content) quick = rq.content;
+    } catch (e) { console.error('[SELF-RESEARCH] sub-agent quick failed:', agent.role, e && e.message); }
+    return { content: (quick && quick.trim()) ? quick : rawMaterial, raw: rawMaterial, searchCount: searchCount, sources: sources, queries: queries };
+  }
+
+  // 阶段二（深度模式）：基于资料做自主深度思考与批判性分析，形成独立研判
+  var analysis = '';
+  try {
+    var analysisMessages = [
+      { role: 'system', content: sharedPrefix + '\n\n---\n\n你是 XTJ 深入研究模式派出的 [' + agent.role + '] 分析专家。你必须"自己有脑子"：\n' +
+        '基于下方资料，做自主深度思考与批判性分析，而不是复述或罗列。要求:\n' +
+        '1. 交叉验证多源信息，指出一致与冲突之处\n' +
+        '2. 评估信息可信度与潜在偏见/局限\n' +
+        '3. 提炼真正关键的逻辑链条与因果机制\n' +
+        '4. 形成你自己的独立判断与见解（明确"我认为/值得注意"）\n' +
+        '5. 坦诚标注不确定与未证伪之处\n' +
+        '结构: 【核心判断】→【多源交叉验证】→【批判性评估】→【不确定与风险】。200-700 字。' },
+      { role: 'user', content: '研究主题: ' + originalMessage + '\n子方向: ' + agent.task_description + '\n\n你收集到的资料要点:\n' + (rawMaterial || '(无资料)').slice(0, 6000) + '\n\n请深度分析并形成独立研判。' }
+    ];
+    var r2 = await callDeepSeekViaResponses(analysisMessages, {
+      thinking_mode: 'high',
+      max_tokens: 4000,
+      onContentChunk: function (c) { analysis += c; }
+    });
+    if (!analysis && r2 && r2.content) analysis = r2.content;
+  } catch (e) {
+    console.error('[SELF-RESEARCH] sub-agent analysis failed:', agent.role, e && e.message);
+    analysis = '';
+  }
+  return { content: (analysis && analysis.trim()) ? analysis : rawMaterial, raw: rawMaterial, searchCount: searchCount, sources: sources, queries: queries };
+}
+
+// 自托管深度研究主流程：返回 { answer, sources, queries, agents }
+async function runSelfResearchFlow(opts) {
+  var res = opts.res;
+  var query = opts.query;
+  var model = opts.model || 'pro';
+  var userName = opts.userName || '';
+  var convId = opts.convId || '';
+  var config = opts.config || {};
+  var cancelToken = opts.cancelToken || { cancelled: false };
+  var rewrite = opts.rewrite !== false;
+  var sharedPrefix = buildAiCorePrompt(config);
+
+  function sseSend(obj) {
+    if (res.writableEnded) return;
+    try { writeSse(res, obj); } catch (e) {}
+  }
+  function isCancelled() { return cancelToken.cancelled === true || res.writableEnded; }
+
+  // 研究强度 → 子智能体数量区间
+  var modeMap = {
+    mini: { min: 1, max: 2 },
+    pro: { min: 3, max: 5 },
+    auto: { min: 2, max: 5 }
+  };
+  var range = modeMap[model] || modeMap.pro;
+
+  if (isCancelled()) return { answer: '', sources: [], agents: [] };
+
+  // 1. 主智能体理解 + 改写问题
+  sseSend({ type: 'research_stage', stage: 'rewrite', message: '总指挥正在理解并拆解研究任务…' });
+  var researchQuery = query;
+  if (rewrite) {
+    try {
+      var rq = await rewriteResearchQuery(query);
+      if (rq && rq !== query) {
+        researchQuery = rq;
+        sseSend({ type: 'research_stage', stage: 'rewrite_done', message: '任务已拆解，准备派出研究小队…' });
+      }
+    } catch (e) { /* 改写失败静默回退原 query */ }
+  }
+  if (isCancelled()) return { answer: '', sources: [], agents: [] };
+
+  // 2. 主智能体 (Planner) 拆分 1-5 个子任务
+  sseSend({ type: 'research_stage', stage: 'collect', message: '总指挥派出 ' + range.min + '-' + range.max + ' 个研究子智能体并行调研中…' });
+  var plannerContent = '';
+  try {
+    var plannerRes = await callDeepSeek(
+      [
+        { role: 'system', content: sharedPrefix + '\n\n---\n\n' + SELF_RESEARCH_PLANNER_PROMPT },
+        { role: 'user', content: '研究主题: ' + researchQuery + '\n\n请输出规划 JSON。' }
+      ],
+      {
+        thinking_mode: 'high',
+        max_tokens: 4096,
+        response_format: { type: 'json_object' },
+        model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
+      }
+    );
+    plannerContent = plannerRes.content || '';
+  } catch (e) {
+    console.error('[SELF-RESEARCH] planner failed:', e && e.message);
+    plannerContent = '{"agents":[]}';
+  }
+  var plan = null;
+  try { plan = JSON.parse(plannerContent); } catch (e) {
+    try { var _m = plannerContent.match(/\{[\s\S]*\}/); if (_m) plan = JSON.parse(_m[0]); } catch (e2) {}
+  }
+  if (!plan || typeof plan !== 'object') plan = { agents: [] };
+  var agents = Array.isArray(plan.agents) ? plan.agents : [];
+  agents = agents.filter(function (a) { return a && a.role; }).map(function (a) {
+    return {
+      role: String(a.role),
+      task_description: a.task_description || a.task || ('研究：' + (a.role || '')),
+      need_search: a.need_search !== false,
+      search_angle: a.search_angle || (a.search_queries && a.search_queries[0]) || ''
+    };
+  });
+  // 强制数量区间 1-5
+  if (agents.length > range.max) agents = agents.slice(0, range.max);
+  if (agents.length < range.min) {
+    var _def = buildDefaultAgents(researchQuery);
+    _def = _def.slice(0, Math.max(range.min, Math.min(range.max, _def.length)));
+    if (_def.length) agents = _def;
+  }
+  if (agents.length === 0) agents = [{ role: '综合研究员', task_description: '从多维度全面研究：' + researchQuery, need_search: true, search_angle: '' }];
+  agents = agents.slice(0, 5);
+  var agentCount = agents.length;
+
+  // 3. 子智能体并行调研 (Promise.all 真·并行, DeepSeek 内置 web_search)
+  var allSources = [];
+  var allQueries = [];
+  var searchCountTotal = 0;
+  var workerResults = [];
+  var deepMode = (model !== 'mini'); // pro/auto：子智能体走"海量检索 → 自主批判性分析"双阶段
+  var workerPromises = agents.map(function (agent) {
+    return runResearchSubAgent({
+      agent: agent, originalMessage: researchQuery, sharedPrefix: sharedPrefix,
+      cancelToken: cancelToken, deep: deepMode, onSearch: function () { searchCountTotal++; }
+    }).then(function (wr) {
+      if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
+      if (wr && wr.queries) wr.queries.forEach(function (q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
+      return { role: agent.role, status: 'success', content: wr ? wr.content : '', sources: wr ? wr.sources : [] };
+    }).catch(function (e) {
+      console.error('[SELF-RESEARCH] sub-agent failed:', agent.role, e && e.message);
+      return { role: agent.role, status: 'failed', content: '', sources: [] };
+    });
+  });
+  workerResults = await Promise.all(workerPromises);
+  if (isCancelled()) return { answer: '', sources: allSources, agents: agents };
+
+  // 3.5 查漏补缺（仅深度档）：总指挥先审视一手材料，识别影响结论可靠性的关键缺口，至多再派 2 个补充调研
+  if (deepMode) {
+    try {
+      var gapDigest = workerResults.map(function (wr, i) {
+        var _gc = String(wr.content || '').slice(0, 1200);
+        return '方向' + (i + 1) + '「' + (wr.role || '') + '」:\n' + (_gc || '(无材料)');
+      }).join('\n\n');
+      var gapRes = await callDeepSeek(
+        [
+          { role: 'system', content: '你是研究总指挥。审视下方已收集的材料，判断"要写出一份结论可靠、经得起推敲的研究报告"还缺什么关键信息。\n' +
+            '重点关注三类缺口：(a) 支撑核心结论的关键数据缺失；(b) 关键事实只有单一来源、未经交叉验证；(c) 材料之间存在矛盾、需要再查证定论。\n' +
+            '严格输出 JSON（无 markdown 代码块）:\n' +
+            '{"gaps":[{"role":"2-6字中文角色","task_description":"需要补充查证什么(60字内)","search_angle":"检索关键词"}]}\n' +
+            '规则：只列真正影响结论可靠性的缺口；最多 2 个；若材料已足够，返回 {"gaps":[]}。' },
+          { role: 'user', content: '研究主题: ' + researchQuery + '\n\n已有材料摘要:\n' + gapDigest.slice(0, 6000) + '\n\n请输出缺口 JSON。' }
+        ],
+        { thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER) }
+      );
+      var gapPlan = null;
+      try { gapPlan = JSON.parse(gapRes.content || '{}'); } catch (e) {
+        try { var _gm = String(gapRes.content || '').match(/\{[\s\S]*\}/); if (_gm) gapPlan = JSON.parse(_gm[0]); } catch (e2) {}
+      }
+      var gaps = (gapPlan && Array.isArray(gapPlan.gaps))
+        ? gapPlan.gaps.filter(function (g) { return g && g.task_description; }).slice(0, 2)
+        : [];
+      if (gaps.length && !isCancelled()) {
+        sseSend({ type: 'research_stage', stage: 'gapfill', message: '总指挥发现 ' + gaps.length + ' 处信息缺口，正在补充查证…' });
+        var gapResults = await Promise.all(gaps.map(function (g) {
+          return runResearchSubAgent({
+            agent: { role: String(g.role || '补充查证'), task_description: String(g.task_description), need_search: true, search_angle: g.search_angle || '' },
+            originalMessage: researchQuery,
+            sharedPrefix: sharedPrefix,
+            cancelToken: cancelToken,
+            deep: false, // 补充轮只补事实，不再做二次长思考（控制时延）
+            onSearch: function () { searchCountTotal++; }
+          }).then(function (wr) {
+            if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
+            return { role: '补充查证·' + String(g.role || ''), status: 'success', content: wr ? wr.content : '' };
+          }).catch(function (e) {
+            console.error('[SELF-RESEARCH] gap agent failed:', g.role, e && e.message);
+            return null;
+          });
+        }));
+        gapResults.forEach(function (gr) { if (gr && gr.content) workerResults.push(gr); });
+      }
+    } catch (e) {
+      console.error('[SELF-RESEARCH] gap-check failed:', e && e.message);
+    }
+  }
+  if (isCancelled()) return { answer: '', sources: allSources, agents: agents };
+  allSources = cleanSearchResults(allSources, 50);
+  allQueries = allQueries.slice(0, 20);
+  // 内置 web_search 不暴露来源 URL，用检索次数构造占位来源以呈现"网页搜索 N"
+  if (allSources.length === 0 && searchCountTotal > 0) {
+    for (var _si = 0; _si < searchCountTotal; _si++) {
+      allSources.push({ title: 'DeepSeek 联网检索 #' + (_si + 1), url: '', snippet: '' });
+    }
+  }
+
+  // 4. 主智能体 (Synthesizer) 汇总所有子结果 → 最终中文报告（流式）
+  sseSend({ type: 'research_stage', stage: 'synthesize', message: '总指挥正在交叉验证与深度研判，生成最终报告…' });
+  var materialCount = workerResults.length || agentCount;
+  var synthTemplate = deepMode ? SELF_RESEARCH_SYNTH_PROMPT_DEEP : SELF_RESEARCH_SYNTH_PROMPT_FAST;
+  var synthPrompt = synthTemplate.replace('{{AGENT_COUNT}}', String(materialCount));
+  var synthMessages = [
+    { role: 'system', content: sharedPrefix + '\n\n---\n\n' + synthPrompt },
+    { role: 'user', content: '研究主题: ' + query + (researchQuery !== query ? ('\n（已优化为：' + researchQuery + '）') : '') }
+  ];
+  // 汇入各路调研材料（深度档给更大配额，保证总指挥拿到足量原料做交叉验证）
+  var perAgentLimit = deepMode ? 4000 : 1800;
+  var workerSummary = '【以下为各研究方向汇总上来的原始材料，仅供你整合推理，不得直接照搬结构或原文】\n';
+  var okCount = 0;
+  workerResults.forEach(function (wr, idx) {
+    var _c = String(wr.content || '').trim();
+    if (!_c) { workerSummary += '\n--- 方向' + (idx + 1) + '：' + (wr.role || '') + '（未取得有效材料）---\n'; return; }
+    okCount++;
+    if (_c.length > perAgentLimit) _c = _c.slice(0, perAgentLimit) + '\n...(材料截断)';
+    workerSummary += '\n--- 方向' + (idx + 1) + '：' + (wr.role || '') + ' ---\n' + _c + '\n';
+  });
+  synthMessages.push({ role: 'user', content: workerSummary });
+  if (allSources.length) {
+    var _realSrc = allSources.filter(function (s) { return s && s.url; });
+    if (_realSrc.length) {
+      var srcList = '\n\n【检索到的来源（判断证据强弱时可参考其权威性，正文不要贴链接）】\n';
+      _realSrc.forEach(function (s, i) { srcList += '[' + (i + 1) + '] ' + (s.title || '无标题') + ' - ' + s.url + '\n'; });
+      synthMessages.push({ role: 'user', content: srcList });
+    }
+  }
+  var synthTask = '本次共完成约 ' + searchCountTotal + ' 次联网检索，' + okCount + '/' + materialCount + ' 个研究方向取得有效材料。\n' +
+    '现在请你以首席研究员身份，对上述材料做交叉验证、因果推演与批判性评估，形成有独立判断的完整研究报告。\n' +
+    '再次强调：不要按材料顺序复述，要重新组织；冲突之处必须表态并说明理由；不确定之处必须坦诚标注。';
+  if (okCount === 0) synthTask += '\n注意：本次未取得有效检索材料，请如实说明信息不足，仅基于可靠常识做有限判断，禁止编造数据。';
+  synthMessages.push({ role: 'user', content: synthTask });
+
+  var finalAnswer = '';
+  try {
+    var synthAbort = new AbortController();
+    if (isCancelled()) synthAbort.abort();
+    cancelToken._onSynthCancel = function () { try { synthAbort.abort(); } catch (e) {} };
+    var synthRes = await callDeepSeekViaResponses(synthMessages, {
+      thinking_mode: 'high',
+      max_tokens: 16384,
+      total_timeout_ms: 600000, // 长报告 + high 思考，放宽到 10 分钟
+      signal: synthAbort.signal,
+      onContentChunk: function (chunk) {
+        if (isCancelled() || synthAbort.signal.aborted) return;
+        finalAnswer += chunk;
+        sseSend({ type: 'research_content', text: chunk, content: chunk });
+      }
+    });
+    if (!finalAnswer && synthRes && synthRes.content) finalAnswer = synthRes.content;
+  } catch (e) {
+    console.error('[SELF-RESEARCH] synthesizer failed:', e && e.message);
+    // 兜底：直接拼接各子智能体结果
+    finalAnswer = workerResults.map(function (wr, idx) {
+      return '\n【' + (wr.role || ('方向' + (idx + 1))) + '】\n' + (wr.content || '');
+    }).join('\n');
+  } finally {
+    if (cancelToken && cancelToken._onSynthCancel) delete cancelToken._onSynthCancel;
+  }
+  if (isCancelled()) return { answer: finalAnswer, sources: allSources, agents: agents };
+  if (!finalAnswer || !finalAnswer.trim()) finalAnswer = '（研究未完成，请重试）';
+  return { answer: finalAnswer, sources: allSources, queries: allQueries, agents: agents };
+}
+
+// POST /api/agent/research/stream - 自托管多智能体深度研究（SSE 流式，事件契约兼容旧 Tavily 代理）
+// 架构（2026-08 重构，完全去 Tavily 编排依赖）：
 //   1) rewrite=true（默认）→ DeepSeek 查询改写（research_stage: rewrite → rewrite_done），失败静默回退原 query
-//   2) mode='hybrid'（默认）→ Tavily 收集 + DeepSeek 流式中文综合（research_stage: collect → synthesize）
-//      mode='direct' → 保持原有行为（Tavily 报告直接返回）
-//   3) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
-//   4) 最终报告持久化到 posts（actor_key=ai_msg_conv_<convId>_<ts>），research_done 携带 message_id
+//   2) 主智能体(大哥) Planner 把问题拆成 1-5 个子任务 → 子智能体 Promise.all 真·并行调研
+//      （使用 DeepSeek 内置 web_search，research_stage: collect → synthesize）
+//   3) 主智能体 Synthesizer 汇总所有子结果 → 流式生成最终中文报告（research_content）
+//   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
+//   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
 app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10), async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
+  var cancelToken = { cancelled: false };
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -16484,6 +16743,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
   function markStreamDisconnected() {
     if (aborted) return;
     aborted = true;
+    cancelToken.cancelled = true;
     clearStreamHeartbeat();
     try { _researchAbort.abort(); } catch (_) {}
   }
@@ -16499,7 +16759,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
     var query = vq;
     var model = String(req.body && req.body.model || 'pro').trim();
     if (['pro', 'mini', 'auto'].indexOf(model) < 0) model = 'pro';
-    // mode：默认 hybrid（Tavily 收集 → DeepSeek 中文综合）；direct 保持原有直接返回行为
+    // mode：仅用于缓存 key 兼容（历史沿用 hybrid），当前已不再驱动 Tavily 分支
     var mode = String(req.body && req.body.mode || 'hybrid').trim();
     if (mode !== 'direct') mode = 'hybrid';
     // rewrite：默认 true（DeepSeek 查询改写预处理）
@@ -16531,138 +16791,33 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
       return safeEnd();
     }
 
-    // B. 查询改写预处理（失败静默回退原 query）
-    var researchQuery = query;
-    if (rewrite && !aborted) {
-      writeSse(res, { type: 'research_stage', stage: 'rewrite', message: '正在优化研究问题…' });
-      researchQuery = await rewriteResearchQuery(query);
-      if (!aborted && researchQuery !== query) {
-        writeSse(res, { type: 'research_stage', stage: 'rewrite_done', message: '问题已优化' });
-      }
-    }
-
-    var tavilyAnswer = '';
-    var tavilySources = [];
-    var tavilyDoneReceived = false;
-
-    if (mode === 'direct') {
-      // 原有行为：Tavily 报告直接返回（拦截 research_done 以补 message_id，事件顺序不变）
-      await tavilyResearchStream(researchQuery, model, function(ev) {
-        if (aborted) return;
-        if (ev.type === 'research_done') {
-          tavilyDoneReceived = true;
-          if (typeof ev.answer === 'string') tavilyAnswer = ev.answer;
-          return; // done 在持久化后补发（带 message_id）
-        }
-        if (ev.type === 'research_content' && typeof ev.text === 'string') tavilyAnswer += ev.text;
-        if (ev.type === 'research_sources' && Array.isArray(ev.sources)) tavilySources = ev.sources;
-        if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
-      }, _researchAbort.signal);
-      if (aborted) return safeEnd();
-      if (tavilyDoneReceived) {
-        if (!tavilyAnswer) tavilyAnswer = '（研究完成，未返回正文）';
-        var directMsgId = await persistResearchRecord(userName, convId, query, tavilyAnswer, tavilySources);
-        if (!aborted) {
-          researchCacheSet(cacheKey, tavilyAnswer, tavilySources);
-          writeSse(res, { type: 'research_sources', sources: tavilySources });
-          writeSse(res, { type: 'research_done', answer: tavilyAnswer, sources: tavilySources, message_id: directMsgId });
-        }
+    // ★ 自托管多智能体深度研究：主agent(大哥) 收任务 → 派 1-5 子agent 并行调研 → 主agent 汇总
+    //   完全不依赖 Tavily 编排/搜索；子agent 使用 DeepSeek 内置 web_search。事件契约与旧代理一致。
+    var config = await getAiConfig();
+    var selfResult;
+    try {
+      selfResult = await runSelfResearchFlow({
+        res: res, query: query, model: model, userName: userName, convId: convId,
+        config: config, cancelToken: cancelToken, rewrite: rewrite
+      });
+    } catch (e) {
+      if (!aborted) {
+        try { writeSse(res, { type: 'error', error: 'self_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
       }
       return safeEnd();
     }
-
-    // C. 混合模式：Tavily 收集 → DeepSeek 中文综合（流式）
-    writeSse(res, { type: 'research_stage', stage: 'collect', message: '多智能体并行研究中…' });
-    await tavilyResearchStream(researchQuery, model, function(ev) {
-      if (aborted) return;
-      if (ev.type === 'research_done') {
-        // 拦截 Tavily 的 done：不结束流，保留完整 answer 供综合
-        tavilyDoneReceived = true;
-        if (typeof ev.answer === 'string') tavilyAnswer = ev.answer;
-        return;
-      }
-      if (ev.type === 'research_content' && typeof ev.text === 'string') {
-        // ★ 2026-08-05: 中间原始报告不转发给前端（只累积），避免与最终综合报告叠加展示
-        tavilyAnswer += ev.text;
-        return;
-      }
-      if (ev.type === 'research_sources' && Array.isArray(ev.sources)) tavilySources = ev.sources;
-      if (!writeSse(res, ev)) { aborted = true; try { _researchAbort.abort(); } catch (_) {} }
-    }, _researchAbort.signal);
-    if (aborted || !tavilyDoneReceived) return safeEnd();
-
-    writeSse(res, { type: 'research_stage', stage: 'synthesize', message: '正在综合生成中文报告…' });
-
-    // DeepSeek 流式综合（复用 /api/agent/chat/stream 的 SSE 读取模式：fetch stream:true + 读 delta.content）
-    var synthText = '';
-    var synthOk = false;
-    if (!aborted && DEEPSEEK_API_KEY) {
-      try {
-        var synthPrompt = '你是深度研究综合专家。下面是一份多智能体网络研究的原始报告和来源列表。请用中文写一份结构清晰的最终研究报告：保留关键事实与数据，来源处标注编号[N]，语言自然流畅。长度 600-1200 字。\n\n原始报告：\n' + tavilyAnswer + '\n\n来源：\n' + tavilySources.map(function(s, i) { return '[' + (i + 1) + '] ' + (s.title || '') + ' ' + (s.url || ''); }).join('\n');
-        var synthTimeoutSignal = AbortSignal.timeout(180000);
-        var synthSignal = (typeof AbortSignal.any === 'function') ? AbortSignal.any([synthTimeoutSignal, _researchAbort.signal]) : _researchAbort.signal;
-        var synthResp = await fetch(DEEPSEEK_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
-          body: JSON.stringify({
-            model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
-            messages: [{ role: 'user', content: synthPrompt }],
-            stream: true,
-            max_tokens: 4000
-          }),
-          signal: synthSignal
-        });
-        if (synthResp && synthResp.ok && synthResp.body) {
-          var synthReader = synthResp.body.getReader();
-          var synthDecoder = new TextDecoder('utf-8');
-          var synthBuffer = '';
-          while (!aborted) {
-            var synthRead;
-            try { synthRead = await synthReader.read(); } catch (e) { break; }
-            if (synthRead.done) break;
-            synthBuffer += synthDecoder.decode(synthRead.value, { stream: true });
-            var synthLines = synthBuffer.split('\n');
-            synthBuffer = synthLines.pop() || '';
-            for (var sli = 0; sli < synthLines.length; sli++) {
-              var synthLine = synthLines[sli].trim();
-              if (!synthLine || synthLine === 'data: [DONE]' || synthLine.indexOf('data: ') !== 0) continue;
-              var synthChunk;
-              try { synthChunk = JSON.parse(synthLine.slice(6)); } catch (e) { continue; }
-              if (!synthChunk || !synthChunk.choices || !synthChunk.choices[0]) continue;
-              var delta = synthChunk.choices[0].delta || {};
-              if (typeof delta.content === 'string' && delta.content) {
-                synthText += delta.content;
-                if (!writeSse(res, { type: 'research_content', text: delta.content, content: delta.content })) { aborted = true; break; }
-              }
-            }
-          }
-          if (synthText && synthText.trim()) synthOk = true;
-        }
-      } catch (e) {
-        console.warn('[RESEARCH] synthesis failed, falling back to Tavily answer:', e && e.message);
-      }
+    if (aborted || (cancelToken && cancelToken.cancelled)) return safeEnd();
+    if (!selfResult || !selfResult.answer) {
+      if (!aborted) { try { writeSse(res, { type: 'error', error: 'self_research_empty', message: '研究未生成内容' }); } catch (_) {} }
+      return safeEnd();
     }
-    if (aborted) return safeEnd();
-
-    var finalAnswer;
-    if (synthOk) {
-      finalAnswer = synthText;
-    } else {
-      // fallback：DeepSeek 不可用/失败 → 直接把 Tavily 原始 answer 作为 research_content 分块发出
-      finalAnswer = tavilyAnswer || '（研究未返回可用内容）';
-      for (var fci = 0; !aborted && fci < finalAnswer.length; fci += 300) {
-        var fPiece = finalAnswer.slice(fci, fci + 300);
-        if (!writeSse(res, { type: 'research_content', text: fPiece, content: fPiece })) { aborted = true; break; }
-      }
-    }
-    if (aborted) return safeEnd();
 
     // D. 持久化 + 缓存写入 + 结束事件
-    var msgId = await persistResearchRecord(userName, convId, query, finalAnswer, tavilySources);
+    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources);
     if (aborted) return safeEnd();
-    researchCacheSet(cacheKey, finalAnswer, tavilySources);
-    writeSse(res, { type: 'research_sources', sources: tavilySources });
-    writeSse(res, { type: 'research_done', answer: finalAnswer, sources: tavilySources, message_id: msgId });
+    researchCacheSet(cacheKey, selfResult.answer, selfResult.sources);
+    writeSse(res, { type: 'research_sources', sources: selfResult.sources });
+    writeSse(res, { type: 'research_done', answer: selfResult.answer, sources: selfResult.sources, message_id: msgId });
     return safeEnd();
   } catch (e) {
     if (!aborted) {
