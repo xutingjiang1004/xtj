@@ -203,8 +203,10 @@ test('validatePath rejects .. traversal', () => {
 });
 
 test('code-workspace also validates paths with per-segment check', () => {
-  assert.match(codeWorkspace, /part === '\.\.'/);
-  assert.match(codeWorkspace, /path\.split\('\/'\)\.some/);
+  // ★ 修复后：validatePath 与 code-file-system.js 对齐，归一化（合并 //、去 ./）后
+  // 逐段检查，拒绝 '..'/'.'/空段，覆盖 a//b、a/./b 等输入。
+  assert.match(codeWorkspace, /parts\[i\] === '\.\.'/);
+  assert.match(codeWorkspace, /path\.split\('\/'\)/);
   assert.match(codeWorkspace, /Path traversal is not allowed/);
 });
 

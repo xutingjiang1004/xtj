@@ -1431,6 +1431,27 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             }
         };
 
+        // ★ 修复 M-1：个人中心"通知"开关此前完全没有绑定，拨动无任何持久化效果。
+        // 初始化时读取 xtj-notif 设置 checked 状态，change 时写入偏好（'off' 表示关闭）。
+        function initProfileNotificationToggle() {
+            var toggle = document.getElementById('profileNotifToggle');
+            if (!toggle || toggle.__xtjNotifBound) return;
+            toggle.__xtjNotifBound = true;
+            try {
+                toggle.checked = window.safeStorage.get('xtj-notif') !== 'off';
+            } catch (e) {}
+            toggle.addEventListener('change', function() {
+                try {
+                    window.safeStorage.set('xtj-notif', toggle.checked ? 'on' : 'off');
+                } catch (e) {}
+            });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initProfileNotificationToggle);
+        } else {
+            initProfileNotificationToggle();
+        }
+
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
@@ -3090,6 +3111,12 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     showToast('请选择图片文件');
                     return;
                 }
+                // ★ 修复 S5：前端同样拒绝 SVG（服务端已拒），避免 SVG 先上传到公共桶、
+                // 后端再拒绝造成的"存储桶残留可执行脚本文件"窗口。
+                if (/\.svgz?$/i.test(String(file.name || '')) || file.type === 'image/svg+xml') {
+                    showToast('不支持 SVG 头像（存在安全风险）');
+                    return;
+                }
                 
                 if (file.size > 10 * 1024 * 1024) {
                     showToast('图片大小不能超过10MB');
@@ -3354,7 +3381,17 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 // H-36: 登出只清除会话相关键，保留用户偏好与设备身份：
                 // xtj-theme（主题偏好，theme-toggle.js 实际使用连字符 key）、xtj_device_id（设备 ID，设备追踪）、
                 // xtj_pending_behavior（未上报的遥测队列）。
-                var xtjPreserveKeys = { 'xtj-theme': 1, 'xtj_theme': 1, 'xtj_device_id': 1, 'xtj_pending_behavior': 1 };
+                // ★ 修复：新增 xtj-notif（通知开关偏好）、xtj_report_reply_check（举报回复提醒）、
+                // xtj_current_tab（最近停留 tab）等用户偏好键，避免登出静默重置用户设置。
+                var xtjPreserveKeys = {
+                    'xtj-theme': 1,
+                    'xtj_theme': 1,
+                    'xtj_device_id': 1,
+                    'xtj_pending_behavior': 1,
+                    'xtj-notif': 1,
+                    'xtj_report_reply_check': 1,
+                    'xtj_current_tab': 1
+                };
                 try {
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
@@ -3794,7 +3831,9 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (profileActivityState.loading) return;
-                if (!forceRefresh && profileActivityState.loadedUser === currentUser && Date.now() - profileActivityState.lastLoadedAt < 45000) {
+                // ★ 修复：缓存窗口从 45000ms 缩短到 8000ms —— 用户在其他页面点赞/评论后，
+                // 45 秒内切回"我的"面板看不到更新；缩短后切回即可较快看到最新互动数据。
+                if (!forceRefresh && profileActivityState.loadedUser === currentUser && Date.now() - profileActivityState.lastLoadedAt < 8000) {
                     renderProfileActivity();
                     return;
                 }
@@ -7416,9 +7455,21 @@ function renderProfileActivityList(kind) {
                     var el = document.getElementById(id);
                     if (!el) return;
                     var eventName = el.type === "checkbox" || el.tagName === "SELECT" || el.type === "date" ? "change" : "input";
-                    el.addEventListener(eventName, function() {
-                        window.applyPostFilters();
-                    });
+                    if (eventName === "input") {
+                        // ★ 修复：搜索输入防抖 300ms，避免每次击键全量重建 feed DOM
+                        var debounceTimer = null;
+                        el.addEventListener(eventName, function() {
+                            if (debounceTimer) clearTimeout(debounceTimer);
+                            debounceTimer = setTimeout(function() {
+                                debounceTimer = null;
+                                window.applyPostFilters();
+                            }, 300);
+                        });
+                    } else {
+                        el.addEventListener(eventName, function() {
+                            window.applyPostFilters();
+                        });
+                    }
                 });
             }
 
@@ -8213,6 +8264,9 @@ function renderProfileActivityList(kind) {
                 if (window.isTogglingPostVisibility) return;
                 var post;
                 var nextVisibility;
+                // ★ 修复：失败分支已设置失败文案，若 finally 仍无条件重置为成功态文案
+                // 会覆盖"操作失败/操作异常"的提示；handled 置位后 finally 不再重置。
+                var handled = false;
                 try {
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
                     if (!post || !canEditPost(post)) {
@@ -8229,6 +8283,7 @@ function renderProfileActivityList(kind) {
                         visibility: nextVisibility
                     });
                     if (!result.ok) {
+                        handled = true;
                         if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🌐 设为公开"; }
                         showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
@@ -8237,6 +8292,7 @@ function renderProfileActivityList(kind) {
                     showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
                     await loadFeed(true);
                 } catch (e) {
+                    handled = true;
                     console.error("togglePostVisibility error:", e);
                     if (btn) {
                         btn.disabled = false;
@@ -8245,7 +8301,7 @@ function renderProfileActivityList(kind) {
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 } finally {
                     window.isTogglingPostVisibility = false;
-                    if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
+                    if (!handled && btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
                 }
             };
             // ============== Global click delegation ==============
@@ -8680,6 +8736,9 @@ function renderProfileActivityList(kind) {
                 if (filteredPosts.length < endIdx && !feedEndReached) {
                     try {
                         feedPageFetchPending = true;
+                        // ★ 修复：ensureFeedCoverageForVisibleSlice 内部以 feedNextOffset（服务端游标）拉取，
+                        // 不再依赖 feedPage 推算 offset，避免并发发帖/删除导致 offset 漂移时帖子重复或永久跳过。
+                        // 拉取成功后以当前内存过滤结果重新计算切片。
                         await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
                         writeFeedCacheSnapshot();
                     } catch (e) {
@@ -8803,7 +8862,9 @@ function renderProfileActivityList(kind) {
                 var visibleCount = feedPage * FEED_PAGE_SIZE;
                 var currentPages = filteredPosts.slice(0, Math.max(FEED_PAGE_SIZE, visibleCount));
                 // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
-                feedEndReached = !!feedEndReached && currentPages.length >= filteredPosts.length;
+                // ★ 修复：不再用 `currentPages.length >= filteredPosts.length` 反向置 feedEndReached。
+                // 缓存 hydrate 或帖数恰为 20 的倍数时会把 endReached 误置 true，导致无限滚动提前终止。
+                // feedEndReached 只由服务端 endReached / 空 chunk / 游标越界判定。
                 renderFeedWithAvatars(currentPages, visibleComments, scopedLikes);
                 refreshPendingFeedIpPosts(currentPages);
                 renderFilterSummary(filteredPosts.length);
@@ -9837,19 +9898,30 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 try {
+                    // ★ 修复：口径对齐 —— loadDockChatList 用最近 180 条按会话聚合再求和，
+                    // 这里原为 120 条直接逐条计数（去重 120 条），两处结果不一致导致切换 tab 时数字跳动。
+                    // 现将查询上限提高到 200，并同样先按会话（media_url）聚合每条会话的未读数
+                    // （封顶 99），再对所有会话求和，与 loadDockChatList 的统计口径保持一致。
                     var result = await sb.from('posts')
                         .select('id, user_name, content, views, created_at')
                         .eq('media_type', DM_MARKER)
                         .eq('media_url', window.currentUser)
                         .order('created_at', { ascending: false })
-                        .limit(120);
+                        .limit(200);
 
                     var data = result.data;
                     var error = result.error;
                     if (error) return;
-                    var cnt = 0;
+                    var convUnreadMap = {};
                     (data || []).forEach(function(m) {
-                        if (!window.isMsgReadByMe(m)) cnt++;
+                        var sender = m && m.user_name;
+                        if (!sender) return;
+                        if (window.isMsgReadByMe(m)) return;
+                        convUnreadMap[sender] = Math.min((convUnreadMap[sender] || 0) + 1, 99);
+                    });
+                    var cnt = 0;
+                    Object.keys(convUnreadMap).forEach(function(sender) {
+                        cnt += convUnreadMap[sender];
                     });
                     setUnreadBadgeCount(cnt);
                 } catch(e) {}
@@ -10256,10 +10328,8 @@ function renderProfileActivityList(kind) {
                         } else if (tab === 'posts') {
                             // 帖子页刷新
                             window.showToast('正在刷新...');
-                            // 清除刷新状态
-                            try {
-                                window.safeStorage.remove(CACHE_KEY);
-                            } catch(e) {}
+                            // ★ 修复：不再先删缓存再刷新。若网络失败，用户仍可看到旧数据与重试入口；
+                            // 刷新成功时 loadFeed 会写入新快照自然覆盖旧缓存。
                             if (typeof window.initialLoad === 'function') {
                                 rebuildFeedFromCurrentState()
                                     .then(function() {
@@ -10695,19 +10765,26 @@ function renderProfileActivityList(kind) {
                     });
                 } catch(e) {
                     if (listLoadSeq !== _dockChatListLoadSeq) return;
-                    window.dockChatListCacheTime = 0;
-                    if (!hadRenderedList) el.innerHTML = '';
-                    var previousRetry = el.querySelector('.chat-load-retry');
-                    if (previousRetry) previousRetry.remove();
-                    var retry = document.createElement('button');
-                    retry.type = 'button';
-                    retry.className = 'chat-load-retry';
-                    retry.textContent = '消息加载失败，点击重试';
-                    retry.addEventListener('click', function() {
-                        retry.remove();
-                        loadDockChatList();
-                    }, { once: true });
-                    el.appendChild(retry);
+                    // ★ 修复：已有列表时保留旧列表并仅 toast 提示失败，不追加重试按钮；
+                    // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
+                    // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
+                    if (!hadRenderedList) {
+                        el.innerHTML = '';
+                        var previousRetry = el.querySelector('.chat-load-retry');
+                        if (previousRetry) previousRetry.remove();
+                        var retry = document.createElement('button');
+                        retry.type = 'button';
+                        retry.className = 'chat-load-retry';
+                        retry.textContent = '消息加载失败，点击重试';
+                        retry.addEventListener('click', function() {
+                            retry.remove();
+                            loadDockChatList();
+                        }, { once: true });
+                        el.appendChild(retry);
+                        window.dockChatListCacheTime = 0;
+                    } else {
+                        showToast('消息列表刷新失败，请稍后重试');
+                    }
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                 }
@@ -11013,6 +11090,7 @@ function renderProfileActivityList(kind) {
 
             function buildDockChatRenderSignature(msgs) {
                 return (Array.isArray(msgs) ? msgs : []).map(function(m) {
+                    var payload = getDMMessagePayload(m) || {};
                     return [
                         m && m.id ? m.id : '',
                         m && m.__tempId ? m.__tempId : '',
@@ -11022,7 +11100,10 @@ function renderProfileActivityList(kind) {
                         m && m.created_at ? m.created_at : '',
                         m && m.actor_key ? m.actor_key : '',
                         m && m.views ? m.views : 0,
-                        m && m.__optimistic ? 1 : 0
+                        m && m.__optimistic ? 1 : 0,
+                        // ★ 修复：签名纳入 read_at 与 withdrawn，已读状态/撤回后必须重渲染
+                        getDMMessageReadAt(m),
+                        payload.withdrawn ? 1 : 0
                     ].join('~');
                 }).join('|');
             }
@@ -11403,7 +11484,9 @@ function renderProfileActivityList(kind) {
                 } catch(e) {
                     removeDockChatCacheMessage(targetUser, tempId);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    inp.value = capturedContent;
+                    // ★ 修复：发送失败恢复输入框内容时，若用户失败提示期间已输入新内容，
+                    // 直接赋值会覆盖用户正在输入的内容；仅当输入框当前为空时才恢复原文。
+                    if (!inp.value) { inp.value = capturedContent; }
                     showToast('发送失败: ' + (e && e.message ? e.message : '未知错误'));
                 }
                 finally { dockChatSending = false; }
@@ -11775,12 +11858,13 @@ function renderProfileActivityList(kind) {
             }
 
             if (themeBtn) {
-                themeBtn.addEventListener('click', function() {
+                themeBtn.__xtjLegacyThemeClick = function() {
                     const isDark = htmlEl.getAttribute('data-theme') === 'dark';
                     const nextTheme = !isDark ? '深色模式' : '浅色模式';
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('settings_change', '切换主题 → ' + nextTheme); } catch(e) {}
                     animateThemeToggle(!isDark, themeBtn);
-                });
+                };
+                themeBtn.addEventListener('click', themeBtn.__xtjLegacyThemeClick);
             }
             // 初始化时从 localStorage 读取主题设置
             const savedTheme = window.safeStorage.get(THEME_STORAGE_KEY);
@@ -11802,6 +11886,21 @@ function renderProfileActivityList(kind) {
                     });
                 }
             } catch (_) {}
+            // ★ 修复 M-2：本旧主题块在 core.js 顶层立即执行，此时 theme-toggle.js
+            // （V2 控制器）尚未加载（defer 顺序在 core 之后）。DOMContentLoaded 时
+            // 所有 defer 脚本已执行完毕，若 V2 已接管（__xtjThemeControllerV2 被设置），
+            // 移除旧块对 themeToggle 的 click 绑定，避免双 handler 同时响应导致
+            // 动画/存储键（xtj-theme vs xtj_theme）互相覆盖。主题统一由 V2 管理。
+            if (themeBtn) {
+                document.addEventListener('DOMContentLoaded', function() {
+                    try {
+                        if (window.__xtjThemeControllerV2 && themeBtn.__xtjLegacyThemeClick) {
+                            themeBtn.removeEventListener('click', themeBtn.__xtjLegacyThemeClick);
+                            themeBtn.__xtjLegacyThemeClick = null;
+                        }
+                    } catch (e3) {}
+                });
+            }
             }
 
             function applyPerformanceMode() {

@@ -117,6 +117,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     showingHistory: false,
     headerButtonsCleanup: null,
     _currentReqId: null,
+    // ★ 修复：深度思考二级页面独立请求 ID 通道，与普通聊天 _currentReqId 隔离，
+    // 避免深页流式输出期间打开普通聊天发消息导致深页 SSE 被误判"被取代"而中断。
+    _dtCurrentReqId: null,
+    // ★ 修复：深度思考二级页面独立 AbortController，与普通聊天 S.abortController 隔离，
+    // 避免深页关闭/超时误杀普通聊天正在进行的流式请求。
+    _dtAbortController: null,
     _lastMsgDedupKey: '',
     _lastDtDedupKey: '',
     _lastConfigVersion: 0,
@@ -672,8 +678,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function writeConvId(v) {
     try {
-      if (v) localStorage.setItem(CONV_ID_KEY, v);
-      else localStorage.removeItem(CONV_ID_KEY);
+      // ★ 修复：存储键并入用户名，防止同一浏览器多账号切换时串会话
+      var un = readUserName();
+      var key = CONV_ID_KEY + (un ? ':' + encodeURIComponent(un) : '');
+      if (v) localStorage.setItem(key, v);
+      else localStorage.removeItem(key);
     } catch (e) {}
   }
 
@@ -2807,7 +2816,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.activeRenderers = [];
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
-    S.abortController = null;
+    // ★ 修复：cancelDeepThink 只清深页独立 controller，不影响普通聊天
+    S._dtAbortController = null;
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     // Fire-and-forget cancel to server
     try {
@@ -3036,8 +3046,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function loadResearchHistoryList(bodyEl) {
     var items = [];
-    fetch(API_BASE + '/research/history?limit=10', { method: 'GET', credentials: 'include' })
-      .then(function(resp) {
+    // ★ 修复 S1：历史研究列表同样需要鉴权头，与 /research/stream 对齐
+    getUserAuthPayload({ forceNoToken: false }).then(function(authPayload) {
+      var authHeaders = (authPayload && authPayload.headers) || {};
+      return fetch(API_BASE + '/research/history?limit=10', { method: 'GET', credentials: 'include', headers: authHeaders });
+    }).then(function(resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
       })
@@ -3187,9 +3200,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try {
         var resp;
         try {
+          // ★ 修复 S1：研究接口此前不带 Authorization 头（与全站其他 AI 请求不一致），
+          // 后端若按 token 鉴权将 401，或产生鉴权模型不一致。改用统一鉴权 payload。
+          var authPayload = await getUserAuthPayload({ forceNoToken: false });
+          var authHeaders = (authPayload && authPayload.headers) || {};
           resp = await fetch(API_BASE + '/research/stream', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             credentials: 'include',
             body: JSON.stringify({
               query: String(query || ''),
@@ -3370,7 +3387,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { progressCard.remove(); } catch (e) {}
       if (S.deepThinkProgressCard === progressCard) S.deepThinkProgressCard = null;
       if (controller && S.deepThinkJob === controller) S.deepThinkJob = null;
-      if (controller && S.abortController === controller) S.abortController = null;
+      if (controller && S._dtAbortController === controller) S._dtAbortController = null;
     }
 
     try {
@@ -3385,12 +3402,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       scrollToBottom(dtMessagesEl, true);
 
       controller = new AbortController();
-      S.abortController = controller;
+      // ★ 修复：Tavily 深页流程也走深页独立通道
+      S._dtAbortController = controller;
       S.deepThinkJob = controller;
       S.currentStreamAborted = false;
 
       var researchPromise = runTavilyResearch(text, function(prog) {
-        if (S._currentReqId !== reqId) {
+        if (S._dtCurrentReqId !== reqId) {
           try { if (researchPromise && researchPromise.cancel) researchPromise.cancel(); } catch (e) {}
           return;
         }
@@ -3672,7 +3690,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // SSE 事件处理函数
     function _handleSseEvent(evt) {
-      if (S._currentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
+      if (S._dtCurrentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
 
         if (evt.type === 'meta') {
           if (streamConvIdRef) streamConvIdRef.value = evt.conversation_id;
@@ -3774,7 +3792,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (evt.type === 'done') {
           safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
-          S.sending = false; S.paused = false; S.activeRenderers = []; S.abortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
+          S.sending = false; S.paused = false; S.activeRenderers = []; S._dtAbortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
           if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
@@ -3795,7 +3813,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     while (true) {
-      if (S._currentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
+      if (S._dtCurrentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
         if (abortedRef) abortedRef.value = true;
         // 120s 绝对超时中止：标记 timedOut，让循环后的兜底逻辑统一收尾
         if (controller && controller.signal.aborted && controller._abortReason === 'timeout') {
@@ -3968,13 +3986,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // 4. 创建 AbortController
     var controller = new AbortController();
-    S.abortController = controller;
+    // ★ 修复：旧版深度思考发送也走独立通道，避免覆盖普通聊天状态（此函数为历史死代码，同步保留）
+    S._dtAbortController = controller;
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
     // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
     // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
-      if (S._currentReqId !== reqId) return;
+      if (S._dtCurrentReqId !== reqId) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
     }, 120000);
@@ -4471,20 +4490,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
       S.lifecycleId++;
       S.clientRequestId++;
-      S._currentReqId = null;
-      if (S.abortController) {
+      // ★ 修复：只清深页独立请求通道，不动普通聊天的 _currentReqId，
+      // 避免关闭深页时误杀正在进行的普通聊天流。
+      S._dtCurrentReqId = null;
+      // ★ 修复：只 abort 深页自己的 controller（_dtAbortController / deepThinkJob），
+      // 不再触碰普通聊天共享的 S.abortController。
+      var dtControllers = [S._dtAbortController, S.deepThinkJob];
+      dtControllers.forEach(function(c) {
+        if (!c) return;
         try {
-          S.abortController._abortReason = 'aborted';
-          try { S.abortController.abort('aborted'); } catch (eAbortReason) { S.abortController.abort(); }
+          c._abortReason = 'aborted';
+          try { c.abort('aborted'); } catch (eAbortReason) { c.abort(); }
         } catch (eAbort) {}
-      }
-      if (S.deepThinkJob && S.deepThinkJob !== S.abortController) {
-        try {
-          S.deepThinkJob._abortReason = 'aborted';
-          try { S.deepThinkJob.abort('aborted'); } catch (eJobAbortReason) { S.deepThinkJob.abort(); }
-        } catch (eJobAbort) {}
-      }
-      S.abortController = null;
+      });
+      S._dtAbortController = null;
       S.deepThinkJob = null;
       S.sending = false;
       // A file selected in the research composer is session-scoped.  Never
@@ -4568,14 +4587,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
-    S._currentReqId = reqId;
+    // ★ 修复：深页请求 ID 写入独立通道，不覆盖普通聊天的 _currentReqId
+    S._dtCurrentReqId = reqId;
     function resetSendingIfCurrent() {
-      if (S._currentReqId === reqId) {
+      if (S._dtCurrentReqId === reqId) {
         if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
         S.sending = false;
         S.deepThinkJob = null;
         S.deepThinkProgressCard = null;
-        S.abortController = null;
+        S._dtAbortController = null;
         S.paused = false;
         S.activeRenderers = [];
         var dtPB = document.getElementById('dtPauseBtn');
@@ -4661,13 +4681,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // 4. 创建 AbortController
     var controller = new AbortController();
-    S.abortController = controller;
+    // ★ 修复：深页 controller 存独立通道，不再覆盖普通聊天的 S.abortController
+    S._dtAbortController = controller;
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
     // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
     // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
-      if (S._currentReqId !== reqId) return;
+      if (S._dtCurrentReqId !== reqId) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
     }, 120000);
@@ -5190,33 +5211,61 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { closeSiteSearch(); } catch (e) {}
       try { closeAiChat(); } catch (e2) {}
     };
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') {
       // validate: source must be posts, source_id must be valid UUID
-      if (target.type === 'post' && item.source !== 'posts') {
+      if (item.source !== 'posts') {
         console.warn('[site-search] blocked invalid post result', { source: item.source, source_id: item.source_id });
         return;
       }
-      if (target.type === 'post' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(target.post_id || item.source_id || ''))) {
-        console.warn('[site-search] blocked invalid post_id', target.post_id || item.source_id);
+      // ★ 修复：comment 类型同样要求 posts 来源 + UUID，防止伪造跳转目标越权打开任意帖子详情
+      var postId = String(target.post_id || item.source_id || '');
+      if (!UUID_RE.test(postId)) {
+        console.warn('[site-search] blocked invalid post_id', postId);
         return;
       }
       closeSecondary();
-      window.openPostDetail(target.post_id);
+      window.openPostDetail(postId);
     } else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
+      // ★ 修复：photo 类型校验来源与 id 格式，避免越权预览
+      var photoId = String(target.post_id || item.source_id || '');
+      if ((item.source !== 'posts' && item.source !== 'photos') || !photoId) {
+        console.warn('[site-search] blocked invalid photo result', { source: item.source, source_id: photoId });
+        return;
+      }
       closeSecondary();
-      window.openPhotoPreview(0, { photos: [{ id: String(target.post_id || item.source_id || 'search-photo'), cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
+      window.openPhotoPreview(0, { photos: [{ id: photoId, cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
     } else if (target.type === 'photo' && typeof window.openPostDetail === 'function') {
+      var photoPostId = String(target.post_id || item.source_id || '');
+      if (item.source !== 'posts' || !UUID_RE.test(photoPostId)) {
+        console.warn('[site-search] blocked invalid photo post result', { source: item.source, source_id: photoPostId });
+        return;
+      }
       closeSecondary();
-      window.openPostDetail(target.post_id);
+      window.openPostDetail(photoPostId);
     } else if (target.type === 'dm' && typeof window.openChat === 'function') {
+      // ★ 修复：dm 跳转必须有明确的会话对象，空 user 直接拦截
+      if (!target.user || typeof target.user !== 'string') {
+        console.warn('[site-search] blocked invalid dm target', target);
+        return;
+      }
       closeSecondary();
       window.openChat(target.user);
     } else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') {
+      if (!target.conversation_id) {
+        console.warn('[site-search] blocked invalid ai_history target', target);
+        return;
+      }
       try { closeSiteSearch(); } catch (e3) {}
       window.__xtjAiAgent.openConversation(target.conversation_id, target.mode);
     } else if (target.type === 'user' && typeof window.openUserProfile === 'function') {
+      var userName = target.user_name || item.title || '';
+      if (!userName || typeof userName !== 'string') {
+        console.warn('[site-search] blocked invalid user target', target);
+        return;
+      }
       closeSecondary();
-      window.openUserProfile(target.user_name || item.title || '');
+      window.openUserProfile(userName);
     }
   }
 
@@ -5955,7 +6004,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var readResult;
         try { readResult = await reader.read(); } catch (e) { throw e; }
         if (readResult.done) break;
-        if (!S.active) { reader.cancel().catch(function(){}); break; }
+        if (!S.active) {
+          // ★ 修复 M10：break 前必须置 aborted，否则下方 `S._currentReqId !== reqId || aborted`
+          // 判定可能走"完成处理"分支保留半成品节点（回答闪现后消失）。
+          aborted = true;
+          reader.cancel().catch(function(){});
+          break;
+        }
         
         buffer += decoder.decode(readResult.value, { stream: true });
         var lines = buffer.split('\n');
@@ -6009,6 +6064,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             cleanupRenderers();
             hideAssistantTyping();
             if (assistantBubble) try { assistantBubble.innerHTML = ''; } catch (e) {}
+            // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
+            // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
+            reasoningContainer = null;
+            if (reasoningRenderer) { try { reasoningRenderer.cancel(); } catch (eR) {} reasoningRenderer = null; }
             aiContent = '';
             aiReasoning = '';
             reasoningStarted = false;
@@ -6279,7 +6338,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'reasoning') {
-            aiReasoning += evt.text || '';
+            // ★ 修复 M8：思考文本无限累积会导致内存膨胀与收尾一次性渲染卡顿。
+            // 设 200k 字符上限（深页已有 4000/次切片与上限，普通聊天此前无上限）。
+            var chunkText = String(evt.text || '');
+            if (aiReasoning.length < 200000) {
+              var room = 200000 - aiReasoning.length;
+              aiReasoning += room > 0 ? chunkText.slice(0, room) : '';
+            }
             // C 修复：用户关闭思考时，跳过流式渲染（仅静默累积，收尾由 finishAiMessage 统一隐藏）
             if (S.thinkingMode === 'off') continue;
             // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
@@ -6947,6 +7012,9 @@ function showChatMessages() {
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     messagesEl.addEventListener('scroll', window.throttleRAF(function() {
       S.autoScrollPinned = isNearBottom(messagesEl, 84);
+      // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
+      // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。
+      if (S.showingHistory || !messagesEl.offsetParent) return;
       if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
         loadHistory(messagesEl, S.oldestCursor);
       }

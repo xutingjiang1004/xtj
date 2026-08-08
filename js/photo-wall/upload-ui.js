@@ -529,10 +529,12 @@
       if (grid) grid.innerHTML = '';
       var input = byId('photoFileInput');
       if (input) input.value = '';
-      var title = byId('pwUploadTitle');
+      var title = byId('pwUploadSheetTitle');
       if (title) title.textContent = '选择照片';
-      var subtitle = byId('pwUploadSubtitle');
+      var subtitle = byId('pwUploadSheetMeta');
       if (subtitle) subtitle.textContent = '最多 ' + MAX_BATCH_COUNT + ' 张图片，单张不超过 50MB';
+      var skipMeta = byId('pwUploadSheetSkipped');
+      if (skipMeta) { skipMeta.style.display = 'none'; skipMeta.textContent = ''; }
       setUploadResult('', false);
     } else {
       // force 分支（如开始上传时）也要回收预览 URL，避免 Blob 内存泄漏

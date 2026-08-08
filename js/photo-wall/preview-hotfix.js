@@ -390,17 +390,23 @@
       // H-32: 双击（缩放）取消单次单击的延迟关闭
       if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
       state.ignoreNativeDblClickUntil = now + 520;
+      // ★ 修复：双击命中后重置 lastTapAt 与坐标，防止随后的 dblclick 事件
+      // 在关闭定时器已被取消的间隙再次进入单击判定（先关后开 / 关不掉）。
       state.lastTapAt = 0;
+      state.lastTapX = 0;
+      state.lastTapY = 0;
       toggleZoomAt(point);
       return;
     }
+    // ★ 修复：非双击命中的新点击先取消旧定时器再启动新定时器，
+    // 避免"第一次点击的关闭定时器在第二次点击后才触发"导致的时序竞争。
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
     state.lastTapAt = now;
     state.lastTapX = point.x;
     state.lastTapY = point.y;
     // H-32: 单击延迟关闭预览（与原 preview.js 的单击关闭一致）；
     // 仅未缩放时生效，双击会在 280ms 内取消该定时器。
     if (state.scale > 1.01 || isModalOpen()) return;
-    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
     state.singleTapCloseTimer = setTimeout(function () {
       state.singleTapCloseTimer = 0;
       if (isModalOpen() || state.scale > 1.01) return;
@@ -891,6 +897,11 @@
     if (state.forceClosing) return;
     state.forceClosing = true;
     clearCloseFallbackTimer();
+    // ★ 修复 A2：关闭时移除键盘导航监听，避免每次打开预览重复注册
+    if (state.__keydownHandler) {
+      try { document.removeEventListener('keydown', state.__keydownHandler, true); } catch (_) {}
+      state.__keydownHandler = null;
+    }
     try {
       closePhotoInfoInternal(true);
       if (state.activePointerId != null) {
@@ -1254,6 +1265,35 @@
         resetPreviewState({ animate: false, resetRotation: false, keepSuppressTap: true });
       }
     }, true);
+
+    // ★ 修复 A2：预览键盘导航（捕获阶段，避免被页面其他监听吞掉）
+    ensurePreviewKeydownHandler();
+  }
+
+  // ★ 修复 A2：注册/恢复预览键盘导航监听。
+  // 每次打开预览时调用（forceClosePhotoPreview 关闭时会移除，防止累积重复监听）。
+  function ensurePreviewKeydownHandler() {
+    if (state.__keydownHandler) return;
+    var keydownHandler = function (event) {
+      var root = overlay();
+      if (!root || !root.classList.contains('active')) return;
+      // 输入框/文本域内不劫持方向键
+      var tag = event.target && event.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target && event.target.isContentEditable)) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof window.forceClosePhotoPreview === 'function') window.forceClosePhotoPreview();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        if (typeof window.ppPrevPhoto === 'function') window.ppPrevPhoto();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        if (typeof window.ppNextPhoto === 'function') window.ppNextPhoto();
+      }
+    };
+    document.addEventListener('keydown', keydownHandler, true);
+    state.__keydownHandler = keydownHandler;
   }
 
   // 错误 UI 与 preview.js 原 3 次重试逻辑协调：
@@ -1310,6 +1350,15 @@
       root.classList.remove('pp-img-error');
       var ph = root.querySelector('.pp-error-placeholder');
       if (ph) ph.remove();
+      // ★ 修复 B6：前后邻图槽位（ppPrevImg/ppNextImg）加载失败时也会挂 pp-placeholder，
+      // 此前 clearImageError 只清理主图占位符，邻图失败块残留到切换时才闪烁。
+      ['ppPrevImg', 'ppNextImg'].forEach(function(id) {
+        var sideImg = document.getElementById(id);
+        if (!sideImg) return;
+        sideImg.classList.remove('pp-placeholder');
+        var sidePh = sideImg.parentNode && sideImg.parentNode.querySelector('.pp-error-placeholder');
+        if (sidePh) sidePh.remove();
+      });
     }
     if (img) {
       img.style.display = '';
@@ -1427,6 +1476,8 @@
       if (safeIndex >= explicitPhotos.length) safeIndex = explicitPhotos.length - 1;
       resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
       clearImageError();
+      // ★ 修复 A2：每次打开预览确保键盘导航监听存在（关闭时会被移除）
+      ensurePreviewKeydownHandler();
       var result = openWithExplicitPhotos(safeIndex, explicitPhotos, options || null);
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);

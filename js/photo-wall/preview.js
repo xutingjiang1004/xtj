@@ -149,6 +149,9 @@
                 s.removeEventListener("transitionend", r);
                 if (_fallback) { clearTimeout(_fallback); _fallback = null; }
                 s.classList.remove("snapping"), c = !1,
+                // ★ 修复 B3：回弹完成后位移 l 归零。此前 W() 越界回弹不重置 l，
+                // 残留位移会导致下一次 pointerup 的翻页判定（|U| > a/4）误判方向。
+                l = 0,
                 Y(10);
                 var e = i, t = n, o = document.getElementById("ppPrevImg"), a = (document.getElementById("photoPreviewImage"),
                 document.getElementById("ppNextImg"));

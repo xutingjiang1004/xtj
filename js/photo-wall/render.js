@@ -406,6 +406,9 @@
   function renderSorted(photos){
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
+    // ★ 修复 C3：每次重渲染复位 loadingMore，避免分组切换/返回相册后
+    // 旧哨兵的 loadingMore=true 残留，导致新分组哨兵首次 intersect 不触发加载。
+    loadingMore = false;
     var toggle = document.getElementById('pwAlbumToggle');
     if (toggle) toggle.classList.toggle('active', !!window.pwAlbumView);
 
