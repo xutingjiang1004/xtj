@@ -7407,16 +7407,11 @@ function showChatMessages() {
       if (!panelOpen || panelClosing) return;
       panelClosing = true;
       panelOpen = false;
-      // 二级页面 → 走回退动画（不立即跳），与外壳关闭动画并行
-      if (currentPage !== 'primary') {
-        if (animate !== false) {
-          navigateTo('primary');
-        } else {
-          goToPrimaryPage(false);
-        }
-      } else {
-        goToPrimaryPage(false);
-      }
+      // 二级页面 → 即时回到主页（不走页面切换动画）。
+      // ★ 修复动画 bug：此前 navigateTo('primary') 的 280ms 页面切换动画与
+      // 外壳 400ms 关闭动画叠加，出现"先切页再收拢"的视觉跳动/闪烁。
+      // 关闭时只保留外壳的收拢动画，页面即时复位。
+      goToPrimaryPage(false);
       // 标记 closing 状态提升合成层
       panelShell.classList.remove('is-opening');
       panelShell.classList.add('is-closing');

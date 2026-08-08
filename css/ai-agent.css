@@ -1283,6 +1283,12 @@
   overflow: hidden;
   padding: 8px;
   z-index: 1;
+  /* ★ 修复打开/关闭动画期间文字模糊：
+     shell 的 clip-path + transform 动画会让内容重栅格化导致文字发虚。
+     内容层独立提升为 GPU 合成层（translateZ(0) + will-change），
+     动画时文字不再随 clip-path 逐帧重绘，保持清晰。 */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 /* ============================================================
