@@ -1318,14 +1318,14 @@
 }
 
 /* 离场态（动画退出中）
-   立即脱离布局贡献：position: absolute + visibility hidden + pointer-events none
+   立即脱离布局贡献：position: absolute + pointer-events none
    否则 grid-area 1/1 重叠的离场页仍占高度，导致面板高度突变、位置错位
-   透明度 + transform 仍保留动画效果 */
+   透明度 + transform 仍保留动画效果（用 opacity 淡出，而非 visibility:hidden 瞬间消失，
+   避免离场页秒隐 + 入场页从 opacity:0 淡入造成的"空白闪烁"——改为正常交叉淡入淡出） */
 .ai-panel-page.is-leaving {
   opacity: 0;
   transform: translateX(-18px);
   pointer-events: none;
-  visibility: hidden;
   position: absolute;
   inset: 0;
 }
