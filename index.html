@@ -234,7 +234,7 @@
                     </div>
                     <div class="post-filter-panel" id="postFilterPanel">
                         <div class="post-filter-row post-filter-row--top">
-                            <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论?.." autocomplete="off" />
+                            <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论.." autocomplete="off" />
                             <select id="postVisibilityFilter" class="post-filter-select">
                                 <option value="all">全部可见状态</option>
                                 <option value="public">公开</option>
@@ -476,7 +476,7 @@
                             <span class="profile-activity-count" id="profileLikesCount">0</span>
                         </div>
                         <div class="profile-activity-list" id="profileLikesList"></div>
-                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" onclick="toggleProfileActivity('likes')" style="display:none;">更多点赞内容</button>
+                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" onclick="event.stopPropagation();toggleProfileActivity('likes')" style="display:none;">更多点赞内容</button>
                     </section>
                     <section class="profile-activity-card profile-activity-card--summary" id="profileCommentsCard" role="button" tabindex="0" onclick="toggleProfileActivity('comments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('comments');}">
                         <div class="profile-activity-head">
@@ -487,7 +487,7 @@
                             <span class="profile-activity-count" id="profileCommentsCount">0</span>
                         </div>
                         <div class="profile-activity-list" id="profileCommentsList"></div>
-                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
+                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="event.stopPropagation();toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
                     </section>
                 </div>
                 <div class="profile-settings">

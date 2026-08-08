@@ -235,6 +235,10 @@
   }
 
   var contactsSyncPending = false;
+  // 导出供 performRefresh('chat') 等外部流程调用（原为 IIFE 私有函数）
+  window.syncContacts = syncContacts;
+  window.syncChatBadge = syncChatBadge;
+
   function scheduleContactsSync() {
     if (contactsSyncPending) return;
     contactsSyncPending = true;

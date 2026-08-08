@@ -392,9 +392,6 @@ function shouldForceSplitAgents(message, minLen) {
 
 // 深度研究模式：不再根据字数跳过多 agent 分析
 // AI 自主判断是否需要深度研究，直接交给 Planner 决策
-function isTrivialNewMessage(message) {
-  return false;
-}
 
 function buildDefaultAgents(message) {
   var m = String(message || '');
@@ -2881,7 +2878,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
     });
   } else if (source === 'dm') {
-    var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + userName + ',media_url.eq.' + userName).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + pgrstQuote(userName) + ',media_url.eq.' + pgrstQuote(userName)).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
     if (dmRes.error) { console.error('[aiSiteSearch] dm query error:', dmRes.error); return { results: [], error: { code: 'dm_query_failed', message: '聊天搜索暂时不可用' } }; }
     rows = (dmRes.data || []).map(function(m) {
       var text = aiSiteText(m.content, 10000);
@@ -4043,7 +4040,10 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
       // 乐观锁冲突：强制下一轮重读
       rowToUpdate = null;
     }
-    // 重试耗尽：本次不计入，避免放大；不缓存
+    // 重试耗尽：本次不计入，避免放大；不缓存。
+    // 有意降级为 fail-open（不拦截请求），避免持久化限流故障时误伤正常流量。
+    // TODO(未来迁移)：改用迁移 039 的 atomic RPC（单一原子操作完成读-判-写）彻底消除
+    // 并发冲突与 CAS 重试；届时可移除本 fail-open 分支，让耗尽场景按 DB 判定结果返回。
     return { limited: false };
   } catch(e) {
     // DB 不可用时降级为仅本地限流
@@ -4106,17 +4106,17 @@ async function extractEmbeddedFiles(text) {
       } else {
         var buffer = Buffer.from(base64Data, 'base64');
         if (mimeType === 'application/pdf' && getPdfParser()) {
-          var pdfData = await pdfParser(buffer);
+          var pdfData = await getPdfParser()(buffer);
           extractedText = pdfData.text || '';
         } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()) {
-          var mammothResult = await mammothParser.extractRawText({ buffer: buffer });
+          var mammothResult = await getMammothParser().extractRawText({ buffer: buffer });
           extractedText = mammothResult.value || '';
         } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && getXlsxParser()) {
-          var workbook = xlsxParser.read(buffer, { type: 'buffer' });
+          var workbook = getXlsxParser().read(buffer, { type: 'buffer' });
           var sheets = [];
           workbook.SheetNames.forEach(function(sName) {
             var sheet = workbook.Sheets[sName];
-            var csv = xlsxParser.utils.sheet_to_csv(sheet, { blankrows: false });
+            var csv = getXlsxParser().utils.sheet_to_csv(sheet, { blankrows: false });
             sheets.push('【工作表: ' + sName + '】\n' + csv);
           });
           extractedText = sheets.join('\n\n');
@@ -7546,7 +7546,7 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   try {
     var cookieOpts = {
       httpOnly: true,
-      secure: true,
+      secure: req.secure || process.env.NODE_ENV === 'production',
       sameSite: 'Strict',
       maxAge: ADMIN_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000,
       path: '/'
@@ -7981,7 +7981,15 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
       supabase.from('posts').select('*').eq('media_type', '__ann__').order('created_at', { ascending: false }).limit(500)
     ]);
-    
+
+    // 任一查询失败不得静默返回空数组掩盖故障
+    const queryResults = [['posts', postRes], ['likes', likeRes], ['comments', commRes], ['bans', banRes], ['announcements', annRes]];
+    const failedQuery = queryResults.find(function (pair) { return pair[1].error; });
+    if (failedQuery) {
+      console.error('[API] /admin/data 查询失败: ' + failedQuery[0] + ': ' + (failedQuery[1].error.message || failedQuery[1].error.code || 'unknown'));
+      return res.status(503).json({ error: '数据加载部分失败：' + failedQuery[0] });
+    }
+
     return res.json({
       posts: postRes.data || [],
       likes: likeRes.data || [],
@@ -9255,12 +9263,12 @@ app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
     if (targetUser !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: '无权查看他人点赞记录', code: 'forbidden' });
     }
-    const limit = parseInt(req.query.limit, 10) || '160';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 160, 1), 500);
     const { data, error } = await supabase.from('likes')
       .select('id, post_id, user_name, actor_key, created_at')
       .eq('user_name', targetUser)
       .order('created_at', { ascending: false })
-      .limit(limit > 0 ? Math.min(limit, 500) : 160);
+      .limit(limit);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true, data: data || [] });
   } catch (e) { console.error('[API] likes get:', e.message); return res.status(500).json({ error: '查询失败' }); }
@@ -9600,7 +9608,7 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
 app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(0, parseInt(req.query.page, 10) || 0);
-    var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || FEED_PAGE_SIZE));
+    var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
     var from = page * limit;
     var to = from + limit - 1;
 
@@ -11094,7 +11102,7 @@ app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (r
   c.status = status;
   c.reviewed_at = new Date().toISOString();
   c.reviewed_by = ADMIN_USERNAME;
-  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id).eq('media_type', REPORT_MARKER);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   var notifMsg = status === 'actioned' ? '管理员已将你的举报标记为已处理' : (status === 'dismissed' ? '管理员已驳回你的举报' : '管理员已审核你的举报');
   addReportNotification(id, status, notifMsg).catch(function(){});
@@ -11363,13 +11371,9 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     if (!startDate && !endDate && statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
       return res.json(statsCache.data);
     }
-    // 简单锁：并发请求等待500ms后重试缓存
+    // 并发去重：已有查询在进行中则直接复用同一个 promise，避免重复查询
     if (!startDate && !endDate && statsCache.pending) {
-      // 已有查询进行中，等待缓存更新
-      await new Promise(function(r) { setTimeout(r, 500); });
-      if (statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
-        return res.json(statsCache.data);
-      }
+      return res.json(await statsCache.pending);
     }
 
     // 构建带日期筛选的查询
@@ -11389,78 +11393,92 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       return q;
     }
 
-    // 创建 pending promise 防止并发重复查询
-    if (!startDate && !endDate) {
-      statsCache.pending = true;  // 简单锁标志
-    }
-    const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
-      applyPublicPostExclusions(buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')),
-      buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
-      buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
-      buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
-      buildSummaryQuery('likes', 'id', null, null, 'created_at'),
-      buildSummaryQuery('comments', 'id', null, null, 'created_at'),
-      buildSummaryQuery('posts', 'id', 'media_type', '__photo_wall__', 'created_at'),
-    ]);
+    // 汇总查询：无日期筛选时由 pending promise 复用（并发请求共享同一份查询，避免重复查询）
+    async function runStatsQuery() {
+      const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
+        applyPublicPostExclusions(buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')),
+        buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
+        buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
+        buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
+        buildSummaryQuery('likes', 'id', null, null, 'created_at'),
+        buildSummaryQuery('comments', 'id', null, null, 'created_at'),
+        buildSummaryQuery('posts', 'id', 'media_type', '__photo_wall__', 'created_at'),
+      ]);
 
-    const posts = (postsRes.data || []).filter(p => {
-      if (p.content) {
-        try { var c = JSON.parse(p.content); if (c && c.target_type) return false; } catch(e) {}
+      const posts = (postsRes.data || []).filter(p => {
+        if (p.content) {
+          try { var c = JSON.parse(p.content); if (c && c.target_type) return false; } catch(e) {}
+        }
+        return true;
+      });
+      const authRows = authRowsRes.data || [];
+      const authUserMap = buildAuthUserMap(authRows);
+      const visits = visitsRes.data || [];
+      const attacks = attacksRes.data || [];
+      const likes = likesRes.data || [];
+      const comments = commentsRes.data || [];
+      const photos = photosRes.data || [];
+
+      // 按日期聚合访问数据
+      const dailyVisits = {};
+      visits.forEach(v => {
+        var d = v.media_url || '';
+        if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+        if (d) dailyVisits[d] = (dailyVisits[d] || 0) + 1;
+      });
+
+      // 按日期聚合攻击数据
+      const dailyAttacks = {};
+      attacks.forEach(a => {
+        var d = '';
+        try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
+        if (d) dailyAttacks[d] = (dailyAttacks[d] || 0) + 1;
+      });
+
+      // 攻击类型分布
+      const attackTypes = {};
+      attacks.forEach(a => {
+        var t = a.media_url || 'unknown';
+        attackTypes[t] = (attackTypes[t] || 0) + 1;
+      });
+
+      // API防火墙拦截 = CORS + CSRF（RATE_LIMIT是速率限制，不计入拦截）
+      var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
+
+      return {
+        total_users: Object.keys(authUserMap).length,
+        total_posts: posts.length,
+        total_comments: comments.length,
+        total_likes: likes.length,
+        total_photos: photos.length,
+        total_visits: visits.length,
+        total_attacks: attacks.length,
+        firewall_intercepts: firewallIntercepts,
+        daily_visits: dailyVisits,
+        daily_attacks: dailyAttacks,
+        attack_types: attackTypes,
+        cached_at: new Date().toISOString()
+      };
+    }
+
+    // 无日期筛选时：已有查询在进行中则复用同一个 promise（见上方并发去重分支）；
+    // 否则由第一个请求创建 pending promise，并发请求共享同一份查询结果
+    if (!startDate && !endDate) {
+      if (!statsCache.pending) {
+        var statsPromise = runStatsQuery();
+        statsCache.pending = statsPromise;
+        // 查询失败时释放 pending，避免后续请求永久等待同一个失败 promise
+        statsPromise.catch(function() {
+          if (statsCache.pending === statsPromise) statsCache.pending = null;
+        });
       }
-      return true;
-    });
-    const authRows = authRowsRes.data || [];
-    const authUserMap = buildAuthUserMap(authRows);
-    const visits = visitsRes.data || [];
-    const attacks = attacksRes.data || [];
-    const likes = likesRes.data || [];
-    const comments = commentsRes.data || [];
-    const photos = photosRes.data || [];
-
-    // 按日期聚合访问数据
-    const dailyVisits = {};
-    visits.forEach(v => {
-      var d = v.media_url || '';
-      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-      if (d) dailyVisits[d] = (dailyVisits[d] || 0) + 1;
-    });
-
-    // 按日期聚合攻击数据
-    const dailyAttacks = {};
-    attacks.forEach(a => {
-      var d = '';
-      try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
-      if (d) dailyAttacks[d] = (dailyAttacks[d] || 0) + 1;
-    });
-
-    // 攻击类型分布
-    const attackTypes = {};
-    attacks.forEach(a => {
-      var t = a.media_url || 'unknown';
-      attackTypes[t] = (attackTypes[t] || 0) + 1;
-    });
-
-    // API防火墙拦截 = CORS + CSRF（RATE_LIMIT是速率限制，不计入拦截）
-    var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
-
-    const result = {
-      total_users: Object.keys(authUserMap).length,
-      total_posts: posts.length,
-      total_comments: comments.length,
-      total_likes: likes.length,
-      total_photos: photos.length,
-      total_visits: visits.length,
-      total_attacks: attacks.length,
-      firewall_intercepts: firewallIntercepts,
-      daily_visits: dailyVisits,
-      daily_attacks: dailyAttacks,
-      attack_types: attackTypes,
-      cached_at: new Date().toISOString()
-    };
-
-    if (!startDate && !endDate) {
-      statsCache = { data: result, ts: Date.now(), pending: null };
+      var sharedResult = await statsCache.pending;
+      statsCache = { data: sharedResult, ts: Date.now(), pending: null };
+      return res.json(sharedResult);
     }
+
+    // 带日期筛选：不走缓存，直接查询
+    const result = await runStatsQuery();
     return res.json(result);
   } catch (e) {
     statsCache.pending = null;
@@ -12352,7 +12370,19 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       var sourceInfo = Object.keys(loginInfo).length ? loginInfo : activeInfo;
       var device = normalizeDeviceSnapshot(sourceInfo);
       var ip = String(loginInfo.ip || activeInfo.ip || userInfo.last_ip || '');
-      var location = loginInfo.ip_location || activeInfo.ip_location || userInfo.last_ip_location || userInfo.last_precise_location || userInfo.last_location || null;
+      // 位置来源判定：按优先级记录 location 实际来自哪个字段（精确位置 vs IP 推断）
+      var locationSourceKind = 'unavailable';
+      var location = null;
+      var locationCandidates = [
+        ['precise', loginInfo.ip_location],
+        ['precise', activeInfo.ip_location],
+        ['ip', userInfo.last_ip_location],
+        ['precise', userInfo.last_precise_location],
+        ['ip', userInfo.last_location]
+      ];
+      for (var li = 0; li < locationCandidates.length; li++) {
+        if (locationCandidates[li][1]) { location = locationCandidates[li][1]; locationSourceKind = locationCandidates[li][0]; break; }
+      }
       return {
         user_name: name,
         last_active: activeByUser[name].created_at,
@@ -12363,7 +12393,7 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
         device_label: [device.type, device.os, device.browser, device.model].filter(Boolean).join(' · '),
         ip: ip === 'unknown' ? '' : ip,
         location: onlineLocationText(location),
-        location_source: location ? (location === userInfo.last_precise_location ? 'precise' : 'ip') : 'unavailable'
+        location_source: location ? locationSourceKind : 'unavailable'
       };
     });
     var deviceStats = { mobile: 0, desktop: 0, tablet: 0, unknown: 0 };
@@ -14058,9 +14088,6 @@ function buildAiCorePrompt(config) {
   return lines.filter(Boolean).join('\n');
 }
 
-// 动态上下文：每次可能变，独立 token 段
-function buildAiDynamicContext() { return ''; }
-
 // ===================== 全局 AI 配置读取 =====================
 const AI_DEFAULT_CONFIG = {
   version: 2,
@@ -14732,12 +14759,10 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 6. 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
-    var dynamicContext = buildAiDynamicContext(ctx, config);
 
     // 7. 组装 messages
     var messages = [
       { role: 'system', content: corePrompt },
-      { role: 'system', content: dynamicContext },
       { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
@@ -15101,14 +15126,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 组装 system prompt — 缓存优化：corePrompt 必须完全固定且放在最前
     var corePrompt = buildAiCorePrompt(config);
-    var dynamicContext = buildAiDynamicContext(ctx, config);
 
     // ★ 缓存优化：消息顺序 = corePrompt(固定) → history(稳定) → user(新) → [time/weather 仅必要时后置]
     // 当前时间从 system 提前位移到末尾，且仅在时间相关查询时注入，避免每分钟破坏缓存前缀
     var messages = [
       { role: 'system', content: corePrompt }
     ];
-    if (dynamicContext) messages.push({ role: 'system', content: dynamicContext });
 
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
@@ -18268,6 +18291,11 @@ process.on('uncaughtException', function(err) {
   console.error('[FATAL] uncaughtException: 进程状态未知，优雅关闭后退出避免数据损坏');
   gracefulShutdown(1);
 });
+// SIGTERM：容器编排（如 Render、Docker）停止实例时发送，优雅关闭 HTTP 服务再退出
+process.on('SIGTERM', function() {
+  console.error('[FATAL] SIGTERM 收到，优雅关闭 HTTP 服务...');
+  gracefulShutdown(0);
+});
 process.on('unhandledRejection', function(reason) {
   var now = Date.now();
   if (!_unhandledRejectionWindowStart || now - _unhandledRejectionWindowStart > UNHANDLED_REJECTION_WINDOW_MS) {
@@ -18288,8 +18316,8 @@ const port = process.env.PORT || 3000;
 // ── DM 未读消息邮件通知定时器 ──
 const DM_UNREAD_NOTIFY_INTERVAL = 60 * 1000; // 每60秒检查一次
 const DM_UNREAD_NOTIFY_TIMEOUT = 10 * 60 * 1000; // 10分钟未读即通知
-const ADMIN_DM_NOTIFY_EMAIL = '20051004xtj@gmail.com';
-const ADMIN_DM_NOTIFY_USER = 'xxz';
+const ADMIN_DM_NOTIFY_EMAIL = process.env.ADMIN_DM_NOTIFY_EMAIL || '20051004xtj@gmail.com';
+const ADMIN_DM_NOTIFY_USER = process.env.ADMIN_DM_NOTIFY_USER || 'xxz';
 var dmUnreadNotifyTimer = null;
 var dmUnreadNotifiedIds = new Set(); // 已通知的消息ID，防止重复发送
 
