@@ -14112,7 +14112,7 @@ async function loadAiContext(userName, convId) {
         .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
-        .limit(AI_CHAT_HISTORY_LIMIT);
+        .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
       msgRows = r.data;
     } else {
       var r2 = await supabase.from('posts')
@@ -14121,12 +14121,12 @@ async function loadAiContext(userName, convId) {
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
-        .limit(AI_CHAT_HISTORY_LIMIT);
+        .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
       msgRows = r2.data;
     }
     if (Array.isArray(msgRows)) {
-      // desc 拿到的是最新在前，reverse 后变正序（旧→新），再 slice 取最近 15 条
-      ctx.history = msgRows.slice().reverse().map(function(r) {
+      // desc 拿到的是最新在前，reverse 后变正序（旧→新）
+      var parsedRows = msgRows.slice().reverse().map(function(r) {
         var meta = parseMsgMeta(r);
         var content = String(r.content || '');
         if (meta.role === 'assistant') {
@@ -14142,6 +14142,23 @@ async function loadAiContext(userName, convId) {
         var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
         return { role: meta.role || 'user', content: normalized };
       });
+      // ★ 优化：固定 20 条在长对话下截断严重（20×4000 字符≈120k 字符，
+      // 但 DeepSeek 上下文窗口有限，实际能容纳的轮次远少于 20 条完整消息）。
+      // 改为按 token 预算从"最新"往前累积：优先保留最近的完整对话，
+      // 超出预算时丢弃更早的轮次。中文按 1.5 字符/token 估算，预算 12000 tokens。
+      var HISTORY_TOKEN_BUDGET = 12000;
+      var CHAR_PER_TOKEN_EST = 1.5;
+      var budgetChars = HISTORY_TOKEN_BUDGET * CHAR_PER_TOKEN_EST;
+      var kept = [];
+      var usedChars = 0;
+      for (var hi = parsedRows.length - 1; hi >= 0; hi--) {
+        var row = parsedRows[hi];
+        var cost = row.content.length;
+        if (usedChars + cost > budgetChars && kept.length > 0) break;
+        kept.push(row);
+        usedChars += cost;
+      }
+      ctx.history = kept.reverse();
     }
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
@@ -15030,7 +15047,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   - web_search === false → 强制关闭所有外部搜索，仅用模型自身能力
     //   - 未传（旧客户端/深度思考页）→ 保持原有 allowSearch 行为，向后兼容
     var webSearchPref = req.body && req.body.web_search;
+    // ★ 优化（用户诉求）：开关未开时，不再强制关闭所有搜索能力。
+    //   web_search=true  → 走 Responses API 内置 web_search + Tavily 预搜（双通道，用户明确要搜）
+    //   web_search=false → 仍走标准 Chat Completions，但允许模型在需要时自主调用
+    //                      search_web/tavily_search 工具（模型自己判断"这个问题需要搜索"）。
+    //                      这样用户不开开关，模型遇到时效/事实性问题也会自己搜。
+    //                      开关仍影响 Responses 路径与 Tavily 预搜，保持"关"时更省配额。
+    // 注意：webSearchPref === false 时 allowSearch 控制的是"后端主动预搜/正则注入"，
+    // 模型自主工具调用由非思考模式的 AI_TOOLS 挂载决定（见下方 needsFcCheck 逻辑），不受此开关影响。
     if (webSearchPref === false) {
+      // 关闭"后端主动搜索"（预加载/正则注入），但保留模型自主工具调用的能力
       allowSearch = false;
     }
 
@@ -15092,16 +15118,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // ★ 网页搜索改造（重构）：
-    //   useBuiltInSearch —— 新面板已明确选择（web_search 为 true 或 false），一律走
-    //     Responses API 路径并启用 DeepSeek 官方内置 web_search（模型内部搜索能力）；
+    //   useBuiltInSearch —— web_search 为 true 或 false（前端明确传了开关）都走
+    //     Responses API 路径并启用 DeepSeek 官方内置 web_search（模型内部搜索能力）。
+    //     false 时模型在思考后"自主决定"是否调用内置搜索（用户诉求：没开开关，
+    //     但问题需要搜索时模型自己搜），区别仅在于不叠加 Tavily 预搜、更省配额。
     //     旧客户端/深度思考页未传 web_search 时保持 false，回退原标准 Chat Completions 路径。
     //   useTavilyCluster —— 仅当 web_search 明确为 true（搜索"开"）时，叠加 Tavily 第三方
     //     集群搜索（双通道"一起抓取"，约 3000 次额度），实现海量全网搜索。
     //   webSearchEnabled —— 仅用于消息元数据 / done 事件，反映用户开关状态（向后兼容前端）。
-    // ★ 修正：只有用户明确打开网页搜索时才走 Responses API（它需要内置 web_search 工具）。
-    //   web_search === false 时回退标准 Chat Completions 路径，该路径能显式禁用 reasoning，
-    //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
-    var useBuiltInSearch = (webSearchPref === true);
+    // ★ 修正（用户诉求）：web_search === false 时也走 Responses API（内置 web_search 工具），
+    //   让模型在需要时自主调用自身搜索能力；此前强制回退 Chat Completions 导致
+    //   开关关闭时模型完全丧失搜索能力。
+    var useBuiltInSearch = (webSearchPref !== false);
     var useTavilyCluster = (webSearchPref === true);
     var webSearchEnabled = (webSearchPref === true);
     if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
@@ -16745,7 +16773,7 @@ async function runSelfResearchFlow(opts) {
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10), async (req, res) => {
+app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20), async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
@@ -16801,7 +16829,13 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 10),
     if (!convId || !/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
     startStreamHeartbeat();
 
+    // ★ 优化（缓存刷新）：前端传 refresh=true 时跳过缓存重新研究，
+    // 解决"对同一问题结果不满意，重问却被 24h 缓存回放"的问题。
+    var forceRefresh = !!(req.body && req.body.refresh === true);
     var cacheKey = researchCacheKey(userName, query, model, mode);
+    if (forceRefresh) {
+      try { researchCache.delete(cacheKey); } catch (_) {}
+    }
 
     // A. 缓存命中 → 按原事件序列回放（research_step 0/1/2 → content 300 字切块 → sources → done）
     var cached = researchCacheGet(cacheKey);

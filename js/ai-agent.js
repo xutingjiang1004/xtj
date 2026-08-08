@@ -2955,6 +2955,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '深入研究' }));
       // 搜索数量：网页搜索 N（如 网页搜索 100）
       footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '网页搜索 ' + srcs.length }));
+      // ★ 优化：结果不满意时可"重新研究"（后端 refresh=true 跳过 24h 缓存重新跑）
+      if (card._researchRefreshFn) {
+        var refreshBtn = el('button', {
+          type: 'button',
+          class: 'ai-msg-refresh-research',
+          text: '↻ 重新研究',
+          style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+        });
+        refreshBtn.addEventListener('click', function() {
+          if (refreshBtn.disabled) return;
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = '研究中…';
+          try { if (card._researchRefreshFn) card._researchRefreshFn(); } catch (e) {}
+        });
+        footer.appendChild(refreshBtn);
+      }
     }
 
     setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
@@ -3212,7 +3228,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               query: String(query || ''),
               model: (opts && opts.model) || 'pro',
               mode: (opts && opts.mode) || 'hybrid',
-              rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true
+              rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true,
+              // ★ 优化：refresh=true 时后端跳过 24h 缓存重新研究（结果不满意重试）
+              refresh: !!(opts && opts.refresh === true),
+              // ★ 优化：研究通道沿用深页会话 ID，让多次研究归入同一会话、
+              // 历史面板可按会话聚合（此前后端每次生成新 convId，上下文不延续）。
+              conversation_id: S && S.dtConversationId ? S.dtConversationId : undefined
             }),
             signal: controller.signal
           });
@@ -3400,6 +3421,48 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.deepThinkProgressCard = progressCard;
       dtMessagesEl.appendChild(progressCard);
       scrollToBottom(dtMessagesEl, true);
+
+      // ★ 优化：结果不满意时"重新研究"（refresh=true 跳过后端 24h 缓存）
+      progressCard._researchRefreshFn = function() {
+        if (!isResearchCard(progressCard) || (progressCard._researchState && progressCard._researchState.state === 'researching')) return;
+        // 重置卡片为研究中状态，用同一 query 强制重新研究
+        answer = '';
+        sources = [];
+        setResearchCardState(progressCard, 'researching', { statusText: '正在重新研究…', progress: 0.2, expanded: false });
+        var answerEl = progressCard.querySelector('.ai-think-answer');
+        if (answerEl) { try { answerEl.innerHTML = ''; } catch (e) {} }
+        var oldSourcesBox = progressCard.querySelector('.ai-tavily-sources-box');
+        if (oldSourcesBox) { try { oldSourcesBox.remove(); } catch (e) {} }
+        runTavilyResearch(text, function(prog) {
+          if (S._dtCurrentReqId !== reqId) {
+            return;
+          }
+          if (!prog) return;
+          if (prog.stage) handleResearchStage(prog.stage, prog.message);
+          if (typeof prog.step === 'number') setStep(prog.step);
+          if (prog.content) {
+            answer += String(prog.content);
+            appendStreamChunk(String(prog.content));
+            if (!responding) {
+              responding = true;
+              if (isResearchCard(progressCard)) {
+                setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: false });
+                setResearchSteps(progressCard, 3, 3);
+              }
+            }
+          }
+          if (prog.sources) sources = prog.sources;
+        }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: true }).then(function(result) {
+          answer = (result && result.answer) || '';
+          sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
+          renderResearchResult();
+        }).catch(function(err) {
+          console.warn('[AI] Tavily re-research failed:', err && err.message);
+          if (isResearchCard(progressCard)) {
+            markResearchCardOutcome(progressCard, 'error', '重新研究失败：' + ((err && err.message) || '未知错误'));
+          }
+        });
+      };
 
       controller = new AbortController();
       // ★ 修复：Tavily 深页流程也走深页独立通道
@@ -4686,12 +4749,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
     // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
-    // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
+    // 请求可无限挂起。这里加 300s 绝对超时兜底（后端最长 5 分钟思考，
+    // 此前 120s 会在后端完成前被前端掐断。超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
       if (S._dtCurrentReqId !== reqId) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 120000);
+    }, 300000);
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
     var url = API_BASE + '/chat';
@@ -5601,9 +5665,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // P5 修复: 创建单一助手节点，typing dots 放在节点内部
     // 从发送到完成，始终使用同一个 DOM 节点
+    // ★ 优化：去掉打字三点动画（用户反馈"气泡闪现 1 秒又消失"的观感）。
+    // 节点仍保留（30+ 处事件处理引用它），但初始为空白占位，
+    // 回复流式到达时才渲染内容，不再显示转瞬即逝的打字气泡。
     var assistantNode = el('div', { class: 'ai-msg assistant entering generating' });
-    var assistantBubble = el('div', { class: 'ai-msg-bubble ai-typing-bubble' });
-    for (var di = 0; di < 3; di++) assistantBubble.appendChild(el('span'));
+    var assistantBubble = el('div', { class: 'ai-msg-bubble' });
+    // ★ 优化：初始隐藏气泡（无打字动画后空气泡会显示空白的渐变背景占位），
+    // 首个内容事件到达时 ensureAssistantBubbleReady 会设 display='block' 显示。
+    assistantBubble.style.display = 'none';
     assistantNode.appendChild(assistantBubble);
     messagesEl.appendChild(assistantNode);
     scrollToBottom(messagesEl, true);
@@ -5612,8 +5681,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // cannot leave the temporary typing bubble on screen.
     function hideAssistantTyping() {
       try {
-        var dots = assistantBubble.querySelectorAll('span');
-        for (var hi = 0; hi < dots.length; hi++) dots[hi].style.display = 'none';
         assistantBubble.classList.remove('ai-typing-bubble');
         assistantBubble.classList.add('ai-reply-pending');
       } catch (e) {}
@@ -5657,7 +5724,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: reqId,
         clientRequestId: 'cr_' + S.clientRequestId,
-        timeoutMs: 120000
+        // ★ 优化：后端深度思考/长思考最长 5 分钟，前端 120s 会提前掐断，
+        // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
+        timeoutMs: 300000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -6053,6 +6122,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (evt.action === 'searching') {
               var qs = evt.queries || [];
               maStatus.textContent = '多 Agent 协作：正在并行搜索 ' + qs.join('、');
+              // ★ 优化：把拆解的查询词同步展示进思考过程，让用户看到
+              // "拆了哪些词、搜了什么"，而不是只看一个状态条。
+              try {
+                if (qs.length) {
+                  var maThink = ensureReasoningNode();
+                  var maBody = maThink && maThink.querySelector('.ai-thinking-body');
+                  if (maBody) {
+                    var maEntry = el('div', { class: 'ai-thought-entry' });
+                    maEntry.innerHTML = '<div class="ai-thought-role">🔍 多 Agent 拆解搜索词</div><div class="ai-thought-chunk"></div>';
+                    maEntry.querySelector('.ai-thought-chunk').textContent = qs.map(function(q, qi) { return (qi + 1) + '. ' + q; }).join('\n');
+                    maBody.appendChild(maEntry);
+                    try { maBody.scrollTop = maBody.scrollHeight; } catch (e) {}
+                  }
+                  if (maThink) setThinkingExpanded(maThink, true, messagesEl);
+                }
+              } catch (eMa) {}
             }
           }
 
