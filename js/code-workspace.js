@@ -12,7 +12,6 @@
     directoryHandle: null,
     workspaceName: '',
     workspaceMode: 'local', // 'local' or 'github'
-    fileHandles: {}, // TODO: write-only field (verified 0 readers in repo) — safe to remove with its writes
     openTabs: [],
     activePath: '',
     pinnedFiles: [], // Replaces contextPaths — only priority hints, not full uploads
@@ -80,7 +79,6 @@
     _layoutMenuCleanup: null,
     _isReadOnly: false,
     _phoneMode: false, // Phase 6: 手机端只读聊天模式
-    _persistenceFailed: false, // TODO: write-only field (verified 0 readers in repo) — safe to remove with its writes
     workspaceGeneration: 0,
     restoreGeneration: 0
   };
@@ -1284,12 +1282,10 @@
     state.recoveredOperations = [];
     state.snapshots = {};
     state._documentStates = {};
-    state.fileHandles = {};
     state.messages = [];
     state.conversationId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     state.lastFailedMessage = '';
     state._isReadOnly = false;
-    state._persistenceFailed = false;
     // Clear backend index
     try {
       postJson('/api/code/agent/clear_index', getWorkspaceScope(previousWorkspaceId, previousGeneration)).catch(function () {});
@@ -2661,6 +2657,11 @@
               }).catch(function (err) {
                 childrenContainer.innerHTML = '<div style="padding:2px 12px;font-size:11px;color:var(--cw-danger);">加载失败</div>';
                 console.error('[code-workspace] expandDirectory error:', err);
+                // ★ 修复:展开失败时不保留 expandedPaths 记录,避免下次
+                // renderFileTree() 重建后对同一目录再次 _toggle 触发加载失败循环。
+                // 记录路径为 data-path(与折叠/展开使用的 key 完全一致)。
+                var failPath = row.getAttribute('data-path');
+                if (failPath && expandedPaths[failPath]) delete expandedPaths[failPath];
               });
             }
           }
@@ -3024,11 +3025,6 @@
       state.activePath = path;
       persistOpenTabs();
 
-      // Cache file handle
-      if (result.handle) {
-        state.fileHandles[path] = result.handle;
-      }
-
       renderTabs();
       renderEditor();
 
@@ -3362,7 +3358,11 @@
         // Track content changes
         editor.getModel().onDidChangeContent(function () {
           var newContent = editor.getValue();
-          if (newContent !== tab.content) {
+          // ★ 修复:modified 的判定基准是磁盘已保存内容(tab.content),而不是
+          // 上一次编辑内容。若 _currentContent 是字符串(说明此前有未保存编辑),
+          // 就与它对比;否则与 tab.content 对比。用户改回旧值后再次输入,仍
+          // 视为未保存修改,不再误判为"未修改"而丢弃 _currentContent。
+          if (typeof tab._currentContent === 'string' ? newContent !== tab._currentContent : newContent !== tab.content) {
             tab.modified = true;
             tab._currentContent = newContent;
             tab._contentVersion = (tab._contentVersion || 0) + 1;
@@ -3413,7 +3413,11 @@
     // Track changes
     textarea.addEventListener('input', function () {
       var newContent = textarea.value;
-      if (newContent !== tab.content) {
+      // ★ 修复:modified 的判定基准是磁盘已保存内容(tab.content),而不是
+      // 上一次编辑内容。若 _currentContent 是字符串(说明此前有未保存编辑),
+      // 就与它对比;否则与 tab.content 对比。用户改回旧值后再次输入,仍
+      // 视为未保存修改,不再误判为"未修改"而丢弃 _currentContent。
+      if (typeof tab._currentContent === 'string' ? newContent !== tab._currentContent : newContent !== tab.content) {
         tab.modified = true;
         tab._currentContent = newContent;
         tab._contentVersion = (tab._contentVersion || 0) + 1;
@@ -4145,11 +4149,9 @@
                   syncBuildContextToUI(ctx);
                   // Save current manifest to IDB
                   saveFileManifestToIDB(files).catch(function (err) {
-                    state._persistenceFailed = true;
                     console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
                   });
                   saveWorkspaceToIDB(workspaceId).catch(function (err) {
-                    state._persistenceFailed = true;
                     console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
                   });
                   return {
@@ -4249,11 +4251,9 @@
         // Save from the original scan (files may have been filtered to
         // changed files by the incremental manifest comparison).
         saveFileManifestToIDB(allFiles).catch(function (err) {
-          state._persistenceFailed = true;
           console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
         });
         saveWorkspaceToIDB(workspaceId).catch(function (err) {
-          state._persistenceFailed = true;
           console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
         });
       }
@@ -7879,7 +7879,30 @@
               break;
             }
           }
-          if (!session) session = data.sessions[0];
+          if (!session && !savedState.clientRequestId) {
+            // No client_request_id persisted — the exact-match loop cannot run.
+            // Only accept the most recent session when it also matches our
+            // identity (same request_id, or same conversation_id). Otherwise
+            // sessions[0] could belong to another user's / another request's
+            // stream and must not be resumed.
+            var fallback = data.sessions[0];
+            var identityOk = false;
+            if (fallback && savedState.requestId && fallback.request_id &&
+                String(fallback.request_id) === String(savedState.requestId)) {
+              identityOk = true;
+            } else if (fallback && savedState.conversationId &&
+                fallback.conversation_id &&
+                fallback.conversation_id === savedState.conversationId) {
+              identityOk = true;
+            }
+            // Leave session null when identity does not match — do not recover.
+            if (identityOk) session = fallback;
+          } else if (!session) {
+            // client_request_id was persisted but no exact match: keep the
+            // legacy fallback — the mismatch guard below decides whether to
+            // discard the state.
+            session = data.sessions[0];
+          }
         }
 
         if (!session) {

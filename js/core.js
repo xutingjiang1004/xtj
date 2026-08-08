@@ -400,6 +400,9 @@ const ADMIN_NAME = "xxz";
             var _lastRefreshUser = '';
             // 持久化登录标记（用户选择"保持登录"）
             var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
+            // 会话写入时间戳。声明上移，保证 clearUserToken（TDZ 安全）
+            // 及其后续所有引用均在此 let 声明之后。
+            let lastUserSessionWriteAt = 0;
 
             function getUserToken() {
                 // 仅从内存读取（会话内缓存；持久化令牌机制已移除）
@@ -752,7 +755,6 @@ const ADMIN_NAME = "xxz";
             //          fetch_failed 保留上一次成功获取的 URL（降级用，可能为 null）
             //   fetched_at: 写入时间戳（ms）
             let avatarCache = {};
-            let lastUserSessionWriteAt = 0;
 
             // 读取内存缓存中的头像 URL（用于展示）。返回 string 或 null。
             // - has_avatar     → entry.url
@@ -4077,6 +4079,12 @@ function renderProfileActivityList(kind) {
                     } else if (typeof rebuildFeedFromCurrentState === 'function') {
                         rebuildFeedFromCurrentState().catch(function() {});
                     }
+                    // 成功路径同样恢复按钮（disabled/textContent），
+                    // 与 catch/finally 行为保持一致，避免按钮残留"删除中.."
+                    if (btn) {
+                        btn.disabled = false;
+                        if (btn.textContent === '删除中..') btn.textContent = originalText || '删除';
+                    }
                     showToast('评论已删除');
                 } catch (e) {
                     console.error('deleteFeedComment error:', e);
@@ -4649,6 +4657,19 @@ function renderProfileActivityList(kind) {
                 var profileName = document.getElementById("profileName");
                 var profileStatus = document.getElementById("profileStatus");
                 var publishBox = document.getElementById("publishBox");
+
+                // 缺失关键元素时不崩溃：仅做必要的登录态兜底
+                if (!unauthUI || !authUI || !annBtnWrapper) {
+                    if (currentUser) {
+                        queueDeferredStartupTasks();
+                    } else {
+                        __xtjDeferredWarmupQueued = false;
+                        stopRestrictionPolling();
+                        hideBlockedScreen();
+                        hideMuteIndicator();
+                    }
+                    return;
+                }
                 
                 if (currentUser) {
                     unauthUI.style.display = "none";

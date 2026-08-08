@@ -1449,6 +1449,8 @@
     };
 
     let toastTimer = null;
+    let pageTimer = null;
+    let closeTimer = null;
 
     function showToast(message) {
       toast.textContent = message;
@@ -1464,6 +1466,12 @@
     function setMenuOpen(open) {
       state.open = open;
 
+      if (open) {
+        // 重开时取消上一个关闭定时器，避免 260ms 后误回主页面
+        if (closeTimer) clearTimeout(closeTimer);
+        closeTimer = null;
+      }
+
       menuShell.classList.toggle("open", open);
 
       plusButton.setAttribute(
@@ -1477,7 +1485,8 @@
       );
 
       if (!open) {
-        window.setTimeout(() => {
+        clearTimeout(closeTimer);
+        closeTimer = window.setTimeout(() => {
           showPage("main", false);
         }, 260);
       }
@@ -1496,7 +1505,11 @@
         return;
       }
 
-      const currentPage = pages[state.page];
+      // 同步更新 state.page，立即生效，避免 90ms 延迟期间连点导致状态不一致
+      const previousPageName = state.page;
+      state.page = pageName;
+
+      const currentPage = pages[previousPageName];
 
       if (animate && currentPage) {
         currentPage.classList.add(
@@ -1508,14 +1521,19 @@
 
       currentPage?.classList.remove("active");
 
-      window.setTimeout(() => {
+      // 取消上一个未完成的页面切换定时器，防止过期回调互相覆盖
+      if (pageTimer) clearTimeout(pageTimer);
+
+      pageTimer = window.setTimeout(() => {
+        // 守卫：如果定时器触发时页面已再次切换，丢弃过期回调
+        if (state.page !== pageName) return;
+
         currentPage?.classList.remove(
           "leaving-left",
           "leaving-right"
         );
 
         nextPage.classList.add("active");
-        state.page = pageName;
       }, animate ? 90 : 0);
     }
 

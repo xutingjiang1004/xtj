@@ -39,7 +39,8 @@ function isRecipientAllowed(to) {
     }
     if (r.startsWith('*.')) {
       const domain = r.slice(2);
-      return to.toLowerCase().endsWith('.' + domain);
+      // 需同时匹配根域 (admin@x.com) 和子域 (a@sub.x.com)
+      return to.toLowerCase().endsWith('@' + domain) || to.toLowerCase().endsWith('.' + domain);
     }
     return to.toLowerCase() === r;
   });

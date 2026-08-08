@@ -1,14 +1,14 @@
 /* ============================================================
-   desktop.css 鈥?PC 绔闈㈠竷灞€
+   desktop.css — PC 端布局
    ============================================================
-   只在屏幕宽度 >= 1024px 鏃剁敓鏁堛€?
-   移动端（< 1024px锛塪esktop.css 瀹屽叏涓嶅姞杞姐€?
+   只在屏幕宽度 >= 1024px 时生效。
+   移动端（< 1024px）desktop.css 完全不加载。
 
-   璁捐鍘熷垯锛?
-   - 浠呴€氳繃 CSS 璋冩暣甯冨眬锛屼笉鍔?HTML / JS
-   - 涓嶆柊澧?pointer-events: none，不遮挡按钮
-   - 涓嶄慨鏀?id / class / data-* / 表单 / 事件绑定
-   - 涓嶆敼鍙?Supabase / 鍙戝竷 / 鑱婂ぉ / 绛涢€?/ 寮圭獥 / 鐧诲綍
+   设计原则：
+   - 仅通过 CSS 调整布局，不动 HTML / JS
+   - 不新增 pointer-events: none，不遮挡按钮
+   - 不修改 id / class / data-* / 表单 / 事件绑定
+   - 不修改 Supabase / 发布 / 聊天 / 筛选 / 弹窗 / 登录
    ============================================================ */
 
 @media (min-width: 768px) {
@@ -1344,24 +1344,6 @@
     background: rgba(255, 255, 255, 0.68);
   }
 
-  #panelChat .dock-chat-container::after {
-    grid-column: 3;
-    grid-row: 2;
-    display: block;
-    min-width: 0;
-    padding: 22px 20px;
-    border-left: 1px solid rgba(19, 67, 45, 0.12);
-    background: rgba(247, 252, 249, 0.58);
-    color: var(--text-muted, #6d7b73);
-    content: "资料 / 成员\A\A选择会话后查看";
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.6;
-    white-space: pre-line;
-    pointer-events: none;
-  }
-
-  #panelChat .dock-chat-container::after { display: none; }
 
   #panelChat .desktop-chat-inspector {
     grid-column: 3;
@@ -1429,8 +1411,7 @@
     border-color: rgba(255, 255, 255, 0.09);
   }
 
-  [data-theme="dark"] #panelChat #dockChatListView,
-  [data-theme="dark"] #panelChat .dock-chat-container::after {
+  [data-theme="dark"] #panelChat #dockChatListView {
     background: rgba(15, 16, 22, 0.96);
     border-color: rgba(255, 255, 255, 0.09);
   }

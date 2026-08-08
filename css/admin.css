@@ -641,7 +641,6 @@
     #tabReportsBtn { --tab-icon-color: #f08a24; --tab-icon-bg: rgba(240,138,36,0.12); --tab-icon-bg-hover: rgba(240,138,36,0.18); }
     #tabBansBtn { --tab-icon-color: #db4258; --tab-icon-bg: rgba(219,66,88,0.12); --tab-icon-bg-hover: rgba(219,66,88,0.18); }
     #tabMutesBtn { --tab-icon-color: #8a59d9; --tab-icon-bg: rgba(138,89,217,0.12); --tab-icon-bg-hover: rgba(138,89,217,0.18); }
-    #tabBlacklistBtn { --tab-icon-color: #8d4f5f; --tab-icon-bg: rgba(141,79,95,0.12); --tab-icon-bg-hover: rgba(141,79,95,0.18); }
     #tabPhotosBtn { --tab-icon-color: #14a089; --tab-icon-bg: rgba(20,160,137,0.12); --tab-icon-bg-hover: rgba(20,160,137,0.18); }
     #tabEmailBtn { --tab-icon-color: #e86f2c; --tab-icon-bg: rgba(232,111,44,0.12); --tab-icon-bg-hover: rgba(232,111,44,0.18); }
     #tabBehaviorBtn { --tab-icon-color: #3b9f8c; --tab-icon-bg: rgba(59,159,140,0.12); --tab-icon-bg-hover: rgba(59,159,140,0.18); }
@@ -1452,10 +1451,6 @@
         line-height: 1.6;
     }
 
-    #tabBlacklistBtn,
-    #tabBlacklist {
-        display: none !important;
-    }
     .email-section { max-width: 800px; }
     .email-section .user-list { max-height: 300px; overflow-y: auto; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; padding: 4px; margin-bottom: 12px; }
     .email-section .user-list .user-item { display: flex; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: default; gap: 8px; }
@@ -1906,7 +1901,7 @@
         color: #ef4444;
     }
 
-/* �Ż�ָ�ƺ� IP �ȴ�����Ϣչʾ */
+/* 优化指纹码和 IP 等敏感信息展示 */
 .ip-text, .code-hash {
     font-family: Consolas, "Courier New", monospace !important;
     font-size: 13px !important;

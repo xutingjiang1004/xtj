@@ -134,13 +134,14 @@ const JS_FILES = [
 ];
 
 // ★ 修复（Bug 2）：前端直连 Supabase 的 ANON key 注入。
-// 仓库是 public repo，config.js 中仅保留占位符（eyJhbG...yDDA）作为安全默认；
-// 构建时若设置了 SUPABASE_ANON_KEY 环境变量，则替换占位符后压缩，
-// 使 feed 失败回退 / 浏览统计 RPC / 照片墙统计等直连功能在生产可用。
+// 仓库是 public repo，config.js 与 core.js（XTJ_RUNTIME_CONFIG 默认值）中仅保留
+// 占位符（eyJhbG...yDDA）作为安全默认；构建时若设置了 SUPABASE_ANON_KEY 环境变量，
+// 则替换占位符后压缩，使 feed 失败回退 / 浏览统计 RPC / 照片墙统计等直连功能在生产可用。
 // 未设置时保持占位符（功能静默降级，但绝不泄露真实 key 到源码）。
+// 同时注入 js/config.js 和 js/core.js（两处占位符均为带引号的 "eyJhbG...yDDA"）。
 var CONFIG_ANON_PLACEHOLDER = 'eyJhbG...yDDA';
 function injectConfigSecrets(source, filePath) {
-  if (filePath !== 'js/config.js') return source;
+  if (filePath !== 'js/config.js' && filePath !== 'js/core.js') return source;
   var anonKey = process.env.SUPABASE_ANON_KEY || '';
   anonKey = String(anonKey).trim();
   if (!anonKey || anonKey.indexOf('...') !== -1 || anonKey === CONFIG_ANON_PLACEHOLDER) {
@@ -149,11 +150,11 @@ function injectConfigSecrets(source, filePath) {
   var occurrences = source.split(CONFIG_ANON_PLACEHOLDER).length - 1;
   if (occurrences > 0) {
     var injected = source.split(CONFIG_ANON_PLACEHOLDER).join(anonKey);
-    console.log('[INJECT] SUPABASE_ANON_KEY: replaced ' + occurrences + ' placeholder occurrence(s) in js/config.js (from env)');
+    console.log('[INJECT] SUPABASE_ANON_KEY: replaced ' + occurrences + ' placeholder occurrence(s) in ' + filePath + ' (from env)');
     return injected;
   }
   // 占位符不存在时绝不能假装成功：源文件可能已被误写入真实 key（泄漏风险）
-  console.warn('[INJECT] WARNING: placeholder (' + CONFIG_ANON_PLACEHOLDER + ') NOT found in js/config.js - nothing injected; check that js/config.js still holds the placeholder');
+  console.warn('[INJECT] WARNING: placeholder (' + CONFIG_ANON_PLACEHOLDER + ') NOT found in ' + filePath + ' - nothing injected; check that ' + filePath + ' still holds the placeholder');
   return source;
 }
 
@@ -190,7 +191,7 @@ function minifyJS(filePath, optional) {
     var normalizedSource = fs.readFileSync(fullPath, 'utf8').replace(/\x0d\n?/g, '\n');
     // 指纹注释记录 LF 归一化源码哈希（注入前），供 check-build-consistency 校验产物新鲜度
     var fingerprint = crypto.createHash('sha256').update(normalizedSource).digest('hex');
-    // ★ 修复（Bug 2）：config.js 构建时注入 SUPABASE_ANON_KEY（若有设置）
+    // ★ 修复（Bug 2）：config.js / core.js 构建时注入 SUPABASE_ANON_KEY（若有设置）
     normalizedSource = injectConfigSecrets(normalizedSource, filePath);
     var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xtj-js-'));
     tempInputPath = path.join(tempDir, path.basename(fullPath));

@@ -11313,11 +11313,6 @@ body.ios-chat-keyboard-open .chat-input-area {
 /* =============================
    举报弹窗改版 - 左右布局
    ============================= */
-/* 弹窗加宽 */
-.report-modal {
-  max-width: 780px !important;
-}
-
 /* 内容 - flex 行容器 */
 .report-modal-content {
   display: flex !important;

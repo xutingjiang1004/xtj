@@ -6881,7 +6881,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function switchConversation(cid) {
-    console.log('[DEBUG] switchConversation called:', cid, 'current S.convId:', S.conversationId);
     if (!cid) return;
     if (cid === S.conversationId && S.messages.length > 0) return;
     abortCurrentRequest();
@@ -6903,7 +6902,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (S.messagesEl) {
       S.loading = false;
       S.loadingMore = false;
-      console.log('[DEBUG] calling loadHistory from switchConversation for:', cid);
       await loadHistory(S.messagesEl, null);
     }
   }

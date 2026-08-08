@@ -36,8 +36,10 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION = 10000;
 
 function validateFile(filePath) {
+  // 先做 existsSync 检查再 safeResolve，避免 realpathSync 对不存在文件抛原始 ENOENT
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) throw new Error(`文件不存在: ${resolved}`);
   const fp = safeResolve(filePath);
-  if (!fs.existsSync(fp)) throw new Error(`文件不存在: ${fp}`);
   const valid = [".jpg",".jpeg",".png",".webp",".avif",".tiff",".gif"];
   if (!valid.includes(path.extname(fp).toLowerCase())) throw new Error(`不支持的格式: ${path.extname(fp)}`);
   const stat = fs.statSync(fp);
@@ -73,7 +75,7 @@ server.tool("image_compress", "压缩图片文件", { filepath: z.string(), qual
   const fmt = ext.toLowerCase().replace('.', '');
   let p = sharp(fp);
   if (fmt === 'jpg' || fmt === 'jpeg') p = p.jpeg({quality:q,mozjpeg:true});
-  else if (fmt === 'png') p = p.png({quality:q,compressionLevel:9});
+  else if (fmt === 'png') p = p.png({compressionLevel:9}); // PNG 为无损格式，sharp 不支持 quality 参数
   else if (fmt === 'webp') p = p.webp({quality:q});
   else p = p.jpeg({quality:q,mozjpeg:true});
   await p.toFile(out);
@@ -85,10 +87,15 @@ server.tool("image_compress", "压缩图片文件", { filepath: z.string(), qual
 
 server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { filepath: z.string(), format: z.enum(["jpeg","png","webp","avif","tiff"]), quality: z.number().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
-  const out = `${fp.slice(0, -path.extname(fp).length)}.${args.format}`;
+  let out = `${fp.slice(0, -path.extname(fp).length)}.${args.format}`;
+  // 防覆盖：输入扩展名与目标 format 相同时加 _converted 后缀，避免 toFile 原地覆盖源文件
+  if (path.extname(fp).slice(1).toLowerCase() === args.format) {
+    out = `${fp.slice(0, -path.extname(fp).length)}_converted.${args.format}`;
+  }
   const q = args.quality ?? 85;
   let p = sharp(fp);
-  switch(args.format){ case"jpeg":p=p.jpeg({quality:q,mozjpeg:true});break; case"png":p=p.png({quality:q});break; case"webp":p=p.webp({quality:q});break; case"avif":p=p.avif({quality:q});break; case"tiff":p=p.tiff({quality:q});break; }
+  switch(args.format){ case"jpeg":p=p.jpeg({quality:q,mozjpeg:true});break; case"png":p=p.png({compressionLevel:9});break; // PNG 无损，不支持 quality
+  case"webp":p=p.webp({quality:q});break; case"avif":p=p.avif({quality:q});break; case"tiff":p=p.tiff({quality:q});break; }
   const info = await p.toFile(out);
   return { content: [{ type: "text", text: `✅ 转换完成\n  ${path.basename(fp)} → ${path.basename(out)}\n  格式: ${args.format.toUpperCase()}\n  大小: ${fmtSize(fs.statSync(out).size)}\n  尺寸: ${info.width}x${info.height}` }] };
 });
@@ -137,13 +144,21 @@ server.tool("image_batch_optimize", "批量优化目录下所有图片", { direc
   const fmt = args.format||"webp"; const q = args.quality??80; const mw = args.max_width||1920;
   const results = [];
   for (const file of files) {
-    const full = path.join(dir, file); const outName = `${path.basename(file,path.extname(file))}.${fmt}`; const out = path.join(dir, outName);
+    const full = path.join(dir, file);
+    // 防覆盖：输入扩展名与目标 fmt 相同时加 _opt 后缀，避免 toFile 原地覆盖源文件
+    let outName = `${path.basename(file,path.extname(file))}.${fmt}`;
+    if (path.extname(file).slice(1).toLowerCase() === fmt) {
+      outName = `${path.basename(file,path.extname(file))}_opt.${fmt}`;
+    }
+    const out = path.join(dir, outName);
     try {
+      // 在 toFile 之前读取源文件大小，避免源文件被覆盖后统计出错
+      const s1 = fs.statSync(full).size;
       const meta = await sharp(full).metadata();
       let p = sharp(full); if (meta.width && meta.width > mw) p = p.resize({width:mw});
       switch(fmt){case"webp":p=p.webp({quality:q});break;case"avif":p=p.avif({quality:q});break;case"jpeg":p=p.jpeg({quality:q});break;}
       await p.toFile(out);
-      const s1 = fs.statSync(full).size; const s2 = fs.statSync(out).size; const sv = ((1-s2/s1)*100).toFixed(1);
+      const s2 = fs.statSync(out).size; const sv = ((1-s2/s1)*100).toFixed(1);
       results.push(`  ✅ ${file} → ${outName} (${fmtSize(s1)}→${fmtSize(s2)}, -${sv}%)`);
     } catch(e) { results.push(`  ❌ ${file}: ${e.message}`); }
   }

@@ -901,18 +901,3 @@
 }
 
 #panelCode .code-composer-menu button[role="menuitem"]:active,
-#panelCode .code-composer-menu .code-context-usage:active {
-  background: var(--cw-border, #e0e0e0);
-}
-
- # p a n e l C o d e   . c o d e - c o m p o s e r - m e n u   b u t t o n [ r o l e = \  
- m e n u i t e m \ ]   . c o d e - a c t i o n - i c o n , 
- # p a n e l C o d e   . c o d e - c o m p o s e r - m e n u   . c o d e - c o n t e x t - u s a g e   . c o d e - a c t i o n - i c o n   { 
-     w i d t h :   1 5 p x ; 
-     h e i g h t :   1 5 p x ; 
-     m a r g i n - r i g h t :   8 p x ; 
-     v e r t i c a l - a l i g n :   - 2 p x ; 
-     c o l o r :   v a r ( - - c w - m u t e d ,   # 6 6 6 ) ; 
- } 
-  
- 

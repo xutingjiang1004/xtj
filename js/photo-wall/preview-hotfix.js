@@ -897,6 +897,8 @@
     if (state.forceClosing) return;
     state.forceClosing = true;
     clearCloseFallbackTimer();
+    // ★ 关闭预览时清除单击延迟关闭定时器，避免关闭后再次触发二次 close
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
     // ★ 修复 A2：关闭时移除键盘导航监听，避免每次打开预览重复注册
     if (state.__keydownHandler) {
       try { document.removeEventListener('keydown', state.__keydownHandler, true); } catch (_) {}

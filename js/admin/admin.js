@@ -4258,8 +4258,6 @@ async function initAdminClient() {
         recipients.forEach(function(r) {
           var displayName = (r.user_name && r.user_name !== r.email) ? r.user_name : '';
           var label = displayName ? (displayName + ' <' + r.email + '>') : r.email;
-          var escapedEmail = r.email.replace(/'/g,"\\'");
-          var escapedLabel = label.replace(/'/g, "\\'");
           h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + safeJsStr(r.email) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span class="email-history-remove" onclick="event.stopPropagation();emailConfirmDeleteRecipientHistory(\'' + safeJsStr(r.email) + '\',\'' + safeJsStr(label) + '\')" style="cursor:pointer;opacity:0.55;font-size:14px;line-height:1;padding:0 2px;border-radius:999px;" title="删除此历史邮箱">×</span></span>';
         });
         wrap.innerHTML = h;
