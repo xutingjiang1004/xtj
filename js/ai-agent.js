@@ -7115,6 +7115,9 @@ function showChatMessages() {
       if (!pageEl) return;
       pageEl.removeAttribute('hidden');
       pageEl.setAttribute('aria-hidden', 'false');
+      // ★ 关键修复：若该页此前正在离场（快速来回切换），必须清除 is-leaving，
+      //   否则 opacity:0 + position:absolute 会让页面重新进入后仍显示空白。
+      pageEl.classList.remove('is-leaving');
       pageEl.classList.add('is-entering');
       // 双层 rAF 触发 transition，避免强制回流
       nextFrame(function() {
@@ -7165,6 +7168,9 @@ function showChatMessages() {
         if (ev && ev.target !== fromPage) return;
         done = true;
         fromPage.removeEventListener('transitionend', onLeaveEnd);
+        // ★ 关键修复：transitionend 触发时，若该页已被重新激活（快速来回切换），
+        //   不得再把它隐藏，否则会出现"切回来后突然空白"的闪烁。
+        if (fromPage.classList.contains('is-active')) return;
         setHiddenPage(fromPage);
         clearPageTransitionTimer(fromId);
       }
