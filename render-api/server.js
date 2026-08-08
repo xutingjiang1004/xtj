@@ -14639,7 +14639,10 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //   web_search 明确为 true 或 false → 走 Responses API 启用内置 web_search；
     //   true 时再叠加 Tavily 第三方集群搜索；未传 → 走原标准路径（向后兼容）。
     var webSearchPref = req.body && req.body.web_search;
-    var useBuiltInSearch = (webSearchPref === true || webSearchPref === false);
+    // ★ 修正：只有用户明确打开网页搜索时才走 Responses API（它需要内置 web_search 工具）。
+    //   web_search === false 时回退标准 Chat Completions 路径，该路径能显式禁用 reasoning，
+    //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
+    var useBuiltInSearch = (webSearchPref === true);
     var useTavilyCluster = (webSearchPref === true);
     var webSearchEnabled = (webSearchPref === true);
     if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
@@ -14954,9 +14957,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (aborted) return safeEnd();
     startStreamHeartbeat();
     
-    // 立即发送思考开始信号, 让前端显示"思考中..."而非干等
-    writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
-    if (aborted) return safeEnd();
+    // 思考开始信号：在确定 thinkingMode 之后、真正调用模型之前再发，且仅在开启思考时发送。
+    // 此前无条件发送会导致用户关闭思考后仍看到"思考中..."，产生后端未关闭的错觉。
     
     // 读取全局 AI 配置 + 上下文 (并行)
     T_stage.config_start = Date.now();
@@ -15012,6 +15014,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'enhanced_stage', stage: 'understand', message: '正在梳理问题与回答结构…' });
     }
     var useThinking = thinkingMode !== 'off';
+    if (useThinking) {
+      writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+      if (aborted) return safeEnd();
+    }
     // Enhanced chat is a bounded, single-agent middle gear: it may use the
     // server-owned search pipeline even when the legacy chat toggle is off.
     // Deep research remains a separate route with its own multi-agent budget.
@@ -15092,7 +15098,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   useTavilyCluster —— 仅当 web_search 明确为 true（搜索"开"）时，叠加 Tavily 第三方
     //     集群搜索（双通道"一起抓取"，约 3000 次额度），实现海量全网搜索。
     //   webSearchEnabled —— 仅用于消息元数据 / done 事件，反映用户开关状态（向后兼容前端）。
-    var useBuiltInSearch = (webSearchPref === true || webSearchPref === false);
+    // ★ 修正：只有用户明确打开网页搜索时才走 Responses API（它需要内置 web_search 工具）。
+    //   web_search === false 时回退标准 Chat Completions 路径，该路径能显式禁用 reasoning，
+    //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
+    var useBuiltInSearch = (webSearchPref === true);
     var useTavilyCluster = (webSearchPref === true);
     var webSearchEnabled = (webSearchPref === true);
     if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
@@ -15102,13 +15111,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     if (useBuiltInSearch && !aborted) {
       // ===== Responses API 路径（内置 web_search + 可选 Tavily 并行） =====
-      // ★ 修复：与标准流式路径对齐，先发 reasoning_start 让前端提前创建
-      //   思考过程折叠按钮。此前此路径不发 reasoning_start，前端只能靠首条
-      //   reasoning 事件兜底创建，在 done 紧随 / search_supplement 重置等场景下，
-      //   reasoningContainer 可能持有脱离 DOM 的陈旧引用，导致 finishAiMessage
-      //   误跳过创建 → "已思考"按钮消失。
-      writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
-      if (aborted) return safeEnd();
+      // 思考开始信号已在外部根据 useThinking 统一发送，此处不再重复。
 
       var responsesContent = '';
       var responsesReasoning = '';
@@ -15250,8 +15253,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         };
       }
 
+      var _responsesSaved = false;
       try {
-        await supabase.from('posts').insert([
+        var _responsesSaveResult = await supabase.from('posts').insert([
           {
             user_name: userName,
             content: message,
@@ -15267,11 +15271,38 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
+        if (_responsesSaveResult && _responsesSaveResult.error) {
+          console.error('[AGENT-STREAM] save failed:', _responsesSaveResult.error && _responsesSaveResult.error.message, 'userName:', userName, 'convId:', String(convId).slice(0, 8));
+        } else {
+          _responsesSaved = true;
+        }
       } catch (e) {
         console.error('[AGENT-STREAM] save messages failed:', e.message);
       }
 
-      writeSse(res, { type: 'done', conversation_id: convId, model: usedModel, usage: responsesUsage, thinking_mode: thinkingMode, search_count: searchResultsCollected.length, web_search: webSearchEnabled });
+      writeSse(res, {
+        type: 'done',
+        complete: true,
+        interrupted: false,
+        saved: _responsesSaved,
+        finish_reason: 'stop',
+        conversation_id: convId,
+        model: usedModel,
+        usage: responsesUsage,
+        thinking_mode: thinkingMode,
+        requested_thinking_mode: thinkingMode,
+        applied_thinking_mode: useThinking ? thinkingMode : 'off',
+        reasoning: thinkingMode !== 'off' ? responsesReasoning : '',
+        content: responsesContent,
+        content_length: responsesContent.length,
+        reasoning_length: responsesReasoning.length,
+        search_count: searchResultsCollected.length,
+        search_query: searchQueriesCollected.length > 0 ? searchQueriesCollected[0] : message.slice(0, 100),
+        search_results: searchResultsCollected.length > 0 ? searchResultsCollected.slice(0, 50) : undefined,
+        search_expires_at: searchMetaToStore && typeof searchMetaToStore.expires_at === 'number' ? searchMetaToStore.expires_at : undefined,
+        web_search: webSearchEnabled,
+        total_ms: Date.now() - T0
+      });
       return safeEnd();
     }
 
