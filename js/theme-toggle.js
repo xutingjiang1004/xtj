@@ -3,6 +3,11 @@
 
   if (window.__xtjThemeToggleBound) return;
   window.__xtjThemeToggleBound = true;
+  // ★ 修复 M-2：声明本模块接管主题控制（V2）。core.js 中旧主题块以
+  // `if (!window.__xtjThemeControllerV2)` 守卫，此前从未设置此标记导致两套
+  // 实现同时运行、存储键（xtj_theme vs xtj-theme）互相覆盖。
+  // 设置后旧块被跳过，主题状态统一由本模块管理。
+  window.__xtjThemeControllerV2 = true;
 
   var STORAGE_KEY = 'xtj_theme';
   var LEGACY_STORAGE_KEY = 'xtj-theme';

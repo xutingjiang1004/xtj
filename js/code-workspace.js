@@ -62,6 +62,7 @@
     _githubLoadPromise: null,
     _githubLoadKey: '',
     _githubErrorKey: '',
+    _githubErrorAt: 0,
     _indexController: null,
     _indexStatusController: null,
     _indexBuildPromise: null,
@@ -89,6 +90,9 @@
   // ──────────────────────────────────────────────
   var _dom = {};
   var _documentExtractionSerial = 0;
+  // ★ 修复:记录文件树中已展开目录的 data-path,renderFileTree() 全量重建后
+  // 据此恢复展开状态(折叠时移除,重建后对仍在 expandedPaths 中的节点调用 _toggle 展开)。
+  var expandedPaths = {};
   var MAX_OPEN_FILE_CONTEXT = 12;
   var MAX_OPEN_FILE_CHARS = 240000;
   var MAX_OPEN_FILES_TOTAL_CHARS = 900000;
@@ -417,11 +421,24 @@
     if (typeof path !== 'string' || path.trim() === '') {
       throw new Error('Path must be a non-empty string');
     }
-    if (path.split('/').some(function(part) { return part === '..'; })) {
-      throw new Error('Path traversal is not allowed');
-    }
     if (/^[a-zA-Z]:[\\/]/.test(path) || path.charAt(0) === '/') {
       throw new Error('Absolute paths are not allowed');
+    }
+    // ★ 修复:与 code-file-system.js 的 validatePath 对齐 —— 先归一化(去掉首尾
+    // 斜杠、合并连续斜杠),再逐段检查,拒绝 '..' 段、'.' 段与空段,
+    // 覆盖 a//b、a/./b 等此前前端放行、FS 层抛错的输入。
+    var normalized = path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\/+/g, '/');
+    var parts = normalized.split('/');
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] === '..' || parts[i] === '.') {
+        throw new Error('Path traversal is not allowed');
+      }
+      if (parts[i] === '') {
+        throw new Error('Empty path segment is not allowed');
+      }
+    }
+    if (parts.length === 0) {
+      throw new Error('Path resolves to empty');
     }
     return true;
   }
@@ -2549,6 +2566,21 @@
     if (rootNode._toggle) {
       rootNode._toggle();
     }
+
+    // ★ 修复:恢复之前已展开目录的展开状态 —— 遍历所有目录节点,对
+    // data-path 记录在 expandedPaths 中的节点调用其 wrapper 的 _toggle()。
+    // 目录节点懒加载展开时 childrenContainer.children.length === 0 才加载,
+    // 直接调用 _toggle 即可触发加载。
+    var dirRows = _dom.fileTree.querySelectorAll('.code-tree-item.dir');
+    for (var di = 0; di < dirRows.length; di++) {
+      var dirPath = dirRows[di].getAttribute('data-path');
+      if (dirPath && expandedPaths[dirPath]) {
+        var dirWrapper = dirRows[di].parentNode;
+        if (dirWrapper && dirWrapper._toggle && !dirRows[di].classList.contains('expanded')) {
+          dirWrapper._toggle();
+        }
+      }
+    }
   }
 
   function createTreeItem(item) {
@@ -2590,11 +2622,17 @@
           row.classList.remove('expanded');
           childrenContainer.classList.add('collapsed');
           expanded = false;
+          // ★ 修复:折叠时从 expandedPaths 移除,保持记录与真实展开状态同步。
+          var collapsePath = row.getAttribute('data-path');
+          if (collapsePath) delete expandedPaths[collapsePath];
         } else {
           // Expand
           row.classList.add('expanded');
           childrenContainer.classList.remove('collapsed');
           expanded = true;
+          // ★ 修复:展开时记录目录 data-path,供 renderFileTree() 重建后恢复展开状态。
+          var expandPath = row.getAttribute('data-path');
+          if (expandPath) expandedPaths[expandPath] = true;
 
           // Lazy load children
           if (childrenContainer.children.length === 0 && item.handle) {
@@ -2801,7 +2839,20 @@
       showToast('\u6587\u4ef6\u5220\u9664\u80fd\u529b\u4e0d\u53ef\u7528\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5', 'error');
       return;
     }
-    if (!window.confirm('\u786e\u5b9a\u5220\u9664\u6587\u4ef6\u201c' + path + '\u201d\u5417\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002')) return;
+    // ★ 修复:若该文件在 openTabs 中且有未保存修改(tab.modified),
+    // 追加提示,避免用户未察觉未保存内容随删除一并丢失。
+    var unsaved = false;
+    for (var t = 0; t < state.openTabs.length; t++) {
+      if (state.openTabs[t].path === path && state.openTabs[t].modified) {
+        unsaved = true;
+        break;
+      }
+    }
+    var deleteMsg = '\u786e\u5b9a\u5220\u9664\u6587\u4ef6\u201c' + path + '\u201d\u5417\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002';
+    if (unsaved) {
+      deleteMsg += '\n\u8be5\u6587\u4ef6\u5b58\u5728\u672a\u4fdd\u5b58\u4fee\u6539\uff0c\u5220\u9664\u540e\u5c06\u4e22\u5931\u3002';
+    }
+    if (!window.confirm(deleteMsg)) return;
     fs.deleteFileByPath(path).then(function () {
       var tabIndex = state.openTabs.findIndex(function (item) { return item.path === path; });
       if (tabIndex >= 0) {
@@ -2830,14 +2881,68 @@
 
     // Highlight active file
     if (state.activePath) {
-      var items = _dom.fileTree.querySelectorAll('.code-tree-item.file');
-      for (var i = 0; i < items.length; i++) {
-        if (items[i].getAttribute('data-path') === state.activePath) {
-          items[i].classList.add('active');
-          break;
+      // ★ 修复 S1：文件树是懒加载的，深层目录未展开时节点不在 DOM 中，
+      // 直接按 data-path 匹配永远找不到。先按 activePath 逐段展开目录
+      // （等待每层懒加载完成），再高亮目标文件。
+      var pathParts = state.activePath.split('/').filter(Boolean);
+      var queue = Promise.resolve();
+      for (var pi = 1; pi < pathParts.length; pi++) {
+        (function (targetDepth) {
+          queue = queue.then(function () {
+            return expandTreePathPrefix(pathParts.slice(0, targetDepth).join('/'));
+          });
+        })(pi);
+      }
+      queue.then(function () {
+        var items = _dom.fileTree.querySelectorAll('.code-tree-item.file');
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].getAttribute('data-path') === state.activePath) {
+            items[i].classList.add('active');
+            break;
+          }
+        }
+      }).catch(function (err) {
+        console.warn('[code-workspace] refreshFileTree expand failed:', err);
+      });
+    }
+  }
+
+  // ★ 修复 S1：展开树中 data-path 等于给定前缀的目录节点（懒加载完成后自动展开子层）
+  function expandTreePathPrefix(prefix) {
+    if (!prefix) return Promise.resolve();
+    var dirRows = _dom.fileTree.querySelectorAll('.code-tree-item.dir');
+    for (var i = 0; i < dirRows.length; i++) {
+      if (dirRows[i].getAttribute('data-path') === prefix) {
+        var w = dirRows[i].parentNode;
+        if (w && w._toggle) {
+          var row = dirRows[i];
+          if (!row.classList.contains('expanded')) {
+            w._toggle();
+            // 懒加载异步：等待子节点插入后再展开下一层（最多轮询 2s）
+            return waitForTreeChildren(row).then(function () {
+              return row.classList.contains('expanded') ? Promise.resolve() : Promise.reject(new Error('expand timeout: ' + prefix));
+            });
+          }
+          return Promise.resolve();
         }
       }
     }
+    return Promise.resolve();
+  }
+
+  function waitForTreeChildren(row) {
+    var container = row.parentNode && row.parentNode.querySelector('.code-tree-children');
+    if (!container) return Promise.resolve();
+    var deadline = Date.now() + 2000;
+    return new Promise(function (resolve) {
+      (function poll() {
+        if (container.children.length > 0 || container.textContent.indexOf('空目录') >= 0 || Date.now() > deadline) {
+          resolve();
+        } else {
+          setTimeout(poll, 50);
+        }
+      })();
+    });
   }
 
   // ──────────────────────────────────────────────
@@ -4098,7 +4203,8 @@
                 return uploadFilesInBatches(files, result, ctx, controller, workspaceId, wsGen, {
                   incremental: true,
                   manifestPaths: manifestFiles.map(function (f) { return f.path; }),
-                  deletedPaths: deletePaths
+                  // ★ 修复 S4：deletePaths 仅在 persist_enabled 分支赋值，防御性兜底
+                  deletedPaths: deletePaths || []
                 }).catch(function (incrementalErr) {
                   if (!incrementalErr || incrementalErr.code !== 'INCREMENTAL_BATCH_TOO_LARGE') throw incrementalErr;
                   // Preserve correctness over bandwidth: a delta too large for
@@ -4537,7 +4643,10 @@
         return responseJson(response, '无法读取 GitHub 分支');
       })
     ]).then(function (results) {
+      // ★ 修复:仓库信息加载成功后清空错误去重状态,
+      // 避免旧错误 key 残留导致新错误被误判为重复。
       state._githubErrorKey = '';
+      state._githubErrorAt = 0;
       return {
         parsed: parsed,
         repo: results[0].repo || results[0],
@@ -4680,8 +4789,13 @@
           loadBtn.textContent = '加载仓库';
           if (err && err.name === 'AbortError') return;
           var errorKey = String((err && err.status) || 0) + ':' + String((err && err.message) || '未知错误');
-          if (state._githubErrorKey !== errorKey) {
+          // ★ 修复:错误 toast 改为限时去重 —— 3 秒内相同错误只提示一次,
+          // 超过 3 秒允许再次提示,避免用户连续点击"加载仓库"时同一错误
+          // (如 404)只在第一次有提示。
+          var now = Date.now();
+          if (state._githubErrorKey !== errorKey || now - state._githubErrorAt >= 3000) {
             state._githubErrorKey = errorKey;
+            state._githubErrorAt = now;
             showToast('加载失败: ' + (err.message || '未知错误'), 'error');
           }
         });
@@ -5667,7 +5781,22 @@
           return DOMPurify.sanitize(rendered, {
             USE_PROFILES: { html: true },
             FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
-            FORBID_ATTR: ['onerror', 'onload', 'onclick', 'style']
+            // ★ 修复 S3：此前只禁止 4 个事件属性，onmouseover/onfocus 等仍可注入。
+            // 改为禁止全部 on* 事件属性 + 危险属性（style/srcdoc/formaction 等）。
+            FORBID_ATTR: [
+              'style',
+              'srcdoc',
+              'formaction',
+              'xlink:href',
+              'onerror', 'onload', 'onclick', 'ondblclick', 'oncontextmenu',
+              'onmouseover', 'onmouseout', 'onmousedown', 'onmouseup', 'onmousemove', 'onmouseenter', 'onmouseleave',
+              'onfocus', 'onblur', 'onchange', 'oninput', 'onsubmit', 'onkeydown', 'onkeyup', 'onkeypress',
+              'ontouchstart', 'ontouchend', 'ontouchmove', 'ontouchcancel',
+              'ondrag', 'ondrop', 'ondragstart', 'ondragend', 'ondragover', 'ondragenter', 'ondragleave',
+              'onauxclick', 'onpointerdown', 'onpointerup', 'onpointermove', 'onpointerenter', 'onpointerleave',
+              'onanimationstart', 'onanimationend', 'onanimationiteration', 'ontransitionend', 'onwheel', 'onscroll',
+              'onpaste', 'oncopy', 'oncut', 'onselect', 'onselectionchange', 'onresize', 'onerror'
+            ]
           });
         }
         // 没有 DOMPurify 时，退回先转义再替换方案，不允许直接使用 marked 原始 HTML
@@ -9275,8 +9404,10 @@
   window.addEventListener('beforeunload', function (event) {
     if (state.active && hasUnsavedChanges()) {
       // 触发浏览器原生离开确认，不在 beforeunload 中弹自定义 confirm
+      // ★ 修复：returnValue 必须是非空字符串，Chrome 对空字符串不弹确认框，
+      // 导致未保存内容在刷新/关闭时静默丢失。preventDefault 需配合 returnValue。
       event.preventDefault();
-      event.returnValue = '';
+      event.returnValue = '存在未保存的修改，确定要离开吗？';
     }
     // Do not clear workspace state here: the browser may cancel navigation after the
     // native prompt, in which case clearing editors/blob URLs corrupts the

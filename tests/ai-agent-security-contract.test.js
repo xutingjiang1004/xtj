@@ -59,8 +59,11 @@ test('deep research close invalidates callbacks, aborts streams, and clears tran
   const closeBody = source.slice(closeStart, source.indexOf('var _dtFileData', closeStart));
   assert.match(closeBody, /S\.lifecycleId\+\+/);
   assert.match(closeBody, /S\.clientRequestId\+\+/);
-  assert.match(closeBody, /S\.abortController\.abort/);
-  assert.match(closeBody, /S\.deepThinkJob\.abort/);
+  // ★ 修复后：closeDeepThinkPage 只 abort 深页独立通道（_dtAbortController / deepThinkJob），
+  // 不再触碰普通聊天共享的 S.abortController，避免误杀普通聊天流。
+  assert.match(closeBody, /_dtAbortController/);
+  assert.match(closeBody, /c\.abort/);
+  assert.match(closeBody, /S\.deepThinkJob/);
   assert.match(closeBody, /_dtFileData\s*=\s*null/);
 });
 

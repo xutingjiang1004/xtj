@@ -257,16 +257,22 @@
   }
 
   function getSHA256(input) {
-    var buffer;
+    var bufferPromise;
     if (typeof input === 'string') {
       var encoder = new TextEncoder();
-      buffer = encoder.encode(input);
+      bufferPromise = Promise.resolve(encoder.encode(input));
     } else if (input instanceof ArrayBuffer || input instanceof Uint8Array) {
-      buffer = input;
+      bufferPromise = Promise.resolve(input);
+    } else if (typeof Blob !== 'undefined' && input instanceof Blob) {
+      // ★ 修复：writeBinaryFile 允许 Blob 内容，但 getSHA256 此前不支持 Blob，
+      // 导致所有 Blob 写入在校验前就 reject。转换为 ArrayBuffer 后参与校验。
+      bufferPromise = input.arrayBuffer();
     } else {
-      return Promise.reject(new Error('getSHA256: input must be a string, ArrayBuffer, or Uint8Array'));
+      return Promise.reject(new Error('getSHA256: input must be a string, ArrayBuffer, Uint8Array, or Blob'));
     }
-    return crypto.subtle.digest('SHA-256', buffer).then(function (hash) {
+    return bufferPromise.then(function (buffer) {
+      return crypto.subtle.digest('SHA-256', buffer);
+    }).then(function (hash) {
       return sha256ToHex(hash);
     });
   }
