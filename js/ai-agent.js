@@ -1648,9 +1648,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
-    // V2: 更快节奏, minChunk=3/maxChunk=12 配合 8-20字/帧, 流畅不卡
-    var minChunk = Math.max(1, options && options.minChunk || 3);
-    var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
+    // V6: 流水跟包默认更大块，减少「一顿一顿」
+    var minChunk = Math.max(1, options && options.minChunk || 6);
+    var maxChunk = Math.max(minChunk, options && options.maxChunk || 48);
     if (pending.length <= maxChunk) return pending;
 
     var punctuation = /[，。！？；：?!.?:;\n]/;
@@ -1694,9 +1694,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return el && el.contains(range.commonAncestorContainer);
       } catch (e) { return false; }
     }
-    // V5: 基于时间推进，适配不同刷新率；plainStream 单文本节点 + 微批次，避免每帧建节点卡顿
+    // V6: 流水跟包 — 高吞吐 + 积压追赶，避免打字机一顿一顿
     var lastFrameTime = 0;
-    var charsPerMs = options.plainStream ? 0.55 : 0.7;
+    // ~180–240 字/秒量级；plain 思考略慢仍远高于旧 0.55
+    var charsPerMs = options.charsPerMs != null
+      ? options.charsPerMs
+      : (options.plainStream ? 2.2 : 3.2);
     // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -1748,10 +1751,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         next = pending;
         pending = '';
       } else {
-        // V5: 基于时间 budget 推进，帧率无关；plainStream 累积到缓冲区一帧只写一次
-        var frameBudget = Math.max(1, Math.floor(budget || 16));
+        // V6: 流水跟包 — 积压时加速追赶，接近实时；仍按自然断点切块避免生硬
+        var baseBudget = Math.max(8, Math.floor(budget || 24));
+        // 队列积压：尽快追上网络到达速度，避免「一个字一个字」
+        if (pending.length > 120) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.45));
+        else if (pending.length > 48) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.28));
+        else if (pending.length > 16) baseBudget = Math.max(baseBudget, 20);
+        var frameBudget = baseBudget;
+        var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 16, frameBudget - next.length) }));
+          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
           if (!chunk) break;
           next += chunk;
           pending = pending.slice(chunk.length);
@@ -1793,7 +1802,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!lastFrameTime) lastFrameTime = timestamp;
       var elapsed = timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      var budget = Math.max(1, Math.floor(elapsed * charsPerMs));
+      // 下限提高：慢帧也至少吐一批，保证「流水」感
+      var budget = Math.max(12, Math.floor(elapsed * charsPerMs));
       emitText(false, budget);
       if (pending) schedule();
     }
@@ -3717,7 +3727,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           if (contentRendererRef.value) { try { contentRendererRef.value.stop(); } catch (e8) {} }
           answerEl.innerHTML = '';
-          contentRendererRef.value = createSmoothTextRenderer(answerEl, { minChunk: 2, maxChunk: 6, onDone: function() { finalizeAnswer(); } });
+          contentRendererRef.value = createSmoothTextRenderer(answerEl, { minChunk: 8, maxChunk: 64, charsPerMs: 3.4, onDone: function() { finalizeAnswer(); } });
           contentRendererRef.value.append(contentForRender);
           contentRendererRef.value.finish(contentForRender);
           contentRendererRef.value = null;
@@ -3878,7 +3888,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
           if (aEl && !answerRendererRef.value) {
             aEl.innerHTML = '';
-            answerRendererRef.value = createSmoothTextRenderer(aEl, { minChunk: 1, maxChunk: 3, plainStream: true });
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { minChunk: 8, maxChunk: 64, charsPerMs: 3.2, plainStream: true });
           }
           aiContentRef.value += String(evt.chunk);
           if (answerRendererRef.value) answerRendererRef.value.append(evt.chunk);
@@ -4276,7 +4286,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
-              minChunk: 2, maxChunk: 6,
+              minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -4939,7 +4949,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
-              minChunk: 2, maxChunk: 6,
+              minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -5734,15 +5744,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // P5 修复: 创建单一助手节点，typing dots 放在节点内部
     // 从发送到完成，始终使用同一个 DOM 节点
-    // ★ 优化：去掉打字三点动画（用户反馈"气泡闪现 1 秒又消失"的观感）。
-    // 节点仍保留（30+ 处事件处理引用它），但初始为空白占位，
-    // 回复流式到达时才渲染内容，不再显示转瞬即逝的打字气泡。
+    // ★ 优化：发送后立刻展示「思考中」占位，不等服务端首包（降低感知延迟）
     var assistantNode = el('div', { class: 'ai-msg assistant entering generating' });
     var assistantBubble = el('div', { class: 'ai-msg-bubble' });
-    // ★ 优化：初始隐藏气泡（无打字动画后空气泡会显示空白的渐变背景占位），
-    // 首个内容事件到达时 ensureAssistantBubbleReady 会设 display='block' 显示。
+    // 气泡先隐藏，等 content 到达再显示；思考占位单独可见
     assistantBubble.style.display = 'none';
     assistantNode.appendChild(assistantBubble);
+    // 思考模式开启时：立即插入思考节点，用户一点发送就看到反馈
+    var _earlyThinkingShown = false;
+    if (S.thinkingMode && S.thinkingMode !== 'off') {
+      try {
+        var earlyRn = buildReasoningNode('思考中...', messagesEl);
+        assistantNode.insertBefore(earlyRn, assistantNode.firstChild);
+        setThinkingExpanded(earlyRn, true, messagesEl);
+        _earlyThinkingShown = true;
+      } catch (eEarly) {}
+    } else {
+      // 关闭思考时给轻量「准备中」占位，避免空白等太久
+      try {
+        assistantBubble.style.display = 'block';
+        assistantBubble.classList.add('ai-reply-pending');
+        assistantBubble.textContent = '正在回复…';
+      } catch (ePending) {}
+    }
     messagesEl.appendChild(assistantNode);
     scrollToBottom(messagesEl, true);
 
@@ -5751,6 +5775,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function hideAssistantTyping() {
       try {
         assistantBubble.classList.remove('ai-typing-bubble');
+        if (assistantBubble.classList.contains('ai-reply-pending') && assistantBubble.textContent === '正在回复…') {
+          assistantBubble.textContent = '';
+        }
         assistantBubble.classList.add('ai-reply-pending');
       } catch (e) {}
     }
@@ -6132,6 +6159,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function ensureAssistantBubbleReady() {
         hideAssistantTyping();
         assistantBubble.classList.remove('ai-reply-pending');
+        // 清掉发送后占位文案，避免和流式内容拼在一起
+        if (assistantBubble.textContent === '正在回复…' && !contentRenderer) {
+          try { assistantBubble.textContent = ''; } catch (eClr) {}
+        }
         assistantBubble.style.display = 'block';
         assistantBubble.style.visibility = 'visible';
         if (!assistantBubble.classList.contains('ai-typing')) {
@@ -6139,8 +6170,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (!contentRenderer) {
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
-            minChunk: 4,
-            maxChunk: 16,
+            minChunk: 8,
+            maxChunk: 64,
+            charsPerMs: 3.4,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
               scrollToBottom(messagesEl, false);
@@ -6625,8 +6657,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (!reasoningRenderer) {
                 body.textContent = '';
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                minChunk: 2,
-                maxChunk: 8,
+                minChunk: 6,
+                maxChunk: 48,
+                charsPerMs: 2.6,
+                plainStream: true,
                 onRender: function() {
                   if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
                 }

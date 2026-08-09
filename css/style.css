@@ -1720,7 +1720,8 @@
             box-shadow: var(--button-glass-shadow-hover);
         }
         .theme-toggle-btn:active {
-            box-shadow: var(--button-glass-shadow-active);
+            box-shadow: none;
+            transform: scale(0.98);
         }
         .theme-toggle-btn:focus-visible {
             outline: none;
@@ -5882,54 +5883,62 @@
         }
         .photo-preview-close:active { transform: scale(.92); }
         .photo-preview-close { }
-        /* 预览左右切换箭头 */
+        /* 预览左右切换箭头 — 固定左右中线，不与 toolbar/关闭钮重叠 */
         .pp-nav-arrow {
             position: absolute;
             top: 50%;
-            z-index: 12;
-            width: 40px;
-            height: 40px;
+            z-index: 30;
+            width: 44px;
+            height: 44px;
+            margin-top: -22px; /* 用 margin 垂直居中，避免 active 改 transform 时跑位 */
             border-radius: 999px;
-            border: 1px solid rgba(255,255,255,.10);
-            background: rgba(255,255,255,.05);
+            border: 1px solid rgba(255,255,255,.12);
+            background: rgba(20, 28, 26, 0.42);
             backdrop-filter: blur(14px) saturate(120%);
             -webkit-backdrop-filter: blur(14px) saturate(120%);
-            color: rgba(255,255,255,.80);
+            color: rgba(255,255,255,.88);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform .2s cubic-bezier(.16,1,.3,1), background .2s ease, opacity .2s ease, box-shadow .2s ease;
+            transition: background .2s ease, opacity .2s ease, border-color .2s ease, transform .15s ease;
             pointer-events: auto;
-            transform: translateY(-50%);
+            transform: none;
             opacity: 0;
-            box-shadow: 0 4px 16px rgba(0,0,0,.10);
+            box-shadow: 0 4px 16px rgba(0,0,0,.18);
         }
         .photo-preview-overlay.active .pp-nav-arrow {
-            animation: ppNavEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s forwards;
+            animation: ppNavEnter 0.35s cubic-bezier(0.16,1,0.3,1) 0.12s forwards;
         }
         @keyframes ppNavEnter {
-            0% { opacity: 0; transform: translateY(-50%) scale(0.8); }
-            100% { opacity: 1; transform: translateY(-50%) scale(1); }
+            0% { opacity: 0; transform: scale(0.88); }
+            100% { opacity: 1; transform: scale(1); }
         }
         .pp-nav-prev {
-            left: calc(12px + env(safe-area-inset-left, 0px));
+            left: max(12px, env(safe-area-inset-left, 0px));
+            right: auto;
         }
         .pp-nav-next {
-            right: calc(12px + env(safe-area-inset-right, 0px));
+            right: max(12px, env(safe-area-inset-right, 0px));
+            left: auto;
         }
         .pp-nav-arrow:hover {
             background: rgba(255,255,255,.14);
-            border-color: rgba(255,255,255,.25);
-            box-shadow: 0 6px 24px rgba(0,0,0,.16);
+            border-color: rgba(255,255,255,.28);
             color: white;
+            box-shadow: 0 6px 20px rgba(0,0,0,.2);
+            transform: none;
+            filter: none;
         }
         .pp-nav-arrow:active {
-            transform: translateY(-50%) scale(.92);
+            transform: scale(0.96);
+            box-shadow: none;
+            background: rgba(255,255,255,.12);
         }
         .pp-nav-arrow.pp-nav-hidden {
-            opacity: 0;
+            opacity: 0 !important;
             pointer-events: none;
+            visibility: hidden;
         }
         .pp-nav-arrow svg {
             width: 20px;
@@ -7131,12 +7140,12 @@
                 .pw-upload-sheet-close,
                 .pw-upload-sheet-btn,
             ):not(:disabled):not([aria-disabled="true"]):hover {
-                transform: translateY(-1px);
+                /* 避免 translate/重阴影触发文字发糊；仅轻变色与边框 */
+                transform: none;
                 border-color: var(--button-glass-border-hover);
-                background:
-                    linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.12) 52%, rgba(255, 255, 255, 0.04) 100%),
-                    var(--button-glass-bg-hover);
-                box-shadow: var(--button-glass-highlight), var(--button-glass-shadow-hover);
+                background: var(--button-glass-bg-hover);
+                box-shadow: var(--button-glass-shadow);
+                filter: none;
             }
         }
         :is(
@@ -7188,11 +7197,11 @@
             .pw-upload-sheet-close,
             .pw-upload-sheet-btn,
         ):not(:disabled):not([aria-disabled="true"]):active {
-            transform: translateY(0) scale(0.97);
-            background:
-                linear-gradient(135deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.04) 60%, rgba(255, 255, 255, 0) 100%),
-                var(--button-glass-bg-active);
-            box-shadow: var(--button-glass-highlight), var(--button-glass-shadow-active);
+            /* 保留轻量按下反馈；去掉 inset/中心玻璃阴影（点哪都像中间按下，观感差） */
+            transform: translateY(0) scale(0.98);
+            background: var(--button-glass-bg-active);
+            box-shadow: none;
+            filter: none;
         }
         :is(
             button:not(.dock-tab),

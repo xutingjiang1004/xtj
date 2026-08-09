@@ -86,11 +86,23 @@
     }
     function D(e, t) {
         if (e) {
-            if (!t) return void clearPreviewImageLoad(e, !0);
+            if (!t) {
+                clearPreviewImageLoad(e, !0);
+                e.style.opacity = "0";
+                e.classList.remove("pp-placeholder");
+                return;
+            }
             if (e._ppUrl === t) {
                 if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
-            } else e._ppCleanup && e._ppCleanup();
+            } else {
+                // 换 URL 前彻底清旧图，避免切换时残影
+                e._ppCleanup && e._ppCleanup();
+                e.style.transition = "none";
+                e.style.opacity = "0";
+                e.classList.remove("pp-placeholder");
+                try { e.removeAttribute("src"); } catch (err) {}
+            }
             e._ppUrl = t;
             var o = C[t];
             if (o && o.naturalWidth > 0) return e._ppCleanup && e._ppCleanup(), e.style.transition = "none", e.src = t, void (e.style.opacity = "1");
@@ -119,10 +131,15 @@
     function O(e) {
         if (M(), s) {
             var t = n, o = document.getElementById("ppPrevImg"), i = document.getElementById("photoPreviewImage"), r = document.getElementById("ppNextImg");
+            // 先硬清邻槽，避免切图瞬间露出上一轮残留图
+            if (o) { clearPreviewImageLoad(o, !0); }
+            if (r) { clearPreviewImageLoad(r, !0); }
             k(e), t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
             e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1,
-            s.classList.remove("snapping"), s.style.transition = "", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
-            t[e] && window.updateAmbientBackground(t[e].imageUrl);
+            s.classList.remove("snapping"), s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
+            // 强制一次回流后再允许 transition，防止残影叠在滑动层
+            void s.offsetWidth,
+            t[e] && window.updateAmbientBackground && window.updateAmbientBackground(t[e].imageUrl);
         }
     }
     function R(e, t) {
@@ -168,11 +185,16 @@
         }
     }
     function N(e) {
-        i = e, q(), t = n[e], j(e), F(e), M(), s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
-        l = 0, c = !1, s.classList.remove("snapping"), O(e), n[e] && window.updateAmbientBackground(n[e].imageUrl),
+        i = e, q(), t = n[e], j(e), F(e), M();
+        if (s) {
+            s.style.transition = "none";
+            s.style.transform = "translate3d(" + -a + "px, 0, 0)";
+            s.classList.remove("snapping");
+        }
+        l = 0, c = !1, O(e), n[e] && window.updateAmbientBackground && window.updateAmbientBackground(n[e].imageUrl),
         setTimeout(function() {
             f = !1;
-        }, 300);
+        }, 280);
     }
     function W(e) {
         if (!f) {
@@ -180,7 +202,13 @@
             if (t < 0 || t >= n.length) Math.abs(l) > 2 && A(0); else {
                 f = !0, M();
                 var o = 1 === e ? -2 * a : 0;
+                // 预取目标与邻图，但不提前把错误 URL 留在当前中槽
                 k(t), z(t), R(o, function() {
+                    // 动画结束后硬重置轨道与三槽，杜绝上一张残留
+                    if (s) {
+                        s.style.transition = "none";
+                        s.style.transform = "translate3d(" + -a + "px, 0, 0)";
+                    }
                     N(t);
                 });
             }
@@ -261,20 +289,39 @@
                     i.style.transition = "none", i.style.opacity = "0";
                     var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
                     o.style.transition = "none", o.style.transform = "translate(0, 0) scale(1)", o.style.transformOrigin = "top left",
-                    o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.15s cubic-bezier(0.25, 1, 0.4, 1)",
-                    o.style.transition = "transform 0.2s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.2s cubic-bezier(0.25, 1, 0.4, 1)",
+                    o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+                    o.style.transition = "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
                     o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px",
                     t.style.opacity = "0", setTimeout(function() {
-                        i && (i.style.transition = "", i.style.opacity = ""), o && (o.style.transition = "",
-                        o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = "", o.style.opacity = "", o.classList.remove("pp-placeholder"), o.removeAttribute("src")),
+                        i && (i.style.transition = "", i.style.opacity = "");
+                        // 关闭后清空三槽，防止下次打开残留
+                        ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
+                            var img = document.getElementById(id);
+                            if (img) {
+                                clearPreviewImageLoad(img, !0);
+                                img.style.transform = "";
+                                img.style.transformOrigin = "";
+                                img.style.borderRadius = "";
+                                img.style.opacity = "";
+                            }
+                        });
                         t.style.transition = "", t.style.opacity = "", t.classList.remove("active"), document.body.classList.remove("photo-previewing");
-                    }, 220);
-                } else t.style.transition = "opacity 0.15s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
+                    }, 280);
+                } else t.style.transition = "opacity 0.22s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
                 setTimeout(function() {
-                    t.style.opacity = "", t.style.transition = "", t.classList.remove("active"), o && (o.style.transition = "",
-                    o.style.transform = "", o.style.transformOrigin = "", o.style.borderRadius = "", o.style.opacity = "", o.classList.remove("pp-placeholder"), o.removeAttribute("src")),
+                    t.style.opacity = "", t.style.transition = "", t.classList.remove("active");
+                    ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
+                        var img = document.getElementById(id);
+                        if (img) {
+                            clearPreviewImageLoad(img, !0);
+                            img.style.transform = "";
+                            img.style.transformOrigin = "";
+                            img.style.borderRadius = "";
+                            img.style.opacity = "";
+                        }
+                    });
                     i && (i.style.transition = "", i.style.opacity = ""), document.body.classList.remove("photo-previewing");
-                }, 150);
+                }, 220);
             } else document.body.classList.remove("photo-previewing");
         }
     }
