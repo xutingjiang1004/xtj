@@ -84,12 +84,18 @@
   gap: 10px;
   padding: 12px 14px 10px;
   min-height: 58px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 253, 250, 0.74));
-  border-bottom: 1px solid rgba(140, 196, 158, 0.16);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.34);
+  /* Apple 液态玻璃：半透明 + 强模糊，聊天字可从背后透出 */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(248, 253, 251, 0.28)),
+    rgba(255, 255, 255, 0.22);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.38);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.45) inset,
+    0 8px 28px rgba(40, 90, 70, 0.06);
   pointer-events: auto;
+  isolation: isolate;
 }
 
 .ai-chat-header > * { pointer-events: auto; }
@@ -570,19 +576,34 @@
 }
 
 .ai-thinking-panel {
-  /* P1-3: 移除 max-height: 2000px 动画，改用 grid-template-rows: 0fr/1fr
-     内部 .ai-thinking-body 设置 min-height:0; overflow:hidden */
+  /* 折叠时完全隐藏正文，避免「思考中」下方漏出 body 残影 */
   display: grid;
   grid-template-rows: 0fr;
-  opacity: 0.3;
-  transform: translateY(-6px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
   width: fit-content;
   max-width: min(82vw, 680px);
   box-sizing: border-box;
+  overflow: hidden;
   transition:
     grid-template-rows var(--ai-motion-panel) var(--ai-ease-standard),
     opacity var(--ai-motion-base) ease,
-    transform var(--ai-motion-panel) var(--ai-ease-standard);
+    transform var(--ai-motion-panel) var(--ai-ease-standard),
+    visibility 0s linear var(--ai-motion-panel);
+}
+
+.ai-thinking:not(.expanded) .ai-thinking-body {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
 }
 
 /* P0-5 修复: JS 把 ai-motion-window 加到 .ai-think-thinking (details) 上，
@@ -606,7 +627,24 @@
 .ai-thinking.expanded .ai-thinking-panel {
   grid-template-rows: 1fr;
   opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
   transform: translateY(0);
+  overflow: visible;
+  transition:
+    grid-template-rows var(--ai-motion-panel) var(--ai-ease-standard),
+    opacity var(--ai-motion-base) ease,
+    transform var(--ai-motion-panel) var(--ai-ease-standard),
+    visibility 0s linear 0s;
+}
+
+.ai-thinking.expanded .ai-thinking-body {
+  visibility: visible !important;
+  opacity: 1 !important;
+  max-height: none !important;
+  font-size: inherit !important;
+  line-height: 1.55 !important;
+  color: inherit !important;
 }
 
 /* grid-template-rows 动画的内部容器：min-height:0 允许收缩 */
@@ -898,16 +936,23 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 7px 10px max(8px, env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, rgba(249, 253, 251, 0.56), rgba(255, 255, 255, 0.68));
-  border-top: 1px solid rgba(140, 196, 158, 0.14);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  padding: 8px 12px max(10px, env(safe-area-inset-bottom));
+  /* 底部液态玻璃，与顶栏统一 */
+  background:
+    linear-gradient(0deg, rgba(255, 255, 255, 0.48), rgba(248, 253, 251, 0.28)),
+    rgba(255, 255, 255, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -10px 32px rgba(40, 90, 70, 0.06);
   position: relative;
   z-index: 5;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: transform 0.16s ease, padding 0.16s ease, border-color 0.16s ease;
+  isolation: isolate;
 }
 
 .ai-chat-input-bar::before {
@@ -2070,8 +2115,15 @@
 }
 
 [data-theme="dark"] .ai-chat-header {
-  background: linear-gradient(180deg, rgba(18, 24, 28, 0.88), rgba(20, 26, 30, 0.72));
-  border-bottom-color: rgba(127, 187, 172, 0.1);
+  background:
+    linear-gradient(180deg, rgba(22, 30, 34, 0.5), rgba(18, 24, 28, 0.36)),
+    rgba(12, 16, 18, 0.28);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 10px 28px rgba(0, 0, 0, 0.22);
 }
 
 [data-theme="dark"] .ai-chat-back,
@@ -2218,8 +2270,15 @@
 }
 
 [data-theme="dark"] .ai-chat-input-bar {
-  background: linear-gradient(180deg, rgba(18, 24, 28, 0.56), rgba(18, 24, 28, 0.74));
-  border-top-color: rgba(127, 187, 172, 0.08);
+  background:
+    linear-gradient(0deg, rgba(22, 30, 34, 0.52), rgba(18, 24, 28, 0.34)),
+    rgba(12, 16, 18, 0.26);
+  border-top-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 -10px 32px rgba(0, 0, 0, 0.24);
 }
 
 [data-theme="dark"] .ai-chat-input {

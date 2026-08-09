@@ -5754,9 +5754,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var _earlyThinkingShown = false;
     if (S.thinkingMode && S.thinkingMode !== 'off') {
       try {
-        var earlyRn = buildReasoningNode('思考中...', messagesEl);
+        // body 留空，避免折叠态面板里「思考中...」正文从下方漏出
+        var earlyRn = buildReasoningNode('', messagesEl);
+        var earlyLabel = earlyRn.querySelector('.ai-thinking-label');
+        if (earlyLabel) earlyLabel.textContent = '思考中';
+        setThinkingExpanded(earlyRn, false, messagesEl);
         assistantNode.insertBefore(earlyRn, assistantNode.firstChild);
-        setThinkingExpanded(earlyRn, true, messagesEl);
         _earlyThinkingShown = true;
       } catch (eEarly) {}
     } else {
@@ -6700,12 +6703,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             try {
               usageResult = evt.usage || null;
               finalModel = evt.model || '';
-              finalThinkingMode = evt.thinking_mode || S.thinkingMode;
+              finalThinkingMode = evt.thinking_mode || evt.applied_thinking_mode || S.thinkingMode;
               // sanitized_content 优先：后端清洗后的正文
               if (evt.sanitized_content) {
                 aiContent = evt.sanitized_content;
               } else if (evt.content) {
                 aiContent = evt.content;
+              }
+              // 搜索路径若流式 reasoning 丢失，done 包里仍可能带完整 reasoning
+              if ((!aiReasoning || !String(aiReasoning).trim()) && evt.reasoning) {
+                aiReasoning = String(evt.reasoning);
               }
             } catch (e) {}
             
@@ -6942,14 +6949,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
-      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 8000, abortController: loadController });
+      // 历史接口偶发慢/弱网：超时放宽并做一次静默重试，减少「缓存记录，刷新失败」误报
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 15000, abortController: loadController });
+      if ((!r.ok || !r.data) && !before && r && r.error_code !== 'aborted') {
+        var canRetry = r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error' || (r.status >= 500);
+        if (canRetry && requestId === S.historyRequestId) {
+          try {
+            await new Promise(function(resolve) { setTimeout(resolve, 400); });
+            if (requestId === S.historyRequestId && (!loadController || !loadController.signal || !loadController.signal.aborted)) {
+              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 18000, abortController: loadController });
+            }
+          } catch (eRetry) {}
+        }
+      }
 
       if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
 
       if (!r.ok || !r.data) {
         if (!before) {
-          try { console.warn('[AI] loadHistory failed:', r.status, r.error); } catch (e) {}
-          renderHistoryUnavailable(messagesEl, r, { preserveExistingMessages: hasCache });
+          try { console.warn('[AI] loadHistory failed:', r.status, r.error, r.error_code); } catch (e) {}
+          // 已有缓存时：仅在真正失败后提示；中止请求不刷横幅
+          if (r.error_code === 'aborted') {
+            removeHistoryUnavailableBanner(messagesEl);
+          } else {
+            renderHistoryUnavailable(messagesEl, r, { preserveExistingMessages: hasCache });
+          }
         }
         return;
       }
