@@ -392,24 +392,81 @@
             flex-wrap: nowrap;
             gap: 8px;
         }
-        /* 帖子顶栏：始终单行，避免子项被拉满宽后换行成「空白高条」 */
+        /* 帖子顶栏：硬性单行矮栏，杜绝「超高空白玻璃条」 */
         #panelPosts .posts-nav,
-        #panelPosts.active .posts-nav {
+        #panelPosts.active .posts-nav,
+        #panelPosts nav.posts-nav {
+            display: flex !important;
+            flex-direction: row !important;
             flex-wrap: nowrap !important;
-            align-items: center;
-            min-height: 52px;
-            max-height: 80px;
-            box-sizing: border-box;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: 10px !important;
+            min-height: 52px !important;
+            max-height: 64px !important;
+            height: 56px !important;
+            box-sizing: border-box !important;
+            overflow: visible !important;
+            padding-block: 8px !important;
         }
         #panelPosts .posts-nav > *,
         #panelPosts.active .posts-nav > * {
-            flex: 0 0 auto;
+            flex: 0 0 auto !important;
             width: auto !important;
-            max-width: none;
+            max-width: none !important;
+            align-self: center !important;
+            min-height: 0 !important;
+            max-height: 48px !important;
         }
         #panelPosts .posts-nav > .nav-auth,
         #panelPosts.active .posts-nav > .nav-auth {
-            margin-inline-start: auto;
+            margin-inline-start: auto !important;
+        }
+        #panelPosts .posts-nav-brand {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+            gap: 8px !important;
+            max-height: 48px !important;
+        }
+        /* AI 工具：纯图标，CSS 未加载完也不会竖排「AI工具」四字 */
+        #panelPosts .ai-tools-nav,
+        #panelPosts .ai-tools-trigger,
+        #aiToolsBtn.ai-tools-trigger {
+            width: 40px !important;
+            height: 40px !important;
+            min-width: 40px !important;
+            min-height: 40px !important;
+            max-width: 40px !important;
+            max-height: 40px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+            color: transparent !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            flex: 0 0 40px !important;
+            box-sizing: border-box !important;
+        }
+        #panelPosts .ai-tools-trigger svg,
+        #aiToolsBtn .ai-tools-trigger-icon {
+            width: 20px !important;
+            height: 20px !important;
+            display: block !important;
+            color: inherit !important;
+            stroke: currentColor !important;
+            flex-shrink: 0 !important;
+        }
+        #panelPosts .ai-tools-trigger {
+            color: rgba(50, 120, 95, 0.9) !important;
+            font-size: 0 !important;
+        }
+        #panelPosts .ai-tools-sr-only {
+            display: none !important;
         }
 
         h1 {
@@ -15414,11 +15471,14 @@ button.post-publish:hover {
   #panelPosts nav,
   #panelPosts .posts-nav {
     border: 0 !important;
-    border-bottom: 1px solid rgba(127, 191, 168, 0.14) !important;
+    border-bottom: 1px solid rgba(127, 191, 168, 0.12) !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
-    background: linear-gradient(180deg, rgba(252, 255, 254, 0.92), rgba(245, 251, 248, 0.88)) !important;
+    background: rgba(250, 253, 252, 0.92) !important;
     min-height: 56px !important;
-    max-height: 72px !important;
+    max-height: 56px !important;
+    height: 56px !important;
+    padding-block: 0 !important;
   }
 
   #panelChat .chat-header,
