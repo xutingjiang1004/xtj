@@ -46,15 +46,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=ad92e279dd" />
+    <link rel="stylesheet" href="css/style.min.css?v=07326f992a" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=ad92e279dd" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=3462b58593" /></noscript>
-    <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=512cdd763b" />
-    <link rel="stylesheet" href="css/ui-enhance.min.css?v=6c71e5e920" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=71a0d4f1e9" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=3462b58593">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=2eee54e5fd">
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=07326f992a" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=4035c2cccd" /></noscript>
+    <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=6852b8abab" />
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=a1d7b43990" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=c79b13b5f8" media="print" onload="this.media='all'">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4035c2cccd">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=21ac7407fe">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=36ec270e61">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -138,17 +138,15 @@
             <nav class="posts-nav">
                 <div class="posts-nav-brand">
                     <h1>xtj</h1>
-                </div>
-                <!-- 顶部工具组：主题 / AI / 公告 / 举报，统一靠右挨着用户区（不改功能，只归位） -->
-                <div class="posts-nav-tools" id="postsNavTools">
-                    <button id="themeToggle" class="theme-toggle-btn posts-nav-icon-btn" title="切换主题" aria-label="切换主题">
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
                         <span class="theme-toggle-orb" aria-hidden="true">
                             <span class="theme-toggle-core"></span>
                         </span>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
                         <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false">
-                            <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
+                            <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
+                            <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
                         <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
                             <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18.5 3.5 21l4.1-1.3A8.4 8.4 0 1 0 4 16.4"></path><path d="M8 12h.01M12 12h.01M16 12h.01"></path></svg></span><span><b>小猫AI</b><small>对话与历史记录</small></span></button>
@@ -156,24 +154,24 @@
                             <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="5.8"></circle><path d="m15.2 15.2 4.3 4.3M8.5 10.8h4.6M10.8 8.5v4.6"></path></svg></span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
                         </div>
                     </div>
-                    <div id="announcement-btn-wrapper" style="display:none; position:relative; z-index:3; pointer-events:auto;">
-                        <button class="announcement-btn posts-nav-icon-btn" id="announcementBtn" title="公告" aria-label="公告" onclick="openAnnouncementModal()">
-                            <svg viewBox="0 0 24 24">
-                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                            </svg>
-                            <span class="announcement-badge" id="announcementBadge" style="display:none;">0</span>
-                        </button>
-                    </div>
-                    <div id="report-btn-wrapper" style="display:none; position:relative; z-index:3; pointer-events:auto;">
-                        <button class="report-btn posts-nav-icon-btn" id="reportBtn" title="举报" aria-label="举报" onclick="openReportModal()" style="position:relative;overflow:visible;">
-                            <svg viewBox="0 0 24 24">
-                                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
-                                <line x1="4" y1="22" x2="4" y2="15"></line>
-                            </svg>
-                            <span id="reportBtnBadge" class="nav-chat-badge" style="display:none;">0</span>
-                        </button>
-                    </div>
+                </div>
+                <div id="announcement-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="announcement-btn posts-nav-icon-btn" id="announcementBtn" title="公告" aria-label="公告" onclick="openAnnouncementModal()">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span class="announcement-badge" id="announcementBadge" style="display:none;">0</span>
+                    </button>
+                </div>
+                <div id="report-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="report-btn posts-nav-icon-btn" id="reportBtn" title="举报" aria-label="举报" onclick="openReportModal()" style="position:relative;overflow:visible;">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+                            <line x1="4" y1="22" x2="4" y2="15"></line>
+                        </svg>
+                        <span id="reportBtnBadge" class="nav-chat-badge" style="display:none;">0</span>
+                    </button>
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">

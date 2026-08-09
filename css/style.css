@@ -150,19 +150,14 @@
 [data-theme="dark"] .post-location-panel { background: var(--bg-card); border-color: var(--border-color); }
 [data-theme="dark"] .post-location-option { border-bottom-color: var(--border-color); }
         [data-theme="dark"] .action-btn {
-            background: rgba(28, 42, 38, 0.92);
-            border-color: rgba(181,225,217,0.12);
-            color: #c4cfc7;
-            box-shadow: none;
+            background: rgba(18,39,44,0.48);
+            border-color: rgba(181,225,217,0.08);
+            color: var(--text-muted);
         }
-        [data-theme="dark"] .action-btn:hover {
-            background: rgba(36, 52, 48, 0.96);
-            box-shadow: none;
-        }
+        [data-theme="dark"] .action-btn:hover { background: rgba(24,48,54,0.62); }
         [data-theme="dark"] .action-btn.liked {
-            background: rgba(255,59,96,0.16);
-            border-color: rgba(255,59,96,0.24);
-            box-shadow: none;
+            background: rgba(255,59,96,0.2);
+            border-color: rgba(255,59,96,0.3);
         }
         [data-theme="dark"] .comment-item {
             background: linear-gradient(180deg, rgba(17, 35, 40, 0.66), rgba(13, 27, 31, 0.56));
@@ -394,84 +389,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: nowrap;
+            flex-wrap: wrap;
             gap: 8px;
-        }
-        /* 帖子顶栏：硬性单行矮栏，杜绝「超高空白玻璃条」 */
-        #panelPosts .posts-nav,
-        #panelPosts.active .posts-nav,
-        #panelPosts nav.posts-nav {
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            align-items: center !important;
-            justify-content: flex-start !important;
-            gap: 10px !important;
-            min-height: 52px !important;
-            max-height: 64px !important;
-            height: 56px !important;
-            box-sizing: border-box !important;
-            overflow: visible !important;
-            padding-block: 8px !important;
-        }
-        #panelPosts .posts-nav > *,
-        #panelPosts.active .posts-nav > * {
-            flex: 0 0 auto !important;
-            width: auto !important;
-            max-width: none !important;
-            align-self: center !important;
-            min-height: 0 !important;
-            max-height: 48px !important;
-        }
-        #panelPosts .posts-nav > .nav-auth,
-        #panelPosts.active .posts-nav > .nav-auth {
-            margin-inline-start: auto !important;
-        }
-        #panelPosts .posts-nav-brand {
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            align-items: center !important;
-            gap: 8px !important;
-            max-height: 48px !important;
-        }
-        /* AI 工具：纯图标，CSS 未加载完也不会竖排「AI工具」四字 */
-        #panelPosts .ai-tools-nav,
-        #panelPosts .ai-tools-trigger,
-        #aiToolsBtn.ai-tools-trigger {
-            width: 40px !important;
-            height: 40px !important;
-            min-width: 40px !important;
-            min-height: 40px !important;
-            max-width: 40px !important;
-            max-height: 40px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            overflow: hidden !important;
-            font-size: 0 !important;
-            line-height: 0 !important;
-            color: transparent !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            flex: 0 0 40px !important;
-            box-sizing: border-box !important;
-        }
-        #panelPosts .ai-tools-trigger svg,
-        #aiToolsBtn .ai-tools-trigger-icon {
-            width: 20px !important;
-            height: 20px !important;
-            display: block !important;
-            color: inherit !important;
-            stroke: currentColor !important;
-            flex-shrink: 0 !important;
-        }
-        #panelPosts .ai-tools-trigger {
-            color: rgba(50, 120, 95, 0.9) !important;
-            font-size: 0 !important;
-        }
-        #panelPosts .ai-tools-sr-only {
-            display: none !important;
         }
 
         h1 {
@@ -550,23 +469,25 @@
         }
 
         .publish-box {
-            position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-            background: rgba(255,255,255,0.42);
-            border: 1px solid rgba(255,255,255,0.5);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+            position: relative; z-index: 1; padding: 24px; border-radius: var(--radius-md);
+            transition: var(--trans-smooth);
+            background: rgba(255,255,255,0.3);
+            border: 1px solid rgba(255,255,255,0.4);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.08);
         }
         .publish-box::before {
-            content: none;
+            content: ''; position: absolute; inset: -1px; border-radius: inherit;
+            background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 50%, rgba(5,150,105,0.08) 100%);
+            pointer-events: none; z-index: -1;
         }
         .publish-box:hover {
-            transform: none;
-            box-shadow: 0 8px 24px rgba(5, 150, 105, 0.08);
-            border-color: rgba(140, 196, 158, 0.35);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 56px rgba(5, 150, 105, 0.15), 0 6px 20px rgba(5, 150, 105, 0.1);
+            border-color: rgba(255,255,255,1);
         }
         .publish-box:focus-within {
-            border-color: rgba(5, 150, 105, 0.35);
-            box-shadow: 0 8px 24px rgba(5, 150, 105, 0.08), 0 0 0 2px rgba(5, 150, 105, 0.08);
+            border-color: rgba(5, 150, 105, 0.4);
+            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12), 0 0 0 3px rgba(5, 150, 105, 0.1);
         }
         .publish-box textarea {
             width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
@@ -622,23 +543,14 @@
         .post-filter-bar {
             position: relative;
             z-index: 1;
-            padding: 8px 4px;
-            border-radius: 0;
-            background: transparent;
-            border: 0;
-            box-shadow: none;
+            padding: 16px 18px;
+            border-radius: var(--radius-sm);
+            background: rgba(255,255,255,0.42);
+            border: 1px solid rgba(255,255,255,0.56);
+            box-shadow: 0 8px 26px rgba(0,0,0,0.05);
             display: flex;
             flex-direction: column;
-            gap: 10px;
-        }
-        /* 展开筛选面板时再给轻表面，收起时不占一整张卡片 */
-        .post-filter-bar.is-open,
-        .post-filter-bar:has(.post-filter-panel:not([hidden]):not([style*="display: none"])) {
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.36);
-            border: 1px solid rgba(140, 196, 158, 0.16);
-            box-shadow: none;
+            gap: 12px;
         }
         .post-filter-row {
             display: flex;
@@ -945,37 +857,24 @@
         .chat-msg.sent .msg-read-status { color: rgba(255,255,255,0.7); }
         .chat-msg.received .msg-read-status { color: var(--text-muted); }
 
-        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 0; }
+        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
-            padding: 18px 18px 14px; border-radius: 0;
+            padding: 24px; border-radius: var(--radius-md);
             --post-enter-delay: 0ms;
             opacity: 0;
-            transform: translateY(10px) scale(0.995);
+            transform: translateY(14px) scale(0.992);
             transition:
                 opacity 0.16s ease var(--post-enter-delay);
-            background: transparent;
-            border: 0;
-            border-bottom: 1px solid rgba(60, 90, 80, 0.08);
-            box-shadow: none;
-            outline: none;
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(255,255,255,0.7);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.06);
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
         }
-        .post.glass {
-            background: transparent !important;
-            border: 0 !important;
-            border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
-        [data-theme="dark"] .post,
-        [data-theme="dark"] .post.glass {
-            background: transparent !important;
-            border: 0 !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-            box-shadow: none !important;
+        [data-theme="dark"] .post {
+            background: rgba(30, 30, 40, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         .post.visible { 
             opacity: 1; 
@@ -1229,31 +1128,25 @@
             align-items: stretch;
         }
         .action-btn {
-            background: rgba(246, 249, 247, 0.98);
-            border: 1px solid rgba(60, 90, 80, 0.08);
-            padding: 0 10px; border-radius: 12px; font-size: 12px; color: #4a5d56;
-            cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-            font-weight: 600;
+            background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.7);
+            padding: 0 10px; border-radius: 99px; font-size: 12px; color: var(--text-muted);
+            cursor: pointer; transition: var(--trans-smooth); font-weight: 600;
             position: relative; overflow: visible !important;
-            min-width: 0; min-height: 36px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
-            box-shadow: none;
+            min-width: 0; min-height: 40px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.02);
             white-space: nowrap;
         }
-        .action-btn:hover {
-            background: rgba(236, 242, 239, 1);
-            color: #2f403a;
-            box-shadow: none;
-        }
+        .action-btn:hover { background: rgba(255,255,255,0.7); }
 
         .action-btn.liked {
-            background: rgba(255, 59, 96, 0.1);
+            background: linear-gradient(135deg, rgba(255, 59, 96, 0.15), rgba(255, 105, 135, 0.15));
             color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.18);
-            box-shadow: none;
+            border-color: rgba(255, 59, 96, 0.4);
+            box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12);
         }
         .action-btn.liked:hover {
-            background: rgba(255, 59, 96, 0.14);
-            box-shadow: none;
+            background: linear-gradient(135deg, rgba(255, 59, 96, 0.2), rgba(255, 105, 135, 0.2));
+            box-shadow: 0 4px 16px rgba(255, 59, 96, 0.2);
         }
 
         .actions .like-blossom {
@@ -7304,22 +7197,11 @@
             .pw-upload-sheet-close,
             .pw-upload-sheet-btn,
         ):not(:disabled):not([aria-disabled="true"]):active {
-            /* 仅极轻缩放；禁止换背景/阴影，避免中间脏斑 */
+            /* 保留轻量按下反馈；去掉 inset/中心玻璃阴影（点哪都像中间按下，观感差） */
             transform: translateY(0) scale(0.98);
-            box-shadow: none !important;
-            filter: none !important;
-        }
-        /* 帖子操作按钮（评论/置顶等）：按下只变背景透明度，无中心反馈 */
-        .action-btn:active,
-        .action-btn.xtj-pressing {
-            transform: scale(0.98) !important;
-            box-shadow: none !important;
-            filter: none !important;
-            background: rgba(140, 196, 158, 0.12) !important;
-        }
-        .action-btn.liked:active,
-        .action-btn.liked.xtj-pressing {
-            background: linear-gradient(135deg, rgba(255, 59, 96, 0.18), rgba(255, 105, 135, 0.14)) !important;
+            background: var(--button-glass-bg-active);
+            box-shadow: none;
+            filter: none;
         }
         :is(
             button:not(.dock-tab),
@@ -7473,23 +7355,24 @@
                 var(--button-glass-bg);
         }
         .action-btn {
-            min-width: 0;
+            min-width: 72px;
             padding: 6px 10px;
             font-weight: 600;
-            color: #4a5d56;
-            background: rgba(246, 249, 247, 0.98);
-            border: 1px solid rgba(60, 90, 80, 0.08);
-            box-shadow: none;
+            color: var(--text-muted);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05) 58%, rgba(255, 255, 255, 0.02) 100%),
+                var(--button-glass-bg);
+            box-shadow: var(--button-glass-highlight), 0 4px 12px rgba(0, 0, 0, 0.03);
         }
         .action-btn:hover {
-            color: #2f403a;
-            background: rgba(236, 242, 239, 1);
-            box-shadow: none;
+            color: var(--text-main);
         }
         .action-btn.liked {
             color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.18);
-            background: rgba(255, 59, 96, 0.1);
+            border-color: rgba(255, 59, 96, 0.26);
+            background:
+                linear-gradient(135deg, rgba(255, 59, 96, 0.16), rgba(255, 255, 255, 0.04) 62%, rgba(255, 255, 255, 0.02) 100%),
+                rgba(255, 255, 255, 0.16);
         }
         .pp-delete-btn,
         .announcement-delete-btn,
@@ -10601,9 +10484,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   .upc-msg-btn,
   .pp-confirm-btn
 ):not(:disabled):active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: none !important;
-  filter: none !important;
+  transform: translateY(0) scale(0.965);
   transition-duration: 0.12s !important;
 }
 
@@ -10823,8 +10704,56 @@ body.ios-chat-keyboard-open .chat-input-area {
 ) {
   -webkit-tap-highlight-color: transparent;
 }
-/* 已移除：:active::after 中心 radial-gradient 点击反馈
-   （点哪都在按钮中间亮一块，观感很差；评论等 action-btn 尤其明显） */
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn,
+  .user-filter-btn,
+  .search-toggle,
+  .filter-toggle
+)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 50%, rgba(45,160,103,0.12) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0s;
+}
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn,
+  .user-filter-btn,
+  .search-toggle,
+  .filter-toggle
+):active::after {
+  opacity: 1;
+  transition: opacity 0s;
+}
 
 
 #photoPreviewOverlay .pp-info-modal-content {
@@ -15318,17 +15247,14 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-/* 帖子：默认无独立卡片黑框；桌面一体表面由 ui-shell 接管 */
-#panelPosts .post,
-#panelPosts .post.glass {
-  background: transparent !important;
-  border: 0 !important;
-  border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+/* 帖子卡片玻璃化（保留原有阴影，但圆角统一 + 背景统一） */
+.post {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(16px) saturate(142%);
+  -webkit-backdrop-filter: blur(16px) saturate(142%);
 }
 
 /* 发布按钮：浅蓝薄荷体系（替代突兀紫） */
@@ -15489,106 +15415,69 @@ button.post-publish:hover {
 }
 
 /* ========================================================
- * Main panel UI unification (v2)
- * 一层主表面 + 分区，避免发帖/筛选/帖子同权「千层蛋糕」
+ * Main panel UI unification
+ * Scope: posts,
+
+
+chat,
+
+
+profile content only. Dock stays untouched.
  * ======================================================== */
 @media (min-width: 1024px) {
   #panelPosts nav,
-  #panelPosts .posts-nav {
-    border: 0 !important;
-    border-bottom: 1px solid rgba(127, 191, 168, 0.12) !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    background: rgba(250, 253, 252, 0.92) !important;
-    min-height: 56px !important;
-    max-height: 56px !important;
-    height: 56px !important;
-    padding-block: 0 !important;
-  }
-
-  #panelChat .chat-header,
-  #panelChat .chat-input-area {
-    border: 1px solid rgba(127, 191, 168, 0.18) !important;
-    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
-    background: linear-gradient(180deg, rgba(252, 255, 254, 0.90), rgba(245, 251, 248, 0.86)) !important;
-  }
-
-  /* 一体表面：发帖/筛选/列表同一白底，帖子无独立黑框 */
   #panelPosts .publish-box,
-  #panelPosts .publish-box.glass {
-    border: 0 !important;
-    box-shadow: none !important;
-    background: rgba(255, 255, 255, 0.94) !important;
-    padding: 18px 20px 14px !important;
-    border-radius: 20px 20px 0 0 !important;
-  }
-
   #panelPosts .post-filter-bar,
-  #panelPosts .post-filter-bar.glass {
-    border: 0 !important;
-    border-top: 1px solid rgba(60, 90, 80, 0.08) !important;
-    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
-    box-shadow: none !important;
-    background: rgba(255, 255, 255, 0.94) !important;
-    padding: 8px 16px !important;
-    margin: 0 !important;
-    border-radius: 0 !important;
-  }
-
   #panelPosts .stat-card,
+  #panelPosts .post,
+  #panelChat .chat-header,
+  #panelChat .chat-input-area,
   #panelProfile .profile-user-card,
   #panelProfile .profile-activity-card,
   #panelProfile .profile-settings,
   #panelProfile .profile-totals-bar {
-    border: 1px solid rgba(127, 191, 168, 0.12) !important;
-    box-shadow: 0 4px 14px rgba(79, 130, 118, 0.04) !important;
-    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(127, 191, 168, 0.20) !important;
+    box-shadow: 0 14px 34px rgba(79, 130, 118, 0.10) !important;
   }
 
-  #panelPosts #feed {
-    background: rgba(255, 255, 255, 0.94) !important;
-    border-radius: 0 0 20px 20px !important;
-    box-shadow: 0 10px 40px rgba(20, 50, 40, 0.06) !important;
-    gap: 0 !important;
-    overflow: hidden !important;
-  }
-
-  #panelPosts .post,
-  #panelPosts .post.glass {
-    border: 0 !important;
-    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 18px 20px !important;
-    border-radius: 0 !important;
-    margin: 0 !important;
-    max-width: none !important;
-    outline: none !important;
-  }
-
-  #panelPosts .post:last-child {
-    border-bottom: 0 !important;
-  }
-
-  #panelPosts .action-btn {
-    background: rgba(246, 249, 247, 0.98) !important;
-    border: 1px solid rgba(60, 90, 80, 0.08) !important;
-    color: #4a5d56 !important;
-    box-shadow: none !important;
-    border-radius: 12px !important;
-  }
-
-  #panelPosts .action-btn.liked {
-    background: rgba(255, 59, 96, 0.1) !important;
-    border-color: rgba(255, 59, 96, 0.18) !important;
-    color: #ff3b60 !important;
+  #panelPosts nav,
+  #panelChat .chat-header,
+  #panelChat .chat-input-area {
+    background: linear-gradient(180deg, rgba(252, 255, 254, 0.90), rgba(245, 251, 248, 0.86)) !important;
   }
 
   #panelPosts .publish-box,
+  #panelPosts .post-filter-bar,
+  #panelPosts .stat-card,
+  #panelPosts .post,
+  #panelProfile .profile-user-card,
+  #panelProfile .profile-activity-card,
+  #panelProfile .profile-settings,
+  #panelProfile .profile-totals-bar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 251, 249, 0.82)) !important;
+  }
+
+  #panelPosts .publish-box,
+  #panelPosts .post-filter-bar,
+  #panelPosts .post {
+    padding: 20px !important;
+  }
+
+  #panelPosts .post-filter-bar {
+    margin-bottom: 18px !important;
+  }
+
+  #panelPosts .publish-box,
+  #panelPosts .post,
   #panelProfile .profile-user-card,
   #panelProfile .profile-activity-card,
   #panelProfile .profile-settings {
     overflow: clip;
+  }
+
+  #panelPosts .post {
+    max-width: none;
+    margin-bottom: 18px;
   }
 
   #panelPosts .post-header,
