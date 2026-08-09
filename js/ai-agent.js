@@ -7634,12 +7634,12 @@ function showChatMessages() {
       plusBtn.setAttribute('aria-expanded', 'true');
       // 监听 transitionend，移除 is-opening
       panelShell.addEventListener('transitionend', onPanelOpenEnd);
-      // 兜底 400ms 后强制移除（clip-path 最长 380ms + 余量）
+      // 兜底：动画约 260ms
       if (openFallbackTimer) clearTimeout(openFallbackTimer);
       openFallbackTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         openFallbackTimer = null;
-      }, 400);
+      }, 300);
     }
 
     // P0-3 + 交互修复 + Apple 风格关闭动画: 关闭面板
@@ -7681,7 +7681,6 @@ function showChatMessages() {
         goToPrimaryPage(false);
       }
       panelShell.addEventListener('transitionend', onShellEnd);
-      // 兜底 400ms（clip-path 最长 380ms + 余量）
       closeTimer = setTimeout(function() {
         if (done) return;
         done = true;
@@ -7690,7 +7689,7 @@ function showChatMessages() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         goToPrimaryPage(false);
-      }, 400);
+      }, 300);
     }
 
     // 模型选择逻辑
@@ -7832,20 +7831,29 @@ function showChatMessages() {
 
     function adjustPanelPosition() {
       if (!panelShell) return;
+      // 仅做左右边界避让；不再使用 clip-path（会糊字）
+      panelShell.style.removeProperty('--panel-clip-start');
+      var wasOpen = panelShell.classList.contains('open');
+      // 临时可见以测量（不影响交互）
+      if (!wasOpen) {
+        panelShell.style.visibility = 'hidden';
+        panelShell.style.opacity = '0';
+        panelShell.style.pointerEvents = 'none';
+        panelShell.style.display = '';
+      }
+      var left = 10;
+      panelShell.style.left = left + 'px';
+      panelShell.style.right = 'auto';
       var rect = panelShell.getBoundingClientRect();
-      var vw = window.innerWidth;
+      var vw = window.innerWidth || document.documentElement.clientWidth || 0;
       if (rect.right > vw - 8) {
         panelShell.style.left = 'auto';
-        panelShell.style.right = '4px';
-        // 右边对齐: clip-path 起点从右下角 (按钮位置) 展开
-        // ★ 用 CSS 变量而非 inline clip-path：inline 会覆盖 .open 规则的 clip-path: inset(0)，
-        //   导致面板打开后仍被完全裁剪（菜单打不开的根因）
-        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 0 0 75% round 22px)');
-      } else {
-        panelShell.style.left = '10px';
-        panelShell.style.right = 'auto';
-        // 左边对齐: clip-path 起点从左下角 (按钮位置) 展开
-        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 75% 0 0 round 22px)');
+        panelShell.style.right = '6px';
+      }
+      if (!wasOpen) {
+        panelShell.style.visibility = '';
+        panelShell.style.opacity = '';
+        panelShell.style.pointerEvents = '';
       }
     }
 
