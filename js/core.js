@@ -7809,8 +7809,37 @@ function renderProfileActivityList(kind) {
                 // 优先使用后端 API（支持私密帖子可见性过滤）
                 // 公开首屏：裸 fetch + 硬超时，避免登录态 refresh / optionalAuth 路径拖死 skeleton
                 try {
+                    // 复用 early-feed.js 已发起的首屏请求，避免重复等待
+                    if (page === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
+                        var early = window.__xtjEarlyFeed.data;
+                        posts = normalizePosts(early.posts || []);
+                        comments = early.comments || [];
+                        likes = early.likes || [];
+                        endReached = early.endReached || false;
+                        if (typeof early.total_post_count === 'number') window._xtjTotalPostCount = early.total_post_count;
+                        start = early.next_offset != null ? early.next_offset : start + posts.length;
+                        usedApi = true;
+                    } else if (page === 0 && !usedApi && window.__xtjEarlyFeedPromise) {
+                        try {
+                            var early2 = await (typeof window.xtjWithTimeout === 'function'
+                                ? window.xtjWithTimeout(window.__xtjEarlyFeedPromise, Math.min(FEED_NET_TIMEOUT_MS, 12000), 'early-feed')
+                                : window.__xtjEarlyFeedPromise);
+                            if (early2 && early2.ok) {
+                                posts = normalizePosts(early2.posts || []);
+                                comments = early2.comments || [];
+                                likes = early2.likes || [];
+                                endReached = early2.endReached || false;
+                                if (typeof early2.total_post_count === 'number') window._xtjTotalPostCount = early2.total_post_count;
+                                start = early2.next_offset != null ? early2.next_offset : start + posts.length;
+                                usedApi = true;
+                            }
+                        } catch (earlyErr) {
+                            console.warn('[feed] early-feed unavailable:', earlyErr && earlyErr.message);
+                        }
+                    }
                     var feedPath = '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE;
                     var apiResp = null;
+                    if (!usedApi) {
                     var knownUser = '';
                     try {
                         knownUser = String((typeof currentUser === 'string' ? currentUser : '') || (window.safeStorage && window.safeStorage.get('xtj_user')) || '').trim();
@@ -7842,6 +7871,7 @@ function renderProfileActivityList(kind) {
                             start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
                             usedApi = true;
                         }
+                    }
                     }
                 } catch (apiErr) {
                     console.warn('[feed] API unavailable, fallback to Supabase:', apiErr && apiErr.message);
@@ -8720,6 +8750,7 @@ function renderProfileActivityList(kind) {
                             }).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
+                    window.__xtjCoreFeedReady = true;
                     await renderFeedFromMemoryState();
                     setupFeedInfiniteScroll();
                     hydrateDeferredFeedRelations(chunk, requestId).then(function() {
