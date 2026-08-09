@@ -3958,15 +3958,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // passed resolveCodeModel(), every runtime identity surface must use the
       // model the client actually selected.
       capabilities.model = model;
+      // resolveThinkingMode 已把 'auto' 解析为 off/high，此处是唯一真源，不再重复推断
       var thinkingMode = thinkingSelection.effective;
-      // P0 Fix: 前端明确发送的 thinking_mode 直接使用，不再用 auto 正则覆盖
-      // 只有当前端发送 'auto' 时才做推断
-      if (thinkingMode === 'auto') {
-        var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
-        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
-      } else {
-        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
-      }
+      if (!/^(off|low|medium|high|max)$/.test(thinkingMode)) thinkingMode = 'high';
       var requestedThinkingMode = thinkingMode;
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
@@ -5000,13 +4994,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       // Keep the runtime identity aligned with the validated per-request
       // selection instead of falling back to the deployment default model.
       capabilities.model = model;
+      // resolveThinkingMode 已把 'auto' 解析为 off/high，此处是唯一真源，不再重复推断
       var thinkingMode = thinkingSelection.effective;
-      if (thinkingMode === 'auto') {
-        var simpleTaskRE = /^(列出|查看|打开|搜索|读|找|这个|解释|有哪些|简单|查询|怎么用|什么意思)/;
-        thinkingMode = simpleTaskRE.test(message.trim()) ? 'off' : 'high';
-      } else {
-        thinkingMode = /^(off|low|medium|high|max)$/.test(thinkingMode) ? thinkingMode : 'high';
-      }
+      if (!/^(off|low|medium|high|max)$/.test(thinkingMode)) thinkingMode = 'high';
       var requestedThinkingMode = thinkingMode;
       var firstToolChoice = inferInitialToolChoice(message, indexSummary, openFiles, activePath);
 
