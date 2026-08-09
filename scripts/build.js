@@ -105,6 +105,7 @@ function validateHtmlMinifiedRefs(htmlFile) {
 }
 
 const JS_FILES = [
+  'js/early-feed.js',
   'js/core-utils.js',
   'js/core.js',
   'js/performance.js',
