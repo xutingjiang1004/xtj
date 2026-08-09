@@ -130,7 +130,8 @@
 .ai-chat-new-btn:active,
 .ai-chat-del-btn:active,
 .ai-chat-send:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.98);
+  box-shadow: none;
 }
 
 .ai-chat-header-avatar {
@@ -1193,30 +1194,32 @@
   position: absolute;
   left: 10px;
   bottom: calc(100% + 8px);
-  width: 236px;
+  width: 248px;
   border-radius: 22px;
   border: 1px solid var(--ai-glass-border);
   /* 外壳本体不设 backdrop-filter，由 ::before 承担 */
   background: transparent;
+  /* 过程与静态都保留轻投影，模拟真实玻璃菜单悬浮 */
   box-shadow:
-    var(--ai-glass-shadow),
+    0 12px 32px rgba(40, 80, 70, 0.14),
+    0 4px 12px rgba(40, 80, 70, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   z-index: 20;
-  /* clip-path 起点由 JS 以 CSS 变量 --panel-clip-start 设置（不能用 inline clip-path，
-     否则会覆盖 .open 规则的 clip-path: inset(0)，面板打开后仍被完全裁剪 → 菜单打不开）:
-     左侧: inset(100% 75% 0 0 round 22px) — 从按钮位置 (左下) 展开
-     右侧: inset(100% 0 0 75% round 22px) — 从按钮位置 (右下) 展开 */
+  /* clip-path 起点由 JS 以 CSS 变量 --panel-clip-start 设置 */
   clip-path: var(--panel-clip-start, inset(100% 75% 0 0 round 22px));
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(8px);
+  transform: translateY(6px) scale(0.96);
+  transform-origin: 20px 100%;
   transition:
-    opacity 210ms ease,
-    visibility 0ms linear 300ms,
-    transform 280ms var(--ai-ease-standard),
-    clip-path 300ms var(--ai-ease-standard);
+    opacity 200ms ease,
+    visibility 0ms linear 280ms,
+    transform 300ms var(--ai-ease-standard),
+    clip-path 300ms var(--ai-ease-standard),
+    box-shadow 220ms ease;
   isolation: isolate;
+  overflow: visible;
 }
 
 .ai-plus-panel-shell.open {
@@ -1224,20 +1227,21 @@
   visibility: visible;
   pointer-events: auto;
   clip-path: inset(0 round 22px);
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
+  box-shadow:
+    0 16px 40px rgba(40, 80, 70, 0.16),
+    0 6px 16px rgba(40, 80, 70, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
   transition:
-    opacity 190ms ease,
+    opacity 180ms ease,
     visibility 0ms linear 0ms,
-    transform 360ms var(--ai-ease-spring),
-    clip-path 390ms var(--ai-ease-spring);
+    transform 340ms var(--ai-ease-spring),
+    clip-path 360ms var(--ai-ease-spring),
+    box-shadow 240ms ease;
 }
 
-/* Apple 风格打开时短暂提升合成层（JS 在 transitionend 移除 class） */
-.ai-plus-panel-shell.is-opening {
-  will-change: transform, opacity, clip-path;
-}
-
-/* 关闭时也提升合成层（避免动画过程中内容闪烁） */
+/* 打开/关闭过程保留投影，仅提升合成层 */
+.ai-plus-panel-shell.is-opening,
 .ai-plus-panel-shell.is-closing {
   will-change: transform, opacity, clip-path;
 }
@@ -1279,16 +1283,14 @@
   position: relative;
   display: grid;
   grid-template-rows: 1fr;
-  min-height: 256px;
+  min-height: 248px;
   overflow: hidden;
   padding: 8px;
   z-index: 1;
-  /* ★ 修复打开/关闭动画期间文字模糊：
-     shell 的 clip-path + transform 动画会让内容重栅格化导致文字发虚。
-     内容层独立提升为 GPU 合成层（translateZ(0) + will-change），
-     动画时文字不再随 clip-path 逐帧重绘，保持清晰。 */
+  /* 内容层独立合成，开合动画时文字保持清晰 */
   transform: translateZ(0);
-  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ============================================================
@@ -1349,7 +1351,7 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 16px;
+  padding: 11px 14px;
   border: none;
   border-radius: 14px;
   background: transparent;
@@ -1360,31 +1362,45 @@
   text-align: left;
   font-family: inherit;
   min-height: 44px;
-  /* P1-2/P2: 按钮反馈 140ms；hover 只改背景/色，不缩放文字避免模糊 */
+  box-sizing: border-box;
+  /* hover 只改背景/色，不缩放文字避免模糊 */
   transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
 }
 
+/* 主页/列表项：图标列固定宽，文字与右侧 value 对齐 */
+.ai-panel-option > svg:first-child {
+  flex: 0 0 20px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+}
+.ai-panel-option > span:not(.ai-panel-option-value):not(.ai-search-status) {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+}
+
 .ai-panel-option:hover {
-  /* 修 hover 模糊: 用 inset box-shadow 代替 background 变化
-     background 变化会触发 backdrop-filter 区域重做
-     inset shadow 是合成层属性，不重做 backdrop-filter */
-  background: rgba(66, 155, 122, 0.04);
+  /* hover 只改背景/色，不 scale、不重阴影，避免文字发糊 */
+  background: rgba(66, 155, 122, 0.06);
   color: rgba(30, 48, 42, 0.95);
-  box-shadow: inset 0 0 0 1px rgba(66, 155, 122, 0.14);
+  box-shadow: none;
+  filter: none;
+  transform: none;
 }
 
 .ai-panel-option:active {
-  background: rgba(66, 155, 122, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(66, 155, 122, 0.22);
-  /* 短按反馈 — 极小缩放，但缩放到 ::before 容器而非 text */
-  /* 不缩放按钮本身以避免文字模糊 */
+  background: rgba(66, 155, 122, 0.1);
+  box-shadow: none;
+  filter: none;
+  transform: none;
 }
 
 .ai-panel-option.active,
 .ai-panel-option[aria-checked="true"] {
-  background: rgba(66, 155, 122, 0.08);
+  background: rgba(66, 155, 122, 0.1);
   color: rgba(38, 108, 82, 0.95);
-  box-shadow: inset 0 0 0 1px rgba(66, 155, 122, 0.22);
+  box-shadow: none;
 }
 
 /* ============================================================
@@ -1397,35 +1413,47 @@
 }
 
 /* ============================================================
-   返回按钮
+   返回按钮 — 紧凑导航条，视觉权重 ≤ 模型选项
    ============================================================ */
 .ai-panel-back {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
-  color: rgba(80, 95, 90, 0.85);
-  font-size: 14px;
-  font-weight: 600;
+  color: rgba(80, 95, 90, 0.78);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  min-height: 44px;
+  min-height: 36px;
+  max-height: 40px;
   transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
+  box-shadow: none;
 }
 
 .ai-panel-back svg {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.75;
 }
 
 .ai-panel-back:hover {
-  background: rgba(66, 155, 122, 0.07);
-  color: rgba(30, 48, 42, 0.95);
+  background: rgba(66, 155, 122, 0.06);
+  color: rgba(30, 48, 42, 0.92);
+  box-shadow: none;
+  transform: none;
+  filter: none;
+}
+
+.ai-panel-back:active {
+  background: rgba(66, 155, 122, 0.1);
+  box-shadow: none;
+  transform: none;
 }
 
 /* ============================================================
@@ -1456,17 +1484,31 @@
 .ai-panel-options-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  margin-top: 2px;
 }
 
 /* ============================================================
-   选项主体
+   选项主体（模型等多行选项）
    ============================================================ */
 .ai-panel-option-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  flex: 1 0 auto;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+}
+
+/* 二级页模型/思考选项：统一卡片高度与内边距，大于返回条 */
+.ai-panel-page-secondary .ai-panel-option[role="radio"] {
+  min-height: 52px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  align-items: center;
+}
+.ai-panel-page-secondary .ai-panel-option[role="radio"][aria-checked="true"] {
+  background: rgba(66, 155, 122, 0.1);
 }
 
 /* ============================================================
@@ -1475,6 +1517,7 @@
 .ai-panel-option-label {
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.25;
 }
 
 /* ============================================================
@@ -1483,6 +1526,7 @@
 .ai-panel-option-desc {
   font-size: 11px;
   font-weight: 400;
+  line-height: 1.35;
   color: rgba(100, 110, 120, 0.7);
 }
 
@@ -1555,7 +1599,14 @@
   border-color: var(--ai-glass-border);
   background: transparent;
   box-shadow:
-    var(--ai-glass-shadow),
+    0 14px 36px rgba(0, 0, 0, 0.36),
+    0 4px 14px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+[data-theme="dark"] .ai-plus-panel-shell.open {
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.4),
+    0 6px 16px rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -1580,16 +1631,21 @@
 [data-theme="dark"] .ai-panel-option:hover {
   background: rgba(127, 187, 172, 0.1);
   color: rgba(210, 228, 222, 0.94);
+  box-shadow: none;
+  filter: none;
+  transform: none;
 }
 
 [data-theme="dark"] .ai-panel-option:active {
   background: rgba(127, 187, 172, 0.16);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .ai-panel-option.active,
 [data-theme="dark"] .ai-panel-option[aria-checked="true"] {
   background: rgba(66, 155, 122, 0.16);
   color: rgba(160, 220, 196, 0.94);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .ai-panel-back {

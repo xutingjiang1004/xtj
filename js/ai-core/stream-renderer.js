@@ -37,7 +37,9 @@
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
     var lastFrameTime = 0;
-    var charsPerMs = options.plainStream ? 0.55 : 0.7;
+    var charsPerMs = options.charsPerMs != null
+      ? options.charsPerMs
+      : (options.plainStream ? 2.2 : 3.2);
     // plainStream mode: reuse single text node to avoid per-frame reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -105,9 +107,12 @@
         next = pending;
         pending = '';
       } else {
-        var frameBudget = Math.max(1, Math.floor(budget || 16));
+        var frameBudget = Math.max(8, Math.floor(budget || 24));
+        if (pending.length > 120) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.45));
+        else if (pending.length > 48) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.28));
+        var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(options.maxChunk || 16, frameBudget - next.length) }));
+          var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
           if (!chunk) break;
           next += chunk;
           pending = pending.slice(chunk.length);
@@ -144,7 +149,7 @@
       if (!lastFrameTime) lastFrameTime = timestamp;
       var elapsed = timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      var budget = Math.max(1, Math.floor(elapsed * charsPerMs));
+      var budget = Math.max(12, Math.floor(elapsed * charsPerMs));
       emitText(false, budget);
       if (pending) schedule();
     }

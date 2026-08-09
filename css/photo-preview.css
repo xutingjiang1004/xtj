@@ -307,14 +307,23 @@ html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-info-mo
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
     width: 48px;
     height: 48px;
+    margin-top: -24px;
+    z-index: 30;
   }
 
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-prev {
-    left: 32px;
+    left: max(24px, env(safe-area-inset-left, 0px));
+    right: auto;
   }
 
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-next {
-    right: 32px;
+    right: max(24px, env(safe-area-inset-right, 0px));
+    left: auto;
+  }
+
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow:active {
+    transform: scale(0.96);
+    box-shadow: none;
   }
 
   html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img {

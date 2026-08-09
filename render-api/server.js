@@ -14453,14 +14453,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
       return safeEnd();
     }
-    message = await extractChatAttachments(message, req.body && req.body.attachments);
-    if (aborted) return safeEnd();
-    
-    // 会话管理
+
+    // 会话管理（尽早生成 convId，便于立刻 flush SSE，降低首包等待）
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId) convId = genConvId();
     if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
 
+    // ★ 延迟优化：校验通过后立刻开 SSE + meta，附件解析与配置/历史并行
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -14471,15 +14470,25 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     writeSse(res, { type: 'meta', conversation_id: convId });
     if (aborted) return safeEnd();
     startStreamHeartbeat();
-    
-    // 思考开始信号：在确定 thinkingMode 之后、真正调用模型之前再发，且仅在开启思考时发送。
-    // 此前无条件发送会导致用户关闭思考后仍看到"思考中..."，产生后端未关闭的错觉。
-    
-    // 读取全局 AI 配置 + 上下文 (并行)
+
+    // 请求体已带思考模式时，先发 preparing 事件（不等 config/ctx），前端可立刻稳固「思考中」态
+    var _reqThinkingHint = (req.body && req.body.thinking_mode) || '';
+    if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) >= 0) {
+      try {
+        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now(), early: true });
+      } catch (_) {}
+    }
+
+    // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
     T_stage.config_start = Date.now();
+    var attachPromise = extractChatAttachments(message, req.body && req.body.attachments);
     var configPromise = getAiConfig();
     var ctxPromise = loadAiContext(userName, convId);
-    var [config, ctx] = await Promise.all([configPromise, ctxPromise]);
+    var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
+    message = _parallelPrep[0];
+    var config = _parallelPrep[1];
+    var ctx = _parallelPrep[2];
+    if (aborted) return safeEnd();
     T_stage.config_ms = Date.now() - T_stage.config_start;
     
     // 当前时间上下文
@@ -14527,8 +14536,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'enhanced_stage', stage: 'understand', message: '正在梳理问题与回答结构…' });
     }
     var useThinking = thinkingMode !== 'off';
+    // 若先前 early reasoning_start 因最终判定关闭思考而误发，前端以后续事件为准；
+    // 未 early 发过且需要思考时，在此补发正式信号。
     if (useThinking) {
-      writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+      if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) < 0) {
+        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+      }
       if (aborted) return safeEnd();
     }
     // Enhanced chat is a bounded, single-agent middle gear: it may use the

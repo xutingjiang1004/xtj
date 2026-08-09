@@ -478,8 +478,10 @@ html { font-size: calc(16px * var(--xtj-font-scale, 1)); }
 .toast-warn, .toast-warning { border-color: rgba(210,160,60,.45) !important; background: linear-gradient(135deg, rgba(255,246,220,.96), rgba(255,250,236,.94)) !important; color: #8a6418 !important; }
 
 button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-pressing, .ai-chat-send.xtj-pressing {
-  transform: scale(0.96) !important;
-  transition: transform .12s ease !important;
+  transform: scale(0.98) !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transition: transform .12s ease, background .12s ease !important;
 }
 
 .xtj-img-soft { transition: opacity .28s ease; }
