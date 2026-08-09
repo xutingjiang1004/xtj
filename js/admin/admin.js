@@ -175,25 +175,37 @@
     // 不移除 window.sb，避免影响前台页面功能
 
     // ===================== Token 管理（前后端共享，仅用于 API 鉴权） =====================
-    var TOKEN_SALT = 'xtj_7k3m';
+    // ★ 安全加固：不再使用硬编码盐。每次写入 token 时生成随机盐并随密文存储，
+    // 攻击者仅凭公开源码无法逆向出 token（硬编码盐 + 可逆 XOR 等于没有保护）。
+    // 这仍是"混淆"而非加密（token 必须可逆取出用于请求头），真正的边界在后端签名校验。
+    var TOKEN_SALT_KEY = 'xtj_admin_token_salt';
 
-    // localStorage存储（非安全措施，仅防明文泄露）
-    function _obfuscateToken(raw) {
+    // 生成随机盐（字母数字，避免特殊字符破坏 storage）
+    function _generateTokenSalt() {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        var out = '';
+        for (var i = 0; i < 24; i++) {
+            out += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return out;
+    }
+
+    function _obfuscateToken(raw, salt) {
         if (!raw) return '';
         var result = '';
         for (var i = 0; i < raw.length; i++) {
-            result += String.fromCharCode(raw.charCodeAt(i) ^ TOKEN_SALT.charCodeAt(i % TOKEN_SALT.length));
+            result += String.fromCharCode(raw.charCodeAt(i) ^ salt.charCodeAt(i % salt.length));
         }
         return btoa(result);
     }
 
-    function _deobfuscateToken(encoded) {
-        if (!encoded) return '';
+    function _deobfuscateToken(encoded, salt) {
+        if (!encoded || !salt) return '';
         try {
             var raw = atob(encoded);
             var result = '';
             for (var i = 0; i < raw.length; i++) {
-                result += String.fromCharCode(raw.charCodeAt(i) ^ TOKEN_SALT.charCodeAt(i % TOKEN_SALT.length));
+                result += String.fromCharCode(raw.charCodeAt(i) ^ salt.charCodeAt(i % salt.length));
             }
             return result;
         } catch(e) { return ''; }
@@ -421,15 +433,23 @@
 
     // ===================== API 辅助函数 =====================
     function getToken() {
-        try { return _deobfuscateToken(sessionStorage.getItem(USER_ACCESS_TOKEN_KEY) || ''); } catch(e) { return ''; }
+        try {
+            var salt = sessionStorage.getItem(TOKEN_SALT_KEY) || '';
+            return _deobfuscateToken(sessionStorage.getItem(USER_ACCESS_TOKEN_KEY) || '', salt);
+        } catch(e) { return ''; }
     }
 
     function setToken(t) {
-        try { sessionStorage.setItem(USER_ACCESS_TOKEN_KEY, _obfuscateToken(t)); } catch(e) {}
+        try {
+            var salt = _generateTokenSalt();
+            sessionStorage.setItem(TOKEN_SALT_KEY, salt);
+            sessionStorage.setItem(USER_ACCESS_TOKEN_KEY, _obfuscateToken(t, salt));
+        } catch(e) {}
     }
 
     function clearToken() {
         try { sessionStorage.removeItem(USER_ACCESS_TOKEN_KEY); } catch(e) {}
+        try { sessionStorage.removeItem(TOKEN_SALT_KEY); } catch(e) {}
     }
 
     async function refreshUserAccessToken() {

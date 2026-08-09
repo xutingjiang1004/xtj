@@ -306,7 +306,9 @@ test('load-more sentinel debounces cascade paging and offers retry on real failu
   // 分组视图级联：新页照片不属于当前分组时停止自动加载
   assert.match(renderSource, /_lastMoreLoadAt/);
   assert.match(renderSource, /当前分组暂无更多照片/);
-  assert.match(renderSource, /groupByDate\(more\)\.some/);
+  // ★ 修复后：按日期 key 逐张判断新页照片是否属于当前分组（不再用 groupByDate(more)，
+  // 后者按新页日期分组几乎永远匹配不上当前分组，导致分组页加载更多永久中断）
+  assert.match(renderSource, /mKey === window\.pwAlbumGroupKey/);
   // 失败重试：真实失败显示可点击重试，AbortError（被刷新/切换取代）静默恢复
   assert.match(renderSource, /加载失败，点击重试/);
   assert.match(renderSource, /err\.name === 'AbortError'/);

@@ -362,11 +362,27 @@
       setSentinelText('加载中...', false);
       Promise.resolve(window.loadMorePhotos()).then(function(more){
         if (more && more.length) {
-          // ★ 分组视图下：若新页没有任何照片属于当前分组（group.photos 不增长），
-          // 停止自动加载并提示，避免整格重建后哨兵仍在视口触发级联翻页
-          if (window.pwAlbumGroupKey && !groupByDate(more).some(function(g){ return g.key === window.pwAlbumGroupKey; })) {
-            setSentinelText('当前分组暂无更多照片', false);
-            return;
+          // ★ 修复：判断"新加载的照片里是否包含当前分组日期的照片"。
+          // 之前用 groupByDate(more) 判断——groupByDate 把新页照片按各自日期分组，
+          // 其组 key 几乎不可能等于当前 pwAlbumGroupKey（除非新页恰好全是同一天），
+          // 导致永远命中"当前分组暂无更多照片"，分组页加载更多永久中断。
+          // 正确做法：逐张检查 more 的日期 key 是否等于当前分组 key。
+          if (window.pwAlbumGroupKey) {
+            var hasGroupPhoto = false;
+            for (var mi = 0; mi < more.length; mi++) {
+              var mp = more[mi];
+              if (!mp) continue;
+              var md = new Date(mp.timestamp || Date.now());
+              if (isNaN(md.getTime())) md = new Date();
+              var mKey = md.getFullYear() + '-' + String(md.getMonth() + 1).padStart(2, '0') + '-' + String(md.getDate()).padStart(2, '0');
+              if (mKey === window.pwAlbumGroupKey) { hasGroupPhoto = true; break; }
+            }
+            if (!hasGroupPhoto) {
+              // 新页没有当前分组的照片：不销毁哨兵，提示后等待用户继续滚动/点击，
+              // 若服务端还有更多（hasMorePhotos 仍为 true），后续加载仍可能带出本组照片。
+              setSentinelText('当前分组暂无更多照片', true);
+              return;
+            }
           }
           renderPhotoWallWithoutReload();
         } else {

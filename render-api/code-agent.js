@@ -22,6 +22,16 @@ const MAX_HISTORY_ITEMS = 50;
 // hard-blocks on total file count or total content size.
 const MAX_FILES_TOTAL_CONTENT = 900 * 1024; // Kept only for legacy fallback warning, not a hard block
 const MAX_SINGLE_FILE_CONTENT = 2 * 1024 * 1024;
+// 敏感文件名黑名单（大小写不敏感）：命中即拒绝读取，防止 Code Agent 被诱导
+// 读取 .env / 私钥 / 凭据文件后把内容泄露给模型与客户端。
+// 匹配依据：去掉目录前缀后的 basename（如 .env、.env.local、server.key、id_rsa）。
+const SENSITIVE_FILE_BASENAME_RE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx)$|credentials.*|id_rsa.*|id_ed25519.*|secrets.*)$/i;
+function isSensitiveFilePath(p) {
+  if (typeof p !== 'string' || !p.trim()) return false;
+  var s = p.replace(/\\/g, '/');
+  var basename = s.split('/').pop() || '';
+  return SENSITIVE_FILE_BASENAME_RE.test(basename);
+}
 const MAX_OPERATIONS = 10;
 const MAX_NEW_CONTENT_LEN = 2 * 1024 * 1024;
 const DEEPSEEK_TIMEOUT_MS = 180000;
@@ -1449,6 +1459,11 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
   function readPath(path, startLine, endLine) {
     var normalizedPath = normalizeToolPath(path);
     if (!normalizedPath) return { ok: false, code: 'INVALID_PATH', error: '文件路径无效' };
+    // 敏感文件黑名单：.env / *.pem / *.key / credentials* / id_rsa* / id_ed25519* / *.p12 / *.pfx / secrets*
+    // 一律拒绝读取，防止被诱导读取后泄露给模型或客户端。
+    if (isSensitiveFilePath(normalizedPath)) {
+      return { ok: false, code: 'SENSITIVE_FILE_DENIED', error: '拒绝读取敏感文件: ' + normalizedPath };
+    }
     var overlayResolved = resolveOverlayFile(normalizedPath);
     if (overlayResolved && overlayResolved.file) {
       // basename 回退匹配时标注来源，供日志/后续操作识别，避免误读同名文件
@@ -3757,6 +3772,10 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
       var scopeResult = validateWorkspaceScope(req, body);
       if (!scopeResult.ok) return res.status(400).json({ ok: false, error: scopeResult.error });
+      var readPathArg = String(body.path || '');
+      if (isSensitiveFilePath(normalizeToolPath(readPathArg))) {
+        return res.status(403).json({ ok: false, code: 'SENSITIVE_FILE_DENIED', error: '拒绝读取敏感文件: ' + readPathArg });
+      }
       var result = codeIndex.readFileRange(scopeResult.value, body.path, body.startLine || 1, body.endLine || 999999);
       return res.json(result);
     } catch (err) {

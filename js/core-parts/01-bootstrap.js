@@ -374,8 +374,9 @@ const ADMIN_NAME = "xxz";
                         if (typeof window.__xtjRememberBehaviorToken === 'function') {
                             window.__xtjRememberBehaviorToken(token);
                         } else {
-                            // H-38: 跨脚本只通过 window 共享 token，避免依赖另一个文件的闭包作用域。
-                            window.behaviorLastKnownToken = String(token);
+                            // H-38: 回退分支只记录"已观察到 token"的存在性标志，
+                            // 不再把明文 access token 挂到 window（任何脚本都可读）。
+                            window.__xtjBehaviorTokenKnown = true;
                         }
                     } catch(e) {}
                     // 通知其他模块用户认证已就绪（用于自动定位等）
@@ -982,6 +983,9 @@ const ADMIN_NAME = "xxz";
         }
 
         function touchUserSession(force) {
+            // ★ 幽灵会话防护：当前认证状态已是登出（显式登出/启动时身份不匹配/会话过期清理后），
+            // 直接 return，绝不把残留的 xtj_user 重新写回 storage，避免"UI 未登录但 storage 显示已登录"。
+            if (window._xtjAuthState === 'unauthenticated') return;
             var userName = String(window.currentUser || window._lastKnownUser || "").trim();
             if (!userName) return;
             var now = Date.now();

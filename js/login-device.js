@@ -989,7 +989,6 @@
             var token = null;
             try {
                 token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-                if (token) { try { window.behaviorLastKnownToken = token; } catch (e) {} }
             } catch (e) { /* token refresh failed */ }
             if (!token) {
                 behaviorRetryCount++;
@@ -1061,9 +1060,6 @@
     function rememberBehaviorToken(token) {
         if (token) {
             behaviorLastKnownToken = token;
-            // H-38: 通过 window 暴露 token，core.js 的 setUserToken 无局部
-            // rememberBehaviorToken 引用时回退到这里，pagehide keepalive 不再恒为 null。
-            window.behaviorLastKnownToken = token;
         }
     }
     window.__xtjRememberBehaviorToken = rememberBehaviorToken;
@@ -1073,7 +1069,7 @@
         // L2 修复：统一 token 获取函数名（其他处均用 getUserToken；旧代码用不存在的
         // window.getToken 导致 pagehide 时 token 恒为空、行为数据丢失）。
         // 注：ensureUserToken 是异步的，pagehide 场景无法等待，仅用同步缓存 + getUserToken。
-        var token = window.behaviorLastKnownToken || behaviorLastKnownToken;
+        var token = behaviorLastKnownToken;
         if (!token && typeof window.getUserToken === 'function') {
             try { token = window.getUserToken(); } catch (e) {}
         }

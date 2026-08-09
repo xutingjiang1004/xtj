@@ -975,14 +975,20 @@
                         isRefreshing[tab] = true;
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
-                        if (tab === 'ai') {
-                            if (!window.currentUser) {
-                                renderPhotoWallLockedState();
-                                isRefreshing[tab] = false;
-                                window.showToast('请先登录');
-                                return;
-                            }
-                            window.showToast('正在刷新...');
+                        if (tab === 'ai') {
+                            if (!window.currentUser) {
+                                // ★ 修复：双击刷新在未登录时不再调用 renderPhotoWallLockedState()
+                                // 把整个 photoGrid 替换成"登录提示"锁定页（破坏照片墙网格且无恢复入口）。
+                                // 改为与单击分支一致的 ensurePhotoWallVisibleContent()（未登录时它只做
+                                // 加载/兜底渲染，不替换网格），并复位刷新锁，保留网格不被破坏。
+                                isRefreshing[tab] = false;
+                                window.showToast('请先登录');
+                                ensurePhotoWallVisibleContent().catch(function(err) {
+                                    console.warn('[photo-wall] double-tap refresh visibility check failed', err);
+                                });
+                                return;
+                            }
+                            window.showToast('正在刷新...');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
                                     return window.loadPhotoWallData(true).then(function() {

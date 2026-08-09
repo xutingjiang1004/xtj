@@ -6723,7 +6723,8 @@ function probeDatabaseConnectivity() {
         clearTimeout(timer);
         settled = true;
         if (r && r.error) {
-          _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: r.error.message || String(r.error.code || 'unknown') };
+          // 不对外透传 Supabase 原始错误（可能含项目 URL / 表结构等侦察信息）
+          _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: 'database_unavailable' };
         } else {
           _HEALTH_DB_CACHE = { ts: Date.now(), status: 'ok', error: null };
         }
@@ -6732,14 +6733,15 @@ function probeDatabaseConnectivity() {
         if (settled) return;
         clearTimeout(timer);
         settled = true;
-        _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: (err && err.message) ? err.message : String(err) };
+        // 网络异常不泄露底层细节（如 supabase 实例地址/认证信息）
+        _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: 'database_unavailable' };
         resolve(_HEALTH_DB_CACHE);
       });
     } catch (e) {
       if (settled) return;
       clearTimeout(timer);
       settled = true;
-      _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: (e && e.message) ? e.message : String(e) };
+      _HEALTH_DB_CACHE = { ts: Date.now(), status: 'down', error: 'database_unavailable' };
       resolve(_HEALTH_DB_CACHE);
     }
   });
@@ -6754,15 +6756,13 @@ app.get('/health', async (req, res) => {
     uptime_seconds: Math.floor((Date.now() - new Date(STARTED_AT).getTime()) / 1000),
     env: _IS_PRODUCTION ? 'production' : (process.env.NODE_ENV || 'development')
   };
+  // 配置层只暴露不敏感字段：不返回 *_configured 布尔值（会被用作侦察配置状态），
+  // 只保留 env 以便客户端/监控区分部署环境。allConfigOk 仍参与整体 ok/503 判定。
   var configStatus = {
-    deepseek_configured: !!DEEPSEEK_API_KEY,
-    supabase_url_configured: !!SUPABASE_URL,
-    supabase_key_configured: !!SUPABASE_SERVICE_KEY,
-    admin_password_configured: !!ADMIN_PASSWORD,
-    api_secret_configured: !!API_SECRET
+    env: _IS_PRODUCTION ? 'production' : (process.env.NODE_ENV || 'development')
   };
+  var allConfigOk = !!(DEEPSEEK_API_KEY && SUPABASE_URL && SUPABASE_SERVICE_KEY);
   var dbProbe = await probeDatabaseConnectivity();
-  var allConfigOk = configStatus.deepseek_configured && configStatus.supabase_url_configured && configStatus.supabase_key_configured;
   var dbOk = dbProbe.status === 'ok';
   var overallOk = allConfigOk && dbOk;
   return res.status(overallOk ? 200 : 503).json({
@@ -6818,9 +6818,23 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
     return res.status(401).json({ error: '账号或密码错误' });
   }
   // 使用 timingSafeEqual 防止时序侧信道攻击
-  const pwBuf = crypto.createHash('sha256').update(password).digest();
-  const adminBuf = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
-  const pwMatch = crypto.timingSafeEqual(pwBuf, adminBuf);
+  // ★ 安全：支持 ADMIN_PASSWORD_HASH 环境变量（sha256:<hex> 或 scrypt:v1:...），
+  // 避免把明文密码写进 env；未配置时回退到 ADMIN_PASSWORD 明文比对（兼容现有部署）。
+  const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || '';
+  let pwMatch = false;
+  if (adminPasswordHash) {
+    const hexMatch = adminPasswordHash.match(/^sha256:([a-f0-9]{64})$/i);
+    if (hexMatch) {
+      const pwHashHex = crypto.createHash('sha256').update(password).digest('hex');
+      pwMatch = safeTextEqual(pwHashHex.toLowerCase(), hexMatch[1].toLowerCase());
+    } else if (adminPasswordHash.indexOf('scrypt:v1:') === 0) {
+      pwMatch = await verifyAuthPassword(adminPasswordHash, password, ADMIN_USERNAME);
+    }
+  } else {
+    const pwBuf = crypto.createHash('sha256').update(password).digest();
+    const adminBuf = crypto.createHash('sha256').update(ADMIN_PASSWORD || '').digest();
+    pwMatch = crypto.timingSafeEqual(pwBuf, adminBuf);
+  }
   if (!pwMatch) {
     return res.status(401).json({ error: '账号或密码错误' });
   }
@@ -6970,30 +6984,50 @@ async function optionalAuth(req, res, next) {
 }
 
 const AUTH_VERIFIER_PREFIX = 'scrypt:v1:';
+// ★ 密码哈希参数：新注册/升级使用更强的 N=2^15（比旧 N=2^14 高一倍）。
+// 参数随 verifier 存储（scrypt:v1:<N>:<r>:<p>:<salt>:<key>），
+// 旧格式（scrypt:v1:<salt>:<key>，无参数）用默认 N=16384 验证，保持存量用户可登录。
+// 注：内存 = N*r*128 字节。N=2^15*r=8 恰为 Node 默认 maxmem(32MB) 边界，取 r=4 留余量。
+const SCRYPT_DEFAULT_N = 16384;
+const SCRYPT_STRONG_N = 32768; // 2^15
+const SCRYPT_R = 4;
+const SCRYPT_P = 1;
 function safeTextEqual(left, right) {
   var leftBuf = Buffer.from(String(left || ''));
   var rightBuf = Buffer.from(String(right || ''));
   return leftBuf.length === rightBuf.length && crypto.timingSafeEqual(leftBuf, rightBuf);
 }
-function scryptAsync(password, salt) {
+function scryptAsync(password, salt, N, r) {
   return new Promise(function(resolve, reject) {
-    crypto.scrypt(String(password), salt, 32, { N: 16384, r: 8, p: 1 }, function(error, key) {
+    crypto.scrypt(String(password), salt, 32, { N: N || SCRYPT_DEFAULT_N, r: r || SCRYPT_R, p: SCRYPT_P }, function(error, key) {
       if (error) reject(error); else resolve(key);
     });
   });
 }
 async function deriveAuthVerifier(password) {
   var salt = crypto.randomBytes(16).toString('base64url');
-  var key = await scryptAsync(password, salt);
-  return AUTH_VERIFIER_PREFIX + salt + ':' + key.toString('base64url');
+  var key = await scryptAsync(password, salt, SCRYPT_STRONG_N, SCRYPT_R);
+  return AUTH_VERIFIER_PREFIX + SCRYPT_STRONG_N + ':' + SCRYPT_R + ':' + SCRYPT_P + ':' + salt + ':' + key.toString('base64url');
 }
 async function verifyAuthPassword(stored, password, userName) {
   var value = String(stored || '');
   if (value.indexOf(AUTH_VERIFIER_PREFIX) === 0) {
     var fields = value.split(':');
+    // 新格式: scrypt:v1:<N>:<r>:<p>:<salt>:<key> (7 段: [scrypt,v1,N,r,p,salt,key])
+    // 旧格式: scrypt:v1:<salt>:<key> (4 段: [scrypt,v1,salt,key]，原 r=8 硬编码)
+    if (fields.length === 7 && fields[2] && fields[3] && fields[4] && fields[5] && fields[6]) {
+      var N = parseInt(fields[2], 10);
+      if (!(N >= 16384 && N <= 1048576)) return false;
+      var r = parseInt(fields[3], 10);
+      if (!(r >= 1 && r <= 32)) return false;
+      var p = parseInt(fields[4], 10);
+      if (!(p >= 1 && p <= 8)) return false;
+      var key = await scryptAsync(password, fields[5], N, r);
+      return safeTextEqual(fields[6], key.toString('base64url'));
+    }
     if (fields.length !== 4 || !fields[2] || !fields[3]) return false;
-    var key = await scryptAsync(password, fields[2]);
-    return safeTextEqual(fields[3], key.toString('base64url'));
+    var legacyKey = await scryptAsync(password, fields[2], SCRYPT_DEFAULT_N, 8);
+    return safeTextEqual(fields[3], legacyKey.toString('base64url'));
   }
   // Legacy browser records: PBKDF2 salt:hash, SHA-256(password), or
   // SHA-256(username:password). They are accepted only here and upgraded.
@@ -9028,24 +9062,31 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 
 // ===================== 照片墙接口（修复 RLS 权限问题） ======================
 // GET /api/photos/wall/:userName - 获取用户照片墙（需登录）
+// 可见性：查看自己的照片墙返回全部；查看他人的仅返回公开照片。
 app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
   try {
     const targetUser = String(req.params.userName || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
     const limit = parseInt(req.query.limit, 10) || 200;
-    const { data, error } = await supabase.from('posts')
+    let query = supabase.from('posts')
       .select('id, user_name, content, media_url, media_type, created_at')
       .eq('user_name', targetUser)
       .eq('media_type', '__photo_wall__')
       .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })
       .limit(limit > 0 ? Math.min(limit, 500) : 200);
+    // 查看他人的照片墙时仅返回公开照片（私密照片只有本人可见）
+    if (String(req.userName || '') !== String(targetUser)) {
+      query = query.eq('visibility', 'public');
+    }
+    const { data, error } = await query;
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true, data: data || [] });
   } catch (e) { console.error('[API] photo wall get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
 // GET /api/photos/public - 公开照片墙（无需登录，限流）
+// 可见性：仅返回公开照片，私密照片一律不出现。
 app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
   try {
     const pageRaw = parseInt(req.query.page, 10);
@@ -9057,6 +9098,7 @@ app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
     const { data, error } = await supabase.from('posts')
       .select('id, user_name, media_url, content, created_at, views')
       .eq('media_type', '__photo_wall__')
+      .eq('visibility', 'public')
       .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })
       .range(from, to);
@@ -13049,11 +13091,17 @@ app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
     var errorType = String(type || 'unknown').slice(0, 50);
     var errorMsg = String(message || '').slice(0, 500);
     var errorStack = String(stack || '').slice(0, 1000);
-    var pageUrl = String(url || '').slice(0, 500);
+    // 超长截断：url 限 2048、user_agent 限 500，防止无界垃圾填充
+    var pageUrl = String(url || '').slice(0, 2048);
     var ua = String(user_agent || '').slice(0, 500);
-    // 不保存敏感信息
-    if (/token|password|cookie|authorization|secret/i.test(errorMsg)) errorMsg = '[filtered: sensitive]';
-    if (/token|password|cookie|authorization|secret/i.test(errorStack)) errorStack = '[filtered: sensitive]';
+    // 不保存敏感信息（token/password/cookie/authorization/secret 等一律替换为 [REDACTED]）。
+    // message/stack 保持原行为（整体替换为占位串）；url/user_agent 同样清洗，但仅把
+    // 命中敏感词的片段替换为 [REDACTED]，保留其余诊断信息，避免破坏前端上报功能。
+    var _SENSITIVE_RE = /token|password|cookie|authorization|secret|api[_-]?key|access[_-]?key|session[_-]?id/i;
+    if (_SENSITIVE_RE.test(errorMsg)) errorMsg = '[filtered: sensitive]';
+    if (_SENSITIVE_RE.test(errorStack)) errorStack = '[filtered: sensitive]';
+    if (_SENSITIVE_RE.test(pageUrl)) pageUrl = pageUrl.replace(_SENSITIVE_RE, '[REDACTED]');
+    if (_SENSITIVE_RE.test(ua)) ua = ua.replace(_SENSITIVE_RE, '[REDACTED]');
 
     await supabase.from('posts').insert([{
       user_name: 'system',

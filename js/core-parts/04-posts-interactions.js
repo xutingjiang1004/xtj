@@ -1392,45 +1392,6 @@
                 }
             }
 
-            function trackView(postId) {
-                const key = `xtj_v_${postId}`;
-                if (!window.safeStorage.get(key) && !viewTracked.has(postId)) {
-                    viewTracked.add(postId);
-                    window.safeStorage.set(key, "1");
-                    var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
-                    if (postEl) {
-                        var statsEl = postEl.querySelector('.post-stats-text');
-                        if (statsEl) {
-                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
-                            if (vm) {
-                                var newVal = parseInt(vm[1]) + 1;
-                                statsEl.textContent = statsEl.textContent.replace(/浏览 \d+/, '浏览 ' + newVal);
-                            }
-                        }
-                    }
-                    if (currentUser && postInfoCache[postId]) {
-                        var rawContent = postInfoCache[postId].content || '';
-                        var displayContent = rawContent;
-                        try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
-                        saveViewHistory({
-                            user_name: currentUser,
-                            post_id: postId,
-                            post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || '(图片/视频)'),
-                            post_author: postInfoCache[postId].user_name || '未知',
-                            media_url: postInfoCache[postId].media_url || '',
-                            media_type: postInfoCache[postId].media_type || '',
-                            viewed_at: new Date().toISOString()
-                        });
-                    }
-                    setTimeout(async () => { 
-                        try { 
-                            await sb.rpc("increment_post_views", { p_post_id: postId }); 
-                        } catch(e){ console.error(e); } 
-                    }, 1000);
-                    updateFeedStats();
-                }
-            }
-
             // ===================== 浏览历史加载 =====================
             // 保存浏览历史：分页加载相关变量
             saveViewHistory = function(entry) {
@@ -4082,7 +4043,14 @@
                 pageLoading.textContent = "正在加载更多帖子";
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(pageLoading, sentinel || null);
-                var startIdx = feedPage * FEED_PAGE_SIZE;
+                // ★ 修复：切片起点统一以"已渲染条数"计算，不再用 feedPage（显示计数）
+                // 推算。feedPage 仅作显示计数，由 applyPostFilters/clearPostFilters 重置为 1，
+                // 但 feedNextOffset（服务端游标）不随之重置；若用 feedPage 推算切片，
+                // 筛选开启时 filteredPosts 远小于 feedAllPosts 会提前判定"没有更多"，
+                // 或 20 页后游标与切片错位导致循环不满足。是否还有更多只由 feedNextOffset/
+                // feedEndReached 判定，切片长度只受当前内存过滤结果约束。
+                var renderedCount = feed.querySelectorAll(".post").length;
+                var startIdx = Math.max(renderedCount, 0);
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
@@ -4127,8 +4095,11 @@
                     }
                     return;
                 }
-                if (startIdx >= filteredPosts.length && !fetchFailed) {
-                    feedEndReached = true;
+                // ★ 修复：只有"服务端已到末尾"才置 feedEndReached 并显示"没有更多"。
+                // 筛选开启时 filteredPosts 可能远小于已拉取总量（feedNextOffset 尚未到末尾），
+                // 此时不能因为切片末尾超过 filteredPosts 就提前终止无限滚动——继续滚动应
+                // 继续用 feedNextOffset 拉取，让更多可匹配筛选的帖子进入内存后再渲染。
+                if (feedEndReached && startIdx >= filteredPosts.length) {
                     var noMore = document.getElementById("feedNoMore");
                     if (!noMore) {
                         noMore = document.createElement("div");
@@ -4141,11 +4112,13 @@
                     }
                     return;
                 }
-                var filteredPostIds = new Set();
-                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
-                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
-                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
-                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                if (startIdx < filteredPosts.length) {
+                    var filteredPostIds = new Set();
+                    filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                    var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                    var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                    appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                }
                 feedPage++;
             };
 

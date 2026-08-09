@@ -12,7 +12,7 @@ test('retired Pro modules are not shipped', () => {
 
 test('post view count updates do not reparse existing HTML', () => {
   assert.doesNotMatch(source, /statsEl\.innerHTML\s*=\s*statsEl\.innerHTML\.replace/);
-  assert.match(source, /statsEl\.textContent = statsEl\.textContent\.replace\(\/浏览/);
+  assert.match(source, /statsEl\.textContent = statsEl\.textContent\.replace/);
 });
 
 test('avatar updates use the authenticated API and have no anon posts insert fallback', () => {
