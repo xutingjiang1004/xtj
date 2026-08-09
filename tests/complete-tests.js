@@ -438,11 +438,12 @@ test('narrow active posts retain the original horizontal statistics row', functi
 console.log('\n=== English Module Regression Guards ===');
 test('server.js public post filter excludes retired English marker', function(){
   var s = read('render-api/server.js');
+  var pq = read('render-api/post-query.js');
   // white-list approach: only NORMAL_POST_MEDIA_TYPES are allowed, __ai_english_learning__ is inherently excluded
   assert.ok(s.indexOf("__ai_english_learning__") >= 0, 'server.js missing __ai_english_learning__ filter');
   assert.ok(s.indexOf("applyNormalPostAllowlist") >= 0, 'server.js filter chain uses white-list (applyNormalPostAllowlist) instead of exclusion-based neq');
-  // verify __ai_english_learning__ is NOT in the white-list
-  var normalTypes = s.match(/NORMAL_POST_MEDIA_TYPES\s*=\s*\[([^\]]+)\]/);
+  // verify __ai_english_learning__ is NOT in the white-list (defined in post-query.js)
+  var normalTypes = pq.match(/NORMAL_POST_MEDIA_TYPES\s*=\s*\[([^\]]+)\]/);
   assert.ok(normalTypes, 'NORMAL_POST_MEDIA_TYPES array not found');
   assert.ok(normalTypes[1].indexOf('__ai_english_learning__') < 0, 'NORMAL_POST_MEDIA_TYPES must not include __ai_english_learning__');
 });

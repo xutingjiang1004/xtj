@@ -21,9 +21,10 @@ function researchFnSource() {
   // ★ 2026-08-08: 深度研究已重构为自托管多智能体（runSelfResearchFlow），
   //   Tavily 流式代理（tavilyResearchStream / TAVILY_RESEARCH_PHASES）已删除。
   //   缓存/改写/持久化核心仍保留在 Tavily Research 增强流水线区段，改从该区段截取。
+  // ★ searchBrave 等 provider 已移入 search-providers.js,research 段结束锚点改用"输入校验"分段。
   const start = server.indexOf('var researchCache = new Map()');
   assert.notEqual(start, -1, 'missing researchCache (Tavily Research pipeline)');
-  const end = server.indexOf('async function searchBrave', start);
+  const end = server.indexOf('// ===================== 输入校验', start);
   assert.ok(end > start, 'could not isolate research pipeline');
   return server.slice(start, end);
 }

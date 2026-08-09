@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const aiAgent = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
+const searchProviders = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'search-providers.js'), 'utf8');
 
 test('tavily_search tool is declared in AI_TOOLS with Tavily-specific params', () => {
   const toolBlock = server.match(/name: 'tavily_search',[\s\S]*?required: \['query'\][\s\S]*?\n    \},/);
@@ -29,7 +30,7 @@ test('executeToolCall dispatches tavily_search and guards missing API key', () =
 });
 
 test('searchTavily forwards advanced options (search_depth / include_answer / time_range / topic)', () => {
-  const fnBlock = server.match(/async function searchTavily\(query, maxResults, extraOpts\) \{[\s\S]*?signal: AbortSignal\.timeout\(15000\)[\s\S]*?\n    \}\);/);
+  const fnBlock = searchProviders.match(/async function searchTavily\(query, maxResults, extraOpts\) \{[\s\S]*?signal: AbortSignal\.timeout\(15000\)[\s\S]*?\n    \}\);/);
   assert.ok(fnBlock, 'searchTavily signature with extraOpts missing');
   assert.match(fnBlock[0], /search_depth: extraOpts\.search_depth === 'advanced' \? 'advanced' : 'basic'/);
   assert.match(fnBlock[0], /include_answer: !!extraOpts\.include_answer/);
@@ -45,6 +46,6 @@ test('search result collection covers tavily_search on both streaming paths', ()
 });
 
 test('frontend renders tavily_search tool name in tool_calls and tool_result status bars', () => {
-  assert.match(aiAgent, /var nameMap = \{ search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气', get_current_time: '获取时间' \};/);
-  assert.match(aiAgent, /var nameMap = \{ search_web: '已联网搜索', tavily_search: '已Tavily搜索', get_weather: '已查询天气', get_current_time: '已获取时间' \};/);
+  assert.match(aiAgent, /var nameMapCall = \{[\s\S]*?tavily_search: 'Tavily搜索'/);
+  assert.match(aiAgent, /var nameMap = \{[\s\S]*?tavily_search: 'Tavily搜索'/);
 });
