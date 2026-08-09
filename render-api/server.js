@@ -14515,20 +14515,30 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 思考模式
-        // ★ M: fallback 从 max 改成 low
+    // ★ M: fallback 从 max 改成 low
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var requestedModel = req.body && req.body.model;
     var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro'];
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
-    // DeepSeek cannot safely combine reasoning mode with tools. Station actions
-    // are routed through function calling, so select the non-thinking path.
-    if (/搜索|查找|找一下|私信|发送消息|草稿|公告|维修任务/i.test(message)) thinkingMode = 'off';
+
+    // 搜索/工具意图：DeepSeek reasoning 与 tools 不能并存。
+    // 明确「搜一下/查一下/最新…」时强制关思考，才能挂 tools / 内置 web_search。
+    // （旧正则只有「搜索|找一下」，漏了「搜一下」等口语，导致一直思考却从不搜）
+    var explicitSearchIntent = /搜索|搜一下|搜搜|搜一搜|查找|找一下|查一下|查查|查资料|联网|帮我搜|请搜索|google|百度一下|谷歌一下/i.test(message);
+    var liveInfoIntent = /最新|实时|今天|现在|当前|新闻|资讯|价格|多少钱|汇率|天气|温度|赛程|比分|发布|上市|官宣/i.test(message);
+    var siteToolIntent = /私信|发送消息|草稿|公告|维修任务/i.test(message);
+    var forceToolsPath = explicitSearchIntent || siteToolIntent;
+    if (forceToolsPath) thinkingMode = 'off';
+
     // A bounded middle gear for normal chat. This is intentionally not the
     // deep_think multi-agent route and keeps provider/tool compatibility.
     var responseProfile = (req.body && req.body.response_profile) === 'enhanced' ? 'enhanced' : 'normal';
     if (responseProfile === 'enhanced') {
-      thinkingMode = thinkingMode === 'off' || thinkingMode === 'low' ? 'medium' : thinkingMode;
+      // 增强模式默认开思考；若用户明确要搜/调工具，仍保持 tools 路径（思考保持 off）
+      if (!forceToolsPath) {
+        thinkingMode = thinkingMode === 'off' || thinkingMode === 'low' ? 'medium' : thinkingMode;
+      }
       messages.push({
         role: 'system',
         content: '【增强思考回复约束】先在内部梳理问题，再判断是否需要查证；对时效、比较、推荐或事实性结论，优先基于已提供的可靠检索证据回答。不要展示原始思维链。输出遵循：先给结论，再给关键依据和可执行建议；信息不足时明确说明限制。若界面展示了检索来源，可在正文用 [1]、[2] 指代它们。'
@@ -14544,49 +14554,34 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
       if (aborted) return safeEnd();
     }
+
+    // admin/global 是否允许搜索（配置开关）
     // Enhanced chat is a bounded, single-agent middle gear: it may use the
     // server-owned search pipeline even when the legacy chat toggle is off.
     // Deep research remains a separate route with its own multi-agent budget.
     var enhancedSearchAllowed = responseProfile === 'enhanced' && !(config && config.enhanced && config.enhanced.allow_web_search === false);
-    var allowSearch = enhancedSearchAllowed || !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
-
-    // ★ 网页搜索改造：前端 + 号面板的"网页搜索"开关
-    //   - web_search === true  → 走 DeepSeek Responses API 内置 web_search（服务端执行）
-    //     + Tavily 预搜注入（双通道"一起抓取"，结果统一整理后回答）
-    //   - web_search === false → 强制关闭所有外部搜索，仅用模型自身能力
-    //   - 未传（旧客户端/深度思考页）→ 保持原有 allowSearch 行为，向后兼容
+    var adminSearchAllowed = enhancedSearchAllowed || !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
+    // allowSearch：服务端主动检索 / 思考态注入 / FC 预检 均可用
+    // ★ 修复：web_search 面板开关只控制「双通道 Tavily + 强制 Responses 内置搜」，
+    //   不再把 allowSearch 整条关掉，否则「搜一下」在思考模式/关开关时永远不搜。
+    var allowSearch = adminSearchAllowed;
     var webSearchPref = req.body && req.body.web_search;
-    // ★ 优化（用户诉求）：开关未开时，不再强制关闭所有搜索能力。
-    //   web_search=true  → 走 Responses API 内置 web_search + Tavily 预搜（双通道，用户明确要搜）
-    //   web_search=false → 仍走标准 Chat Completions，但允许模型在需要时自主调用
-    //                      search_web/tavily_search 工具（模型自己判断"这个问题需要搜索"）。
-    //                      这样用户不开开关，模型遇到时效/事实性问题也会自己搜。
-    //                      开关仍影响 Responses 路径与 Tavily 预搜，保持"关"时更省配额。
-    // 注意：webSearchPref === false 时 allowSearch 控制的是"后端主动预搜/正则注入"，
-    // 模型自主工具调用由非思考模式的 AI_TOOLS 挂载决定（见下方 needsFcCheck 逻辑），不受此开关影响。
-    if (webSearchPref === false) {
-      // 关闭"后端主动搜索"（预加载/正则注入），但保留模型自主工具调用的能力
-      allowSearch = false;
-    }
+    // 主动预搜：用户打开网页搜索，或消息带明确/时效搜索意图
+    var proactiveSearch = allowSearch && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
 
-    // ★ P3 修复 bug 3: 提前预加载 useThinking 模式下的搜索结果, 与后续 fetch DeepSeek 完全并行
-    //   之前在 line 8560-8595 才 await searchWeb, 阻塞 5-15s, 导致首字延迟 = searchWeb + max 思考 = 15-25s
-    //   现在在思考模式决定后立即 fire (不 await), 跟 config/ctx 加载 + 后续 fetch DeepSeek 同时进行
+    // ★ P3: 思考态提前 fire 搜索（与后续 DeepSeek 并行），不阻塞首包
     var _preloadedSearchPromise = null;
     var _preloadedSearchResults = null;
     var _preloadedQuery = '';
-    if (useThinking && allowSearch && !aborted) {
-      // 简单快速检测搜索意图 (与 line 8537-8556 needsWebSearch 取最常用关键词, 涵盖 90%+ 场景)
-      var _quickSearchHint = /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(message);
+    if (useThinking && proactiveSearch && !aborted) {
+      var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(message);
       if (_quickSearchHint) {
-        // 复用 line 8561-8573 的 _psQuery 计算逻辑 (剥前缀)
         var _psQuery = message.slice(0, 80);
-        var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
+        var _psStripped = message.replace(/^(?:搜索|搜一下|搜搜|搜一搜|查一下|搜搜|百度|google|谷歌|查询|查查|查资料|帮我搜|请搜索)\s*/i, '').trim().slice(0, 150);
         if (_psStripped.length >= 3) {
           _psQuery = _psStripped;
         }
         _preloadedQuery = _psQuery;
-        // fire searchWeb (不 await), 与 fetch DeepSeek 同步进行
         _preloadedSearchPromise = searchWeb(_psQuery, 20).then(function(r) {
           _preloadedSearchResults = r;
           return r;
@@ -14669,16 +14664,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var searchResultsCollected = [];
       var searchQueriesCollected = [];
 
-      // Tavily 并行搜索（仅当搜索"开"时叠加第三方集群；"关"时只用内置 web_search）
+      // 服务端预搜：
+      // - web_search 开：Tavily 双通道
+      // - 思考开（此时 Responses 不挂 tools，内置 web_search 不可用）：必须预搜注入，否则模型瞎编
+      // - 明确搜索意图：即使开关关也预搜，保证「搜一下」有结果
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (useTavilyCluster) {
-        var tavilyQuery = message.slice(0, 150);
-        tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
+      var shouldServerSearch = useTavilyCluster || (useThinking && proactiveSearch) || (explicitSearchIntent && allowSearch);
+      if (shouldServerSearch && allowSearch) {
+        var tavilyQuery = (_preloadedQuery || message).slice(0, 150);
+        tavilyPromise = (_preloadedSearchPromise || searchWeb(tavilyQuery, 20)).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
           return r;
         }).catch(function(e) {
-          console.error('[AGENT-STREAM] Tavily search error:', e && e.message);
+          console.error('[AGENT-STREAM] server presearch error:', e && e.message);
           return null;
         });
       }
@@ -14757,8 +14756,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         responsesResult = await callDeepSeek(messages, responsesOptions);
       } catch (e) {
         if (aborted) return safeEnd();
-        console.error('[AGENT-STREAM] Responses API failed:', e && e.message);
-        writeSse(res, { type: 'error', error: 'AI 调用失败，请稍后再试' });
+        var _respErrMsg = (e && e.message) ? String(e.message).slice(0, 180) : '';
+        console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg);
+        var _friendly = 'AI 调用失败，请稍后再试';
+        if (/timeout|超时|abort|idle/i.test(_respErrMsg)) _friendly = 'AI 响应超时，请稍后重试或关闭思考模式';
+        else if (/thinking|reasoning/i.test(_respErrMsg)) _friendly = '当前模型不支持该思考配置，请关闭思考或换模型后重试';
+        else if (/401|403|key|auth|unauthorized/i.test(_respErrMsg)) _friendly = 'AI 服务鉴权失败，请联系管理员';
+        else if (/429|rate/i.test(_respErrMsg)) _friendly = 'AI 请求过于频繁，请稍后再试';
+        else if (/HTTP 4\d\d/.test(_respErrMsg)) _friendly = 'AI 请求参数被拒绝，请关闭思考后重试或换模型';
+        writeSse(res, { type: 'error', error: _friendly });
         return safeEnd();
       }
       if (aborted) return safeEnd();
@@ -14856,13 +14862,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
-    // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
+    // 思考关 + 允许搜索时：明显搜索/时效意图走 FC 预检（带 AI_TOOLS）
+    // 注意：不再被 web_search 面板开关关掉（开关只控制 Tavily 双通道）
     var needsFcCheck = allowSearch && !useThinking && !aborted;
-    // 短消息(<=10字符如"666""你好""哈哈")不可能是搜索意图，跳过FC检查直接流式
     var isShortMsg = message.length <= 10;
-    var fcQuickIntent = !isShortMsg && /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
+    var fcQuickIntent = !isShortMsg && (explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message));
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
-    needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
+    needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent || siteToolIntent);
     var hasCalledTools = false;
     // Only persist server-generated cards. The model never supplies executable UI.
     var siteToolCards = [];
@@ -15265,7 +15271,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 搜索 → 思考 → 回复：先执行搜索（阻塞），再将搜索结果注入上下文，最后开始思考流
-    if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
+    // 使用 proactiveSearch：用户开网页搜索 或 消息有搜索/时效意图 时注入（不依赖面板关）
+    if (useThinking && proactiveSearch && !aborted && needsWebSearch(message)) {
       if (responseProfile === 'enhanced') writeSse(res, { type: 'enhanced_stage', stage: 'verify', message: '正在查证必要信息…' });
       var _psQuery = _preloadedQuery || message.slice(0, 80);
       if (!_preloadedSearchPromise) {
@@ -15391,7 +15398,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     } catch (fetchErr) {
       clearTimeout(timer);
       if (aborted) return safeEnd();
-      res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败，请稍后再试' }) + '\n\n');
+      var _fetchErr = (fetchErr && fetchErr.message) ? String(fetchErr.message) : '';
+      console.error('[AGENT-STREAM] fetch failed:', _fetchErr);
+      var _fetchFriendly = /abort|timeout/i.test(_fetchErr)
+        ? 'AI 响应超时，请稍后重试或关闭思考模式'
+        : 'AI 连接失败，请检查网络后重试';
+      res.write('data: ' + JSON.stringify({ type: 'error', error: _fetchFriendly }) + '\n\n');
       return safeEnd();
     }
     clearTimeout(timer);
@@ -15403,11 +15415,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         console.error('[AGENT-STREAM] API error', streamResp.status, errMsg);
         if (useThinking && (errMsg.indexOf('thinking') >= 0 || errMsg.indexOf('reasoning_effort') >= 0)) {
           res.write('data: ' + JSON.stringify({ type: 'error', error: '当前模型不支持思考模式，请关闭思考模式后重试' }) + '\n\n');
+        } else if (streamResp.status === 429) {
+          res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 请求过于频繁，请稍后再试' }) + '\n\n');
+        } else if (streamResp.status === 401 || streamResp.status === 403) {
+          res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 服务鉴权失败，请联系管理员' }) + '\n\n');
         } else {
-          res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败（' + streamResp.status + '）' }) + '\n\n');
+          res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败（' + streamResp.status + '），请稍后重试' }) + '\n\n');
         }
       } catch (e2) {
-        res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败' }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败，请稍后再试' }) + '\n\n');
       }
       return safeEnd();
     }
