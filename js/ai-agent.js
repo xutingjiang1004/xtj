@@ -284,22 +284,26 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
     });
     // 链接: 使用 DOM API 防 XSS, 白名单协议: http:, https:, mailto:
+    // ★ 安全: 用 new URL() 解析协议而非字符串前缀匹配。前缀匹配会被
+    //   实体编码 (如 java&#x09;script:) 或协议混淆 (如 https://x@javascript:)
+    //   绕过,交给浏览器解析后可能执行。URL 解析后浏览器会对协议做
+    //   规范化,这里再校验最终协议,双重防护。
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
       var cleanHref = String(href).trim();
-      var lowerHref = cleanHref.toLowerCase();
-      var allowedProtocols = ['http:', 'https:', 'mailto:'];
       var protocolOk = false;
-      for (var p = 0; p < allowedProtocols.length; p++) {
-        if (lowerHref.indexOf(allowedProtocols[p]) === 0) { protocolOk = true; break; }
-      }
+      try {
+        var parsedUrl = new URL(cleanHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
+        var proto = String(parsedUrl.protocol || '').toLowerCase();
+        protocolOk = (proto === 'http:' || proto === 'https:' || proto === 'mailto:');
+      } catch (_) { protocolOk = false; }
       if (!protocolOk) {
-        if (lowerHref.indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
+        if (cleanHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
         return '<span class="ai-blocked-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
       }
       var a = document.createElement('a');
-      a.setAttribute('href', cleanHref);
-      a.setAttribute('target', '_blank');
-      a.setAttribute('rel', 'noopener');
+      a.href = cleanHref;
+      a.target = '_blank';
+      a.rel = 'noopener';
       a.textContent = label;
       return a.outerHTML;
     });

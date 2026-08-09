@@ -45,6 +45,7 @@ test('feed requests attach identity when available but keep anonymous fallback n
   assert.match(optional, /response\.status === 401/);
   assert.match(optional, /refreshUserToken\(true\)/);
   assert.doesNotMatch(optional, /handleProtectedAuthFailure/);
-  assert.match(feed, /xtjOptionalAuthFetch\('\/api\/feed\?page='/);
+  assert.match(feed, /xtjOptionalAuthFetch\(feedPath, \{ timeoutMs: FEED_NET_TIMEOUT_MS \}\)/);
+  assert.match(feed, /feedPath = '\/api\/feed\?page=' \+ page \+ '&limit=' \+ FEED_PAGE_SIZE/);
   assert.match(authors, /xtjOptionalAuthFetch\('\/api\/feed\/authors'\)/);
 });

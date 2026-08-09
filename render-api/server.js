@@ -7078,6 +7078,11 @@ app.post('/api/user/register', rateLimit(60000, 5), async (req, res) => {
     if (!userNameVal || !/^[\u4e00-\u9fa5a-zA-Z0-9_]{2,20}$/.test(userNameVal)) {
       return res.status(400).json({ error: '昵称格式不正确' });
     }
+    // ★ 安全:管理员用户名是保留字,禁止通过普通注册流程占用。
+    // 否则攻击者可先注册 ADMIN_USERNAME,前端 isAdmin() 按用户名判定即提权。
+    if (String(userNameVal) === String(ADMIN_USERNAME)) {
+      return res.status(400).json({ error: '该昵称不可用' });
+    }
     if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
       return res.status(400).json({ error: '密码长度应为 6-128 位' });
     }
@@ -7770,6 +7775,31 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     }
     if (refChecks.some(function(result) { return result.data && result.data.length > 0; })) {
       return res.status(403).json({ ok: false, error: '该文件已被照片记录引用，无权清理' });
+    }
+    // ★ 归属校验：upload_id 绑定到用户（actor_key = photo_<ns>_<uploadId>，ns 为用户名哈希）。
+    // 若该 upload_id 已存在属于"其他用户"的照片记录，说明是别人的上传（含未提交窗口期），
+    // 当前用户无权清理其文件。属于当前用户或完全无记录的孤儿文件才允许清理。
+    var uploadOwnerNs = crypto.createHash('sha256').update(String(req.userName)).digest('hex').slice(0, 12);
+    var uploadNewActorKey = 'photo_' + uploadOwnerNs + '_' + uploadId;
+    var uploadLegacyActorKey = 'photo_' + uploadId;
+    try {
+      var ownerCheck = await supabase.from('posts')
+        .select('user_name')
+        .eq('media_type', '__photo_wall__')
+        .or('actor_key.eq.' + uploadNewActorKey + ',actor_key.eq.' + uploadLegacyActorKey)
+        .limit(5);
+      if (ownerCheck && ownerCheck.error) {
+        return res.status(503).json({ ok: false, error: '暂时无法确认文件归属，请稍后重试' });
+      }
+      var ownerRows = (ownerCheck && ownerCheck.data) || [];
+      for (var oi = 0; oi < ownerRows.length; oi++) {
+        if (String(ownerRows[oi].user_name || '') !== String(req.userName)) {
+          return res.status(403).json({ ok: false, error: '无权清理该文件' });
+        }
+      }
+    } catch (ownerErr) {
+      console.error('[photo-cleanup] owner check exception:', ownerErr && ownerErr.message);
+      return res.status(503).json({ ok: false, error: '暂时无法确认文件归属，请稍后重试' });
     }
     // 时间窗口校验：本接口只处理本次上传失败遗留的文件
     // （命名约定 photos/<upload_id>_<epochMs>_<rand>_<name>）。
@@ -9025,7 +9055,7 @@ app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
     const from = Math.max(page, 0) * limit;
     const to = from + limit - 1;
     const { data, error } = await supabase.from('posts')
-      .select('id, user_name, media_url, content, created_at, views, actor_key')
+      .select('id, user_name, media_url, content, created_at, views')
       .eq('media_type', '__photo_wall__')
       .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })

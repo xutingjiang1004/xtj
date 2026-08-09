@@ -15,10 +15,11 @@ test('DOCX replacement inserts longer text once across multiple runs', () => {
 });
 
 test('SSE writer has a bounded backpressure buffer and deep-think cleanup', () => {
-  const source = read('render-api/server.js');
-  assert.match(source, /MAX_SSE_BUFFER_BYTES/);
-  assert.match(source, /_sseBufferBytes/);
-  assert.match(source, /activeDeepThinkJobs\.delete\(convId\)/);
+  const sse = read('render-api/sse-write.js');
+  const server = read('render-api/server.js');
+  assert.match(sse, /MAX_SSE_BUFFER_BYTES/);
+  assert.match(sse, /_sseBufferBytes/);
+  assert.match(server, /activeDeepThinkJobs\.delete\(convId\)/);
 });
 
 test('Code chat timeout does not outlive a settled request', () => {
@@ -67,7 +68,7 @@ test('photo cleanup uses the generated webp thumbnail path', () => {
 });
 
 test('normal post filters encode an empty media type explicitly', () => {
-  const source = read('render-api/server.js');
+  const source = read('render-api/post-query.js');
   assert.match(source, /NORMAL_POST_EMPTY_MEDIA_FILTER\s*=\s*'media_type\.eq\.""'/);
   assert.doesNotMatch(source, /t === '' \? 'media_type\.eq\.'/);
   assert.doesNotMatch(source, /media_type\.is\.null,media_type\.eq\.,/);
