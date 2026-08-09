@@ -5424,17 +5424,146 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return meta.join(' · ');
   }
 
-  function renderAiToolCard(messagesEl, card) {
+  function renderAiToolCard(messagesEl, card, insertBeforeNode) {
     if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
     var cardId = String(card.id || '');
     if (!messagesEl.__xtjAiCardIds) messagesEl.__xtjAiCardIds = {};
     if (cardId && messagesEl.__xtjAiCardIds[cardId]) return null;
     if (cardId) messagesEl.__xtjAiCardIds[cardId] = true;
-    var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + String(card.type || 'tool_result').replace(/[^a-z_]/g, '') });
+    var type = String(card.type || 'tool_result').replace(/[^a-z_]/g, '');
+    var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + type });
     if (cardId) shell.setAttribute('data-ai-card-id', cardId);
     shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
     var data = card.data || {};
-    if (Array.isArray(data.results)) {
+
+    function appendKvGrid(pairs) {
+      var grid = el('div', { class: 'ai-tool-card-kv' });
+      pairs.forEach(function(pair) {
+        if (pair[1] === undefined || pair[1] === null || pair[1] === '') return;
+        var row = el('div', { class: 'ai-tool-card-kv-row' });
+        row.appendChild(el('span', { class: 'ai-tool-card-kv-k', text: pair[0] }));
+        row.appendChild(el('span', { class: 'ai-tool-card-kv-v', text: String(pair[1]) }));
+        grid.appendChild(row);
+      });
+      if (grid.childNodes.length) shell.appendChild(grid);
+    }
+
+    if (type === 'weather') {
+      var tempLine = el('div', { class: 'ai-tool-card-hero' });
+      tempLine.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: (data.temperature_c != null ? data.temperature_c + '°C' : '—') }));
+      tempLine.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: String(data.condition || data.city || '') }));
+      shell.appendChild(tempLine);
+      appendKvGrid([
+        ['地点', data.city],
+        ['湿度', data.humidity != null ? data.humidity + '%' : ''],
+        ['风速', data.wind_kmh != null ? data.wind_kmh + ' km/h' : ''],
+        ['今日最高', data.high_c != null ? data.high_c + '°C' : ''],
+        ['今日最低', data.low_c != null ? data.low_c + '°C' : ''],
+        ['降雨概率', data.precip_prob != null ? data.precip_prob + '%' : ''],
+        ['更新', data.queried_at]
+      ]);
+    } else if (type === 'exchange_rate') {
+      var rateHero = el('div', { class: 'ai-tool-card-hero' });
+      rateHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.rate != null ? Number(data.rate).toFixed(4) : '—' }));
+      rateHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: (data.from || '') + ' → ' + (data.to || '') }));
+      shell.appendChild(rateHero);
+      appendKvGrid([
+        ['换算', (data.amount != null ? data.amount : 1) + ' ' + (data.from || '') + ' ≈ ' + (data.converted != null ? data.converted : '—') + ' ' + (data.to || '')],
+        ['更新', data.updated_at]
+      ]);
+    } else if (type === 'stock_quote') {
+      var stockHero = el('div', { class: 'ai-tool-card-hero' });
+      stockHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: String(data.price != null ? data.price : '—') }));
+      var chg = String(data.change || '');
+      var chgPct = String(data.change_pct || '');
+      var chgText = (chg ? chg : '') + (chgPct ? ' (' + chgPct + '%)' : '');
+      var chgClass = 'ai-tool-card-hero-sub';
+      if (/^-/.test(chg) || /^-/.test(chgPct)) chgClass += ' is-down';
+      else if (chg && chg !== '0' && chg !== '0.00') chgClass += ' is-up';
+      stockHero.appendChild(el('span', { class: chgClass, text: chgText || String(data.symbol || '') }));
+      shell.appendChild(stockHero);
+      appendKvGrid([
+        ['名称', data.name],
+        ['代码', data.symbol],
+        ['今开', data.open],
+        ['最高', data.high],
+        ['最低', data.low],
+        ['昨收', data.prev_close],
+        ['时间', data.time]
+      ]);
+    } else if (type === 'time') {
+      appendKvGrid([
+        ['北京时间', data.beijing_time],
+        ['星期', data.weekday],
+        ['时区', data.timezone]
+      ]);
+    } else if (type === 'page_read') {
+      var pageTitle = el('div', { class: 'ai-tool-card-page-title', text: String(data.title || '网页') });
+      shell.appendChild(pageTitle);
+      if (data.url) {
+        var safeHref = '';
+        try {
+          var u = new URL(String(data.url));
+          if (u.protocol === 'https:' || u.protocol === 'http:') safeHref = u.toString();
+        } catch (e) {}
+        if (safeHref) {
+          var link = el('a', {
+            class: 'ai-tool-card-link',
+            href: safeHref,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: safeHref.length > 72 ? safeHref.slice(0, 72) + '…' : safeHref
+          });
+          shell.appendChild(link);
+        }
+      }
+      if (data.snippet) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.snippet).slice(0, 360) }));
+      }
+      var pageMeta = [];
+      if (data.truncated) pageMeta.push('正文已截断');
+      if (data.bytes) pageMeta.push((data.bytes > 1024 ? (data.bytes / 1024).toFixed(1) + ' KB' : data.bytes + ' B'));
+      if (pageMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pageMeta.join(' · ') }));
+    } else if (type === 'image_ocr') {
+      if (data.error && !data.text) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: '识别未完成：' + String(data.error).slice(0, 200) }));
+      } else {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.text || '').slice(0, 800) || '（无文字）' }));
+      }
+      appendKvGrid([
+        ['文件', data.file_name],
+        ['引擎', data.provider],
+        ['字数', data.chars != null ? data.chars : '']
+      ]);
+    } else if (type === 'web_search' && Array.isArray(data.results)) {
+      if (data.query) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
+      }
+      var webList = el('div', { class: 'ai-tool-card-list' });
+      data.results.slice(0, 12).forEach(function(item) {
+        var row = el('div', { class: 'ai-tool-result ai-tool-result--link' });
+        var href = '';
+        try {
+          var wu = new URL(String(item.url || ''));
+          if (wu.protocol === 'https:' || wu.protocol === 'http:') href = wu.toString();
+        } catch (e2) {}
+        if (href) {
+          row.appendChild(el('a', {
+            class: 'ai-tool-result-title-link',
+            href: href,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: String(item.title || item.url || '结果').slice(0, 120)
+          }));
+        } else {
+          row.appendChild(el('b', { text: String(item.title || '结果').slice(0, 120) }));
+        }
+        if (item.snippet) row.appendChild(el('span', { text: String(item.snippet).slice(0, 180) }));
+        if (item.source) row.appendChild(el('small', { class: 'ai-tool-result-meta', text: String(item.source) }));
+        webList.appendChild(row);
+      });
+      shell.appendChild(webList);
+    } else if (Array.isArray(data.results)) {
       var list = el('div', { class: 'ai-tool-card-list' });
       data.results.slice(0, 20).forEach(function(item) {
         var result = el('button', { class: 'ai-tool-result', type: 'button' });
@@ -5458,8 +5587,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } else if (data.task || data.draft || data.message || data.announcement) {
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
     }
-    messagesEl.appendChild(shell);
-    scrollToBottom(messagesEl, false);
+
+    if (insertBeforeNode && insertBeforeNode.parentNode) {
+      insertBeforeNode.parentNode.insertBefore(shell, insertBeforeNode);
+    } else if (messagesEl) {
+      messagesEl.appendChild(shell);
+    }
+    try {
+      var scroller = messagesEl && messagesEl.classList && messagesEl.classList.contains('ai-messages')
+        ? messagesEl
+        : (messagesEl && messagesEl.closest && messagesEl.closest('.ai-messages'));
+      if (scroller) scrollToBottom(scroller, false);
+    } catch (eScroll) {}
     return shell;
   }
 
@@ -6407,8 +6546,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
             var nameMapCall = {
-              search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气',
-              get_current_time: '获取时间', get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+              search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
+              get_weather: '查询天气', get_current_time: '获取时间',
+              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
             };
             var timeline = assistantNode.querySelector('.ai-tool-timeline');
             if (!timeline) {
@@ -6419,8 +6559,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var label = nameMapCall[t.name] || t.name || '工具';
               var detail = '';
               if (t.args && t.args.query) detail = String(t.args.query);
+              else if (t.args && t.args.url) detail = String(t.args.url).slice(0, 80);
               else if (t.args && t.args.location) detail = String(t.args.location);
               else if (t.args && t.args.symbol) detail = String(t.args.symbol);
+              else if (t.args && t.args.from && t.args.to) detail = String(t.args.from) + '→' + String(t.args.to);
               var stepId = 'tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24);
               var existing = timeline.querySelector('[data-tool-step="' + stepId.replace(/"/g, '') + '"]');
               if (existing) {
@@ -6457,7 +6599,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'card') {
-            try { renderAiToolCard(messagesEl, evt.card); } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
+            try {
+              // Prefer placing cards inside the assistant turn (before bubble),
+              // fall back to transcript end for early attachment OCR cards.
+              if (assistantNode && assistantBubble) {
+                renderAiToolCard(assistantNode, evt.card, assistantBubble);
+              } else {
+                renderAiToolCard(messagesEl, evt.card);
+              }
+            } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
             continue;
           }
 
@@ -6501,8 +6651,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               assistantNode.insertBefore(toolBar2, assistantBubble);
             }
             var nameMap = {
-              search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气',
-              get_current_time: '获取时间', get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+              search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
+              get_weather: '查询天气', get_current_time: '获取时间',
+              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
             };
             var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';

@@ -54,7 +54,9 @@ const {
   cleanSearchResults,
   withSearchProviderTimeout
 } = require('./search-providers');
-const { queryWeather, CITY_COORDS } = require('./weather');
+const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
+const { fetchSafeWebPage } = require('./web-fetch');
+const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
 const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
 const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMAL_POST_MEDIA_TYPES } = require('./post-query');
@@ -729,6 +731,20 @@ const AI_TOOLS = [
         required: ['symbol']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_web_page',
+      description: '读取并提取某个 HTTPS 网页/链接的正文内容。当用户发送具体 URL、要求总结某篇文章、打开某个链接、阅读新闻详情时使用。不要用它代替搜索：先 search_web/tavily_search 找到链接，再对本工具传入具体 URL。仅支持 https:// 公网页面，不访问内网。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: '完整的 HTTPS 网址，例如 https://example.com/article' }
+        },
+        required: ['url']
+      }
+    }
   }
 ];
 
@@ -811,12 +827,21 @@ async function executeToolCall(toolCall, context) {
       try {
         var result = await searchWeb(q, maxR);
         var resultsArr = result && result.results ? result.results : [];
+        var webItems = resultsArr.slice(0, 20).map(function(r) {
+          return {
+            title: String(r.title || '').slice(0, 200),
+            url: String(r.url || r.link || '').slice(0, 2000),
+            snippet: String(r.snippet || r.description || '').slice(0, 300),
+            source: String(r.source || '').slice(0, 80)
+          };
+        });
         return {
           tool_name: name,
           query: q,
           results_count: resultsArr.length,
-          content: JSON.stringify(resultsArr.slice(0, 20)),
-          diagnostics: result && result.diagnostics ? result.diagnostics : null
+          content: JSON.stringify(webItems),
+          diagnostics: result && result.diagnostics ? result.diagnostics : null,
+          cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, results: webItems })] : []
         };
       } catch (e) {
         return { tool_name: name, query: q, error: e && e.message || '搜索失败' };
@@ -836,12 +861,21 @@ async function executeToolCall(toolCall, context) {
         });
         if (tavilyResult.error) return { tool_name: name, query: tq, error: tavilyResult.error };
         var tArr = tavilyResult.results || [];
+        var tItems = tArr.slice(0, 10).map(function(r) {
+          return {
+            title: String(r.title || '').slice(0, 200),
+            url: String(r.url || r.link || '').slice(0, 2000),
+            snippet: String(r.snippet || r.content || r.description || '').slice(0, 300),
+            source: 'Tavily'
+          };
+        });
         return {
           tool_name: name,
           query: tq,
           results_count: tArr.length,
-          content: JSON.stringify(tArr.slice(0, 10)),
-          diagnostics: { provider: 'Tavily', search_depth: args.search_depth === 'advanced' ? 'advanced' : 'basic' }
+          content: JSON.stringify(tItems),
+          diagnostics: { provider: 'Tavily', search_depth: args.search_depth === 'advanced' ? 'advanced' : 'basic' },
+          cards: tItems.length ? [aiSiteCard('web_search', 'Tavily 搜索', { query: tq, results: tItems })] : []
         };
       } catch (e) {
         return { tool_name: name, query: tq, error: e && e.message || 'Tavily 搜索失败' };
@@ -851,11 +885,16 @@ async function executeToolCall(toolCall, context) {
       var loc = String(args.location || '').trim().slice(0, 50);
       if (!loc) return { tool_name: name, error: '位置为空' };
       try {
-        var weatherResult = await queryWeather(loc);
-        if (weatherResult) {
-          return { tool_name: name, location: loc, content: weatherResult };
+        var weatherData = await queryWeatherData(loc);
+        if (weatherData) {
+          var weatherResult = formatWeatherText(weatherData);
+          return {
+            tool_name: name,
+            location: weatherData.city || loc,
+            content: weatherResult,
+            cards: [aiSiteCard('weather', weatherData.city + ' 天气', weatherData)]
+          };
         }
-        // 如果不在已知城市列表，尝试搜索
         return { tool_name: name, location: loc, error: '暂不支持该城市天气查询，支持的城市：北京、上海、广州、深圳、杭州、湖州、安吉、东京、大阪、首尔、济州岛、巴黎、伦敦、纽约' };
       } catch (e) {
         return { tool_name: name, location: loc, error: e && e.message || '天气查询失败' };
@@ -867,10 +906,18 @@ async function executeToolCall(toolCall, context) {
       var cnf = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
       var weekday = weekdays[now.getDay()];
       var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
-      return { tool_name: name, content: timeResult };
+      return {
+        tool_name: name,
+        content: timeResult,
+        cards: [aiSiteCard('time', '当前时间', {
+          beijing_time: cnf,
+          weekday: weekday,
+          timezone: 'Asia/Shanghai (UTC+8)'
+        })]
+      };
     }
     case 'get_exchange_rate': {
-      // ★ 新增工具：实时汇率查询（open.er-api.com 免费层，无需 API key）
+      // ★ 实时汇率（open.er-api.com 免费层，无需 API key）
       var fromCur = String(args.from || 'USD').trim().toUpperCase().slice(0, 5);
       var toCur = String(args.to || 'CNY').trim().toUpperCase().slice(0, 5);
       var amount = Number(args.amount);
@@ -884,17 +931,32 @@ async function executeToolCall(toolCall, context) {
         }
         var rate = Number(erData.rates[toCur]);
         var converted = amount * rate;
+        var erPayload = {
+          from: fromCur,
+          to: toCur,
+          amount: amount,
+          rate: rate,
+          converted: Number(converted.toFixed(4)),
+          updated_at: String(erData.time_last_update_utc || '')
+        };
         var erResult = '【实时汇率】\n1 ' + fromCur + ' = ' + rate.toFixed(4) + ' ' + toCur +
           '\n' + amount + ' ' + fromCur + ' ≈ ' + converted.toFixed(2) + ' ' + toCur +
-          '\n更新时间：' + String(erData.time_last_update_utc || '') +
+          '\n更新时间：' + erPayload.updated_at +
           '\n（汇率实时波动，仅供参考）';
-        return { tool_name: name, from: fromCur, to: toCur, rate: rate, content: erResult };
+        return {
+          tool_name: name,
+          from: fromCur,
+          to: toCur,
+          rate: rate,
+          content: erResult,
+          cards: [aiSiteCard('exchange_rate', fromCur + ' → ' + toCur, erPayload)]
+        };
       } catch (e) {
         return { tool_name: name, from: fromCur, to: toCur, error: e && e.message || '汇率查询失败' };
       }
     }
     case 'get_stock_quote': {
-      // ★ 新增工具：实时行情（腾讯行情接口，免费无 key）
+      // ★ 实时行情（腾讯行情接口，免费无 key）
       var sym = String(args.symbol || '').trim().slice(0, 20);
       if (!sym) return { tool_name: name, error: '证券代码为空' };
       try {
@@ -921,8 +983,8 @@ async function executeToolCall(toolCall, context) {
           return { tool_name: name, symbol: sym, error: '未找到该证券的行情（代码可能无效或不在支持范围）' };
         }
         var parts = sqMatch[1].split('~');
-        // 腾讯行情字段: 1名称 2代码 3当前价 4昨收 5今开 6成交量 7外盘 8内盘 ... 30时间 31涨跌 32涨跌% 33最高 34最低 ...
-        var name = parts[1] || sym;
+        // 腾讯行情字段: 1名称 2代码 3当前价 4昨收 5今开 ... 30时间 31涨跌 32涨跌% 33最高 34最低
+        var stockName = parts[1] || sym;
         var price = parts[3] || '-';
         var prevClose = parts[4] || '-';
         var open = parts[5] || '-';
@@ -931,14 +993,63 @@ async function executeToolCall(toolCall, context) {
         var change = parts[31] || '-';
         var changePct = parts[32] || '-';
         var time = parts[30] || '';
-        var sqResult = '【实时行情】' + name + '（' + sym + '）\n' +
+        var sqPayload = {
+          name: stockName,
+          symbol: sym,
+          price: price,
+          change: change,
+          change_pct: changePct,
+          open: open,
+          high: high,
+          low: low,
+          prev_close: prevClose,
+          time: time
+        };
+        var sqResult = '【实时行情】' + stockName + '（' + sym + '）\n' +
           '当前价：' + price + '\n涨跌：' + change + '（' + changePct + '%）' +
           '\n今开：' + open + '　最高：' + high + '　最低：' + low +
           '\n昨收：' + prevClose + '\n时间：' + time +
           '\n（行情实时波动，仅供参考）';
-        return { tool_name: name, symbol: sym, content: sqResult };
+        return {
+          tool_name: name,
+          symbol: sym,
+          content: sqResult,
+          cards: [aiSiteCard('stock_quote', stockName + ' 行情', sqPayload)]
+        };
       } catch (e) {
         return { tool_name: name, symbol: sym, error: e && e.message || '行情查询失败' };
+      }
+    }
+    case 'read_web_page': {
+      var pageUrl = String(args.url || '').trim().slice(0, 2000);
+      if (!pageUrl) return { tool_name: name, error: '网址为空' };
+      try {
+        var page = await fetchSafeWebPage(pageUrl);
+        var pageText = page.content || '';
+        var pageTitle = page.title || pageUrl;
+        var contentForModel = '【网页阅读结果】\n标题：' + pageTitle +
+          '\nURL：' + page.url +
+          '\n类型：' + (page.content_type || '') +
+          (page.truncated ? '\n（正文已截断）' : '') +
+          '\n\n' + pageText +
+          '\n\n要求：必须基于以上网页正文回答，不准编造页面中没有的内容。引用时标明来源标题或 URL。';
+        return {
+          tool_name: name,
+          url: page.url,
+          title: pageTitle,
+          content: contentForModel,
+          results_count: 1,
+          cards: [aiSiteCard('page_read', '已阅读网页', {
+            title: pageTitle,
+            url: page.url,
+            snippet: pageText.slice(0, 360),
+            bytes: page.bytes,
+            truncated: !!page.truncated,
+            content_type: page.content_type || ''
+          })]
+        };
+      } catch (e) {
+        return { tool_name: name, url: pageUrl, error: e && e.message || '网页阅读失败' };
       }
     }
     default:
@@ -3370,10 +3481,12 @@ function securityRateLimit(windowMs, maxRequests) {
 // - 内置 25s 超时控制（AbortController），避免长请求拖死 Express 进程
 // - 未配置 API Key 时返 mock 回复（开发模式 + 本地无 Key 测试）
 // - 错误信息统一脱敏，不暴露 DeepSeek 原始错误给前端调用方
-// ===================== 文件内容提取 (PDF/DOCX/XLSX/TXT) =====================
+// ===================== 文件内容提取 (PDF/DOCX/XLSX/TXT + 图片 OCR) =====================
+// 返回 { text, cards }；cards 供 SSE 结果卡展示（图片 OCR 等）
 async function extractEmbeddedFiles(text) {
-  if (!text || typeof text !== 'string') return text;
+  if (!text || typeof text !== 'string') return { text: text || '', cards: [] };
   var result = text;
+  var cards = [];
   // 匹配 ![](data:...) 和 [](data:...) 模式
   var fileRegex = /(!?)\[([^\]]*)\]\(data:([^,;]+);?[^,]*?(?:;base64)?,(.+?)\)/g;
   var match;
@@ -3412,7 +3525,33 @@ async function extractEmbeddedFiles(text) {
         } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
           extractedText = buffer.toString('utf-8');
         } else if (mimeType.startsWith('image/')) {
-          extractedText = '[用户上传了一张图片: ' + fileName + ' (' + mimeType + '), 当前暂不支持图片识别]';
+          // DeepSeek 聊天路径暂无多模态：图片理解走 OCR 文字通道
+          var ocr = await ocrImageBuffer(buffer, mimeType, fileName, { sharp: sharp });
+          if (ocr && ocr.text) {
+            extractedText =
+              '【图片 OCR 识别结果 · ' + fileName + '】\n' +
+              '（说明：当前模型无多模态看图能力，以下为 OCR 提取的文字，请基于文字回答用户关于图片的问题）\n' +
+              ocr.text;
+            cards.push(aiSiteCard('image_ocr', '图片文字识别', {
+              file_name: fileName,
+              text: ocr.text.slice(0, 2000),
+              provider: ocr.provider || 'ocr.space',
+              chars: ocr.chars || ocr.text.length
+            }));
+          } else {
+            var ocrErr = (ocr && ocr.error) ? String(ocr.error).slice(0, 160) : '未识别到文字';
+            extractedText =
+              '[用户上传图片: ' + fileName + ' (' + mimeType + ')]\n' +
+              '图片理解通道（OCR）未得到可用文字：' + ocrErr + '\n' +
+              '说明：DeepSeek 当前 API 不支持多模态看图；若图中有清晰印刷体中文/英文，可重试或换更清晰截图。';
+            cards.push(aiSiteCard('image_ocr', '图片识别未完成', {
+              file_name: fileName,
+              text: '',
+              error: ocrErr,
+              provider: (ocr && ocr.provider) || 'ocr.space',
+              chars: 0
+            }));
+          }
         } else {
           try {
             extractedText = buffer.toString('utf-8').slice(0, 5000);
@@ -3430,12 +3569,13 @@ async function extractEmbeddedFiles(text) {
     // 所有分支都替换，不保留原始 Base64
     result = result.replace(match[0], extractedText || '\n\n【文件解析跳过】\n\n');
   }
-  return result;
+  return { text: result, cards: cards };
 }
 
 // The browser sends structured attachments separately from the message text.
 // Normalize them into the existing, size-limited extractor so DOCX/PDF/XLSX/TXT
 // uploads follow exactly the same validation and parsing path as legacy embeds.
+// 返回 { text, cards }
 async function extractChatAttachments(message, attachments) {
   var base = typeof message === 'string' ? message : '';
   if (!Array.isArray(attachments) || attachments.length === 0) {
@@ -3464,6 +3604,13 @@ async function extractChatAttachments(message, attachments) {
     chunks.push('\n\n[附件数量超过 10 个，已跳过多余文件]\n');
   }
   return extractEmbeddedFiles(chunks.join(''));
+}
+
+function unwrapAttachmentExtract(result) {
+  if (result && typeof result === 'object' && typeof result.text === 'string') {
+    return { text: result.text, cards: Array.isArray(result.cards) ? result.cards : [] };
+  }
+  return { text: typeof result === 'string' ? result : '', cards: [] };
 }
 
 // ===================== 1. DeepSeek 统一封装 =====================
@@ -13446,7 +13593,9 @@ function buildAiCorePrompt(config) {
     persona ? '用户额外人设：' + persona : '',
     sysPrompt ? '用户额外指令：' + sysPrompt : '',
     '当前风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
-    allowWebSearch ? '可用工具：search_web / get_weather / get_current_time。' : '',
+    allowWebSearch
+      ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote。用户发具体 HTTPS 链接时优先 read_web_page 阅读正文；时效问题先搜索再按需读页。'
+      : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page（读用户给出的链接）。',
     emojiRule,
     '【输出硬性规则】1) 一条回复只表达一个核心观点，不要分点罗列。2) 短句为主，别写长段落。3) 不写"作为一个 AI"开场白。4) 不写括号动作描写（如 "*笑了笑*"）。',
     '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复。'
@@ -13752,8 +13901,12 @@ async function handleDeepThinkChat(req, res) {
       }
     }, 1500);
 
-    // 3. 提取消息中嵌入的文件 (base64 → 文本)
-    message = await extractChatAttachments(message, req.body && req.body.attachments);
+    // 3. 提取消息中嵌入的文件 (base64 → 文本 / 图片 OCR)
+    var _attachDeep = unwrapAttachmentExtract(await extractChatAttachments(message, req.body && req.body.attachments));
+    message = _attachDeep.text;
+    if (_attachDeep.cards && _attachDeep.cards.length) {
+      _attachDeep.cards.forEach(function(card) { try { sseSend({ type: 'card', card: card }); } catch (_) {} });
+    }
 
     // 4. 读取配置和上下文
     var config = await getAiConfig();
@@ -14105,7 +14258,10 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
     if (message && message.error) return res.status(400).json({ error: message.error });
     if (!message) return res.status(400).json({ error: '消息内容不能为空' });
-    message = await extractChatAttachments(message, req.body && req.body.attachments);
+    var _attachJson = unwrapAttachmentExtract(await extractChatAttachments(message, req.body && req.body.attachments));
+    message = _attachJson.text;
+    // JSON 非流式路径：OCR 卡片随最终响应一并返回（无 SSE）
+    var attachmentCardsJson = _attachJson.cards || [];
 
     // 3. 会话管理
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -14485,11 +14641,19 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var configPromise = getAiConfig();
     var ctxPromise = loadAiContext(userName, convId);
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
-    message = _parallelPrep[0];
+    var _attachStream = unwrapAttachmentExtract(_parallelPrep[0]);
+    message = _attachStream.text;
+    var attachmentCardsStream = _attachStream.cards || [];
     var config = _parallelPrep[1];
     var ctx = _parallelPrep[2];
     if (aborted) return safeEnd();
     T_stage.config_ms = Date.now() - T_stage.config_start;
+    // 图片 OCR 等附件结果卡尽早推给前端
+    if (attachmentCardsStream.length) {
+      attachmentCardsStream.forEach(function(card) {
+        try { writeSse(res, { type: 'card', card: card }); } catch (_) {}
+      });
+    }
     
     // 当前时间上下文
     var _now = new Date();
@@ -14854,14 +15018,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 思考关 + 允许搜索时：明显搜索/时效意图走 FC 预检（带 AI_TOOLS）
     // 注意：不再被 web_search 面板开关关掉（开关只控制 Tavily 双通道）
-    var needsFcCheck = allowSearch && !useThinking && !aborted;
+    // 有工具意图时做 FC 预检（搜索开关打开，或仅需读链/行情/汇率/天气等本地工具）
     var isShortMsg = message.length <= 10;
-    var fcQuickIntent = !isShortMsg && (explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message));
+    var hasHttpsUrl = /https:\/\/[^\s<>"']+/i.test(message);
+    var fcQuickIntent = !isShortMsg && (explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|股价|行情|比特币|股票|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何|总结|阅读|打开这个链接|看看这个/i.test(message));
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
-    needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent || siteToolIntent);
+    var fcLocalToolIntent = /汇率|换算|美元|日元|欧元|港币|股价|行情|股票|比特币|以太坊|上证|深证|几点|现在时间|今天几号|星期几/i.test(message);
+    var needsFcCheck = !useThinking && !aborted && (
+      (allowSearch && (fcQuickIntent || fcWeatherIntent || siteToolIntent || hasHttpsUrl)) ||
+      hasHttpsUrl ||
+      fcWeatherIntent ||
+      fcLocalToolIntent
+    );
     var hasCalledTools = false;
     // Only persist server-generated cards. The model never supplies executable UI.
     var siteToolCards = [];
+    if (attachmentCardsStream && attachmentCardsStream.length) {
+      attachmentCardsStream.forEach(function(c) { siteToolCards.push(c); });
+    }
     var hasFCFallbackContent = false;
     var fcFallbackContent = null;
     var fcFallbackUsage = null;
