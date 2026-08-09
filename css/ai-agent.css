@@ -4932,7 +4932,8 @@
     grid-column: 1 / -1;
     grid-row: 2;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--ai-desktop-context);
+    /* Default: full-width single column. Do NOT reserve an empty right rail. */
+    grid-template-columns: minmax(0, 1fr);
     align-content: start;
     column-gap: clamp(20px, 3vw, 44px);
     padding: 26px clamp(24px, 4vw, 64px) 34px;
@@ -4940,11 +4941,21 @@
     scroll-padding-bottom: 34px;
   }
 
+  /* Only open the right context rail when tool/search status cards are present. */
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages:has(> .ai-search-status, > .ai-tool-status) {
+    grid-template-columns: minmax(0, 1fr) var(--ai-desktop-context);
+  }
+
   .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-chat-messages {
     grid-column: 2;
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages::before {
+    content: none;
+    pointer-events: none;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages:has(> .ai-search-status, > .ai-tool-status)::before {
     content: "";
     position: absolute;
     z-index: 0;
@@ -4967,7 +4978,8 @@
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-progress-card,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-think-card {
     grid-column: 1;
-    width: min(100%, 820px);
+    /* Use full main column; keep a readable max for ultra-wide screens. */
+    width: min(100%, 960px);
     justify-self: center;
   }
 
@@ -5000,7 +5012,7 @@
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-bubble,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-thinking,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-footer {
-    max-width: min(88%, 820px);
+    max-width: min(92%, 960px);
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-bubble {
