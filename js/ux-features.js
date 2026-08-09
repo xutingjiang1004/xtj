@@ -522,10 +522,11 @@
   // ---------- Photo wall spacing class ----------
   function polishPhotoWall() {
     var wall = document.getElementById('photoWall') || document.querySelector('.photo-wall-grid, #photoWallGrid, .pw-grid');
-    if (wall) wall.classList.add('xtj-photo-grid-polish');
+    // 幂等保护：class 已存在时不再 add，避免产生新 mutation 触发 observer 再处理
+    if (wall && !wall.classList.contains('xtj-photo-grid-polish')) wall.classList.add('xtj-photo-grid-polish');
     // also polish common photo containers
     document.querySelectorAll('.photo-item, .pw-item, .photo-wall-item').forEach(function (n) {
-      n.classList.add('xtj-photo-item-polish');
+      if (!n.classList.contains('xtj-photo-item-polish')) n.classList.add('xtj-photo-item-polish');
     });
   }
 
