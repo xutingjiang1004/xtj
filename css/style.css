@@ -389,8 +389,27 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             gap: 8px;
+        }
+        /* 帖子顶栏：始终单行，避免子项被拉满宽后换行成「空白高条」 */
+        #panelPosts .posts-nav,
+        #panelPosts.active .posts-nav {
+            flex-wrap: nowrap !important;
+            align-items: center;
+            min-height: 52px;
+            max-height: 80px;
+            box-sizing: border-box;
+        }
+        #panelPosts .posts-nav > *,
+        #panelPosts.active .posts-nav > * {
+            flex: 0 0 auto;
+            width: auto !important;
+            max-width: none;
+        }
+        #panelPosts .posts-nav > .nav-auth,
+        #panelPosts.active .posts-nav > .nav-auth {
+            margin-inline-start: auto;
         }
 
         h1 {
@@ -469,25 +488,23 @@
         }
 
         .publish-box {
-            position: relative; z-index: 1; padding: 24px; border-radius: var(--radius-md);
-            transition: var(--trans-smooth);
-            background: rgba(255,255,255,0.3);
-            border: 1px solid rgba(255,255,255,0.4);
-            box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+            position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            background: rgba(255,255,255,0.42);
+            border: 1px solid rgba(255,255,255,0.5);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.05);
         }
         .publish-box::before {
-            content: ''; position: absolute; inset: -1px; border-radius: inherit;
-            background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 50%, rgba(5,150,105,0.08) 100%);
-            pointer-events: none; z-index: -1;
+            content: none;
         }
         .publish-box:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 20px 56px rgba(5, 150, 105, 0.15), 0 6px 20px rgba(5, 150, 105, 0.1);
-            border-color: rgba(255,255,255,1);
+            transform: none;
+            box-shadow: 0 8px 24px rgba(5, 150, 105, 0.08);
+            border-color: rgba(140, 196, 158, 0.35);
         }
         .publish-box:focus-within {
-            border-color: rgba(5, 150, 105, 0.4);
-            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12), 0 0 0 3px rgba(5, 150, 105, 0.1);
+            border-color: rgba(5, 150, 105, 0.35);
+            box-shadow: 0 8px 24px rgba(5, 150, 105, 0.08), 0 0 0 2px rgba(5, 150, 105, 0.08);
         }
         .publish-box textarea {
             width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
@@ -543,14 +560,23 @@
         .post-filter-bar {
             position: relative;
             z-index: 1;
-            padding: 16px 18px;
-            border-radius: var(--radius-sm);
-            background: rgba(255,255,255,0.42);
-            border: 1px solid rgba(255,255,255,0.56);
-            box-shadow: 0 8px 26px rgba(0,0,0,0.05);
+            padding: 8px 4px;
+            border-radius: 0;
+            background: transparent;
+            border: 0;
+            box-shadow: none;
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 10px;
+        }
+        /* 展开筛选面板时再给轻表面，收起时不占一整张卡片 */
+        .post-filter-bar.is-open,
+        .post-filter-bar:has(.post-filter-panel:not([hidden]):not([style*="display: none"])) {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.36);
+            border: 1px solid rgba(140, 196, 158, 0.16);
+            box-shadow: none;
         }
         .post-filter-row {
             display: flex;
@@ -857,17 +883,17 @@
         .chat-msg.sent .msg-read-status { color: rgba(255,255,255,0.7); }
         .chat-msg.received .msg-read-status { color: var(--text-muted); }
 
-        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
+        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px; }
         .post {
-            padding: 24px; border-radius: var(--radius-md);
+            padding: 18px 18px 14px; border-radius: 14px;
             --post-enter-delay: 0ms;
             opacity: 0;
-            transform: translateY(14px) scale(0.992);
+            transform: translateY(10px) scale(0.995);
             transition:
                 opacity 0.16s ease var(--post-enter-delay);
-            background: rgba(255,255,255,0.92);
-            border: 1px solid rgba(255,255,255,0.7);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.06);
+            background: rgba(255,255,255,0.86);
+            border: 1px solid rgba(140, 196, 158, 0.16);
+            box-shadow: none;
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
@@ -15415,56 +15441,63 @@ button.post-publish:hover {
 }
 
 /* ========================================================
- * Main panel UI unification
- * Scope: posts,
-
-
-chat,
-
-
-profile content only. Dock stays untouched.
+ * Main panel UI unification (v2)
+ * 一层主表面 + 分区，避免发帖/筛选/帖子同权「千层蛋糕」
  * ======================================================== */
 @media (min-width: 1024px) {
   #panelPosts nav,
-  #panelPosts .publish-box,
-  #panelPosts .post-filter-bar,
-  #panelPosts .stat-card,
-  #panelPosts .post,
-  #panelChat .chat-header,
-  #panelChat .chat-input-area,
-  #panelProfile .profile-user-card,
-  #panelProfile .profile-activity-card,
-  #panelProfile .profile-settings,
-  #panelProfile .profile-totals-bar {
-    border: 1px solid rgba(127, 191, 168, 0.20) !important;
-    box-shadow: 0 14px 34px rgba(79, 130, 118, 0.10) !important;
+  #panelPosts .posts-nav {
+    border: 0 !important;
+    border-bottom: 1px solid rgba(127, 191, 168, 0.14) !important;
+    box-shadow: none !important;
+    background: linear-gradient(180deg, rgba(252, 255, 254, 0.92), rgba(245, 251, 248, 0.88)) !important;
+    min-height: 56px !important;
+    max-height: 72px !important;
   }
 
-  #panelPosts nav,
   #panelChat .chat-header,
   #panelChat .chat-input-area {
+    border: 1px solid rgba(127, 191, 168, 0.18) !important;
+    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
     background: linear-gradient(180deg, rgba(252, 255, 254, 0.90), rgba(245, 251, 248, 0.86)) !important;
   }
 
-  #panelPosts .publish-box,
-  #panelPosts .post-filter-bar,
+  /* 发帖：唯一稍抬高的主输入面 */
+  #panelPosts .publish-box {
+    border: 1px solid rgba(127, 191, 168, 0.18) !important;
+    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 252, 250, 0.86)) !important;
+    padding: 18px 18px 14px !important;
+    border-radius: 16px !important;
+  }
+
+  /* 筛选：默认非卡片工具行 */
+  #panelPosts .post-filter-bar {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 6px 2px !important;
+    margin-bottom: 4px !important;
+    border-radius: 0 !important;
+  }
+
   #panelPosts .stat-card,
-  #panelPosts .post,
   #panelProfile .profile-user-card,
   #panelProfile .profile-activity-card,
   #panelProfile .profile-settings,
   #panelProfile .profile-totals-bar {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 251, 249, 0.82)) !important;
+    border: 1px solid rgba(127, 191, 168, 0.16) !important;
+    box-shadow: 0 6px 16px rgba(79, 130, 118, 0.05) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 251, 249, 0.8)) !important;
   }
 
-  #panelPosts .publish-box,
-  #panelPosts .post-filter-bar,
+  /* 帖子：轻边框、无重阴影 */
   #panelPosts .post {
-    padding: 20px !important;
-  }
-
-  #panelPosts .post-filter-bar {
-    margin-bottom: 18px !important;
+    border: 1px solid rgba(127, 191, 168, 0.14) !important;
+    box-shadow: none !important;
+    background: rgba(255, 255, 255, 0.82) !important;
+    padding: 18px 18px 14px !important;
+    border-radius: 14px !important;
   }
 
   #panelPosts .publish-box,

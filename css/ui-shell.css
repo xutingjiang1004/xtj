@@ -258,30 +258,47 @@
     padding: 26px 28px 36px;
   }
 
-  #panelPosts.active nav {
+  #panelPosts.active nav,
+  #panelPosts.active .posts-nav {
     position: sticky;
     top: 0;
     z-index: 8;
     display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 16px 20px;
-    margin: -26px -28px 20px;
+    gap: 12px;
+    min-height: 64px;
+    max-height: 72px;
+    height: auto;
+    padding: 12px 20px;
+    margin: -26px -28px 16px;
     border-bottom: 1px solid var(--xtj-line-soft);
     background: rgba(250, 253, 252, 0.84);
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
     box-shadow: none;
+    overflow: visible;
   }
 
+  /* 禁止子项 width:100% 导致 flex-wrap 整行堆叠成「超高空白顶栏」 */
   #panelPosts.active nav > div,
-  #panelPosts.active nav .nav-auth {
+  #panelPosts.active .posts-nav > div,
+  #panelPosts.active nav .nav-auth,
+  #panelPosts.active .posts-nav .nav-auth {
     display: flex;
-    width: 100%;
-    justify-content: space-between;
+    flex: 0 0 auto;
+    width: auto !important;
+    max-width: none;
+    min-width: 0;
+    justify-content: flex-start;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+  }
+
+  #panelPosts.active .posts-nav > .nav-auth {
+    margin-inline-start: auto;
   }
 
   #panelPosts.active .wrap {
@@ -289,7 +306,7 @@
     margin: 0 auto;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 272px;
-    gap: 20px;
+    gap: 12px 20px;
     padding: 0;
   }
 
@@ -297,6 +314,21 @@
   #panelPosts.active .post-filter-bar,
   #panelPosts.active #feed {
     grid-column: 1;
+  }
+
+  #panelPosts.active .post-filter-bar {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 4px 2px !important;
+  }
+
+  #panelPosts.active .publish-box {
+    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
+  }
+
+  #panelPosts.active .post {
+    box-shadow: none !important;
   }
 
   #panelPosts.active .stats {
@@ -579,19 +611,34 @@
 
 /* Posts navigation and profile layout: final component-level rules. */
 #panelPosts.active .posts-nav {
-  gap: 12px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 56px;
+  max-height: 80px;
+  box-sizing: border-box;
+  overflow: visible;
 }
 
 #panelPosts.active .posts-nav > .posts-nav-brand,
 #panelPosts.active .posts-nav > .posts-nav-tools,
-#panelPosts.active .posts-nav > .nav-auth {
-  width: auto;
+#panelPosts.active .posts-nav > .nav-auth,
+#panelPosts.active .posts-nav > #announcement-btn-wrapper,
+#panelPosts.active .posts-nav > #report-btn-wrapper {
+  width: auto !important;
+  max-width: none;
   justify-content: flex-start;
   flex: 0 0 auto;
+  align-self: center;
 }
 
 #panelPosts.active .posts-nav-brand {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -601,6 +648,42 @@
   position: relative;
   flex: 0 0 42px;
   inline-size: 42px;
+  block-size: 42px;
+  min-inline-size: 42px;
+  min-block-size: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 强制 AI 工具为图标按钮，禁止文字竖排撑高顶栏 */
+#panelPosts.active .ai-tools-trigger {
+  inline-size: 42px !important;
+  block-size: 42px !important;
+  min-inline-size: 42px !important;
+  min-block-size: 42px !important;
+  max-inline-size: 42px !important;
+  max-block-size: 42px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
+}
+
+#panelPosts.active .ai-tools-sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
 
 #panelPosts.active .ai-tools-nav.is-open {
@@ -615,7 +698,6 @@
 }
 
 #panelPosts.active .ai-tools-trigger-icon { inline-size: 20px; block-size: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-#panelPosts.active .ai-tools-sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 #panelPosts.active .ai-tools-trigger:hover,
 #panelPosts.active .ai-tools-nav.is-open .ai-tools-trigger {
@@ -1651,6 +1733,8 @@ html.xtj-ios-viewport .dock-panel {
   #panelPosts.active .posts-nav {
     width: 100% !important;
     min-height: 72px !important;
+    max-height: 72px !important;
+    height: 72px !important;
     margin: 0 !important;
     padding: 0 28px !important;
     border: 0 !important;
@@ -1659,6 +1743,21 @@ html.xtj-ios-viewport .dock-panel {
     background: color-mix(in srgb, var(--wb-pane) 93%, transparent) !important;
     box-shadow: none !important;
     backdrop-filter: none !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    overflow: visible !important;
+  }
+
+  #panelPosts.active .posts-nav > * {
+    width: auto !important;
+    flex: 0 0 auto !important;
+    align-self: center !important;
+  }
+
+  #panelPosts.active .posts-nav > .nav-auth {
+    margin-inline-start: auto !important;
   }
 
   #panelPosts.active .posts-nav-brand h1 { display: none !important; }
@@ -1687,13 +1786,61 @@ html.xtj-ios-viewport .dock-panel {
   #panelPosts.active #postFilterBar { grid-row: 2; }
   #panelPosts.active #feed { grid-row: 3; }
 
-  #panelPosts.active .publish-box,
-  #panelPosts.active .post-filter-bar,
-  #panelPosts.active .post {
-    border-color: var(--wb-border) !important;
-    border-radius: 15px !important;
+  /* 视觉统一：同一平面分区，避免发帖/筛选/帖子三层同权「千层蛋糕」 */
+  #panelPosts.active .wrap {
+    gap: 10px 24px !important;
+    padding-top: 18px !important;
+  }
+
+  #panelPosts.active .publish-box {
+    border: 1px solid var(--wb-border) !important;
+    border-radius: 16px !important;
     background: var(--wb-pane-raised) !important;
-    box-shadow: 0 12px 34px rgba(14, 55, 43, 0.045) !important;
+    box-shadow: 0 8px 24px rgba(14, 55, 43, 0.04) !important;
+    padding: 18px 18px 14px !important;
+  }
+
+  /* 筛选：降级为工具条，不再占一整张重卡片 */
+  #panelPosts.active .post-filter-bar {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 4px 2px 2px !important;
+    margin: 0 !important;
+  }
+
+  #panelPosts.active .post-filter-bar .post-filter-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 2px;
+  }
+
+  #panelPosts.active .post-filter-bar .filter-toggle-btn,
+  #panelPosts.active .post-filter-bar .post-filter-clear {
+    border-radius: 999px !important;
+    box-shadow: none !important;
+  }
+
+  /* 帖子列表：轻边框、几乎无阴影，用间距分区 */
+  #panelPosts.active .post {
+    border: 1px solid color-mix(in srgb, var(--wb-border) 70%, transparent) !important;
+    border-radius: 14px !important;
+    background: color-mix(in srgb, var(--wb-pane-raised) 88%, transparent) !important;
+    box-shadow: none !important;
+    margin-bottom: 10px !important;
+  }
+
+  #panelPosts.active #feed {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #panelPosts.active #feed > .post {
+    margin-bottom: 0 !important;
   }
 
   .desktop-right-rail {
@@ -1716,7 +1863,7 @@ html.xtj-ios-viewport .dock-panel {
     border: 1px solid var(--wb-border);
     border-radius: 15px;
     background: var(--wb-pane-raised);
-    box-shadow: 0 12px 34px rgba(14, 55, 43, 0.045);
+    box-shadow: 0 6px 18px rgba(14, 55, 43, 0.035);
   }
 
   .desktop-rail-heading {
