@@ -1228,114 +1228,98 @@
 }
 
 /* ============================================================
-   面板外壳 — Apple 风格展开/关闭动画（精确从 + 按钮中心展开）
-   面板 left:10px 紧贴 + 按钮左边缘，按钮宽 38px
-   中心相对面板左边缘 = 19px，bottom = 面板底部（按钮高度处）
-   关闭时面板 scale(1) → scale(0.04) 收回 + 按钮中心
-   打开时面板从按钮中心 scale(0.04) → scale(1) 展开
-   纯 scale 缩放（不混 translateY），符合 Apple app 风格
+   面板外壳 — 只做 opacity + translateY，禁止 scale/clip-path
+   （scale/clip-path 会逐帧重栅格化文字 → 打开过程发糊）
    ============================================================ */
 .ai-plus-panel-shell {
   position: absolute;
   left: 10px;
-  bottom: calc(100% + 8px);
-  width: 248px;
-  border-radius: 22px;
-  border: 1px solid var(--ai-glass-border);
-  /* 外壳本体不设 backdrop-filter，由 ::before 承担 */
-  background: transparent;
-  /* 过程与静态都保留轻投影，模拟真实玻璃菜单悬浮 */
+  bottom: calc(100% + 10px);
+  width: 252px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(252, 255, 253, 0.78);
   box-shadow:
-    0 12px 32px rgba(40, 80, 70, 0.14),
-    0 4px 12px rgba(40, 80, 70, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    0 18px 48px rgba(30, 70, 55, 0.14),
+    0 4px 14px rgba(30, 70, 55, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
   z-index: 20;
-  /* clip-path 起点由 JS 以 CSS 变量 --panel-clip-start 设置 */
-  clip-path: var(--panel-clip-start, inset(100% 75% 0 0 round 22px));
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(6px) scale(0.96);
-  transform-origin: 20px 100%;
+  /* 仅位移动画，不用 scale，文字全程清晰 */
+  transform: translate3d(0, 10px, 0);
+  transform-origin: 24px 100%;
   transition:
-    opacity 200ms ease,
-    visibility 0ms linear 280ms,
-    transform 300ms var(--ai-ease-standard),
-    clip-path 300ms var(--ai-ease-standard),
+    opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0ms linear 240ms,
     box-shadow 220ms ease;
   isolation: isolate;
-  overflow: visible;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
 }
 
 .ai-plus-panel-shell.open {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  clip-path: inset(0 round 22px);
-  transform: translateY(0) scale(1);
+  transform: translate3d(0, 0, 0);
   box-shadow:
-    0 16px 40px rgba(40, 80, 70, 0.16),
-    0 6px 16px rgba(40, 80, 70, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    0 20px 52px rgba(30, 70, 55, 0.16),
+    0 6px 16px rgba(30, 70, 55, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
   transition:
-    opacity 180ms ease,
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.18, 0.9, 0.28, 1.05),
     visibility 0ms linear 0ms,
-    transform 340ms var(--ai-ease-spring),
-    clip-path 360ms var(--ai-ease-spring),
-    box-shadow 240ms ease;
+    box-shadow 220ms ease;
 }
 
-/* 打开/关闭过程保留投影，仅提升合成层 */
+/* 开合过程：不提升 will-change 到 clip-path/scale，避免糊字 */
 .ai-plus-panel-shell.is-opening,
 .ai-plus-panel-shell.is-closing {
-  will-change: transform, opacity, clip-path;
+  will-change: opacity, transform;
 }
 
-/* 玻璃背景层 — 独立承担 backdrop-filter，避免选项 hover 触发重做 */
+/* 轻量高光层（不做 backdrop，模糊交给 shell 本体一次完成） */
 .ai-plus-panel-shell::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.42) 0%, rgba(248, 255, 250, 0.28) 40%, rgba(240, 252, 245, 0.18) 100%),
-    var(--ai-glass-bg);
-  backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
-  -webkit-backdrop-filter: blur(var(--ai-glass-blur)) saturate(var(--ai-glass-saturation));
-  pointer-events: none;
-  z-index: -1;
-  /* 防止 transform 影响 backdrop-filter 区域 */
-  will-change: opacity;
-}
-
-/* 内描边（一层） */
-.ai-plus-panel-shell::after {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  border-radius: 21px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.06) 42%, transparent 100%);
   pointer-events: none;
   z-index: 0;
 }
 
-/* 面板内容（双层结构：外壳负责动画，内容承载文字，避免模糊）
-   作为 grid 容器，让所有 .ai-panel-page 重叠到同一格子
-   固定 grid-template-rows: 1fr 让所有 page stretch 到同一高度，
-   避免切换二级页时面板高度突变、位置跳动（切换时 grid item 高度由 grid track 决定而非 max(items)）
-   min-height 256px = 思考页 (5 选项 + 1 返回 + gap) 的最大高度 */
+.ai-plus-panel-shell::after {
+  content: none;
+}
+
+/* 内容层：不参与外壳位移之外的任何缩放，始终清晰 */
 .ai-plus-panel-content {
   position: relative;
   display: grid;
   grid-template-rows: 1fr;
-  min-height: 248px;
+  min-height: 236px;
   overflow: hidden;
-  padding: 8px;
+  padding: 6px;
   z-index: 1;
-  /* 内容层独立合成，开合动画时文字保持清晰 */
-  transform: translateZ(0);
+  transform: none;
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 打开过程中内容可略晚一帧淡入，进一步避免合成糊 */
+.ai-plus-panel-shell.is-opening .ai-plus-panel-content {
+  opacity: 1;
 }
 
 /* ============================================================
@@ -1344,40 +1328,33 @@
    hidden 属性确保离场后不占布局
    ============================================================ */
 .ai-panel-page {
-  display: grid;
-  grid-area: 1 / 1;          /* 所有页面重叠到同一格子 */
+  display: flex;
   flex-direction: column;
-  gap: 2px;
-  /* 默认状态：隐藏 */
+  grid-area: 1 / 1;
+  gap: 1px;
   opacity: 0;
-  transform: translateX(18px);
+  /* 二级页切换只用小位移，避免大 translate 糊字 */
+  transform: translate3d(12px, 0, 0);
   pointer-events: none;
   transition:
-    opacity var(--ai-motion-panel) var(--ai-ease-standard),
-    transform var(--ai-motion-panel) var(--ai-ease-standard);
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* 进入起始态（即将动画进入） */
 .ai-panel-page.is-entering {
   opacity: 0;
-  transform: translateX(18px);
+  transform: translate3d(12px, 0, 0);
 }
 
-/* 活动态（可见） */
 .ai-panel-page.is-active {
   opacity: 1;
-  transform: translateX(0);
+  transform: translate3d(0, 0, 0);
   pointer-events: auto;
 }
 
-/* 离场态（动画退出中）
-   立即脱离布局贡献：position: absolute + pointer-events none
-   否则 grid-area 1/1 重叠的离场页仍占高度，导致面板高度突变、位置错位
-   透明度 + transform 仍保留动画效果（用 opacity 淡出，而非 visibility:hidden 瞬间消失，
-   避免离场页秒隐 + 入场页从 opacity:0 淡入造成的"空白闪烁"——改为正常交叉淡入淡出） */
 .ai-panel-page.is-leaving {
   opacity: 0;
-  transform: translateX(-18px);
+  transform: translate3d(-10px, 0, 0);
   pointer-events: none;
   position: absolute;
   inset: 0;
@@ -1389,53 +1366,54 @@
 }
 
 /* ============================================================
-   选项按钮
+   选项按钮 — 统一栅格：图标 20 | 文案 flex | 右侧 meta
    ============================================================ */
 .ai-panel-option {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 11px 14px;
+  padding: 10px 12px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
-  color: rgba(44, 55, 51, 0.88);
+  color: rgba(40, 52, 48, 0.9);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  min-height: 44px;
+  min-height: 42px;
   box-sizing: border-box;
-  /* hover 只改背景/色，不缩放文字避免模糊 */
-  transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
+  transition: background 120ms ease, color 120ms ease;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* 主页/列表项：图标列固定宽，文字与右侧 value 对齐 */
+/* 左侧图标列固定宽，保证各行竖向对齐 */
 .ai-panel-option > svg:first-child {
-  flex: 0 0 20px;
+  flex: 0 0 18px;
   width: 16px;
   height: 16px;
-  min-width: 16px;
+  min-width: 18px;
+  opacity: 0.72;
 }
 .ai-panel-option > span:not(.ai-panel-option-value):not(.ai-search-status) {
   flex: 1 1 auto;
   min-width: 0;
-  line-height: 1.3;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 
 .ai-panel-option:hover {
-  /* hover 只改背景/色，不 scale、不重阴影，避免文字发糊 */
-  background: rgba(66, 155, 122, 0.06);
-  color: rgba(30, 48, 42, 0.95);
+  background: rgba(66, 155, 122, 0.08);
+  color: rgba(28, 48, 42, 0.96);
   box-shadow: none;
   filter: none;
   transform: none;
 }
 
 .ai-panel-option:active {
-  background: rgba(66, 155, 122, 0.1);
+  background: rgba(66, 155, 122, 0.12);
   box-shadow: none;
   filter: none;
   transform: none;
@@ -1443,8 +1421,8 @@
 
 .ai-panel-option.active,
 .ai-panel-option[aria-checked="true"] {
-  background: rgba(66, 155, 122, 0.1);
-  color: rgba(38, 108, 82, 0.95);
+  background: rgba(66, 155, 122, 0.12);
+  color: rgba(32, 96, 74, 0.98);
   box-shadow: none;
 }
 
@@ -1453,12 +1431,13 @@
    ============================================================ */
 .ai-panel-separator {
   height: 1px;
-  margin: 4px 12px;
-  background: rgba(66, 155, 122, 0.08);
+  margin: 5px 10px;
+  background: rgba(66, 155, 122, 0.1);
+  flex: 0 0 auto;
 }
 
 /* ============================================================
-   返回按钮 — 紧凑导航条，视觉权重 ≤ 模型选项
+   返回按钮 — 与选项同列宽，略轻
    ============================================================ */
 .ai-panel-back {
   display: flex;
@@ -1469,26 +1448,27 @@
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: rgba(80, 95, 90, 0.78);
+  color: rgba(90, 105, 100, 0.82);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
   min-height: 36px;
-  max-height: 40px;
-  transition: background var(--ai-motion-fast) var(--ai-ease-standard), color var(--ai-motion-fast) var(--ai-ease-standard);
+  max-height: 38px;
+  transition: background 120ms ease, color 120ms ease;
   box-shadow: none;
+  margin-bottom: 2px;
 }
 
 .ai-panel-back svg {
-  flex: 0 0 auto;
+  flex: 0 0 18px;
   width: 14px;
   height: 14px;
-  opacity: 0.75;
+  opacity: 0.7;
 }
 
 .ai-panel-back:hover {
-  background: rgba(66, 155, 122, 0.06);
+  background: rgba(66, 155, 122, 0.07);
   color: rgba(30, 48, 42, 0.92);
   box-shadow: none;
   transform: none;
@@ -1506,21 +1486,22 @@
    ============================================================ */
 .ai-panel-option-value {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  color: rgba(66, 155, 122, 0.7);
+  color: rgba(66, 155, 122, 0.72);
   margin-left: auto;
+  letter-spacing: -0.01em;
 }
 
 /* ============================================================
    右箭头
    ============================================================ */
 .ai-panel-chevron {
-  flex: 0 0 auto;
+  flex: 0 0 14px;
   width: 14px;
   height: 14px;
-  opacity: 0.4;
-  margin-left: 2px;
+  opacity: 0.35;
+  margin-left: 0;
 }
 
 /* ============================================================
@@ -1529,8 +1510,9 @@
 .ai-panel-options-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 2px;
+  margin-top: 0;
+  flex: 1 1 auto;
 }
 
 /* ============================================================
@@ -1539,21 +1521,37 @@
 .ai-panel-option-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   flex: 1 1 auto;
   min-width: 0;
   text-align: left;
 }
 
-/* 二级页模型/思考选项：统一卡片高度与内边距，大于返回条 */
+/* 二级页模型/思考选项：整齐卡片行 */
 .ai-panel-page-secondary .ai-panel-option[role="radio"] {
-  min-height: 52px;
-  padding: 12px 14px;
-  border-radius: 14px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 12px;
   align-items: center;
+  gap: 10px;
 }
 .ai-panel-page-secondary .ai-panel-option[role="radio"][aria-checked="true"] {
-  background: rgba(66, 155, 122, 0.1);
+  background: rgba(66, 155, 122, 0.12);
+}
+.ai-panel-page-secondary .ai-panel-option-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.ai-panel-page-secondary .ai-panel-option-desc {
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(100, 110, 120, 0.68);
+}
+.ai-panel-page-secondary .ai-panel-check {
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
 }
 
 /* ============================================================
@@ -1637,22 +1635,23 @@
 }
 
 [data-theme="dark"] .ai-plus-panel-shell {
-  /* P1-1: 暗色模式单独调整透明度和边框，不复用浅色白色玻璃 */
-  --ai-glass-bg: rgba(20, 32, 30, .68);
-  --ai-glass-border: rgba(127, 187, 172, .16);
-  --ai-glass-shadow: 0 14px 32px rgba(0, 0, 0, .32);
-  border-color: var(--ai-glass-border);
-  background: transparent;
+  border-color: rgba(127, 187, 172, 0.18);
+  background: rgba(18, 28, 26, 0.82);
   box-shadow:
-    0 14px 36px rgba(0, 0, 0, 0.36),
-    0 4px 14px rgba(0, 0, 0, 0.22),
+    0 18px 48px rgba(0, 0, 0, 0.4),
+    0 4px 14px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
 }
 [data-theme="dark"] .ai-plus-panel-shell.open {
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.4),
-    0 6px 16px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 20px 52px rgba(0, 0, 0, 0.44),
+    0 6px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .ai-plus-panel-shell::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 50%);
 }
 
 /* 暗色 backdrop-filter 移到 ::before */
