@@ -1,0 +1,48 @@
+== phase 1: 单个禁用 + 对照 ==
+block=stream-renderer.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=markdown-renderer.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=scroll-controller.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=transport.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=request-controller.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=supabase.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=config.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=performance.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=core-utils.min.js -> NAV-OK HUNG [HARD-TIMEOUT]
+block=core.min.js -> NAV-OK ALIVE ready=complete
+block=login-device.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=theme-toggle.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=desktop-shell.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=ux-features.min.js -> NAV-OK ALIVE ready=complete
+block=early-feed.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=NONE(control) -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=NONE(control-2) -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+control 复现: HUNG(符合预期)
+
+== phase 1 汇总 ==
+单禁用即 ALIVE(恢复): core.min.js, ux-features.min.js
+单禁用 NAV-OK(DCL 恢复但主线程仍可能卡): core-utils.min.js, core.min.js, ux-features.min.js
+
+== phase 2: 单禁用已恢复，无需组合 ==
+
+== 最终结论 ==
+单禁用即恢复 ALIVE 的脚本（按可疑度：恢复即元凶）: core.min.js, ux-features.min.js
+
+== 全部结果（按可疑度排序） ==
+block=core.min.js -> NAV-OK ALIVE ready=complete
+block=ux-features.min.js -> NAV-OK ALIVE ready=complete
+block=core-utils.min.js -> NAV-OK HUNG [HARD-TIMEOUT]
+block=stream-renderer.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=markdown-renderer.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=scroll-controller.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=transport.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=request-controller.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=supabase.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=config.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=performance.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=login-device.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=theme-toggle.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=desktop-shell.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=early-feed.min.js -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=NONE(control) -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+block=NONE(control-2) -> NAV-BAD HUNG (page.goto: Timeout 15000ms exceeded. Call log:   [2m- navigating to "https://xt) [HARD-TIMEOUT]
+elapsed 135.9s
