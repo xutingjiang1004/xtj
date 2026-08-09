@@ -589,11 +589,19 @@
     polishPhotoWall();
     ensurePhotoPreviewActions();
     try {
-      var mo = new MutationObserver(function () {
-        ensurePhotoPreviewActions();
-        polishPhotoWall();
+      // 防重入：回调里会对 body 子节点加 class，若直接改会触发自身 mutation
+      // → 无限循环占死主线程（线上首页曾因此彻底卡死，F12 都按不出来）。
+      // 处理期间先 disconnect，杜绝回调重入，处理完再恢复观察。
+      var moBody = new MutationObserver(function () {
+        try {
+          moBody.disconnect();
+          ensurePhotoPreviewActions();
+          polishPhotoWall();
+        } finally {
+          moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+        }
       });
-      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+      moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
     } catch (eObs) {}
 
     // restore prefs
