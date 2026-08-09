@@ -20,14 +20,33 @@ var CITY_COORDS = {
   '纽约': { lat: 40.7128, lon: -74.006 }
 };
 
-async function queryWeather(query) {
+var WEATHER_CODES = {
+  0: '晴天', 1: '大部晴', 2: '多云', 3: '阴天', 45: '雾', 48: '雾凇',
+  51: '小毛毛雨', 53: '中毛毛雨', 55: '大毛毛雨', 61: '小雨', 63: '中雨', 65: '大雨',
+  71: '小雪', 73: '中雪', 75: '大雪', 80: '阵雨', 81: '中阵雨', 82: '大阵雨',
+  85: '小阵雪', 86: '大阵雪', 95: '雷暴', 96: '雷暴加小冰雹', 99: '雷暴加大冰雹'
+};
+
+function formatWeatherText(data) {
+  if (!data) return null;
+  var result = '【天气工具结果】\n查询时间：' + data.queried_at + '（北京时间）\n地点：' + data.city +
+    '\n天气状况：' + data.condition +
+    '\n当前温度：' + data.temperature_c + '°C\n湿度：' + data.humidity + '%\n风速：' + data.wind_kmh + 'km/h';
+  if (data.high_c !== undefined && data.high_c !== null) result += '\n今日最高：' + data.high_c + '°C';
+  if (data.low_c !== undefined && data.low_c !== null) result += '\n今日最低：' + data.low_c + '°C';
+  if (data.precip_prob !== undefined && data.precip_prob !== null) result += '\n降雨概率：' + data.precip_prob + '%';
+  result += '\n\n要求：必须基于以上工具结果回答，不准编造天气数据。';
+  return result;
+}
+
+/** Structured weather for result cards + model content. */
+async function queryWeatherData(query) {
   try {
     var matchedCity = null;
-    // ★ U3: 按城市名长度倒序匹配, 避免"济州岛"先匹配到"济"或"京"等子串
     var cityNames = Object.keys(CITY_COORDS).sort(function(a, b) { return b.length - a.length; });
     for (var i = 0; i < cityNames.length; i++) {
       var cityName = cityNames[i];
-      if (query.indexOf(cityName) >= 0) {
+      if (String(query || '').indexOf(cityName) >= 0) {
         matchedCity = { name: cityName, coords: CITY_COORDS[cityName] };
         break;
       }
@@ -36,7 +55,9 @@ async function queryWeather(query) {
 
     var lat = matchedCity.coords.lat;
     var lon = matchedCity.coords.lon;
-    var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
+    var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
+      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code' +
+      '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
 
     var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return null;
@@ -45,30 +66,39 @@ async function queryWeather(query) {
 
     var current = data.current;
     var daily = data.daily;
-
-    // WMO 天气代码转中文
-    var weatherCodes = { 0:'晴天', 1:'大部晴', 2:'多云', 3:'阴天', 45:'雾', 48:'雾凇', 51:'小毛毛雨', 53:'中毛毛雨', 55:'大毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 71:'小雪', 73:'中雪', 75:'大雪', 80:'阵雨', 81:'中阵雨', 82:'大阵雨', 85:'小阵雪', 86:'大阵雪', 95:'雷暴', 96:'雷暴加小冰雹', 99:'雷暴加大冰雹' };
     var wmoCode = current.weather_code;
-    var weatherDesc = weatherCodes[wmoCode] || ('天气代码 ' + wmoCode);
+    var weatherDesc = WEATHER_CODES[wmoCode] || ('天气代码 ' + wmoCode);
+    var queriedAt = new Date().toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
 
-    var result = '【天气工具结果】\n查询时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + '（北京时间）\n地点：' + matchedCity.name + '\n天气状况：' + weatherDesc + '\n当前温度：' + current.temperature_2m + '°C\n湿度：' + current.relative_humidity_2m + '%\n风速：' + current.wind_speed_10m + 'km/h';
-    if (daily) {
-      if (daily.temperature_2m_max && daily.temperature_2m_max[0] !== undefined) result += '\n今日最高：' + daily.temperature_2m_max[0] + '°C';
-      if (daily.temperature_2m_min && daily.temperature_2m_min[0] !== undefined) result += '\n今日最低：' + daily.temperature_2m_min[0] + '°C';
-      if (daily.precipitation_probability_max && daily.precipitation_probability_max[0] !== undefined) result += '\n降雨概率：' + daily.precipitation_probability_max[0] + '%';
-    }
-    result += '\n\n要求：必须基于以上工具结果回答，不准编造天气数据。';
-    return result;
+    return {
+      city: matchedCity.name,
+      condition: weatherDesc,
+      temperature_c: current.temperature_2m,
+      humidity: current.relative_humidity_2m,
+      wind_kmh: current.wind_speed_10m,
+      high_c: daily && daily.temperature_2m_max ? daily.temperature_2m_max[0] : null,
+      low_c: daily && daily.temperature_2m_min ? daily.temperature_2m_min[0] : null,
+      precip_prob: daily && daily.precipitation_probability_max ? daily.precipitation_probability_max[0] : null,
+      weather_code: wmoCode,
+      queried_at: queriedAt
+    };
   } catch (e) {
     console.error('[WEATHER] query error:', e && e.message);
     return null;
   }
 }
 
-// 网页搜素函数 - 双引擎并行：Bing（全局可用）+ SearXNG（Render US 可用）
-// 无需 API Key，取最快返回有效结果的那一个
+async function queryWeather(query) {
+  var data = await queryWeatherData(query);
+  return formatWeatherText(data);
+}
 
 module.exports = {
   queryWeather: queryWeather,
+  queryWeatherData: queryWeatherData,
+  formatWeatherText: formatWeatherText,
   CITY_COORDS: CITY_COORDS
 };
