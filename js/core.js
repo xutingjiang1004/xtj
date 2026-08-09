@@ -10,2248 +10,2266 @@
  * Lines from original core.js: 63-2306
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
-// console.log('[XTJ] core.js loaded, starting...');
-
-            var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
-                API_BASE: window.location.origin,
-                SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
-                SUPABASE_ANON_KEY: "eyJhbG...yDDA"
-            };
-            if (!window.XTJ_CONFIG) {
-                console.warn('[XTJ] config.js 未加载，使用默认配置');
-            }
-            window.XTJ_CONFIG = XTJ_RUNTIME_CONFIG;
-            // 小猫 AI 统一身份配置
-            window.XTJ_AI_IDENTITY = {
-              name: '小猫',
-              badge: 'AI',
-              description: '徐旭泽的犀利毒舌 AI 分身',
-              avatar: 'cat_ai',
-              username: 'cat_ai'
-            };
-            const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
-            const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
-            var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
-            var sb;
-            function initSupabaseClient() {
-                if (sb) return true;
-                if (!window.supabase || typeof window.supabase.createClient !== 'function') return false;
-                try {
-                    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-                    window.sb = sb;
-                    return true;
-                } catch (e) {
-                    console.error('[XTJ] Supabase client initialization failed:', e && e.message);
-                    return false;
-                }
-            }
-            // ★ 修复 M6：检查配置完整性，避免静默失败。
-            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志——
-            // 本地开发/静态托管时降级继续（REST 主流程可用），不硬失败；其余格式错误 fail-fast
-            var _anonKey = String(SUPABASE_ANON_KEY || '');
-            var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
-              /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
-              || /^sb_publishable_/.test(_anonKey)
-              || _anonKey.indexOf('...') > -1
-            );
-            if (!_sbConfigOk) {
-                console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
-                sb = null;
-                document.addEventListener('DOMContentLoaded', function () {
-                    var _feedEl = document.getElementById('feed');
-                    if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
-                });
-            } else if (typeof window.supabase !== 'undefined') {
-                initSupabaseClient();
-            } else {
-                console.error('Supabase SDK not loaded');
-                window.addEventListener('xtj:supabase-ready', function () {
-                    if (!initSupabaseClient()) return;
-                    if (typeof window.initialLoad === 'function') {
-                        window.initialLoad(true).catch(function (e) {
-                            console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
-                        });
-                    }
-                }, { once: true });
-                document.addEventListener('DOMContentLoaded', function() {
-                    var feedEl = document.getElementById('feed');
-                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
-                });
-            }
-            window.sb = sb;
-
-
-(function() {
-    if (window.XTJSecondaryPageState && window.restoreMainNavigationState) return;
-
-    // 保存原始 overflow 和 touchAction，用于恢复
-    var _origDocOverflow = null;
-    var _origBodyOverflow = null;
-    var _origBodyTouchAction = null;
-
-    function saveOriginalStyles() {
-        if (_origDocOverflow === null) {
-            _origDocOverflow = document.documentElement.style.overflow || '';
-            _origBodyOverflow = document.body.style.overflow || '';
-            _origBodyTouchAction = document.body.style.touchAction || '';
-        }
-    }
-
-    function restoreOriginalStyles() {
-        if (_origDocOverflow !== null) {
-            document.documentElement.style.overflow = _origDocOverflow;
-            document.body.style.overflow = _origBodyOverflow;
-            document.body.style.touchAction = _origBodyTouchAction;
-            _origDocOverflow = null;
-            _origBodyOverflow = null;
-            _origBodyTouchAction = null;
-        } else {
-            // A bfcache restore or legacy secondary page can leave inline
-            // locks behind without going through saveOriginalStyles().
-            document.documentElement.style.overflow = '';
-            document.body.style.overflow = '';
-            document.body.style.touchAction = '';
-        }
-    }
-
-    function isVisiblePanel(id, activeClass) {
-        var panel = document.getElementById(id);
-        if (!panel) return false;
-        if (panel.hidden || panel.classList.contains('hidden')) return false;
-        if (panel.getAttribute('aria-hidden') === 'true') return false;
-        if (activeClass && !panel.classList.contains(activeClass)) return false;
-        return true;
-    }
-
-    function hasVisibleSecondaryPage() {
-        // 通用检查：任何 dock-panel 非默认的可见面板
-        return isVisiblePanel('panelDeepThink', 'active');
-    }
-
-    function clearStaleDockDisplay() {
-        var dockBar = document.getElementById('dockBar') || document.querySelector('.dock-bar');
-        if (dockBar && dockBar.style && dockBar.style.display === 'none') {
-            dockBar.style.display = '';
-        }
-    }
-
-    // Owner 契约：同一 owner 真正幂等，open 多次只需一次 close
-    // 每个 owner 记录 { handle: releaseFn, domRef: WeakRef|null }
-    var _openOwners = {};
-    var _ownerSerial = 0;
-
-    function applySecondaryPageState(locked) {
-        try {
-            document.body.classList.toggle('secondary-page-open', !!locked);
-            if (locked) {
-                saveOriginalStyles();
-                document.documentElement.style.overflow = 'hidden';
-                document.body.style.overflow = 'hidden';
-                document.body.style.touchAction = 'none';
-            } else {
-                restoreOriginalStyles();
-                document.body.classList.remove('secondary-page-open');
-                clearStaleDockDisplay();
-            }
-        } catch (e) {}
-    }
-
-    function getAllOpenOwners() {
-        var owners = [];
-        for (var k in _openOwners) {
-            if (Object.prototype.hasOwnProperty.call(_openOwners, k) && _openOwners[k]) {
-                owners.push(k);
-            }
-        }
-        return owners;
-    }
-
-    // 清理 stale owner：DOM 不存在、已断开或隐藏时移除
-    function cleanStaleOwners() {
-        var changed = false;
-        for (var k in _openOwners) {
-            if (!Object.prototype.hasOwnProperty.call(_openOwners, k)) continue;
-            var entry = _openOwners[k];
-            if (!entry) { delete _openOwners[k]; changed = true; continue; }
-            // 检查 owner 关联的 DOM 是否仍然连接
-            if (entry.domRef) {
-                var el = entry.domRef.deref();
-                if (!el || !el.isConnected || el.hidden ||
-                    el.classList.contains('hidden') ||
-                    el.getAttribute('aria-hidden') === 'true') {
-                    delete _openOwners[k];
-                    changed = true;
-                }
-            }
-        }
-        return changed;
-    }
-
-    function reconcile() {
-        cleanStaleOwners();
-        var owners = getAllOpenOwners();
-        if (owners.length > 0) {
-            applySecondaryPageState(true);
-            return true;
-        }
-        applySecondaryPageState(false);
-        return false;
-    }
-
-    window.XTJSecondaryPageState = {
-        // open 真正幂等：同一 owner 已 open 时不重复计数
-        // 返回 release handle，调用后等同于 close(ownerName)
-        open: function(ownerName, domElement) {
-            if (!ownerName) return function(){};
-            ownerName = String(ownerName);
-            // 已 open 的 owner 不重复计数
-            if (_openOwners[ownerName]) {
-                // 返回已存在的 release handle
-                return _openOwners[ownerName].handle;
-            }
-            var released = false;
-            var handle = function() {
-                if (released) return;
-                released = true;
-                if (_openOwners[ownerName]) delete _openOwners[ownerName];
-                reconcile();
-            };
-            _openOwners[ownerName] = {
-                handle: handle,
-                domRef: (domElement && typeof WeakRef !== 'undefined') ? new WeakRef(domElement) : null,
-                serial: ++_ownerSerial
-            };
-            reconcile();
-            return handle;
-        },
-        close: function(ownerName) {
-            if (!ownerName) return;
-            ownerName = String(ownerName);
-            if (_openOwners[ownerName]) delete _openOwners[ownerName];
-            reconcile();
-        },
-        reset: function() {
-            _openOwners = {};
-            reconcile();
-        },
-        isActive: function(ownerName) {
-            if (!ownerName) return false;
-            return !!_openOwners[String(ownerName)];
-        },
-        hasVisibleSecondaryPage: hasVisibleSecondaryPage,
-        getOpenOwners: getAllOpenOwners
-    };
-
-    window.restoreMainNavigationState = function() {
-        return reconcile();
-    };
-
-    function scheduleRestore() {
-        setTimeout(function() {
-            try { window.restoreMainNavigationState(); } catch (e) {}
-        }, 0);
-    }
-
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
-    else scheduleRestore();
-    // pageshow 恢复逻辑：browser back/forward 时重新检测
-    window.addEventListener('pageshow', function(e) {
-        // 仅当从 bfcache 恢复时才需要重新 reconcile
-        if (e.persisted) scheduleRestore();
-    });
-    document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') scheduleRestore();
-    });
-    // 路由切换时重新对账（popstate 覆盖浏览器后退/前进）
-    window.addEventListener('popstate', function() { scheduleRestore(); });
-})();
-
-window.safeLocalStorageGetJSON = function(key, fallback) {
-    try {
-        var v = window.safeStorage.get(key);
-        if (v === null) return fallback;
-        return JSON.parse(v);
-    } catch(e) {
-        window.safeStorage.remove(key);
-        return fallback;
-    }
-};
-window.safeLocalStorageGet = function(key, fallback) {
-    try {
-        var v = window.safeStorage.get(key);
-        return v !== null ? v : fallback;
-    } catch(e) {
-        return fallback;
-    }
-};
-window.safeLocalStorageSet = function(key, value) {
-    window.safeStorage.set(key, String(value));
-};
-
-function xtjLoadingEscapeHtml(str) {
-    return String(str == null ? '' : str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-function buildXtjLoadingHtmlFallback(title, subtitle, type) {
-    var safeTitle = xtjLoadingEscapeHtml(title || '加载中..');
-    var safeSubtitle = subtitle ? xtjLoadingEscapeHtml(subtitle) : '';
-    if (type === 'feed') {
-        return '<div class="xtj-loading-skeleton">' +
-               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
-               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
-               '</div>';
-    }
-    return '<div class="xtj-magic-loading loading" style="display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;text-align:center;color:var(--text-muted);">'
-        + '<div><div style="font-size:28px;line-height:1;margin-bottom:10px;">!</div>'
-        + '<div>' + safeTitle + '</div>'
-        + (safeSubtitle ? '<div style="font-size:12px;margin-top:6px;opacity:.7;">' + safeSubtitle + '</div>' : '')
-        + '</div></div>';
-}
-function getXtjLoadingHtml(title, subtitle, type) {
-    var loader = window.xtjMagicLoadingHtml;
-    if (typeof loader === 'function' && loader !== window.__xtjFallbackLoadingHtml) {
-        try {
-            return loader(title, subtitle, type);
-        } catch (_) {}
-    }
-    return buildXtjLoadingHtmlFallback(title, subtitle, type);
-}
-window.buildXtjLoadingHtmlFallback = buildXtjLoadingHtmlFallback;
-window.getXtjLoadingHtml = getXtjLoadingHtml;
-if (typeof window.xtjMagicLoadingHtml !== 'function') {
-    window.__xtjFallbackLoadingHtml = function(title, subtitle, type) {
-        return buildXtjLoadingHtmlFallback(title, subtitle, type);
-    };
-    window.xtjMagicLoadingHtml = window.__xtjFallbackLoadingHtml;
-}
-
-const ADMIN_NAME = "xxz";
-            const AVATAR_CACHE_KEY = "xtj_avatars_v2";
-            const AVATAR_CACHE_VERSION = 2;
-            const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小时 — localStorage 中 has_avatar 的有效期
-            // P7: 显式四态头像缓存的内存有效期（has_avatar 重查间隔、confirmed_none/fetch_failed 的 TTL）
-            const AVATAR_FETCH_TTL_MS = 5 * 60 * 1000; // 5 分钟
-            const USER_SESSION_KEY = "xtj_user_session";
-            const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-            const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
-            var USER_TOKEN_KEY = 'xtj_user_token';
-            var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
-            var memoryUserToken = '';
-            var memoryUserTokenIssuedAt = 0;
-            // 共享 refresh promise，避免多个 API 同时刷新
-            var _refreshPromise = null;
-            var _protectedAuthFailureHandled = false;
-            var _lastRefreshAuthResult = { ok: false, reason: 'not_attempted', status: 0 };
-            // ★ 刷新时服务端返回的规范 user_name
-            var _lastRefreshUser = '';
-            // 持久化登录标记（用户选择"保持登录"）
-            var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
-            // 会话写入时间戳。声明上移，保证 clearUserToken（TDZ 安全）
-            // 及其后续所有引用均在此 let 声明之后。
-            let lastUserSessionWriteAt = 0;
-
-            function getUserToken() {
-                // 仅从内存读取（会话内缓存；持久化令牌机制已移除）
-                var token = memoryUserToken || '';
-                // 检查是否过期
-                if (token) {
-                    var ts = memoryUserTokenIssuedAt;
-                    if (ts && (Date.now() - ts > 15 * 60 * 1000)) {
-                        // access token 可能已过期，尝试刷新
-                        memoryUserToken = '';
-                        memoryUserTokenIssuedAt = 0;
-                        token = '';
-                    }
-                }
-                return token;
-            }
-
-            function setUserToken(token) {
-                if (token) {
-                    // ★ 修复：拿到有效 token 说明会话已就绪，清除 refresh 冷却（登录后立即可刷新）
-                    try { _refreshCooldownUntil = 0; } catch (e) {}
-                    memoryUserToken = String(token);
-                    memoryUserTokenIssuedAt = Date.now();
-                    try {
-                        if (typeof window.__xtjRememberBehaviorToken === 'function') {
-                            window.__xtjRememberBehaviorToken(token);
-                        } else {
-                            // H-38: 跨脚本只通过 window 共享 token，避免依赖另一个文件的闭包作用域。
-                            window.behaviorLastKnownToken = String(token);
-                        }
-                    } catch(e) {}
-                    // 通知其他模块用户认证已就绪（用于自动定位等）
-                    try {
-                        window.__xtjAuthReady = true;
-                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { token: String(token) } }));
-                    } catch(e) {}
-                }
-            }
-
-            function setPersistentAuth(enabled) {
-                try {
-                    if (enabled) {
-                        window.safeStorage.set(PERSISTENT_AUTH_KEY, '1');
-                    } else {
-                        window.safeStorage.remove(PERSISTENT_AUTH_KEY);
-                    }
-                } catch(e) {}
-            }
-
-            function isPersistentAuth() {
-                try {
-                    return window.safeStorage.get(PERSISTENT_AUTH_KEY) === '1';
-                } catch(e) { return false; }
-            }
-
-            function clearUserToken() {
-                memoryUserToken = '';
-                memoryUserTokenIssuedAt = 0;
-                lastUserSessionWriteAt = 0;
-                try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
-                try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
-                try { window.safeStorage.remove(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { window.safeStorage.remove(PERSISTENT_AUTH_KEY); } catch(e) {}
-            }
-
-            // Clear all browser-side authentication state in one place. Password
-            // hashes are never retained as a session fallback.
-            function clearAllAuthState(options) {
-                options = options || {};
-                var revokeRemote = options.revokeRemote !== false;
-                var shouldBroadcast = options.broadcast !== false;
-                var reason = options.reason || 'manual';
-                var tokenForRevocation = getUserToken();
-                clearUserToken();
-                lastUserSessionWriteAt = 0;
-                try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
-                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
-                try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
-                // ★ 清理 AI 聊天缓存
-                try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
-                // ★ 清理个人资料缓存
-                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
-                // ★ 清理头像缓存
-                try { avatarCache = {}; } catch(e) {}
-                try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
-                // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
-                try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_feed_cache_v7'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_feed_cache_v7'); } catch(e) {}
-                // ★ 清理 AI 相关的异步请求和 pending 状态
-                try {
-                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
-                } catch(e) {}
-                try {
-                    // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
-                    // 统一清理 timer / AbortController / status DOM / cache 并设置迟到回调防护
-                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
-                } catch(e) {}
-                // Explicit logout revokes the refresh cookie. An expired session
-                // must not make another request just to report that it expired.
-                if (revokeRemote) try {
-                    var logoutHeaders = {};
-                    if (tokenForRevocation) logoutHeaders.Authorization = 'Bearer ' + tokenForRevocation;
-                    fetch(API_BASE + '/api/user/logout', {
-                        method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }).catch(function(){});
-                } catch(e) {}
-
-                // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
-                if (shouldBroadcast) {
-                    try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout(reason); } catch(e) {}
-                }
-            }
-            window.clearAllAuthState = clearAllAuthState;
-
-            function handleProtectedAuthFailure() {
-                if (_protectedAuthFailureHandled) return;
-                _protectedAuthFailureHandled = true;
-                clearAllAuthState({ revokeRemote: false });
-                try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
-                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
-                // ★ 30秒后重置，允许用户关闭弹窗后再次触发
-                setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
-            }
-            window.handleProtectedAuthFailure = handleProtectedAuthFailure;
-
-            async function ensureUserToken() {
-                var existingToken = getUserToken();
-                if (existingToken) return existingToken;
-                // 尝试用 refresh token 刷新
-                var result = await refreshUserTokenViaCookie();
-                return (result && result.token) || '';
-            }
-
-            // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
-            var _refreshPromise = null;
-            // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
-            // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
-            var _refreshCooldownUntil = 0;
-            async function refreshUserTokenViaCookie() {
-                if (_refreshPromise) return _refreshPromise;
-                if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
-                    return { token: '', user_name: '' };
-                }
-                _refreshPromise = (async function() {
-                    try {
-                        var res = await fetch(API_BASE + '/api/user/refresh', {
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' }
-                        });
-                        if (res.ok) {
-                            var data = await res.json().catch(function(){ return {}; });
-                            if (data && data.token) {
-                                setUserToken(data.token);
-                                // ★ 使用服务端返回的规范 user_name
-                                var serverUserName = (data.user_name || '').trim();
-                                if (serverUserName) {
-                                    _lastRefreshUser = serverUserName;
-                                }
-                                _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
-                                return { token: data.token, user_name: serverUserName || '' };
-                            }
-                            _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
-                            return { token: '', user_name: '' };
-                        }
-                        _lastRefreshAuthResult = {
-                            ok: false,
-                            reason: res.status === 401 ? 'expired' : (res.status === 403 ? 'forbidden' : 'unavailable'),
-                            status: res.status
-                        };
-                        // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
-                        if (res.status === 401 || res.status === 403) {
-                            _refreshCooldownUntil = Date.now() + 30000;
-                        }
-                        return { token: '', user_name: '' };
-                    } catch(e) {
-                        _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
-                        return { token: '', user_name: '' };
-                    } finally {
-                        _refreshPromise = null;
-                    }
-                })();
-                return _refreshPromise;
-            }
-
-            /**
-             * 返回统一认证请求头对象。
-             * 使用短期 access token，过期时仅通过 HttpOnly refresh cookie 刷新。
-             */
-            window.getUserAuthHeaders = async function() {
-                // 先尝试从 cookie 刷新
-                var token = await ensureUserToken();
-                if (token) {
-                    return {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    };
-                }
-                return null;
-            }
-            window.getUserToken = getUserToken;
-            window.ensureUserToken = ensureUserToken;
-            window.clearUserToken = clearUserToken;
-
-            /**
-             * 强制刷新 token。
-             * 使用 refresh token cookie 强制刷新。
-             */
-            window.refreshUserToken = async function(force) {
-                try {
-                    if (!force) {
-                        var existing = getUserToken();
-                        if (existing) return existing;
-                    }
-                    // 优先 cookie 刷新
-                    var result = await refreshUserTokenViaCookie();
-                    if (result && result.token) return result.token;
-                } catch (e) {}
-                return '';
-            };
-
-            /**
-             * ★ 新增：统一鉴权状态检查（AI 模块用）
-             *  - 仅当 currentUser + 真实 token 都存在时，返回 ok=true
-             *  - 没有 access token 时，仅尝试 HttpOnly refresh cookie
-             * 返回 { ok, reason, token, user_name }
-             *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
-             */
-            window.ensureProtectedOperationAuth = async function() {
-                // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
-                if (window._xtjAuthState === 'auth_pending') {
-                    var waitStart = Date.now();
-                    while (window._xtjAuthState === 'auth_pending' && (Date.now() - waitStart) < 5000) {
-                        await new Promise(function(r) { setTimeout(r, 150); });
-                    }
-                }
-                try {
-                    var userName = '';
-                    try {
-                        if (typeof currentUser === 'string') userName = currentUser;
-                        else if (currentUser && currentUser.user_name) userName = currentUser.user_name;
-                    } catch (e) { userName = ''; }
-                    if (!userName) {
-                        try { userName = window.safeStorage.get('xtj_user') || ''; } catch (e) {}
-                    }
-                    userName = String(userName || '').trim();
-                    if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
-
-                    var token = await ensureUserToken();
-                    if (token) {
-                        // ★ 验证 token 身份与 UI 身份一致
-                        // 优先使用刷新时服务端返回的规范 user_name
-                        if (_lastRefreshUser && _lastRefreshUser !== userName) {
-                            // Token 对应的是另一个账号，UI 身份过期
-                            _protectedAuthFailureHandled = true;
-                            clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'identity_mismatch' });
-                            try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
-                            try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
-                            return { ok: false, reason: 'identity_mismatch', token: token, user_name: userName };
-                        }
-                        _protectedAuthFailureHandled = false;
-                        try { touchUserSession(false); } catch (e2) {}
-                        return { ok: true, reason: 'ok', token: token, user_name: userName };
-                    }
-                    if (_lastRefreshAuthResult.reason === 'expired') {
-                        handleProtectedAuthFailure();
-                        return { ok: false, reason: 'expired', status: _lastRefreshAuthResult.status, token: '', user_name: userName };
-                    }
-                    return {
-                        ok: false,
-                        reason: _lastRefreshAuthResult.reason || 'unavailable',
-                        status: _lastRefreshAuthResult.status || 0,
-                        token: '',
-                        user_name: userName
-                    };
-                } catch (e) {
-                    return { ok: false, reason: 'exception', status: 0, token: '', user_name: '' };
-                }
-            };
-            window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
-
-            window.xtjProtectedFetch = async function(path, options) {
-                options = options || {};
-                var auth = await window.ensureProtectedOperationAuth();
-                if (!auth.ok) {
-                    var authError = new Error(auth.reason === 'expired' ? '登录已失效' : '认证服务暂时不可用');
-                    authError.code = auth.reason || 'auth_unavailable';
-                    authError.status = auth.status || 0;
-                    throw authError;
-                }
-                async function send(token) {
-                    var headers = Object.assign({}, options.headers || {});
-                    var isFormData = options.body instanceof FormData;
-                    if (!isFormData && !headers['Content-Type'] && options.body != null) {
-                        headers['Content-Type'] = 'application/json';
-                    }
-                    headers.Authorization = 'Bearer ' + token;
-                    return fetch((window.API_BASE || '') + path, Object.assign({}, options, {
-                        credentials: 'include',
-                        headers: headers
-                    }));
-                }
-                var response = await send(auth.token);
-                if (response.status === 401) {
-                    var renewed = await window.refreshUserToken(true);
-                    if (renewed) response = await send(renewed);
-                }
-                if (response.status === 401) {
-                    window.handleProtectedAuthFailure();
-                }
-                return response;
-            };
-
-            // Public feed endpoints may use identity when available, but must never force login.
-            window.xtjOptionalAuthFetch = async function(path, options) {
-                options = options || {};
-                var knownUser = String(currentUser || window.safeStorage.get('xtj_user') || '').trim();
-
-                async function send(token) {
-                    var headers = Object.assign({}, options.headers || {});
-                    if (token) headers.Authorization = 'Bearer ' + token;
-                    return fetch((window.API_BASE || '') + path, Object.assign({}, options, {
-                        credentials: 'include',
-                        headers: headers
-                    }));
-                }
-
-                var token = getUserToken();
-                if (!token && knownUser) token = await ensureUserToken();
-                var response = await send(token);
-                if (token && response.status === 401) {
-                    var renewed = await window.refreshUserToken(true);
-                    response = await send(renewed || '');
-                }
-                return response;
-            };
-
-            // P7: 头像缓存改为显式四态结构。
-            // 每个条目形如 { state, url, fetched_at }：
-            //   state: 'has_avatar' | 'confirmed_none' | 'fetch_failed' | 'not_fetched'
-            //   url:   有头像时为 URL 字符串；confirmed_none 为 null；
-            //          fetch_failed 保留上一次成功获取的 URL（降级用，可能为 null）
-            //   fetched_at: 写入时间戳（ms）
-            let avatarCache = {};
-
-            // 读取内存缓存中的头像 URL（用于展示）。返回 string 或 null。
-            // - has_avatar     → entry.url
-            // - confirmed_none → null（TTL 内不重查）
-            // - fetch_failed   → entry.url（旧 URL 降级，可能为 null）
-            // - not_fetched    → null
-            function getAvatarUrl(userName) {
-                if (!userName) return null;
-                var entry = avatarCache[userName];
-                if (!entry) return null;
-                return entry.url || null;
-            }
-
-            // 内存缓存是否仍处于 TTL 内（调用方不应重新查询后端）。
-            function hasFreshAvatarCache(userName) {
-                if (!userName) return false;
-                var entry = avatarCache[userName];
-                if (!entry || entry.state === 'not_fetched') return false;
-                var age = Date.now() - (entry.fetched_at || 0);
-                return age < AVATAR_FETCH_TTL_MS;
-            }
-
-            // 写入内存缓存条目。fetch_failed 时若 url 为空则保留旧 URL（降级）。
-            function setAvatarCacheEntry(userName, state, url) {
-                if (!userName) return;
-                var now = Date.now();
-                var prevUrl = (avatarCache[userName] && avatarCache[userName].url) || null;
-                var resolvedUrl;
-                if (state === 'has_avatar') {
-                    resolvedUrl = url || null;
-                } else if (state === 'fetch_failed') {
-                    resolvedUrl = url || prevUrl;
-                } else {
-                    resolvedUrl = null;
-                }
-                avatarCache[userName] = {
-                    state: state,
-                    url: resolvedUrl,
-                    fetched_at: now
-                };
-            }
-
-            // ★ 头像缓存版本化读写（含 TTL 和 fetched_at）
-            // 返回 { username: { state, url, fetched_at } } 对象映射。
-            function readAvatarCacheFromStorage() {
-                try {
-                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
-                    var now = Date.now();
-                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
-                        var result = {};
-                        var keys = Object.keys(raw.data);
-                        for (var i = 0; i < keys.length; i++) {
-                            var entry = raw.data[keys[i]];
-                            if (!entry || typeof entry !== 'object') continue;
-                            // 迁移旧格式：无 state 字段但有 url → 视为 has_avatar
-                            var state = entry.state || (entry.url ? 'has_avatar' : null);
-                            if (!state) continue;
-                            // fetch_failed 不持久化（仅内存），防御性跳过
-                            if (state === 'fetch_failed') continue;
-                            var fetchedAt = entry.fetched_at || 0;
-                            // TTL 按状态区分：has_avatar 24h，confirmed_none 5min
-                            var ttl = state === 'confirmed_none' ? AVATAR_FETCH_TTL_MS : AVATAR_CACHE_TTL_MS;
-                            if ((now - fetchedAt) >= ttl) continue;
-                            // has_avatar 必须有 url
-                            if (state === 'has_avatar' && !entry.url) continue;
-                            result[keys[i]] = {
-                                state: state,
-                                url: entry.url || null,
-                                fetched_at: fetchedAt
-                            };
-                        }
-                        return result;
-                    }
-                    // 迁移旧格式 { username: url }
-                    var old = window.safeLocalStorageGetJSON("xtj_avatars", null);
-                    if (old && typeof old === 'object' && !old.version) {
-                        var migrated = { version: AVATAR_CACHE_VERSION, data: {} };
-                        var oldKeys = Object.keys(old);
-                        for (var j = 0; j < oldKeys.length; j++) {
-                            if (typeof old[oldKeys[j]] === 'string') {
-                                migrated.data[oldKeys[j]] = {
-                                    state: 'has_avatar',
-                                    url: old[oldKeys[j]],
-                                    fetched_at: Date.now()
-                                };
-                            }
-                        }
-                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(migrated));
-                        // 迁移后删除旧缓存
-                        try { window.safeStorage.remove("xtj_avatars"); } catch(e) {}
-                        var mResult = {};
-                        var mKeys = Object.keys(migrated.data);
-                        for (var k = 0; k < mKeys.length; k++) {
-                            mResult[mKeys[k]] = migrated.data[mKeys[k]];
-                        }
-                        return mResult;
-                    }
-                } catch(e) {}
-                return {};
-            }
-            // data 为 { username: { state, url, fetched_at } } 对象映射。
-            // 只持久化 has_avatar 与 confirmed_none；fetch_failed 不写入 localStorage。
-            function writeAvatarCacheToStorage(data) {
-                try {
-                    var now = Date.now();
-                    var wrapped = { version: AVATAR_CACHE_VERSION, data: {} };
-                    var keys = Object.keys(data || {});
-                    for (var i = 0; i < keys.length; i++) {
-                        var entry = data[keys[i]];
-                        if (!entry || typeof entry !== 'object') continue;
-                        // 只持久化 has_avatar 和 confirmed_none
-                        if (entry.state !== 'has_avatar' && entry.state !== 'confirmed_none') continue;
-                        // 跳过已过期的 confirmed_none（5min TTL）
-                        if (entry.state === 'confirmed_none' &&
-                            (now - (entry.fetched_at || 0)) >= AVATAR_FETCH_TTL_MS) continue;
-                        // has_avatar 必须有 url
-                        if (entry.state === 'has_avatar' && !entry.url) continue;
-                        wrapped.data[keys[i]] = {
-                            state: entry.state,
-                            url: entry.url || null,
-                            fetched_at: entry.fetched_at || now
-                        };
-                    }
-                    window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(wrapped));
-                } catch(e) {}
-            }
-            function invalidateAvatarCacheEntry(username) {
-                if (!username) return;
-                // P7: 上传头像后立即失效 confirmed_none 缓存（设置为 not_fetched），
-                // 这样下次 fetchAvatarUrl 会重新查询后端获取新头像。
-                // 清除 url（与原 delete 行为一致），避免 onerror 后重渲染复用已失效的 URL。
-                avatarCache[username] = {
-                    state: 'not_fetched',
-                    url: null,
-                    fetched_at: 0
-                };
-                try {
-                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
-                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
-                        delete raw.data[username];
-                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(raw));
-                    }
-                } catch(e) {}
-            }
-            // ★ 暴露为全局函数，供 inline onerror 调用
-            window.__xtjInvalidateAvatarCache = function(username) {
-                invalidateAvatarCacheEntry(username);
-            };
-
-            // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
-            // P7: 显式四态 — has_avatar / confirmed_none / fetch_failed / not_fetched
-            async function fetchAvatarUrl(userName) {
-                if (!userName) return null;
-                // P7: TTL 内的缓存直接返回，不重新查询后端。
-                // - has_avatar     → 返回 url
-                // - confirmed_none → 返回 null（TTL 内不重查）
-                // - fetch_failed   → 返回旧 url（降级，可能为 null）
-                if (hasFreshAvatarCache(userName)) {
-                    return getAvatarUrl(userName);
-                }
-                try {
-                    var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
-                    if (!resp.ok) {
-                        // P7: 网络失败 — 设置 fetch_failed，不缓存为无头像。
-                        // 保留旧 URL 用于降级展示。
-                        setAvatarCacheEntry(userName, 'fetch_failed', null);
-                        return getAvatarUrl(userName);
-                    }
-                    var result = await resp.json();
-                    if (result.ok && result.avatar_url) {
-                        setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
-                        return result.avatar_url;
-                    }
-                    if (result.ok && result.avatar_url === null) {
-                    // P7: 后端确认无头像 — 清除旧缓存并设置 confirmed_none，TTL 内有效。
-                    delete avatarCache[userName];
-                    setAvatarCacheEntry(userName, 'confirmed_none', null);
-                    return null;
-                }
-                    // 后端返回非预期结构 — 视为失败
-                    setAvatarCacheEntry(userName, 'fetch_failed', null);
-                    return getAvatarUrl(userName);
-                } catch(e) {
-                    // P7: 网络异常 — 设置 fetch_failed，降级返回旧缓存 URL。
-                    setAvatarCacheEntry(userName, 'fetch_failed', null);
-                    return getAvatarUrl(userName);
-                }
-            }
-
-        function readUserSession() {
-            try {
-                var raw = window.safeStorage.get(USER_SESSION_KEY);
-                if (!raw) return null;
-                var parsed = JSON.parse(raw);
-                return parsed && typeof parsed === "object" ? parsed : null;
-            } catch (e) {
-                return null;
-            }
-        }
-
-        function writeUserSession(userName, options) {
-            var name = String(userName || "").trim();
-            if (!name) return null;
-            var now = Date.now();
-            var existing = readUserSession();
-            var resetLoginAt = !!(options && options.resetLoginAt);
-            var loginAt = resetLoginAt ? now : Number(existing && existing.user_name === name ? existing.login_at : 0);
-            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = now;
-            var next = {
-                user_name: name,
-                login_at: loginAt,
-                last_active_at: now
-            };
-            window.safeStorage.set(USER_SESSION_KEY, JSON.stringify(next));
-            window.safeStorage.set("xtj_user", name);
-            lastUserSessionWriteAt = now;
-            return next;
-        }
-
-        // Remove credentials left by earlier clients; ongoing sessions are renewed
-        // exclusively through the HttpOnly refresh cookie.
-        try { sessionStorage.removeItem('xtj_pw_hash'); window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
-
-        function clearUserSessionStorage() {
-            try { window.safeStorage.remove(USER_SESSION_KEY); } catch (e) {}
-            try { window.safeStorage.remove("xtj_user"); } catch (e) {}
-            try { sessionStorage.removeItem("xtj_pw_hash"); } catch (e) {}
-            try { window.safeStorage.remove("xtj_pw_hash"); } catch (e) {}
-            lastUserSessionWriteAt = 0;
-        }
-
-        function restoreCurrentUserFromSession() {
-            var now = Date.now();
-            var session = readUserSession();
-            if (!session) {
-                var legacyUser = "";
-                try { legacyUser = window.safeStorage.get("xtj_user") || ""; } catch (e) { legacyUser = ""; }
-                legacyUser = String(legacyUser || "").trim();
-                if (legacyUser) {
-                    writeUserSession(legacyUser, { resetLoginAt: true });
-                    return legacyUser;
-                }
-                return "";
-            }
-            var userName = String(session.user_name || "").trim();
-            var lastActiveAt = Number(session.last_active_at || 0);
-            if (!userName || !Number.isFinite(lastActiveAt) || lastActiveAt <= 0 || (now - lastActiveAt) > USER_SESSION_TTL_MS) {
-                clearUserSessionStorage();
-                return "";
-            }
-            var loginAt = Number(session.login_at || 0);
-            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = lastActiveAt;
-            try {
-                localStorage.setItem(USER_SESSION_KEY, JSON.stringify({
-                    user_name: userName,
-                    login_at: loginAt,
-                    last_active_at: now
-                }));
-                window.safeStorage.set("xtj_user", userName);
-            } catch (e) {}
-            lastUserSessionWriteAt = now;
-            return userName;
-        }
-
-        function touchUserSession(force) {
-            var userName = String(window.currentUser || window._lastKnownUser || "").trim();
-            if (!userName) return;
-            var now = Date.now();
-            if (!force && lastUserSessionWriteAt && (now - lastUserSessionWriteAt) < USER_SESSION_TOUCH_INTERVAL_MS) return;
-            writeUserSession(userName, { resetLoginAt: false });
-        }
-
-        window.touchUserSession = touchUserSession;
-        document.addEventListener("visibilitychange", function () {
-            if (!document.hidden) touchUserSession(false);
-        });
-        window.addEventListener("focus", function () {
-            touchUserSession(false);
-        });
-
-        let currentUser = restoreCurrentUserFromSession();
-        window.currentUser = currentUser;
-        window._lastKnownUser = currentUser;
-        // ★ 认证状态机：auth_pending | authenticated | unauthenticated | offline_unverified
-        window._xtjAuthState = currentUser ? 'auth_pending' : 'unauthenticated';
-        window._xtjCanonicalUser = ''; // 服务端确认的权威用户名
-
-        // ★ 是否已通过服务端验证（auth_pending 期间禁止所有受保护操作）
-        window.isAuthenticated = function() {
-            return window._xtjAuthState === 'authenticated';
-        };
-        window.getCanonicalUser = function() {
-            return window._xtjCanonicalUser || window.currentUser || '';
-        };
-
-        // ★ 启动时尝试验证会话：如果从 session 恢复了用户，用 refresh cookie 验证
-        var _startupAuthVerified = false;
-        if (currentUser) {
-            loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
-            // 异步验证：尝试用 refresh cookie 获取 token 并校验身份
-            (async function() {
-                try {
-                    var refreshResult = await refreshUserTokenViaCookie();
-                    var serverUser = (refreshResult && refreshResult.user_name) || '';
-                    if (serverUser && serverUser !== currentUser) {
-                        // Token 身份与会话不一致，清除幽灵登录状态
-                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_identity_mismatch' });
-                        currentUser = '';
-                        window.currentUser = '';
-                        window._lastKnownUser = '';
-                        window._xtjAuthState = 'unauthenticated';
-                        window._xtjCanonicalUser = '';
-                        // 刷新 UI
-                        if (typeof initUI === 'function') initUI().catch(function() {});
-                    } else if (serverUser) {
-                        _startupAuthVerified = true;
-                        window._xtjAuthState = 'authenticated';
-                        window._xtjCanonicalUser = serverUser;
-                        // 确保内部状态一致
-                        if (serverUser !== currentUser) {
-                            currentUser = serverUser;
-                            window.currentUser = serverUser;
-                            window._lastKnownUser = serverUser;
-                            writeUserSession(serverUser, { resetLoginAt: false });
-                        }
-                    }
-                } catch (e) {
-                    // 验证失败，如果 refresh cookie 不存在则清除幽灵状态
-                    if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'no_cookie') {
-                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_refresh_expired' });
-                        currentUser = '';
-                        window.currentUser = '';
-                        window._lastKnownUser = '';
-                        window._xtjAuthState = 'unauthenticated';
-                        window._xtjCanonicalUser = '';
-                        if (typeof initUI === 'function') initUI().catch(function() {});
-                    } else {
-                        // 网络暂时失败，保留本地用户名但标记为 offline_unverified
-                        window._xtjAuthState = 'offline_unverified';
-                    }
-                }
-            })();
-        }
-
-        // ★ 多标签页账号切换同步 (BroadcastChannel) - 带事件去重
-        (function() {
-            try {
-                // ★ 生成稳定的 sourceTabId
-                var _sourceTabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                var _processedEventIds = {};
-                var _MAX_PROCESSED_EVENTS = 50;
-
-                function _isOwnMessage(msg) {
-                    return msg && msg.sourceTabId === _sourceTabId;
-                }
-                function _isEventProcessed(eventId) {
-                    if (!eventId) return false;
-                    return !!_processedEventIds[eventId];
-                }
-                function _markEventProcessed(eventId) {
-                    if (!eventId) return;
-                    _processedEventIds[eventId] = Date.now();
-                    // 清理超过50条旧记录
-                    var keys = Object.keys(_processedEventIds);
-                    if (keys.length > _MAX_PROCESSED_EVENTS) {
-                        keys.sort(function(a, b) { return _processedEventIds[a] - _processedEventIds[b]; });
-                        var toRemove = keys.length - _MAX_PROCESSED_EVENTS;
-                        for (var i = 0; i < toRemove; i++) { delete _processedEventIds[keys[i]]; }
-                    }
-                }
-
-                var authChannel = new BroadcastChannel('xtj_auth_sync');
-                authChannel.addEventListener('message', function(event) {
-                    var msg = event && event.data;
-                    if (!msg || !msg.type) return;
-                    // ★ 忽略自己发出的消息
-                    if (_isOwnMessage(msg)) return;
-                    // ★ 防止重复消费
-                    if (_isEventProcessed(msg.eventId)) return;
-                    _markEventProcessed(msg.eventId);
-
-                    if (msg.type === 'account_switched' || msg.type === 'logout') {
-                        // 其他标签页切换了账号，本标签页必须清除旧状态
-                        // ★ broadcast:false 防止形成循环广播
-                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync' });
-                        currentUser = '';
-                        window.currentUser = '';
-                        window._lastKnownUser = '';
-                        if (typeof initUI === 'function') initUI().catch(function() {});
-                        if (typeof showToast === 'function') showToast('账号已在其他窗口切换，请重新登录', 'info');
-                    }
-                });
-                // 登录成功后广播
-                window.__xtjBroadcastAuthChange = function(newUser) {
-                    try {
-                        var eventId = 'auth_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                        _markEventProcessed(eventId);
-                        authChannel.postMessage({
-                            type: 'account_switched',
-                            eventId: eventId,
-                            sourceTabId: _sourceTabId,
-                            user: newUser,
-                            timestamp: Date.now()
-                        });
-                    } catch (e) {}
-                };
-                // 退出时广播
-                window.__xtjBroadcastLogout = function(reason) {
-                    try {
-                        var eventId = 'logout_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                        _markEventProcessed(eventId);
-                        authChannel.postMessage({
-                            type: 'logout',
-                            eventId: eventId,
-                            sourceTabId: _sourceTabId,
-                            reason: reason || 'manual',
-                            timestamp: Date.now()
-                        });
-                    } catch (e) {}
-                };
-            } catch (e) {
-                // BroadcastChannel 不可用（旧浏览器），静默降级
-            }
-        })();
-
-        var statsEl = document.getElementById('statsSection');
-        if (statsEl && !currentUser) statsEl.style.display = 'none';
-
-        // 记录用户访问到后端统计（API优先，Supabase直连兜底）
-        var _visitLoggedToday = false;
-        function logUserVisitToApi(userName) {
-            if (!userName) return;
-            if (typeof API_BASE !== 'undefined' && API_BASE) {
-                try {
-                    var userToken = getUserToken();
-                    var headers = { 'Content-Type': 'application/json' };
-                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
-                    var body = { user_name: userName };
-                    fetch(API_BASE + '/api/log-user-visit', {
-                        method: 'POST', headers: headers, body: JSON.stringify(body)
-                    }).catch(function(){
-                        try { checkReportReplies(); } catch (_) {}
-                    });
-                } catch(e) {}
-            } else if (sb && !_visitLoggedToday) {
-                // 无后端API时直接写Supabase，同天只记录一次
-                _visitLoggedToday = true;
-                var today = new Date().toISOString().slice(0, 10);
-                try {
-                    sb.from('posts').insert([{
-                        user_name: userName || 'anonymous',
-                        content: JSON.stringify({ date: today }),
-                        media_type: '__user_visit__',
-                        media_url: today,
-                        actor_key: 'uvisit_' + Date.now()
-                    }]).then(function(){}, function(){});
-                } catch(e) {}
-            }
-        }
-
-        // IP级访问记录（无后端API时直接写Supabase）
-        var _ipVisitDay = '';
-        function logIpVisitToSupabase() {
-            if (typeof API_BASE !== 'undefined' && API_BASE) return; // 有后端API时不重复记录
-            if (!sb) return;
-            var today = new Date().toISOString().slice(0, 10);
-            if (_ipVisitDay === today) return; // 同天只记一次
-            _ipVisitDay = today;
-            try {
-                sb.from('posts').insert([{
-                    user_name: 'visitor',
-                    content: JSON.stringify({ date: today }),
-                    media_type: '__visit__',
-                    media_url: today,
-                    actor_key: 'visit_' + Date.now()
-                }]).then(function(){}, function(){});
-            } catch(e) {}
-        }
-
-        // 前端攻击检测（无后端API时记录到Supabase）
-        var _attackClickTimes = [];
-        var _attackLoggedToday = false;
-        function logFrontendAttack(type, detail) {
-            if (typeof API_BASE !== 'undefined' && API_BASE) return;
-            if (!sb) return;
-            var today = new Date().toISOString().slice(0, 10);
-            try {
-                sb.from('posts').insert([{
-                    user_name: 'frontend',
-                    content: JSON.stringify({ type: type, detail: String(detail || '').slice(0, 200), date: today }),
-                    media_type: '__attack__',
-                    media_url: type,
-                    actor_key: 'fa_' + Date.now()
-                }]).then(function(){}, function(){});
-            } catch(e) {}
-        }
-        // 检测异常快速点击（>8次/秒）
-        document.addEventListener('click', function() {
-            var now = Date.now();
-            _attackClickTimes.push(now);
-            _attackClickTimes = _attackClickTimes.filter(function(t) { return now - t < 1000; });
-            if (_attackClickTimes.length > 8 && !_attackLoggedToday) {
-                _attackLoggedToday = true;
-                logFrontendAttack('RAPID_CLICK', '异常高频点击 ' + _attackClickTimes.length + '次/秒');
-                setTimeout(function() { _attackLoggedToday = false; }, 60000);
-            }
-        }, true);
-
-        let dockChatListCacheTime = 0;
-        const DOCK_CHAT_CACHE_DURATION = 120000;
-        let deviceId;
-        try { deviceId = window.safeStorage.get("xtj_device_id"); } catch(e) { deviceId = null; }
-        if (!deviceId) {
-            try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
-            window.safeStorage.set("xtj_device_id", deviceId);
-        }
-        window.deviceId = deviceId;
-
-        let delPostId = null, delOwnerKey = null;
-        let activePostId = null;
-        const viewTracked = new Set();
-        // 挂到 window：登出清理 clearAllAuthState 中 window.viewTracked.clear() 依赖此引用
-        window.viewTracked = viewTracked;
-        let postVisibilityObserver = null;
-        let postDwellObserver = null;
-        const postDwellTimers = new Map();
-        const POST_DWELL_THRESHOLD = 0.5;
-        const POST_DWELL_DELAY = 1200;
-
-        // ★ 修复 M4：页面卸载 / 面板切换时清理 Observer 和 Timer
-        function cleanupObservers() {
-            if (postVisibilityObserver) {
-                try { postVisibilityObserver.disconnect(); } catch(e) {}
-                postVisibilityObserver = null;
-            }
-            if (postDwellObserver) {
-                try { postDwellObserver.disconnect(); } catch(e) {}
-                postDwellObserver = null;
-            }
-            postDwellTimers.forEach(function(timerId, postId) {
-                clearTimeout(timerId);
-            });
-            postDwellTimers.clear();
-        }
-        window.addEventListener('beforeunload', cleanupObservers);
-        // 在面板切换时也清理（由 switchTab 调用）
-        window.__xtjCleanupObservers = cleanupObservers;
-        function primePostReveal(nodes) {
-            Array.from(nodes || []).forEach(function(post, index) {
-                if (!post || post.classList.contains('visible')) return;
-                post.style.setProperty('--post-enter-delay', Math.min(index, 5) * 42 + 'ms');
-            });
-        }
-        function clearPostDwellTimer(postId) {
-            if (!postId || !postDwellTimers.has(postId)) return;
-            clearTimeout(postDwellTimers.get(postId));
-            postDwellTimers.delete(postId);
-        }
-        function schedulePostDwellTracking(postId) {
-            if (!postId || postDwellTimers.has(postId) || !canTrackViewNow(postId)) return;
-            var timerId = setTimeout(function() {
-                postDwellTimers.delete(postId);
-                trackView(postId);
-            }, POST_DWELL_DELAY);
-            postDwellTimers.set(postId, timerId);
-        }
-        function getPostVisibilityObserver() {
-            if (!postVisibilityObserver) {
-                try {
-                    postVisibilityObserver = new IntersectionObserver(e => {
-                        e.forEach(i => {
-                            if (i.isIntersecting) {
-                                i.target.classList.add('visible');
-                            }
-                        });
-                    }, { threshold: 0.05 });
-                } catch(_) {
-                    postVisibilityObserver = { observe: function(el) { el.classList.add('visible'); } };
-                }
-            }
-            return postVisibilityObserver;
-        }
-        function getPostDwellObserver() {
-            if (!postDwellObserver) {
-                try {
-                    postDwellObserver = new IntersectionObserver(function(entries) {
-                        entries.forEach(function(entry) {
-                            var target = entry && entry.target;
-                            var postId = target ? String(target.getAttribute('data-post-id') || '').trim() : '';
-                            if (!postId) return;
-                            if (entry.isIntersecting && entry.intersectionRatio >= POST_DWELL_THRESHOLD) {
-                                schedulePostDwellTracking(postId);
-                            } else {
-                                clearPostDwellTimer(postId);
-                            }
-                        });
-                    }, { threshold: [0, POST_DWELL_THRESHOLD, 1] });
-                } catch (_) {
-                    postDwellObserver = {
-                        observe: function() {},
-                        unobserve: function() {}
-                    };
-                }
-            }
-            return postDwellObserver;
-        }
-        function observePostViewportState(nodes) {
-            Array.from(nodes || []).forEach(function(post) {
-                if (!post) return;
-                getPostVisibilityObserver().observe(post);
-                getPostDwellObserver().observe(post);
-            });
-        }
-        const CACHE_KEY = "xtj_feed_cache_v7";
-        const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
-
-        const POST_METADATA_MARKER = "__xtj_post_v2__";
-        const POST_META_DEFAULTS = {
-            visibility: "public",
-            is_pinned: false,
-            pinned_at: null,
-            updated_at: null,
-            edited_at: null,
-            fileSize: null,
-            originalSize: null,
-            mimeType: "",
-        };
-        let postSearchState = {
-            keyword: "",
-            user: "",
-            startDate: "",
-            endDate: "",
-            visibility: "all",
-            onlyMine: false
-        };
-        let editPostId = null;
-        let postFilterUsersLoaded = false;
-        let postFilterUsersLoading = false;
-        let postFilterUsers = [];
-        let postFilterUsersLoadSeq = 0;
-        let postFilterUsersLoadTimer = null;
-
-        function stopPostFilterUsersLoading() {
-            if (postFilterUsersLoadTimer) {
-                clearTimeout(postFilterUsersLoadTimer);
-                postFilterUsersLoadTimer = null;
-            }
-            postFilterUsersLoading = false;
-        }
-
-        function renderPostFilterUserLoader() {
-            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
-        }
-
-function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; }
-        function clearFeedCache() {
-            try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
-            feedVisiblePostsCache = null;
-            feedMapsCache = null;
-        }
-        window.clearFeedCache = clearFeedCache;
-
-        window.syncProfileUser = window.syncProfileUser || function() {
-            var name = document.getElementById('profileName');
-            var status = document.getElementById('profileStatus');
-            var avatar = document.getElementById('profileAvatar');
-            if (!name) return;
-            if (window.currentUser) {
-                name.textContent = window.currentUser;
-                if (status) status.textContent = '查看资料';
-                if (avatar) avatar.textContent = window.currentUser[0].toUpperCase();
-            } else {
-                name.textContent = '未登录';
-                if (status) status.textContent = '请先登录';
-                if (avatar) avatar.textContent = '?';
-            }
-        };
-
-        // ★ 修复 M-1：个人中心"通知"开关此前完全没有绑定，拨动无任何持久化效果。
-        // 初始化时读取 xtj-notif 设置 checked 状态，change 时写入偏好（'off' 表示关闭）。
-        function initProfileNotificationToggle() {
-            var toggle = document.getElementById('profileNotifToggle');
-            if (!toggle || toggle.__xtjNotifBound) return;
-            toggle.__xtjNotifBound = true;
-            try {
-                toggle.checked = window.safeStorage.get('xtj-notif') !== 'off';
-            } catch (e) {}
-            toggle.addEventListener('change', function() {
-                try {
-                    window.safeStorage.set('xtj-notif', toggle.checked ? 'on' : 'off');
-                } catch (e) {}
-            });
-        }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initProfileNotificationToggle);
-        } else {
-            initProfileNotificationToggle();
-        }
-
-        var xtjModuleDefinitions = {
-            enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
-            'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
-            // Code must load its filesystem bridge before evaluating the workspace.
-            'code-fs': { scripts: ['xtj-module-code-fs'] },
-            'code-workspace': {
-                dependencies: ['code-fs'],
-                styles: ['xtj-module-code-style', 'xtj-module-code-claude-style'],
-                scripts: ['xtj-module-code-workspace']
-            },
-            'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
-            'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
-            'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
-            gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
-        };
-        var xtjModulePromises = Object.create(null);
-        // Render can take longer than 15 seconds to cold-deliver the lazy Code bundle.
-        // Keep one bounded retry window instead of failing into an empty Code surface.
-        var XTJ_MODULE_LOAD_TIMEOUT = 45000;
-
-        function moduleAssetUrl(metaName) {
-            var meta = document.querySelector('meta[name="' + metaName + '"]');
-            return meta && String(meta.content || '').trim();
-        }
-
-        function loadModuleStyle(moduleName, metaName) {
-            var url = moduleAssetUrl(metaName);
-            if (!url) return Promise.reject(new Error('missing_module_asset:' + metaName));
-            return new Promise(function(resolve, reject) {
-                var selector = 'link[data-xtj-asset="' + metaName + '"]';
-                var existing = document.querySelector(selector);
-                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
-                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
-                var node = existing || document.createElement('link');
-                var settled = false;
-                var timer = null;
-                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
-                function fail(code) {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    node.dataset.xtjFailed = '1';
-                    if (node.parentNode) node.remove();
-                    reject(new Error(code + ':' + moduleName));
-                }
-                node.onload = function() {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    node.dataset.xtjLoaded = '1';
-                    delete node.dataset.xtjFailed;
-                    resolve(node);
-                };
-                node.onerror = function() { fail('module_style_failed'); };
-                timer = setTimeout(function() { fail('module_style_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
-                if (!existing) {
-                    node.rel = 'stylesheet';
-                    node.href = url;
-                    node.dataset.xtjAsset = metaName;
-                    node.dataset.xtjModule = moduleName;
-                    document.head.appendChild(node);
-                }
-            });
-        }
-
-        function loadModuleScript(moduleName, assetKey, directUrl) {
-            var url = directUrl || moduleAssetUrl(assetKey);
-            if (!url) return Promise.reject(new Error('missing_module_asset:' + assetKey));
-            return new Promise(function(resolve, reject) {
-                var selector = 'script[data-xtj-asset="' + assetKey.replace(/"/g, '\\"') + '"]';
-                var existing = document.querySelector(selector);
-                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
-                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
-                var node = existing || document.createElement('script');
-                var settled = false;
-                var timer = null;
-                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
-                function fail(code) {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    node.dataset.xtjFailed = '1';
-                    if (node.parentNode) node.remove();
-                    reject(new Error(code + ':' + moduleName));
-                }
-                node.onload = function() {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    node.dataset.xtjLoaded = '1';
-                    delete node.dataset.xtjFailed;
-                    resolve(node);
-                };
-                node.onerror = function() { fail('module_script_failed'); };
-                timer = setTimeout(function() { fail('module_script_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
-                if (!existing) {
-                    node.src = url;
-                    node.defer = true;
-                    node.dataset.xtjAsset = assetKey;
-                    node.dataset.xtjModule = moduleName;
-                    (document.body || document.head).appendChild(node);
-                }
-            });
-        }
-
-        function loadXtjModule(name) {
-            var moduleName = String(name || '');
-            var definition = xtjModuleDefinitions[moduleName];
-            if (!definition) return Promise.reject(new Error('unknown_module:' + moduleName));
-            if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName];
-            var dependencyChain = (definition.dependencies || []).reduce(function(chain, dependency) {
-                return chain.then(function() { return loadXtjModule(dependency); });
-            }, Promise.resolve());
-            xtjModulePromises[moduleName] = dependencyChain.then(function() {
-                // 并行加载 CSS 和 JS，避免串行等待
-                var cssPromise = (definition.styles || []).length > 0
-                    ? Promise.all((definition.styles || []).map(function(metaName) { return loadModuleStyle(moduleName, metaName); }))
-                    : Promise.resolve();
-                var scripts = (definition.scripts || []).map(function(metaName) { return { key: metaName, url: null }; });
-                (definition.externalScripts || []).forEach(function(url) { scripts.push({ key: moduleName + '-external-' + url, url: url }); });
-                var jsPromise = scripts.length > 0
-                    ? scripts.reduce(function(chain, item) {
-                        return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
-                    }, Promise.resolve())
-                    : Promise.resolve();
-                return Promise.all([cssPromise, jsPromise]).then(function() {
-                    var valid = true;
-                    if (moduleName === 'ai-agent') valid = !!(window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function');
-                    if (moduleName === 'code-fs') valid = !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
-                    if (moduleName === 'code-workspace') valid = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
-                    if (!valid) throw new Error('module_export_missing:' + moduleName);
-                    return { name: moduleName, loadedAt: Date.now() };
-                });
-            }).catch(function(error) {
-                delete xtjModulePromises[moduleName];
-                throw error;
-            });
-            return xtjModulePromises[moduleName];
-        }
-        window.XTJModuleLoader = {
-            load: loadXtjModule,
-            diagnose: function(name) {
-                var definition = xtjModuleDefinitions[String(name || '')] || {};
-                return {
-                    name: String(name || ''),
-                    scripts: (definition.scripts || []).map(moduleAssetUrl),
-                    styles: (definition.styles || []).map(moduleAssetUrl),
-                    state: xtjModulePromises[String(name || '')] ? 'loading-or-ready' : 'idle'
-                };
-            }
-        };
-
-        function ensureGsap() {
-            if (window.gsap) return Promise.resolve(window.gsap);
-            return loadXtjModule('gsap').then(function() { return window.gsap || null; });
-        }
-        window.ensureGsap = ensureGsap;
-        window.__xtjEnsureGsap = ensureGsap;
-
-        function ensurePhotoWallLoaded() {
-            return loadXtjModule('photo-wall');
-        }
-
-        function ensurePhotoWallPreviewLoaded() {
-            return loadXtjModule('photo-preview');
-        }
-
-        function ensurePhotoWallUploadLoaded() {
-            return loadXtjModule('photo-upload');
-        }
-
-        function ensureAiAgentLoaded() {
-            return loadXtjModule('ai-agent');
-        }
-        window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
-
-        function bindTopAiToolsLauncher() {
-            var nav = document.getElementById('aiToolsNav');
-            var trigger = document.getElementById('aiToolsBtn');
-            var menu = document.getElementById('aiToolsMenu');
-            if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
-            nav.__xtjAiToolsBound = true;
-            function setOpen(open) {
-                nav.classList.toggle('is-open', !!open);
-                menu.hidden = !open;
-                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-                // Start loading as soon as the menu is useful, not after a tool is clicked.
-                if (open) ensureAiAgentLoaded().catch(function() {});
-            }
-            nav.addEventListener('pointerenter', function() {
-                ensureAiAgentLoaded().catch(function() {});
-            }, { passive: true });
-            nav.addEventListener('focusin', function() {
-                ensureAiAgentLoaded().catch(function() {});
-            });
-            trigger.addEventListener('click', function(event) {
-                event.stopPropagation();
-                setOpen(menu.hidden);
-            });
-            menu.addEventListener('click', function(event) {
-                var button = event.target.closest('[data-ai-tool]');
-                if (!button) return;
-                var tool = button.getAttribute('data-ai-tool');
-                setOpen(false);
-                ensureAiAgentLoaded().then(function() {
-                    if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
-                    if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
-                    if (tool === 'chat' && window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') return window.__xtjAiAgent.open();
-                    if (typeof window.__xtjOpenAiChat === 'function') return window.__xtjOpenAiChat();
-                }).catch(function(error) {
-                    console.error('[XTJ] top AI tools load failed:', error);
-                    if (typeof window.showToast === 'function') window.showToast('AI 工具加载失败，请重试');
-                });
-            });
-            document.addEventListener('click', function(event) {
-                if (!nav.contains(event.target)) setOpen(false);
-            });
-            document.addEventListener('keydown', function(event) {
-                if (event.key === 'Escape') setOpen(false);
-            });
-        }
-        bindTopAiToolsLauncher();
-        scheduleAiPreload();
-
-        function ensureCoreAnimationsLoaded() {
-            return loadXtjModule('enhancements');
-        }
-        window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
-
-        function loadEnhancementsAfterInteraction() {
-            document.removeEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
-            document.removeEventListener('keydown', loadEnhancementsAfterInteraction, true);
-            ensureCoreAnimationsLoaded().catch(function(error) {
-                console.error('[XTJ] enhancement module load failed:', error);
-            });
-        }
-        document.addEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
-        document.addEventListener('keydown', loadEnhancementsAfterInteraction, true);
-
-        function lazyAiChatLauncher() {
-            var _aiChatOpenInProgress = false;
-            var _aiChatOpenPromise = null;
-            var _aiChatLastError = null;
-            var _aiChatOpenGeneration = 0;
-
-            // A Code navigation must be able to invalidate a lazy AI load.
-            // Without this, an old ensureAiAgentLoaded()/ensureUserToken()
-            // continuation can re-open panelAiChat over Code after the user
-            // has already left it.
-            window.__xtjCancelPendingAiChatOpen = function() {
-                _aiChatOpenGeneration += 1;
-                _aiChatOpenInProgress = false;
-                _aiChatOpenPromise = null;
-            };
-
-            window.__xtjOpenAiChat = function() {
-                if (_aiChatOpenInProgress) return;
-                _aiChatOpenInProgress = true;
-                _aiChatLastError = null;
-                var openGeneration = ++_aiChatOpenGeneration;
-
-                // 立即进入 AI 页面骨架（300ms 内）
-                var aiChatPanel = document.getElementById('panelAiChat');
-                if (aiChatPanel) {
-                    // 清理旧状态
-                    if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
-                    if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
-                    aiChatPanel.classList.remove('hidden');
-                    aiChatPanel.style.display = '';
-                    aiChatPanel.innerHTML = getAiChatSkeleton();
-                    aiChatPanel.classList.add('active');
-                    aiChatPanel.setAttribute('aria-hidden', 'false');
-                    aiChatPanel.setAttribute('aria-busy', 'true');
-                }
-
-                // 显示 loading 在 AI 页面内部
-                var loadingEl = aiChatPanel ? aiChatPanel.querySelector('.ai-chat-loading') : null;
-                if (loadingEl) loadingEl.textContent = '正在加载 AI 模块...';
-
-                // 初始化分阶段错误状态
-                var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
-
-                _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
-                    if (openGeneration !== _aiChatOpenGeneration) return;
-                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
-                    return ensureUserToken().then(function(token) {
-                        if (openGeneration !== _aiChatOpenGeneration) return;
-                        if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
-                        if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
-                        if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
-                            if (openGeneration !== _aiChatOpenGeneration) return;
-                            window.__xtjOpenAiChat();
-                            if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
-                            return;
-                        }
-                        errorState.config = true;
-                        throw new Error('ai_module_not_ready');
-                    });
-                }).catch(function(err) {
-                    if (openGeneration !== _aiChatOpenGeneration) return;
-                    _aiChatLastError = err;
-                    _aiChatOpenInProgress = false;
-                    if (aiChatPanel) {
-                        aiChatPanel.removeAttribute('aria-busy');
-                        renderAiChatErrorState(aiChatPanel, errorState, err);
-                    }
-                    console.error('[XTJ] ai-agent lazy load failed:', err);
-                }).finally(function() {
-                    if (openGeneration === _aiChatOpenGeneration) {
-                        _aiChatOpenInProgress = false;
-                        if (loadingEl) loadingEl.textContent = '';
-                    }
-                });
-            };
-            lazyAiChatLauncher._realOpen = window.__xtjOpenAiChat;
-        }
-        lazyAiChatLauncher();
-
-        function getAiChatSkeleton() {
-            return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
-                + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
-                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
-                + '</div>';
-        }
-
-        function renderAiChatErrorState(panel, errorState, err) {
-            var errorEl = panel.querySelector('.ai-chat-error');
-            var loadingEl = panel.querySelector('.ai-chat-loading');
-            if (loadingEl) loadingEl.style.display = 'none';
-            if (!errorEl) return;
-            errorEl.style.display = '';
-
-            var msgs = [];
-            var errMsg = err && err.message || '';
-
-            if (errorState.resource) {
-                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
-                    + '<strong>AI 资源加载失败</strong><br><small style="color:var(--text-secondary);">请检查网络连接后重试</small><br>'
-                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试加载</button>'
-                    + '</div>');
-            }
-            if (errorState.auth) {
-                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
-                    + '<strong>登录已过期</strong><br><small style="color:var(--text-secondary);">请重新登录后继续使用 AI</small><br>'
-                    + '<button onclick="window.openAuthModal(\'login\')" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重新登录</button>'
-                    + '</div>');
-            }
-            if (errorState.config) {
-                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
-                    + '<strong>AI 配置加载失败</strong><br><small style="color:var(--text-secondary);">服务器暂不可用</small><br>'
-                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
-                    + '</div>');
-            }
-            if (msgs.length === 0) {
-                msgs.push('<div class="ai-chat-error-item" style="padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
-                    + '<strong>加载失败</strong><br><small style="color:var(--text-secondary);">' + escapeHtml(errMsg || '未知错误') + '</small><br>'
-                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
-                    + '</div>');
-            }
-            errorEl.innerHTML = msgs.join('');
-        }
-
-        // 空闲时预加载 AI 模块（不阻塞消息列表首屏渲染）
-        var _aiPreloadScheduled = false;
-        function scheduleAiPreload() {
-            if (_aiPreloadScheduled) return;
-            _aiPreloadScheduled = true;
-            var preloadFn = function() {
-                try {
-                    ensureAiAgentLoaded().then(function() {
-                        console.log('[XTJ] AI module preloaded');
-                    }).catch(function(err) {
-                        console.warn('[XTJ] AI module preload failed:', err && err.message);
-                    });
-                } catch(e) {}
-            };
-            if (typeof requestIdleCallback === 'function') {
-                requestIdleCallback(preloadFn, { timeout: 2000 });
-            } else {
-                setTimeout(preloadFn, 2000);
-            }
-        }
-        // 在消息页面加载后触发预加载
-        window.__xtjScheduleAiPreload = scheduleAiPreload;
-
-        function lazyPhotoUploadLauncher() {
-            ensurePhotoWallUploadLoaded().then(function() {
-                if (typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) {
-                    window.xtjUploadBtn();
-                }
-            }).catch(function(err) {
-                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
-                console.error('[XTJ] photo upload lazy load failed:', err);
-            });
-        }
-        function lazyPhotoWallSubmitLauncher() {
-            ensurePhotoWallUploadLoaded().then(function() {
-                if (typeof window.triggerPhotoWallUpload === 'function' && window.triggerPhotoWallUpload !== lazyPhotoWallSubmitLauncher) {
-                    window.triggerPhotoWallUpload();
-                }
-            }).catch(function(err) {
-                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
-                console.error('[XTJ] photo upload submit lazy load failed:', err);
-            });
-        }
-        window.xtjUploadBtn = lazyPhotoUploadLauncher;
-        window.triggerPhotoUpload = lazyPhotoUploadLauncher;
-        window.triggerPhotoWallUpload = lazyPhotoWallSubmitLauncher;
-
-        function lazyOpenPhotoPreview() {
-            var args = Array.prototype.slice.call(arguments);
-            return ensurePhotoWallPreviewLoaded().then(function() {
-                if (typeof window.openPhotoPreview === 'function' && window.openPhotoPreview !== lazyOpenPhotoPreview) {
-                    return window.openPhotoPreview.apply(window, args);
-                }
-            }).catch(function(err) {
-                console.error('[XTJ] photo preview lazy load failed:', err);
-            });
-        }
-        if (typeof window.openPhotoPreview !== 'function') {
-            window.openPhotoPreview = lazyOpenPhotoPreview;
-        }
-
-        function parsePostContent(post) {
-            var raw = post && typeof post.content === "string" ? post.content : "";
-            if (!raw) return { text: "", meta: {} };
-            try {
-                var parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === "object" && parsed.__type === POST_METADATA_MARKER) {
-                    return {
-                        text: typeof parsed.text === "string" ? parsed.text : "",
-                        meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : {}
-                    };
-                }
-            } catch (e) {}
-            return { text: raw, meta: {} };
-        }
-        window.parsePostContent = parsePostContent;
-
-        function buildPostContentPayload(text, meta) {
-            return JSON.stringify({
-                __type: POST_METADATA_MARKER,
-                text: text || "",
-                meta: Object.assign({}, POST_META_DEFAULTS, meta || {})
-            });
-        }
-
-        function normalizePost(post) {
-            var parsed = parsePostContent(post || {});
-            var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
-            var realVisibility = post && typeof post.visibility === "string" && post.visibility ? post.visibility : "";
-            var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
-            var hasRealPinnedAt = !!(post && post.pinned_at);
-            var hasRealUpdatedAt = !!(post && post.updated_at);
-            var metaLocationName = meta.location_name || "";
-            var metaLocationProvince = meta.location_province || "";
-            var metaLocationCity = meta.location_city || "";
-            var metaLocationDistrict = meta.location_district || "";
-            var metaLocationLevel = meta.location_level || "";
-            return Object.assign({}, post, {
-                content: parsed.text || "",
-                visibility: realVisibility || meta.visibility || "public",
-                is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
-                pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
-                updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
-                location_name: post && post.location_name ? post.location_name : metaLocationName,
-                location_province: post && post.location_province ? post.location_province : metaLocationProvince,
-                location_city: post && post.location_city ? post.location_city : metaLocationCity,
-                location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
-                location_level: post && post.location_level ? post.location_level : metaLocationLevel,
-                _contentMeta: meta
-            });
-        }
-        window.normalizePost = normalizePost;
-
-        function getPostDisplayContent(post) {
-            return normalizePost(post).content || "";
-        }
-        window.getPostDisplayContent = getPostDisplayContent;
-
-        function canViewPost(post) {
-            var p = normalizePost(post);
-            if (p.visibility === "private") {
-                return !!window.currentUser && p.user_name === window.currentUser;
-            }
-            return true;
-        }
-        window.canViewPost = canViewPost;
-
-        function canEditPost(post) {
-            var p = normalizePost(post);
-            return !!currentUser && (p.user_name === currentUser || isAdmin());
-        }
-        window.canEditPost = canEditPost;
-
-        function canPinPost(post) {
-            if (!currentUser) return false;
-            var p = normalizePost(post);
-            return isAdmin() || (!!p && p.user_name === currentUser);
-        }
-        window.canPinPost = canPinPost;
-
-        // Authors may pin their own post; the server enforces one pinned post per author.
-        async function canPinThisPost(post) {
-            if (isAdmin()) return true;
-            var p = normalizePost(post);
-            if (!p || p.user_name !== currentUser) return false;
-            try {
-                if (!sb) return false;
-                var { data: pinnedPosts } = await sb.from('posts')
-                    .select('id')
-                    .eq('user_name', currentUser)
-                    .eq('is_pinned', true);
-                return !pinnedPosts || pinnedPosts.length < 1;
-            } catch(e) { return false; }
-        }
-
-        function canDeletePost(post) {
-            var p = normalizePost(post);
-            if (!currentUser) return false;
-            if (isAdmin()) return true;
-            if (p.user_name && p.user_name === currentUser) return true;
-            return !p.user_name && !!deviceId && !!p.actor_key && p.actor_key === deviceId;
-        }
-        window.canDeletePost = canDeletePost;
-        window.isAdmin = isAdmin;
-
-        function normalizePosts(posts) {
-            return (posts || []).map(normalizePost);
-        }
-
-        function sortPosts(posts) {
-            return posts.slice().sort(function(a, b) {
-                var pa = normalizePost(a);
-                var pb = normalizePost(b);
-                if (!!pa.is_pinned !== !!pb.is_pinned) return pa.is_pinned ? -1 : 1;
-                if (pa.is_pinned && pb.is_pinned) return new Date(pb.pinned_at || pb.created_at || 0) - new Date(pa.pinned_at || pa.created_at || 0);
-                return new Date(pb.created_at || 0) - new Date(pa.created_at || 0);
-            });
-        }
-        window.sortPosts = sortPosts;
-
-        function toLocalDateKey(dateLike) {
-            if (!dateLike) return "";
-            var d = new Date(dateLike);
-            if (isNaN(d.getTime())) return "";
-            var y = d.getFullYear();
-            var m = String(d.getMonth() + 1).padStart(2, "0");
-            var day = String(d.getDate()).padStart(2, "0");
-            return y + "-" + m + "-" + day;
-        }
-
-        function isPostInDateRange(post, startDate, endDate) {
-            var key = toLocalDateKey(post && post.created_at);
-            if (!key) return false;
-            if (startDate && key < startDate) return false;
-            if (endDate && key > endDate) return false;
-            return true;
-        }
-        window.isPostInDateRange = isPostInDateRange;
-
-        function getPostSearchState() {
-            return Object.assign({}, postSearchState);
-        }
-        window.getPostSearchState = getPostSearchState;
-
-        function getFilteredPosts(posts, comments) {
-            var state = getPostSearchState();
-            var keyword = (state.keyword || "").trim().toLowerCase();
-            var userFilter = (state.user || "").trim().toLowerCase();
-            var visibilityFilter = state.visibility || "all";
-            var onlyMine = !!state.onlyMine;
-            var matchedCommentPostIds = new Set();
-
-            (comments || []).forEach(function(c) {
-                if (!c) return;
-                var commentContent = String(c.content || "").toLowerCase();
-                var commentUser = String(c.user_name || "").toLowerCase();
-                if (keyword && (commentContent.indexOf(keyword) >= 0 || commentUser.indexOf(keyword) >= 0)) {
-                    matchedCommentPostIds.add(String(c.post_id));
-                }
-            });
-
-            return sortPosts(normalizePosts(posts).filter(function(post) {
-                if (!post) return false;
-                if (typeof isSystemPost === 'function' && isSystemPost(post)) return false;
-                if (!post.user_name) return false;
-                if (!canViewPost(post)) return false;
-                if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
-                if (visibilityFilter !== "all" && post.visibility !== visibilityFilter) return false;
-                if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
-                if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
-                if (!keyword) return true;
-                var postContent = String(post.content || "").toLowerCase();
-                var postUser = String(post.user_name || "").toLowerCase();
-                var dateText = toLocalDateKey(post.created_at);
-                return postContent.indexOf(keyword) >= 0 ||
-                    postUser.indexOf(keyword) >= 0 ||
-                    dateText.indexOf(keyword) >= 0 ||
-                    matchedCommentPostIds.has(String(post.id));
-            }));
-        }
-        window.getFilteredPosts = getFilteredPosts;
-
-        function renderFilterSummary(count) {
-            var el = document.getElementById("postFilterSummary");
-            if (!el) return;
-            var state = getPostSearchState();
-            var activeCount = 0;
-            if (state.keyword) activeCount++;
-            if (state.user) activeCount++;
-            if (state.startDate || state.endDate) activeCount++;
-            if (state.onlyMine) activeCount++;
-            if (state.visibility && state.visibility !== "all") activeCount++;
-            var badge = document.getElementById("filterActiveBadge");
-            if (badge) {
-                badge.textContent = activeCount;
-                badge.style.display = activeCount > 0 ? "inline-flex" : "none";
-            }
-            var clearBtn = document.getElementById("filterClearBtn");
-            if (clearBtn) clearBtn.style.display = activeCount > 0 ? "" : "none";
-            var hasFilters = activeCount > 0;
-            if (!hasFilters) {
-                el.textContent = "全部帖子";
-            } else if (!count) {
-                el.textContent = "没有找到相关帖子";
-            } else {
-                el.textContent = "找到 " + count + " 条结果";
-            }
-        }
-        window.renderFilterSummary = renderFilterSummary;
-
-        // ========== 应用状态（向后兼容） ==========
-        window.appState = {
-            get currentUser() { return window.currentUser; },
-            set currentUser(v) { window.currentUser = v; },
-            get photoWallData() { return window.photoWallData; },
-            set photoWallData(v) { window.photoWallData = v; },
-            get deviceId() { return window.deviceId; },
-            _listeners: {}
-        };
-        function safeText(str) {
-            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-        }
-        window.safeText = safeText;
-
-        function showToast(message, type) {
-            const container = document.getElementById('toastContainer');
-            if (!container) { console.warn("showToast: toastContainer not found"); return; }
-            const toast = document.createElement('div');
-            toast.className = 'toast' + (type === 'error' ? ' toast-error' : '');
-            if (typeof window.__xtjUiTextRepair === 'function') {
-                try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
-            }
-            toast.textContent = message == null ? '' : String(message);
-            container.appendChild(toast);
-            setTimeout(() => {
-                toast.style.animation = 'toastFade 0.3s ease-out forwards';
-                setTimeout(() => toast.remove(), 300);
-            }, type === 'error' ? 4000 : 2500);
-        }
-        window.showToast = showToast;
-
-        function showConfirm(title, message, confirmText, callback) {
-            var overlay = document.getElementById('ppConfirmOverlay');
-            if (!overlay) return;
-            document.getElementById('ppConfirmTitle').textContent = title || '确认操作';
-            document.getElementById('ppConfirmMsg').textContent = message || '确定要执行此操作吗？';
-            document.getElementById('ppConfirmOkBtn').textContent = confirmText || '确认';
-            window._confirmCallback = callback;
-            if (overlay._closeTimer) {
-                clearTimeout(overlay._closeTimer);
-                overlay._closeTimer = null;
-            }
-            
-            // FLIP Animation: Step 1 - First (记录按钮位置)
-            var origin = window._confirmOrigin;
-            
-            // FLIP Animation: Step 2 - Last (设置最终状态)
-            overlay.classList.remove('closing');
-            overlay.classList.add('active');
-            var okBtn = document.getElementById('ppConfirmOkBtn');
-            okBtn.disabled = false;
-            
-            var dialog = overlay.querySelector('.pp-confirm-dialog');
-            if (dialog) {
-                dialog.style.transition = 'none';
-                dialog.style.transform = '';
-                dialog.style.opacity = '1';
-            }
-            
-            void dialog?.offsetHeight;
-            
-            // FLIP Animation: Step 3 - Invert (计算反转偏移)
-            if (origin && dialog) {
-                var dialogRect = dialog.getBoundingClientRect();
-                var dx = origin.btnCx - dialogRect.left - dialogRect.width / 2;
-                var dy = origin.btnCy - dialogRect.top - dialogRect.height / 2;
-                
-                var btnSize = Math.sqrt(origin.btnWidth * origin.btnWidth + origin.btnHeight * origin.btnHeight) || 40;
-                var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
-                var scale = btnSize / dialogSize * 0.6;
-                
-                dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
-                dialog.style.transformOrigin = 'center center';
-                dialog.style.opacity = '0';
-                
-                overlay._ppDeleteOrigin = { 
-                    dx: dx, 
-                    dy: dy, 
-                    scale: scale,
-                    btnCx: origin.btnCx,
-                    btnCy: origin.btnCy
-                };
-            }
-            
-            void dialog?.offsetHeight;
-            
-            // FLIP Animation: Step 4 - Play (播放动画)
-            if (origin && dialog) {
-                dialog.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
-                dialog.style.transform = 'translate(0, 0) scale(1)';
-                dialog.style.opacity = '1';
-            }
-            
-            window._confirmOrigin = null;
-        }
-        window.showConfirm = showConfirm;
-
-        window.execConfirm = function() {
-            var overlay = document.getElementById('ppConfirmOverlay');
-            if (!overlay) return;
-            if (overlay.classList.contains('closing')) return;
-            var cb = window._confirmCallback;
-            
-            if (overlay._ppDeleteOrigin) {
-                var dialog = overlay.querySelector('.pp-confirm-dialog');
-                if (dialog) {
-                    var o = overlay._ppDeleteOrigin;
-                    var okBtn = document.getElementById('ppConfirmOkBtn');
-                    if (okBtn) okBtn.disabled = true;
-                    overlay.classList.add('closing');
-                    
-                    // FLIP Animation for Close: 获取删除按钮前位置
-                    var dialogRect = dialog.getBoundingClientRect();
-                    
-                    // 获取删除按钮前位置
-                    var deleteBtn = document.getElementById('ppDeleteBtn');
-                    var btnRect = deleteBtn ? deleteBtn.getBoundingClientRect() : null;
-                    
-                    var targetDx = o.dx;
-                    var targetDy = o.dy;
-                    var targetScale = o.scale || 0.3;
-                    
-                    if (btnRect) {
-                        // 使用按钮前位置，计算变换
-                        targetDx = btnRect.left + btnRect.width / 2 - dialogRect.left - dialogRect.width / 2;
-                        targetDy = btnRect.top + btnRect.height / 2 - dialogRect.top - dialogRect.height / 2;
-                        
-                        var btnSize = Math.sqrt(btnRect.width * btnRect.width + btnRect.height * btnRect.height);
-                        var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
-                        targetScale = btnSize / dialogSize * 0.6;
-                    }
-                    
-                    // Step 3 - Invert: 计算飞回偏移
-                    dialog.style.transition = 'none';
-                    dialog.style.transform = 'translate(0, 0) scale(1)';
-                    dialog.style.opacity = '1';
-                    void dialog.offsetHeight;
-                    
-                    // Step 4 - Play: 播放飞回动画
-                    dialog.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
-                    dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
-                    dialog.style.opacity = '0';
-                    
-                    overlay._closeTimer = setTimeout(function() {
-                        dialog.style.transform = '';
-                        dialog.style.opacity = '';
-                        dialog.style.transition = '';
-                        dialog.style.transformOrigin = '';
-                        overlay._ppDeleteOrigin = null;
-                        overlay._closeTimer = null;
-                        overlay.classList.remove('closing');
-                        overlay.classList.remove('active');
-                        window._confirmCallback = null;
-                        if (typeof cb === 'function') {
-                            cb();
-                        }
-                    }, 320);
-                    return;
-                }
-            }
-            
-            overlay.classList.remove('active');
-            overlay.classList.add('closing');
-            var okBtn = document.getElementById('ppConfirmOkBtn');
-            if (okBtn) okBtn.disabled = true;
-            overlay._closeTimer = setTimeout(function() {
-                overlay.classList.remove('closing');
-                overlay.classList.remove('active');
-                window._confirmCallback = null;
-                overlay._closeTimer = null;
-                if (typeof cb === 'function') {
-                    cb();
-                }
-            }, 280);
-        };
-
-        window.closeConfirm = function() {
-            var overlay = document.getElementById('ppConfirmOverlay');
-            if (!overlay) return;
-            if (overlay.classList.contains('closing')) return;
-            
-            if (overlay._ppDeleteOrigin) {
-                var dialog = overlay.querySelector('.pp-confirm-dialog');
-                if (dialog) {
-                    var o = overlay._ppDeleteOrigin;
-                    overlay.classList.add('closing');
-                    dialog.style.transition = 'none';
-                    dialog.style.transform = 'scale(1) translateY(0)';
-                    dialog.style.opacity = '1';
-                    void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
-                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(' + (o.scale || 0.18) + ')';
-                    dialog.style.opacity = '0';
-                    overlay._closeTimer = setTimeout(function() {
-                        overlay._ppDeleteOrigin = null;
-                        overlay._closeTimer = null;
-                        overlay.classList.remove('closing');
-                        overlay.classList.remove('active');
-                        window._confirmCallback = null;
-                        var okBtn = document.getElementById('ppConfirmOkBtn');
-                        if (okBtn) okBtn.disabled = false;
-                    }, 380);
-                    return;
-                }
-            }
-            
-            overlay.classList.remove('active');
-            overlay.classList.add('closing');
-            overlay._closeTimer = setTimeout(function() {
-                overlay.classList.remove('closing');
-                overlay.classList.remove('active');
-                window._confirmCallback = null;
-                var okBtn = document.getElementById('ppConfirmOkBtn');
-                if (okBtn) okBtn.disabled = false;
-                overlay._closeTimer = null;
-            }, 300);
+// console.log('[XTJ] core.js loaded, starting...');
+
+            var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
+                API_BASE: window.location.origin,
+                SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
+                SUPABASE_ANON_KEY: "eyJhbG...yDDA"
+            };
+            if (!window.XTJ_CONFIG) {
+                console.warn('[XTJ] config.js 未加载，使用默认配置');
+            }
+            window.XTJ_CONFIG = XTJ_RUNTIME_CONFIG;
+            // 小猫 AI 统一身份配置
+            window.XTJ_AI_IDENTITY = {
+              name: '小猫',
+              badge: 'AI',
+              description: '徐旭泽的犀利毒舌 AI 分身',
+              avatar: 'cat_ai',
+              username: 'cat_ai'
+            };
+            const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
+            const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
+            var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
+            var sb;
+            function initSupabaseClient() {
+                if (sb) return true;
+                if (!window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                try {
+                    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                    window.sb = sb;
+                    return true;
+                } catch (e) {
+                    console.error('[XTJ] Supabase client initialization failed:', e && e.message);
+                    return false;
+                }
+            }
+            // ★ 修复 M6：检查配置完整性，避免静默失败。
+            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志——
+            // 本地开发/静态托管时降级继续（REST 主流程可用），不硬失败；其余格式错误 fail-fast
+            var _anonKey = String(SUPABASE_ANON_KEY || '');
+            var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
+              /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
+              || /^sb_publishable_/.test(_anonKey)
+              || _anonKey.indexOf('...') > -1
+            );
+            if (!_sbConfigOk) {
+                console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
+                sb = null;
+                document.addEventListener('DOMContentLoaded', function () {
+                    var _feedEl = document.getElementById('feed');
+                    if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
+                });
+            } else if (typeof window.supabase !== 'undefined') {
+                initSupabaseClient();
+            } else {
+                console.error('Supabase SDK not loaded');
+                window.addEventListener('xtj:supabase-ready', function () {
+                    if (!initSupabaseClient()) return;
+                    if (typeof window.initialLoad === 'function') {
+                        window.initialLoad(true).catch(function (e) {
+                            console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
+                        });
+                    }
+                }, { once: true });
+                document.addEventListener('DOMContentLoaded', function() {
+                    var feedEl = document.getElementById('feed');
+                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
+                });
+            }
+            window.sb = sb;
+
+
+(function() {
+    if (window.XTJSecondaryPageState && window.restoreMainNavigationState) return;
+
+    // 保存原始 overflow 和 touchAction，用于恢复
+    var _origDocOverflow = null;
+    var _origBodyOverflow = null;
+    var _origBodyTouchAction = null;
+
+    function saveOriginalStyles() {
+        if (_origDocOverflow === null) {
+            _origDocOverflow = document.documentElement.style.overflow || '';
+            _origBodyOverflow = document.body.style.overflow || '';
+            _origBodyTouchAction = document.body.style.touchAction || '';
+        }
+    }
+
+    function restoreOriginalStyles() {
+        if (_origDocOverflow !== null) {
+            document.documentElement.style.overflow = _origDocOverflow;
+            document.body.style.overflow = _origBodyOverflow;
+            document.body.style.touchAction = _origBodyTouchAction;
+            _origDocOverflow = null;
+            _origBodyOverflow = null;
+            _origBodyTouchAction = null;
+        } else {
+            // A bfcache restore or legacy secondary page can leave inline
+            // locks behind without going through saveOriginalStyles().
+            document.documentElement.style.overflow = '';
+            document.body.style.overflow = '';
+            document.body.style.touchAction = '';
+        }
+    }
+
+    function isVisiblePanel(id, activeClass) {
+        var panel = document.getElementById(id);
+        if (!panel) return false;
+        if (panel.hidden || panel.classList.contains('hidden')) return false;
+        if (panel.getAttribute('aria-hidden') === 'true') return false;
+        if (activeClass && !panel.classList.contains(activeClass)) return false;
+        return true;
+    }
+
+    function hasVisibleSecondaryPage() {
+        // 通用检查：任何 dock-panel 非默认的可见面板
+        return isVisiblePanel('panelDeepThink', 'active');
+    }
+
+    function clearStaleDockDisplay() {
+        var dockBar = document.getElementById('dockBar') || document.querySelector('.dock-bar');
+        if (dockBar && dockBar.style && dockBar.style.display === 'none') {
+            dockBar.style.display = '';
+        }
+    }
+
+    // Owner 契约：同一 owner 真正幂等，open 多次只需一次 close
+    // 每个 owner 记录 { handle: releaseFn, domRef: WeakRef|null }
+    var _openOwners = {};
+    var _ownerSerial = 0;
+
+    function applySecondaryPageState(locked) {
+        try {
+            document.body.classList.toggle('secondary-page-open', !!locked);
+            if (locked) {
+                saveOriginalStyles();
+                document.documentElement.style.overflow = 'hidden';
+                document.body.style.overflow = 'hidden';
+                document.body.style.touchAction = 'none';
+            } else {
+                restoreOriginalStyles();
+                document.body.classList.remove('secondary-page-open');
+                clearStaleDockDisplay();
+            }
+        } catch (e) {}
+    }
+
+    function getAllOpenOwners() {
+        var owners = [];
+        for (var k in _openOwners) {
+            if (Object.prototype.hasOwnProperty.call(_openOwners, k) && _openOwners[k]) {
+                owners.push(k);
+            }
+        }
+        return owners;
+    }
+
+    // 清理 stale owner：DOM 不存在、已断开或隐藏时移除
+    function cleanStaleOwners() {
+        var changed = false;
+        for (var k in _openOwners) {
+            if (!Object.prototype.hasOwnProperty.call(_openOwners, k)) continue;
+            var entry = _openOwners[k];
+            if (!entry) { delete _openOwners[k]; changed = true; continue; }
+            // 检查 owner 关联的 DOM 是否仍然连接
+            if (entry.domRef) {
+                var el = entry.domRef.deref();
+                if (!el || !el.isConnected || el.hidden ||
+                    el.classList.contains('hidden') ||
+                    el.getAttribute('aria-hidden') === 'true') {
+                    delete _openOwners[k];
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    function reconcile() {
+        cleanStaleOwners();
+        var owners = getAllOpenOwners();
+        if (owners.length > 0) {
+            applySecondaryPageState(true);
+            return true;
+        }
+        applySecondaryPageState(false);
+        return false;
+    }
+
+    window.XTJSecondaryPageState = {
+        // open 真正幂等：同一 owner 已 open 时不重复计数
+        // 返回 release handle，调用后等同于 close(ownerName)
+        open: function(ownerName, domElement) {
+            if (!ownerName) return function(){};
+            ownerName = String(ownerName);
+            // 已 open 的 owner 不重复计数
+            if (_openOwners[ownerName]) {
+                // 返回已存在的 release handle
+                return _openOwners[ownerName].handle;
+            }
+            var released = false;
+            var handle = function() {
+                if (released) return;
+                released = true;
+                if (_openOwners[ownerName]) delete _openOwners[ownerName];
+                reconcile();
+            };
+            _openOwners[ownerName] = {
+                handle: handle,
+                domRef: (domElement && typeof WeakRef !== 'undefined') ? new WeakRef(domElement) : null,
+                serial: ++_ownerSerial
+            };
+            reconcile();
+            return handle;
+        },
+        close: function(ownerName) {
+            if (!ownerName) return;
+            ownerName = String(ownerName);
+            if (_openOwners[ownerName]) delete _openOwners[ownerName];
+            reconcile();
+        },
+        reset: function() {
+            _openOwners = {};
+            reconcile();
+        },
+        isActive: function(ownerName) {
+            if (!ownerName) return false;
+            return !!_openOwners[String(ownerName)];
+        },
+        hasVisibleSecondaryPage: hasVisibleSecondaryPage,
+        getOpenOwners: getAllOpenOwners
+    };
+
+    window.restoreMainNavigationState = function() {
+        return reconcile();
+    };
+
+    function scheduleRestore() {
+        setTimeout(function() {
+            try { window.restoreMainNavigationState(); } catch (e) {}
+        }, 0);
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
+    else scheduleRestore();
+    // pageshow 恢复逻辑：browser back/forward 时重新检测
+    window.addEventListener('pageshow', function(e) {
+        // 仅当从 bfcache 恢复时才需要重新 reconcile
+        if (e.persisted) scheduleRestore();
+    });
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') scheduleRestore();
+    });
+    // 路由切换时重新对账（popstate 覆盖浏览器后退/前进）
+    window.addEventListener('popstate', function() { scheduleRestore(); });
+})();
+
+window.safeLocalStorageGetJSON = function(key, fallback) {
+    try {
+        var v = window.safeStorage.get(key);
+        if (v === null) return fallback;
+        return JSON.parse(v);
+    } catch(e) {
+        window.safeStorage.remove(key);
+        return fallback;
+    }
+};
+window.safeLocalStorageGet = function(key, fallback) {
+    try {
+        var v = window.safeStorage.get(key);
+        return v !== null ? v : fallback;
+    } catch(e) {
+        return fallback;
+    }
+};
+window.safeLocalStorageSet = function(key, value) {
+    window.safeStorage.set(key, String(value));
+};
+
+function xtjLoadingEscapeHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function buildXtjLoadingHtmlFallback(title, subtitle, type) {
+    var safeTitle = xtjLoadingEscapeHtml(title || '加载中..');
+    var safeSubtitle = subtitle ? xtjLoadingEscapeHtml(subtitle) : '';
+    if (type === 'feed') {
+        return '<div class="xtj-loading-skeleton">' +
+               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
+               '<div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div>' +
+               '</div>';
+    }
+    return '<div class="xtj-magic-loading loading" style="display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;text-align:center;color:var(--text-muted);">'
+        + '<div><div style="font-size:28px;line-height:1;margin-bottom:10px;">!</div>'
+        + '<div>' + safeTitle + '</div>'
+        + (safeSubtitle ? '<div style="font-size:12px;margin-top:6px;opacity:.7;">' + safeSubtitle + '</div>' : '')
+        + '</div></div>';
+}
+function getXtjLoadingHtml(title, subtitle, type) {
+    var loader = window.xtjMagicLoadingHtml;
+    if (typeof loader === 'function' && loader !== window.__xtjFallbackLoadingHtml) {
+        try {
+            return loader(title, subtitle, type);
+        } catch (_) {}
+    }
+    return buildXtjLoadingHtmlFallback(title, subtitle, type);
+}
+window.buildXtjLoadingHtmlFallback = buildXtjLoadingHtmlFallback;
+window.getXtjLoadingHtml = getXtjLoadingHtml;
+if (typeof window.xtjMagicLoadingHtml !== 'function') {
+    window.__xtjFallbackLoadingHtml = function(title, subtitle, type) {
+        return buildXtjLoadingHtmlFallback(title, subtitle, type);
+    };
+    window.xtjMagicLoadingHtml = window.__xtjFallbackLoadingHtml;
+}
+
+const ADMIN_NAME = "xxz";
+            const AVATAR_CACHE_KEY = "xtj_avatars_v2";
+            const AVATAR_CACHE_VERSION = 2;
+            const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小时 — localStorage 中 has_avatar 的有效期
+            // P7: 显式四态头像缓存的内存有效期（has_avatar 重查间隔、confirmed_none/fetch_failed 的 TTL）
+            const AVATAR_FETCH_TTL_MS = 5 * 60 * 1000; // 5 分钟
+            const USER_SESSION_KEY = "xtj_user_session";
+            const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+            const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+            var USER_TOKEN_KEY = 'xtj_user_token';
+            var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
+            var memoryUserToken = '';
+            var memoryUserTokenIssuedAt = 0;
+            // 共享 refresh promise，避免多个 API 同时刷新
+            var _refreshPromise = null;
+            var _protectedAuthFailureHandled = false;
+            var _lastRefreshAuthResult = { ok: false, reason: 'not_attempted', status: 0 };
+            // ★ 刷新时服务端返回的规范 user_name
+            var _lastRefreshUser = '';
+            // 持久化登录标记（用户选择"保持登录"）
+            var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
+            // 会话写入时间戳。声明上移，保证 clearUserToken（TDZ 安全）
+            // 及其后续所有引用均在此 let 声明之后。
+            let lastUserSessionWriteAt = 0;
+
+            function getUserToken() {
+                // 仅从内存读取（会话内缓存；持久化令牌机制已移除）
+                var token = memoryUserToken || '';
+                // 检查是否过期
+                if (token) {
+                    var ts = memoryUserTokenIssuedAt;
+                    if (ts && (Date.now() - ts > 15 * 60 * 1000)) {
+                        // access token 可能已过期，尝试刷新
+                        memoryUserToken = '';
+                        memoryUserTokenIssuedAt = 0;
+                        token = '';
+                    }
+                }
+                return token;
+            }
+
+            function setUserToken(token) {
+                if (token) {
+                    // ★ 修复：拿到有效 token 说明会话已就绪，清除 refresh 冷却（登录后立即可刷新）
+                    try { _refreshCooldownUntil = 0; } catch (e) {}
+                    memoryUserToken = String(token);
+                    memoryUserTokenIssuedAt = Date.now();
+                    try {
+                        if (typeof window.__xtjRememberBehaviorToken === 'function') {
+                            window.__xtjRememberBehaviorToken(token);
+                        } else {
+                            // H-38: 跨脚本只通过 window 共享 token，避免依赖另一个文件的闭包作用域。
+                            window.behaviorLastKnownToken = String(token);
+                        }
+                    } catch(e) {}
+                    // 通知其他模块用户认证已就绪（用于自动定位等）
+                    try {
+                        window.__xtjAuthReady = true;
+                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { token: String(token) } }));
+                    } catch(e) {}
+                }
+            }
+
+            function setPersistentAuth(enabled) {
+                try {
+                    if (enabled) {
+                        window.safeStorage.set(PERSISTENT_AUTH_KEY, '1');
+                    } else {
+                        window.safeStorage.remove(PERSISTENT_AUTH_KEY);
+                    }
+                } catch(e) {}
+            }
+
+            function isPersistentAuth() {
+                try {
+                    return window.safeStorage.get(PERSISTENT_AUTH_KEY) === '1';
+                } catch(e) { return false; }
+            }
+
+            function clearUserToken() {
+                memoryUserToken = '';
+                memoryUserTokenIssuedAt = 0;
+                lastUserSessionWriteAt = 0;
+                try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
+                try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
+                try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
+                try { window.safeStorage.remove(USER_TOKEN_TS_KEY); } catch(e) {}
+                try { window.safeStorage.remove(PERSISTENT_AUTH_KEY); } catch(e) {}
+            }
+
+            // Clear all browser-side authentication state in one place. Password
+            // hashes are never retained as a session fallback.
+            function clearAllAuthState(options) {
+                options = options || {};
+                var revokeRemote = options.revokeRemote !== false;
+                var shouldBroadcast = options.broadcast !== false;
+                var reason = options.reason || 'manual';
+                var tokenForRevocation = getUserToken();
+                clearUserToken();
+                lastUserSessionWriteAt = 0;
+                try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
+                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
+                try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
+                // ★ 清理 AI 聊天缓存
+                try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
+                // ★ 清理个人资料缓存
+                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
+                // ★ 清理头像缓存
+                try { avatarCache = {}; } catch(e) {}
+                try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; } catch(e) {}
+                // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
+                try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_feed_cache_v7'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_feed_cache_v7'); } catch(e) {}
+                // ★ 清理 AI 相关的异步请求和 pending 状态
+                try {
+                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
+                } catch(e) {}
+                try {
+                    // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
+                    // 统一清理 timer / AbortController / status DOM / cache 并设置迟到回调防护
+                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
+                } catch(e) {}
+                // Explicit logout revokes the refresh cookie. An expired session
+                // must not make another request just to report that it expired.
+                if (revokeRemote) try {
+                    var logoutHeaders = {};
+                    if (tokenForRevocation) logoutHeaders.Authorization = 'Bearer ' + tokenForRevocation;
+                    fetch(API_BASE + '/api/user/logout', {
+                        method: 'POST', credentials: 'include', headers: logoutHeaders
+                    }).catch(function(){});
+                } catch(e) {}
+
+                // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
+                if (shouldBroadcast) {
+                    try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout(reason); } catch(e) {}
+                }
+            }
+            window.clearAllAuthState = clearAllAuthState;
+
+            function handleProtectedAuthFailure() {
+                if (_protectedAuthFailureHandled) return;
+                _protectedAuthFailureHandled = true;
+                clearAllAuthState({ revokeRemote: false });
+                try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
+                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                // ★ 30秒后重置，允许用户关闭弹窗后再次触发
+                setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
+            }
+            window.handleProtectedAuthFailure = handleProtectedAuthFailure;
+
+            async function ensureUserToken() {
+                var existingToken = getUserToken();
+                if (existingToken) return existingToken;
+                // 尝试用 refresh token 刷新
+                var result = await refreshUserTokenViaCookie();
+                return (result && result.token) || '';
+            }
+
+            // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
+            var _refreshPromise = null;
+            // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
+            // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
+            var _refreshCooldownUntil = 0;
+            async function refreshUserTokenViaCookie() {
+                if (_refreshPromise) return _refreshPromise;
+                if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
+                    return { token: '', user_name: '' };
+                }
+                _refreshPromise = (async function() {
+                    try {
+                        // VPN/代理下无超时的 refresh 会卡住 ensureUserToken → feed 永久 skeleton
+                        var refreshFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                        var res = await refreshFetch(API_BASE + '/api/user/refresh', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' }
+                        }, 10000);
+                        if (res.ok) {
+                            var data = await res.json().catch(function(){ return {}; });
+                            if (data && data.token) {
+                                setUserToken(data.token);
+                                // ★ 使用服务端返回的规范 user_name
+                                var serverUserName = (data.user_name || '').trim();
+                                if (serverUserName) {
+                                    _lastRefreshUser = serverUserName;
+                                }
+                                _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
+                                return { token: data.token, user_name: serverUserName || '' };
+                            }
+                            _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
+                            return { token: '', user_name: '' };
+                        }
+                        _lastRefreshAuthResult = {
+                            ok: false,
+                            reason: res.status === 401 ? 'expired' : (res.status === 403 ? 'forbidden' : 'unavailable'),
+                            status: res.status
+                        };
+                        // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
+                        if (res.status === 401 || res.status === 403) {
+                            _refreshCooldownUntil = Date.now() + 30000;
+                        }
+                        return { token: '', user_name: '' };
+                    } catch(e) {
+                        _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
+                        return { token: '', user_name: '' };
+                    } finally {
+                        _refreshPromise = null;
+                    }
+                })();
+                return _refreshPromise;
+            }
+
+            /**
+             * 返回统一认证请求头对象。
+             * 使用短期 access token，过期时仅通过 HttpOnly refresh cookie 刷新。
+             */
+            window.getUserAuthHeaders = async function() {
+                // 先尝试从 cookie 刷新
+                var token = await ensureUserToken();
+                if (token) {
+                    return {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    };
+                }
+                return null;
+            }
+            window.getUserToken = getUserToken;
+            window.ensureUserToken = ensureUserToken;
+            window.clearUserToken = clearUserToken;
+
+            /**
+             * 强制刷新 token。
+             * 使用 refresh token cookie 强制刷新。
+             */
+            window.refreshUserToken = async function(force) {
+                try {
+                    if (!force) {
+                        var existing = getUserToken();
+                        if (existing) return existing;
+                    }
+                    // 优先 cookie 刷新
+                    var result = await refreshUserTokenViaCookie();
+                    if (result && result.token) return result.token;
+                } catch (e) {}
+                return '';
+            };
+
+            /**
+             * ★ 新增：统一鉴权状态检查（AI 模块用）
+             *  - 仅当 currentUser + 真实 token 都存在时，返回 ok=true
+             *  - 没有 access token 时，仅尝试 HttpOnly refresh cookie
+             * 返回 { ok, reason, token, user_name }
+             *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
+             */
+            window.ensureProtectedOperationAuth = async function() {
+                // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
+                if (window._xtjAuthState === 'auth_pending') {
+                    var waitStart = Date.now();
+                    while (window._xtjAuthState === 'auth_pending' && (Date.now() - waitStart) < 5000) {
+                        await new Promise(function(r) { setTimeout(r, 150); });
+                    }
+                }
+                try {
+                    var userName = '';
+                    try {
+                        if (typeof currentUser === 'string') userName = currentUser;
+                        else if (currentUser && currentUser.user_name) userName = currentUser.user_name;
+                    } catch (e) { userName = ''; }
+                    if (!userName) {
+                        try { userName = window.safeStorage.get('xtj_user') || ''; } catch (e) {}
+                    }
+                    userName = String(userName || '').trim();
+                    if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
+
+                    var token = await ensureUserToken();
+                    if (token) {
+                        // ★ 验证 token 身份与 UI 身份一致
+                        // 优先使用刷新时服务端返回的规范 user_name
+                        if (_lastRefreshUser && _lastRefreshUser !== userName) {
+                            // Token 对应的是另一个账号，UI 身份过期
+                            _protectedAuthFailureHandled = true;
+                            clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'identity_mismatch' });
+                            try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
+                            try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            return { ok: false, reason: 'identity_mismatch', token: token, user_name: userName };
+                        }
+                        _protectedAuthFailureHandled = false;
+                        try { touchUserSession(false); } catch (e2) {}
+                        return { ok: true, reason: 'ok', token: token, user_name: userName };
+                    }
+                    if (_lastRefreshAuthResult.reason === 'expired') {
+                        handleProtectedAuthFailure();
+                        return { ok: false, reason: 'expired', status: _lastRefreshAuthResult.status, token: '', user_name: userName };
+                    }
+                    return {
+                        ok: false,
+                        reason: _lastRefreshAuthResult.reason || 'unavailable',
+                        status: _lastRefreshAuthResult.status || 0,
+                        token: '',
+                        user_name: userName
+                    };
+                } catch (e) {
+                    return { ok: false, reason: 'exception', status: 0, token: '', user_name: '' };
+                }
+            };
+            window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
+
+            window.xtjProtectedFetch = async function(path, options) {
+                options = options || {};
+                var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
+                var auth = await window.ensureProtectedOperationAuth();
+                if (!auth.ok) {
+                    var authError = new Error(auth.reason === 'expired' ? '登录已失效' : '认证服务暂时不可用');
+                    authError.code = auth.reason || 'auth_unavailable';
+                    authError.status = auth.status || 0;
+                    throw authError;
+                }
+                async function send(token) {
+                    var headers = Object.assign({}, options.headers || {});
+                    var isFormData = options.body instanceof FormData;
+                    if (!isFormData && !headers['Content-Type'] && options.body != null) {
+                        headers['Content-Type'] = 'application/json';
+                    }
+                    headers.Authorization = 'Bearer ' + token;
+                    var fetchOpts = Object.assign({}, options, {
+                        credentials: 'include',
+                        headers: headers
+                    });
+                    delete fetchOpts.timeoutMs;
+                    var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                    return doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                }
+                var response = await send(auth.token);
+                if (response.status === 401) {
+                    var renewed = await window.refreshUserToken(true);
+                    if (renewed) response = await send(renewed);
+                }
+                if (response.status === 401) {
+                    window.handleProtectedAuthFailure();
+                }
+                return response;
+            };
+
+            // Public feed endpoints may use identity when available, but must never force login.
+            window.xtjOptionalAuthFetch = async function(path, options) {
+                options = options || {};
+                var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
+                var knownUser = String(currentUser || window.safeStorage.get('xtj_user') || '').trim();
+
+                async function send(token) {
+                    var headers = Object.assign({}, options.headers || {});
+                    if (token) headers.Authorization = 'Bearer ' + token;
+                    var fetchOpts = Object.assign({}, options, {
+                        credentials: 'include',
+                        headers: headers
+                    });
+                    delete fetchOpts.timeoutMs;
+                    var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                    return doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                }
+
+                var token = getUserToken();
+                // 已登录但无 access token 时 refresh 可能因 VPN 挂起；ensureUserToken 内已有超时
+                if (!token && knownUser) {
+                    try {
+                        token = await ensureUserToken();
+                    } catch (tokenErr) {
+                        console.warn('[XTJ] optional-auth token refresh failed:', tokenErr && tokenErr.message);
+                        token = '';
+                    }
+                }
+                var response = await send(token);
+                if (token && response.status === 401) {
+                    var renewed = await window.refreshUserToken(true);
+                    response = await send(renewed || '');
+                }
+                return response;
+            };
+
+            // P7: 头像缓存改为显式四态结构。
+            // 每个条目形如 { state, url, fetched_at }：
+            //   state: 'has_avatar' | 'confirmed_none' | 'fetch_failed' | 'not_fetched'
+            //   url:   有头像时为 URL 字符串；confirmed_none 为 null；
+            //          fetch_failed 保留上一次成功获取的 URL（降级用，可能为 null）
+            //   fetched_at: 写入时间戳（ms）
+            let avatarCache = {};
+
+            // 读取内存缓存中的头像 URL（用于展示）。返回 string 或 null。
+            // - has_avatar     → entry.url
+            // - confirmed_none → null（TTL 内不重查）
+            // - fetch_failed   → entry.url（旧 URL 降级，可能为 null）
+            // - not_fetched    → null
+            function getAvatarUrl(userName) {
+                if (!userName) return null;
+                var entry = avatarCache[userName];
+                if (!entry) return null;
+                return entry.url || null;
+            }
+
+            // 内存缓存是否仍处于 TTL 内（调用方不应重新查询后端）。
+            function hasFreshAvatarCache(userName) {
+                if (!userName) return false;
+                var entry = avatarCache[userName];
+                if (!entry || entry.state === 'not_fetched') return false;
+                var age = Date.now() - (entry.fetched_at || 0);
+                return age < AVATAR_FETCH_TTL_MS;
+            }
+
+            // 写入内存缓存条目。fetch_failed 时若 url 为空则保留旧 URL（降级）。
+            function setAvatarCacheEntry(userName, state, url) {
+                if (!userName) return;
+                var now = Date.now();
+                var prevUrl = (avatarCache[userName] && avatarCache[userName].url) || null;
+                var resolvedUrl;
+                if (state === 'has_avatar') {
+                    resolvedUrl = url || null;
+                } else if (state === 'fetch_failed') {
+                    resolvedUrl = url || prevUrl;
+                } else {
+                    resolvedUrl = null;
+                }
+                avatarCache[userName] = {
+                    state: state,
+                    url: resolvedUrl,
+                    fetched_at: now
+                };
+            }
+
+            // ★ 头像缓存版本化读写（含 TTL 和 fetched_at）
+            // 返回 { username: { state, url, fetched_at } } 对象映射。
+            function readAvatarCacheFromStorage() {
+                try {
+                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
+                    var now = Date.now();
+                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
+                        var result = {};
+                        var keys = Object.keys(raw.data);
+                        for (var i = 0; i < keys.length; i++) {
+                            var entry = raw.data[keys[i]];
+                            if (!entry || typeof entry !== 'object') continue;
+                            // 迁移旧格式：无 state 字段但有 url → 视为 has_avatar
+                            var state = entry.state || (entry.url ? 'has_avatar' : null);
+                            if (!state) continue;
+                            // fetch_failed 不持久化（仅内存），防御性跳过
+                            if (state === 'fetch_failed') continue;
+                            var fetchedAt = entry.fetched_at || 0;
+                            // TTL 按状态区分：has_avatar 24h，confirmed_none 5min
+                            var ttl = state === 'confirmed_none' ? AVATAR_FETCH_TTL_MS : AVATAR_CACHE_TTL_MS;
+                            if ((now - fetchedAt) >= ttl) continue;
+                            // has_avatar 必须有 url
+                            if (state === 'has_avatar' && !entry.url) continue;
+                            result[keys[i]] = {
+                                state: state,
+                                url: entry.url || null,
+                                fetched_at: fetchedAt
+                            };
+                        }
+                        return result;
+                    }
+                    // 迁移旧格式 { username: url }
+                    var old = window.safeLocalStorageGetJSON("xtj_avatars", null);
+                    if (old && typeof old === 'object' && !old.version) {
+                        var migrated = { version: AVATAR_CACHE_VERSION, data: {} };
+                        var oldKeys = Object.keys(old);
+                        for (var j = 0; j < oldKeys.length; j++) {
+                            if (typeof old[oldKeys[j]] === 'string') {
+                                migrated.data[oldKeys[j]] = {
+                                    state: 'has_avatar',
+                                    url: old[oldKeys[j]],
+                                    fetched_at: Date.now()
+                                };
+                            }
+                        }
+                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(migrated));
+                        // 迁移后删除旧缓存
+                        try { window.safeStorage.remove("xtj_avatars"); } catch(e) {}
+                        var mResult = {};
+                        var mKeys = Object.keys(migrated.data);
+                        for (var k = 0; k < mKeys.length; k++) {
+                            mResult[mKeys[k]] = migrated.data[mKeys[k]];
+                        }
+                        return mResult;
+                    }
+                } catch(e) {}
+                return {};
+            }
+            // data 为 { username: { state, url, fetched_at } } 对象映射。
+            // 只持久化 has_avatar 与 confirmed_none；fetch_failed 不写入 localStorage。
+            function writeAvatarCacheToStorage(data) {
+                try {
+                    var now = Date.now();
+                    var wrapped = { version: AVATAR_CACHE_VERSION, data: {} };
+                    var keys = Object.keys(data || {});
+                    for (var i = 0; i < keys.length; i++) {
+                        var entry = data[keys[i]];
+                        if (!entry || typeof entry !== 'object') continue;
+                        // 只持久化 has_avatar 和 confirmed_none
+                        if (entry.state !== 'has_avatar' && entry.state !== 'confirmed_none') continue;
+                        // 跳过已过期的 confirmed_none（5min TTL）
+                        if (entry.state === 'confirmed_none' &&
+                            (now - (entry.fetched_at || 0)) >= AVATAR_FETCH_TTL_MS) continue;
+                        // has_avatar 必须有 url
+                        if (entry.state === 'has_avatar' && !entry.url) continue;
+                        wrapped.data[keys[i]] = {
+                            state: entry.state,
+                            url: entry.url || null,
+                            fetched_at: entry.fetched_at || now
+                        };
+                    }
+                    window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(wrapped));
+                } catch(e) {}
+            }
+            function invalidateAvatarCacheEntry(username) {
+                if (!username) return;
+                // P7: 上传头像后立即失效 confirmed_none 缓存（设置为 not_fetched），
+                // 这样下次 fetchAvatarUrl 会重新查询后端获取新头像。
+                // 清除 url（与原 delete 行为一致），避免 onerror 后重渲染复用已失效的 URL。
+                avatarCache[username] = {
+                    state: 'not_fetched',
+                    url: null,
+                    fetched_at: 0
+                };
+                try {
+                    var raw = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, null);
+                    if (raw && raw.version === AVATAR_CACHE_VERSION && raw.data) {
+                        delete raw.data[username];
+                        window.safeStorage.set(AVATAR_CACHE_KEY, JSON.stringify(raw));
+                    }
+                } catch(e) {}
+            }
+            // ★ 暴露为全局函数，供 inline onerror 调用
+            window.__xtjInvalidateAvatarCache = function(username) {
+                invalidateAvatarCacheEntry(username);
+            };
+
+            // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
+            // P7: 显式四态 — has_avatar / confirmed_none / fetch_failed / not_fetched
+            async function fetchAvatarUrl(userName) {
+                if (!userName) return null;
+                // P7: TTL 内的缓存直接返回，不重新查询后端。
+                // - has_avatar     → 返回 url
+                // - confirmed_none → 返回 null（TTL 内不重查）
+                // - fetch_failed   → 返回旧 url（降级，可能为 null）
+                if (hasFreshAvatarCache(userName)) {
+                    return getAvatarUrl(userName);
+                }
+                try {
+                    var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
+                    if (!resp.ok) {
+                        // P7: 网络失败 — 设置 fetch_failed，不缓存为无头像。
+                        // 保留旧 URL 用于降级展示。
+                        setAvatarCacheEntry(userName, 'fetch_failed', null);
+                        return getAvatarUrl(userName);
+                    }
+                    var result = await resp.json();
+                    if (result.ok && result.avatar_url) {
+                        setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
+                        return result.avatar_url;
+                    }
+                    if (result.ok && result.avatar_url === null) {
+                    // P7: 后端确认无头像 — 清除旧缓存并设置 confirmed_none，TTL 内有效。
+                    delete avatarCache[userName];
+                    setAvatarCacheEntry(userName, 'confirmed_none', null);
+                    return null;
+                }
+                    // 后端返回非预期结构 — 视为失败
+                    setAvatarCacheEntry(userName, 'fetch_failed', null);
+                    return getAvatarUrl(userName);
+                } catch(e) {
+                    // P7: 网络异常 — 设置 fetch_failed，降级返回旧缓存 URL。
+                    setAvatarCacheEntry(userName, 'fetch_failed', null);
+                    return getAvatarUrl(userName);
+                }
+            }
+
+        function readUserSession() {
+            try {
+                var raw = window.safeStorage.get(USER_SESSION_KEY);
+                if (!raw) return null;
+                var parsed = JSON.parse(raw);
+                return parsed && typeof parsed === "object" ? parsed : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function writeUserSession(userName, options) {
+            var name = String(userName || "").trim();
+            if (!name) return null;
+            var now = Date.now();
+            var existing = readUserSession();
+            var resetLoginAt = !!(options && options.resetLoginAt);
+            var loginAt = resetLoginAt ? now : Number(existing && existing.user_name === name ? existing.login_at : 0);
+            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = now;
+            var next = {
+                user_name: name,
+                login_at: loginAt,
+                last_active_at: now
+            };
+            window.safeStorage.set(USER_SESSION_KEY, JSON.stringify(next));
+            window.safeStorage.set("xtj_user", name);
+            lastUserSessionWriteAt = now;
+            return next;
+        }
+
+        // Remove credentials left by earlier clients; ongoing sessions are renewed
+        // exclusively through the HttpOnly refresh cookie.
+        try { sessionStorage.removeItem('xtj_pw_hash'); window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
+
+        function clearUserSessionStorage() {
+            try { window.safeStorage.remove(USER_SESSION_KEY); } catch (e) {}
+            try { window.safeStorage.remove("xtj_user"); } catch (e) {}
+            try { sessionStorage.removeItem("xtj_pw_hash"); } catch (e) {}
+            try { window.safeStorage.remove("xtj_pw_hash"); } catch (e) {}
+            lastUserSessionWriteAt = 0;
+        }
+
+        function restoreCurrentUserFromSession() {
+            var now = Date.now();
+            var session = readUserSession();
+            if (!session) {
+                var legacyUser = "";
+                try { legacyUser = window.safeStorage.get("xtj_user") || ""; } catch (e) { legacyUser = ""; }
+                legacyUser = String(legacyUser || "").trim();
+                if (legacyUser) {
+                    writeUserSession(legacyUser, { resetLoginAt: true });
+                    return legacyUser;
+                }
+                return "";
+            }
+            var userName = String(session.user_name || "").trim();
+            var lastActiveAt = Number(session.last_active_at || 0);
+            if (!userName || !Number.isFinite(lastActiveAt) || lastActiveAt <= 0 || (now - lastActiveAt) > USER_SESSION_TTL_MS) {
+                clearUserSessionStorage();
+                return "";
+            }
+            var loginAt = Number(session.login_at || 0);
+            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = lastActiveAt;
+            try {
+                localStorage.setItem(USER_SESSION_KEY, JSON.stringify({
+                    user_name: userName,
+                    login_at: loginAt,
+                    last_active_at: now
+                }));
+                window.safeStorage.set("xtj_user", userName);
+            } catch (e) {}
+            lastUserSessionWriteAt = now;
+            return userName;
+        }
+
+        function touchUserSession(force) {
+            var userName = String(window.currentUser || window._lastKnownUser || "").trim();
+            if (!userName) return;
+            var now = Date.now();
+            if (!force && lastUserSessionWriteAt && (now - lastUserSessionWriteAt) < USER_SESSION_TOUCH_INTERVAL_MS) return;
+            writeUserSession(userName, { resetLoginAt: false });
+        }
+
+        window.touchUserSession = touchUserSession;
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) touchUserSession(false);
+        });
+        window.addEventListener("focus", function () {
+            touchUserSession(false);
+        });
+
+        let currentUser = restoreCurrentUserFromSession();
+        window.currentUser = currentUser;
+        window._lastKnownUser = currentUser;
+        // ★ 认证状态机：auth_pending | authenticated | unauthenticated | offline_unverified
+        window._xtjAuthState = currentUser ? 'auth_pending' : 'unauthenticated';
+        window._xtjCanonicalUser = ''; // 服务端确认的权威用户名
+
+        // ★ 是否已通过服务端验证（auth_pending 期间禁止所有受保护操作）
+        window.isAuthenticated = function() {
+            return window._xtjAuthState === 'authenticated';
+        };
+        window.getCanonicalUser = function() {
+            return window._xtjCanonicalUser || window.currentUser || '';
+        };
+
+        // ★ 启动时尝试验证会话：如果从 session 恢复了用户，用 refresh cookie 验证
+        var _startupAuthVerified = false;
+        if (currentUser) {
+            loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
+            // 异步验证：尝试用 refresh cookie 获取 token 并校验身份
+            (async function() {
+                try {
+                    var refreshResult = await refreshUserTokenViaCookie();
+                    var serverUser = (refreshResult && refreshResult.user_name) || '';
+                    if (serverUser && serverUser !== currentUser) {
+                        // Token 身份与会话不一致，清除幽灵登录状态
+                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_identity_mismatch' });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        window._xtjAuthState = 'unauthenticated';
+                        window._xtjCanonicalUser = '';
+                        // 刷新 UI
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                    } else if (serverUser) {
+                        _startupAuthVerified = true;
+                        window._xtjAuthState = 'authenticated';
+                        window._xtjCanonicalUser = serverUser;
+                        // 确保内部状态一致
+                        if (serverUser !== currentUser) {
+                            currentUser = serverUser;
+                            window.currentUser = serverUser;
+                            window._lastKnownUser = serverUser;
+                            writeUserSession(serverUser, { resetLoginAt: false });
+                        }
+                    }
+                } catch (e) {
+                    // 验证失败，如果 refresh cookie 不存在则清除幽灵状态
+                    if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'no_cookie') {
+                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_refresh_expired' });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        window._xtjAuthState = 'unauthenticated';
+                        window._xtjCanonicalUser = '';
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                    } else {
+                        // 网络暂时失败，保留本地用户名但标记为 offline_unverified
+                        window._xtjAuthState = 'offline_unverified';
+                    }
+                }
+            })();
+        }
+
+        // ★ 多标签页账号切换同步 (BroadcastChannel) - 带事件去重
+        (function() {
+            try {
+                // ★ 生成稳定的 sourceTabId
+                var _sourceTabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                var _processedEventIds = {};
+                var _MAX_PROCESSED_EVENTS = 50;
+
+                function _isOwnMessage(msg) {
+                    return msg && msg.sourceTabId === _sourceTabId;
+                }
+                function _isEventProcessed(eventId) {
+                    if (!eventId) return false;
+                    return !!_processedEventIds[eventId];
+                }
+                function _markEventProcessed(eventId) {
+                    if (!eventId) return;
+                    _processedEventIds[eventId] = Date.now();
+                    // 清理超过50条旧记录
+                    var keys = Object.keys(_processedEventIds);
+                    if (keys.length > _MAX_PROCESSED_EVENTS) {
+                        keys.sort(function(a, b) { return _processedEventIds[a] - _processedEventIds[b]; });
+                        var toRemove = keys.length - _MAX_PROCESSED_EVENTS;
+                        for (var i = 0; i < toRemove; i++) { delete _processedEventIds[keys[i]]; }
+                    }
+                }
+
+                var authChannel = new BroadcastChannel('xtj_auth_sync');
+                authChannel.addEventListener('message', function(event) {
+                    var msg = event && event.data;
+                    if (!msg || !msg.type) return;
+                    // ★ 忽略自己发出的消息
+                    if (_isOwnMessage(msg)) return;
+                    // ★ 防止重复消费
+                    if (_isEventProcessed(msg.eventId)) return;
+                    _markEventProcessed(msg.eventId);
+
+                    if (msg.type === 'account_switched' || msg.type === 'logout') {
+                        // 其他标签页切换了账号，本标签页必须清除旧状态
+                        // ★ broadcast:false 防止形成循环广播
+                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync' });
+                        currentUser = '';
+                        window.currentUser = '';
+                        window._lastKnownUser = '';
+                        if (typeof initUI === 'function') initUI().catch(function() {});
+                        if (typeof showToast === 'function') showToast('账号已在其他窗口切换，请重新登录', 'info');
+                    }
+                });
+                // 登录成功后广播
+                window.__xtjBroadcastAuthChange = function(newUser) {
+                    try {
+                        var eventId = 'auth_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                        _markEventProcessed(eventId);
+                        authChannel.postMessage({
+                            type: 'account_switched',
+                            eventId: eventId,
+                            sourceTabId: _sourceTabId,
+                            user: newUser,
+                            timestamp: Date.now()
+                        });
+                    } catch (e) {}
+                };
+                // 退出时广播
+                window.__xtjBroadcastLogout = function(reason) {
+                    try {
+                        var eventId = 'logout_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                        _markEventProcessed(eventId);
+                        authChannel.postMessage({
+                            type: 'logout',
+                            eventId: eventId,
+                            sourceTabId: _sourceTabId,
+                            reason: reason || 'manual',
+                            timestamp: Date.now()
+                        });
+                    } catch (e) {}
+                };
+            } catch (e) {
+                // BroadcastChannel 不可用（旧浏览器），静默降级
+            }
+        })();
+
+        var statsEl = document.getElementById('statsSection');
+        if (statsEl && !currentUser) statsEl.style.display = 'none';
+
+        // 记录用户访问到后端统计（API优先，Supabase直连兜底）
+        var _visitLoggedToday = false;
+        function logUserVisitToApi(userName) {
+            if (!userName) return;
+            if (typeof API_BASE !== 'undefined' && API_BASE) {
+                try {
+                    var userToken = getUserToken();
+                    var headers = { 'Content-Type': 'application/json' };
+                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
+                    var body = { user_name: userName };
+                    fetch(API_BASE + '/api/log-user-visit', {
+                        method: 'POST', headers: headers, body: JSON.stringify(body)
+                    }).catch(function(){
+                        try { checkReportReplies(); } catch (_) {}
+                    });
+                } catch(e) {}
+            } else if (sb && !_visitLoggedToday) {
+                // 无后端API时直接写Supabase，同天只记录一次
+                _visitLoggedToday = true;
+                var today = new Date().toISOString().slice(0, 10);
+                try {
+                    sb.from('posts').insert([{
+                        user_name: userName || 'anonymous',
+                        content: JSON.stringify({ date: today }),
+                        media_type: '__user_visit__',
+                        media_url: today,
+                        actor_key: 'uvisit_' + Date.now()
+                    }]).then(function(){}, function(){});
+                } catch(e) {}
+            }
+        }
+
+        // IP级访问记录（无后端API时直接写Supabase）
+        var _ipVisitDay = '';
+        function logIpVisitToSupabase() {
+            if (typeof API_BASE !== 'undefined' && API_BASE) return; // 有后端API时不重复记录
+            if (!sb) return;
+            var today = new Date().toISOString().slice(0, 10);
+            if (_ipVisitDay === today) return; // 同天只记一次
+            _ipVisitDay = today;
+            try {
+                sb.from('posts').insert([{
+                    user_name: 'visitor',
+                    content: JSON.stringify({ date: today }),
+                    media_type: '__visit__',
+                    media_url: today,
+                    actor_key: 'visit_' + Date.now()
+                }]).then(function(){}, function(){});
+            } catch(e) {}
+        }
+
+        // 前端攻击检测（无后端API时记录到Supabase）
+        var _attackClickTimes = [];
+        var _attackLoggedToday = false;
+        function logFrontendAttack(type, detail) {
+            if (typeof API_BASE !== 'undefined' && API_BASE) return;
+            if (!sb) return;
+            var today = new Date().toISOString().slice(0, 10);
+            try {
+                sb.from('posts').insert([{
+                    user_name: 'frontend',
+                    content: JSON.stringify({ type: type, detail: String(detail || '').slice(0, 200), date: today }),
+                    media_type: '__attack__',
+                    media_url: type,
+                    actor_key: 'fa_' + Date.now()
+                }]).then(function(){}, function(){});
+            } catch(e) {}
+        }
+        // 检测异常快速点击（>8次/秒）
+        document.addEventListener('click', function() {
+            var now = Date.now();
+            _attackClickTimes.push(now);
+            _attackClickTimes = _attackClickTimes.filter(function(t) { return now - t < 1000; });
+            if (_attackClickTimes.length > 8 && !_attackLoggedToday) {
+                _attackLoggedToday = true;
+                logFrontendAttack('RAPID_CLICK', '异常高频点击 ' + _attackClickTimes.length + '次/秒');
+                setTimeout(function() { _attackLoggedToday = false; }, 60000);
+            }
+        }, true);
+
+        let dockChatListCacheTime = 0;
+        const DOCK_CHAT_CACHE_DURATION = 120000;
+        let deviceId;
+        try { deviceId = window.safeStorage.get("xtj_device_id"); } catch(e) { deviceId = null; }
+        if (!deviceId) {
+            try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
+            window.safeStorage.set("xtj_device_id", deviceId);
+        }
+        window.deviceId = deviceId;
+
+        let delPostId = null, delOwnerKey = null;
+        let activePostId = null;
+        const viewTracked = new Set();
+        // 挂到 window：登出清理 clearAllAuthState 中 window.viewTracked.clear() 依赖此引用
+        window.viewTracked = viewTracked;
+        let postVisibilityObserver = null;
+        let postDwellObserver = null;
+        const postDwellTimers = new Map();
+        const POST_DWELL_THRESHOLD = 0.5;
+        const POST_DWELL_DELAY = 1200;
+
+        // ★ 修复 M4：页面卸载 / 面板切换时清理 Observer 和 Timer
+        function cleanupObservers() {
+            if (postVisibilityObserver) {
+                try { postVisibilityObserver.disconnect(); } catch(e) {}
+                postVisibilityObserver = null;
+            }
+            if (postDwellObserver) {
+                try { postDwellObserver.disconnect(); } catch(e) {}
+                postDwellObserver = null;
+            }
+            postDwellTimers.forEach(function(timerId, postId) {
+                clearTimeout(timerId);
+            });
+            postDwellTimers.clear();
+        }
+        window.addEventListener('beforeunload', cleanupObservers);
+        // 在面板切换时也清理（由 switchTab 调用）
+        window.__xtjCleanupObservers = cleanupObservers;
+        function primePostReveal(nodes) {
+            Array.from(nodes || []).forEach(function(post, index) {
+                if (!post || post.classList.contains('visible')) return;
+                post.style.setProperty('--post-enter-delay', Math.min(index, 5) * 42 + 'ms');
+            });
+        }
+        function clearPostDwellTimer(postId) {
+            if (!postId || !postDwellTimers.has(postId)) return;
+            clearTimeout(postDwellTimers.get(postId));
+            postDwellTimers.delete(postId);
+        }
+        function schedulePostDwellTracking(postId) {
+            if (!postId || postDwellTimers.has(postId) || !canTrackViewNow(postId)) return;
+            var timerId = setTimeout(function() {
+                postDwellTimers.delete(postId);
+                trackView(postId);
+            }, POST_DWELL_DELAY);
+            postDwellTimers.set(postId, timerId);
+        }
+        function getPostVisibilityObserver() {
+            if (!postVisibilityObserver) {
+                try {
+                    postVisibilityObserver = new IntersectionObserver(e => {
+                        e.forEach(i => {
+                            if (i.isIntersecting) {
+                                i.target.classList.add('visible');
+                            }
+                        });
+                    }, { threshold: 0.05 });
+                } catch(_) {
+                    postVisibilityObserver = { observe: function(el) { el.classList.add('visible'); } };
+                }
+            }
+            return postVisibilityObserver;
+        }
+        function getPostDwellObserver() {
+            if (!postDwellObserver) {
+                try {
+                    postDwellObserver = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            var target = entry && entry.target;
+                            var postId = target ? String(target.getAttribute('data-post-id') || '').trim() : '';
+                            if (!postId) return;
+                            if (entry.isIntersecting && entry.intersectionRatio >= POST_DWELL_THRESHOLD) {
+                                schedulePostDwellTracking(postId);
+                            } else {
+                                clearPostDwellTimer(postId);
+                            }
+                        });
+                    }, { threshold: [0, POST_DWELL_THRESHOLD, 1] });
+                } catch (_) {
+                    postDwellObserver = {
+                        observe: function() {},
+                        unobserve: function() {}
+                    };
+                }
+            }
+            return postDwellObserver;
+        }
+        function observePostViewportState(nodes) {
+            Array.from(nodes || []).forEach(function(post) {
+                if (!post) return;
+                getPostVisibilityObserver().observe(post);
+                getPostDwellObserver().observe(post);
+            });
+        }
+        const CACHE_KEY = "xtj_feed_cache_v7";
+        const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
+
+        const POST_METADATA_MARKER = "__xtj_post_v2__";
+        const POST_META_DEFAULTS = {
+            visibility: "public",
+            is_pinned: false,
+            pinned_at: null,
+            updated_at: null,
+            edited_at: null,
+            fileSize: null,
+            originalSize: null,
+            mimeType: "",
+        };
+        let postSearchState = {
+            keyword: "",
+            user: "",
+            startDate: "",
+            endDate: "",
+            visibility: "all",
+            onlyMine: false
+        };
+        let editPostId = null;
+        let postFilterUsersLoaded = false;
+        let postFilterUsersLoading = false;
+        let postFilterUsers = [];
+        let postFilterUsersLoadSeq = 0;
+        let postFilterUsersLoadTimer = null;
+
+        function stopPostFilterUsersLoading() {
+            if (postFilterUsersLoadTimer) {
+                clearTimeout(postFilterUsersLoadTimer);
+                postFilterUsersLoadTimer = null;
+            }
+            postFilterUsersLoading = false;
+        }
+
+        function renderPostFilterUserLoader() {
+            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
+        }
+
+function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; }
+        function clearFeedCache() {
+            try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
+            feedVisiblePostsCache = null;
+            feedMapsCache = null;
+        }
+        window.clearFeedCache = clearFeedCache;
+
+        window.syncProfileUser = window.syncProfileUser || function() {
+            var name = document.getElementById('profileName');
+            var status = document.getElementById('profileStatus');
+            var avatar = document.getElementById('profileAvatar');
+            if (!name) return;
+            if (window.currentUser) {
+                name.textContent = window.currentUser;
+                if (status) status.textContent = '查看资料';
+                if (avatar) avatar.textContent = window.currentUser[0].toUpperCase();
+            } else {
+                name.textContent = '未登录';
+                if (status) status.textContent = '请先登录';
+                if (avatar) avatar.textContent = '?';
+            }
+        };
+
+        // ★ 修复 M-1：个人中心"通知"开关此前完全没有绑定，拨动无任何持久化效果。
+        // 初始化时读取 xtj-notif 设置 checked 状态，change 时写入偏好（'off' 表示关闭）。
+        function initProfileNotificationToggle() {
+            var toggle = document.getElementById('profileNotifToggle');
+            if (!toggle || toggle.__xtjNotifBound) return;
+            toggle.__xtjNotifBound = true;
+            try {
+                toggle.checked = window.safeStorage.get('xtj-notif') !== 'off';
+            } catch (e) {}
+            toggle.addEventListener('change', function() {
+                try {
+                    window.safeStorage.set('xtj-notif', toggle.checked ? 'on' : 'off');
+                } catch (e) {}
+            });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initProfileNotificationToggle);
+        } else {
+            initProfileNotificationToggle();
+        }
+
+        var xtjModuleDefinitions = {
+            enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
+            'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
+            // Code must load its filesystem bridge before evaluating the workspace.
+            'code-fs': { scripts: ['xtj-module-code-fs'] },
+            'code-workspace': {
+                dependencies: ['code-fs'],
+                styles: ['xtj-module-code-style', 'xtj-module-code-claude-style'],
+                scripts: ['xtj-module-code-workspace']
+            },
+            'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
+            'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
+            'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
+            gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
+        };
+        var xtjModulePromises = Object.create(null);
+        // Render can take longer than 15 seconds to cold-deliver the lazy Code bundle.
+        // Keep one bounded retry window instead of failing into an empty Code surface.
+        var XTJ_MODULE_LOAD_TIMEOUT = 45000;
+
+        function moduleAssetUrl(metaName) {
+            var meta = document.querySelector('meta[name="' + metaName + '"]');
+            return meta && String(meta.content || '').trim();
+        }
+
+        function loadModuleStyle(moduleName, metaName) {
+            var url = moduleAssetUrl(metaName);
+            if (!url) return Promise.reject(new Error('missing_module_asset:' + metaName));
+            return new Promise(function(resolve, reject) {
+                var selector = 'link[data-xtj-asset="' + metaName + '"]';
+                var existing = document.querySelector(selector);
+                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
+                var node = existing || document.createElement('link');
+                var settled = false;
+                var timer = null;
+                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
+                function fail(code) {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjFailed = '1';
+                    if (node.parentNode) node.remove();
+                    reject(new Error(code + ':' + moduleName));
+                }
+                node.onload = function() {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjLoaded = '1';
+                    delete node.dataset.xtjFailed;
+                    resolve(node);
+                };
+                node.onerror = function() { fail('module_style_failed'); };
+                timer = setTimeout(function() { fail('module_style_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
+                if (!existing) {
+                    node.rel = 'stylesheet';
+                    node.href = url;
+                    node.dataset.xtjAsset = metaName;
+                    node.dataset.xtjModule = moduleName;
+                    document.head.appendChild(node);
+                }
+            });
+        }
+
+        function loadModuleScript(moduleName, assetKey, directUrl) {
+            var url = directUrl || moduleAssetUrl(assetKey);
+            if (!url) return Promise.reject(new Error('missing_module_asset:' + assetKey));
+            return new Promise(function(resolve, reject) {
+                var selector = 'script[data-xtj-asset="' + assetKey.replace(/"/g, '\\"') + '"]';
+                var existing = document.querySelector(selector);
+                if (existing && existing.dataset.xtjLoaded === '1') return resolve(existing);
+                if (existing && existing.dataset.xtjFailed === '1') { existing.remove(); existing = null; }
+                var node = existing || document.createElement('script');
+                var settled = false;
+                var timer = null;
+                function cleanup() { timer && clearTimeout(timer); timer = null; node.onload = null; node.onerror = null; }
+                function fail(code) {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjFailed = '1';
+                    if (node.parentNode) node.remove();
+                    reject(new Error(code + ':' + moduleName));
+                }
+                node.onload = function() {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    node.dataset.xtjLoaded = '1';
+                    delete node.dataset.xtjFailed;
+                    resolve(node);
+                };
+                node.onerror = function() { fail('module_script_failed'); };
+                timer = setTimeout(function() { fail('module_script_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
+                if (!existing) {
+                    node.src = url;
+                    node.defer = true;
+                    node.dataset.xtjAsset = assetKey;
+                    node.dataset.xtjModule = moduleName;
+                    (document.body || document.head).appendChild(node);
+                }
+            });
+        }
+
+        function loadXtjModule(name) {
+            var moduleName = String(name || '');
+            var definition = xtjModuleDefinitions[moduleName];
+            if (!definition) return Promise.reject(new Error('unknown_module:' + moduleName));
+            if (xtjModulePromises[moduleName]) return xtjModulePromises[moduleName];
+            var dependencyChain = (definition.dependencies || []).reduce(function(chain, dependency) {
+                return chain.then(function() { return loadXtjModule(dependency); });
+            }, Promise.resolve());
+            xtjModulePromises[moduleName] = dependencyChain.then(function() {
+                // 并行加载 CSS 和 JS，避免串行等待
+                var cssPromise = (definition.styles || []).length > 0
+                    ? Promise.all((definition.styles || []).map(function(metaName) { return loadModuleStyle(moduleName, metaName); }))
+                    : Promise.resolve();
+                var scripts = (definition.scripts || []).map(function(metaName) { return { key: metaName, url: null }; });
+                (definition.externalScripts || []).forEach(function(url) { scripts.push({ key: moduleName + '-external-' + url, url: url }); });
+                var jsPromise = scripts.length > 0
+                    ? scripts.reduce(function(chain, item) {
+                        return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
+                    }, Promise.resolve())
+                    : Promise.resolve();
+                return Promise.all([cssPromise, jsPromise]).then(function() {
+                    var valid = true;
+                    if (moduleName === 'ai-agent') valid = !!(window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function');
+                    if (moduleName === 'code-fs') valid = !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
+                    if (moduleName === 'code-workspace') valid = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
+                    if (!valid) throw new Error('module_export_missing:' + moduleName);
+                    return { name: moduleName, loadedAt: Date.now() };
+                });
+            }).catch(function(error) {
+                delete xtjModulePromises[moduleName];
+                throw error;
+            });
+            return xtjModulePromises[moduleName];
+        }
+        window.XTJModuleLoader = {
+            load: loadXtjModule,
+            diagnose: function(name) {
+                var definition = xtjModuleDefinitions[String(name || '')] || {};
+                return {
+                    name: String(name || ''),
+                    scripts: (definition.scripts || []).map(moduleAssetUrl),
+                    styles: (definition.styles || []).map(moduleAssetUrl),
+                    state: xtjModulePromises[String(name || '')] ? 'loading-or-ready' : 'idle'
+                };
+            }
+        };
+
+        function ensureGsap() {
+            if (window.gsap) return Promise.resolve(window.gsap);
+            return loadXtjModule('gsap').then(function() { return window.gsap || null; });
+        }
+        window.ensureGsap = ensureGsap;
+        window.__xtjEnsureGsap = ensureGsap;
+
+        function ensurePhotoWallLoaded() {
+            return loadXtjModule('photo-wall');
+        }
+
+        function ensurePhotoWallPreviewLoaded() {
+            return loadXtjModule('photo-preview');
+        }
+
+        function ensurePhotoWallUploadLoaded() {
+            return loadXtjModule('photo-upload');
+        }
+
+        function ensureAiAgentLoaded() {
+            return loadXtjModule('ai-agent');
+        }
+        window.__xtjEnsureAiAgentLoaded = ensureAiAgentLoaded;
+
+        function bindTopAiToolsLauncher() {
+            var nav = document.getElementById('aiToolsNav');
+            var trigger = document.getElementById('aiToolsBtn');
+            var menu = document.getElementById('aiToolsMenu');
+            if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+            nav.__xtjAiToolsBound = true;
+            function setOpen(open) {
+                nav.classList.toggle('is-open', !!open);
+                menu.hidden = !open;
+                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                // Start loading as soon as the menu is useful, not after a tool is clicked.
+                if (open) ensureAiAgentLoaded().catch(function() {});
+            }
+            nav.addEventListener('pointerenter', function() {
+                ensureAiAgentLoaded().catch(function() {});
+            }, { passive: true });
+            nav.addEventListener('focusin', function() {
+                ensureAiAgentLoaded().catch(function() {});
+            });
+            trigger.addEventListener('click', function(event) {
+                event.stopPropagation();
+                setOpen(menu.hidden);
+            });
+            menu.addEventListener('click', function(event) {
+                var button = event.target.closest('[data-ai-tool]');
+                if (!button) return;
+                var tool = button.getAttribute('data-ai-tool');
+                setOpen(false);
+                ensureAiAgentLoaded().then(function() {
+                    if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
+                    if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
+                    if (tool === 'chat' && window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') return window.__xtjAiAgent.open();
+                    if (typeof window.__xtjOpenAiChat === 'function') return window.__xtjOpenAiChat();
+                }).catch(function(error) {
+                    console.error('[XTJ] top AI tools load failed:', error);
+                    if (typeof window.showToast === 'function') window.showToast('AI 工具加载失败，请重试');
+                });
+            });
+            document.addEventListener('click', function(event) {
+                if (!nav.contains(event.target)) setOpen(false);
+            });
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') setOpen(false);
+            });
+        }
+        bindTopAiToolsLauncher();
+        scheduleAiPreload();
+
+        function ensureCoreAnimationsLoaded() {
+            return loadXtjModule('enhancements');
+        }
+        window.__xtjEnsureCoreAnimationsLoaded = ensureCoreAnimationsLoaded;
+
+        function loadEnhancementsAfterInteraction() {
+            document.removeEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
+            document.removeEventListener('keydown', loadEnhancementsAfterInteraction, true);
+            ensureCoreAnimationsLoaded().catch(function(error) {
+                console.error('[XTJ] enhancement module load failed:', error);
+            });
+        }
+        document.addEventListener('pointerdown', loadEnhancementsAfterInteraction, true);
+        document.addEventListener('keydown', loadEnhancementsAfterInteraction, true);
+
+        function lazyAiChatLauncher() {
+            var _aiChatOpenInProgress = false;
+            var _aiChatOpenPromise = null;
+            var _aiChatLastError = null;
+            var _aiChatOpenGeneration = 0;
+
+            // A Code navigation must be able to invalidate a lazy AI load.
+            // Without this, an old ensureAiAgentLoaded()/ensureUserToken()
+            // continuation can re-open panelAiChat over Code after the user
+            // has already left it.
+            window.__xtjCancelPendingAiChatOpen = function() {
+                _aiChatOpenGeneration += 1;
+                _aiChatOpenInProgress = false;
+                _aiChatOpenPromise = null;
+            };
+
+            window.__xtjOpenAiChat = function() {
+                if (_aiChatOpenInProgress) return;
+                _aiChatOpenInProgress = true;
+                _aiChatLastError = null;
+                var openGeneration = ++_aiChatOpenGeneration;
+
+                // 立即进入 AI 页面骨架（300ms 内）
+                var aiChatPanel = document.getElementById('panelAiChat');
+                if (aiChatPanel) {
+                    // 清理旧状态
+                    if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
+                    if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
+                    aiChatPanel.classList.remove('hidden');
+                    aiChatPanel.style.display = '';
+                    aiChatPanel.innerHTML = getAiChatSkeleton();
+                    aiChatPanel.classList.add('active');
+                    aiChatPanel.setAttribute('aria-hidden', 'false');
+                    aiChatPanel.setAttribute('aria-busy', 'true');
+                }
+
+                // 显示 loading 在 AI 页面内部
+                var loadingEl = aiChatPanel ? aiChatPanel.querySelector('.ai-chat-loading') : null;
+                if (loadingEl) loadingEl.textContent = '正在加载 AI 模块...';
+
+                // 初始化分阶段错误状态
+                var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
+
+                _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
+                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
+                    return ensureUserToken().then(function(token) {
+                        if (openGeneration !== _aiChatOpenGeneration) return;
+                        if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
+                        if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
+                        if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
+                            if (openGeneration !== _aiChatOpenGeneration) return;
+                            window.__xtjOpenAiChat();
+                            if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
+                            return;
+                        }
+                        errorState.config = true;
+                        throw new Error('ai_module_not_ready');
+                    });
+                }).catch(function(err) {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
+                    _aiChatLastError = err;
+                    _aiChatOpenInProgress = false;
+                    if (aiChatPanel) {
+                        aiChatPanel.removeAttribute('aria-busy');
+                        renderAiChatErrorState(aiChatPanel, errorState, err);
+                    }
+                    console.error('[XTJ] ai-agent lazy load failed:', err);
+                }).finally(function() {
+                    if (openGeneration === _aiChatOpenGeneration) {
+                        _aiChatOpenInProgress = false;
+                        if (loadingEl) loadingEl.textContent = '';
+                    }
+                });
+            };
+            lazyAiChatLauncher._realOpen = window.__xtjOpenAiChat;
+        }
+        lazyAiChatLauncher();
+
+        function getAiChatSkeleton() {
+            return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
+                + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
+                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
+                + '</div>';
+        }
+
+        function renderAiChatErrorState(panel, errorState, err) {
+            var errorEl = panel.querySelector('.ai-chat-error');
+            var loadingEl = panel.querySelector('.ai-chat-loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (!errorEl) return;
+            errorEl.style.display = '';
+
+            var msgs = [];
+            var errMsg = err && err.message || '';
+
+            if (errorState.resource) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>AI 资源加载失败</strong><br><small style="color:var(--text-secondary);">请检查网络连接后重试</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试加载</button>'
+                    + '</div>');
+            }
+            if (errorState.auth) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>登录已过期</strong><br><small style="color:var(--text-secondary);">请重新登录后继续使用 AI</small><br>'
+                    + '<button onclick="window.openAuthModal(\'login\')" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重新登录</button>'
+                    + '</div>');
+            }
+            if (errorState.config) {
+                msgs.push('<div class="ai-chat-error-item" style="margin-bottom:14px;padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>AI 配置加载失败</strong><br><small style="color:var(--text-secondary);">服务器暂不可用</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
+                    + '</div>');
+            }
+            if (msgs.length === 0) {
+                msgs.push('<div class="ai-chat-error-item" style="padding:12px;background:var(--bg-error, #fff0f0);border-radius:8px;">'
+                    + '<strong>加载失败</strong><br><small style="color:var(--text-secondary);">' + escapeHtml(errMsg || '未知错误') + '</small><br>'
+                    + '<button onclick="window.__xtjOpenAiChat()" style="margin-top:8px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">重试</button>'
+                    + '</div>');
+            }
+            errorEl.innerHTML = msgs.join('');
+        }
+
+        // 空闲时预加载 AI 模块（不阻塞消息列表首屏渲染）
+        var _aiPreloadScheduled = false;
+        function scheduleAiPreload() {
+            if (_aiPreloadScheduled) return;
+            _aiPreloadScheduled = true;
+            var preloadFn = function() {
+                try {
+                    ensureAiAgentLoaded().then(function() {
+                        console.log('[XTJ] AI module preloaded');
+                    }).catch(function(err) {
+                        console.warn('[XTJ] AI module preload failed:', err && err.message);
+                    });
+                } catch(e) {}
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(preloadFn, { timeout: 2000 });
+            } else {
+                setTimeout(preloadFn, 2000);
+            }
+        }
+        // 在消息页面加载后触发预加载
+        window.__xtjScheduleAiPreload = scheduleAiPreload;
+
+        function lazyPhotoUploadLauncher() {
+            ensurePhotoWallUploadLoaded().then(function() {
+                if (typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) {
+                    window.xtjUploadBtn();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
+                console.error('[XTJ] photo upload lazy load failed:', err);
+            });
+        }
+        function lazyPhotoWallSubmitLauncher() {
+            ensurePhotoWallUploadLoaded().then(function() {
+                if (typeof window.triggerPhotoWallUpload === 'function' && window.triggerPhotoWallUpload !== lazyPhotoWallSubmitLauncher) {
+                    window.triggerPhotoWallUpload();
+                }
+            }).catch(function(err) {
+                if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
+                console.error('[XTJ] photo upload submit lazy load failed:', err);
+            });
+        }
+        window.xtjUploadBtn = lazyPhotoUploadLauncher;
+        window.triggerPhotoUpload = lazyPhotoUploadLauncher;
+        window.triggerPhotoWallUpload = lazyPhotoWallSubmitLauncher;
+
+        function lazyOpenPhotoPreview() {
+            var args = Array.prototype.slice.call(arguments);
+            return ensurePhotoWallPreviewLoaded().then(function() {
+                if (typeof window.openPhotoPreview === 'function' && window.openPhotoPreview !== lazyOpenPhotoPreview) {
+                    return window.openPhotoPreview.apply(window, args);
+                }
+            }).catch(function(err) {
+                console.error('[XTJ] photo preview lazy load failed:', err);
+            });
+        }
+        if (typeof window.openPhotoPreview !== 'function') {
+            window.openPhotoPreview = lazyOpenPhotoPreview;
+        }
+
+        function parsePostContent(post) {
+            var raw = post && typeof post.content === "string" ? post.content : "";
+            if (!raw) return { text: "", meta: {} };
+            try {
+                var parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === "object" && parsed.__type === POST_METADATA_MARKER) {
+                    return {
+                        text: typeof parsed.text === "string" ? parsed.text : "",
+                        meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : {}
+                    };
+                }
+            } catch (e) {}
+            return { text: raw, meta: {} };
+        }
+        window.parsePostContent = parsePostContent;
+
+        function buildPostContentPayload(text, meta) {
+            return JSON.stringify({
+                __type: POST_METADATA_MARKER,
+                text: text || "",
+                meta: Object.assign({}, POST_META_DEFAULTS, meta || {})
+            });
+        }
+
+        function normalizePost(post) {
+            var parsed = parsePostContent(post || {});
+            var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
+            var realVisibility = post && typeof post.visibility === "string" && post.visibility ? post.visibility : "";
+            var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
+            var hasRealPinnedAt = !!(post && post.pinned_at);
+            var hasRealUpdatedAt = !!(post && post.updated_at);
+            var metaLocationName = meta.location_name || "";
+            var metaLocationProvince = meta.location_province || "";
+            var metaLocationCity = meta.location_city || "";
+            var metaLocationDistrict = meta.location_district || "";
+            var metaLocationLevel = meta.location_level || "";
+            return Object.assign({}, post, {
+                content: parsed.text || "",
+                visibility: realVisibility || meta.visibility || "public",
+                is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
+                pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
+                updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
+                location_name: post && post.location_name ? post.location_name : metaLocationName,
+                location_province: post && post.location_province ? post.location_province : metaLocationProvince,
+                location_city: post && post.location_city ? post.location_city : metaLocationCity,
+                location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
+                location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                _contentMeta: meta
+            });
+        }
+        window.normalizePost = normalizePost;
+
+        function getPostDisplayContent(post) {
+            return normalizePost(post).content || "";
+        }
+        window.getPostDisplayContent = getPostDisplayContent;
+
+        function canViewPost(post) {
+            var p = normalizePost(post);
+            if (p.visibility === "private") {
+                return !!window.currentUser && p.user_name === window.currentUser;
+            }
+            return true;
+        }
+        window.canViewPost = canViewPost;
+
+        function canEditPost(post) {
+            var p = normalizePost(post);
+            return !!currentUser && (p.user_name === currentUser || isAdmin());
+        }
+        window.canEditPost = canEditPost;
+
+        function canPinPost(post) {
+            if (!currentUser) return false;
+            var p = normalizePost(post);
+            return isAdmin() || (!!p && p.user_name === currentUser);
+        }
+        window.canPinPost = canPinPost;
+
+        // Authors may pin their own post; the server enforces one pinned post per author.
+        async function canPinThisPost(post) {
+            if (isAdmin()) return true;
+            var p = normalizePost(post);
+            if (!p || p.user_name !== currentUser) return false;
+            try {
+                if (!sb) return false;
+                var { data: pinnedPosts } = await sb.from('posts')
+                    .select('id')
+                    .eq('user_name', currentUser)
+                    .eq('is_pinned', true);
+                return !pinnedPosts || pinnedPosts.length < 1;
+            } catch(e) { return false; }
+        }
+
+        function canDeletePost(post) {
+            var p = normalizePost(post);
+            if (!currentUser) return false;
+            if (isAdmin()) return true;
+            if (p.user_name && p.user_name === currentUser) return true;
+            return !p.user_name && !!deviceId && !!p.actor_key && p.actor_key === deviceId;
+        }
+        window.canDeletePost = canDeletePost;
+        window.isAdmin = isAdmin;
+
+        function normalizePosts(posts) {
+            return (posts || []).map(normalizePost);
+        }
+
+        function sortPosts(posts) {
+            return posts.slice().sort(function(a, b) {
+                var pa = normalizePost(a);
+                var pb = normalizePost(b);
+                if (!!pa.is_pinned !== !!pb.is_pinned) return pa.is_pinned ? -1 : 1;
+                if (pa.is_pinned && pb.is_pinned) return new Date(pb.pinned_at || pb.created_at || 0) - new Date(pa.pinned_at || pa.created_at || 0);
+                return new Date(pb.created_at || 0) - new Date(pa.created_at || 0);
+            });
+        }
+        window.sortPosts = sortPosts;
+
+        function toLocalDateKey(dateLike) {
+            if (!dateLike) return "";
+            var d = new Date(dateLike);
+            if (isNaN(d.getTime())) return "";
+            var y = d.getFullYear();
+            var m = String(d.getMonth() + 1).padStart(2, "0");
+            var day = String(d.getDate()).padStart(2, "0");
+            return y + "-" + m + "-" + day;
+        }
+
+        function isPostInDateRange(post, startDate, endDate) {
+            var key = toLocalDateKey(post && post.created_at);
+            if (!key) return false;
+            if (startDate && key < startDate) return false;
+            if (endDate && key > endDate) return false;
+            return true;
+        }
+        window.isPostInDateRange = isPostInDateRange;
+
+        function getPostSearchState() {
+            return Object.assign({}, postSearchState);
+        }
+        window.getPostSearchState = getPostSearchState;
+
+        function getFilteredPosts(posts, comments) {
+            var state = getPostSearchState();
+            var keyword = (state.keyword || "").trim().toLowerCase();
+            var userFilter = (state.user || "").trim().toLowerCase();
+            var visibilityFilter = state.visibility || "all";
+            var onlyMine = !!state.onlyMine;
+            var matchedCommentPostIds = new Set();
+
+            (comments || []).forEach(function(c) {
+                if (!c) return;
+                var commentContent = String(c.content || "").toLowerCase();
+                var commentUser = String(c.user_name || "").toLowerCase();
+                if (keyword && (commentContent.indexOf(keyword) >= 0 || commentUser.indexOf(keyword) >= 0)) {
+                    matchedCommentPostIds.add(String(c.post_id));
+                }
+            });
+
+            return sortPosts(normalizePosts(posts).filter(function(post) {
+                if (!post) return false;
+                if (typeof isSystemPost === 'function' && isSystemPost(post)) return false;
+                if (!post.user_name) return false;
+                if (!canViewPost(post)) return false;
+                if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
+                if (visibilityFilter !== "all" && post.visibility !== visibilityFilter) return false;
+                if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
+                if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
+                if (!keyword) return true;
+                var postContent = String(post.content || "").toLowerCase();
+                var postUser = String(post.user_name || "").toLowerCase();
+                var dateText = toLocalDateKey(post.created_at);
+                return postContent.indexOf(keyword) >= 0 ||
+                    postUser.indexOf(keyword) >= 0 ||
+                    dateText.indexOf(keyword) >= 0 ||
+                    matchedCommentPostIds.has(String(post.id));
+            }));
+        }
+        window.getFilteredPosts = getFilteredPosts;
+
+        function renderFilterSummary(count) {
+            var el = document.getElementById("postFilterSummary");
+            if (!el) return;
+            var state = getPostSearchState();
+            var activeCount = 0;
+            if (state.keyword) activeCount++;
+            if (state.user) activeCount++;
+            if (state.startDate || state.endDate) activeCount++;
+            if (state.onlyMine) activeCount++;
+            if (state.visibility && state.visibility !== "all") activeCount++;
+            var badge = document.getElementById("filterActiveBadge");
+            if (badge) {
+                badge.textContent = activeCount;
+                badge.style.display = activeCount > 0 ? "inline-flex" : "none";
+            }
+            var clearBtn = document.getElementById("filterClearBtn");
+            if (clearBtn) clearBtn.style.display = activeCount > 0 ? "" : "none";
+            var hasFilters = activeCount > 0;
+            if (!hasFilters) {
+                el.textContent = "全部帖子";
+            } else if (!count) {
+                el.textContent = "没有找到相关帖子";
+            } else {
+                el.textContent = "找到 " + count + " 条结果";
+            }
+        }
+        window.renderFilterSummary = renderFilterSummary;
+
+        // ========== 应用状态（向后兼容） ==========
+        window.appState = {
+            get currentUser() { return window.currentUser; },
+            set currentUser(v) { window.currentUser = v; },
+            get photoWallData() { return window.photoWallData; },
+            set photoWallData(v) { window.photoWallData = v; },
+            get deviceId() { return window.deviceId; },
+            _listeners: {}
+        };
+        function safeText(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+        window.safeText = safeText;
+
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
+            if (!container) { console.warn("showToast: toastContainer not found"); return; }
+            const toast = document.createElement('div');
+            toast.className = 'toast' + (type === 'error' ? ' toast-error' : '');
+            if (typeof window.__xtjUiTextRepair === 'function') {
+                try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
+            }
+            toast.textContent = message == null ? '' : String(message);
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'toastFade 0.3s ease-out forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, type === 'error' ? 4000 : 2500);
+        }
+        window.showToast = showToast;
+
+        function showConfirm(title, message, confirmText, callback) {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            document.getElementById('ppConfirmTitle').textContent = title || '确认操作';
+            document.getElementById('ppConfirmMsg').textContent = message || '确定要执行此操作吗？';
+            document.getElementById('ppConfirmOkBtn').textContent = confirmText || '确认';
+            window._confirmCallback = callback;
+            if (overlay._closeTimer) {
+                clearTimeout(overlay._closeTimer);
+                overlay._closeTimer = null;
+            }
+            
+            // FLIP Animation: Step 1 - First (记录按钮位置)
+            var origin = window._confirmOrigin;
+            
+            // FLIP Animation: Step 2 - Last (设置最终状态)
+            overlay.classList.remove('closing');
+            overlay.classList.add('active');
+            var okBtn = document.getElementById('ppConfirmOkBtn');
+            okBtn.disabled = false;
+            
+            var dialog = overlay.querySelector('.pp-confirm-dialog');
+            if (dialog) {
+                dialog.style.transition = 'none';
+                dialog.style.transform = '';
+                dialog.style.opacity = '1';
+            }
+            
+            void dialog?.offsetHeight;
+            
+            // FLIP Animation: Step 3 - Invert (计算反转偏移)
+            if (origin && dialog) {
+                var dialogRect = dialog.getBoundingClientRect();
+                var dx = origin.btnCx - dialogRect.left - dialogRect.width / 2;
+                var dy = origin.btnCy - dialogRect.top - dialogRect.height / 2;
+                
+                var btnSize = Math.sqrt(origin.btnWidth * origin.btnWidth + origin.btnHeight * origin.btnHeight) || 40;
+                var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
+                var scale = btnSize / dialogSize * 0.6;
+                
+                dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+                dialog.style.transformOrigin = 'center center';
+                dialog.style.opacity = '0';
+                
+                overlay._ppDeleteOrigin = { 
+                    dx: dx, 
+                    dy: dy, 
+                    scale: scale,
+                    btnCx: origin.btnCx,
+                    btnCy: origin.btnCy
+                };
+            }
+            
+            void dialog?.offsetHeight;
+            
+            // FLIP Animation: Step 4 - Play (播放动画)
+            if (origin && dialog) {
+                dialog.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
+                dialog.style.transform = 'translate(0, 0) scale(1)';
+                dialog.style.opacity = '1';
+            }
+            
+            window._confirmOrigin = null;
+        }
+        window.showConfirm = showConfirm;
+
+        window.execConfirm = function() {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            if (overlay.classList.contains('closing')) return;
+            var cb = window._confirmCallback;
+            
+            if (overlay._ppDeleteOrigin) {
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    var o = overlay._ppDeleteOrigin;
+                    var okBtn = document.getElementById('ppConfirmOkBtn');
+                    if (okBtn) okBtn.disabled = true;
+                    overlay.classList.add('closing');
+                    
+                    // FLIP Animation for Close: 获取删除按钮前位置
+                    var dialogRect = dialog.getBoundingClientRect();
+                    
+                    // 获取删除按钮前位置
+                    var deleteBtn = document.getElementById('ppDeleteBtn');
+                    var btnRect = deleteBtn ? deleteBtn.getBoundingClientRect() : null;
+                    
+                    var targetDx = o.dx;
+                    var targetDy = o.dy;
+                    var targetScale = o.scale || 0.3;
+                    
+                    if (btnRect) {
+                        // 使用按钮前位置，计算变换
+                        targetDx = btnRect.left + btnRect.width / 2 - dialogRect.left - dialogRect.width / 2;
+                        targetDy = btnRect.top + btnRect.height / 2 - dialogRect.top - dialogRect.height / 2;
+                        
+                        var btnSize = Math.sqrt(btnRect.width * btnRect.width + btnRect.height * btnRect.height);
+                        var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
+                        targetScale = btnSize / dialogSize * 0.6;
+                    }
+                    
+                    // Step 3 - Invert: 计算飞回偏移
+                    dialog.style.transition = 'none';
+                    dialog.style.transform = 'translate(0, 0) scale(1)';
+                    dialog.style.opacity = '1';
+                    void dialog.offsetHeight;
+                    
+                    // Step 4 - Play: 播放飞回动画
+                    dialog.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
+                    dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
+                    dialog.style.opacity = '0';
+                    
+                    overlay._closeTimer = setTimeout(function() {
+                        dialog.style.transform = '';
+                        dialog.style.opacity = '';
+                        dialog.style.transition = '';
+                        dialog.style.transformOrigin = '';
+                        overlay._ppDeleteOrigin = null;
+                        overlay._closeTimer = null;
+                        overlay.classList.remove('closing');
+                        overlay.classList.remove('active');
+                        window._confirmCallback = null;
+                        if (typeof cb === 'function') {
+                            cb();
+                        }
+                    }, 320);
+                    return;
+                }
+            }
+            
+            overlay.classList.remove('active');
+            overlay.classList.add('closing');
+            var okBtn = document.getElementById('ppConfirmOkBtn');
+            if (okBtn) okBtn.disabled = true;
+            overlay._closeTimer = setTimeout(function() {
+                overlay.classList.remove('closing');
+                overlay.classList.remove('active');
+                window._confirmCallback = null;
+                overlay._closeTimer = null;
+                if (typeof cb === 'function') {
+                    cb();
+                }
+            }, 280);
+        };
+
+        window.closeConfirm = function() {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            if (overlay.classList.contains('closing')) return;
+            
+            if (overlay._ppDeleteOrigin) {
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    var o = overlay._ppDeleteOrigin;
+                    overlay.classList.add('closing');
+                    dialog.style.transition = 'none';
+                    dialog.style.transform = 'scale(1) translateY(0)';
+                    dialog.style.opacity = '1';
+                    void dialog.offsetHeight;
+                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
+                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(' + (o.scale || 0.18) + ')';
+                    dialog.style.opacity = '0';
+                    overlay._closeTimer = setTimeout(function() {
+                        overlay._ppDeleteOrigin = null;
+                        overlay._closeTimer = null;
+                        overlay.classList.remove('closing');
+                        overlay.classList.remove('active');
+                        window._confirmCallback = null;
+                        var okBtn = document.getElementById('ppConfirmOkBtn');
+                        if (okBtn) okBtn.disabled = false;
+                    }, 380);
+                    return;
+                }
+            }
+            
+            overlay.classList.remove('active');
+            overlay.classList.add('closing');
+            overlay._closeTimer = setTimeout(function() {
+                overlay.classList.remove('closing');
+                overlay.classList.remove('active');
+                window._confirmCallback = null;
+                var okBtn = document.getElementById('ppConfirmOkBtn');
+                if (okBtn) okBtn.disabled = false;
+                overlay._closeTimer = null;
+            }, 300);
         };
 
 /**
@@ -4718,4180 +4736,4195 @@ function renderProfileActivityList(kind) {
  * Lines from original core.js: 4753-8928
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
-            // ===================== 点赞 =====================
-            function getCurrentLikeIdentityValues() {
-                var values = [];
-                if (deviceId) values.push(String(deviceId));
-                if (currentUser) values.push(String(currentUser));
-                return Array.from(new Set(values.filter(Boolean)));
-            }
-
-            function makeLikeLookupKeys(postId, actorKey, userName) {
-                var pid = String(postId || '');
-                var keys = [];
-                if (actorKey) keys.push(pid + '|' + String(actorKey));
-                if (userName) keys.push(pid + '|' + String(userName));
-                return Array.from(new Set(keys));
-            }
-
-            function isLikeOwnedByCurrentUser(like, postId) {
-                if (!like) return false;
-                if (postId != null && String(like.post_id || '') !== String(postId)) return false;
-                if (currentUser && String(like.user_name || '') === String(currentUser)) return true;
-                var actor = String(like.actor_key || '');
-                if (!actor) return false;
-                return getCurrentLikeIdentityValues().indexOf(actor) >= 0;
-            }
-
-            function isPostLikedByCurrentUser(likeUserMap, postId) {
-                var keys = makeLikeLookupKeys(postId, deviceId, currentUser);
-                for (var i = 0; i < keys.length; i++) {
-                    if (likeUserMap && likeUserMap[keys[i]]) return true;
-                }
-                return false;
-            }
-
-            function setLikeButtonState(btn, liked) {
-                if (!btn) return;
-                btn.classList.toggle('liked', !!liked);
-                btn.textContent = liked ? '❤️' : '🤍';
-                btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
-            }
-
-            function persistFeedLikesCache() {
-                try {
-                    var raw = window.safeStorage.get(CACHE_KEY);
-                    if (!raw) return;
-                    var parsed = JSON.parse(raw);
-                    if (!parsed || typeof parsed !== 'object') return;
-                    if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
-                    parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
-                    parsed.timestamp = Date.now();
-                    window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
-                } catch (e) {}
-            }
-
-            function updateLikeStatsText(statsEl, liked) {
-                if (!statsEl) return;
-                var text = statsEl.textContent || '';
-                var match = text.match(/(?:点赞|❤)\s*(\d+)/);
-                if (!match) return;
-                var current = parseInt(match[1], 10) || 0;
-                var next = liked ? current + 1 : Math.max(0, current - 1);
-                statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
-            }
-
-            function updatePostLikeCount(postId, likeCount) {
-                var count = Number(likeCount);
-                if (!Number.isFinite(count) || count < 0) return;
-                var pid = String(postId || '');
-                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var statsEl = postEl.querySelector('.post-stats-text');
-                    if (!statsEl) return;
-                    statsEl.textContent = (statsEl.textContent || '').replace(/(点赞|❤)\s*\d+/, '$1 ' + count);
-                });
-            }
-
-            function getPostLikeButtons(postId) {
-                var pid = String(postId || '');
-                var buttons = [];
-                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
-                    if (likeBtn) buttons.push(likeBtn);
-                });
-                return buttons;
-            }
-
-            function setPostLikePending(postId, pending) {
-                getPostLikeButtons(postId).forEach(function(likeBtn) {
-                    // Keep the control available so rapid toggles feel immediate while the latest intent syncs.
-                    likeBtn.disabled = false;
-                    if (pending) likeBtn.setAttribute('aria-busy', 'true');
-                    else likeBtn.removeAttribute('aria-busy');
-                    if (pending) likeBtn.dataset.likePending = '1';
-                    else delete likeBtn.dataset.likePending;
-                });
-            }
-
-            function updatePostLikeUi(postId, liked, likeRecord) {
-                var pid = String(postId || '');
-                if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
-                feedAllLikes = feedAllLikes.filter(function(item) {
-                    return !isLikeOwnedByCurrentUser(item, pid);
-                });
-                if (liked) {
-                    feedAllLikes.push(likeRecord || {
-                        post_id: pid,
-                        user_name: currentUser,
-                        actor_key: deviceId
-                    });
-                }
-                persistFeedLikesCache();
-
-                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
-                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
-                    var statsEl = postEl.querySelector('.post-stats-text');
-                    var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
-                    setLikeButtonState(likeBtn, liked);
-                    if (stateChanged) updateLikeStatsText(statsEl, liked);
-                });
-            }
-            var likeStatRefreshTimer = null;
-            function scheduleLikeStatRefresh() {
-                var modal = document.getElementById('statModal');
-                if (!modal || !modal.classList.contains('active') || statCurrentType !== 'likes') return;
-                if (likeStatRefreshTimer) clearTimeout(likeStatRefreshTimer);
-                likeStatRefreshTimer = setTimeout(function() {
-                    likeStatRefreshTimer = null;
-                    refreshStatModal();
-                }, 300);
-            }
-
-            var likeOperations = Object.create(null);
-
-            function applyPostLikeIntent(postId, liked, sourceButton) {
-                updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
-                updateFeedStats();
-                if (liked && sourceButton) createLikeBlossom(sourceButton);
-            }
-
-            function flushPostLikeOperation(postId, operation) {
-                if (likeOperations[postId] !== operation) return Promise.resolve();
-                var requestedLiked = operation.desired;
-                operation.running = true;
-                operation.requested = requestedLiked;
-                var normalizedPostId = postId.trim().toLowerCase();
-                return window.xtjProtectedFetch('/api/post/like', {
-                    method: 'POST',
-                    body: JSON.stringify({ post_id: normalizedPostId, liked: requestedLiked })
-                }).then(function(likeResponse) {
-                    return likeResponse.json().catch(function() { return {}; }).then(function(likeResult) {
-                        if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== requestedLiked) {
-                            throw new Error(likeResult.error || 'like_state_sync_failed');
-                        }
-                        operation.confirmed = requestedLiked;
-                        updatePostLikeCount(postId, likeResult.like_count);
-                        touchUserSession(false);
-                        scheduleLikeStatRefresh();
-                        if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') loadProfileActivity(true);
-                        try { if (typeof window.queueBehavior === 'function') window.queueBehavior(requestedLiked ? 'post_like' : 'post_unlike', 'post ' + postId.slice(0, 8)); } catch(e) {}
-                        if (operation.desired !== operation.confirmed) return flushPostLikeOperation(postId, operation);
-                    });
-                }).catch(function(error) {
-                    console.error(error);
-                    if (likeOperations[postId] !== operation) return;
-                    if (operation.desired !== operation.confirmed) {
-                        applyPostLikeIntent(postId, operation.confirmed);
-                        showToast("点赞失败，请重试");
-                    }
-                }).finally(function() {
-                    // ★ 修复：无条件复位 running——此前仅当 desired===confirmed 时才删除条目，
-                    // 若"请求在途时再点取消 → 第一次成功触发 re-flush → 第二次失败"，条目会永久
-                    // 残留在 running=true 状态，此后 toggleLike 不再发起任何请求，点赞态与服务器
-                    // 永久失同步（P1）。现在 running 始终复位：状态未同步时下次点击可重新 flush。
-                    operation.running = false;
-                    setPostLikePending(postId, false);
-                    if (likeOperations[postId] === operation && operation.desired === operation.confirmed) {
-                        delete likeOperations[postId];
-                    }
-                });
-            }
-
-            window.toggleLike = function (btn, postId) {
-                if (!currentUser) { showToast("请先登录"); return; }
-                if (isUserMuted()) { showToast("您已被禁言，无法点赞"); return; }
-                var pid = String(postId || '');
-                if (!btn || !pid) return;
-                var normalizedPostId = pid.trim().toLowerCase();
-                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
-                    showToast("帖子参数无效");
-                    return;
-                }
-                var operation = likeOperations[pid];
-                var visibleButton = getPostLikeButtons(pid)[0] || btn;
-                var currentLiked = operation ? operation.desired : visibleButton.classList.contains('liked');
-                var nextLiked = !currentLiked;
-                if (!operation) {
-                    operation = { confirmed: currentLiked, desired: currentLiked, running: false, promise: null };
-                    likeOperations[pid] = operation;
-                }
-                operation.desired = nextLiked;
-                setPostLikePending(pid, true);
-                applyPostLikeIntent(pid, nextLiked, btn);
-                if (!operation.running) operation.promise = flushPostLikeOperation(pid, operation);
-                return operation.promise;
-            };
-
-            var likeBlossomSequence = 0;
-
-            function createLikeBlossom(btn) {
-                var perfProfile = window.__xtjPerfProfile || 'full';
-                if (perfProfile === 'lite') return;
-                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-                var layer = btn.closest ? btn.closest('.actions') : btn.parentElement;
-                if (!layer) return;
-
-                var existing = btn._likeBlossom;
-                if (existing) {
-                    if (existing.timer) clearTimeout(existing.timer);
-                    if (existing.node && existing.node.parentNode) existing.node.remove();
-                }
-
-                var buttonRect = btn.getBoundingClientRect();
-                var layerRect = layer.getBoundingClientRect();
-                var blossom = document.createElement('span');
-                var gradientId = 'xtj-like-blossom-gradient-' + (++likeBlossomSequence);
-                blossom.className = 'like-blossom';
-                blossom.setAttribute('aria-hidden', 'true');
-                blossom.style.left = (buttonRect.left - layerRect.left + buttonRect.width / 2) + 'px';
-                blossom.style.top = (buttonRect.top - layerRect.top + buttonRect.height / 2) + 'px';
-                blossom.innerHTML = '<svg viewBox="0 0 100 100" focusable="false"><defs><linearGradient id="' + gradientId + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe8f0"/><stop offset=".62" stop-color="#ffb4c8"/><stop offset="1" stop-color="#ff91ad"/></linearGradient></defs><g transform="translate(50 50)"><g transform="rotate(0)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(72)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(144)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(216)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(288)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><circle cx="0" cy="0" r="7.5" fill="#ffd96b"/><circle cx="-2" cy="-1" r="2.2" fill="#fff2ad"/></g></svg>';
-                btn.classList.add('like-bloom-origin');
-                layer.appendChild(blossom);
-
-                var cleanup = function() {
-                    if (btn._likeBlossom && btn._likeBlossom.node === blossom) btn._likeBlossom = null;
-                    if (blossom.parentNode) blossom.remove();
-                };
-                blossom.addEventListener('animationend', cleanup, { once: true });
-                btn._likeBlossom = {
-                    node: blossom,
-                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 620 : 820)
-                };
-            }
-
-            // ===================== 帖子操作弹窗 =====================
-            const POST_ACTION_MODAL_IDS = ['commentModal', 'delModal'];
-
-            function resetCommentModalState() {
-                var input = document.getElementById("commInp");
-                var btn = document.getElementById("commBtn");
-                activePostId = null;
-                if (input) input.value = "";
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = "发布评论";
-                }
-            }
-
-            function clearPostActionConfirmOverlay() {
-                var overlay = document.getElementById('ppConfirmOverlay');
-                var okBtn = document.getElementById('ppConfirmOkBtn');
-                if (!overlay) return;
-                if (overlay._closeTimer) {
-                    clearTimeout(overlay._closeTimer);
-                    overlay._closeTimer = null;
-                }
-                overlay.classList.remove('active');
-                overlay.classList.remove('closing');
-                overlay.style.opacity = '';
-                overlay.style.transition = '';
-                overlay.style.pointerEvents = '';
-                overlay._ppDeleteOrigin = null;
-                window._confirmCallback = null;
-                if (okBtn) okBtn.disabled = false;
-                var dialog = overlay.querySelector('.pp-confirm-dialog');
-                if (dialog) {
-                    dialog.style.transition = '';
-                    dialog.style.transform = '';
-                    dialog.style.opacity = '';
-                    dialog.style.transformOrigin = '';
-                }
-            }
-
-            function isPostActionModalId(id) {
-                return POST_ACTION_MODAL_IDS.indexOf(String(id || '')) !== -1;
-            }
-
-            function forceClosePostActionModal(id) {
-                var el = document.getElementById(id);
-                if (el) {
-                    el.classList.remove("active");
-                    el.classList.remove("closing");
-                    el.style.display = '';
-                    el.style.pointerEvents = '';
-                }
-                if (id === 'commentModal') {
-                    resetCommentModalState();
-                } else if (id === 'delModal') {
-                    cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: true });
-                }
-            }
-
-            function closeOtherPostActionModals(exceptId) {
-                POST_ACTION_MODAL_IDS.forEach(function(id) {
-                    if (id !== exceptId) forceClosePostActionModal(id);
-                });
-                clearPostActionConfirmOverlay();
-            }
-
-            function resetPostActionModals() {
-                closeOtherPostActionModals('');
-            }
-
-            window.openComment = function (postId) {
-                if (!currentUser) { showToast("请先登录"); return; }
-                if (window.__xtjDeleteInProgress) {
-                    if (Date.now() - window.__xtjDeleteStartTime > 12000) {
-                        cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
-                    } else {
-                        showToast("正在删除中，请稍后..");
-                        return;
-                    }
-                }
-                
-                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
-                if (!postEl) return;
-                
-                // 如果已经存在，则收起（切换显示状态）
-                var existingBox = postEl.querySelector('.inline-comment-box');
-                if (existingBox) {
-                    existingBox.style.gridTemplateRows = '0fr';
-                    existingBox.style.opacity = '0';
-                    existingBox.style.marginTop = '0px';
-                    setTimeout(() => existingBox.remove(), 300);
-                    return;
-                }
-                
-                // 移除其他帖子下可能打开的内联输入框，保持界面整洁
-                document.querySelectorAll('.inline-comment-box').forEach(function(el) {
-                    el.style.gridTemplateRows = '0fr';
-                    el.style.opacity = '0';
-                    el.style.marginTop = '0px';
-                    setTimeout(() => el.remove(), 300);
-                });
-                
-                // 创建内联评论框容器 (带动画)
-                var box = document.createElement('div');
-                box.className = 'inline-comment-box';
-                box.style.display = 'grid';
-                box.style.gridTemplateRows = '0fr';
-                box.style.opacity = '0';
-                box.style.marginTop = '0px';
-                box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-                box.style.background = 'transparent'; // 修复底色不统一的问题
-                box.style.borderBottomLeftRadius = '16px';
-                box.style.borderBottomRightRadius = '16px';
-                
-                var gridInner = document.createElement('div');
-                gridInner.style.overflow = 'hidden';
-                
-                var innerWrap = document.createElement('div');
-                innerWrap.style.padding = '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
-                innerWrap.style.display = 'flex';
-                innerWrap.style.gap = '8px';
-                innerWrap.style.alignItems = 'center';
-                
-                var inp = document.createElement('input');
-                inp.type = 'text';
-                inp.className = 'inline-comment-inp';
-                inp.placeholder = '写下你的想法...';
-                inp.style.flex = '1';
-                inp.style.padding = '8px 12px';
-                inp.style.border = '1px solid var(--border)';
-                inp.style.borderRadius = '20px';
-                inp.style.background = 'var(--bg-secondary)';
-                inp.style.outline = 'none';
-                inp.style.fontSize = '14px';
-                
-                // ★ @ mention autocomplete
-                var mentionDropdown = null;
-                var mentionActiveIndex = 0;
-                function closeMentionDropdown() {
-                    if (mentionDropdown && mentionDropdown.parentNode) {
-                        mentionDropdown.parentNode.removeChild(mentionDropdown);
-                    }
-                    mentionDropdown = null;
-                    mentionActiveIndex = 0;
-                }
-                function insertMentionAtCursor(inp, mentionText) {
-                    var start = inp.selectionStart || 0;
-                    var text = inp.value;
-                    // 找到光标前最近的 @ 位置
-                    var atPos = -1;
-                    for (var i = start - 1; i >= 0; i--) {
-                        if (text[i] === '@' || text[i] === '＠') {
-                            // 检查 @ 是否在开头、空格后或换行后
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
-                        }
-                    }
-                    if (atPos >= 0) {
-                        var before = text.slice(0, atPos);
-                        var after = text.slice(start);
-                        inp.value = before + mentionText + after;
-                        var newCursor = atPos + mentionText.length;
-                        inp.setSelectionRange(newCursor, newCursor);
-                    }
-                    closeMentionDropdown();
-                    inp.focus();
-                }
-                function showMentionDropdown(inp) {
-                    var start = inp.selectionStart || 0;
-                    var text = inp.value;
-                    // 查找光标前最近的 @
-                    var atPos = -1;
-                    for (var i = start - 1; i >= 0; i--) {
-                        if (text[i] === '@' || text[i] === '＠') {
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
-                        }
-                    }
-                    if (atPos < 0) { closeMentionDropdown(); return; }
-                    // 检查 @ 后面是否已经有非空内容（排除空格）
-                    var afterAt = text.slice(atPos + 1, start);
-                    if (afterAt.length > 0 && !/^\s*$/.test(afterAt)) {
-                        // 用户已经开始输入了，检查是否匹配"小猫"的前缀
-                        if (!'小猫'.startsWith(afterAt) && !'小猫'.includes(afterAt)) {
-                            closeMentionDropdown(); return;
-                        }
-                    }
-                    closeMentionDropdown();
-                    mentionDropdown = document.createElement('div');
-                    mentionDropdown.className = 'mention-dropdown';
-                    mentionDropdown.setAttribute('role', 'listbox');
-                    mentionDropdown.setAttribute('aria-label', '提及候选');
-                    mentionDropdown.innerHTML = 
-                        '<div class="mention-item mention-active" role="option" aria-selected="true" id="mention-cat-ai" data-insert="@小猫 ">' +
-                        '<span class="mention-avatar">🐱</span>' +
-                        '<span class="mention-name">小猫</span>' +
-                        '<span class="mention-badge">AI</span>' +
-                        '<span class="mention-desc">犀利毒舌回复</span>' +
-                        '</div>';
-                    mentionActiveIndex = 0;
-                    // 定位在输入框下方
-                    var rect = inp.getBoundingClientRect();
-                    mentionDropdown.style.position = 'fixed';
-                    mentionDropdown.style.left = rect.left + 'px';
-                    mentionDropdown.style.top = (rect.bottom + 4) + 'px';
-                    mentionDropdown.style.minWidth = rect.width + 'px';
-                    mentionDropdown.style.zIndex = '99999';
-                    document.body.appendChild(mentionDropdown);
-                    // 点击选中
-                    mentionDropdown.addEventListener('click', function(e) {
-                        var item = e.target.closest('.mention-item');
-                        if (item) {
-                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
-                        }
-                    });
-                    // 触摸支持
-                    mentionDropdown.addEventListener('touchend', function(e) {
-                        var item = e.target.closest('.mention-item');
-                        if (item) {
-                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
-                        }
-                    });
-                    // 设置 aria-expanded
-                    inp.setAttribute('aria-expanded', 'true');
-                    inp.setAttribute('role', 'combobox');
-                    inp.setAttribute('aria-activedescendant', 'mention-cat-ai');
-                }
-                function updateMentionActive(delta) {
-                    if (!mentionDropdown) return;
-                    var items = mentionDropdown.querySelectorAll('.mention-item');
-                    if (!items.length) return;
-                    items[mentionActiveIndex].classList.remove('mention-active');
-                    items[mentionActiveIndex].setAttribute('aria-selected', 'false');
-                    mentionActiveIndex = (mentionActiveIndex + delta + items.length) % items.length;
-                    items[mentionActiveIndex].classList.add('mention-active');
-                    items[mentionActiveIndex].setAttribute('aria-selected', 'true');
-                    inp.setAttribute('aria-activedescendant', items[mentionActiveIndex].id || '');
-                }
-                inp.addEventListener('input', function() {
-                    showMentionDropdown(inp);
-                });
-                inp.addEventListener('keydown', function(e) {
-                    // ★ 统一 keydown 处理器：mention dropdown 优先
-                    if (mentionDropdown) {
-                        if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); updateMentionActive(1); return; }
-                        if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); updateMentionActive(-1); return; }
-                        if (e.key === 'Enter' || e.key === 'Tab') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            e.stopImmediatePropagation();
-                            var items = mentionDropdown.querySelectorAll('.mention-item');
-                            if (items[mentionActiveIndex]) {
-                                insertMentionAtCursor(inp, items[mentionActiveIndex].getAttribute('data-insert'));
-                            }
-                            return;
-                        }
-                        if (e.key === 'Escape') { e.preventDefault(); closeMentionDropdown(); return; }
-                    }
-                    // ★ 没有 mention dropdown 时，Enter 发送评论
-                    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        btn.click();
-                    }
-                });
-                inp.addEventListener('click', function() {
-                    showMentionDropdown(inp);
-                });
-                // 全局关闭（使用命名函数，注释框销毁时移除）
-                var _mentionGlobalClick = function(e) {
-                    if (mentionDropdown && e.target !== inp && !mentionDropdown.contains(e.target)) {
-                        closeMentionDropdown();
-                    }
-                };
-                document.addEventListener('click', _mentionGlobalClick, true);
-                // 帖子关闭或重绘时关闭 + 移除全局监听器
-                var _origBoxRemove = box.remove;
-                box.remove = function() {
-                    closeMentionDropdown();
-                    document.removeEventListener('click', _mentionGlobalClick, true);
-                    _origBoxRemove.call(box);
-                };
-                
-                var btn = document.createElement('button');
-                btn.className = 'btn-sm btn-primary';
-                btn.textContent = '发送';
-                btn.style.borderRadius = '20px';
-                btn.style.padding = '6px 14px';
-                
-                btn.onclick = async function() {
-                    if (btn.disabled) return;
-                    if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
-                    var content = inp.value.trim();
-                    if (!content) { showToast("请输入评论内容"); return; }
-                    var targetPostId = String(postId || '').trim().toLowerCase();
-                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
-                        showToast("帖子参数无效");
-                        return;
-                    }
-                    
-                    btn.disabled = true;
-                    btn.textContent = "发送中..";
-                    
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
-                    try {
-                        const response = await window.xtjProtectedFetch('/api/post/comment', {
-                            signal: controller.signal,
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ post_id: targetPostId, content: content })
-                        });
-                        clearTimeout(timeoutId);
-                        const result = await response.json().catch(function() { return {}; });
-                        if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
-                        
-                        touchUserSession(false);
-                        showToast("评论成功");
-                        box.style.gridTemplateRows = '0fr';
-                        box.style.opacity = '0';
-                        box.style.marginTop = '0px';
-                        setTimeout(() => box.remove(), 300);
-                        
-                        var scrollEl = document.getElementById('panelPosts');
-                        var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
-                        var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
-                        
-                        if (insertedComment) {
-                            feedAllComments = (feedAllComments || []).filter(function(item) {
-                                return !(item && item.id != null && String(item.id) === String(insertedComment.id));
-                            }).concat([insertedComment]);
-                            writeFeedCacheSnapshot();
-                            await renderFeedFromMemoryState();
-                        } else {
-                            await loadFeed(true);
-                        }
-                        
-                        requestAnimationFrame(function() {
-                            var p = document.getElementById('panelPosts');
-                            if (p && savedScroll > 0) p.scrollTop = savedScroll;
-                            var newEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
-                            if (newEl) newEl.classList.add('visible');
-                        });
-                        loadProfileActivity(true);
-                        
-                        // 小猫 AI 自动回复轮询
-                        // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
-                        // 小猫后跟非汉字字符，导致 @小猫帮我看看 不匹配（"帮"是汉字）。
-                        // 改为负向断言 (?![猫])：仅排除 小猫咪，@小猫帮我看看 可匹配。
-                        if (content && /[@＠]小猫(?![猫咪])/.test(content) && insertedComment) {
-                            pollCatAiReply(insertedComment.id, targetPostId);
-                        }
-                    } catch (e) {
-                        showToast("评论失败: " + (e.message || "未知错误"));
-                        btn.disabled = false;
-                        btn.textContent = '发送';
-                    }
-                };
-
-                // ★ 不再使用独立的 inp.onkeydown，统一由 addEventListener 处理
-                
-                innerWrap.appendChild(inp);
-                innerWrap.appendChild(btn);
-                gridInner.appendChild(innerWrap);
-                box.appendChild(gridInner);
-                
-                var actionsEl = postEl.querySelector('.actions');
-                if (actionsEl) {
-                    actionsEl.parentNode.insertBefore(box, actionsEl.nextSibling);
-                } else {
-                    postEl.appendChild(box);
-                }
-                
-                // 触发展开动画
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        box.style.gridTemplateRows = '1fr';
-                        box.style.opacity = '1';
-                        box.style.marginTop = '8px';
-                    });
-                });
-                
-                setTimeout(() => inp.focus(), 300); // 动画结束后再 focus
-            };
-
-            // ===================== 删除帖子 =====================
-            // 用 window 挂载，确保不同 IIFE 共享
-            if (typeof window.__xtjDeleteInProgress === 'undefined') window.__xtjDeleteInProgress = false;
-            if (typeof window.__xtjDeleteStartTime === 'undefined') window.__xtjDeleteStartTime = 0;
-            if (!window.__xtjDeleteSession) {
-                window.__xtjDeleteSession = {
-                    timeoutId: null,
-                    postId: null,
-                    ownerKey: null,
-                    postEl: null,
-                    originalOpacity: '',
-                    originalPointerEvents: '',
-                    originalFilter: ''
-                };
-            }
-            function getDeleteSession() {
-                return window.__xtjDeleteSession;
-            }
-            function restoreDeleteTargetVisual() {
-                var session = getDeleteSession();
-                if (!session.postEl) return;
-                try { session.postEl.style.opacity = session.originalOpacity || ''; } catch (e) {}
-                try { session.postEl.style.pointerEvents = session.originalPointerEvents || ''; } catch (e) {}
-                try { session.postEl.style.filter = session.originalFilter || ''; } catch (e) {}
-                session.postEl = null;
-                session.originalOpacity = '';
-                session.originalPointerEvents = '';
-                session.originalFilter = '';
-            }
-            function resetDeleteButtonState() {
-                var btn = document.getElementById("delBtn");
-                if (!btn) return;
-                try { btn.disabled = false; } catch (e) {}
-                try { btn.textContent = "确认删除"; } catch (e) {}
-            }
-            function cleanupDeleteSession(options) {
-                var opts = options || {};
-                var session = getDeleteSession();
-                if (session.timeoutId) {
-                    clearTimeout(session.timeoutId);
-                    session.timeoutId = null;
-                }
-                if (opts.restoreVisual !== false) {
-                    restoreDeleteTargetVisual();
-                } else {
-                    session.postEl = null;
-                    session.originalOpacity = '';
-                    session.originalPointerEvents = '';
-                    session.originalFilter = '';
-                }
-                if (opts.hideModal !== false) {
-                    var modalEl = document.getElementById("delModal");
-                    if (modalEl) modalEl.classList.remove("active");
-                }
-                if (opts.resetTarget !== false) {
-                    delPostId = null;
-                    delOwnerKey = null;
-                    session.postId = null;
-                    session.ownerKey = null;
-                }
-                resetDeleteButtonState();
-                window.__xtjDeleteInProgress = false;
-                window.__xtjDeleteStartTime = 0;
-                if (opts.toast && typeof showToast === 'function') {
-                    showToast(opts.toast);
-                }
-            }
-            function findPostCardElement(postId) {
-                return document.querySelector('.post[data-post-id="' + postId + '"]');
-            }
-            function removeDeletedPostFromFeed(postId) {
-                if (!Array.isArray(feedAllPosts)) return;
-                feedAllPosts = feedAllPosts.filter(function(post) {
-                    return String(post.id) !== String(postId);
-                });
-            }
-            async function confirmPostDeleteStatus(postId) {
-                var controller = typeof AbortController === 'function' ? new AbortController() : null;
-                var statusTimeoutMs = Number(window.__xtjPostDeleteStatusTimeoutMs) > 0 ? Number(window.__xtjPostDeleteStatusTimeoutMs) : 8000;
-                var timer = setTimeout(function() { if (controller) controller.abort(); }, statusTimeoutMs);
-                try {
-                    var response = await window.xtjProtectedFetch('/api/post/delete-status', {
-                        method: 'POST',
-                        body: JSON.stringify({ post_id: postId }),
-                        signal: controller ? controller.signal : undefined
-                    });
-                    var result = await response.json().catch(function() { return {}; });
-                    if (!response.ok || !result.ok) return { confirmed: false };
-                    return { confirmed: true, deleted: result.deleted === true && result.exists === false };
-                } catch (_) {
-                    return { confirmed: false };
-                } finally {
-                    clearTimeout(timer);
-                }
-            }
-            // 快速本地检查帖子是否存在（不依赖网络，避免二次超时）
-            function quickPostExistsCheck(postId) {
-                try {
-                    var allPosts = normalizePosts(feedAllPosts);
-                    var found = allPosts.find(function(p) { return String(p.id) === String(postId); });
-                    if (found) return 'exists';
-                    // 如果本地feed中已不存在，视为已删除
-                    return 'deleted';
-                } catch (_) {
-                    return 'unknown';
-                }
-            }
-            function applyConfirmedPostDeletion(postId, session) {
-                removeDeletedPostFromFeed(postId);
-                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
-
-                // 乐观删除动画：透明度+位移+高度收缩，180-220ms
-                if (session.postEl && session.postEl.parentNode) {
-                    var el = session.postEl;
-                    var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                    if (reducedMotion) {
-                        try { el.remove(); } catch (e) {}
-                    } else {
-                        el.style.transition = 'opacity 200ms ease, transform 200ms ease, max-height 200ms ease, margin 200ms ease, padding 200ms ease';
-                        el.style.opacity = '0';
-                        el.style.transform = 'translateY(-8px) scale(0.98)';
-                        el.style.maxHeight = '0';
-                        el.style.overflow = 'hidden';
-                        el.style.margin = '0';
-                        el.style.padding = '0';
-                        el.style.border = 'none';
-                        el.style.pointerEvents = 'none';
-                        var onTransitionEnd = function() {
-                            try { el.remove(); } catch (e) {}
-                            el.removeEventListener('transitionend', onTransitionEnd);
-                        };
-                        el.addEventListener('transitionend', onTransitionEnd);
-                        // 兜底：250ms 后强制移除
-                        setTimeout(function() {
-                            try { if (el.parentNode) el.remove(); } catch (e) {}
-                        }, 250);
-                    }
-                }
-
-                if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
-                cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
-                showToast("帖子已删除");
-                // 不再调用 loadFeed(true)，避免整页重建和闪白
-            }
-            window.openDelete = function (postId, ownerKey) {
-                // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
-                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
-                    console.warn('[openDelete] 检测到上一次删除超时卡死，强制解锁');
-                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
-                }
-                if (window.__xtjDeleteInProgress) {
-                    showToast("正在删除中，请稍后..");
-                    return;
-                }
-                var targetPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
-                if (targetPost && !canDeletePost(targetPost)) {
-                    showToast("无权删除这条帖子");
-                    return;
-                }
-                delPostId = postId;
-                delOwnerKey = ownerKey;
-                var session = getDeleteSession();
-                session.postId = postId;
-                session.ownerKey = ownerKey;
-                closeOtherPostActionModals('delModal');
-                openModal("delModal");
-            };
-            var delBtn = document.getElementById("delBtn");
-            if (delBtn) delBtn.onclick = async () => {
-                if (!delPostId) return;
-                // ★ 入口强制解锁（同 openDelete）
-                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
-                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
-                }
-                if (window.__xtjDeleteInProgress) return;
-                const btn = document.getElementById("delBtn");
-                const session = getDeleteSession();
-                const targetPostId = String(delPostId);
-                const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
-                if (currentPost && !canDeletePost(currentPost)) {
-                    cleanupDeleteSession({ toast: "无权删除这条帖子" });
-                    return;
-                }
-                window.__xtjDeleteInProgress = true;
-                window.__xtjDeleteStartTime = Date.now();
-                btn.disabled = true;
-                btn.textContent = "删除中..";
-                var finished = false;
-                session.postEl = findPostCardElement(targetPostId);
-                if (session.postEl) {
-                    session.originalOpacity = session.postEl.style.opacity || '';
-                    session.originalPointerEvents = session.postEl.style.pointerEvents || '';
-                    session.originalFilter = session.postEl.style.filter || '';
-                    session.postEl.style.opacity = '0.56';
-                    session.postEl.style.pointerEvents = 'none';
-                    session.postEl.style.filter = 'grayscale(0.08)';
-                }
-                session.timeoutId = setTimeout(function() {
-                    if (finished) return;
-                    console.warn('[delBtn] delete flow exceeded safety deadline');
-                    finished = true;
-                    cleanupDeleteSession({ toast: "删除状态确认超时，请刷新后重试" });
-                    // 不再调用 loadFeed(true)，防止整页重建
-                }, 30000);
-
-                try {
-                    var deleteController = typeof AbortController === 'function' ? new AbortController() : null;
-                    var deleteTimedOut = false;
-                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 10000;
-                    var deleteTimer = setTimeout(function() {
-                        deleteTimedOut = true;
-                        if (deleteController) deleteController.abort();
-                    }, deleteTimeoutMs);
-                    let deleteResponse;
-                    try {
-                        deleteResponse = await window.xtjProtectedFetch('/api/post/delete', {
-                            method: 'POST',
-                            body: JSON.stringify({ post_id: targetPostId }),
-                            signal: deleteController ? deleteController.signal : undefined
-                        });
-                    } catch (raceErr) {
-                        if (finished) return;
-                        if (deleteTimedOut) {
-                            console.warn('[delBtn] delete request timed out; checking locally');
-                            // The delete request may have reached the server before this
-                            // browser timed out. Confirm with the authoritative endpoint
-                            // before deciding whether to restore the optimistic UI.
-                            var authoritativeStatus = await confirmPostDeleteStatus(targetPostId);
-                            if (finished) return;
-                            finished = true;
-                            if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
-                                applyConfirmedPostDeletion(targetPostId, session);
-                            } else {
-                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
-                            }
-                            return;
-                            // 说明：原先此处有"快速本地检查"兜底，但被上方 return 短路成为死代码。
-                            // 超时后必须以权威接口 confirmPostDeleteStatus 的结果为准（避免误删/误恢复），
-                            // 本地缓存检查不可靠，故移除。
-                            // [dead code removed - quickPostExistsCheck local fallback]
-                        }
-                        throw raceErr;
-                    } finally {
-                        clearTimeout(deleteTimer);
-                    }
-                    if (finished) return;
-                    const deleteResult = await deleteResponse.json().catch(function() { return {}; });
-                    if (!deleteResponse.ok || !deleteResult.ok || (!deleteResult.deleted && !deleteResult.already_deleted)) {
-                        finished = true;
-                        cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
-                        return;
-                    }
-                    finished = true;
-                    applyConfirmedPostDeletion(targetPostId, session);
-                } catch (e) {
-                    if (finished) return;
-                    console.error('[delBtn] 删除异常:', e);
-                    finished = true;
-                    // 恢复目标帖子视觉状态
-                    if (session.postEl) {
-                        try {
-                            session.postEl.style.opacity = session.originalOpacity || '';
-                            session.postEl.style.pointerEvents = session.originalPointerEvents || '';
-                            session.postEl.style.filter = session.originalFilter || '';
-                            session.postEl.style.transition = '';
-                            session.postEl.style.transform = '';
-                            session.postEl.style.maxHeight = '';
-                            session.postEl.style.overflow = '';
-                            session.postEl.style.margin = '';
-                            session.postEl.style.padding = '';
-                            session.postEl.style.border = '';
-                        } catch(e) {}
-                    }
-                    cleanupDeleteSession({ toast: "删除帖子失败: " + (e && e.message || "未知错误"), restoreVisual: false });
-                } finally {
-                    if (!finished) {
-                        cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: false });
-                    }
-                }
-            };
-
-            window.openModal = function (id) {
-                var el = document.getElementById(id);
-                if (!el) return;
-                if (isPostActionModalId(id)) {
-                    closeOtherPostActionModals(id);
-                }
-                el.style.display = '';
-                el.classList.add("active");
-            };
-
-            window.closeModal = function (id) {
-                var el = document.getElementById(id);
-                if (!el) return;
-                if (isPostActionModalId(id)) {
-                    forceClosePostActionModal(id);
-                } else {
-                    el.classList.remove("active");
-                }
-                // 删除弹窗取消时立即清理，不播放动画
-                if (id === 'delModal') {
-                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
-                }
-                if (id === 'loginModal' || id === 'registerModal') {
-                    if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
-                        try { authModalFocusOrigin.focus(); } catch (_) {}
-                    }
-                    authModalFocusOrigin = null;
-                }
-                if (id === 'statModal' && statPollTimer) {
-                    clearInterval(statPollTimer);
-                    statPollTimer = null;
-                }
-            };
-            resetPostActionModals();
-
-            // ===================== 图片查看器 =====================
-            const ivZoomState = { scale: 1, tx: 0, ty: 0 };
-            let ivIsZooming = false;
-            let ivIsPanning = false;
-            let ivLastDist = 0;
-            let ivPanStartX = 0, ivPanStartY = 0;
-            let ivStartTx = 0, ivStartTy = 0;
-            let ivStartScale = 1;
-            let ivPinchAnchorX = 0, ivPinchAnchorY = 0;
-            let ivLastTapTime = 0;
-            let ivDoubleTapTimer = null;
-            let ivHintTimer = null;
-            let ivTouchEndTime = 0;
-
-            function ivApplyTransform() {
-                const img = document.getElementById('ivImg');
-                if (!img) return;
-                const v = ivZoomState;
-                const t = `translate3d(${v.tx}px, ${v.ty}px, 0) scale(${v.scale})`;
-                img.style.transform = t;
-                img.style.webkitTransform = t;
-            }
-
-            function ivResetZoom(instant = false) {
-                const img = document.getElementById('ivImg');
-                if (!img) return;
-                ivZoomState.scale = 1;
-                ivZoomState.tx = 0;
-                ivZoomState.ty = 0;
-                if (instant) {
-                    img.classList.add('instant');
-                    img.style.transform = '';
-                    img.style.webkitTransform = '';
-                    void img.offsetWidth;
-                    img.classList.remove('instant');
-                } else {
-                    img.style.transform = '';
-                    img.style.webkitTransform = '';
-                }
-            }
-
-            function ivZoomAt(clientX, clientY, nextScale) {
-                const oldScale = ivZoomState.scale || 1;
-                const x = clientX == null ? window.innerWidth / 2 : clientX;
-                const y = clientY == null ? window.innerHeight / 2 : clientY;
-                const anchorX = (x - window.innerWidth / 2 - ivZoomState.tx) / oldScale;
-                const anchorY = (y - window.innerHeight / 2 - ivZoomState.ty) / oldScale;
-                ivZoomState.scale = Math.max(1, Math.min(6, nextScale));
-                ivZoomState.tx = x - window.innerWidth / 2 - anchorX * ivZoomState.scale;
-                ivZoomState.ty = y - window.innerHeight / 2 - anchorY * ivZoomState.scale;
-                if (ivZoomState.scale <= 1.01) {
-                    ivResetZoom(false);
-                } else {
-                    ivApplyTransform();
-                    ivShowHint();
-                }
-            }
-
-            function ivShowHint() {
-                const h = document.getElementById('ivZoomHint');
-                if (!h) return;
-                h.classList.add('show');
-                clearTimeout(ivHintTimer);
-                ivHintTimer = setTimeout(() => h.classList.remove('show'), 2000);
-            }
-
-            function buildPostPreviewItemFromTrigger(src, triggerEl) {
-                var el = triggerEl && triggerEl.getAttribute ? triggerEl : null;
-                if (!el) return null;
-                var postId = String(el.getAttribute('data-post-id') || '').trim();
-                if (!postId) return null;
-                var userName = String(el.getAttribute('data-post-user') || '').trim();
-                var createdAt = String(el.getAttribute('data-post-created-at') || '').trim();
-                var views = Number(el.getAttribute('data-post-views') || 0) || 0;
-                var fileSize = Number(el.getAttribute('data-file-size') || 0) || null;
-                var originalSize = Number(el.getAttribute('data-original-size') || 0) || null;
-                return {
-                    id: 'post_' + postId,
-                    imageUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
-                    thumbUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
-                    username: userName || '',
-                    timestamp: createdAt || '',
-                    views: views,
-                    fileSize: fileSize,
-                    originalSize: originalSize,
-                    __xtjSource: 'post',
-                    __xtjPostId: postId,
-                    __xtjActorKey: String(el.getAttribute('data-actor-key') || ''),
-                    __xtjCanDelete: String(el.getAttribute('data-can-delete') || '') === '1'
-                };
-            }
-
-            function syncPostPhotoPreviewChrome(photo) {
-                var overlay = document.getElementById('photoPreviewOverlay');
-                if (!overlay) return;
-                var isPostPhoto = !!(photo && photo.__xtjSource === 'post');
-                overlay.classList.toggle('pp-post-mode', isPostPhoto);
-                var prevBtn = document.getElementById('ppPrevBtn');
-                var nextBtn = document.getElementById('ppNextBtn');
-                if (prevBtn) prevBtn.style.display = isPostPhoto ? 'none' : '';
-                if (nextBtn) nextBtn.style.display = isPostPhoto ? 'none' : '';
-                var deleteBtn = document.getElementById('ppDeleteBtn');
-                if (deleteBtn && isPostPhoto) {
-                    deleteBtn.style.display = photo.__xtjCanDelete ? 'flex' : 'none';
-                    deleteBtn.title = '删除帖子';
-                }
-            }
-
-            function ensurePhotoPreviewContextHooks() {
-                if (window.__xtjPhotoPreviewContextHooked) return;
-                if (typeof window.closePhotoPreview !== 'function') return;
-                var originalClosePhotoPreview = window.closePhotoPreview;
-                window.closePhotoPreview = function() {
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (overlay) overlay.classList.remove('pp-post-mode');
-                    window.__xtjPhotoPreviewContext = null;
-                    return originalClosePhotoPreview.apply(this, arguments);
-                };
-                window.__xtjPhotoPreviewContextHooked = true;
-            }
-
-            function openPostImagePreview(src, triggerEl) {
-                var photo = buildPostPreviewItemFromTrigger(src, triggerEl);
-                if (!photo || !photo.imageUrl || typeof window.openPhotoPreview !== 'function') return false;
-                ensurePhotoPreviewContextHooks();
-                if (typeof window.closeImageViewer === 'function') {
-                    try { window.closeImageViewer(); } catch (e) {}
-                }
-                window.__xtjPhotoPreviewContext = {
-                    kind: 'post',
-                    postId: photo.__xtjPostId,
-                    actorKey: photo.__xtjActorKey || '',
-                    canDelete: !!photo.__xtjCanDelete
-                };
-                window.openPhotoPreview(0, { photos: [photo], originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
-                window.photoPreviewCurrent = photo;
-                setTimeout(function() {
-                    syncPostPhotoPreviewChrome(photo);
-                }, 30);
-                return true;
-            }
-            window.openPostImagePreview = openPostImagePreview;
-
-            window.openImageViewer = function (src, triggerEl) {
-                function fallbackOpen() {
-                    if (typeof window.forceClosePhotoPreview === 'function') {
-                        try { window.forceClosePhotoPreview(); } catch (e) {}
-                    } else if (typeof window.closePhotoPreview === 'function') {
-                        try { window.closePhotoPreview(); } catch (e) {}
-                    }
-                    const viewer = document.getElementById('imgViewer');
-                    const img = document.getElementById('ivImg');
-                    const wrapper = document.getElementById('ivWrapper');
-                    ivResetZoom(true);
-                    img.src = src;
-                    wrapper.classList.add('open-anim');
-                    viewer.classList.add('img-transition');
-                    img.classList.add('instant');
-                    void img.offsetWidth;
-                    img.classList.remove('instant');
-                    viewer.classList.add('active');
-                    setTimeout(function() { viewer.classList.add('show'); }, 10);
-                    document.body.style.overflow = 'hidden';
-                }
-                if ((typeof window.openPhotoPreview !== 'function' || window.openPhotoPreview === lazyOpenPhotoPreview) && typeof ensurePhotoWallPreviewLoaded === 'function') {
-                    ensurePhotoWallPreviewLoaded().then(function() {
-                        if (!openPostImagePreview(src, triggerEl)) fallbackOpen();
-                    }).catch(function() {
-                        fallbackOpen();
-                    });
-                    return;
-                }
-                if (openPostImagePreview(src, triggerEl)) return;
-                fallbackOpen();
-            };
-
-            window.closeImageViewer = function () {
-                const viewer = document.getElementById('imgViewer');
-                const wrapper = document.getElementById('ivWrapper');
-                ivResetZoom(true);
-                wrapper.classList.remove('open-anim');
-                viewer.classList.remove('show');
-                setTimeout(function() {
-                    viewer.classList.remove('active');
-                    viewer.classList.remove('img-transition');
-                }, 300);
-                document.body.style.overflow = '';
-            };
-
-            window.deleteCurrentPhoto = function() {
-                var ctx = window.__xtjPhotoPreviewContext || null;
-                var current = window.photoPreviewCurrent || null;
-                if (ctx && ctx.kind === 'post' && current && current.__xtjSource === 'post') {
-                    if (!ctx.canDelete) {
-                        showToast('仅发布者可删除');
-                        return;
-                    }
-                    if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
-                    setTimeout(function() {
-                        openDelete(ctx.postId, ctx.actorKey || '');
-                    }, 60);
-                    return;
-                }
-                if (typeof window.deletePhotoFromPreview === 'function') {
-                    window.deletePhotoFromPreview();
-                }
-            };
-
-            document.addEventListener('keydown', function (e) {
-                if (e.key !== 'Escape') return;
-                var iv = document.getElementById('imgViewer');
-                if (iv && iv.classList.contains('active')) { closeImageViewer(); return; }
-                var am = document.getElementById('announcementModal');
-                if (am && am.classList.contains('active')) { closeAnnouncementModal(); return; }
-                var sm = document.getElementById('statModal');
-                if (sm && sm.classList.contains('active')) { sm.classList.remove('active'); return; }
-                var cm = document.getElementById('commentModal');
-                if (cm && cm.classList.contains('active')) { closeModal('commentModal'); return; }
-            });
-
-            const ivViewerEl = document.getElementById('imgViewer');
-            const ivImgEl = document.getElementById('ivImg');
-
-            // 判空保护：图片查看器元素缺失时跳过绑定，不得中断 core.js 后续逻辑
-            if (ivViewerEl) {
-            ivViewerEl.addEventListener('click', function (e) {
-                if (Date.now() - ivTouchEndTime < 120) return;
-                if (e.target === ivViewerEl || e.target === document.getElementById('ivWrapper')) {
-                    closeImageViewer();
-                }
-            });
-
-            ivViewerEl.addEventListener('contextmenu', function (e) {
-                e.preventDefault();
-            });
-
-            ivViewerEl.addEventListener('touchstart', function (e) {
-                if (e.target.closest('.iv-close')) return;
-                if (e.touches.length === 2) {
-                    e.preventDefault();
-                    ivIsZooming = true;
-                    const t = e.touches;
-                    ivLastDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-                    ivStartTx = ivZoomState.tx;
-                    ivStartTy = ivZoomState.ty;
-                    ivStartScale = ivZoomState.scale;
-                    const cx = (t[0].clientX + t[1].clientX) / 2;
-                    const cy = (t[0].clientY + t[1].clientY) / 2;
-                    ivPinchAnchorX = (cx - window.innerWidth / 2 - ivStartTx) / ivStartScale;
-                    ivPinchAnchorY = (cy - window.innerHeight / 2 - ivStartTy) / ivStartScale;
-                    ivImgEl.classList.add('instant');
-                } else if (e.touches.length === 1) {
-                    const now = Date.now();
-                    if (now - ivLastTapTime < 320) {
-                        clearTimeout(ivDoubleTapTimer);
-                        ivLastTapTime = 0;
-                        if (ivZoomState.scale > 1.5) {
-                            ivResetZoom(false);
-                        } else {
-                            ivZoomAt(e.touches[0].clientX, e.touches[0].clientY, 2.5);
-                        }
-                        return;
-                    }
-                    ivLastTapTime = now;
-                    ivDoubleTapTimer = setTimeout(() => { ivLastTapTime = 0; }, 350);
-
-                    if (ivZoomState.scale > 1) {
-                        ivIsPanning = true;
-                        ivPanStartX = e.touches[0].clientX;
-                        ivPanStartY = e.touches[0].clientY;
-                        ivStartTx = ivZoomState.tx;
-                        ivStartTy = ivZoomState.ty;
-                        ivImgEl.classList.add('instant');
-                    }
-                }
-            }, { passive: false });
-
-            var _ivMoveTicking = false;
-            ivViewerEl.addEventListener('touchmove', function (e) {
-                if (ivIsZooming && e.touches.length === 2) {
-                    e.preventDefault();
-                    const t = e.touches;
-                    const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-                    const totalRatio = dist / ivLastDist;
-                    const newScale = Math.max(1, Math.min(6, ivStartScale * totalRatio));
-                    const cx = (t[0].clientX + t[1].clientX) / 2;
-                    const cy = (t[0].clientY + t[1].clientY) / 2;
-                    ivZoomState.scale = newScale;
-                    ivZoomState.tx = cx - window.innerWidth / 2 - ivPinchAnchorX * newScale;
-                    ivZoomState.ty = cy - window.innerHeight / 2 - ivPinchAnchorY * newScale;
-                    if (!_ivMoveTicking) {
-                        _ivMoveTicking = true;
-                        requestAnimationFrame(function() {
-                            ivApplyTransform();
-                            ivShowHint();
-                            _ivMoveTicking = false;
-                        });
-                    }
-                } else if (ivIsPanning && e.touches.length === 1) {
-                    e.preventDefault();
-                    const dx = e.touches[0].clientX - ivPanStartX;
-                    const dy = e.touches[0].clientY - ivPanStartY;
-                    ivZoomState.tx = ivStartTx + dx;
-                    ivZoomState.ty = ivStartTy + dy;
-                    if (!_ivMoveTicking) {
-                        _ivMoveTicking = true;
-                        requestAnimationFrame(function() {
-                            ivApplyTransform();
-                            _ivMoveTicking = false;
-                        });
-                    }
-                }
-            }, { passive: false });
-
-            ivViewerEl.addEventListener('touchend', function (e) {
-                ivTouchEndTime = Date.now();
-                if (ivIsZooming) {
-                    ivIsZooming = false;
-                    if (ivZoomState.scale <= 1) {
-                        ivImgEl.classList.remove('instant');
-                        ivResetZoom(false);
-                    } else {
-                        setTimeout(() => ivImgEl.classList.remove('instant'), 50);
-                    }
-                }
-                if (ivIsPanning) {
-                    ivIsPanning = false;
-                    ivImgEl.classList.remove('instant');
-                }
-            });
-
-            ivViewerEl.addEventListener('wheel', function (e) {
-                if (!ivViewerEl.classList.contains('active')) return;
-                e.preventDefault();
-                const delta = -e.deltaY * 0.002;
-                const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
-                if (newScale === ivZoomState.scale) return;
-                const cx = e.clientX;
-                const cy = e.clientY;
-                const ratio = newScale / ivZoomState.scale;
-                ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
-                ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
-                ivZoomState.scale = newScale;
-                ivApplyTransform();
-                ivShowHint();
-                if (ivZoomState.scale <= 1) {
-                    ivResetZoom(true);
-                }
-            }, { passive: false });
-            } // end if (ivViewerEl)
-
-            // ===================== 浏览历史缓存 =====================
-            // 帖子信息缓存：用于浏览历史与媒体标签
-            const postInfoCache = {};
-            // 挂到 window：登出清理 clearAllAuthState 中 window.postInfoCache 清理依赖此引用
-            window.postInfoCache = postInfoCache;
-            const VIEW_HISTORY_KEY = 'xtj_view_history';
-            const VIEW_TRACK_TTL = 5 * 60 * 1000;
-            const VIEW_HISTORY_MEDIA_LABEL = '(\u56fe\u7247/\u89c6\u9891)';
-            const VIEW_HISTORY_DELETED_AUTHOR = '\u5df2\u5220\u9664\u7528\u6237';
-
-            function normalizeViewHistoryText(value, fallback) {
-                var text = String(value == null ? '' : value).trim();
-                if (!text) return fallback;
-                // ★ 修复：媒体标记检测关键词此前为编码损坏的乱码（永不匹配），
-                // 替换为正常中文关键词，使媒体帖子的历史标签能正确显示
-                if (text.indexOf('图片') !== -1 || text.indexOf('视频') !== -1 || text.indexOf('音频') !== -1 || text.indexOf('(图片/视频)') !== -1) return VIEW_HISTORY_MEDIA_LABEL;
-                // ★ 修复：已删除用户标记检测关键词同上（乱码→正常中文）
-                if (text.indexOf('已删除') !== -1 || text.indexOf('未知') !== -1) return VIEW_HISTORY_DELETED_AUTHOR;
-                // 兼容旧数据：如果存储的是原始 JSON，解析出 text 字段
-                if (text.startsWith('{') && text.indexOf('"__type"') !== -1) {
-                    try { var pc = JSON.parse(text); if (pc && pc.text !== undefined) return pc.text || fallback; } catch(e) {}
-                }
-                return text;
-            }
-
-            function normalizeViewHistoryEntry(entry) {
-                entry = entry || {};
-                return Object.assign({}, entry, {
-                    user_name: String(entry.user_name || '').trim(),
-                    post_id: entry.post_id,
-                    post_content: normalizeViewHistoryText(entry.post_content, VIEW_HISTORY_MEDIA_LABEL),
-                    post_author: normalizeViewHistoryText(entry.post_author, VIEW_HISTORY_DELETED_AUTHOR),
-                    media_url: String(entry.media_url || '').trim(),
-                    media_type: String(entry.media_type || '').trim(),
-                    viewed_at: entry.viewed_at || new Date().toISOString()
-                });
-            }
-
-            function shouldKeepViewHistoryEntry(entry) {
-                var viewer = String(entry && entry.user_name || '').trim();
-                var author = String(entry && entry.post_author || '').trim();
-                if (!viewer || !author || viewer === author) return false;
-                // 过滤系统日志 marker，不允许在前台总浏览弹窗显示
-                var mediaType = String(entry && entry.media_type || '').trim();
-                if (/^__.*__$/.test(mediaType)) return false; // 以双下划线开头&结尾的系统记录
-                // 过滤原始 JSON 字符串（device_id、ip、user_agent 等敏感信息不应出现在前台）
-                var postContent = String(entry && entry.post_content || '');
-                if (postContent.indexOf('"device_id"') !== -1 && postContent.indexOf('"ip"') !== -1) return false;
-                if (postContent.indexOf('"browser_fingerprint_hash"') !== -1) return false;
-                if (postContent.indexOf('"canvas_fingerprint_hash"') !== -1) return false;
-                if (postContent.indexOf('"webgl_fingerprint_hash"') !== -1) return false;
-                if (postContent.indexOf('"webrtc_local_ips"') !== -1) return false;
-                return true;
-            }
-
-            function getViewHistory() {
-                try {
-                    var history = window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
-                    var changed = false;
-                    var normalized = Array.isArray(history) ? history.map(function(entry) {
-                        var next = normalizeViewHistoryEntry(entry);
-                        if (!changed && JSON.stringify(next) !== JSON.stringify(entry || {})) changed = true;
-                        return next;
-                    }) : [];
-                    var filtered = normalized.filter(function(entry) {
-                        var keep = shouldKeepViewHistoryEntry(entry);
-                        if (!keep) changed = true;
-                        return keep;
-                    });
-                    if (changed) {
-                        window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(filtered));
-                    }
-                    return filtered;
-                } catch(e) { return []; }
-            }
-
-            function saveViewHistory(entry) {
-                const history = getViewHistory();
-                // 避免重复记录相同 post_id + user_name 的浏览记录
-                const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
-                if (!exists) {
-                    history.unshift(normalizeViewHistoryEntry(entry));
-                    // 只保留最近 500 条
-                    if (history.length > 500) history.length = 500;
-                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
-                }
-            }
-
-            function trackView(postId) {
-                const key = `xtj_v_${postId}`;
-                if (!window.safeStorage.get(key) && !viewTracked.has(postId)) {
-                    viewTracked.add(postId);
-                    window.safeStorage.set(key, "1");
-                    var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
-                    if (postEl) {
-                        var statsEl = postEl.querySelector('.post-stats-text');
-                        if (statsEl) {
-                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
-                            if (vm) {
-                                var newVal = parseInt(vm[1]) + 1;
-                                statsEl.textContent = statsEl.textContent.replace(/浏览 \d+/, '浏览 ' + newVal);
-                            }
-                        }
-                    }
-                    if (currentUser && postInfoCache[postId]) {
-                        var rawContent = postInfoCache[postId].content || '';
-                        var displayContent = rawContent;
-                        try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
-                        saveViewHistory({
-                            user_name: currentUser,
-                            post_id: postId,
-                            post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || '(图片/视频)'),
-                            post_author: postInfoCache[postId].user_name || '未知',
-                            media_url: postInfoCache[postId].media_url || '',
-                            media_type: postInfoCache[postId].media_type || '',
-                            viewed_at: new Date().toISOString()
-                        });
-                    }
-                    setTimeout(async () => { 
-                        try { 
-                            await sb.rpc("increment_post_views", { p_post_id: postId }); 
-                        } catch(e){ console.error(e); } 
-                    }, 1000);
-                    updateFeedStats();
-                }
-            }
-
-            // ===================== 浏览历史加载 =====================
-            // 保存浏览历史：分页加载相关变量
-            saveViewHistory = function(entry) {
-                const history = getViewHistory();
-                var normalized = normalizeViewHistoryEntry(entry);
-                var postId = String(normalized.post_id || normalized.postId || '').trim();
-                var userName = String(normalized.user_name || normalized.userName || '').trim();
-                // 去重：相同 post_id + user_name 的记录不重复添加
-                var exists = postId ? history.some(function(h) {
-                    return String(h.post_id || h.postId || '') === postId &&
-                           String(h.user_name || h.userName || '') === userName;
-                }) : false;
-                if (!exists) {
-                    history.unshift(normalized);
-                    if (history.length > 500) history.length = 500;
-                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
-                }
-            };
-
-            function canTrackViewNow(postId) {
-                const key = `xtj_v_${postId}`;
-                const now = Date.now();
-                var last = 0;
-                try { last = Number(window.safeStorage.get(key) || 0); } catch (e) { last = 0; }
-                if (viewTracked.has(postId) && now - last < VIEW_TRACK_TTL) return false;
-                if (last && now - last < VIEW_TRACK_TTL) return false;
-                return true;
-            }
-
-            trackView = function(postId) {
-                const key = `xtj_v_${postId}`;
-                if (!canTrackViewNow(postId)) return false;
-                // ★ 修复：未登录时不记录浏览——静默返回（此前 throw + console.error
-                // 导致每次滚动浏览都报错刷屏，且删除节流标记造成无限重复触发）。
-                if (!currentUser || typeof window.xtjProtectedFetch !== 'function') return false;
-                viewTracked.add(postId);
-                // ★ 修复：请求发出前先写节流键，防止键仅成功后写入期间
-                // 1 秒内重复触发并发 POST（在途请求保护）
-                window.safeStorage.set(key, String(Date.now()));
-                setTimeout(async () => {
-                    try {
-                        if (!currentUser || typeof window.xtjProtectedFetch !== 'function') throw new Error('view_auth_required');
-                        var response = await window.xtjProtectedFetch('/api/post/view', {
-                            method: 'POST',
-                            body: JSON.stringify({ post_id: String(postId) })
-                        });
-                        var result = await response.json().catch(function() { return {}; });
-                        if (!response.ok || !result.ok) throw new Error(result.error || 'view_record_failed');
-                        var authoritativeViews = Number(result.views);
-                        if (Number.isFinite(authoritativeViews)) {
-                            var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
-                            var statsEl = postEl && postEl.querySelector('.post-stats-text');
-                            if (statsEl) statsEl.textContent = statsEl.textContent.replace(/\d+/, String(authoritativeViews));
-                            if (Array.isArray(feedAllPosts)) {
-                                feedAllPosts = feedAllPosts.map(function(post) {
-                                    return post && String(post.id) === String(postId) ? Object.assign({}, post, { views: authoritativeViews }) : post;
-                                });
-                                if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
-                            }
-                            if (postInfoCache[postId]) postInfoCache[postId].views = authoritativeViews;
-                        }
-                        window.safeStorage.set(key, String(Date.now()));
-                        if (result.recorded && currentUser && postInfoCache[postId]) {
-                            var cachedPost = postInfoCache[postId];
-                            var rawContent = cachedPost.content || '';
-                            var displayContent = rawContent;
-                            try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
-                            saveViewHistory({ user_name: currentUser, post_id: postId,
-                                post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || VIEW_HISTORY_MEDIA_LABEL),
-                                post_author: cachedPost.user_name || VIEW_HISTORY_DELETED_AUTHOR,
-                                media_url: cachedPost.media_url || '', media_type: cachedPost.media_type || '',
-                                viewed_at: result.viewed_at || new Date().toISOString() });
-                        }
-                        updateFeedStats();
-                    } catch (e) {
-                        viewTracked.delete(postId);
-                        try { window.safeStorage.remove(key); } catch (_) {}
-                        console.error(e);
-                    }
-                }, 1000);
-                return true;
-            };
-            window.xtjTrackPostView = trackView;
-            window.xtjCanTrackPostView = canTrackViewNow;
-            window.xtjGetPostById = function(postId) {
-                var found = Array.isArray(feedAllPosts) ? feedAllPosts.find(function(post) {
-                    return post && String(post.id) === String(postId);
-                }) : null;
-                return found || postInfoCache[postId] || null;
-            };
-
-            let feedPage = 1;
-            const FEED_PAGE_SIZE = 20;
-            let feedEndReached = false;
-            let feedAllPosts = [];
-            let feedAllComments = [];
-            let feedAllLikes = [];
-            let feedScrollObserver = null;
-            let feedLoadRequestId = 0;
-            let feedStateVersion = 0;
-            let feedNextOffset = 0;
-            let feedLoadedPages = [];
-            let feedPageFetchPending = false;
-            // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
-            // 需用户点击错误提示"重试"才清除并重新加载
-            let feedLoadMoreFailed = false;
-
-            function markFeedStateChanged() {
-                feedStateVersion += 1;
-                feedVisiblePostsCache = null;
-                feedMapsCache = null;
-                return feedStateVersion;
-            }
-
-            function syncPostInfoCache(post) {
-                var normalized = normalizePost(post || {});
-                if (!normalized || !normalized.id) return;
-                postInfoCache[normalized.id] = {
-                    id: normalized.id,
-                    content: normalized.content || '',
-                    user_name: normalized.user_name || '',
-                    media_url: normalized.media_url || '',
-                    media_type: normalized.media_type || '',
-                    created_at: normalized.created_at || '',
-                    views: Number(normalized.views || 0)
-                };
-            }
-            let feedVisiblePostsCache = null; // 缓存过滤后的帖子
-            let feedMapsCache = null; // 缓存 buildPostMaps 结果
-
-            // 无限滚动监听
-
-            // 无限滚动监听
-            function setupFeedInfiniteScroll() {
-                if (feedScrollObserver) feedScrollObserver.disconnect();
-                
-                const feed = document.getElementById('feed');
-                const observer = new IntersectionObserver((entries) => {
-                    entries.forEach(entry => {
-                        if (entry.isIntersecting && !feedEndReached && !feedLoadMoreFailed) {
-                            loadMoreFeedPosts();
-                        }
-                    });
-                }, { rootMargin: '200px' });
-                
-                // 在 feed 底部添加哨兵元素（sentinel）
-                let sentinel = document.getElementById('feedSentinel');
-                if (!sentinel) {
-                    sentinel = document.createElement('div');
-                    sentinel.id = 'feedSentinel';
-                    sentinel.style.height = '1px';
-                    feed.appendChild(sentinel);
-                }
-                observer.observe(sentinel);
-                feedScrollObserver = observer;
-            }
-
-
-            // 构建帖子评论/点赞映射（用于渲染）
-            function buildPostMaps(comments, likes) {
-                const commentMap = {};
-                const likeMap = {};
-                const likeUserMap = {};
-
-                comments.forEach(c => {
-                    if (!commentMap[c.post_id]) commentMap[c.post_id] = [];
-                    commentMap[c.post_id].push(c);
-                });
-
-                likes.forEach(l => {
-                    if (!likeMap[l.post_id]) likeMap[l.post_id] = [];
-                    likeMap[l.post_id].push(l);
-                    makeLikeLookupKeys(l.post_id, l.actor_key, l.user_name).forEach(function(key) {
-                        likeUserMap[key] = true;
-                    });
-                });
-
-                return { commentMap, likeMap, likeUserMap };
-            }
-
-            // 缓存头像 URL
-
-            async function loadAvatarsForUsers(usernames) {
-                var normalizedUsers = Array.from(new Set(
-                    (usernames || [])
-                        .map(function(value) {
-                            return String(value || '').trim();
-                        })
-                        .filter(Boolean)
-                ));
-
-                if (normalizedUsers.length === 0) return;
-                try {
-                    var cachedAvatars = readAvatarCacheFromStorage();
-                    normalizedUsers.forEach(function(username) {
-                        if (username && cachedAvatars[username] && !avatarCache[username]) {
-                            avatarCache[username] = cachedAvatars[username];
-                        }
-                    });
-                } catch (e) {}
-
-                // P7: 只为没有新鲜缓存（TTL 内）的用户发起批量请求。
-                // confirmed_none / has_avatar / fetch_failed 在 TTL 内均不重查。
-                var uncached = normalizedUsers.filter(function(username) {
-                    return !hasFreshAvatarCache(username);
-                });
-                if (uncached.length === 0) return;
-                try {
-                    var resp = await fetch(API_BASE + '/api/avatar/batch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ users: uncached })
-                    });
-                    var result = await resp.json();
-                    if (resp.ok && result.ok && result.avatars) {
-                        var avatars = result.avatars;
-                        var keys = Object.keys(avatars);
-                        for (var ki = 0; ki < keys.length; ki++) {
-                            var k = keys[ki];
-                            // P7: null → confirmed_none；有 URL → has_avatar
-                            if (avatars[k]) {
-                                setAvatarCacheEntry(k, 'has_avatar', avatars[k]);
-                            } else if (avatars[k] === null) {
-                                setAvatarCacheEntry(k, 'confirmed_none', null);
-                            }
-                        }
-                        // 写入本地缓存，避免下次访问重新请求
-                        try {
-                            var cachedAvatars = readAvatarCacheFromStorage();
-                            for (var ki2 = 0; ki2 < keys.length; ki2++) {
-                                var k2 = keys[ki2];
-                                if (avatars[k2]) {
-                                    cachedAvatars[k2] = { state: 'has_avatar', url: avatars[k2], fetched_at: Date.now() };
-                                } else if (avatars[k2] === null) {
-                                    cachedAvatars[k2] = { state: 'confirmed_none', url: null, fetched_at: Date.now() };
-                                }
-                            }
-                            writeAvatarCacheToStorage(cachedAvatars);
-                        } catch(e) {}
-                    } else {
-                        // P7: 批量接口失败时降级到旧缓存（与单用户接口一致）
-                        uncached.forEach(function(username) {
-                            setAvatarCacheEntry(username, 'fetch_failed', null);
-                        });
-                    }
-                } catch(e) {
-                    // P7: 网络异常时降级到旧缓存（与单用户接口一致）
-                    uncached.forEach(function(username) {
-                        setAvatarCacheEntry(username, 'fetch_failed', null);
-                    });
-                    console.error('批量头像加载失败:', e);
-                }
-            }
-
-            function renderAvatarContent(username, avatarUrl) {
-                var safeUser = String(username || '').trim();
-                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
-                var fallbackSpan = '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
-                if (avatarUrl && sanitizeUrl(avatarUrl)) {
-                    return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
-                        '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
-                        '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
-                        ' onload="var p=this.closest(\'.avatar\');if(p){p.classList.add(\'has-image\');this.style.opacity=\'1\'}"' +
-                        ' onerror="var p=this.closest(\'.avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
-                        fallbackSpan;
-                }
-                return fallbackSpan;
-            }
-
-            function getAvatarHtml(username, post) {
-                var safeUser = String(username || '').trim();
-                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
-                var avatarUrl = getAvatarUrl(safeUser) || '';
-
-                if (!avatarUrl && safeUser) {
-                    try {
-                        var cachedAvatars = readAvatarCacheFromStorage();
-                        if (cachedAvatars[safeUser] && cachedAvatars[safeUser].url) {
-                            avatarCache[safeUser] = cachedAvatars[safeUser];
-                            avatarUrl = cachedAvatars[safeUser].url;
-                        }
-                    } catch (e) {}
-                }
-
-                var safeName = escapeHtml(safeUser);
-                var safeNameJs = safeJsStr(safeUser);
-
-                if (avatarUrl && sanitizeUrl(avatarUrl)) {
-                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' +
-                        safeNameJs +
-                        '\')" data-user-name="' + safeName +
-                        '"><div class="avatar clickable">' +
-                        renderAvatarContent(safeUser, avatarUrl) +
-                        '</div></div>';
-                }
-
-                return '<div class="avatar clickable" onclick="openUserProfile(\'' +
-                    safeNameJs +
-                    '\')" data-user-name="' + safeName +
-                    '">' +
-                    escapeHtml(fallbackInitial) +
-                    '</div>';
-            }
-
-            // DEPRECATED_DO_NOT_EDIT ====== [??????]
-            function getPostFilterUserAvatar(username) {
-                var safeName = escapeHtml(username || "");
-                var avatarUrl = getAvatarUrl(username);
-                if (avatarUrl) {
-                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
-                }
-                try {
-                    var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[username] && cachedAvatars[username].url) {
-                        avatarCache[username] = cachedAvatars[username];
-                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username].url) + '" alt="' + safeName + '"></span>';
-                    }
-                } catch(e) {}
-                return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
-            }
-
-            function renderPostFilterUsers() {
-                var list = document.getElementById("postUserQuickList");
-                var input = document.getElementById("postUserFilter");
-                var resetBtn = document.getElementById("postUserFilterReset");
-                if (!list || !input) return;
-                var activeUser = String(input.value || "").trim();
-                if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
-                if (postFilterUsersLoading && !postFilterUsers.length) {
-                    list.innerHTML = renderPostFilterUserLoader();
-                    return;
-                }
-                var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
-                if (!users.length) {
-                    list.innerHTML = '<div class="post-user-chip is-empty">\u6682\u65e0\u53ef\u7b5b\u9009\u7528\u6237</div>';
-                    return;
-                }
-                var html = [
-                    '<button type="button" class="post-user-chip' + (!activeUser ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'\')">' +
-                        '<span class="post-user-chip-avatar">\u5168</span>' +
-                        '<span class="post-user-chip-name">\u5168\u90e8\u7528\u6237</span>' +
-                    '</button>'
-                ];
-                users.forEach(function(username) {
-                    var safeJsName = String(username).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-                    html.push(
-                        '<button type="button" class="post-user-chip' + (activeUser === username ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'' + safeJsName + '\')">' +
-                            getPostFilterUserAvatar(username) +
-                            '<span class="post-user-chip-name">' + escapeHtml(username) + '</span>' +
-                        '</button>'
-                    );
-                });
-                list.innerHTML = html.join("");
-            }
-
-            async function loadPostFilterUsers(forceRefresh) {
-                if (postFilterUsersLoading) return;
-                if (postFilterUsersLoaded && !forceRefresh) {
-                    renderPostFilterUsers();
-                    return;
-                }
-                var loadSeq = ++postFilterUsersLoadSeq;
-                postFilterUsersLoading = true;
-                renderPostFilterUsers();
-                if (postFilterUsersLoadTimer) clearTimeout(postFilterUsersLoadTimer);
-                postFilterUsersLoadTimer = setTimeout(function() {
-                    if (loadSeq !== postFilterUsersLoadSeq) return;
-                    postFilterUsersLoading = false;
-                    renderPostFilterUsers();
-                }, 2400);
-                try {
-                    var authRes = await window.xtjOptionalAuthFetch('/api/feed/authors');
-                    if (!authRes.ok) throw new Error('authors_query_failed');
-                    var authorPayload = await authRes.json();
-                    if (!authorPayload || !authorPayload.ok) throw new Error('authors_query_failed');
-                    var seen = {};
-                    postFilterUsers = (authorPayload.authors || []).map(function(name) {
-                        return String(name || "").trim();
-                    }).filter(function(name) {
-                        if (!name || seen[name]) return false;
-                        seen[name] = true;
-                        return true;
-                    }).sort(function(a, b) {
-                        return a.localeCompare(b, "zh-Hans-CN");
-                    });
-                    postFilterUsersLoaded = true;
-                    if (postFilterUsers.length) {
-                        await Promise.race([
-                            loadAvatarsForUsers(postFilterUsers),
-                            new Promise(function(resolve) { setTimeout(resolve, 1800); })
-                        ]);
-                    }
-                } catch (e) {
-                    console.error("[post-filter-users] load failed", e);
-                    if (!postFilterUsers.length) {
-                        var fallbackSeen = {};
-                        postFilterUsers = (feedAllPosts || []).map(function(post) {
-                            return post && post.user_name ? String(post.user_name).trim() : "";
-                        }).filter(function(name) {
-                            if (!name || fallbackSeen[name]) return false;
-                            fallbackSeen[name] = true;
-                            return true;
-                        }).sort(function(a, b) {
-                            return a.localeCompare(b, "zh-Hans-CN");
-                        });
-                    }
-                } finally {
-                    if (loadSeq === postFilterUsersLoadSeq) {
-                        stopPostFilterUsersLoading();
-                    }
-                    renderPostFilterUsers();
-                }
-            }
-
-            window.selectPostFilterUser = function(userName) {
-                var input = document.getElementById("postUserFilter");
-                if (input) input.value = userName || "";
-                renderPostFilterUsers();
-                window.applyPostFilters();
-            };
-
-            function buildPostContentHtml(content) {
-                return escapeHtml(String(content || ''));
-            }
-            window.buildPostContentHtml = buildPostContentHtml;
-
-            function renderFeedWithAvatars(visiblePosts, comments, likes) {
-                const feed = document.getElementById("feed");
-                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
-
-                var htmlChunks = [];
-                visiblePosts.forEach(function(post) {
-                    try {
-                        const p = normalizePost(post);
-                        const pLikes = likeMap[p.id] || [];
-                        const pComms = commentMap[p.id] || [];
-                        const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
-                        const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        var commentsHtml = '';
-                        if (pComms.length) {
-                            var parentComments = pComms.filter(function(c) { return !c.parent_comment_id; });
-                            var aiCommentMap = {};
-                            pComms.forEach(function(c) {
-                                if (c.parent_comment_id && c.user_name === 'cat_ai' && c.generated_by_ai) {
-                                    var key = String(c.parent_comment_id);
-                                    if (!aiCommentMap[key]) aiCommentMap[key] = [];
-                                    aiCommentMap[key].push(c);
-                                }
-                            });
-                            commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
-                                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(c.id) + '\', this)">删除</button>' : '';
-                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    ';
-                                var aiReplies = aiCommentMap[String(c.id)] || [];
-                                if (aiReplies.length > 0) {
-                                    html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">';
-                                    aiReplies.forEach(function(reply) {
-                                        if (typeof renderCatAiComment === 'function') {
-                                            html += renderCatAiComment(reply);
-                                        }
-                                    });
-                                    html += '</div>';
-                                }
-                                html += '\n                    </div>\n                    ';
-                                return html;
-                            }).join('') + '\n                  </div>\n                  ';
-                        }
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + buildPostContentHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
-                    } catch (e) {
-                        console.error('[feed-render] failed post:', {
-                            postId: post && post.id,
-                            userName: post && post.user_name,
-                            error: e
-                        });
-                    }
-                });
-
-                // Before replacing feed innerHTML:
-                var detachedPanels = [];
-                feed.querySelectorAll('.post-tool-critique, .post-tool-translation').forEach(function(panel) {
-                    var post = panel.closest('.post');
-                    var postId = post ? post.getAttribute('data-post-id') : null;
-                    if (postId) {
-                        panel.parentNode.removeChild(panel);
-                        detachedPanels.push({ id: postId, panel: panel });
-                    }
-                });
-
-                feed.innerHTML = htmlChunks.length ? htmlChunks.join('') : '<div class="loading">快来发布第一条动态吧~</div>';
-
-                // Reattach:
-                detachedPanels.forEach(function(item) {
-                    // L9 修复：CSS 选择器里不能用 escapeHtml（HTML 实体是字面字符永不匹配），
-                    // 应转义选择器特殊字符（对齐 6573 行的 replace(/"/g,'\\"') 模式）
-                    var _pid = String(item.id == null ? '' : item.id).replace(/"/g, '\\"');
-                    var post = feed.querySelector('.post[data-post-id="' + _pid + '"]');
-                    if (post) {
-                        var actions = post.querySelector('.actions');
-                        if (actions) actions.insertAdjacentElement('afterend', item.panel);
-                    }
-                });
-
-                initPostScrollAnimation();
-            }
-
-            function initPostScrollAnimation() {
-                var posts = document.querySelectorAll('.post');
-                primePostReveal(posts);
-                observePostViewportState(posts);
-            }
-
-            let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
-            function updateFeedStats() {
-    // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
-    // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
-    var posts = [];
-    var totalLikes = 0, totalComments = 0, totalViews = 0;
-    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问；
-    // 未初始化（undefined）时回退 DOM 统计，避免筛选/分页后统计错乱。
-    var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
-    if (hasFullData) {
-        posts = feedAllPosts;
-        feedAllLikes.forEach(function(like) {
-            if (!(like && (like.is_like === false || like.like_type === 'unlike'))) totalLikes += 1;
-        });
-        totalComments = feedAllComments.length;
-        posts.forEach(function(p) {
-            if (p && Number(p.views)) totalViews += Number(p.views);
-        });
-    } else {
-        posts = Array.prototype.slice.call(document.querySelectorAll('.post'));
-        posts.forEach(function(p) {
-            var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-            var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
-            if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
-            var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
-            if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
-            var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
-            if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
-        });
-    }
-                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
-                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
-                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
-                if (sPosts) sPosts.textContent = posts.length;
-                if (sViews) sViews.textContent = totalViews;
-                if (sLikes) sLikes.textContent = totalLikes + totalComments;
-            }
-
-            async function initialLoad(skipCache = false) {
-                if (!skipCache) {
-                    const cached = window.safeStorage.get(CACHE_KEY);
-                    if (cached) {
-                        try {
-                            const parsed = JSON.parse(cached);
-                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); queueDeferredStartupTasks(); return; }
-                        } catch(e){}
-                    }
-                }
-                await loadFeed(false);
-                queueDeferredStartupTasks();
-            }
-
-            function collectPostMetadata(visibility, overrides) {
-                var meta = Object.assign({}, POST_META_DEFAULTS, {
-                    visibility: visibility || "public"
-                }, overrides || {});
-                if (overrides && overrides.location && typeof overrides.location === "object") {
-                    meta.location_name = overrides.location.name || "";
-                    meta.location_province = overrides.location.province || "";
-                    meta.location_city = overrides.location.city || "";
-                    meta.location_district = overrides.location.district || "";
-                    meta.location_level = overrides.location.level || "";
-                }
-                return meta;
-            }
-
-            async function insertPostRecord(payload, fallbackContent) {
-                try {
-                    var body = {
-                        content: payload.content || fallbackContent || '',
-                        media_url: payload.media_url || '',
-                        media_type: payload.media_type || '',
-                        actor_key: payload.actor_key || '',
-                        visibility: payload.visibility || 'public'
-                    };
-                    // 位置字段（可选，用户主动选择）
-                    if (payload.location && payload.location.name) {
-                        body.location = {
-                            name: payload.location.name || '',
-                            province: payload.location.province || '',
-                            city: payload.location.city || '',
-                            district: payload.location.district || '',
-                            level: payload.location.level || ''
-                        };
-                    }
-                    var response = await window.xtjProtectedFetch('/api/post/create', {
-                        method: 'POST',
-                        body: JSON.stringify(body)
-                    });
-                    var result = await response.json().catch(function() { return {}; });
-                    if (!response.ok || !result.ok || !result.data) {
-                        return { ok: false, error: new Error(result.error || '发布失败') };
-                    }
-                    var data = normalizePost(result.data);
-                    if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
-                        try {
-                            var fresh = await fetchPostSnapshot(data.id);
-                            if (fresh) data = normalizePost(fresh);
-                        } catch (snapshotError) {
-                            console.warn('[post-create] snapshot refresh failed', snapshotError);
-                        }
-                    }
-                    return { ok: true, fallback: false, data: data };
-                } catch (error) {
-                    return { ok: false, error: error };
-                }
-            }
-
-            function insertPublishedPostIntoFeed(post) {
-                if (!post || !post.id) return false;
-                post = normalizePost(post);
-                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
-                feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
-                feedAllPosts.unshift(post);
-                feedAllPosts = sortPosts(feedAllPosts);
-                syncPostInfoCache(post);
-                var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
-                if (firstPage) {
-                    firstPage.postIds = [String(post.id)].concat((firstPage.postIds || []).filter(function(id) { return String(id) !== String(post.id); }));
-                } else {
-                    feedLoadedPages = [{ offset: 0, postIds: [String(post.id)] }].concat(feedLoadedPages || []);
-                }
-                markFeedStateChanged();
-                var feed = document.getElementById('feed');
-                if (!feed) return false;
-                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
-                var template = document.createElement('template');
-                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
-                var postEl = template.content.firstElementChild;
-                if (!postEl) return false;
-                postEl.classList.add('visible', 'is-newly-published');
-                postEl.style.setProperty('--post-enter-delay', '0ms');
-                feed.insertBefore(postEl, feed.firstChild);
-                observePostViewportState([postEl]);
-                var clearPublishedAnimation = function() { postEl.classList.remove('is-newly-published'); };
-                postEl.addEventListener('animationend', clearPublishedAnimation, { once: true });
-                setTimeout(clearPublishedAnimation, 420);
-                writeFeedCacheSnapshot();
-                updateFeedStats();
-                return true;
-            }
-
-            function postHasRenderableIpData(post) {
-                if (!post) return false;
-                return !!(
-                    String(post.ip_region_text || "").trim() ||
-                    String(post.ip_region_status || "").trim() ||
-                    String(post.ip_province || "").trim() ||
-                    String(post.ip_city || "").trim() ||
-                    String(post.ip_lookup_started_at || "").trim()
-                );
-            }
-
-            function postNeedsIpRefresh(post) {
-                if (!post || !post.id) return false;
-                var status = String(post.ip_region_status || "").trim();
-                var hasLookupStarted = !!String(post.ip_lookup_started_at || "").trim();
-                var hasRegionText = !!String(post.ip_region_text || "").trim();
-                return status === 'pending' || (hasLookupStarted && !hasRegionText);
-            }
-
-            function refreshPublishedPostCard(post) {
-                if (!post || !post.id) return false;
-                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
-                var postId = String(post.id);
-                feedAllPosts = feedAllPosts.map(function(item) {
-                    return String(item && item.id) === postId ? post : item;
-                });
-                syncPostInfoCache(post);
-                markFeedStateChanged();
-                var feed = document.getElementById('feed');
-                if (!feed) return false;
-                var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
-                if (!existing) return false;
-                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
-                var template = document.createElement('template');
-                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
-                var nextPostEl = template.content.firstElementChild;
-                if (!nextPostEl) return false;
-                nextPostEl.classList.add('visible');
-                existing.replaceWith(nextPostEl);
-                observePostViewportState([nextPostEl]);
-                writeFeedCacheSnapshot();
-                updateFeedStats();
-                return true;
-            }
-
-            var publishedPostIpRefreshTimers = Object.create(null);
-            function schedulePublishedPostIpRefresh(postId) {
-                if (!postId) return;
-                var key = String(postId);
-                if (publishedPostIpRefreshTimers[key]) return;
-                publishedPostIpRefreshTimers[key] = true;
-                var attempts = 0;
-                var maxAttempts = 4;
-                function cleanup() {
-                    delete publishedPostIpRefreshTimers[key];
-                }
-                function run() {
-                    attempts++;
-                    fetchPostSnapshot(postId).then(function(freshPost) {
-                        var normalized = freshPost ? normalizePost(freshPost) : null;
-                        var ipText = normalized ? String(normalized.ip_region_text || "").trim() : "";
-                        var ipStatus = normalized ? String(normalized.ip_region_status || "").trim() : "";
-                        var hasFinalIpDisplay = !!ipText || ipStatus === 'resolved' || ipStatus === 'failed';
-                        if (normalized && hasFinalIpDisplay) {
-                            refreshPublishedPostCard(normalized);
-                            cleanup();
-                            return;
-                        }
-                        if (normalized && (ipStatus === 'pending' || String(normalized.ip_lookup_started_at || "").trim())) {
-                            if (attempts < maxAttempts) {
-                                setTimeout(run, attempts === 1 ? 600 : 900);
-                            } else {
-                                cleanup();
-                            }
-                            return;
-                        }
-                        if (attempts < maxAttempts) {
-                            setTimeout(run, attempts === 1 ? 600 : 900);
-                        } else {
-                            cleanup();
-                        }
-                    }).catch(function() {
-                        if (attempts < maxAttempts) {
-                            setTimeout(run, 900);
-                        } else {
-                            cleanup();
-                        }
-                    });
-                }
-                setTimeout(run, 450);
-            }
-
-            function refreshPendingFeedIpPosts(posts) {
-                if (!Array.isArray(posts) || !posts.length) return;
-                posts.forEach(function(post) {
-                    if (!postNeedsIpRefresh(post)) return;
-                    schedulePublishedPostIpRefresh(post.id);
-                });
-            }
-
-            function resetPostComposer() {
-                var postInp = document.getElementById("postInp");
-                var fileInp = document.getElementById("fileInp");
-                var visibilityEl = document.getElementById("postVisibility");
-                if (postInp) postInp.value = "";
-                if (fileInp) fileInp.value = "";
-                if (visibilityEl) visibilityEl.value = "public";
-                resetPostLocation();
-            }
-
-            function buildPostStorageContent(post, text, metaOverrides) {
-                var normalized = normalizePost(post || {});
-                var meta = Object.assign({}, normalized._contentMeta || POST_META_DEFAULTS, {
-                    visibility: normalized.visibility || "public",
-                    is_pinned: !!normalized.is_pinned,
-                    pinned_at: normalized.pinned_at || null,
-                    updated_at: normalized.updated_at || null,
-                    edited_at: (normalized._contentMeta && normalized._contentMeta.edited_at) || null
-                }, metaOverrides || {});
-                var nextText = typeof text === "string" ? text : normalized.content || "";
-                return buildPostContentPayload(nextText, meta);
-            }
-
-            function matchesPostExpectation(post, expected) {
-                if (!post) return false;
-                var normalized = normalizePost(post);
-                if (typeof expected.content === "string" && String(normalized.content || "") !== String(expected.content)) return false;
-                if (expected.visibility != null && String(normalized.visibility || "public") !== String(expected.visibility)) return false;
-                if (expected.is_pinned != null && !!normalized.is_pinned !== !!expected.is_pinned) return false;
-                if (Object.prototype.hasOwnProperty.call(expected, "pinned_at") && String(normalized.pinned_at || "") !== String(expected.pinned_at || "")) return false;
-                return true;
-            }
-
-            async function fetchPostSnapshot(postId) {
-                var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
-                if (fetched.error) throw fetched.error;
-                return fetched.data || null;
-            }
-
-            async function updatePostRecord(post, updates) {
-                var normalized = normalizePost(post);
-                var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
-                var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
-                var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
-                var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
-                var nextEditedAt = Object.prototype.hasOwnProperty.call(updates, "edited_at")
-                    ? updates.edited_at
-                    : ((normalized._contentMeta && normalized._contentMeta.edited_at) || null);
-                var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
-
-                var newContent = buildPostStorageContent(normalized, nextContent, {
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt,
-                    edited_at: nextEditedAt
-                });
-                var updatePayload = {
-                    post_id: post.id,
-                    content: newContent,
-                    visibility: nextVisibility
-                };
-                var resp = await window.xtjProtectedFetch('/api/post/update', {
-                    method: 'POST',
-                    body: JSON.stringify(updatePayload)
-                });
-                var result = await resp.json().catch(function() { return {}; });
-                if (!resp.ok || !result.ok) return { ok: false, error: new Error(result.error || '更新失败') };
-                // 优先使用后端返回的 data，否则重新查询
-                var verified = result.data ? normalizePost(result.data) : null;
-                if (!verified) {
-                    var verifyRes = await sb.from('posts').select('*').eq('id', post.id).maybeSingle();
-                    if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
-                    verified = normalizePost(verifyRes.data);
-                }
-                var verifiedMeta = parsePostContent(verified._rawContent || verified.content || '').meta || {};
-                if (String(verified.visibility || "public") !== String(nextVisibility)) {
-                    return { ok: false, error: new Error("更新失败：visibility 未实际生效") };
-                }
-                if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
-                    return { ok: false, error: new Error("更新失败：content.meta.visibility 未同步") };
-                }
-                if (!!verified.is_pinned !== !!nextPinned) {
-                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
-                }
-                if (!!verifiedMeta.is_pinned !== !!nextPinned) {
-                    return { ok: false, error: new Error("更新失败：content.meta.is_pinned 未同步") };
-                }
-                if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
-                    return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
-                }
-                return { ok: true, data: verified };
-            }
-
-            function getRenderableComments(comments, visiblePosts) {
-                var visibleIds = new Set((visiblePosts || []).map(function(post) { return String(post.id); }));
-                return (comments || []).filter(function(comment) {
-                    return comment && visibleIds.has(String(comment.post_id));
-                });
-            }
-
-            function formatRelativeTime(dateStr) {
-                var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
-                var diff = Math.floor((Date.now() - d.getTime()) / 1000);
-                if (diff < 60) return "刚刚";
-                if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
-                if (diff < 86400) return Math.floor(diff / 3600) + "小时前";
-                if (diff < 86400 * 30) return Math.floor(diff / 86400) + "天前";
-                return d.toLocaleDateString();
-            }
-
-            function formatPostTime(post) {
-                var normalized = normalizePost(post);
-                var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
-                var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
-                if (editedAt) return time + " (已编辑)";
-                return time;
-            }
-
-            function buildPostBadges(post) {
-                var normalized = normalizePost(post);
-                var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
-                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
-                return bits.join("");
-            }
-
-            function buildPostStatsLine(post, likeCount, commentCount) {
-                var normalized = normalizePost(post);
-                return '浏览 ' + (normalized.views || 0) +
-                    ' | 点赞 ' + (likeCount || 0) +
-                    ' | 评论 ' + (commentCount || 0);
-            }
-
-            // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
-            // 原因：上面 line 3765 定义的 buildPostBadges 已经包含 Pro 标志、公开/私密、置顶的完整逻辑。
-            //       此处重新赋值为简单版会**覆盖**上面的完整实现，导致 Pro 标志永远不显示。
-            // 置顶徽章已经在 line 3784 的 buildPostBadges 内部处理了，无需重复。
-            function buildPostActionHtml(post, isLiked, canDelete) {
-                var idJs = safeJsStr(String(post.id));
-                var idHtml = escapeHtml(String(post.id));
-                var actorKeyJs = safeJsStr(String(post.actor_key || ""));
-                var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
-                    '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
-                ];
-                if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
-                }
-                if (canDelete) {
-                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
-                }
-                actions.push('<button type="button" class="action-btn post-tools-trigger" data-post-id="' + idHtml + '" aria-haspopup="menu" aria-expanded="false" aria-label="更多帖子工具">•••</button>');
-                return actions.join("");
-            }
-
-            var activePostToolsMenu = null;
-            function closePostToolsMenu() {
-                if (!activePostToolsMenu) return;
-                var trigger = activePostToolsMenu.trigger;
-                activePostToolsMenu.menu.remove();
-                if (trigger) trigger.setAttribute('aria-expanded', 'false');
-                activePostToolsMenu = null;
-            }
-
-            function openPostToolsMenu(trigger) {
-                if (!trigger) return;
-                if (activePostToolsMenu && activePostToolsMenu.trigger === trigger) {
-                    closePostToolsMenu();
-                    return;
-                }
-                closePostToolsMenu();
-                var postId = String(trigger.getAttribute('data-post-id') || '');
-                if (!postId) return;
-                var menu = document.createElement('div');
-                menu.className = 'post-tools-menu';
-                menu.setAttribute('role', 'menu');
-                var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
-                var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
-                var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
-                var post = feedAllPosts.find(function(p) { return p.id == postId; });
-                if (!post && window.currentPost && window.currentPost.id == postId) post = window.currentPost;
-                var hasText = post && String(post.content || '').trim().length > 0;
-                var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
-                var btnAi = hasText ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
-                menu.innerHTML = btnTranslate + btnAi +
-                                 '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
-                document.body.appendChild(menu);
-                var rect = trigger.getBoundingClientRect();
-                var width = menu.offsetWidth || 148;
-                menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-                menu.style.top = Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 6)) + 'px';
-                trigger.setAttribute('aria-expanded', 'true');
-                activePostToolsMenu = { menu: menu, trigger: trigger };
-            }
-            window.closePostToolsMenu = closePostToolsMenu;
-            window.addEventListener('pagehide', closePostToolsMenu);
-            window.addEventListener('scroll', closePostToolsMenu, { passive: true });
-            window.addEventListener('resize', closePostToolsMenu, { passive: true });
-            if (window.visualViewport) {
-                window.visualViewport.addEventListener('resize', closePostToolsMenu, { passive: true });
-                window.visualViewport.addEventListener('scroll', closePostToolsMenu, { passive: true });
-            }
-            // Capture scroll from dock panels as well as the document; the menu is appended to body.
-            document.addEventListener('scroll', closePostToolsMenu, { capture: true, passive: true });
-            document.addEventListener('visibilitychange', function() {
-                if (document.hidden) closePostToolsMenu();
-            });
-
-            var activePostAiSession = null;
-            function getPostToolAnchor(postId) {
-                return document.querySelector('.post-tools-trigger[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]');
-            }
-            function postToolFetch(body) {
-                return window.xtjProtectedFetch('/api/agent/post-tools', { method: 'POST', body: JSON.stringify(body) }).then(function(resp) {
-                    return resp.json().then(function(data) { if (!resp.ok) throw new Error(data.error || 'post_tool_failed'); return data; });
-                });
-            }
-            window.requestPostTranslation = function(postId) {
-                var anchor = getPostToolAnchor(postId);
-                if (!anchor) return;
-                var host = anchor.closest('.post');
-                if (!host) return;
-                var actions = anchor.closest('.actions');
-                if (!actions) return;
-                var existing = host.querySelector('.post-tool-translation');
-                if (existing) { existing.hidden = !existing.hidden; return; }
-                var panel = document.createElement('section');
-                panel.className = 'post-tool-translation';
-                panel.textContent = '正在翻译...';
-                actions.insertAdjacentElement('afterend', panel);
-                postToolFetch({ post_id: postId, action: 'translate' }).then(function(data) {
-                    panel.textContent = data.translation || '暂时无法翻译该帖子。';
-                    panel.classList.toggle('is-original-chinese', !!data.already_chinese);
-                }).catch(function() { panel.textContent = '翻译暂时不可用。'; panel.classList.add('is-error'); });
-            };
-            function runPostAiRequest(session, payload) {
-                var requestId = ++session.requestId;
-                session.output.textContent = 'AI 正在锐评...';
-                session.output.classList.remove('is-error');
-                session.controller.abort();
-                session.controller = new AbortController();
-                window.xtjProtectedFetch('/api/agent/post-chat/stream', { method: 'POST', body: JSON.stringify(payload), signal: session.controller.signal }).then(function(resp) {
-                    if (!resp.ok || !resp.body) throw new Error('post_chat_failed');
-                    return resp.body.getReader();
-                }).then(function(reader) {
-                    var decoder = new TextDecoder(), buffer = '';
-                    var receivedContent = false;
-                    function read() { return reader.read().then(function(chunk) {
-                        if (chunk.done) {
-                            if (!receivedContent) {
-                                session.output.textContent = 'AI 暂时不可用。';
-                                session.output.classList.add('is-error');
-                            }
-                            return;
-                        }
-                        buffer += decoder.decode(chunk.value, { stream: true });
-                        var events = buffer.split('\n\n'); buffer = events.pop();
-                        events.forEach(function(event) {
-                            var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
-                            if (!dataLine || session.isClosed || requestId !== session.requestId) return;
-                            var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
-                            if (data.content) {
-                                receivedContent = true;
-                                session.conversationId = data.conversation_id || session.conversationId;
-                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
-                            }
-                            if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
-                        });
-                        return read();
-                    }); }
-                    return read();
-                }).catch(function(error) {
-                    if (error.name !== 'AbortError' && !session.isClosed && requestId === session.requestId) {
-                        session.output.textContent = 'AI 暂时不可用。';
-                        session.output.classList.add('is-error');
-                    }
-                });
-            }
-            window.openPostAiChat = function(postId) {
-                var anchor = getPostToolAnchor(postId);
-                if (!anchor) return;
-                var host = anchor.closest('.post');
-                if (!host) return;
-                var actions = anchor.closest('.actions');
-                if (!actions) return;
-                var existing = host.querySelector('.post-tool-critique');
-                if (existing) {
-                    if (existing.classList.contains('is-error')) {
-                        existing.classList.remove('is-error');
-                        existing.textContent = 'AI 正在锐评...';
-                        var existingSession = existing.__aiSession;
-                        if (existingSession) runPostAiRequest(existingSession, { post_id: String(postId), initial: true });
-                    } else {
-                        existing.hidden = !existing.hidden;
-                    }
-                    return;
-                }
-                
-                var panel = document.createElement('section');
-                panel.className = 'post-tool-critique';
-                panel.textContent = 'AI 正在锐评...';
-                actions.insertAdjacentElement('afterend', panel);
-                
-                var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
-                panel.__aiSession = session;
-                runPostAiRequest(session, { post_id: String(postId), initial: true });
-            };
-            window.openPostReport = function(postId) {
-                window.__xtjReportTargetPostId = String(postId);
-                if (typeof window.openReportModal === 'function') window.openReportModal();
-                var reportList = document.getElementById('reportContentList');
-                var selectTarget = function() {
-                    var item = reportList && reportList.querySelector('[data-id="' + String(postId).replace(/"/g, '\\"') + '"]');
-                    if (item) { item.click(); return true; }
-                    return false;
-                };
-                if (!selectTarget() && reportList) {
-                    var observer = new MutationObserver(function() { if (selectTarget()) observer.disconnect(); });
-                    observer.observe(reportList, { childList: true, subtree: true });
-                }
-                postToolFetch({ post_id: postId, action: 'report_scan' }).then(function(data) {
-                    window.__xtjReportAiScan = data.scan || null;
-                    var form = document.getElementById('reportModal');
-                    if (!form || !data.scan) return;
-                    var old = form.querySelector('.report-ai-scan'); if (old) old.remove();
-                    var scan = document.createElement('div'); scan.className = 'report-ai-scan';
-                    scan.textContent = 'AI 检测：' + String(data.scan.summary || '未发现明确风险');
-                    form.querySelector('.report-form, .report-content, .modal-box').appendChild(scan);
-                }).catch(function() { window.__xtjReportAiScan = null; });
-            };
-
-            function buildPostLocationHtml(normalized) {
-                var parts = [];
-                var locationName = String(normalized.location_name || normalized.location || "").trim();
-                if (!locationName && normalized._contentMeta) {
-                    locationName = String((normalized._contentMeta.location_name || "")).trim();
-                }
-                if (locationName) {
-                    parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(locationName) + '</div>');
-                }
-                var ipText = String(normalized.ip_region_text || "").trim();
-                var ipStatus = String(normalized.ip_region_status || "").trim();
-                var ipProvince = String(normalized.ip_province || "").trim();
-                var ipCity = String(normalized.ip_city || "").trim();
-                if (!ipText && normalized._contentMeta) {
-                    var ipMeta = normalized._contentMeta || {};
-                    if (!ipText) ipText = String(ipMeta.ip_region_text || "").trim();
-                    if (!ipStatus) ipStatus = String(ipMeta.ip_region_status || "").trim();
-                    if (!ipProvince) ipProvince = String(ipMeta.ip_province || "").trim();
-                    if (!ipCity) ipCity = String(ipMeta.ip_city || "").trim();
-                }
-                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved' || ipStatus === 'pending' || ipStatus === 'failed';
-                if (!ipText && (ipProvince || ipCity)) {
-                    ipText = [ipProvince, ipCity].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-                }
-                if (hasLookupStarted || ipText) {
-                    if (!ipText && ipStatus === 'pending') ipText = '解析中';
-                    if (!ipText && (ipStatus === 'failed' || ipStatus === 'resolved')) ipText = '未知';
-                    if (!ipText) ipText = '未知';
-                }
-                if (ipText) {
-                    parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
-                }
-                return parts.length ? '<div class="post-location-info">' + parts.join('') + '</div>' : '';
-            }
-
-            function looksLikeSystemTelemetry(content) {
-                if (!content) return false;
-                try {
-                    var obj = JSON.parse(String(content).trim());
-                    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
-                    var telemetryKeys = [
-                        'page_load_id', 'last_attempt_at', 'resolved_address', 'resolved_at',
-                        'capture_reason', 'precise_location_history',
-                        'device_id', 'browser_fingerprint_hash', 'canvas_fingerprint_hash',
-                        'webgl_fingerprint_hash'
-                    ];
-                    var matchCount = 0;
-                    for (var i = 0; i < telemetryKeys.length; i++) {
-                        if (telemetryKeys[i] in obj) matchCount++;
-                    }
-                    return matchCount >= 2;
-                } catch (e) {
-                    return false;
-                }
-            }
-
-            function renderPostCard(post, commentMap, likeMap, likeUserMap) {
-                var normalized = normalizePost(post);
-                // 安全兜底：content 是系统遥测/定位 JSON 则跳过
-                if (looksLikeSystemTelemetry(normalized.content)) {
-                    return '';
-                }
-                var pLikes = likeMap[normalized.id] || [];
-                var pComms = commentMap[normalized.id] || [];
-                var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
-                var canDelete = canDeletePost(normalized);
-                function commentDeleteButton(comment) {
-                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
-                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
-                }
-                var mediaDataAttrs = [
-                    'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
-                    'data-media-url="' + escapeHtml(String(normalized.media_url || "")) + '"',
-                    'data-post-user="' + escapeHtml(String(normalized.user_name || "")) + '"',
-                    'data-post-created-at="' + escapeHtml(String(normalized.created_at || "")) + '"',
-                    'data-post-views="' + escapeHtml(String(normalized.views || 0)) + '"',
-                    'data-file-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.fileSize) || "")) + '"',
-                    'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
-                ].join(" ");
-                var mediaMarkup = '';
-                if (normalized.media_url) {
-                    if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(normalized.media_url) + '" controls preload="none" playsinline></video></div>';
-                    else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(normalized.media_url) + '" controls preload="metadata"></audio></div>';
-                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(normalized.media_url) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(normalized.media_url) + '\', this)"></div>';
-                }
-                return `
-                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
-                  <div class="post-header">
-                    ${getAvatarHtml(normalized.user_name, normalized)}
-                    <div class="post-header-main">
-                      <div class="user-info">
-                        <span class="user-name">${escapeHtml(normalized.user_name)}</span>
-                        <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
-                      </div>
-                      <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
-                    </div>
-                  </div>
-                  <div class="content">${buildPostContentHtml(normalized.content)}</div>
-                  ${mediaMarkup}
-                  ${buildPostLocationHtml(normalized)}
-                  <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
-                  <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
-                  ${pComms.length ? `<div class="comments">${(function(){
-                      var roots = pComms.filter(function(c) { return !c.parent_comment_id; });
-                      var children = pComms.filter(function(c) { return c.parent_comment_id; });
-                      var html = '';
-                      roots.forEach(function(r) {
-                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
-                        var replies = children.filter(function(c) { return String(c.parent_comment_id) === String(r.id); });
-                        if (replies.length > 0) {
-                          html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
-                            if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                            }
-                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                          }).join('') + '</div>';
-                        }
-                        html += '</div>';
-                      });
-                      return html;
-                  })()}</div>` : ''}
-                </div>`;
-            }
-
-            // A malformed legacy record must not take down the complete feed.
-            function renderPostCardSafely(post, commentMap, likeMap, likeUserMap) {
-                try {
-                    return renderPostCard(post, commentMap, likeMap, likeUserMap);
-                } catch (error) {
-                    console.error('[feed-render] failed post:', {
-                        postId: post && post.id,
-                        userName: post && post.user_name,
-                        error: error
-                    });
-                    return '';
-                }
-            }
-
-            function hydrateCachedAvatarsForUsers(usernames) {
-                var users = Array.from(new Set((usernames || []).map(function(value) {
-                    return String(value || '').trim();
-                }).filter(Boolean)));
-                if (!users.length) return;
-                try {
-                    var cachedAvatars = readAvatarCacheFromStorage();
-                    users.forEach(function(userName) {
-                        if (!avatarCache[userName] && cachedAvatars[userName]) avatarCache[userName] = cachedAvatars[userName];
-                    });
-                } catch (e) {}
-            }
-
-            function updatePostFilterStateFromDom() {
-                var keywordEl = document.getElementById("postSearchInput");
-                var userEl = document.getElementById("postUserFilter");
-                var startEl = document.getElementById("postStartDate");
-                var endEl = document.getElementById("postEndDate");
-                var visibilityEl = document.getElementById("postVisibilityFilter");
-                var mineEl = document.getElementById("postOnlyMine");
-                postSearchState = {
-                    keyword: keywordEl ? keywordEl.value.trim() : "",
-                    user: userEl ? userEl.value.trim() : "",
-                    startDate: startEl ? startEl.value : "",
-                    endDate: endEl ? endEl.value : "",
-                    visibility: visibilityEl ? visibilityEl.value : "all",
-                    onlyMine: !!(mineEl && mineEl.checked)
-                };
-            }
-
-            window.applyPostFilters = function() {
-                updatePostFilterStateFromDom();
-                feedPage = 1;
-                feedEndReached = false;
-                var feed = document.getElementById("feed");
-                if (feed) {
-                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
-                }
-                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-            };
-
-            window.clearPostFilters = function() {
-                var ids = ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate"];
-                ids.forEach(function(id) {
-                    var el = document.getElementById(id);
-                    if (el) el.value = "";
-                });
-                var visibilityEl = document.getElementById("postVisibilityFilter");
-                var mineEl = document.getElementById("postOnlyMine");
-                if (visibilityEl) visibilityEl.value = "all";
-                if (mineEl) mineEl.checked = false;
-                postSearchState = {
-                    keyword: "",
-                    user: "",
-                    startDate: "",
-                    endDate: "",
-                    visibility: "all",
-                    onlyMine: false
-                };
-                feedPage = 1;
-                feedEndReached = false;
-                var panel = document.getElementById("postFilterPanel");
-                if (panel) panel.style.display = "none";
-                var btn = document.getElementById("filterToggleBtn");
-                if (btn) btn.classList.remove("active");
-                renderPostFilterUsers();
-                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-            };
-
-            function bindPostFilterEvents() {
-                if (window._postFilterEventsBound) return;
-                window._postFilterEventsBound = true;
-                ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate", "postVisibilityFilter", "postOnlyMine"].forEach(function(id) {
-                    var el = document.getElementById(id);
-                    if (!el) return;
-                    var eventName = el.type === "checkbox" || el.tagName === "SELECT" || el.type === "date" ? "change" : "input";
-                    if (eventName === "input") {
-                        // ★ 修复：搜索输入防抖 300ms，避免每次击键全量重建 feed DOM
-                        var debounceTimer = null;
-                        el.addEventListener(eventName, function() {
-                            if (debounceTimer) clearTimeout(debounceTimer);
-                            debounceTimer = setTimeout(function() {
-                                debounceTimer = null;
-                                window.applyPostFilters();
-                            }, 300);
-                        });
-                    } else {
-                        el.addEventListener(eventName, function() {
-                            window.applyPostFilters();
-                        });
-                    }
-                });
-            }
-
-            window.toggleFilterPanel = function() {
-                var panel = document.getElementById("postFilterPanel");
-                var btn = document.getElementById("filterToggleBtn");
-                if (!panel) return;
-                var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
-                if (isHidden) {
-                    panel.style.display = "flex";
-                    if (btn) btn.classList.add("active");
-                    loadPostFilterUsers(true);
-                    renderPostFilterUsers();
-                } else {
-                    panel.style.display = "none";
-                    if (btn) btn.classList.remove("active");
-                }
-            };
-
-            window._legacyTogglePostPinBase = async function(postId, btn) {
-                if (!postId) { showToast("置顶失败: postId 为空"); return; }
-                var nextPinned;
-                var originalText;
-                if (btn) {
-                    originalText = btn.textContent;
-                    btn.disabled = true;
-                    btn.textContent = '处理中..';
-                }
-                try {
-                    // Fetch current post state directly from DB (only select columns that exist)
-                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
-                    if (!fetchRes.data) { alert('未找到帖子(id=' + postId + ')'); throw new Error('not found'); }
-                    var dbPost = normalizePost(fetchRes.data);
-                    // Check permission
-                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        showToast('无权置顶');
-                        if (btn) { btn.disabled = false; btn.textContent = originalText; }
-                        return;
-                    }
-                    nextPinned = !dbPost.is_pinned;
-                    btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-                    // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
-                    var updHeaders = (typeof window.getUserAuthHeaders === 'function')
-                        ? await window.getUserAuthHeaders() : null;
-                    if (!updHeaders) { showToast('登录已失效'); if (btn) { btn.disabled = false; btn.textContent = originalText; } return; }
-                    var updResp = await fetch((window.API_BASE || '') + '/api/post/update', {
-                        method: 'POST',
-                        headers: updHeaders,
-                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
-                    });
-                    var updResult = await updResp.json();
-                    if (!updResp.ok || !updResult.ok) { alert('更新失败: ' + (updResult.error || '服务器错误')); throw new Error(updResult.error); }
-                    clearFeedCache();
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                    await loadFeed(true);
-                } catch (e) {
-                    console.error('[togglePostPin] error:', e);
-                    if (btn) { btn.disabled = false; btn.textContent = originalText || '置顶'; }
-                    if (!/^[\u4e00-\u9fa5]/.test(e && e.message || '')) {
-                        showToast('操作异常，请查看控制台');
-                    }
-                }
-            };
-            window._legacyTogglePostPin = async function(postId, btn) {
-                if (!postId) { showToast("置顶失败: postId 为空"); return; }
-                var nextPinned;
-                var originalText;
-                if (btn) {
-                    originalText = btn.textContent;
-                    btn.disabled = true;
-                    btn.textContent = '处理中..';
-                }
-                try {
-                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) throw fetchRes.error;
-                    if (!fetchRes.data) throw new Error('未找到对应帖子');
-                    var dbPost = normalizePost(fetchRes.data);
-                    if (!isAdmin()) {
-                        showToast('无权置顶');
-                        return;
-                    }
-                    nextPinned = !dbPost.is_pinned;
-                    if (btn) btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-                    var updateRes = await updatePostRecord(fetchRes.data, {
-                        is_pinned: nextPinned,
-                        pinned_at: nextPinned ? new Date().toISOString() : null,
-                        updated_at: new Date().toISOString()
-                    });
-                    if (!updateRes.ok) {
-                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
-                        return;
-                    }
-                    clearFeedCache();
-                    await loadFeed(true);
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                } catch (e) {
-                    console.error('[togglePostPin override] error:', e);
-                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
-                } finally {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = originalText || '置顶';
-                    }
-                }
-            };
-            var feedCacheWriteTimer = null;
-            function shouldPersistMediaUrl(url) {
-                url = String(url || '');
-                if (!url) return false;
-                if (/^(data:|blob:)/i.test(url)) return false;
-                if (url.length > 900) return false;
-                return true;
-            }
-
-            function toLightweightFeedPost(post) {
-                if (!post || typeof post !== 'object') return post;
-                var snapshot = Object.assign({}, post);
-                if (!shouldPersistMediaUrl(snapshot.media_url)) snapshot.media_url = '';
-                return snapshot;
-            }
-
-            function persistFeedCacheSnapshotNow() {
-                try {
-                    var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
-                    var firstPageIds = new Set((firstPage && Array.isArray(firstPage.postIds) ? firstPage.postIds : (feedAllPosts || []).slice(0, FEED_PAGE_SIZE).map(function(post) {
-                        return String(post && post.id || '');
-                    })).filter(Boolean));
-                    var cachePosts = (feedAllPosts || []).filter(function(post) {
-                        return post &&
-                            firstPageIds.has(String(post.id || '')) &&
-                            !isSystemPost(post);
-                    }).map(toLightweightFeedPost);
-                    var cacheComments = (feedAllComments || []).filter(function(comment) {
-                        return comment && firstPageIds.has(String(comment.post_id || ''));
-                    });
-                    var cacheLikes = (feedAllLikes || []).filter(function(like) {
-                        return like && firstPageIds.has(String(like.post_id || ''));
-                    });
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        version: 7,
-                        data: {
-                            posts: cachePosts,
-                            comments: cacheComments,
-                            likes: cacheLikes,
-                            pages: cachePosts.length ? [{
-                                offset: 0,
-                                postIds: cachePosts.map(function(post) { return String(post.id); })
-                            }] : [],
-                            nextOffset: cachePosts.length,
-                            endReached: cachePosts.length < FEED_PAGE_SIZE,
-                            pageSize: FEED_PAGE_SIZE
-                        },
-                        timestamp: Date.now()
-                    }));
-                } catch (e) {
-                    console.warn('[feed-cache] failed to persist feed cache', e);
-                }
-            }
-
-            function writeFeedCacheSnapshot() {
-                try {
-                    if (feedCacheWriteTimer) clearTimeout(feedCacheWriteTimer);
-                    feedCacheWriteTimer = setTimeout(function() {
-                        feedCacheWriteTimer = null;
-                        persistFeedCacheSnapshotNow();
-                    }, 900);
-                } catch (e) {
-                    console.warn('[feed-cache] failed to schedule feed cache write', e);
-                }
-            }
-
-            function getFeedRecordKey(record, fallbackParts) {
-                if (!record) return "";
-                if (record.id !== undefined && record.id !== null && record.id !== "") return String(record.id);
-                return (fallbackParts || []).map(function(part) {
-                    return String(part == null ? "" : part);
-                }).join("|");
-            }
-
-            function mergeFeedRecords(existing, incoming, keyResolver, shouldSortPosts) {
-                var map = new Map();
-                (existing || []).forEach(function(item) {
-                    if (!item) return;
-                    map.set(keyResolver(item), item);
-                });
-                (incoming || []).forEach(function(item) {
-                    if (!item) return;
-                    map.set(keyResolver(item), item);
-                });
-                var merged = Array.from(map.values());
-                return shouldSortPosts ? sortPosts(merged) : merged;
-            }
-
-            function normalizeFeedSnapshotCache(parsed) {
-                if (!parsed || !parsed.data) return null;
-                var data = parsed.data || {};
-                var posts = normalizePosts(data.posts || []).filter(function(post) {
-                    return !(typeof isSystemPost === 'function' && isSystemPost(post));
-                });
-                var pages = Array.isArray(data.pages) ? data.pages.filter(function(page) {
-                    return page && typeof page.offset === "number";
-                }) : [];
-                if (!pages.length && posts.length) {
-                    pages = [{
-                        offset: 0,
-                        postIds: posts.slice(0, FEED_PAGE_SIZE).map(function(post) { return String(post.id); })
-                    }];
-                }
-                return {
-                    version: parsed.version || 7, // 必须与 CACHE_KEY v7 一致，旧缓存自动以新版本重写
-                    timestamp: parsed.timestamp || 0,
-                    data: {
-                        posts: posts,
-                        comments: Array.isArray(data.comments) ? data.comments : [],
-                        likes: Array.isArray(data.likes) ? data.likes : [],
-                        pages: pages,
-                        nextOffset: typeof data.nextOffset === "number" ? data.nextOffset : posts.length,
-                        endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
-                        pageSize: data.pageSize || FEED_PAGE_SIZE
-                    }
-                };
-            }
-
-            function hydrateFeedStateFromSnapshot(snapshot) {
-                var normalized = normalizeFeedSnapshotCache(snapshot);
-                if (!normalized) return false;
-                feedAllPosts = normalized.data.posts || [];
-                feedAllComments = normalized.data.comments || [];
-                feedAllLikes = normalized.data.likes || [];
-                feedLoadedPages = normalized.data.pages || [];
-                feedNextOffset = typeof normalized.data.nextOffset === "number" ? normalized.data.nextOffset : feedAllPosts.length;
-                feedEndReached = !!normalized.data.endReached;
-                return true;
-            }
-
-            // 统一：应用所有需要从普通帖子流中排除的系统标记
-            // 集中维护，避免漏掉 __pro_gift__ / __pro_gift_claim__ / __vip_plan__ 等
-            function applyVisiblePostQueryFilters(query) {
-                if (!query || typeof query.neq !== 'function') return query;
-                return query
-                    .neq("media_type", AUTH_MARKER)
-                    .neq("media_type", ADMIN_AUTH_MARKER)
-                    .neq("media_type", ADMIN_META_MARKER)
-                    .neq("media_type", DM_MARKER)
-                    .neq("media_type", REPORT_MARKER)
-                    .neq("media_type", "__avatar__")
-                    .neq("media_type", "__user_info__")
-                    .neq("media_type", "__photo_wall__")
-                    .neq("media_type", "__visit__")
-                    .neq("media_type", "__attack__")
-                    .neq("media_type", "__user_visit__")
-                    .neq("media_type", "__post_view__")
-                    .neq("media_type", "__ann__")
-                    .neq("media_type", "__ann_read__")
-                    .neq("media_type", "__vip__")
-                    .neq("media_type", "__vip_order__")
-                    .neq("media_type", "__vip_plan__")
-                    .neq("media_type", "__user_style__")
-                    .neq("media_type", "__pro_gift__")
-                    .neq("media_type", "__pro_gift_claim__")
-                    .neq("media_type", "__login_event__")
-                    .neq("media_type", "__user_behavior__")
-                    .neq("media_type", "__security_alert__")
-                    .neq("media_type", "__admin_audit__")
-                    .neq("media_type", "__client_error__")
-                    .neq("media_type", "__email_sent__")
-                    .neq("media_type", "__email_recipient_history__")
-                    .neq("media_type", "__ai_agent_profile__")
-                    .neq("media_type", "__ai_agent_msg__")
-                    .neq("media_type", "__ai_agent_memory__")
-                    .neq("media_type", "__ai_agent_config__")
-                    .neq("media_type", "**ai_agent_memory_box**")
-                    .neq("media_type", "**ai_agent_conv_summary**")
-                    .neq("media_type", "**ai_agent_memory_log**")
-                    .neq("media_type", "__refresh_token__")
-                    .neq("media_type", "__revoked_token__")
-                    .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
-                    .neq("media_type", "__location_task__");
-            }
-            window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
-
-            // 客户端过滤：单一帖子是否对当前用户可见
-            function isSystemPost(post) {
-                if (!post) return true;
-                var mt = post.media_type;
-                if (!mt) return false;
-                var SYSTEM_MARKERS = [
-                    AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
-                    "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
-                    "__attack__", "__user_visit__", "__post_view__", "__ann__", "__ann_read__",
-                    "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
-                    "__pro_gift__", "__pro_gift_claim__",
-                    "__login_event__", "__user_behavior__", "__security_alert__", "__admin_audit__", "__client_error__",
-                    "__email_sent__", "__email_recipient_history__",
-                    "__refresh_token__", "__revoked_token__",
-                    "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
-                    "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
-                    "__location_task__",
-                    "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
-                ];
-                return SYSTEM_MARKERS.indexOf(mt) >= 0;
-            }
-            window.isSystemPost = isSystemPost;
-
-            function getFeedBasePostQuery() {
-                if (!sb) {
-                    return {
-                        range: function() { return Promise.resolve({ data: [], error: null }); }
-                    };
-                }
-                return applyVisiblePostQueryFilters(
-                    sb.from("posts").select("*")
-                ).order("created_at", { ascending: false });
-            }
-
-            async function fetchFeedPageChunk(offset, requestId, deferRelated) {
-                var start = Math.max(0, Number(offset) || 0);
-                var page = Math.floor(start / FEED_PAGE_SIZE);
-                var posts = [];
-                var comments = [];
-                var likes = [];
-                var endReached = false;
-                var usedApi = false;
-
-                // 优先使用后端 API（支持私密帖子可见性过滤）
-                try {
-                    var apiResp = await window.xtjOptionalAuthFetch('/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE);
-                    if (apiResp.ok) {
-                        var apiData = await apiResp.json();
-                        if (apiData && apiData.ok) {
-                            posts = normalizePosts(apiData.posts || []);
-                            comments = apiData.comments || [];
-                            likes = apiData.likes || [];
-                            endReached = apiData.endReached || false;
-                            if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
-                            // 使用服务器返回的 next_offset，不自行计算
-                            start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
-                            usedApi = true;
-                        }
-                    }
-                } catch (apiErr) {
-                    console.warn('[feed] API unavailable, fallback to Supabase:', apiErr && apiErr.message);
-                }
-
-                if (!usedApi) {
-                    // 回退：Supabase 直连（RLS 仅返回公开帖子）
-                    var end = start + FEED_PAGE_SIZE - 1;
-                    var postRes = await getFeedBasePostQuery().range(start, end);
-                    if (requestId && requestId !== feedLoadRequestId) return null;
-                    if (postRes.error) throw postRes.error;
-                    posts = normalizePosts(postRes.data || []);
-                    endReached = posts.length < FEED_PAGE_SIZE;
-                    try {
-                        var countRes = await applyVisiblePostQueryFilters(sb.from('posts').select('id', { count: 'exact', head: true }));
-                        if (countRes.count !== null) window._xtjTotalPostCount = countRes.count;
-                    } catch(e) {}
-                }
-
-                if (requestId && requestId !== feedLoadRequestId) return null;
-                var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
-                var relatedPromise = null;
-
-                if (postIds.length && !usedApi) {
-                    // 仅 Supabase 直连时需要单独获取评论和点赞
-                    if (!sb) {
-                        relatedPromise = Promise.resolve([ { data: [], error: null }, { data: [], error: null } ]);
-                    } else {
-                        relatedPromise = Promise.all([
-                            sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
-                            sb.from("likes").select("*").in("post_id", postIds)
-                        ]);
-                    }
-                    if (deferRelated) {
-                        return {
-                            offset: start,
-                            posts: posts,
-                            comments: comments,
-                            likes: likes,
-                            nextOffset: start + posts.length,
-                            endReached: endReached,
-                            postIds: postIds,
-                            relatedPromise: relatedPromise
-                        };
-                    }
-                    var related = await relatedPromise;
-                    if (requestId && requestId !== feedLoadRequestId) return null;
-                    if (related[0].error || related[1].error) {
-                        throw (related[0].error || related[1].error);
-                    }
-                    comments = related[0].data || [];
-                    likes = related[1].data || [];
-                }
-
-                return {
-                    offset: start,
-                    posts: posts,
-                    comments: comments,
-                    likes: likes,
-                    nextOffset: start + posts.length,
-                    endReached: endReached,
-                    postIds: postIds
-                };
-            }
-
-            function hydrateDeferredFeedRelations(chunk, requestId) {
-                if (!chunk || !chunk.relatedPromise) return Promise.resolve(false);
-                return chunk.relatedPromise.then(function(related) {
-                    if (requestId !== feedLoadRequestId) return false;
-                    if (related[0].error || related[1].error) {
-                        throw (related[0].error || related[1].error);
-                    }
-                    mergeFeedPageIntoState({
-                        offset: chunk.offset,
-                        posts: [],
-                        comments: related[0].data || [],
-                        likes: related[1].data || [],
-                        nextOffset: chunk.nextOffset,
-                        endReached: chunk.endReached,
-                        postIds: chunk.postIds
-                    });
-                    writeFeedCacheSnapshot();
-                    return renderFeedFromMemoryState().then(function() { return true; });
-                }).catch(function(error) {
-                    console.warn('[feed] engagement hydration failed:', error);
-                    return false;
-                });
-            }
-
-            function mergeFeedPageIntoState(chunk) {
-                if (!chunk) return;
-                feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
-                    return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
-                }, true);
-                feedAllComments = mergeFeedRecords(feedAllComments, chunk.comments, function(comment) {
-                    return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
-                });
-                feedAllLikes = mergeFeedRecords(feedAllLikes, chunk.likes, function(like) {
-                    return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
-                });
-                var pagePostIds = chunk.postIds || [];
-                var pageExists = (feedLoadedPages || []).some(function(page) { return page && page.offset === chunk.offset; });
-                if (!pageExists) {
-                    feedLoadedPages = (feedLoadedPages || []).concat([{
-                        offset: chunk.offset,
-                        postIds: pagePostIds
-                    }]).sort(function(a, b) { return a.offset - b.offset; });
-                }
-                feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset || 0);
-                if (chunk.endReached) feedEndReached = true;
-                (chunk.posts || []).forEach(syncPostInfoCache);
-                markFeedStateChanged();
-            }
-
-            function hasActiveFeedFilters() {
-                var state = getPostSearchState();
-                return !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
-            }
-
-            async function ensureFeedCoverageForVisibleSlice(minVisiblePosts, requestId) {
-                var target = Math.max(Number(minVisiblePosts) || 0, FEED_PAGE_SIZE);
-                var guard = 0;
-                while (!feedEndReached && guard < 12) {
-                    var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
-                    if (filteredPosts.length >= target) break;
-                    var chunk = await fetchFeedPageChunk(feedNextOffset, requestId);
-                    if (!chunk) return false;
-                    if (!chunk.posts.length) {
-                        feedEndReached = true;
-                        break;
-                    }
-                    mergeFeedPageIntoState(chunk);
-                    guard++;
-                }
-                writeFeedCacheSnapshot();
-                return true;
-            }
-
-            function syncPinnedPostIntoFeedState(serverPost) {
-                if (!serverPost || !serverPost.id) return false;
-                var found = false;
-                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
-                    if (String(post.id) !== String(serverPost.id)) return post;
-                    found = true;
-                    return Object.assign({}, post, serverPost);
-                }));
-                return found;
-            }
-
-            async function renderFeedFromMemoryState() {
-                await renderFeed({
-                    posts: feedAllPosts || [],
-                    comments: feedAllComments || [],
-                    likes: feedAllLikes || []
-                });
-                // Phase 3-P0-5: Feed 重渲染后恢复持久化的 retryable 状态，
-                // 避免评论重渲染导致小猫 AI 重试按钮丢失。
-                try { if (typeof restoreCatAiRetryableStatuses === 'function') restoreCatAiRetryableStatuses(); } catch(e) {}
-            }
-
-            async function rebuildFeedFromCurrentState() {
-                feedPage = 1;
-                var noMore = document.getElementById('feedNoMore');
-                if (noMore) noMore.remove();
-                await renderFeedFromMemoryState();
-                if (typeof setupFeedInfiniteScroll === 'function') {
-                    setupFeedInfiniteScroll();
-                }
-            }
-
-            window.xtjPrependPostToFeed = async function(serverPost) {
-                if (!serverPost || !serverPost.id) return false;
-                var normalized = normalizePost(serverPost);
-                var exists = false;
-                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
-                    if (!post || String(post.id) !== String(normalized.id)) return post;
-                    exists = true;
-                    return Object.assign({}, post, normalized);
-                }));
-                if (!exists) {
-                    feedAllPosts = sortPosts([normalized].concat(feedAllPosts || []));
-                }
-                writeFeedCacheSnapshot();
-                await rebuildFeedFromCurrentState();
-                return true;
-            };
-
-            async function refreshPostDetailIfActive(postId) {
-                if (!postId || String(activePostId || '') !== String(postId)) return;
-                if (typeof window.openPostDetail !== 'function') return;
-                try {
-                    await window.openPostDetail(postId);
-                } catch (e) {
-                    console.warn('[pin] failed to refresh post detail', e);
-                }
-            }
-
-            async function verifyPinnedPostInBackground(postId, expectedPinned) {
-                try {
-                    var snapshot = await fetchPostSnapshot(postId);
-                    if (!snapshot) throw new Error('not found');
-                    var normalized = normalizePost(snapshot);
-                    var synced = syncPinnedPostIntoFeedState(snapshot);
-                    writeFeedCacheSnapshot();
-                    if (!!normalized.is_pinned !== !!expectedPinned) {
-                        if (synced) {
-                            await rebuildFeedFromCurrentState();
-                            await refreshPostDetailIfActive(postId);
-                        }
-                        showToast('置顶状态已按服务器结果校正');
-                    }
-                } catch (e) {
-                    console.error('[pin] background verify failed', e);
-                    showToast('置顶已更新，但后台校验失败: ' + (e && e.message ? e.message : '未知错误'));
-                }
-            }
-
-            async function syncFeedDataInBackground() {
-                try {
-                    await loadFeed(true);
-                    return true;
-                } finally {
-                    isRefreshing.posts = false;
-                }
-            }
-
-            function pinMotionReduced() {
-                return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-            }
-
-            function getActualScrollSurface(startNode) {
-                var current = startNode || document.getElementById('feed');
-                while (current && current !== document.body && current !== document.documentElement) {
-                    if (current.scrollHeight > current.clientHeight) {
-                        var style = window.getComputedStyle(current);
-                        if (style.overflowY === 'auto' || style.overflowY === 'scroll') return current;
-                    }
-                    current = current.parentElement;
-                }
-                
-                var se = document.scrollingElement || document.documentElement;
-                if (se && se.scrollHeight > se.clientHeight) {
-                    var seStyle = window.getComputedStyle(se);
-                    if (seStyle.overflowY !== 'hidden' && seStyle.overflowY !== 'clip') {
-                        return window;
-                    }
-                }
-                return window;
-            }
-
-            function waitForPinScroll(surface, targetTop, timeoutMs) {
-                return new Promise(function(resolve) {
-                    var actualSurface = getActualScrollSurface(surface);
-                    if (!actualSurface || pinMotionReduced()) return resolve();
-                    
-                    var getScroll = function() { return actualSurface === window ? window.scrollY : actualSurface.scrollTop; };
-                    if (Math.abs(getScroll() - targetTop) <= 2) return resolve();
-                    
-                    var isResolved = false;
-                    var timeoutId;
-                    
-                    function finish() {
-                        if (isResolved) return;
-                        isResolved = true;
-                        clearTimeout(timeoutId);
-                        actualSurface.removeEventListener('scrollend', onScrollEnd);
-                        resolve();
-                    }
-                    
-                    function onScrollEnd() {
-                        if (Math.abs(getScroll() - targetTop) <= 2) finish();
-                    }
-                    
-                    actualSurface.addEventListener('scrollend', onScrollEnd);
-                    timeoutId = setTimeout(finish, timeoutMs);
-                });
-            }
-
-            function getPinnedPostScrollTarget(surface) {
-                var feed = document.getElementById('feed');
-                if (!feed) return 0;
-                var actualSurface = getActualScrollSurface(surface);
-                var feedRect = feed.getBoundingClientRect();
-                var nav = document.querySelector('.posts-nav.sticky-header') || (surface ? surface.querySelector('.posts-nav') : null);
-                var navRect = nav ? nav.getBoundingClientRect() : null;
-                
-                if (actualSurface === window) {
-                    var navHeight = navRect && navRect.bottom > 0 ? Math.max(0, navRect.height) : 0;
-                    return Math.max(0, Math.round(window.scrollY + feedRect.top - navHeight - 12));
-                } else {
-                    var surfaceRect = actualSurface.getBoundingClientRect();
-                    var navHeight = navRect && navRect.bottom > surfaceRect.top ? Math.max(0, navRect.height) : 0;
-                    return Math.max(0, Math.round(actualSurface.scrollTop + feedRect.top - surfaceRect.top - navHeight - 12));
-                }
-            }
-
-            async function beginPinnedPostTransition(postEl) {
-                var surface = document.getElementById('panelPosts');
-                if (postEl && postEl.isConnected && !pinMotionReduced()) {
-                    postEl.classList.add('post-pin-departing');
-                }
-                var actualSurface = getActualScrollSurface(surface);
-                var targetTop = getPinnedPostScrollTarget(surface);
-                if (pinMotionReduced()) {
-                    actualSurface.scrollTo(0, targetTop);
-                    return;
-                }
-                actualSurface.scrollTo({ top: targetTop, behavior: 'smooth' });
-                await Promise.all([
-                    new Promise(function(resolve) { setTimeout(resolve, 320); }),
-                    waitForPinScroll(surface, targetTop, 620)
-                ]);
-            }
-
-            function completePinnedPostTransition(postId) {
-                var selector = '.post[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]';
-                var postEl = document.querySelector(selector);
-                var surface = document.getElementById('panelPosts');
-                if (!postEl) return Promise.resolve(false);
-                var actualSurface = getActualScrollSurface(surface);
-                actualSurface.scrollTo(0, getPinnedPostScrollTarget(surface));
-                if (pinMotionReduced()) return Promise.resolve(true);
-                return new Promise(function(resolve) {
-                    var completed = false;
-                    var finish = function() {
-                        if (completed) return;
-                        completed = true;
-                        postEl.classList.remove('post-pin-arriving');
-                        postEl.removeEventListener('animationend', onAnimationEnd);
-                        resolve(true);
-                    };
-                    var onAnimationEnd = function(event) {
-                        if (event.target === postEl && event.animationName === 'xtj-pin-arrive') finish();
-                    };
-                    postEl.classList.remove('post-pin-arriving');
-                    void postEl.offsetWidth;
-                    postEl.addEventListener('animationend', onAnimationEnd);
-                    postEl.classList.add('post-pin-arriving');
-                    setTimeout(finish, 760);
-                });
-            }
-
-
-            // Final pin action: server-side RPC enforces one pinned post per author.
-            window.isPinningPost = false;
-            window.togglePostPin = async function(postId, btn) {
-                if (!postId) return;
-                var normalizedPostId = String(postId || '').trim().toLowerCase();
-                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
-                    showToast('置顶失败：帖子参数无效');
-                    return;
-                }
-                
-                if (window.isPinningPost) return;
-                window.isPinningPost = true;
-                
-                var originalText = btn ? btn.textContent : '';
-                var nextPinned = false;
-                var didSucceed = false;
-                var serverSucceeded = false;
-                var authoritativePinnedState = null;
-                try {
-                    if (btn) { btn.disabled = true; btn.textContent = '...'; }
-                    var auth = typeof window.ensureProtectedOperationAuth === 'function'
-                        ? await window.ensureProtectedOperationAuth()
-                        : { ok: !!(typeof window.getUserAuthHeaders === 'function' && await window.getUserAuthHeaders()) };
-                    if (!auth.ok) {
-                        if (auth.reason !== 'expired' && auth.reason !== 'no_user') {
-                            showToast('认证服务暂时不可用，请稍后重试');
-                        }
-                        return;
-                    }
-
-                    var currentPost = normalizePosts(feedAllPosts).find(function(item) {
-                        return String(item.id).toLowerCase() === normalizedPostId;
-                    });
-                    
-                    // Allow pinning even if not in feedAllPosts (e.g. detail view)
-                    var isOwner = currentPost && String(currentUser || '').toLowerCase() === String(currentPost.user_name || '').toLowerCase();
-                    if (currentPost && !isOwner && currentUser !== ADMIN_NAME) {
-                        showToast('无权置顶此帖子');
-                        return;
-                    }
-                    var isCurrentlyPinned = currentPost ? !!currentPost.is_pinned : (btn && (btn.getAttribute('data-pinned') === 'true' || originalText.indexOf('取消') !== -1));
-                    nextPinned = !isCurrentlyPinned;
-                    
-                    var response = await window.xtjProtectedFetch('/api/post/pin', {
-                        method: 'POST',
-                        body: JSON.stringify({ post_id: normalizedPostId, is_pinned: Boolean(nextPinned) })
-                    });
-                    var result = await response.json().catch(function() { return {}; });
-                    if (response.status === 401) {
-                        return;
-                    }
-                    if (result.code === 'pin_migration_required') {
-                        throw new Error('置顶服务尚未完成数据库升级，请部署迁移 008_atomic_post_pin.sql');
-                    }
-                    if (!response.ok || !result.ok || !result.data) throw new Error(result.error || '置顶操作失败');
-                    serverSucceeded = true;
-                    authoritativePinnedState = result.data.is_pinned;
-
-                    (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
-                        syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
-                    });
-                    
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
-                    var willAnimatePin = nextPinned;
-                    if (willAnimatePin) await beginPinnedPostTransition(postEl);
-
-                    if (!syncPinnedPostIntoFeedState(result.data)) {
-                        clearFeedCache();
-                        await loadFeed(true);
-                    } else {
-                        writeFeedCacheSnapshot();
-                        await rebuildFeedFromCurrentState();
-                    }
-                    await refreshPostDetailIfActive(normalizedPostId);
-                    if (willAnimatePin) await completePinnedPostTransition(normalizedPostId);
-                    didSucceed = true;
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                } catch (e) {
-                    if (serverSucceeded) {
-                        console.error('[pin] render failed after server success', e);
-                        showToast('置顶已更新，正在尝试恢复界面同步');
-                        clearFeedCache();
-                        loadFeed(true).catch(function(err){ console.error('loadFeed failed in catch', err); });
-                        refreshPostDetailIfActive(normalizedPostId).catch(function(err){ console.error('refreshPostDetailIfActive failed in catch', err); });
-                    } else {
-                        console.error('[pin] atomic update failed', e);
-                        showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
-                    }
-                } finally {
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
-                    if (postEl) postEl.classList.remove('post-pin-departing');
-                    if (btn) {
-                        btn.disabled = false;
-                        if (authoritativePinnedState !== null) {
-                            btn.textContent = authoritativePinnedState ? '取消置顶' : '置顶';
-                            btn.setAttribute('data-pinned', authoritativePinnedState ? 'true' : 'false');
-                        } else {
-                            btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
-                        }
-                    }
-                    window.isPinningPost = false;
-                }
-            };
-
-            // G10 修复：可见性切换并发锁（与 togglePostPin 的 isPinningPost 对齐），
-            // 防止双击基于同一旧 visibility 发两次更新 + 两次整页刷新
-            window.isTogglingPostVisibility = false;
-            window.togglePostVisibility = async function(postId, btn) {
-                if (window.isTogglingPostVisibility) return;
-                var post;
-                var nextVisibility;
-                // ★ 修复：失败分支已设置失败文案，若 finally 仍无条件重置为成功态文案
-                // 会覆盖"操作失败/操作异常"的提示；handled 置位后 finally 不再重置。
-                var handled = false;
-                try {
-                    post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                    if (!post || !canEditPost(post)) {
-                        showToast("无权修改这条帖子的隐私状态");
-                        return;
-                    }
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.textContent = "处理中..";
-                    }
-                    window.isTogglingPostVisibility = true;
-                    nextVisibility = post.visibility === "private" ? "public" : "private";
-                    var result = await updatePostRecord(post, {
-                        visibility: nextVisibility
-                    });
-                    if (!result.ok) {
-                        handled = true;
-                        if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🌐 设为公开"; }
-                        showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
-                        return;
-                    }
-                    clearFeedCache();
-                    showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
-                    await loadFeed(true);
-                } catch (e) {
-                    handled = true;
-                    console.error("togglePostVisibility error:", e);
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = "🔒 设为私密";
-                    }
-                    showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
-                } finally {
-                    window.isTogglingPostVisibility = false;
-                    if (!handled && btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
-                }
-            };
-            // ============== Global click delegation ==============
-            document.addEventListener('click', function(e) {
-                var postToolTrigger = e.target.closest('.post-tools-trigger');
-                if (postToolTrigger) {
-                    e.preventDefault();
-                    openPostToolsMenu(postToolTrigger);
-                    return;
-                }
-                var postToolAction = e.target.closest('[data-post-tool]');
-                if (postToolAction) {
-                    e.preventDefault();
-                    if (!window.currentUser) { showToast('请先登录'); return; }
-                    var postTool = postToolAction.getAttribute('data-post-tool');
-                    var postToolPostId = postToolAction.getAttribute('data-post-id');
-                    closePostToolsMenu();
-                    if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
-                        window.requestPostTranslation(postToolPostId);
-                    } else if (postTool === 'ask-ai' && typeof window.openPostAiChat === 'function') {
-                        window.openPostAiChat(postToolPostId);
-                    } else if (postTool === 'report' && typeof window.openPostReport === 'function') {
-                        window.openPostReport(postToolPostId);
-                    }
-                    return;
-                }
-                if (activePostToolsMenu && !e.target.closest('.post-tools-menu')) closePostToolsMenu();
-                // Pin button: delegate only (no inline onclick)
-                var pinBtn = e.target.closest('.action-btn.pin');
-                if (pinBtn) {
-                    if (pinBtn.disabled) { return; }
-                    var pid = pinBtn.getAttribute('data-post-id');
-                    if (!pid) { return; }
-                    window.togglePostPin(pid, pinBtn);
-                    return;
-                }
-            });
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closePostToolsMenu();
-            });
-            // ── 帖子位置功能 ──
-            var postLocationData = null;
-            var postLocationRequesting = false;
-
-            window.requestPostLocation = function() {
-                if (postLocationRequesting) return;
-                var btn = document.getElementById('postLocationAddBtn');
-                if (!btn) return;
-                if (!navigator.geolocation) {
-                    showToast('您的浏览器不支持定位功能');
-                    return;
-                }
-                postLocationRequesting = true;
-                btn.disabled = true;
-                btn.textContent = '正在获取位置...';
-                function requestPostLocationFix(options, onError) {
-                    navigator.geolocation.getCurrentPosition(function(position) {
-                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
-                    }, onError, options);
-                }
-                function finishLocationRequest(error) {
-                    postLocationRequesting = false;
-                    btn.disabled = false;
-                    btn.textContent = '添加位置';
-                    showToast(error && error.code === 1 ? '位置权限被拒绝，请在浏览器设置中允许定位' : '定位失败，请重试');
-                }
-                requestPostLocationFix({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }, function(error) {
-                    if (error && error.code !== 1) {
-                        // A timeout or unavailable GPS fix gets one bounded fallback request.
-                        btn.textContent = '正在尝试备用定位...';
-                        requestPostLocationFix({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }, function(fallbackError) {
-                            postLocationRequesting = false;
-                            btn.disabled = false;
-                            btn.textContent = '📍 添加位置';
-                            showToast('定位失败，请重试');
-                        });
-                        return;
-                    }
-                    finishLocationRequest(error);
-                    return;
-                });
-            };
-
-            async function reverseGeocodePostLocation(lat, lng, accuracy) {
-                var btn = document.getElementById('postLocationAddBtn');
-                try {
-                    var resp = await window.xtjProtectedFetch('/api/location/reverse', {
-                        method: 'POST',
-                        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy: Number(accuracy) || null })
-                    });
-                    var data = await resp.json().catch(function() { return {}; });
-                    if (!resp.ok || !data.ok) {
-                        showToast('地址解析失败: ' + (data.error || '请重试'));
-                        postLocationRequesting = false;
-                        if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
-                        return;
-                    }
-                    data.accuracy = Number(accuracy) || null;
-                    showPostLocationOptions(data);
-                } catch (e) {
-                    showToast('地址解析失败，请检查网络');
-                    postLocationRequesting = false;
-                    if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
-                }
-            }
-
-            function showPostLocationOptions(geoData) {
-                var panel = document.getElementById('postLocationPanel');
-                var optionsEl = document.getElementById('postLocationOptions');
-                if (!panel || !optionsEl) return;
-                optionsEl.innerHTML = '';
-                var options = geoData.options || [];
-                if (options.length === 0) {
-                    if (geoData.province && geoData.city) {
-                        options.push({ level: 'city', name: geoData.province + geoData.city, province: geoData.province, city: geoData.city });
-                    }
-                    if (geoData.city && geoData.district) {
-                        options.push({ level: 'district', name: geoData.city + geoData.district, province: geoData.province, city: geoData.city, district: geoData.district });
-                    }
-                }
-                for (var i = 0; i < options.length; i++) {
-                    var opt = options[i];
-                    var optEl = document.createElement('div');
-                    optEl.className = 'post-location-option';
-                    optEl.textContent = opt.name;
-                    optEl.setAttribute('role', 'button');
-                    optEl.setAttribute('tabindex', '0');
-                    (function(option) {
-                        optEl.addEventListener('click', function() { selectPostLocationOption(option); });
-                        optEl.addEventListener('keydown', function(e) {
-                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectPostLocationOption(option); }
-                        });
-                    })(opt);
-                    optionsEl.appendChild(optEl);
-                }
-                panel.style.display = 'block';
-                var addRow = document.getElementById('postLocationAddRow');
-                if (addRow) addRow.style.display = 'none';
-                postLocationRequesting = false;
-                var btn = document.getElementById('postLocationAddBtn');
-                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
-            }
-
-            window.selectPostLocationOption = function(option) {
-                var panel = document.getElementById('postLocationPanel');
-                var addRow = document.getElementById('postLocationAddRow');
-                var preview = document.getElementById('postLocationPreview');
-                var nameEl = document.getElementById('postLocationName');
-                if (panel) panel.style.display = 'none';
-                if (option && option.name) {
-                    postLocationData = {
-                        name: option.name,
-                        province: option.province || '',
-                        city: option.city || '',
-                        district: option.district || '',
-                        level: option.level || ''
-                    };
-                    if (nameEl) nameEl.textContent = option.name;
-                    if (preview) preview.style.display = 'flex';
-                    if (addRow) addRow.style.display = 'none';
-                } else {
-                    postLocationData = null;
-                    if (preview) preview.style.display = 'none';
-                    if (addRow) addRow.style.display = 'block';
-                }
-            };
-
-            window.removePostLocation = function() {
-                postLocationData = null;
-                var preview = document.getElementById('postLocationPreview');
-                var addRow = document.getElementById('postLocationAddRow');
-                if (preview) preview.style.display = 'none';
-                if (addRow) addRow.style.display = 'block';
-            };
-
-            function resetPostLocation() {
-                postLocationData = null;
-                postLocationRequesting = false;
-                var panel = document.getElementById('postLocationPanel');
-                var preview = document.getElementById('postLocationPreview');
-                var addRow = document.getElementById('postLocationAddRow');
-                var btn = document.getElementById('postLocationAddBtn');
-                if (panel) panel.style.display = 'none';
-                if (preview) preview.style.display = 'none';
-                if (addRow) addRow.style.display = 'block';
-                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
-            }
-
-            window.doPublish = async function () {
-                if (!currentUser) { showToast("请先登录"); return; }
-                var btn = document.getElementById("pubBtn");
-                if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
-                if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
-                var content = document.getElementById("postInp").value.trim();
-                var file = document.getElementById("fileInp").files[0];
-                var visibilityEl = document.getElementById("postVisibility");
-                var visibility = visibilityEl ? visibilityEl.value : "public";
-                if (!content && !file) { showToast("请输入帖子内容"); return; }
-                if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                var maxFileSize = 50 * 1024 * 1024;
-                if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
-                if (file) {
-                    var allowedTypes = ['image/','video/','audio/'];
-                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
-                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
-                }
-                btn.disabled = true;
-                btn.classList.add('is-loading');
-                btn.setAttribute('aria-busy', 'true');
-                btn.dataset.originalText = btn.textContent;
-                btn.innerHTML = '<span>发布中</span>';
-                var uploadedPath = '';
-                try {
-                    var media_url = "";
-                    var media_type = "";
-                    if (file) {
-                        var path = buildStorageUploadPath('posts', file.name);
-                        var uploadRes = await sb.storage.from("uploads").upload(path, file);
-                        if (uploadRes.error) throw uploadRes.error;
-                        uploadedPath = path;
-                        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-                        media_type = file.type.startsWith("image/") ? "image" : (file.type.startsWith("audio/") ? "audio" : "video");
-                    }
-                    var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: postLocationData || null }) : { visibility: visibility || "public" };
-                    var contentPayload = buildPostContentPayload(plainText, metadata);
-                    var payload = {
-                        user_name: currentUser,
-                        content: contentPayload,
-                        media_url: media_url,
-                        media_type: media_type || null,
-                        actor_key: deviceId,
-                        visibility: metadata.visibility,
-                        is_pinned: false,
-                        pinned_at: null,
-                        updated_at: null,
-                        location: postLocationData || null
-                    };
-                    var insertRes = await insertPostRecord(payload, contentPayload);
-                    if (!insertRes.ok) {
-                        if (uploadedPath) {
-                            try {
-                                var cleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
-                                if (cleanupResult && cleanupResult.error) console.warn('[post-publish] orphan cleanup failed', cleanupResult.error);
-                            } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
-                            uploadedPath = '';
-                        }
-                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
-                        return;
-                    }
-                    uploadedPath = '';
-                    touchUserSession(false);
-                    resetPostComposer();
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
-                    showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
-                    if (!insertPublishedPostIntoFeed(insertRes.data)) {
-                        clearFeedCache();
-                        await loadFeed(true);
-                    } else {
-                        writeFeedCacheSnapshot();
-                    }
-                    if (insertRes.data && insertRes.data.id) {
-                        schedulePublishedPostIpRefresh(insertRes.data.id);
-                    }
-                    loadProfileActivity(true);
-                } catch (e) {
-                    if (uploadedPath) {
-                        try {
-                            var catchCleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
-                            if (catchCleanupResult && catchCleanupResult.error) console.warn('[post-publish] orphan cleanup failed', catchCleanupResult.error);
-                        } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
-                    }
-                    showToast("发布失败: " + (e.message || "网络错误"));
-                } finally {
-                    btn.disabled = false;
-                    btn.classList.remove('is-loading');
-                    btn.setAttribute('aria-busy', 'false');
-                    btn.textContent = btn.dataset.originalText || "发布动态";
-                    delete btn.dataset.originalText;
-                }
-            };
-
-            loadFeed = async function(forceRefresh) {
-                // ★ 修复：loadFeed 语义为"重新加载 feed"——所有路径（缓存快路径/
-                //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
-                //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
-                //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
-                feedPage = 1;
-                var now = Date.now();
-                var requestId = ++feedLoadRequestId;
-                var stateVersionAtRequest = feedStateVersion;
-                var hadLiveFeed = Array.isArray(feedAllPosts) && feedAllPosts.length > 0;
-                if (forceRefresh) {
-                    // Keep the rendered feed intact until a replacement page succeeds.
-                    // A transient empty response must not turn a populated page into an empty one.
-                    feedPageFetchPending = false;
-                }
-                bindPostFilterEvents();
-                if (!forceRefresh) {
-                    try {
-                        var cached = window.safeStorage.get(CACHE_KEY);
-                        if (cached) {
-                            var parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
-                                if (requestId !== feedLoadRequestId) return;
-                                await renderFeedFromMemoryState();
-                                setupFeedInfiniteScroll();
-                                ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId).then(function() {
-                                    if (requestId !== feedLoadRequestId) return;
-                                    return renderFeedFromMemoryState();
-                                }).catch(function(error) {
-                                    console.warn('[feed] cached coverage refresh failed:', error);
-                                });
-                                return;
-                            }
-                        }
-                    } catch (e) {}
-                }
-                var feed = document.getElementById("feed");
-                if (!forceRefresh && feed) {
-                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
-                }
-                try {
-                    feedPageFetchPending = true;
-                    var chunk = await fetchFeedPageChunk(0, requestId, true);
-                    if (!chunk) return;
-                    if (requestId !== feedLoadRequestId) return;
-                    // A publish may finish while this request is in flight.
-                    // Preserve current state and merge this page when that happens.
-                    if (stateVersionAtRequest === feedStateVersion) {
-                        if (!chunk.posts.length && hadLiveFeed) {
-                            console.warn('[feed] ignored empty refresh response while posts are visible');
-                            return;
-                        }
-                        feedAllPosts = [];
-                        feedAllComments = [];
-                        feedAllLikes = [];
-                        feedLoadedPages = [];
-                        feedNextOffset = 0;
-                        feedEndReached = false;
-                        markFeedStateChanged();
-                    }
-                    if (chunk.posts.length) mergeFeedPageIntoState(chunk);
-                    else feedEndReached = true;
-                    writeFeedCacheSnapshot();
-                    // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
-                    try {
-                        if (typeof window.__xtjBatchLoadVipHistory === 'function') {
-                            var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
-                            var vipLoadPromise = window.__xtjBatchLoadVipHistory(userNames);
-                            // 5s 兜底：超过就放行，不阻塞 renderFeed
-                            var vipLoadTimeout = new Promise(function(resolve) { setTimeout(resolve, 5000); });
-                            Promise.race([vipLoadPromise, vipLoadTimeout]).then(function() {
-                                // VIP 历史加载完后，强制 reRender 让 Pro 标志显示出来
-                                if (window.__xtjVipHistoryCache) {
-                                    try {
-                                        if (typeof renderFeed === 'function') {
-                                            renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-                                        }
-                                    } catch(e) {}
-                                }
-                            }).catch(function() {});
-                        }
-                    } catch (e) { console.warn('[VIP history preload]', e); }
-                    await renderFeedFromMemoryState();
-                    setupFeedInfiniteScroll();
-                    hydrateDeferredFeedRelations(chunk, requestId).then(function() {
-                        if (requestId !== feedLoadRequestId) return;
-                        return ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
-                    }).then(function() {
-                        if (requestId !== feedLoadRequestId) return;
-                        writeFeedCacheSnapshot();
-                    }).catch(function(error) {
-                        console.warn('[feed] background hydration failed:', error);
-                    });
-                } catch (e) {
-                    console.error(e);
-                    var cacheFallbackShown = false;
-                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
-                    try {
-                        var fallbackRaw = window.safeStorage.get(CACHE_KEY);
-                        if (fallbackRaw) {
-                            var fallbackParsed = JSON.parse(fallbackRaw);
-                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
-                                await renderFeedFromMemoryState();
-                                setupFeedInfiniteScroll();
-                                cacheFallbackShown = true;
-                            }
-                        }
-                    } catch (fbErr) {
-                        console.error('[loadFeed] cache fallback failed:', fbErr);
-                    }
-                    // ★ 修复：缓存回退显示时必须给用户可感知反馈（数据可能过期），
-                    // 并提供点击重试入口。此前静默显示旧缓存，用户无法感知加载失败。
-                    if (cacheFallbackShown && feed) {
-                        var staleNotice = document.getElementById('feedStaleNotice');
-                        if (!staleNotice) {
-                            staleNotice = document.createElement('div');
-                            staleNotice.id = 'feedStaleNotice';
-                            staleNotice.className = 'loading feed-load-more-error';
-                            staleNotice.setAttribute('role', 'button');
-                            staleNotice.setAttribute('tabindex', '0');
-                            staleNotice.textContent = '网络加载失败，当前显示缓存内容，点击重试';
-                            staleNotice.addEventListener('click', function() {
-                                var el = document.getElementById('feedStaleNotice');
-                                if (el && el.parentNode) el.parentNode.removeChild(el);
-                                loadFeed(true);
-                            });
-                            feed.appendChild(staleNotice);
-                        }
-                    }
-                } finally {
-                    feedPageFetchPending = false;
-                }
-            };
-            window.loadFeed = loadFeed;
-
-            loadMoreFeedPosts = async function() {
-                if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
-                var feed = document.getElementById("feed");
-                var pageLoading = document.createElement("div");
-                pageLoading.className = "feed-page-loading";
-                pageLoading.setAttribute("role", "status");
-                pageLoading.setAttribute("aria-live", "polite");
-                pageLoading.textContent = "正在加载更多帖子";
-                var sentinel = document.getElementById("feedSentinel");
-                feed.insertBefore(pageLoading, sentinel || null);
-                var startIdx = feedPage * FEED_PAGE_SIZE;
-                var endIdx = startIdx + FEED_PAGE_SIZE;
-                var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
-                var fetchFailed = false;
-                if (filteredPosts.length < endIdx && !feedEndReached) {
-                    try {
-                        feedPageFetchPending = true;
-                        // ★ 修复：ensureFeedCoverageForVisibleSlice 内部以 feedNextOffset（服务端游标）拉取，
-                        // 不再依赖 feedPage 推算 offset，避免并发发帖/删除导致 offset 漂移时帖子重复或永久跳过。
-                        // 拉取成功后以当前内存过滤结果重新计算切片。
-                        await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
-                        writeFeedCacheSnapshot();
-                    } catch (e) {
-                        fetchFailed = true;
-                        console.error('[feed] loadMore ensure coverage failed:', e);
-                    } finally {
-                        feedPageFetchPending = false;
-                    }
-                    filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
-                }
-                pageLoading.remove();
-                if (fetchFailed) {
-                    // ★ 修复：加载更多失败必须给用户可感知反馈 + 可点击重试入口。
-                    // 此前静默失败且 feedEndReached 不置位，哨兵每次进入视口都会
-                    // 无限重复触发请求。失败后置位 feedLoadMoreFailed 暂停自动触发，
-                    // 用户点击"重试"后清除并重新加载。
-                    feedLoadMoreFailed = true;
-                    var failEl = document.getElementById('feedLoadMoreError');
-                    if (!failEl) {
-                        failEl = document.createElement('div');
-                        failEl.id = 'feedLoadMoreError';
-                        failEl.className = 'loading feed-load-more-error';
-                        failEl.setAttribute('role', 'button');
-                        failEl.setAttribute('tabindex', '0');
-                        failEl.textContent = '加载更多失败，点击重试';
-                        failEl.addEventListener('click', function() {
-                            feedLoadMoreFailed = false;
-                            var errEl = document.getElementById('feedLoadMoreError');
-                            if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
-                            loadMoreFeedPosts();
-                        });
-                        feed.appendChild(failEl);
-                    }
-                    return;
-                }
-                if (startIdx >= filteredPosts.length && !fetchFailed) {
-                    feedEndReached = true;
-                    var noMore = document.getElementById("feedNoMore");
-                    if (!noMore) {
-                        noMore = document.createElement("div");
-                        noMore.id = "feedNoMore";
-                        noMore.className = "loading";
-                        noMore.textContent = "没有更多帖子";
-                        noMore.style.padding = "30px";
-                        noMore.style.textAlign = "center";
-                        feed.appendChild(noMore);
-                    }
-                    return;
-                }
-                var filteredPostIds = new Set();
-                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
-                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
-                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
-                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
-                feedPage++;
-            };
-
-            appendMorePosts = function(posts, comments, likes) {
-                var feed = document.getElementById("feed");
-                var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
-                var postsHtml = posts.map(function(post) {
-                    return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
-                }).join("");
-                var sentinel = document.getElementById("feedSentinel");
-                var tempContainer = document.createElement("div");
-                tempContainer.innerHTML = postsHtml;
-                while (tempContainer.firstChild) {
-                    feed.insertBefore(tempContainer.firstChild, sentinel);
-                }
-                var newPosts = feed.querySelectorAll(".post:not(.visible)");
-                primePostReveal(newPosts);
-                observePostViewportState(newPosts);
-                updateFeedStats();
-            };
-
-            renderFeedWithAvatars = function(visiblePosts, comments, likes) {
-                var feed = document.getElementById("feed");
-                var scopedComments = getRenderableComments(comments, visiblePosts);
-                var maps = buildPostMaps(scopedComments, likes);
-                var state = getPostSearchState();
-                var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
-                if (visiblePosts.length) {
-                    feed.innerHTML = visiblePosts.map(function(post) {
-                        return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
-                    }).join("");
-                } else {
-                    feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
-                }
-                initPostScrollAnimation();
-            };
-
-            renderFeed = async function(payload) {
-                bindPostFilterEvents();
-                var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
-                var visibleComments = getRenderableComments(payload.comments, filteredPosts);
-                var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
-                var sPostsEl = document.getElementById("sPosts");
-                if (sPostsEl) sPostsEl.textContent = totalPosts;
-                var sViewsEl = document.getElementById("sViews");
-                if (sViewsEl) sViewsEl.textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
-                var visiblePostIds = new Set();
-                filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
-                var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
-                var sLikesEl = document.getElementById("sLikes");
-                if (sLikesEl) sLikesEl.textContent = scopedLikes.length + visibleComments.length;
-                filteredPosts.forEach(function(post) {
-                    postInfoCache[post.id] = {
-                        content: post.content,
-                        user_name: post.user_name,
-                        media_url: post.media_url || '',
-                        media_type: post.media_type || '',
-                        created_at: post.created_at || '',
-                        views: Number(post.views || 0)
-                    };
-                });
-                var allUsers = new Set();
-                filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
-                visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
-                // Render local avatar cache before the first paint; remote lookup stays background-only.
-                hydrateCachedAvatarsForUsers(Array.from(allUsers));
-                var visibleCount = feedPage * FEED_PAGE_SIZE;
-                var currentPages = filteredPosts.slice(0, Math.max(FEED_PAGE_SIZE, visibleCount));
-                // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
-                // ★ 修复：不再用 `currentPages.length >= filteredPosts.length` 反向置 feedEndReached。
-                // 缓存 hydrate 或帖数恰为 20 的倍数时会把 endReached 误置 true，导致无限滚动提前终止。
-                // feedEndReached 只由服务端 endReached / 空 chunk / 游标越界判定。
-                renderFeedWithAvatars(currentPages, visibleComments, scopedLikes);
-                refreshPendingFeedIpPosts(currentPages);
-                renderFilterSummary(filteredPosts.length);
-                if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
-
-                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
-                    var feedEl = document.getElementById('feed');
-                    if (!feedEl) return;
-                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
-                    avatars.forEach(function(avatarEl) {
-                        if (avatarEl.querySelector('img')) return;
-                        var username = avatarEl.getAttribute('data-user-name') ||
-                            avatarEl.parentElement && avatarEl.parentElement.getAttribute('data-user-name') ||
-                            avatarEl.closest && avatarEl.closest('[data-user-name]') && avatarEl.closest('[data-user-name]').getAttribute('data-user-name');
-                        if (!username) {
-                            // 兼容旧版 onclick 解析
-                            var onclick = avatarEl.getAttribute('onclick') || '';
-                            username = onclick.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
-                            if (!username || username === onclick) username = '';
-                        }
-                        if (!username) return;
-                        var avatarUrl = getAvatarUrl(username);
-                        if (avatarUrl) {
-                            avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
-                        }
-                    });
-                });
-                setTimeout(function() { prefetchStatData(); }, 1000);
-            };
-            window.renderFeed = renderFeed;
-
-            // ★ 关键修复：删除此重复的 delBtn.onclick 赋值！
-            // 原因：此 handler 没有 __xtjDeleteInProgress 锁、没有 Promise.race 超时、
-            //      finally 没重置状态、await loadFeed(true) 会阻塞整个事件循环。
-            //      JS 中 .onclick 重复赋值会**覆盖**前面的 handler（line 2602 区域的完整保护版失效），
-            //      导致删除卡死、连续删除卡死。
-            // 真正生效的 handler 在 line 2602 区域（带锁 + 超时 + 乐观删除 + 入口强制解锁）。
-
+            // ===================== 点赞 =====================
+            function getCurrentLikeIdentityValues() {
+                var values = [];
+                if (deviceId) values.push(String(deviceId));
+                if (currentUser) values.push(String(currentUser));
+                return Array.from(new Set(values.filter(Boolean)));
+            }
+
+            function makeLikeLookupKeys(postId, actorKey, userName) {
+                var pid = String(postId || '');
+                var keys = [];
+                if (actorKey) keys.push(pid + '|' + String(actorKey));
+                if (userName) keys.push(pid + '|' + String(userName));
+                return Array.from(new Set(keys));
+            }
+
+            function isLikeOwnedByCurrentUser(like, postId) {
+                if (!like) return false;
+                if (postId != null && String(like.post_id || '') !== String(postId)) return false;
+                if (currentUser && String(like.user_name || '') === String(currentUser)) return true;
+                var actor = String(like.actor_key || '');
+                if (!actor) return false;
+                return getCurrentLikeIdentityValues().indexOf(actor) >= 0;
+            }
+
+            function isPostLikedByCurrentUser(likeUserMap, postId) {
+                var keys = makeLikeLookupKeys(postId, deviceId, currentUser);
+                for (var i = 0; i < keys.length; i++) {
+                    if (likeUserMap && likeUserMap[keys[i]]) return true;
+                }
+                return false;
+            }
+
+            function setLikeButtonState(btn, liked) {
+                if (!btn) return;
+                btn.classList.toggle('liked', !!liked);
+                btn.textContent = liked ? '❤️' : '🤍';
+                btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
+            }
+
+            function persistFeedLikesCache() {
+                try {
+                    var raw = window.safeStorage.get(CACHE_KEY);
+                    if (!raw) return;
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object') return;
+                    if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
+                    parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
+                    parsed.timestamp = Date.now();
+                    window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
+                } catch (e) {}
+            }
+
+            function updateLikeStatsText(statsEl, liked) {
+                if (!statsEl) return;
+                var text = statsEl.textContent || '';
+                var match = text.match(/(?:点赞|❤)\s*(\d+)/);
+                if (!match) return;
+                var current = parseInt(match[1], 10) || 0;
+                var next = liked ? current + 1 : Math.max(0, current - 1);
+                statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
+            }
+
+            function updatePostLikeCount(postId, likeCount) {
+                var count = Number(likeCount);
+                if (!Number.isFinite(count) || count < 0) return;
+                var pid = String(postId || '');
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var statsEl = postEl.querySelector('.post-stats-text');
+                    if (!statsEl) return;
+                    statsEl.textContent = (statsEl.textContent || '').replace(/(点赞|❤)\s*\d+/, '$1 ' + count);
+                });
+            }
+
+            function getPostLikeButtons(postId) {
+                var pid = String(postId || '');
+                var buttons = [];
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
+                    if (likeBtn) buttons.push(likeBtn);
+                });
+                return buttons;
+            }
+
+            function setPostLikePending(postId, pending) {
+                getPostLikeButtons(postId).forEach(function(likeBtn) {
+                    // Keep the control available so rapid toggles feel immediate while the latest intent syncs.
+                    likeBtn.disabled = false;
+                    if (pending) likeBtn.setAttribute('aria-busy', 'true');
+                    else likeBtn.removeAttribute('aria-busy');
+                    if (pending) likeBtn.dataset.likePending = '1';
+                    else delete likeBtn.dataset.likePending;
+                });
+            }
+
+            function updatePostLikeUi(postId, liked, likeRecord) {
+                var pid = String(postId || '');
+                if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
+                feedAllLikes = feedAllLikes.filter(function(item) {
+                    return !isLikeOwnedByCurrentUser(item, pid);
+                });
+                if (liked) {
+                    feedAllLikes.push(likeRecord || {
+                        post_id: pid,
+                        user_name: currentUser,
+                        actor_key: deviceId
+                    });
+                }
+                persistFeedLikesCache();
+
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
+                    var statsEl = postEl.querySelector('.post-stats-text');
+                    var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
+                    setLikeButtonState(likeBtn, liked);
+                    if (stateChanged) updateLikeStatsText(statsEl, liked);
+                });
+            }
+            var likeStatRefreshTimer = null;
+            function scheduleLikeStatRefresh() {
+                var modal = document.getElementById('statModal');
+                if (!modal || !modal.classList.contains('active') || statCurrentType !== 'likes') return;
+                if (likeStatRefreshTimer) clearTimeout(likeStatRefreshTimer);
+                likeStatRefreshTimer = setTimeout(function() {
+                    likeStatRefreshTimer = null;
+                    refreshStatModal();
+                }, 300);
+            }
+
+            var likeOperations = Object.create(null);
+
+            function applyPostLikeIntent(postId, liked, sourceButton) {
+                updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
+                updateFeedStats();
+                if (liked && sourceButton) createLikeBlossom(sourceButton);
+            }
+
+            function flushPostLikeOperation(postId, operation) {
+                if (likeOperations[postId] !== operation) return Promise.resolve();
+                var requestedLiked = operation.desired;
+                operation.running = true;
+                operation.requested = requestedLiked;
+                var normalizedPostId = postId.trim().toLowerCase();
+                return window.xtjProtectedFetch('/api/post/like', {
+                    method: 'POST',
+                    body: JSON.stringify({ post_id: normalizedPostId, liked: requestedLiked })
+                }).then(function(likeResponse) {
+                    return likeResponse.json().catch(function() { return {}; }).then(function(likeResult) {
+                        if (!likeResponse.ok || !likeResult.ok || !!likeResult.liked !== requestedLiked) {
+                            throw new Error(likeResult.error || 'like_state_sync_failed');
+                        }
+                        operation.confirmed = requestedLiked;
+                        updatePostLikeCount(postId, likeResult.like_count);
+                        touchUserSession(false);
+                        scheduleLikeStatRefresh();
+                        if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') loadProfileActivity(true);
+                        try { if (typeof window.queueBehavior === 'function') window.queueBehavior(requestedLiked ? 'post_like' : 'post_unlike', 'post ' + postId.slice(0, 8)); } catch(e) {}
+                        if (operation.desired !== operation.confirmed) return flushPostLikeOperation(postId, operation);
+                    });
+                }).catch(function(error) {
+                    console.error(error);
+                    if (likeOperations[postId] !== operation) return;
+                    if (operation.desired !== operation.confirmed) {
+                        applyPostLikeIntent(postId, operation.confirmed);
+                        showToast("点赞失败，请重试");
+                    }
+                }).finally(function() {
+                    // ★ 修复：无条件复位 running——此前仅当 desired===confirmed 时才删除条目，
+                    // 若"请求在途时再点取消 → 第一次成功触发 re-flush → 第二次失败"，条目会永久
+                    // 残留在 running=true 状态，此后 toggleLike 不再发起任何请求，点赞态与服务器
+                    // 永久失同步（P1）。现在 running 始终复位：状态未同步时下次点击可重新 flush。
+                    operation.running = false;
+                    setPostLikePending(postId, false);
+                    if (likeOperations[postId] === operation && operation.desired === operation.confirmed) {
+                        delete likeOperations[postId];
+                    }
+                });
+            }
+
+            window.toggleLike = function (btn, postId) {
+                if (!currentUser) { showToast("请先登录"); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法点赞"); return; }
+                var pid = String(postId || '');
+                if (!btn || !pid) return;
+                var normalizedPostId = pid.trim().toLowerCase();
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
+                    showToast("帖子参数无效");
+                    return;
+                }
+                var operation = likeOperations[pid];
+                var visibleButton = getPostLikeButtons(pid)[0] || btn;
+                var currentLiked = operation ? operation.desired : visibleButton.classList.contains('liked');
+                var nextLiked = !currentLiked;
+                if (!operation) {
+                    operation = { confirmed: currentLiked, desired: currentLiked, running: false, promise: null };
+                    likeOperations[pid] = operation;
+                }
+                operation.desired = nextLiked;
+                setPostLikePending(pid, true);
+                applyPostLikeIntent(pid, nextLiked, btn);
+                if (!operation.running) operation.promise = flushPostLikeOperation(pid, operation);
+                return operation.promise;
+            };
+
+            var likeBlossomSequence = 0;
+
+            function createLikeBlossom(btn) {
+                var perfProfile = window.__xtjPerfProfile || 'full';
+                if (perfProfile === 'lite') return;
+                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+                var layer = btn.closest ? btn.closest('.actions') : btn.parentElement;
+                if (!layer) return;
+
+                var existing = btn._likeBlossom;
+                if (existing) {
+                    if (existing.timer) clearTimeout(existing.timer);
+                    if (existing.node && existing.node.parentNode) existing.node.remove();
+                }
+
+                var buttonRect = btn.getBoundingClientRect();
+                var layerRect = layer.getBoundingClientRect();
+                var blossom = document.createElement('span');
+                var gradientId = 'xtj-like-blossom-gradient-' + (++likeBlossomSequence);
+                blossom.className = 'like-blossom';
+                blossom.setAttribute('aria-hidden', 'true');
+                blossom.style.left = (buttonRect.left - layerRect.left + buttonRect.width / 2) + 'px';
+                blossom.style.top = (buttonRect.top - layerRect.top + buttonRect.height / 2) + 'px';
+                blossom.innerHTML = '<svg viewBox="0 0 100 100" focusable="false"><defs><linearGradient id="' + gradientId + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe8f0"/><stop offset=".62" stop-color="#ffb4c8"/><stop offset="1" stop-color="#ff91ad"/></linearGradient></defs><g transform="translate(50 50)"><g transform="rotate(0)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(72)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(144)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(216)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><g transform="rotate(288)"><path d="M0 3 C-13 -2 -19 -16 -13 -28 C-9 -37 -2 -39 0 -31 C2 -39 9 -37 13 -28 C19 -16 13 -2 0 3Z" fill="url(#' + gradientId + ')"/></g><circle cx="0" cy="0" r="7.5" fill="#ffd96b"/><circle cx="-2" cy="-1" r="2.2" fill="#fff2ad"/></g></svg>';
+                btn.classList.add('like-bloom-origin');
+                layer.appendChild(blossom);
+
+                var cleanup = function() {
+                    if (btn._likeBlossom && btn._likeBlossom.node === blossom) btn._likeBlossom = null;
+                    if (blossom.parentNode) blossom.remove();
+                };
+                blossom.addEventListener('animationend', cleanup, { once: true });
+                btn._likeBlossom = {
+                    node: blossom,
+                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 620 : 820)
+                };
+            }
+
+            // ===================== 帖子操作弹窗 =====================
+            const POST_ACTION_MODAL_IDS = ['commentModal', 'delModal'];
+
+            function resetCommentModalState() {
+                var input = document.getElementById("commInp");
+                var btn = document.getElementById("commBtn");
+                activePostId = null;
+                if (input) input.value = "";
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "发布评论";
+                }
+            }
+
+            function clearPostActionConfirmOverlay() {
+                var overlay = document.getElementById('ppConfirmOverlay');
+                var okBtn = document.getElementById('ppConfirmOkBtn');
+                if (!overlay) return;
+                if (overlay._closeTimer) {
+                    clearTimeout(overlay._closeTimer);
+                    overlay._closeTimer = null;
+                }
+                overlay.classList.remove('active');
+                overlay.classList.remove('closing');
+                overlay.style.opacity = '';
+                overlay.style.transition = '';
+                overlay.style.pointerEvents = '';
+                overlay._ppDeleteOrigin = null;
+                window._confirmCallback = null;
+                if (okBtn) okBtn.disabled = false;
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    dialog.style.transition = '';
+                    dialog.style.transform = '';
+                    dialog.style.opacity = '';
+                    dialog.style.transformOrigin = '';
+                }
+            }
+
+            function isPostActionModalId(id) {
+                return POST_ACTION_MODAL_IDS.indexOf(String(id || '')) !== -1;
+            }
+
+            function forceClosePostActionModal(id) {
+                var el = document.getElementById(id);
+                if (el) {
+                    el.classList.remove("active");
+                    el.classList.remove("closing");
+                    el.style.display = '';
+                    el.style.pointerEvents = '';
+                }
+                if (id === 'commentModal') {
+                    resetCommentModalState();
+                } else if (id === 'delModal') {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: true });
+                }
+            }
+
+            function closeOtherPostActionModals(exceptId) {
+                POST_ACTION_MODAL_IDS.forEach(function(id) {
+                    if (id !== exceptId) forceClosePostActionModal(id);
+                });
+                clearPostActionConfirmOverlay();
+            }
+
+            function resetPostActionModals() {
+                closeOtherPostActionModals('');
+            }
+
+            window.openComment = function (postId) {
+                if (!currentUser) { showToast("请先登录"); return; }
+                if (window.__xtjDeleteInProgress) {
+                    if (Date.now() - window.__xtjDeleteStartTime > 12000) {
+                        cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                    } else {
+                        showToast("正在删除中，请稍后..");
+                        return;
+                    }
+                }
+                
+                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                if (!postEl) return;
+                
+                // 如果已经存在，则收起（切换显示状态）
+                var existingBox = postEl.querySelector('.inline-comment-box');
+                if (existingBox) {
+                    existingBox.style.gridTemplateRows = '0fr';
+                    existingBox.style.opacity = '0';
+                    existingBox.style.marginTop = '0px';
+                    setTimeout(() => existingBox.remove(), 300);
+                    return;
+                }
+                
+                // 移除其他帖子下可能打开的内联输入框，保持界面整洁
+                document.querySelectorAll('.inline-comment-box').forEach(function(el) {
+                    el.style.gridTemplateRows = '0fr';
+                    el.style.opacity = '0';
+                    el.style.marginTop = '0px';
+                    setTimeout(() => el.remove(), 300);
+                });
+                
+                // 创建内联评论框容器 (带动画)
+                var box = document.createElement('div');
+                box.className = 'inline-comment-box';
+                box.style.display = 'grid';
+                box.style.gridTemplateRows = '0fr';
+                box.style.opacity = '0';
+                box.style.marginTop = '0px';
+                box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                box.style.background = 'transparent'; // 修复底色不统一的问题
+                box.style.borderBottomLeftRadius = '16px';
+                box.style.borderBottomRightRadius = '16px';
+                
+                var gridInner = document.createElement('div');
+                gridInner.style.overflow = 'hidden';
+                
+                var innerWrap = document.createElement('div');
+                innerWrap.style.padding = '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
+                innerWrap.style.display = 'flex';
+                innerWrap.style.gap = '8px';
+                innerWrap.style.alignItems = 'center';
+                
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.className = 'inline-comment-inp';
+                inp.placeholder = '写下你的想法...';
+                inp.style.flex = '1';
+                inp.style.padding = '8px 12px';
+                inp.style.border = '1px solid var(--border)';
+                inp.style.borderRadius = '20px';
+                inp.style.background = 'var(--bg-secondary)';
+                inp.style.outline = 'none';
+                inp.style.fontSize = '14px';
+                
+                // ★ @ mention autocomplete
+                var mentionDropdown = null;
+                var mentionActiveIndex = 0;
+                function closeMentionDropdown() {
+                    if (mentionDropdown && mentionDropdown.parentNode) {
+                        mentionDropdown.parentNode.removeChild(mentionDropdown);
+                    }
+                    mentionDropdown = null;
+                    mentionActiveIndex = 0;
+                }
+                function insertMentionAtCursor(inp, mentionText) {
+                    var start = inp.selectionStart || 0;
+                    var text = inp.value;
+                    // 找到光标前最近的 @ 位置
+                    var atPos = -1;
+                    for (var i = start - 1; i >= 0; i--) {
+                        if (text[i] === '@' || text[i] === '＠') {
+                            // 检查 @ 是否在开头、空格后或换行后
+                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
+                                atPos = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (atPos >= 0) {
+                        var before = text.slice(0, atPos);
+                        var after = text.slice(start);
+                        inp.value = before + mentionText + after;
+                        var newCursor = atPos + mentionText.length;
+                        inp.setSelectionRange(newCursor, newCursor);
+                    }
+                    closeMentionDropdown();
+                    inp.focus();
+                }
+                function showMentionDropdown(inp) {
+                    var start = inp.selectionStart || 0;
+                    var text = inp.value;
+                    // 查找光标前最近的 @
+                    var atPos = -1;
+                    for (var i = start - 1; i >= 0; i--) {
+                        if (text[i] === '@' || text[i] === '＠') {
+                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
+                                atPos = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (atPos < 0) { closeMentionDropdown(); return; }
+                    // 检查 @ 后面是否已经有非空内容（排除空格）
+                    var afterAt = text.slice(atPos + 1, start);
+                    if (afterAt.length > 0 && !/^\s*$/.test(afterAt)) {
+                        // 用户已经开始输入了，检查是否匹配"小猫"的前缀
+                        if (!'小猫'.startsWith(afterAt) && !'小猫'.includes(afterAt)) {
+                            closeMentionDropdown(); return;
+                        }
+                    }
+                    closeMentionDropdown();
+                    mentionDropdown = document.createElement('div');
+                    mentionDropdown.className = 'mention-dropdown';
+                    mentionDropdown.setAttribute('role', 'listbox');
+                    mentionDropdown.setAttribute('aria-label', '提及候选');
+                    mentionDropdown.innerHTML = 
+                        '<div class="mention-item mention-active" role="option" aria-selected="true" id="mention-cat-ai" data-insert="@小猫 ">' +
+                        '<span class="mention-avatar">🐱</span>' +
+                        '<span class="mention-name">小猫</span>' +
+                        '<span class="mention-badge">AI</span>' +
+                        '<span class="mention-desc">犀利毒舌回复</span>' +
+                        '</div>';
+                    mentionActiveIndex = 0;
+                    // 定位在输入框下方
+                    var rect = inp.getBoundingClientRect();
+                    mentionDropdown.style.position = 'fixed';
+                    mentionDropdown.style.left = rect.left + 'px';
+                    mentionDropdown.style.top = (rect.bottom + 4) + 'px';
+                    mentionDropdown.style.minWidth = rect.width + 'px';
+                    mentionDropdown.style.zIndex = '99999';
+                    document.body.appendChild(mentionDropdown);
+                    // 点击选中
+                    mentionDropdown.addEventListener('click', function(e) {
+                        var item = e.target.closest('.mention-item');
+                        if (item) {
+                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
+                        }
+                    });
+                    // 触摸支持
+                    mentionDropdown.addEventListener('touchend', function(e) {
+                        var item = e.target.closest('.mention-item');
+                        if (item) {
+                            insertMentionAtCursor(inp, item.getAttribute('data-insert'));
+                        }
+                    });
+                    // 设置 aria-expanded
+                    inp.setAttribute('aria-expanded', 'true');
+                    inp.setAttribute('role', 'combobox');
+                    inp.setAttribute('aria-activedescendant', 'mention-cat-ai');
+                }
+                function updateMentionActive(delta) {
+                    if (!mentionDropdown) return;
+                    var items = mentionDropdown.querySelectorAll('.mention-item');
+                    if (!items.length) return;
+                    items[mentionActiveIndex].classList.remove('mention-active');
+                    items[mentionActiveIndex].setAttribute('aria-selected', 'false');
+                    mentionActiveIndex = (mentionActiveIndex + delta + items.length) % items.length;
+                    items[mentionActiveIndex].classList.add('mention-active');
+                    items[mentionActiveIndex].setAttribute('aria-selected', 'true');
+                    inp.setAttribute('aria-activedescendant', items[mentionActiveIndex].id || '');
+                }
+                inp.addEventListener('input', function() {
+                    showMentionDropdown(inp);
+                });
+                inp.addEventListener('keydown', function(e) {
+                    // ★ 统一 keydown 处理器：mention dropdown 优先
+                    if (mentionDropdown) {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); updateMentionActive(1); return; }
+                        if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); updateMentionActive(-1); return; }
+                        if (e.key === 'Enter' || e.key === 'Tab') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            var items = mentionDropdown.querySelectorAll('.mention-item');
+                            if (items[mentionActiveIndex]) {
+                                insertMentionAtCursor(inp, items[mentionActiveIndex].getAttribute('data-insert'));
+                            }
+                            return;
+                        }
+                        if (e.key === 'Escape') { e.preventDefault(); closeMentionDropdown(); return; }
+                    }
+                    // ★ 没有 mention dropdown 时，Enter 发送评论
+                    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        btn.click();
+                    }
+                });
+                inp.addEventListener('click', function() {
+                    showMentionDropdown(inp);
+                });
+                // 全局关闭（使用命名函数，注释框销毁时移除）
+                var _mentionGlobalClick = function(e) {
+                    if (mentionDropdown && e.target !== inp && !mentionDropdown.contains(e.target)) {
+                        closeMentionDropdown();
+                    }
+                };
+                document.addEventListener('click', _mentionGlobalClick, true);
+                // 帖子关闭或重绘时关闭 + 移除全局监听器
+                var _origBoxRemove = box.remove;
+                box.remove = function() {
+                    closeMentionDropdown();
+                    document.removeEventListener('click', _mentionGlobalClick, true);
+                    _origBoxRemove.call(box);
+                };
+                
+                var btn = document.createElement('button');
+                btn.className = 'btn-sm btn-primary';
+                btn.textContent = '发送';
+                btn.style.borderRadius = '20px';
+                btn.style.padding = '6px 14px';
+                
+                btn.onclick = async function() {
+                    if (btn.disabled) return;
+                    if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
+                    var content = inp.value.trim();
+                    if (!content) { showToast("请输入评论内容"); return; }
+                    var targetPostId = String(postId || '').trim().toLowerCase();
+                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
+                        showToast("帖子参数无效");
+                        return;
+                    }
+                    
+                    btn.disabled = true;
+                    btn.textContent = "发送中..";
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    try {
+                        const response = await window.xtjProtectedFetch('/api/post/comment', {
+                            signal: controller.signal,
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ post_id: targetPostId, content: content })
+                        });
+                        clearTimeout(timeoutId);
+                        const result = await response.json().catch(function() { return {}; });
+                        if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
+                        
+                        touchUserSession(false);
+                        showToast("评论成功");
+                        box.style.gridTemplateRows = '0fr';
+                        box.style.opacity = '0';
+                        box.style.marginTop = '0px';
+                        setTimeout(() => box.remove(), 300);
+                        
+                        var scrollEl = document.getElementById('panelPosts');
+                        var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
+                        var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
+                        
+                        if (insertedComment) {
+                            feedAllComments = (feedAllComments || []).filter(function(item) {
+                                return !(item && item.id != null && String(item.id) === String(insertedComment.id));
+                            }).concat([insertedComment]);
+                            writeFeedCacheSnapshot();
+                            await renderFeedFromMemoryState();
+                        } else {
+                            await loadFeed(true);
+                        }
+                        
+                        requestAnimationFrame(function() {
+                            var p = document.getElementById('panelPosts');
+                            if (p && savedScroll > 0) p.scrollTop = savedScroll;
+                            var newEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
+                            if (newEl) newEl.classList.add('visible');
+                        });
+                        loadProfileActivity(true);
+                        
+                        // 小猫 AI 自动回复轮询
+                        // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
+                        // 小猫后跟非汉字字符，导致 @小猫帮我看看 不匹配（"帮"是汉字）。
+                        // 改为负向断言 (?![猫])：仅排除 小猫咪，@小猫帮我看看 可匹配。
+                        if (content && /[@＠]小猫(?![猫咪])/.test(content) && insertedComment) {
+                            pollCatAiReply(insertedComment.id, targetPostId);
+                        }
+                    } catch (e) {
+                        showToast("评论失败: " + (e.message || "未知错误"));
+                        btn.disabled = false;
+                        btn.textContent = '发送';
+                    }
+                };
+
+                // ★ 不再使用独立的 inp.onkeydown，统一由 addEventListener 处理
+                
+                innerWrap.appendChild(inp);
+                innerWrap.appendChild(btn);
+                gridInner.appendChild(innerWrap);
+                box.appendChild(gridInner);
+                
+                var actionsEl = postEl.querySelector('.actions');
+                if (actionsEl) {
+                    actionsEl.parentNode.insertBefore(box, actionsEl.nextSibling);
+                } else {
+                    postEl.appendChild(box);
+                }
+                
+                // 触发展开动画
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        box.style.gridTemplateRows = '1fr';
+                        box.style.opacity = '1';
+                        box.style.marginTop = '8px';
+                    });
+                });
+                
+                setTimeout(() => inp.focus(), 300); // 动画结束后再 focus
+            };
+
+            // ===================== 删除帖子 =====================
+            // 用 window 挂载，确保不同 IIFE 共享
+            if (typeof window.__xtjDeleteInProgress === 'undefined') window.__xtjDeleteInProgress = false;
+            if (typeof window.__xtjDeleteStartTime === 'undefined') window.__xtjDeleteStartTime = 0;
+            if (!window.__xtjDeleteSession) {
+                window.__xtjDeleteSession = {
+                    timeoutId: null,
+                    postId: null,
+                    ownerKey: null,
+                    postEl: null,
+                    originalOpacity: '',
+                    originalPointerEvents: '',
+                    originalFilter: ''
+                };
+            }
+            function getDeleteSession() {
+                return window.__xtjDeleteSession;
+            }
+            function restoreDeleteTargetVisual() {
+                var session = getDeleteSession();
+                if (!session.postEl) return;
+                try { session.postEl.style.opacity = session.originalOpacity || ''; } catch (e) {}
+                try { session.postEl.style.pointerEvents = session.originalPointerEvents || ''; } catch (e) {}
+                try { session.postEl.style.filter = session.originalFilter || ''; } catch (e) {}
+                session.postEl = null;
+                session.originalOpacity = '';
+                session.originalPointerEvents = '';
+                session.originalFilter = '';
+            }
+            function resetDeleteButtonState() {
+                var btn = document.getElementById("delBtn");
+                if (!btn) return;
+                try { btn.disabled = false; } catch (e) {}
+                try { btn.textContent = "确认删除"; } catch (e) {}
+            }
+            function cleanupDeleteSession(options) {
+                var opts = options || {};
+                var session = getDeleteSession();
+                if (session.timeoutId) {
+                    clearTimeout(session.timeoutId);
+                    session.timeoutId = null;
+                }
+                if (opts.restoreVisual !== false) {
+                    restoreDeleteTargetVisual();
+                } else {
+                    session.postEl = null;
+                    session.originalOpacity = '';
+                    session.originalPointerEvents = '';
+                    session.originalFilter = '';
+                }
+                if (opts.hideModal !== false) {
+                    var modalEl = document.getElementById("delModal");
+                    if (modalEl) modalEl.classList.remove("active");
+                }
+                if (opts.resetTarget !== false) {
+                    delPostId = null;
+                    delOwnerKey = null;
+                    session.postId = null;
+                    session.ownerKey = null;
+                }
+                resetDeleteButtonState();
+                window.__xtjDeleteInProgress = false;
+                window.__xtjDeleteStartTime = 0;
+                if (opts.toast && typeof showToast === 'function') {
+                    showToast(opts.toast);
+                }
+            }
+            function findPostCardElement(postId) {
+                return document.querySelector('.post[data-post-id="' + postId + '"]');
+            }
+            function removeDeletedPostFromFeed(postId) {
+                if (!Array.isArray(feedAllPosts)) return;
+                feedAllPosts = feedAllPosts.filter(function(post) {
+                    return String(post.id) !== String(postId);
+                });
+            }
+            async function confirmPostDeleteStatus(postId) {
+                var controller = typeof AbortController === 'function' ? new AbortController() : null;
+                var statusTimeoutMs = Number(window.__xtjPostDeleteStatusTimeoutMs) > 0 ? Number(window.__xtjPostDeleteStatusTimeoutMs) : 8000;
+                var timer = setTimeout(function() { if (controller) controller.abort(); }, statusTimeoutMs);
+                try {
+                    var response = await window.xtjProtectedFetch('/api/post/delete-status', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: postId }),
+                        signal: controller ? controller.signal : undefined
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok) return { confirmed: false };
+                    return { confirmed: true, deleted: result.deleted === true && result.exists === false };
+                } catch (_) {
+                    return { confirmed: false };
+                } finally {
+                    clearTimeout(timer);
+                }
+            }
+            // 快速本地检查帖子是否存在（不依赖网络，避免二次超时）
+            function quickPostExistsCheck(postId) {
+                try {
+                    var allPosts = normalizePosts(feedAllPosts);
+                    var found = allPosts.find(function(p) { return String(p.id) === String(postId); });
+                    if (found) return 'exists';
+                    // 如果本地feed中已不存在，视为已删除
+                    return 'deleted';
+                } catch (_) {
+                    return 'unknown';
+                }
+            }
+            function applyConfirmedPostDeletion(postId, session) {
+                removeDeletedPostFromFeed(postId);
+                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+
+                // 乐观删除动画：透明度+位移+高度收缩，180-220ms
+                if (session.postEl && session.postEl.parentNode) {
+                    var el = session.postEl;
+                    var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                    if (reducedMotion) {
+                        try { el.remove(); } catch (e) {}
+                    } else {
+                        el.style.transition = 'opacity 200ms ease, transform 200ms ease, max-height 200ms ease, margin 200ms ease, padding 200ms ease';
+                        el.style.opacity = '0';
+                        el.style.transform = 'translateY(-8px) scale(0.98)';
+                        el.style.maxHeight = '0';
+                        el.style.overflow = 'hidden';
+                        el.style.margin = '0';
+                        el.style.padding = '0';
+                        el.style.border = 'none';
+                        el.style.pointerEvents = 'none';
+                        var onTransitionEnd = function() {
+                            try { el.remove(); } catch (e) {}
+                            el.removeEventListener('transitionend', onTransitionEnd);
+                        };
+                        el.addEventListener('transitionend', onTransitionEnd);
+                        // 兜底：250ms 后强制移除
+                        setTimeout(function() {
+                            try { if (el.parentNode) el.remove(); } catch (e) {}
+                        }, 250);
+                    }
+                }
+
+                if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
+                cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
+                showToast("帖子已删除");
+                // 不再调用 loadFeed(true)，避免整页重建和闪白
+            }
+            window.openDelete = function (postId, ownerKey) {
+                // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
+                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
+                    console.warn('[openDelete] 检测到上一次删除超时卡死，强制解锁');
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
+                if (window.__xtjDeleteInProgress) {
+                    showToast("正在删除中，请稍后..");
+                    return;
+                }
+                var targetPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
+                if (targetPost && !canDeletePost(targetPost)) {
+                    showToast("无权删除这条帖子");
+                    return;
+                }
+                delPostId = postId;
+                delOwnerKey = ownerKey;
+                var session = getDeleteSession();
+                session.postId = postId;
+                session.ownerKey = ownerKey;
+                closeOtherPostActionModals('delModal');
+                openModal("delModal");
+            };
+            var delBtn = document.getElementById("delBtn");
+            if (delBtn) delBtn.onclick = async () => {
+                if (!delPostId) return;
+                // ★ 入口强制解锁（同 openDelete）
+                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
+                if (window.__xtjDeleteInProgress) return;
+                const btn = document.getElementById("delBtn");
+                const session = getDeleteSession();
+                const targetPostId = String(delPostId);
+                const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
+                if (currentPost && !canDeletePost(currentPost)) {
+                    cleanupDeleteSession({ toast: "无权删除这条帖子" });
+                    return;
+                }
+                window.__xtjDeleteInProgress = true;
+                window.__xtjDeleteStartTime = Date.now();
+                btn.disabled = true;
+                btn.textContent = "删除中..";
+                var finished = false;
+                session.postEl = findPostCardElement(targetPostId);
+                if (session.postEl) {
+                    session.originalOpacity = session.postEl.style.opacity || '';
+                    session.originalPointerEvents = session.postEl.style.pointerEvents || '';
+                    session.originalFilter = session.postEl.style.filter || '';
+                    session.postEl.style.opacity = '0.56';
+                    session.postEl.style.pointerEvents = 'none';
+                    session.postEl.style.filter = 'grayscale(0.08)';
+                }
+                session.timeoutId = setTimeout(function() {
+                    if (finished) return;
+                    console.warn('[delBtn] delete flow exceeded safety deadline');
+                    finished = true;
+                    cleanupDeleteSession({ toast: "删除状态确认超时，请刷新后重试" });
+                    // 不再调用 loadFeed(true)，防止整页重建
+                }, 30000);
+
+                try {
+                    var deleteController = typeof AbortController === 'function' ? new AbortController() : null;
+                    var deleteTimedOut = false;
+                    var deleteTimeoutMs = Number(window.__xtjPostDeleteRequestTimeoutMs) > 0 ? Number(window.__xtjPostDeleteRequestTimeoutMs) : 10000;
+                    var deleteTimer = setTimeout(function() {
+                        deleteTimedOut = true;
+                        if (deleteController) deleteController.abort();
+                    }, deleteTimeoutMs);
+                    let deleteResponse;
+                    try {
+                        deleteResponse = await window.xtjProtectedFetch('/api/post/delete', {
+                            method: 'POST',
+                            body: JSON.stringify({ post_id: targetPostId }),
+                            signal: deleteController ? deleteController.signal : undefined
+                        });
+                    } catch (raceErr) {
+                        if (finished) return;
+                        if (deleteTimedOut) {
+                            console.warn('[delBtn] delete request timed out; checking locally');
+                            // The delete request may have reached the server before this
+                            // browser timed out. Confirm with the authoritative endpoint
+                            // before deciding whether to restore the optimistic UI.
+                            var authoritativeStatus = await confirmPostDeleteStatus(targetPostId);
+                            if (finished) return;
+                            finished = true;
+                            if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
+                                applyConfirmedPostDeletion(targetPostId, session);
+                            } else {
+                                cleanupDeleteSession({ toast: "删除超时，帖子仍然存在，请重试" });
+                            }
+                            return;
+                            // 说明：原先此处有"快速本地检查"兜底，但被上方 return 短路成为死代码。
+                            // 超时后必须以权威接口 confirmPostDeleteStatus 的结果为准（避免误删/误恢复），
+                            // 本地缓存检查不可靠，故移除。
+                            // [dead code removed - quickPostExistsCheck local fallback]
+                        }
+                        throw raceErr;
+                    } finally {
+                        clearTimeout(deleteTimer);
+                    }
+                    if (finished) return;
+                    const deleteResult = await deleteResponse.json().catch(function() { return {}; });
+                    if (!deleteResponse.ok || !deleteResult.ok || (!deleteResult.deleted && !deleteResult.already_deleted)) {
+                        finished = true;
+                        cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
+                        return;
+                    }
+                    finished = true;
+                    applyConfirmedPostDeletion(targetPostId, session);
+                } catch (e) {
+                    if (finished) return;
+                    console.error('[delBtn] 删除异常:', e);
+                    finished = true;
+                    // 恢复目标帖子视觉状态
+                    if (session.postEl) {
+                        try {
+                            session.postEl.style.opacity = session.originalOpacity || '';
+                            session.postEl.style.pointerEvents = session.originalPointerEvents || '';
+                            session.postEl.style.filter = session.originalFilter || '';
+                            session.postEl.style.transition = '';
+                            session.postEl.style.transform = '';
+                            session.postEl.style.maxHeight = '';
+                            session.postEl.style.overflow = '';
+                            session.postEl.style.margin = '';
+                            session.postEl.style.padding = '';
+                            session.postEl.style.border = '';
+                        } catch(e) {}
+                    }
+                    cleanupDeleteSession({ toast: "删除帖子失败: " + (e && e.message || "未知错误"), restoreVisual: false });
+                } finally {
+                    if (!finished) {
+                        cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: false });
+                    }
+                }
+            };
+
+            window.openModal = function (id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                if (isPostActionModalId(id)) {
+                    closeOtherPostActionModals(id);
+                }
+                el.style.display = '';
+                el.classList.add("active");
+            };
+
+            window.closeModal = function (id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                if (isPostActionModalId(id)) {
+                    forceClosePostActionModal(id);
+                } else {
+                    el.classList.remove("active");
+                }
+                // 删除弹窗取消时立即清理，不播放动画
+                if (id === 'delModal') {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
+                if (id === 'loginModal' || id === 'registerModal') {
+                    if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
+                        try { authModalFocusOrigin.focus(); } catch (_) {}
+                    }
+                    authModalFocusOrigin = null;
+                }
+                if (id === 'statModal' && statPollTimer) {
+                    clearInterval(statPollTimer);
+                    statPollTimer = null;
+                }
+            };
+            resetPostActionModals();
+
+            // ===================== 图片查看器 =====================
+            const ivZoomState = { scale: 1, tx: 0, ty: 0 };
+            let ivIsZooming = false;
+            let ivIsPanning = false;
+            let ivLastDist = 0;
+            let ivPanStartX = 0, ivPanStartY = 0;
+            let ivStartTx = 0, ivStartTy = 0;
+            let ivStartScale = 1;
+            let ivPinchAnchorX = 0, ivPinchAnchorY = 0;
+            let ivLastTapTime = 0;
+            let ivDoubleTapTimer = null;
+            let ivHintTimer = null;
+            let ivTouchEndTime = 0;
+
+            function ivApplyTransform() {
+                const img = document.getElementById('ivImg');
+                if (!img) return;
+                const v = ivZoomState;
+                const t = `translate3d(${v.tx}px, ${v.ty}px, 0) scale(${v.scale})`;
+                img.style.transform = t;
+                img.style.webkitTransform = t;
+            }
+
+            function ivResetZoom(instant = false) {
+                const img = document.getElementById('ivImg');
+                if (!img) return;
+                ivZoomState.scale = 1;
+                ivZoomState.tx = 0;
+                ivZoomState.ty = 0;
+                if (instant) {
+                    img.classList.add('instant');
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                    void img.offsetWidth;
+                    img.classList.remove('instant');
+                } else {
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                }
+            }
+
+            function ivZoomAt(clientX, clientY, nextScale) {
+                const oldScale = ivZoomState.scale || 1;
+                const x = clientX == null ? window.innerWidth / 2 : clientX;
+                const y = clientY == null ? window.innerHeight / 2 : clientY;
+                const anchorX = (x - window.innerWidth / 2 - ivZoomState.tx) / oldScale;
+                const anchorY = (y - window.innerHeight / 2 - ivZoomState.ty) / oldScale;
+                ivZoomState.scale = Math.max(1, Math.min(6, nextScale));
+                ivZoomState.tx = x - window.innerWidth / 2 - anchorX * ivZoomState.scale;
+                ivZoomState.ty = y - window.innerHeight / 2 - anchorY * ivZoomState.scale;
+                if (ivZoomState.scale <= 1.01) {
+                    ivResetZoom(false);
+                } else {
+                    ivApplyTransform();
+                    ivShowHint();
+                }
+            }
+
+            function ivShowHint() {
+                const h = document.getElementById('ivZoomHint');
+                if (!h) return;
+                h.classList.add('show');
+                clearTimeout(ivHintTimer);
+                ivHintTimer = setTimeout(() => h.classList.remove('show'), 2000);
+            }
+
+            function buildPostPreviewItemFromTrigger(src, triggerEl) {
+                var el = triggerEl && triggerEl.getAttribute ? triggerEl : null;
+                if (!el) return null;
+                var postId = String(el.getAttribute('data-post-id') || '').trim();
+                if (!postId) return null;
+                var userName = String(el.getAttribute('data-post-user') || '').trim();
+                var createdAt = String(el.getAttribute('data-post-created-at') || '').trim();
+                var views = Number(el.getAttribute('data-post-views') || 0) || 0;
+                var fileSize = Number(el.getAttribute('data-file-size') || 0) || null;
+                var originalSize = Number(el.getAttribute('data-original-size') || 0) || null;
+                return {
+                    id: 'post_' + postId,
+                    imageUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
+                    thumbUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
+                    username: userName || '',
+                    timestamp: createdAt || '',
+                    views: views,
+                    fileSize: fileSize,
+                    originalSize: originalSize,
+                    __xtjSource: 'post',
+                    __xtjPostId: postId,
+                    __xtjActorKey: String(el.getAttribute('data-actor-key') || ''),
+                    __xtjCanDelete: String(el.getAttribute('data-can-delete') || '') === '1'
+                };
+            }
+
+            function syncPostPhotoPreviewChrome(photo) {
+                var overlay = document.getElementById('photoPreviewOverlay');
+                if (!overlay) return;
+                var isPostPhoto = !!(photo && photo.__xtjSource === 'post');
+                overlay.classList.toggle('pp-post-mode', isPostPhoto);
+                var prevBtn = document.getElementById('ppPrevBtn');
+                var nextBtn = document.getElementById('ppNextBtn');
+                if (prevBtn) prevBtn.style.display = isPostPhoto ? 'none' : '';
+                if (nextBtn) nextBtn.style.display = isPostPhoto ? 'none' : '';
+                var deleteBtn = document.getElementById('ppDeleteBtn');
+                if (deleteBtn && isPostPhoto) {
+                    deleteBtn.style.display = photo.__xtjCanDelete ? 'flex' : 'none';
+                    deleteBtn.title = '删除帖子';
+                }
+            }
+
+            function ensurePhotoPreviewContextHooks() {
+                if (window.__xtjPhotoPreviewContextHooked) return;
+                if (typeof window.closePhotoPreview !== 'function') return;
+                var originalClosePhotoPreview = window.closePhotoPreview;
+                window.closePhotoPreview = function() {
+                    var overlay = document.getElementById('photoPreviewOverlay');
+                    if (overlay) overlay.classList.remove('pp-post-mode');
+                    window.__xtjPhotoPreviewContext = null;
+                    return originalClosePhotoPreview.apply(this, arguments);
+                };
+                window.__xtjPhotoPreviewContextHooked = true;
+            }
+
+            function openPostImagePreview(src, triggerEl) {
+                var photo = buildPostPreviewItemFromTrigger(src, triggerEl);
+                if (!photo || !photo.imageUrl || typeof window.openPhotoPreview !== 'function') return false;
+                ensurePhotoPreviewContextHooks();
+                if (typeof window.closeImageViewer === 'function') {
+                    try { window.closeImageViewer(); } catch (e) {}
+                }
+                window.__xtjPhotoPreviewContext = {
+                    kind: 'post',
+                    postId: photo.__xtjPostId,
+                    actorKey: photo.__xtjActorKey || '',
+                    canDelete: !!photo.__xtjCanDelete
+                };
+                window.openPhotoPreview(0, { photos: [photo], originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
+                window.photoPreviewCurrent = photo;
+                setTimeout(function() {
+                    syncPostPhotoPreviewChrome(photo);
+                }, 30);
+                return true;
+            }
+            window.openPostImagePreview = openPostImagePreview;
+
+            window.openImageViewer = function (src, triggerEl) {
+                function fallbackOpen() {
+                    if (typeof window.forceClosePhotoPreview === 'function') {
+                        try { window.forceClosePhotoPreview(); } catch (e) {}
+                    } else if (typeof window.closePhotoPreview === 'function') {
+                        try { window.closePhotoPreview(); } catch (e) {}
+                    }
+                    const viewer = document.getElementById('imgViewer');
+                    const img = document.getElementById('ivImg');
+                    const wrapper = document.getElementById('ivWrapper');
+                    ivResetZoom(true);
+                    img.src = src;
+                    wrapper.classList.add('open-anim');
+                    viewer.classList.add('img-transition');
+                    img.classList.add('instant');
+                    void img.offsetWidth;
+                    img.classList.remove('instant');
+                    viewer.classList.add('active');
+                    setTimeout(function() { viewer.classList.add('show'); }, 10);
+                    document.body.style.overflow = 'hidden';
+                }
+                if ((typeof window.openPhotoPreview !== 'function' || window.openPhotoPreview === lazyOpenPhotoPreview) && typeof ensurePhotoWallPreviewLoaded === 'function') {
+                    ensurePhotoWallPreviewLoaded().then(function() {
+                        if (!openPostImagePreview(src, triggerEl)) fallbackOpen();
+                    }).catch(function() {
+                        fallbackOpen();
+                    });
+                    return;
+                }
+                if (openPostImagePreview(src, triggerEl)) return;
+                fallbackOpen();
+            };
+
+            window.closeImageViewer = function () {
+                const viewer = document.getElementById('imgViewer');
+                const wrapper = document.getElementById('ivWrapper');
+                ivResetZoom(true);
+                wrapper.classList.remove('open-anim');
+                viewer.classList.remove('show');
+                setTimeout(function() {
+                    viewer.classList.remove('active');
+                    viewer.classList.remove('img-transition');
+                }, 300);
+                document.body.style.overflow = '';
+            };
+
+            window.deleteCurrentPhoto = function() {
+                var ctx = window.__xtjPhotoPreviewContext || null;
+                var current = window.photoPreviewCurrent || null;
+                if (ctx && ctx.kind === 'post' && current && current.__xtjSource === 'post') {
+                    if (!ctx.canDelete) {
+                        showToast('仅发布者可删除');
+                        return;
+                    }
+                    if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
+                    setTimeout(function() {
+                        openDelete(ctx.postId, ctx.actorKey || '');
+                    }, 60);
+                    return;
+                }
+                if (typeof window.deletePhotoFromPreview === 'function') {
+                    window.deletePhotoFromPreview();
+                }
+            };
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key !== 'Escape') return;
+                var iv = document.getElementById('imgViewer');
+                if (iv && iv.classList.contains('active')) { closeImageViewer(); return; }
+                var am = document.getElementById('announcementModal');
+                if (am && am.classList.contains('active')) { closeAnnouncementModal(); return; }
+                var sm = document.getElementById('statModal');
+                if (sm && sm.classList.contains('active')) { sm.classList.remove('active'); return; }
+                var cm = document.getElementById('commentModal');
+                if (cm && cm.classList.contains('active')) { closeModal('commentModal'); return; }
+            });
+
+            const ivViewerEl = document.getElementById('imgViewer');
+            const ivImgEl = document.getElementById('ivImg');
+
+            // 判空保护：图片查看器元素缺失时跳过绑定，不得中断 core.js 后续逻辑
+            if (ivViewerEl) {
+            ivViewerEl.addEventListener('click', function (e) {
+                if (Date.now() - ivTouchEndTime < 120) return;
+                if (e.target === ivViewerEl || e.target === document.getElementById('ivWrapper')) {
+                    closeImageViewer();
+                }
+            });
+
+            ivViewerEl.addEventListener('contextmenu', function (e) {
+                e.preventDefault();
+            });
+
+            ivViewerEl.addEventListener('touchstart', function (e) {
+                if (e.target.closest('.iv-close')) return;
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    ivIsZooming = true;
+                    const t = e.touches;
+                    ivLastDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+                    ivStartTx = ivZoomState.tx;
+                    ivStartTy = ivZoomState.ty;
+                    ivStartScale = ivZoomState.scale;
+                    const cx = (t[0].clientX + t[1].clientX) / 2;
+                    const cy = (t[0].clientY + t[1].clientY) / 2;
+                    ivPinchAnchorX = (cx - window.innerWidth / 2 - ivStartTx) / ivStartScale;
+                    ivPinchAnchorY = (cy - window.innerHeight / 2 - ivStartTy) / ivStartScale;
+                    ivImgEl.classList.add('instant');
+                } else if (e.touches.length === 1) {
+                    const now = Date.now();
+                    if (now - ivLastTapTime < 320) {
+                        clearTimeout(ivDoubleTapTimer);
+                        ivLastTapTime = 0;
+                        if (ivZoomState.scale > 1.5) {
+                            ivResetZoom(false);
+                        } else {
+                            ivZoomAt(e.touches[0].clientX, e.touches[0].clientY, 2.5);
+                        }
+                        return;
+                    }
+                    ivLastTapTime = now;
+                    ivDoubleTapTimer = setTimeout(() => { ivLastTapTime = 0; }, 350);
+
+                    if (ivZoomState.scale > 1) {
+                        ivIsPanning = true;
+                        ivPanStartX = e.touches[0].clientX;
+                        ivPanStartY = e.touches[0].clientY;
+                        ivStartTx = ivZoomState.tx;
+                        ivStartTy = ivZoomState.ty;
+                        ivImgEl.classList.add('instant');
+                    }
+                }
+            }, { passive: false });
+
+            var _ivMoveTicking = false;
+            ivViewerEl.addEventListener('touchmove', function (e) {
+                if (ivIsZooming && e.touches.length === 2) {
+                    e.preventDefault();
+                    const t = e.touches;
+                    const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+                    const totalRatio = dist / ivLastDist;
+                    const newScale = Math.max(1, Math.min(6, ivStartScale * totalRatio));
+                    const cx = (t[0].clientX + t[1].clientX) / 2;
+                    const cy = (t[0].clientY + t[1].clientY) / 2;
+                    ivZoomState.scale = newScale;
+                    ivZoomState.tx = cx - window.innerWidth / 2 - ivPinchAnchorX * newScale;
+                    ivZoomState.ty = cy - window.innerHeight / 2 - ivPinchAnchorY * newScale;
+                    if (!_ivMoveTicking) {
+                        _ivMoveTicking = true;
+                        requestAnimationFrame(function() {
+                            ivApplyTransform();
+                            ivShowHint();
+                            _ivMoveTicking = false;
+                        });
+                    }
+                } else if (ivIsPanning && e.touches.length === 1) {
+                    e.preventDefault();
+                    const dx = e.touches[0].clientX - ivPanStartX;
+                    const dy = e.touches[0].clientY - ivPanStartY;
+                    ivZoomState.tx = ivStartTx + dx;
+                    ivZoomState.ty = ivStartTy + dy;
+                    if (!_ivMoveTicking) {
+                        _ivMoveTicking = true;
+                        requestAnimationFrame(function() {
+                            ivApplyTransform();
+                            _ivMoveTicking = false;
+                        });
+                    }
+                }
+            }, { passive: false });
+
+            ivViewerEl.addEventListener('touchend', function (e) {
+                ivTouchEndTime = Date.now();
+                if (ivIsZooming) {
+                    ivIsZooming = false;
+                    if (ivZoomState.scale <= 1) {
+                        ivImgEl.classList.remove('instant');
+                        ivResetZoom(false);
+                    } else {
+                        setTimeout(() => ivImgEl.classList.remove('instant'), 50);
+                    }
+                }
+                if (ivIsPanning) {
+                    ivIsPanning = false;
+                    ivImgEl.classList.remove('instant');
+                }
+            });
+
+            ivViewerEl.addEventListener('wheel', function (e) {
+                if (!ivViewerEl.classList.contains('active')) return;
+                e.preventDefault();
+                const delta = -e.deltaY * 0.002;
+                const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
+                if (newScale === ivZoomState.scale) return;
+                const cx = e.clientX;
+                const cy = e.clientY;
+                const ratio = newScale / ivZoomState.scale;
+                ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
+                ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
+                ivZoomState.scale = newScale;
+                ivApplyTransform();
+                ivShowHint();
+                if (ivZoomState.scale <= 1) {
+                    ivResetZoom(true);
+                }
+            }, { passive: false });
+            } // end if (ivViewerEl)
+
+            // ===================== 浏览历史缓存 =====================
+            // 帖子信息缓存：用于浏览历史与媒体标签
+            const postInfoCache = {};
+            // 挂到 window：登出清理 clearAllAuthState 中 window.postInfoCache 清理依赖此引用
+            window.postInfoCache = postInfoCache;
+            const VIEW_HISTORY_KEY = 'xtj_view_history';
+            const VIEW_TRACK_TTL = 5 * 60 * 1000;
+            const VIEW_HISTORY_MEDIA_LABEL = '(\u56fe\u7247/\u89c6\u9891)';
+            const VIEW_HISTORY_DELETED_AUTHOR = '\u5df2\u5220\u9664\u7528\u6237';
+
+            function normalizeViewHistoryText(value, fallback) {
+                var text = String(value == null ? '' : value).trim();
+                if (!text) return fallback;
+                // ★ 修复：媒体标记检测关键词此前为编码损坏的乱码（永不匹配），
+                // 替换为正常中文关键词，使媒体帖子的历史标签能正确显示
+                if (text.indexOf('图片') !== -1 || text.indexOf('视频') !== -1 || text.indexOf('音频') !== -1 || text.indexOf('(图片/视频)') !== -1) return VIEW_HISTORY_MEDIA_LABEL;
+                // ★ 修复：已删除用户标记检测关键词同上（乱码→正常中文）
+                if (text.indexOf('已删除') !== -1 || text.indexOf('未知') !== -1) return VIEW_HISTORY_DELETED_AUTHOR;
+                // 兼容旧数据：如果存储的是原始 JSON，解析出 text 字段
+                if (text.startsWith('{') && text.indexOf('"__type"') !== -1) {
+                    try { var pc = JSON.parse(text); if (pc && pc.text !== undefined) return pc.text || fallback; } catch(e) {}
+                }
+                return text;
+            }
+
+            function normalizeViewHistoryEntry(entry) {
+                entry = entry || {};
+                return Object.assign({}, entry, {
+                    user_name: String(entry.user_name || '').trim(),
+                    post_id: entry.post_id,
+                    post_content: normalizeViewHistoryText(entry.post_content, VIEW_HISTORY_MEDIA_LABEL),
+                    post_author: normalizeViewHistoryText(entry.post_author, VIEW_HISTORY_DELETED_AUTHOR),
+                    media_url: String(entry.media_url || '').trim(),
+                    media_type: String(entry.media_type || '').trim(),
+                    viewed_at: entry.viewed_at || new Date().toISOString()
+                });
+            }
+
+            function shouldKeepViewHistoryEntry(entry) {
+                var viewer = String(entry && entry.user_name || '').trim();
+                var author = String(entry && entry.post_author || '').trim();
+                if (!viewer || !author || viewer === author) return false;
+                // 过滤系统日志 marker，不允许在前台总浏览弹窗显示
+                var mediaType = String(entry && entry.media_type || '').trim();
+                if (/^__.*__$/.test(mediaType)) return false; // 以双下划线开头&结尾的系统记录
+                // 过滤原始 JSON 字符串（device_id、ip、user_agent 等敏感信息不应出现在前台）
+                var postContent = String(entry && entry.post_content || '');
+                if (postContent.indexOf('"device_id"') !== -1 && postContent.indexOf('"ip"') !== -1) return false;
+                if (postContent.indexOf('"browser_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"canvas_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"webgl_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"webrtc_local_ips"') !== -1) return false;
+                return true;
+            }
+
+            function getViewHistory() {
+                try {
+                    var history = window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
+                    var changed = false;
+                    var normalized = Array.isArray(history) ? history.map(function(entry) {
+                        var next = normalizeViewHistoryEntry(entry);
+                        if (!changed && JSON.stringify(next) !== JSON.stringify(entry || {})) changed = true;
+                        return next;
+                    }) : [];
+                    var filtered = normalized.filter(function(entry) {
+                        var keep = shouldKeepViewHistoryEntry(entry);
+                        if (!keep) changed = true;
+                        return keep;
+                    });
+                    if (changed) {
+                        window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(filtered));
+                    }
+                    return filtered;
+                } catch(e) { return []; }
+            }
+
+            function saveViewHistory(entry) {
+                const history = getViewHistory();
+                // 避免重复记录相同 post_id + user_name 的浏览记录
+                const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
+                if (!exists) {
+                    history.unshift(normalizeViewHistoryEntry(entry));
+                    // 只保留最近 500 条
+                    if (history.length > 500) history.length = 500;
+                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
+                }
+            }
+
+            function trackView(postId) {
+                const key = `xtj_v_${postId}`;
+                if (!window.safeStorage.get(key) && !viewTracked.has(postId)) {
+                    viewTracked.add(postId);
+                    window.safeStorage.set(key, "1");
+                    var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                    if (postEl) {
+                        var statsEl = postEl.querySelector('.post-stats-text');
+                        if (statsEl) {
+                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
+                            if (vm) {
+                                var newVal = parseInt(vm[1]) + 1;
+                                statsEl.textContent = statsEl.textContent.replace(/浏览 \d+/, '浏览 ' + newVal);
+                            }
+                        }
+                    }
+                    if (currentUser && postInfoCache[postId]) {
+                        var rawContent = postInfoCache[postId].content || '';
+                        var displayContent = rawContent;
+                        try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
+                        saveViewHistory({
+                            user_name: currentUser,
+                            post_id: postId,
+                            post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || '(图片/视频)'),
+                            post_author: postInfoCache[postId].user_name || '未知',
+                            media_url: postInfoCache[postId].media_url || '',
+                            media_type: postInfoCache[postId].media_type || '',
+                            viewed_at: new Date().toISOString()
+                        });
+                    }
+                    setTimeout(async () => { 
+                        try { 
+                            await sb.rpc("increment_post_views", { p_post_id: postId }); 
+                        } catch(e){ console.error(e); } 
+                    }, 1000);
+                    updateFeedStats();
+                }
+            }
+
+            // ===================== 浏览历史加载 =====================
+            // 保存浏览历史：分页加载相关变量
+            saveViewHistory = function(entry) {
+                const history = getViewHistory();
+                var normalized = normalizeViewHistoryEntry(entry);
+                var postId = String(normalized.post_id || normalized.postId || '').trim();
+                var userName = String(normalized.user_name || normalized.userName || '').trim();
+                // 去重：相同 post_id + user_name 的记录不重复添加
+                var exists = postId ? history.some(function(h) {
+                    return String(h.post_id || h.postId || '') === postId &&
+                           String(h.user_name || h.userName || '') === userName;
+                }) : false;
+                if (!exists) {
+                    history.unshift(normalized);
+                    if (history.length > 500) history.length = 500;
+                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
+                }
+            };
+
+            function canTrackViewNow(postId) {
+                const key = `xtj_v_${postId}`;
+                const now = Date.now();
+                var last = 0;
+                try { last = Number(window.safeStorage.get(key) || 0); } catch (e) { last = 0; }
+                if (viewTracked.has(postId) && now - last < VIEW_TRACK_TTL) return false;
+                if (last && now - last < VIEW_TRACK_TTL) return false;
+                return true;
+            }
+
+            trackView = function(postId) {
+                const key = `xtj_v_${postId}`;
+                if (!canTrackViewNow(postId)) return false;
+                // ★ 修复：未登录时不记录浏览——静默返回（此前 throw + console.error
+                // 导致每次滚动浏览都报错刷屏，且删除节流标记造成无限重复触发）。
+                if (!currentUser || typeof window.xtjProtectedFetch !== 'function') return false;
+                viewTracked.add(postId);
+                // ★ 修复：请求发出前先写节流键，防止键仅成功后写入期间
+                // 1 秒内重复触发并发 POST（在途请求保护）
+                window.safeStorage.set(key, String(Date.now()));
+                setTimeout(async () => {
+                    try {
+                        if (!currentUser || typeof window.xtjProtectedFetch !== 'function') throw new Error('view_auth_required');
+                        var response = await window.xtjProtectedFetch('/api/post/view', {
+                            method: 'POST',
+                            body: JSON.stringify({ post_id: String(postId) })
+                        });
+                        var result = await response.json().catch(function() { return {}; });
+                        if (!response.ok || !result.ok) throw new Error(result.error || 'view_record_failed');
+                        var authoritativeViews = Number(result.views);
+                        if (Number.isFinite(authoritativeViews)) {
+                            var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                            var statsEl = postEl && postEl.querySelector('.post-stats-text');
+                            if (statsEl) statsEl.textContent = statsEl.textContent.replace(/\d+/, String(authoritativeViews));
+                            if (Array.isArray(feedAllPosts)) {
+                                feedAllPosts = feedAllPosts.map(function(post) {
+                                    return post && String(post.id) === String(postId) ? Object.assign({}, post, { views: authoritativeViews }) : post;
+                                });
+                                if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                            }
+                            if (postInfoCache[postId]) postInfoCache[postId].views = authoritativeViews;
+                        }
+                        window.safeStorage.set(key, String(Date.now()));
+                        if (result.recorded && currentUser && postInfoCache[postId]) {
+                            var cachedPost = postInfoCache[postId];
+                            var rawContent = cachedPost.content || '';
+                            var displayContent = rawContent;
+                            try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
+                            saveViewHistory({ user_name: currentUser, post_id: postId,
+                                post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || VIEW_HISTORY_MEDIA_LABEL),
+                                post_author: cachedPost.user_name || VIEW_HISTORY_DELETED_AUTHOR,
+                                media_url: cachedPost.media_url || '', media_type: cachedPost.media_type || '',
+                                viewed_at: result.viewed_at || new Date().toISOString() });
+                        }
+                        updateFeedStats();
+                    } catch (e) {
+                        viewTracked.delete(postId);
+                        try { window.safeStorage.remove(key); } catch (_) {}
+                        console.error(e);
+                    }
+                }, 1000);
+                return true;
+            };
+            window.xtjTrackPostView = trackView;
+            window.xtjCanTrackPostView = canTrackViewNow;
+            window.xtjGetPostById = function(postId) {
+                var found = Array.isArray(feedAllPosts) ? feedAllPosts.find(function(post) {
+                    return post && String(post.id) === String(postId);
+                }) : null;
+                return found || postInfoCache[postId] || null;
+            };
+
+            let feedPage = 1;
+            const FEED_PAGE_SIZE = 20;
+            let feedEndReached = false;
+            let feedAllPosts = [];
+            let feedAllComments = [];
+            let feedAllLikes = [];
+            let feedScrollObserver = null;
+            let feedLoadRequestId = 0;
+            let feedStateVersion = 0;
+            let feedNextOffset = 0;
+            let feedLoadedPages = [];
+            let feedPageFetchPending = false;
+            // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
+            // 需用户点击错误提示"重试"才清除并重新加载
+            let feedLoadMoreFailed = false;
+
+            function markFeedStateChanged() {
+                feedStateVersion += 1;
+                feedVisiblePostsCache = null;
+                feedMapsCache = null;
+                return feedStateVersion;
+            }
+
+            function syncPostInfoCache(post) {
+                var normalized = normalizePost(post || {});
+                if (!normalized || !normalized.id) return;
+                postInfoCache[normalized.id] = {
+                    id: normalized.id,
+                    content: normalized.content || '',
+                    user_name: normalized.user_name || '',
+                    media_url: normalized.media_url || '',
+                    media_type: normalized.media_type || '',
+                    created_at: normalized.created_at || '',
+                    views: Number(normalized.views || 0)
+                };
+            }
+            let feedVisiblePostsCache = null; // 缓存过滤后的帖子
+            let feedMapsCache = null; // 缓存 buildPostMaps 结果
+
+            // 无限滚动监听
+
+            // 无限滚动监听
+            function setupFeedInfiniteScroll() {
+                if (feedScrollObserver) feedScrollObserver.disconnect();
+                
+                const feed = document.getElementById('feed');
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting && !feedEndReached && !feedLoadMoreFailed) {
+                            loadMoreFeedPosts();
+                        }
+                    });
+                }, { rootMargin: '200px' });
+                
+                // 在 feed 底部添加哨兵元素（sentinel）
+                let sentinel = document.getElementById('feedSentinel');
+                if (!sentinel) {
+                    sentinel = document.createElement('div');
+                    sentinel.id = 'feedSentinel';
+                    sentinel.style.height = '1px';
+                    feed.appendChild(sentinel);
+                }
+                observer.observe(sentinel);
+                feedScrollObserver = observer;
+            }
+
+
+            // 构建帖子评论/点赞映射（用于渲染）
+            function buildPostMaps(comments, likes) {
+                const commentMap = {};
+                const likeMap = {};
+                const likeUserMap = {};
+
+                comments.forEach(c => {
+                    if (!commentMap[c.post_id]) commentMap[c.post_id] = [];
+                    commentMap[c.post_id].push(c);
+                });
+
+                likes.forEach(l => {
+                    if (!likeMap[l.post_id]) likeMap[l.post_id] = [];
+                    likeMap[l.post_id].push(l);
+                    makeLikeLookupKeys(l.post_id, l.actor_key, l.user_name).forEach(function(key) {
+                        likeUserMap[key] = true;
+                    });
+                });
+
+                return { commentMap, likeMap, likeUserMap };
+            }
+
+            // 缓存头像 URL
+
+            async function loadAvatarsForUsers(usernames) {
+                var normalizedUsers = Array.from(new Set(
+                    (usernames || [])
+                        .map(function(value) {
+                            return String(value || '').trim();
+                        })
+                        .filter(Boolean)
+                ));
+
+                if (normalizedUsers.length === 0) return;
+                try {
+                    var cachedAvatars = readAvatarCacheFromStorage();
+                    normalizedUsers.forEach(function(username) {
+                        if (username && cachedAvatars[username] && !avatarCache[username]) {
+                            avatarCache[username] = cachedAvatars[username];
+                        }
+                    });
+                } catch (e) {}
+
+                // P7: 只为没有新鲜缓存（TTL 内）的用户发起批量请求。
+                // confirmed_none / has_avatar / fetch_failed 在 TTL 内均不重查。
+                var uncached = normalizedUsers.filter(function(username) {
+                    return !hasFreshAvatarCache(username);
+                });
+                if (uncached.length === 0) return;
+                try {
+                    var resp = await fetch(API_BASE + '/api/avatar/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ users: uncached })
+                    });
+                    var result = await resp.json();
+                    if (resp.ok && result.ok && result.avatars) {
+                        var avatars = result.avatars;
+                        var keys = Object.keys(avatars);
+                        for (var ki = 0; ki < keys.length; ki++) {
+                            var k = keys[ki];
+                            // P7: null → confirmed_none；有 URL → has_avatar
+                            if (avatars[k]) {
+                                setAvatarCacheEntry(k, 'has_avatar', avatars[k]);
+                            } else if (avatars[k] === null) {
+                                setAvatarCacheEntry(k, 'confirmed_none', null);
+                            }
+                        }
+                        // 写入本地缓存，避免下次访问重新请求
+                        try {
+                            var cachedAvatars = readAvatarCacheFromStorage();
+                            for (var ki2 = 0; ki2 < keys.length; ki2++) {
+                                var k2 = keys[ki2];
+                                if (avatars[k2]) {
+                                    cachedAvatars[k2] = { state: 'has_avatar', url: avatars[k2], fetched_at: Date.now() };
+                                } else if (avatars[k2] === null) {
+                                    cachedAvatars[k2] = { state: 'confirmed_none', url: null, fetched_at: Date.now() };
+                                }
+                            }
+                            writeAvatarCacheToStorage(cachedAvatars);
+                        } catch(e) {}
+                    } else {
+                        // P7: 批量接口失败时降级到旧缓存（与单用户接口一致）
+                        uncached.forEach(function(username) {
+                            setAvatarCacheEntry(username, 'fetch_failed', null);
+                        });
+                    }
+                } catch(e) {
+                    // P7: 网络异常时降级到旧缓存（与单用户接口一致）
+                    uncached.forEach(function(username) {
+                        setAvatarCacheEntry(username, 'fetch_failed', null);
+                    });
+                    console.error('批量头像加载失败:', e);
+                }
+            }
+
+            function renderAvatarContent(username, avatarUrl) {
+                var safeUser = String(username || '').trim();
+                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
+                var fallbackSpan = '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
+                    return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
+                        '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
+                        '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
+                        ' onload="var p=this.closest(\'.avatar\');if(p){p.classList.add(\'has-image\');this.style.opacity=\'1\'}"' +
+                        ' onerror="var p=this.closest(\'.avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        fallbackSpan;
+                }
+                return fallbackSpan;
+            }
+
+            function getAvatarHtml(username, post) {
+                var safeUser = String(username || '').trim();
+                var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
+                var avatarUrl = getAvatarUrl(safeUser) || '';
+
+                if (!avatarUrl && safeUser) {
+                    try {
+                        var cachedAvatars = readAvatarCacheFromStorage();
+                        if (cachedAvatars[safeUser] && cachedAvatars[safeUser].url) {
+                            avatarCache[safeUser] = cachedAvatars[safeUser];
+                            avatarUrl = cachedAvatars[safeUser].url;
+                        }
+                    } catch (e) {}
+                }
+
+                var safeName = escapeHtml(safeUser);
+                var safeNameJs = safeJsStr(safeUser);
+
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
+                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' +
+                        safeNameJs +
+                        '\')" data-user-name="' + safeName +
+                        '"><div class="avatar clickable">' +
+                        renderAvatarContent(safeUser, avatarUrl) +
+                        '</div></div>';
+                }
+
+                return '<div class="avatar clickable" onclick="openUserProfile(\'' +
+                    safeNameJs +
+                    '\')" data-user-name="' + safeName +
+                    '">' +
+                    escapeHtml(fallbackInitial) +
+                    '</div>';
+            }
+
+            // DEPRECATED_DO_NOT_EDIT ====== [??????]
+            function getPostFilterUserAvatar(username) {
+                var safeName = escapeHtml(username || "");
+                var avatarUrl = getAvatarUrl(username);
+                if (avatarUrl) {
+                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
+                }
+                try {
+                    var cachedAvatars = readAvatarCacheFromStorage();
+                    if (cachedAvatars[username] && cachedAvatars[username].url) {
+                        avatarCache[username] = cachedAvatars[username];
+                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username].url) + '" alt="' + safeName + '"></span>';
+                    }
+                } catch(e) {}
+                return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
+            }
+
+            function renderPostFilterUsers() {
+                var list = document.getElementById("postUserQuickList");
+                var input = document.getElementById("postUserFilter");
+                var resetBtn = document.getElementById("postUserFilterReset");
+                if (!list || !input) return;
+                var activeUser = String(input.value || "").trim();
+                if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
+                if (postFilterUsersLoading && !postFilterUsers.length) {
+                    list.innerHTML = renderPostFilterUserLoader();
+                    return;
+                }
+                var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
+                if (!users.length) {
+                    list.innerHTML = '<div class="post-user-chip is-empty">\u6682\u65e0\u53ef\u7b5b\u9009\u7528\u6237</div>';
+                    return;
+                }
+                var html = [
+                    '<button type="button" class="post-user-chip' + (!activeUser ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'\')">' +
+                        '<span class="post-user-chip-avatar">\u5168</span>' +
+                        '<span class="post-user-chip-name">\u5168\u90e8\u7528\u6237</span>' +
+                    '</button>'
+                ];
+                users.forEach(function(username) {
+                    var safeJsName = String(username).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+                    html.push(
+                        '<button type="button" class="post-user-chip' + (activeUser === username ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'' + safeJsName + '\')">' +
+                            getPostFilterUserAvatar(username) +
+                            '<span class="post-user-chip-name">' + escapeHtml(username) + '</span>' +
+                        '</button>'
+                    );
+                });
+                list.innerHTML = html.join("");
+            }
+
+            async function loadPostFilterUsers(forceRefresh) {
+                if (postFilterUsersLoading) return;
+                if (postFilterUsersLoaded && !forceRefresh) {
+                    renderPostFilterUsers();
+                    return;
+                }
+                var loadSeq = ++postFilterUsersLoadSeq;
+                postFilterUsersLoading = true;
+                renderPostFilterUsers();
+                if (postFilterUsersLoadTimer) clearTimeout(postFilterUsersLoadTimer);
+                postFilterUsersLoadTimer = setTimeout(function() {
+                    if (loadSeq !== postFilterUsersLoadSeq) return;
+                    postFilterUsersLoading = false;
+                    renderPostFilterUsers();
+                }, 2400);
+                try {
+                    var authRes = await window.xtjOptionalAuthFetch('/api/feed/authors');
+                    if (!authRes.ok) throw new Error('authors_query_failed');
+                    var authorPayload = await authRes.json();
+                    if (!authorPayload || !authorPayload.ok) throw new Error('authors_query_failed');
+                    var seen = {};
+                    postFilterUsers = (authorPayload.authors || []).map(function(name) {
+                        return String(name || "").trim();
+                    }).filter(function(name) {
+                        if (!name || seen[name]) return false;
+                        seen[name] = true;
+                        return true;
+                    }).sort(function(a, b) {
+                        return a.localeCompare(b, "zh-Hans-CN");
+                    });
+                    postFilterUsersLoaded = true;
+                    if (postFilterUsers.length) {
+                        await Promise.race([
+                            loadAvatarsForUsers(postFilterUsers),
+                            new Promise(function(resolve) { setTimeout(resolve, 1800); })
+                        ]);
+                    }
+                } catch (e) {
+                    console.error("[post-filter-users] load failed", e);
+                    if (!postFilterUsers.length) {
+                        var fallbackSeen = {};
+                        postFilterUsers = (feedAllPosts || []).map(function(post) {
+                            return post && post.user_name ? String(post.user_name).trim() : "";
+                        }).filter(function(name) {
+                            if (!name || fallbackSeen[name]) return false;
+                            fallbackSeen[name] = true;
+                            return true;
+                        }).sort(function(a, b) {
+                            return a.localeCompare(b, "zh-Hans-CN");
+                        });
+                    }
+                } finally {
+                    if (loadSeq === postFilterUsersLoadSeq) {
+                        stopPostFilterUsersLoading();
+                    }
+                    renderPostFilterUsers();
+                }
+            }
+
+            window.selectPostFilterUser = function(userName) {
+                var input = document.getElementById("postUserFilter");
+                if (input) input.value = userName || "";
+                renderPostFilterUsers();
+                window.applyPostFilters();
+            };
+
+            function buildPostContentHtml(content) {
+                return escapeHtml(String(content || ''));
+            }
+            window.buildPostContentHtml = buildPostContentHtml;
+
+            function renderFeedWithAvatars(visiblePosts, comments, likes) {
+                const feed = document.getElementById("feed");
+                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
+
+                var htmlChunks = [];
+                visiblePosts.forEach(function(post) {
+                    try {
+                        const p = normalizePost(post);
+                        const pLikes = likeMap[p.id] || [];
+                        const pComms = commentMap[p.id] || [];
+                        const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
+                        const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
+                        var commentsHtml = '';
+                        if (pComms.length) {
+                            var parentComments = pComms.filter(function(c) { return !c.parent_comment_id; });
+                            var aiCommentMap = {};
+                            pComms.forEach(function(c) {
+                                if (c.parent_comment_id && c.user_name === 'cat_ai' && c.generated_by_ai) {
+                                    var key = String(c.parent_comment_id);
+                                    if (!aiCommentMap[key]) aiCommentMap[key] = [];
+                                    aiCommentMap[key].push(c);
+                                }
+                            });
+                            commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
+                                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(c.id) + '\', this)">删除</button>' : '';
+                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    ';
+                                var aiReplies = aiCommentMap[String(c.id)] || [];
+                                if (aiReplies.length > 0) {
+                                    html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">';
+                                    aiReplies.forEach(function(reply) {
+                                        if (typeof renderCatAiComment === 'function') {
+                                            html += renderCatAiComment(reply);
+                                        }
+                                    });
+                                    html += '</div>';
+                                }
+                                html += '\n                    </div>\n                    ';
+                                return html;
+                            }).join('') + '\n                  </div>\n                  ';
+                        }
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + buildPostContentHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
+                    } catch (e) {
+                        console.error('[feed-render] failed post:', {
+                            postId: post && post.id,
+                            userName: post && post.user_name,
+                            error: e
+                        });
+                    }
+                });
+
+                // Before replacing feed innerHTML:
+                var detachedPanels = [];
+                feed.querySelectorAll('.post-tool-critique, .post-tool-translation').forEach(function(panel) {
+                    var post = panel.closest('.post');
+                    var postId = post ? post.getAttribute('data-post-id') : null;
+                    if (postId) {
+                        panel.parentNode.removeChild(panel);
+                        detachedPanels.push({ id: postId, panel: panel });
+                    }
+                });
+
+                feed.innerHTML = htmlChunks.length ? htmlChunks.join('') : '<div class="loading">快来发布第一条动态吧~</div>';
+
+                // Reattach:
+                detachedPanels.forEach(function(item) {
+                    // L9 修复：CSS 选择器里不能用 escapeHtml（HTML 实体是字面字符永不匹配），
+                    // 应转义选择器特殊字符（对齐 6573 行的 replace(/"/g,'\\"') 模式）
+                    var _pid = String(item.id == null ? '' : item.id).replace(/"/g, '\\"');
+                    var post = feed.querySelector('.post[data-post-id="' + _pid + '"]');
+                    if (post) {
+                        var actions = post.querySelector('.actions');
+                        if (actions) actions.insertAdjacentElement('afterend', item.panel);
+                    }
+                });
+
+                initPostScrollAnimation();
+            }
+
+            function initPostScrollAnimation() {
+                var posts = document.querySelectorAll('.post');
+                primePostReveal(posts);
+                observePostViewportState(posts);
+            }
+
+            let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
+            function updateFeedStats() {
+    // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
+    // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
+    var posts = [];
+    var totalLikes = 0, totalComments = 0, totalViews = 0;
+    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问；
+    // 未初始化（undefined）时回退 DOM 统计，避免筛选/分页后统计错乱。
+    var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
+    if (hasFullData) {
+        posts = feedAllPosts;
+        feedAllLikes.forEach(function(like) {
+            if (!(like && (like.is_like === false || like.like_type === 'unlike'))) totalLikes += 1;
+        });
+        totalComments = feedAllComments.length;
+        posts.forEach(function(p) {
+            if (p && Number(p.views)) totalViews += Number(p.views);
+        });
+    } else {
+        posts = Array.prototype.slice.call(document.querySelectorAll('.post'));
+        posts.forEach(function(p) {
+            var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
+            var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
+            if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
+            var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
+            if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
+            var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
+            if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
+        });
+    }
+                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
+                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
+                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
+                if (sPosts) sPosts.textContent = posts.length;
+                if (sViews) sViews.textContent = totalViews;
+                if (sLikes) sLikes.textContent = totalLikes + totalComments;
+            }
+
+            async function initialLoad(skipCache = false) {
+                if (!skipCache) {
+                    const cached = window.safeStorage.get(CACHE_KEY);
+                    if (cached) {
+                        try {
+                            const parsed = JSON.parse(cached);
+                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); queueDeferredStartupTasks(); return; }
+                        } catch(e){}
+                    }
+                }
+                await loadFeed(false);
+                queueDeferredStartupTasks();
+            }
+
+            function collectPostMetadata(visibility, overrides) {
+                var meta = Object.assign({}, POST_META_DEFAULTS, {
+                    visibility: visibility || "public"
+                }, overrides || {});
+                if (overrides && overrides.location && typeof overrides.location === "object") {
+                    meta.location_name = overrides.location.name || "";
+                    meta.location_province = overrides.location.province || "";
+                    meta.location_city = overrides.location.city || "";
+                    meta.location_district = overrides.location.district || "";
+                    meta.location_level = overrides.location.level || "";
+                }
+                return meta;
+            }
+
+            async function insertPostRecord(payload, fallbackContent) {
+                try {
+                    var body = {
+                        content: payload.content || fallbackContent || '',
+                        media_url: payload.media_url || '',
+                        media_type: payload.media_type || '',
+                        actor_key: payload.actor_key || '',
+                        visibility: payload.visibility || 'public'
+                    };
+                    // 位置字段（可选，用户主动选择）
+                    if (payload.location && payload.location.name) {
+                        body.location = {
+                            name: payload.location.name || '',
+                            province: payload.location.province || '',
+                            city: payload.location.city || '',
+                            district: payload.location.district || '',
+                            level: payload.location.level || ''
+                        };
+                    }
+                    var response = await window.xtjProtectedFetch('/api/post/create', {
+                        method: 'POST',
+                        body: JSON.stringify(body)
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (!response.ok || !result.ok || !result.data) {
+                        return { ok: false, error: new Error(result.error || '发布失败') };
+                    }
+                    var data = normalizePost(result.data);
+                    if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
+                        try {
+                            var fresh = await fetchPostSnapshot(data.id);
+                            if (fresh) data = normalizePost(fresh);
+                        } catch (snapshotError) {
+                            console.warn('[post-create] snapshot refresh failed', snapshotError);
+                        }
+                    }
+                    return { ok: true, fallback: false, data: data };
+                } catch (error) {
+                    return { ok: false, error: error };
+                }
+            }
+
+            function insertPublishedPostIntoFeed(post) {
+                if (!post || !post.id) return false;
+                post = normalizePost(post);
+                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
+                feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
+                feedAllPosts.unshift(post);
+                feedAllPosts = sortPosts(feedAllPosts);
+                syncPostInfoCache(post);
+                var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
+                if (firstPage) {
+                    firstPage.postIds = [String(post.id)].concat((firstPage.postIds || []).filter(function(id) { return String(id) !== String(post.id); }));
+                } else {
+                    feedLoadedPages = [{ offset: 0, postIds: [String(post.id)] }].concat(feedLoadedPages || []);
+                }
+                markFeedStateChanged();
+                var feed = document.getElementById('feed');
+                if (!feed) return false;
+                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
+                var template = document.createElement('template');
+                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
+                var postEl = template.content.firstElementChild;
+                if (!postEl) return false;
+                postEl.classList.add('visible', 'is-newly-published');
+                postEl.style.setProperty('--post-enter-delay', '0ms');
+                feed.insertBefore(postEl, feed.firstChild);
+                observePostViewportState([postEl]);
+                var clearPublishedAnimation = function() { postEl.classList.remove('is-newly-published'); };
+                postEl.addEventListener('animationend', clearPublishedAnimation, { once: true });
+                setTimeout(clearPublishedAnimation, 420);
+                writeFeedCacheSnapshot();
+                updateFeedStats();
+                return true;
+            }
+
+            function postHasRenderableIpData(post) {
+                if (!post) return false;
+                return !!(
+                    String(post.ip_region_text || "").trim() ||
+                    String(post.ip_region_status || "").trim() ||
+                    String(post.ip_province || "").trim() ||
+                    String(post.ip_city || "").trim() ||
+                    String(post.ip_lookup_started_at || "").trim()
+                );
+            }
+
+            function postNeedsIpRefresh(post) {
+                if (!post || !post.id) return false;
+                var status = String(post.ip_region_status || "").trim();
+                var hasLookupStarted = !!String(post.ip_lookup_started_at || "").trim();
+                var hasRegionText = !!String(post.ip_region_text || "").trim();
+                return status === 'pending' || (hasLookupStarted && !hasRegionText);
+            }
+
+            function refreshPublishedPostCard(post) {
+                if (!post || !post.id) return false;
+                if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
+                var postId = String(post.id);
+                feedAllPosts = feedAllPosts.map(function(item) {
+                    return String(item && item.id) === postId ? post : item;
+                });
+                syncPostInfoCache(post);
+                markFeedStateChanged();
+                var feed = document.getElementById('feed');
+                if (!feed) return false;
+                var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
+                if (!existing) return false;
+                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
+                var template = document.createElement('template');
+                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
+                var nextPostEl = template.content.firstElementChild;
+                if (!nextPostEl) return false;
+                nextPostEl.classList.add('visible');
+                existing.replaceWith(nextPostEl);
+                observePostViewportState([nextPostEl]);
+                writeFeedCacheSnapshot();
+                updateFeedStats();
+                return true;
+            }
+
+            var publishedPostIpRefreshTimers = Object.create(null);
+            function schedulePublishedPostIpRefresh(postId) {
+                if (!postId) return;
+                var key = String(postId);
+                if (publishedPostIpRefreshTimers[key]) return;
+                publishedPostIpRefreshTimers[key] = true;
+                var attempts = 0;
+                var maxAttempts = 4;
+                function cleanup() {
+                    delete publishedPostIpRefreshTimers[key];
+                }
+                function run() {
+                    attempts++;
+                    fetchPostSnapshot(postId).then(function(freshPost) {
+                        var normalized = freshPost ? normalizePost(freshPost) : null;
+                        var ipText = normalized ? String(normalized.ip_region_text || "").trim() : "";
+                        var ipStatus = normalized ? String(normalized.ip_region_status || "").trim() : "";
+                        var hasFinalIpDisplay = !!ipText || ipStatus === 'resolved' || ipStatus === 'failed';
+                        if (normalized && hasFinalIpDisplay) {
+                            refreshPublishedPostCard(normalized);
+                            cleanup();
+                            return;
+                        }
+                        if (normalized && (ipStatus === 'pending' || String(normalized.ip_lookup_started_at || "").trim())) {
+                            if (attempts < maxAttempts) {
+                                setTimeout(run, attempts === 1 ? 600 : 900);
+                            } else {
+                                cleanup();
+                            }
+                            return;
+                        }
+                        if (attempts < maxAttempts) {
+                            setTimeout(run, attempts === 1 ? 600 : 900);
+                        } else {
+                            cleanup();
+                        }
+                    }).catch(function() {
+                        if (attempts < maxAttempts) {
+                            setTimeout(run, 900);
+                        } else {
+                            cleanup();
+                        }
+                    });
+                }
+                setTimeout(run, 450);
+            }
+
+            function refreshPendingFeedIpPosts(posts) {
+                if (!Array.isArray(posts) || !posts.length) return;
+                posts.forEach(function(post) {
+                    if (!postNeedsIpRefresh(post)) return;
+                    schedulePublishedPostIpRefresh(post.id);
+                });
+            }
+
+            function resetPostComposer() {
+                var postInp = document.getElementById("postInp");
+                var fileInp = document.getElementById("fileInp");
+                var visibilityEl = document.getElementById("postVisibility");
+                if (postInp) postInp.value = "";
+                if (fileInp) fileInp.value = "";
+                if (visibilityEl) visibilityEl.value = "public";
+                resetPostLocation();
+            }
+
+            function buildPostStorageContent(post, text, metaOverrides) {
+                var normalized = normalizePost(post || {});
+                var meta = Object.assign({}, normalized._contentMeta || POST_META_DEFAULTS, {
+                    visibility: normalized.visibility || "public",
+                    is_pinned: !!normalized.is_pinned,
+                    pinned_at: normalized.pinned_at || null,
+                    updated_at: normalized.updated_at || null,
+                    edited_at: (normalized._contentMeta && normalized._contentMeta.edited_at) || null
+                }, metaOverrides || {});
+                var nextText = typeof text === "string" ? text : normalized.content || "";
+                return buildPostContentPayload(nextText, meta);
+            }
+
+            function matchesPostExpectation(post, expected) {
+                if (!post) return false;
+                var normalized = normalizePost(post);
+                if (typeof expected.content === "string" && String(normalized.content || "") !== String(expected.content)) return false;
+                if (expected.visibility != null && String(normalized.visibility || "public") !== String(expected.visibility)) return false;
+                if (expected.is_pinned != null && !!normalized.is_pinned !== !!expected.is_pinned) return false;
+                if (Object.prototype.hasOwnProperty.call(expected, "pinned_at") && String(normalized.pinned_at || "") !== String(expected.pinned_at || "")) return false;
+                return true;
+            }
+
+            async function fetchPostSnapshot(postId) {
+                var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
+                if (fetched.error) throw fetched.error;
+                return fetched.data || null;
+            }
+
+            async function updatePostRecord(post, updates) {
+                var normalized = normalizePost(post);
+                var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
+                var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
+                var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
+                var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
+                var nextEditedAt = Object.prototype.hasOwnProperty.call(updates, "edited_at")
+                    ? updates.edited_at
+                    : ((normalized._contentMeta && normalized._contentMeta.edited_at) || null);
+                var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
+
+                var newContent = buildPostStorageContent(normalized, nextContent, {
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt,
+                    edited_at: nextEditedAt
+                });
+                var updatePayload = {
+                    post_id: post.id,
+                    content: newContent,
+                    visibility: nextVisibility
+                };
+                var resp = await window.xtjProtectedFetch('/api/post/update', {
+                    method: 'POST',
+                    body: JSON.stringify(updatePayload)
+                });
+                var result = await resp.json().catch(function() { return {}; });
+                if (!resp.ok || !result.ok) return { ok: false, error: new Error(result.error || '更新失败') };
+                // 优先使用后端返回的 data，否则重新查询
+                var verified = result.data ? normalizePost(result.data) : null;
+                if (!verified) {
+                    var verifyRes = await sb.from('posts').select('*').eq('id', post.id).maybeSingle();
+                    if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
+                    verified = normalizePost(verifyRes.data);
+                }
+                var verifiedMeta = parsePostContent(verified._rawContent || verified.content || '').meta || {};
+                if (String(verified.visibility || "public") !== String(nextVisibility)) {
+                    return { ok: false, error: new Error("更新失败：visibility 未实际生效") };
+                }
+                if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
+                    return { ok: false, error: new Error("更新失败：content.meta.visibility 未同步") };
+                }
+                if (!!verified.is_pinned !== !!nextPinned) {
+                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
+                }
+                if (!!verifiedMeta.is_pinned !== !!nextPinned) {
+                    return { ok: false, error: new Error("更新失败：content.meta.is_pinned 未同步") };
+                }
+                if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
+                    return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
+                }
+                return { ok: true, data: verified };
+            }
+
+            function getRenderableComments(comments, visiblePosts) {
+                var visibleIds = new Set((visiblePosts || []).map(function(post) { return String(post.id); }));
+                return (comments || []).filter(function(comment) {
+                    return comment && visibleIds.has(String(comment.post_id));
+                });
+            }
+
+            function formatRelativeTime(dateStr) {
+                var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
+                var diff = Math.floor((Date.now() - d.getTime()) / 1000);
+                if (diff < 60) return "刚刚";
+                if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
+                if (diff < 86400) return Math.floor(diff / 3600) + "小时前";
+                if (diff < 86400 * 30) return Math.floor(diff / 86400) + "天前";
+                return d.toLocaleDateString();
+            }
+
+            function formatPostTime(post) {
+                var normalized = normalizePost(post);
+                var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
+                var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
+                if (editedAt) return time + " (已编辑)";
+                return time;
+            }
+
+            function buildPostBadges(post) {
+                var normalized = normalizePost(post);
+                var bits = [];
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
+                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
+                return bits.join("");
+            }
+
+            function buildPostStatsLine(post, likeCount, commentCount) {
+                var normalized = normalizePost(post);
+                return '浏览 ' + (normalized.views || 0) +
+                    ' | 点赞 ' + (likeCount || 0) +
+                    ' | 评论 ' + (commentCount || 0);
+            }
+
+            // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
+            // 原因：上面 line 3765 定义的 buildPostBadges 已经包含 Pro 标志、公开/私密、置顶的完整逻辑。
+            //       此处重新赋值为简单版会**覆盖**上面的完整实现，导致 Pro 标志永远不显示。
+            // 置顶徽章已经在 line 3784 的 buildPostBadges 内部处理了，无需重复。
+            function buildPostActionHtml(post, isLiked, canDelete) {
+                var idJs = safeJsStr(String(post.id));
+                var idHtml = escapeHtml(String(post.id));
+                var actorKeyJs = safeJsStr(String(post.actor_key || ""));
+                var actions = [
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
+                    '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
+                ];
+                if (canPinPost(post)) {
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                }
+                if (canDelete) {
+                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
+                }
+                actions.push('<button type="button" class="action-btn post-tools-trigger" data-post-id="' + idHtml + '" aria-haspopup="menu" aria-expanded="false" aria-label="更多帖子工具">•••</button>');
+                return actions.join("");
+            }
+
+            var activePostToolsMenu = null;
+            function closePostToolsMenu() {
+                if (!activePostToolsMenu) return;
+                var trigger = activePostToolsMenu.trigger;
+                activePostToolsMenu.menu.remove();
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                activePostToolsMenu = null;
+            }
+
+            function openPostToolsMenu(trigger) {
+                if (!trigger) return;
+                if (activePostToolsMenu && activePostToolsMenu.trigger === trigger) {
+                    closePostToolsMenu();
+                    return;
+                }
+                closePostToolsMenu();
+                var postId = String(trigger.getAttribute('data-post-id') || '');
+                if (!postId) return;
+                var menu = document.createElement('div');
+                menu.className = 'post-tools-menu';
+                menu.setAttribute('role', 'menu');
+                var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
+                var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
+                var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
+                var post = feedAllPosts.find(function(p) { return p.id == postId; });
+                if (!post && window.currentPost && window.currentPost.id == postId) post = window.currentPost;
+                var hasText = post && String(post.content || '').trim().length > 0;
+                var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
+                var btnAi = hasText ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
+                menu.innerHTML = btnTranslate + btnAi +
+                                 '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
+                document.body.appendChild(menu);
+                var rect = trigger.getBoundingClientRect();
+                var width = menu.offsetWidth || 148;
+                menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
+                menu.style.top = Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 6)) + 'px';
+                trigger.setAttribute('aria-expanded', 'true');
+                activePostToolsMenu = { menu: menu, trigger: trigger };
+            }
+            window.closePostToolsMenu = closePostToolsMenu;
+            window.addEventListener('pagehide', closePostToolsMenu);
+            window.addEventListener('scroll', closePostToolsMenu, { passive: true });
+            window.addEventListener('resize', closePostToolsMenu, { passive: true });
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', closePostToolsMenu, { passive: true });
+                window.visualViewport.addEventListener('scroll', closePostToolsMenu, { passive: true });
+            }
+            // Capture scroll from dock panels as well as the document; the menu is appended to body.
+            document.addEventListener('scroll', closePostToolsMenu, { capture: true, passive: true });
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) closePostToolsMenu();
+            });
+
+            var activePostAiSession = null;
+            function getPostToolAnchor(postId) {
+                return document.querySelector('.post-tools-trigger[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]');
+            }
+            function postToolFetch(body) {
+                return window.xtjProtectedFetch('/api/agent/post-tools', { method: 'POST', body: JSON.stringify(body) }).then(function(resp) {
+                    return resp.json().then(function(data) { if (!resp.ok) throw new Error(data.error || 'post_tool_failed'); return data; });
+                });
+            }
+            window.requestPostTranslation = function(postId) {
+                var anchor = getPostToolAnchor(postId);
+                if (!anchor) return;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
+                var existing = host.querySelector('.post-tool-translation');
+                if (existing) { existing.hidden = !existing.hidden; return; }
+                var panel = document.createElement('section');
+                panel.className = 'post-tool-translation';
+                panel.textContent = '正在翻译...';
+                actions.insertAdjacentElement('afterend', panel);
+                postToolFetch({ post_id: postId, action: 'translate' }).then(function(data) {
+                    panel.textContent = data.translation || '暂时无法翻译该帖子。';
+                    panel.classList.toggle('is-original-chinese', !!data.already_chinese);
+                }).catch(function() { panel.textContent = '翻译暂时不可用。'; panel.classList.add('is-error'); });
+            };
+            function runPostAiRequest(session, payload) {
+                var requestId = ++session.requestId;
+                session.output.textContent = 'AI 正在锐评...';
+                session.output.classList.remove('is-error');
+                session.controller.abort();
+                session.controller = new AbortController();
+                window.xtjProtectedFetch('/api/agent/post-chat/stream', { method: 'POST', body: JSON.stringify(payload), signal: session.controller.signal }).then(function(resp) {
+                    if (!resp.ok || !resp.body) throw new Error('post_chat_failed');
+                    return resp.body.getReader();
+                }).then(function(reader) {
+                    var decoder = new TextDecoder(), buffer = '';
+                    var receivedContent = false;
+                    function read() { return reader.read().then(function(chunk) {
+                        if (chunk.done) {
+                            if (!receivedContent) {
+                                session.output.textContent = 'AI 暂时不可用。';
+                                session.output.classList.add('is-error');
+                            }
+                            return;
+                        }
+                        buffer += decoder.decode(chunk.value, { stream: true });
+                        var events = buffer.split('\n\n'); buffer = events.pop();
+                        events.forEach(function(event) {
+                            var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
+                            if (!dataLine || session.isClosed || requestId !== session.requestId) return;
+                            var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
+                            if (data.content) {
+                                receivedContent = true;
+                                session.conversationId = data.conversation_id || session.conversationId;
+                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
+                            }
+                            if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
+                        });
+                        return read();
+                    }); }
+                    return read();
+                }).catch(function(error) {
+                    if (error.name !== 'AbortError' && !session.isClosed && requestId === session.requestId) {
+                        session.output.textContent = 'AI 暂时不可用。';
+                        session.output.classList.add('is-error');
+                    }
+                });
+            }
+            window.openPostAiChat = function(postId) {
+                var anchor = getPostToolAnchor(postId);
+                if (!anchor) return;
+                var host = anchor.closest('.post');
+                if (!host) return;
+                var actions = anchor.closest('.actions');
+                if (!actions) return;
+                var existing = host.querySelector('.post-tool-critique');
+                if (existing) {
+                    if (existing.classList.contains('is-error')) {
+                        existing.classList.remove('is-error');
+                        existing.textContent = 'AI 正在锐评...';
+                        var existingSession = existing.__aiSession;
+                        if (existingSession) runPostAiRequest(existingSession, { post_id: String(postId), initial: true });
+                    } else {
+                        existing.hidden = !existing.hidden;
+                    }
+                    return;
+                }
+                
+                var panel = document.createElement('section');
+                panel.className = 'post-tool-critique';
+                panel.textContent = 'AI 正在锐评...';
+                actions.insertAdjacentElement('afterend', panel);
+                
+                var session = { output: panel, controller: new AbortController(), requestId: 0, conversationId: '', isClosed: false };
+                panel.__aiSession = session;
+                runPostAiRequest(session, { post_id: String(postId), initial: true });
+            };
+            window.openPostReport = function(postId) {
+                window.__xtjReportTargetPostId = String(postId);
+                if (typeof window.openReportModal === 'function') window.openReportModal();
+                var reportList = document.getElementById('reportContentList');
+                var selectTarget = function() {
+                    var item = reportList && reportList.querySelector('[data-id="' + String(postId).replace(/"/g, '\\"') + '"]');
+                    if (item) { item.click(); return true; }
+                    return false;
+                };
+                if (!selectTarget() && reportList) {
+                    var observer = new MutationObserver(function() { if (selectTarget()) observer.disconnect(); });
+                    observer.observe(reportList, { childList: true, subtree: true });
+                }
+                postToolFetch({ post_id: postId, action: 'report_scan' }).then(function(data) {
+                    window.__xtjReportAiScan = data.scan || null;
+                    var form = document.getElementById('reportModal');
+                    if (!form || !data.scan) return;
+                    var old = form.querySelector('.report-ai-scan'); if (old) old.remove();
+                    var scan = document.createElement('div'); scan.className = 'report-ai-scan';
+                    scan.textContent = 'AI 检测：' + String(data.scan.summary || '未发现明确风险');
+                    form.querySelector('.report-form, .report-content, .modal-box').appendChild(scan);
+                }).catch(function() { window.__xtjReportAiScan = null; });
+            };
+
+            function buildPostLocationHtml(normalized) {
+                var parts = [];
+                var locationName = String(normalized.location_name || normalized.location || "").trim();
+                if (!locationName && normalized._contentMeta) {
+                    locationName = String((normalized._contentMeta.location_name || "")).trim();
+                }
+                if (locationName) {
+                    parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(locationName) + '</div>');
+                }
+                var ipText = String(normalized.ip_region_text || "").trim();
+                var ipStatus = String(normalized.ip_region_status || "").trim();
+                var ipProvince = String(normalized.ip_province || "").trim();
+                var ipCity = String(normalized.ip_city || "").trim();
+                if (!ipText && normalized._contentMeta) {
+                    var ipMeta = normalized._contentMeta || {};
+                    if (!ipText) ipText = String(ipMeta.ip_region_text || "").trim();
+                    if (!ipStatus) ipStatus = String(ipMeta.ip_region_status || "").trim();
+                    if (!ipProvince) ipProvince = String(ipMeta.ip_province || "").trim();
+                    if (!ipCity) ipCity = String(ipMeta.ip_city || "").trim();
+                }
+                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved' || ipStatus === 'pending' || ipStatus === 'failed';
+                if (!ipText && (ipProvince || ipCity)) {
+                    ipText = [ipProvince, ipCity].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+                }
+                if (hasLookupStarted || ipText) {
+                    if (!ipText && ipStatus === 'pending') ipText = '解析中';
+                    if (!ipText && (ipStatus === 'failed' || ipStatus === 'resolved')) ipText = '未知';
+                    if (!ipText) ipText = '未知';
+                }
+                if (ipText) {
+                    parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
+                }
+                return parts.length ? '<div class="post-location-info">' + parts.join('') + '</div>' : '';
+            }
+
+            function looksLikeSystemTelemetry(content) {
+                if (!content) return false;
+                try {
+                    var obj = JSON.parse(String(content).trim());
+                    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+                    var telemetryKeys = [
+                        'page_load_id', 'last_attempt_at', 'resolved_address', 'resolved_at',
+                        'capture_reason', 'precise_location_history',
+                        'device_id', 'browser_fingerprint_hash', 'canvas_fingerprint_hash',
+                        'webgl_fingerprint_hash'
+                    ];
+                    var matchCount = 0;
+                    for (var i = 0; i < telemetryKeys.length; i++) {
+                        if (telemetryKeys[i] in obj) matchCount++;
+                    }
+                    return matchCount >= 2;
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function renderPostCard(post, commentMap, likeMap, likeUserMap) {
+                var normalized = normalizePost(post);
+                // 安全兜底：content 是系统遥测/定位 JSON 则跳过
+                if (looksLikeSystemTelemetry(normalized.content)) {
+                    return '';
+                }
+                var pLikes = likeMap[normalized.id] || [];
+                var pComms = commentMap[normalized.id] || [];
+                var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
+                var canDelete = canDeletePost(normalized);
+                function commentDeleteButton(comment) {
+                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
+                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
+                }
+                var mediaDataAttrs = [
+                    'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
+                    'data-media-url="' + escapeHtml(String(normalized.media_url || "")) + '"',
+                    'data-post-user="' + escapeHtml(String(normalized.user_name || "")) + '"',
+                    'data-post-created-at="' + escapeHtml(String(normalized.created_at || "")) + '"',
+                    'data-post-views="' + escapeHtml(String(normalized.views || 0)) + '"',
+                    'data-file-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.fileSize) || "")) + '"',
+                    'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
+                ].join(" ");
+                var mediaMarkup = '';
+                if (normalized.media_url) {
+                    if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(normalized.media_url) + '" controls preload="none" playsinline></video></div>';
+                    else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(normalized.media_url) + '" controls preload="metadata"></audio></div>';
+                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(normalized.media_url) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(normalized.media_url) + '\', this)"></div>';
+                }
+                return `
+                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
+                  <div class="post-header">
+                    ${getAvatarHtml(normalized.user_name, normalized)}
+                    <div class="post-header-main">
+                      <div class="user-info">
+                        <span class="user-name">${escapeHtml(normalized.user_name)}</span>
+                        <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
+                      </div>
+                      <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
+                    </div>
+                  </div>
+                  <div class="content">${buildPostContentHtml(normalized.content)}</div>
+                  ${mediaMarkup}
+                  ${buildPostLocationHtml(normalized)}
+                  <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
+                  <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
+                  ${pComms.length ? `<div class="comments">${(function(){
+                      var roots = pComms.filter(function(c) { return !c.parent_comment_id; });
+                      var children = pComms.filter(function(c) { return c.parent_comment_id; });
+                      var html = '';
+                      roots.forEach(function(r) {
+                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
+                        var replies = children.filter(function(c) { return String(c.parent_comment_id) === String(r.id); });
+                        if (replies.length > 0) {
+                          html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
+                            if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                            }
+                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
+                          }).join('') + '</div>';
+                        }
+                        html += '</div>';
+                      });
+                      return html;
+                  })()}</div>` : ''}
+                </div>`;
+            }
+
+            // A malformed legacy record must not take down the complete feed.
+            function renderPostCardSafely(post, commentMap, likeMap, likeUserMap) {
+                try {
+                    return renderPostCard(post, commentMap, likeMap, likeUserMap);
+                } catch (error) {
+                    console.error('[feed-render] failed post:', {
+                        postId: post && post.id,
+                        userName: post && post.user_name,
+                        error: error
+                    });
+                    return '';
+                }
+            }
+
+            function hydrateCachedAvatarsForUsers(usernames) {
+                var users = Array.from(new Set((usernames || []).map(function(value) {
+                    return String(value || '').trim();
+                }).filter(Boolean)));
+                if (!users.length) return;
+                try {
+                    var cachedAvatars = readAvatarCacheFromStorage();
+                    users.forEach(function(userName) {
+                        if (!avatarCache[userName] && cachedAvatars[userName]) avatarCache[userName] = cachedAvatars[userName];
+                    });
+                } catch (e) {}
+            }
+
+            function updatePostFilterStateFromDom() {
+                var keywordEl = document.getElementById("postSearchInput");
+                var userEl = document.getElementById("postUserFilter");
+                var startEl = document.getElementById("postStartDate");
+                var endEl = document.getElementById("postEndDate");
+                var visibilityEl = document.getElementById("postVisibilityFilter");
+                var mineEl = document.getElementById("postOnlyMine");
+                postSearchState = {
+                    keyword: keywordEl ? keywordEl.value.trim() : "",
+                    user: userEl ? userEl.value.trim() : "",
+                    startDate: startEl ? startEl.value : "",
+                    endDate: endEl ? endEl.value : "",
+                    visibility: visibilityEl ? visibilityEl.value : "all",
+                    onlyMine: !!(mineEl && mineEl.checked)
+                };
+            }
+
+            window.applyPostFilters = function() {
+                updatePostFilterStateFromDom();
+                feedPage = 1;
+                feedEndReached = false;
+                var feed = document.getElementById("feed");
+                if (feed) {
+                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                }
+                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+            };
+
+            window.clearPostFilters = function() {
+                var ids = ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate"];
+                ids.forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el) el.value = "";
+                });
+                var visibilityEl = document.getElementById("postVisibilityFilter");
+                var mineEl = document.getElementById("postOnlyMine");
+                if (visibilityEl) visibilityEl.value = "all";
+                if (mineEl) mineEl.checked = false;
+                postSearchState = {
+                    keyword: "",
+                    user: "",
+                    startDate: "",
+                    endDate: "",
+                    visibility: "all",
+                    onlyMine: false
+                };
+                feedPage = 1;
+                feedEndReached = false;
+                var panel = document.getElementById("postFilterPanel");
+                if (panel) panel.style.display = "none";
+                var btn = document.getElementById("filterToggleBtn");
+                if (btn) btn.classList.remove("active");
+                renderPostFilterUsers();
+                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+            };
+
+            function bindPostFilterEvents() {
+                if (window._postFilterEventsBound) return;
+                window._postFilterEventsBound = true;
+                ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate", "postVisibilityFilter", "postOnlyMine"].forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (!el) return;
+                    var eventName = el.type === "checkbox" || el.tagName === "SELECT" || el.type === "date" ? "change" : "input";
+                    if (eventName === "input") {
+                        // ★ 修复：搜索输入防抖 300ms，避免每次击键全量重建 feed DOM
+                        var debounceTimer = null;
+                        el.addEventListener(eventName, function() {
+                            if (debounceTimer) clearTimeout(debounceTimer);
+                            debounceTimer = setTimeout(function() {
+                                debounceTimer = null;
+                                window.applyPostFilters();
+                            }, 300);
+                        });
+                    } else {
+                        el.addEventListener(eventName, function() {
+                            window.applyPostFilters();
+                        });
+                    }
+                });
+            }
+
+            window.toggleFilterPanel = function() {
+                var panel = document.getElementById("postFilterPanel");
+                var btn = document.getElementById("filterToggleBtn");
+                if (!panel) return;
+                var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
+                if (isHidden) {
+                    panel.style.display = "flex";
+                    if (btn) btn.classList.add("active");
+                    loadPostFilterUsers(true);
+                    renderPostFilterUsers();
+                } else {
+                    panel.style.display = "none";
+                    if (btn) btn.classList.remove("active");
+                }
+            };
+
+            window._legacyTogglePostPinBase = async function(postId, btn) {
+                if (!postId) { showToast("置顶失败: postId 为空"); return; }
+                var nextPinned;
+                var originalText;
+                if (btn) {
+                    originalText = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = '处理中..';
+                }
+                try {
+                    // Fetch current post state directly from DB (only select columns that exist)
+                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
+                    if (!fetchRes.data) { alert('未找到帖子(id=' + postId + ')'); throw new Error('not found'); }
+                    var dbPost = normalizePost(fetchRes.data);
+                    // Check permission
+                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
+                        showToast('无权置顶');
+                        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+                        return;
+                    }
+                    nextPinned = !dbPost.is_pinned;
+                    btn.textContent = nextPinned ? '置顶中..' : '取消中..';
+                    // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
+                    var updHeaders = (typeof window.getUserAuthHeaders === 'function')
+                        ? await window.getUserAuthHeaders() : null;
+                    if (!updHeaders) { showToast('登录已失效'); if (btn) { btn.disabled = false; btn.textContent = originalText; } return; }
+                    var updResp = await fetch((window.API_BASE || '') + '/api/post/update', {
+                        method: 'POST',
+                        headers: updHeaders,
+                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
+                    });
+                    var updResult = await updResp.json();
+                    if (!updResp.ok || !updResult.ok) { alert('更新失败: ' + (updResult.error || '服务器错误')); throw new Error(updResult.error); }
+                    clearFeedCache();
+                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
+                    await loadFeed(true);
+                } catch (e) {
+                    console.error('[togglePostPin] error:', e);
+                    if (btn) { btn.disabled = false; btn.textContent = originalText || '置顶'; }
+                    if (!/^[\u4e00-\u9fa5]/.test(e && e.message || '')) {
+                        showToast('操作异常，请查看控制台');
+                    }
+                }
+            };
+            window._legacyTogglePostPin = async function(postId, btn) {
+                if (!postId) { showToast("置顶失败: postId 为空"); return; }
+                var nextPinned;
+                var originalText;
+                if (btn) {
+                    originalText = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = '处理中..';
+                }
+                try {
+                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    if (fetchRes.error) throw fetchRes.error;
+                    if (!fetchRes.data) throw new Error('未找到对应帖子');
+                    var dbPost = normalizePost(fetchRes.data);
+                    if (!isAdmin()) {
+                        showToast('无权置顶');
+                        return;
+                    }
+                    nextPinned = !dbPost.is_pinned;
+                    if (btn) btn.textContent = nextPinned ? '置顶中..' : '取消中..';
+                    var updateRes = await updatePostRecord(fetchRes.data, {
+                        is_pinned: nextPinned,
+                        pinned_at: nextPinned ? new Date().toISOString() : null,
+                        updated_at: new Date().toISOString()
+                    });
+                    if (!updateRes.ok) {
+                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
+                        return;
+                    }
+                    clearFeedCache();
+                    await loadFeed(true);
+                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
+                } catch (e) {
+                    console.error('[togglePostPin override] error:', e);
+                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
+                } finally {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = originalText || '置顶';
+                    }
+                }
+            };
+            var feedCacheWriteTimer = null;
+            function shouldPersistMediaUrl(url) {
+                url = String(url || '');
+                if (!url) return false;
+                if (/^(data:|blob:)/i.test(url)) return false;
+                if (url.length > 900) return false;
+                return true;
+            }
+
+            function toLightweightFeedPost(post) {
+                if (!post || typeof post !== 'object') return post;
+                var snapshot = Object.assign({}, post);
+                if (!shouldPersistMediaUrl(snapshot.media_url)) snapshot.media_url = '';
+                return snapshot;
+            }
+
+            function persistFeedCacheSnapshotNow() {
+                try {
+                    var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
+                    var firstPageIds = new Set((firstPage && Array.isArray(firstPage.postIds) ? firstPage.postIds : (feedAllPosts || []).slice(0, FEED_PAGE_SIZE).map(function(post) {
+                        return String(post && post.id || '');
+                    })).filter(Boolean));
+                    var cachePosts = (feedAllPosts || []).filter(function(post) {
+                        return post &&
+                            firstPageIds.has(String(post.id || '')) &&
+                            !isSystemPost(post);
+                    }).map(toLightweightFeedPost);
+                    var cacheComments = (feedAllComments || []).filter(function(comment) {
+                        return comment && firstPageIds.has(String(comment.post_id || ''));
+                    });
+                    var cacheLikes = (feedAllLikes || []).filter(function(like) {
+                        return like && firstPageIds.has(String(like.post_id || ''));
+                    });
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        version: 7,
+                        data: {
+                            posts: cachePosts,
+                            comments: cacheComments,
+                            likes: cacheLikes,
+                            pages: cachePosts.length ? [{
+                                offset: 0,
+                                postIds: cachePosts.map(function(post) { return String(post.id); })
+                            }] : [],
+                            nextOffset: cachePosts.length,
+                            endReached: cachePosts.length < FEED_PAGE_SIZE,
+                            pageSize: FEED_PAGE_SIZE
+                        },
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    console.warn('[feed-cache] failed to persist feed cache', e);
+                }
+            }
+
+            function writeFeedCacheSnapshot() {
+                try {
+                    if (feedCacheWriteTimer) clearTimeout(feedCacheWriteTimer);
+                    feedCacheWriteTimer = setTimeout(function() {
+                        feedCacheWriteTimer = null;
+                        persistFeedCacheSnapshotNow();
+                    }, 900);
+                } catch (e) {
+                    console.warn('[feed-cache] failed to schedule feed cache write', e);
+                }
+            }
+
+            function getFeedRecordKey(record, fallbackParts) {
+                if (!record) return "";
+                if (record.id !== undefined && record.id !== null && record.id !== "") return String(record.id);
+                return (fallbackParts || []).map(function(part) {
+                    return String(part == null ? "" : part);
+                }).join("|");
+            }
+
+            function mergeFeedRecords(existing, incoming, keyResolver, shouldSortPosts) {
+                var map = new Map();
+                (existing || []).forEach(function(item) {
+                    if (!item) return;
+                    map.set(keyResolver(item), item);
+                });
+                (incoming || []).forEach(function(item) {
+                    if (!item) return;
+                    map.set(keyResolver(item), item);
+                });
+                var merged = Array.from(map.values());
+                return shouldSortPosts ? sortPosts(merged) : merged;
+            }
+
+            function normalizeFeedSnapshotCache(parsed) {
+                if (!parsed || !parsed.data) return null;
+                var data = parsed.data || {};
+                var posts = normalizePosts(data.posts || []).filter(function(post) {
+                    return !(typeof isSystemPost === 'function' && isSystemPost(post));
+                });
+                var pages = Array.isArray(data.pages) ? data.pages.filter(function(page) {
+                    return page && typeof page.offset === "number";
+                }) : [];
+                if (!pages.length && posts.length) {
+                    pages = [{
+                        offset: 0,
+                        postIds: posts.slice(0, FEED_PAGE_SIZE).map(function(post) { return String(post.id); })
+                    }];
+                }
+                return {
+                    version: parsed.version || 7, // 必须与 CACHE_KEY v7 一致，旧缓存自动以新版本重写
+                    timestamp: parsed.timestamp || 0,
+                    data: {
+                        posts: posts,
+                        comments: Array.isArray(data.comments) ? data.comments : [],
+                        likes: Array.isArray(data.likes) ? data.likes : [],
+                        pages: pages,
+                        nextOffset: typeof data.nextOffset === "number" ? data.nextOffset : posts.length,
+                        endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
+                        pageSize: data.pageSize || FEED_PAGE_SIZE
+                    }
+                };
+            }
+
+            function hydrateFeedStateFromSnapshot(snapshot) {
+                var normalized = normalizeFeedSnapshotCache(snapshot);
+                if (!normalized) return false;
+                feedAllPosts = normalized.data.posts || [];
+                feedAllComments = normalized.data.comments || [];
+                feedAllLikes = normalized.data.likes || [];
+                feedLoadedPages = normalized.data.pages || [];
+                feedNextOffset = typeof normalized.data.nextOffset === "number" ? normalized.data.nextOffset : feedAllPosts.length;
+                feedEndReached = !!normalized.data.endReached;
+                return true;
+            }
+
+            // 统一：应用所有需要从普通帖子流中排除的系统标记
+            // 集中维护，避免漏掉 __pro_gift__ / __pro_gift_claim__ / __vip_plan__ 等
+            function applyVisiblePostQueryFilters(query) {
+                if (!query || typeof query.neq !== 'function') return query;
+                return query
+                    .neq("media_type", AUTH_MARKER)
+                    .neq("media_type", ADMIN_AUTH_MARKER)
+                    .neq("media_type", ADMIN_META_MARKER)
+                    .neq("media_type", DM_MARKER)
+                    .neq("media_type", REPORT_MARKER)
+                    .neq("media_type", "__avatar__")
+                    .neq("media_type", "__user_info__")
+                    .neq("media_type", "__photo_wall__")
+                    .neq("media_type", "__visit__")
+                    .neq("media_type", "__attack__")
+                    .neq("media_type", "__user_visit__")
+                    .neq("media_type", "__post_view__")
+                    .neq("media_type", "__ann__")
+                    .neq("media_type", "__ann_read__")
+                    .neq("media_type", "__vip__")
+                    .neq("media_type", "__vip_order__")
+                    .neq("media_type", "__vip_plan__")
+                    .neq("media_type", "__user_style__")
+                    .neq("media_type", "__pro_gift__")
+                    .neq("media_type", "__pro_gift_claim__")
+                    .neq("media_type", "__login_event__")
+                    .neq("media_type", "__user_behavior__")
+                    .neq("media_type", "__security_alert__")
+                    .neq("media_type", "__admin_audit__")
+                    .neq("media_type", "__client_error__")
+                    .neq("media_type", "__email_sent__")
+                    .neq("media_type", "__email_recipient_history__")
+                    .neq("media_type", "__ai_agent_profile__")
+                    .neq("media_type", "__ai_agent_msg__")
+                    .neq("media_type", "__ai_agent_memory__")
+                    .neq("media_type", "__ai_agent_config__")
+                    .neq("media_type", "**ai_agent_memory_box**")
+                    .neq("media_type", "**ai_agent_conv_summary**")
+                    .neq("media_type", "**ai_agent_memory_log**")
+                    .neq("media_type", "__refresh_token__")
+                    .neq("media_type", "__revoked_token__")
+                    .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
+                    .neq("media_type", "__location_task__");
+            }
+            window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
+
+            // 客户端过滤：单一帖子是否对当前用户可见
+            function isSystemPost(post) {
+                if (!post) return true;
+                var mt = post.media_type;
+                if (!mt) return false;
+                var SYSTEM_MARKERS = [
+                    AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
+                    "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
+                    "__attack__", "__user_visit__", "__post_view__", "__ann__", "__ann_read__",
+                    "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
+                    "__pro_gift__", "__pro_gift_claim__",
+                    "__login_event__", "__user_behavior__", "__security_alert__", "__admin_audit__", "__client_error__",
+                    "__email_sent__", "__email_recipient_history__",
+                    "__refresh_token__", "__revoked_token__",
+                    "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
+                    "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
+                    "__location_task__",
+                    "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
+                ];
+                return SYSTEM_MARKERS.indexOf(mt) >= 0;
+            }
+            window.isSystemPost = isSystemPost;
+
+            function getFeedBasePostQuery() {
+                if (!sb) {
+                    return {
+                        range: function() { return Promise.resolve({ data: [], error: null }); }
+                    };
+                }
+                return applyVisiblePostQueryFilters(
+                    sb.from("posts").select("*")
+                ).order("created_at", { ascending: false });
+            }
+
+            async function fetchFeedPageChunk(offset, requestId, deferRelated) {
+                var start = Math.max(0, Number(offset) || 0);
+                var page = Math.floor(start / FEED_PAGE_SIZE);
+                var posts = [];
+                var comments = [];
+                var likes = [];
+                var endReached = false;
+                var usedApi = false;
+                var FEED_NET_TIMEOUT_MS = 18000;
+                var withTimeout = (typeof window.xtjWithTimeout === 'function')
+                    ? window.xtjWithTimeout
+                    : function(p) { return p; };
+
+                // 优先使用后端 API（支持私密帖子可见性过滤）
+                try {
+                    var apiResp = await window.xtjOptionalAuthFetch('/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE, {
+                        timeoutMs: FEED_NET_TIMEOUT_MS
+                    });
+                    if (apiResp.ok) {
+                        var apiData = await apiResp.json();
+                        if (apiData && apiData.ok) {
+                            posts = normalizePosts(apiData.posts || []);
+                            comments = apiData.comments || [];
+                            likes = apiData.likes || [];
+                            endReached = apiData.endReached || false;
+                            if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
+                            // 使用服务器返回的 next_offset，不自行计算
+                            start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
+                            usedApi = true;
+                        }
+                    }
+                } catch (apiErr) {
+                    console.warn('[feed] API unavailable, fallback to Supabase:', apiErr && apiErr.message);
+                }
+
+                if (!usedApi) {
+                    // 回退：Supabase 直连（RLS 仅返回公开帖子）
+                    // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
+                    var end = start + FEED_PAGE_SIZE - 1;
+                    var postRes = await withTimeout(
+                        getFeedBasePostQuery().range(start, end),
+                        FEED_NET_TIMEOUT_MS,
+                        'feed-supabase'
+                    );
+                    if (requestId && requestId !== feedLoadRequestId) return null;
+                    if (postRes.error) throw postRes.error;
+                    posts = normalizePosts(postRes.data || []);
+                    endReached = posts.length < FEED_PAGE_SIZE;
+                    try {
+                        var countRes = await withTimeout(
+                            applyVisiblePostQueryFilters(sb.from('posts').select('id', { count: 'exact', head: true })),
+                            Math.min(FEED_NET_TIMEOUT_MS, 8000),
+                            'feed-count'
+                        );
+                        if (countRes.count !== null) window._xtjTotalPostCount = countRes.count;
+                    } catch(e) {}
+                }
+
+                if (requestId && requestId !== feedLoadRequestId) return null;
+                var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
+                var relatedPromise = null;
+
+                if (postIds.length && !usedApi) {
+                    // 仅 Supabase 直连时需要单独获取评论和点赞
+                    if (!sb) {
+                        relatedPromise = Promise.resolve([ { data: [], error: null }, { data: [], error: null } ]);
+                    } else {
+                        relatedPromise = Promise.all([
+                            sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
+                            sb.from("likes").select("*").in("post_id", postIds)
+                        ]);
+                    }
+                    if (deferRelated) {
+                        return {
+                            offset: start,
+                            posts: posts,
+                            comments: comments,
+                            likes: likes,
+                            nextOffset: start + posts.length,
+                            endReached: endReached,
+                            postIds: postIds,
+                            relatedPromise: relatedPromise
+                        };
+                    }
+                    var related = await relatedPromise;
+                    if (requestId && requestId !== feedLoadRequestId) return null;
+                    if (related[0].error || related[1].error) {
+                        throw (related[0].error || related[1].error);
+                    }
+                    comments = related[0].data || [];
+                    likes = related[1].data || [];
+                }
+
+                return {
+                    offset: start,
+                    posts: posts,
+                    comments: comments,
+                    likes: likes,
+                    nextOffset: start + posts.length,
+                    endReached: endReached,
+                    postIds: postIds
+                };
+            }
+
+            function hydrateDeferredFeedRelations(chunk, requestId) {
+                if (!chunk || !chunk.relatedPromise) return Promise.resolve(false);
+                return chunk.relatedPromise.then(function(related) {
+                    if (requestId !== feedLoadRequestId) return false;
+                    if (related[0].error || related[1].error) {
+                        throw (related[0].error || related[1].error);
+                    }
+                    mergeFeedPageIntoState({
+                        offset: chunk.offset,
+                        posts: [],
+                        comments: related[0].data || [],
+                        likes: related[1].data || [],
+                        nextOffset: chunk.nextOffset,
+                        endReached: chunk.endReached,
+                        postIds: chunk.postIds
+                    });
+                    writeFeedCacheSnapshot();
+                    return renderFeedFromMemoryState().then(function() { return true; });
+                }).catch(function(error) {
+                    console.warn('[feed] engagement hydration failed:', error);
+                    return false;
+                });
+            }
+
+            function mergeFeedPageIntoState(chunk) {
+                if (!chunk) return;
+                feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
+                    return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
+                }, true);
+                feedAllComments = mergeFeedRecords(feedAllComments, chunk.comments, function(comment) {
+                    return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
+                });
+                feedAllLikes = mergeFeedRecords(feedAllLikes, chunk.likes, function(like) {
+                    return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
+                });
+                var pagePostIds = chunk.postIds || [];
+                var pageExists = (feedLoadedPages || []).some(function(page) { return page && page.offset === chunk.offset; });
+                if (!pageExists) {
+                    feedLoadedPages = (feedLoadedPages || []).concat([{
+                        offset: chunk.offset,
+                        postIds: pagePostIds
+                    }]).sort(function(a, b) { return a.offset - b.offset; });
+                }
+                feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset || 0);
+                if (chunk.endReached) feedEndReached = true;
+                (chunk.posts || []).forEach(syncPostInfoCache);
+                markFeedStateChanged();
+            }
+
+            function hasActiveFeedFilters() {
+                var state = getPostSearchState();
+                return !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+            }
+
+            async function ensureFeedCoverageForVisibleSlice(minVisiblePosts, requestId) {
+                var target = Math.max(Number(minVisiblePosts) || 0, FEED_PAGE_SIZE);
+                var guard = 0;
+                while (!feedEndReached && guard < 12) {
+                    var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                    if (filteredPosts.length >= target) break;
+                    var chunk = await fetchFeedPageChunk(feedNextOffset, requestId);
+                    if (!chunk) return false;
+                    if (!chunk.posts.length) {
+                        feedEndReached = true;
+                        break;
+                    }
+                    mergeFeedPageIntoState(chunk);
+                    guard++;
+                }
+                writeFeedCacheSnapshot();
+                return true;
+            }
+
+            function syncPinnedPostIntoFeedState(serverPost) {
+                if (!serverPost || !serverPost.id) return false;
+                var found = false;
+                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
+                    if (String(post.id) !== String(serverPost.id)) return post;
+                    found = true;
+                    return Object.assign({}, post, serverPost);
+                }));
+                return found;
+            }
+
+            async function renderFeedFromMemoryState() {
+                await renderFeed({
+                    posts: feedAllPosts || [],
+                    comments: feedAllComments || [],
+                    likes: feedAllLikes || []
+                });
+                // Phase 3-P0-5: Feed 重渲染后恢复持久化的 retryable 状态，
+                // 避免评论重渲染导致小猫 AI 重试按钮丢失。
+                try { if (typeof restoreCatAiRetryableStatuses === 'function') restoreCatAiRetryableStatuses(); } catch(e) {}
+            }
+
+            async function rebuildFeedFromCurrentState() {
+                feedPage = 1;
+                var noMore = document.getElementById('feedNoMore');
+                if (noMore) noMore.remove();
+                await renderFeedFromMemoryState();
+                if (typeof setupFeedInfiniteScroll === 'function') {
+                    setupFeedInfiniteScroll();
+                }
+            }
+
+            window.xtjPrependPostToFeed = async function(serverPost) {
+                if (!serverPost || !serverPost.id) return false;
+                var normalized = normalizePost(serverPost);
+                var exists = false;
+                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
+                    if (!post || String(post.id) !== String(normalized.id)) return post;
+                    exists = true;
+                    return Object.assign({}, post, normalized);
+                }));
+                if (!exists) {
+                    feedAllPosts = sortPosts([normalized].concat(feedAllPosts || []));
+                }
+                writeFeedCacheSnapshot();
+                await rebuildFeedFromCurrentState();
+                return true;
+            };
+
+            async function refreshPostDetailIfActive(postId) {
+                if (!postId || String(activePostId || '') !== String(postId)) return;
+                if (typeof window.openPostDetail !== 'function') return;
+                try {
+                    await window.openPostDetail(postId);
+                } catch (e) {
+                    console.warn('[pin] failed to refresh post detail', e);
+                }
+            }
+
+            async function verifyPinnedPostInBackground(postId, expectedPinned) {
+                try {
+                    var snapshot = await fetchPostSnapshot(postId);
+                    if (!snapshot) throw new Error('not found');
+                    var normalized = normalizePost(snapshot);
+                    var synced = syncPinnedPostIntoFeedState(snapshot);
+                    writeFeedCacheSnapshot();
+                    if (!!normalized.is_pinned !== !!expectedPinned) {
+                        if (synced) {
+                            await rebuildFeedFromCurrentState();
+                            await refreshPostDetailIfActive(postId);
+                        }
+                        showToast('置顶状态已按服务器结果校正');
+                    }
+                } catch (e) {
+                    console.error('[pin] background verify failed', e);
+                    showToast('置顶已更新，但后台校验失败: ' + (e && e.message ? e.message : '未知错误'));
+                }
+            }
+
+            async function syncFeedDataInBackground() {
+                try {
+                    await loadFeed(true);
+                    return true;
+                } finally {
+                    isRefreshing.posts = false;
+                }
+            }
+
+            function pinMotionReduced() {
+                return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+            }
+
+            function getActualScrollSurface(startNode) {
+                var current = startNode || document.getElementById('feed');
+                while (current && current !== document.body && current !== document.documentElement) {
+                    if (current.scrollHeight > current.clientHeight) {
+                        var style = window.getComputedStyle(current);
+                        if (style.overflowY === 'auto' || style.overflowY === 'scroll') return current;
+                    }
+                    current = current.parentElement;
+                }
+                
+                var se = document.scrollingElement || document.documentElement;
+                if (se && se.scrollHeight > se.clientHeight) {
+                    var seStyle = window.getComputedStyle(se);
+                    if (seStyle.overflowY !== 'hidden' && seStyle.overflowY !== 'clip') {
+                        return window;
+                    }
+                }
+                return window;
+            }
+
+            function waitForPinScroll(surface, targetTop, timeoutMs) {
+                return new Promise(function(resolve) {
+                    var actualSurface = getActualScrollSurface(surface);
+                    if (!actualSurface || pinMotionReduced()) return resolve();
+                    
+                    var getScroll = function() { return actualSurface === window ? window.scrollY : actualSurface.scrollTop; };
+                    if (Math.abs(getScroll() - targetTop) <= 2) return resolve();
+                    
+                    var isResolved = false;
+                    var timeoutId;
+                    
+                    function finish() {
+                        if (isResolved) return;
+                        isResolved = true;
+                        clearTimeout(timeoutId);
+                        actualSurface.removeEventListener('scrollend', onScrollEnd);
+                        resolve();
+                    }
+                    
+                    function onScrollEnd() {
+                        if (Math.abs(getScroll() - targetTop) <= 2) finish();
+                    }
+                    
+                    actualSurface.addEventListener('scrollend', onScrollEnd);
+                    timeoutId = setTimeout(finish, timeoutMs);
+                });
+            }
+
+            function getPinnedPostScrollTarget(surface) {
+                var feed = document.getElementById('feed');
+                if (!feed) return 0;
+                var actualSurface = getActualScrollSurface(surface);
+                var feedRect = feed.getBoundingClientRect();
+                var nav = document.querySelector('.posts-nav.sticky-header') || (surface ? surface.querySelector('.posts-nav') : null);
+                var navRect = nav ? nav.getBoundingClientRect() : null;
+                
+                if (actualSurface === window) {
+                    var navHeight = navRect && navRect.bottom > 0 ? Math.max(0, navRect.height) : 0;
+                    return Math.max(0, Math.round(window.scrollY + feedRect.top - navHeight - 12));
+                } else {
+                    var surfaceRect = actualSurface.getBoundingClientRect();
+                    var navHeight = navRect && navRect.bottom > surfaceRect.top ? Math.max(0, navRect.height) : 0;
+                    return Math.max(0, Math.round(actualSurface.scrollTop + feedRect.top - surfaceRect.top - navHeight - 12));
+                }
+            }
+
+            async function beginPinnedPostTransition(postEl) {
+                var surface = document.getElementById('panelPosts');
+                if (postEl && postEl.isConnected && !pinMotionReduced()) {
+                    postEl.classList.add('post-pin-departing');
+                }
+                var actualSurface = getActualScrollSurface(surface);
+                var targetTop = getPinnedPostScrollTarget(surface);
+                if (pinMotionReduced()) {
+                    actualSurface.scrollTo(0, targetTop);
+                    return;
+                }
+                actualSurface.scrollTo({ top: targetTop, behavior: 'smooth' });
+                await Promise.all([
+                    new Promise(function(resolve) { setTimeout(resolve, 320); }),
+                    waitForPinScroll(surface, targetTop, 620)
+                ]);
+            }
+
+            function completePinnedPostTransition(postId) {
+                var selector = '.post[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]';
+                var postEl = document.querySelector(selector);
+                var surface = document.getElementById('panelPosts');
+                if (!postEl) return Promise.resolve(false);
+                var actualSurface = getActualScrollSurface(surface);
+                actualSurface.scrollTo(0, getPinnedPostScrollTarget(surface));
+                if (pinMotionReduced()) return Promise.resolve(true);
+                return new Promise(function(resolve) {
+                    var completed = false;
+                    var finish = function() {
+                        if (completed) return;
+                        completed = true;
+                        postEl.classList.remove('post-pin-arriving');
+                        postEl.removeEventListener('animationend', onAnimationEnd);
+                        resolve(true);
+                    };
+                    var onAnimationEnd = function(event) {
+                        if (event.target === postEl && event.animationName === 'xtj-pin-arrive') finish();
+                    };
+                    postEl.classList.remove('post-pin-arriving');
+                    void postEl.offsetWidth;
+                    postEl.addEventListener('animationend', onAnimationEnd);
+                    postEl.classList.add('post-pin-arriving');
+                    setTimeout(finish, 760);
+                });
+            }
+
+
+            // Final pin action: server-side RPC enforces one pinned post per author.
+            window.isPinningPost = false;
+            window.togglePostPin = async function(postId, btn) {
+                if (!postId) return;
+                var normalizedPostId = String(postId || '').trim().toLowerCase();
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedPostId)) {
+                    showToast('置顶失败：帖子参数无效');
+                    return;
+                }
+                
+                if (window.isPinningPost) return;
+                window.isPinningPost = true;
+                
+                var originalText = btn ? btn.textContent : '';
+                var nextPinned = false;
+                var didSucceed = false;
+                var serverSucceeded = false;
+                var authoritativePinnedState = null;
+                try {
+                    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+                    var auth = typeof window.ensureProtectedOperationAuth === 'function'
+                        ? await window.ensureProtectedOperationAuth()
+                        : { ok: !!(typeof window.getUserAuthHeaders === 'function' && await window.getUserAuthHeaders()) };
+                    if (!auth.ok) {
+                        if (auth.reason !== 'expired' && auth.reason !== 'no_user') {
+                            showToast('认证服务暂时不可用，请稍后重试');
+                        }
+                        return;
+                    }
+
+                    var currentPost = normalizePosts(feedAllPosts).find(function(item) {
+                        return String(item.id).toLowerCase() === normalizedPostId;
+                    });
+                    
+                    // Allow pinning even if not in feedAllPosts (e.g. detail view)
+                    var isOwner = currentPost && String(currentUser || '').toLowerCase() === String(currentPost.user_name || '').toLowerCase();
+                    if (currentPost && !isOwner && currentUser !== ADMIN_NAME) {
+                        showToast('无权置顶此帖子');
+                        return;
+                    }
+                    var isCurrentlyPinned = currentPost ? !!currentPost.is_pinned : (btn && (btn.getAttribute('data-pinned') === 'true' || originalText.indexOf('取消') !== -1));
+                    nextPinned = !isCurrentlyPinned;
+                    
+                    var response = await window.xtjProtectedFetch('/api/post/pin', {
+                        method: 'POST',
+                        body: JSON.stringify({ post_id: normalizedPostId, is_pinned: Boolean(nextPinned) })
+                    });
+                    var result = await response.json().catch(function() { return {}; });
+                    if (response.status === 401) {
+                        return;
+                    }
+                    if (result.code === 'pin_migration_required') {
+                        throw new Error('置顶服务尚未完成数据库升级，请部署迁移 008_atomic_post_pin.sql');
+                    }
+                    if (!response.ok || !result.ok || !result.data) throw new Error(result.error || '置顶操作失败');
+                    serverSucceeded = true;
+                    authoritativePinnedState = result.data.is_pinned;
+
+                    (Array.isArray(result.unpinned_post_ids) ? result.unpinned_post_ids : []).forEach(function(id) {
+                        syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
+                    });
+                    
+                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var willAnimatePin = nextPinned;
+                    if (willAnimatePin) await beginPinnedPostTransition(postEl);
+
+                    if (!syncPinnedPostIntoFeedState(result.data)) {
+                        clearFeedCache();
+                        await loadFeed(true);
+                    } else {
+                        writeFeedCacheSnapshot();
+                        await rebuildFeedFromCurrentState();
+                    }
+                    await refreshPostDetailIfActive(normalizedPostId);
+                    if (willAnimatePin) await completePinnedPostTransition(normalizedPostId);
+                    didSucceed = true;
+                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
+                } catch (e) {
+                    if (serverSucceeded) {
+                        console.error('[pin] render failed after server success', e);
+                        showToast('置顶已更新，正在尝试恢复界面同步');
+                        clearFeedCache();
+                        loadFeed(true).catch(function(err){ console.error('loadFeed failed in catch', err); });
+                        refreshPostDetailIfActive(normalizedPostId).catch(function(err){ console.error('refreshPostDetailIfActive failed in catch', err); });
+                    } else {
+                        console.error('[pin] atomic update failed', e);
+                        showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
+                    }
+                } finally {
+                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    if (postEl) postEl.classList.remove('post-pin-departing');
+                    if (btn) {
+                        btn.disabled = false;
+                        if (authoritativePinnedState !== null) {
+                            btn.textContent = authoritativePinnedState ? '取消置顶' : '置顶';
+                            btn.setAttribute('data-pinned', authoritativePinnedState ? 'true' : 'false');
+                        } else {
+                            btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
+                        }
+                    }
+                    window.isPinningPost = false;
+                }
+            };
+
+            // G10 修复：可见性切换并发锁（与 togglePostPin 的 isPinningPost 对齐），
+            // 防止双击基于同一旧 visibility 发两次更新 + 两次整页刷新
+            window.isTogglingPostVisibility = false;
+            window.togglePostVisibility = async function(postId, btn) {
+                if (window.isTogglingPostVisibility) return;
+                var post;
+                var nextVisibility;
+                // ★ 修复：失败分支已设置失败文案，若 finally 仍无条件重置为成功态文案
+                // 会覆盖"操作失败/操作异常"的提示；handled 置位后 finally 不再重置。
+                var handled = false;
+                try {
+                    post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    if (!post || !canEditPost(post)) {
+                        showToast("无权修改这条帖子的隐私状态");
+                        return;
+                    }
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = "处理中..";
+                    }
+                    window.isTogglingPostVisibility = true;
+                    nextVisibility = post.visibility === "private" ? "public" : "private";
+                    var result = await updatePostRecord(post, {
+                        visibility: nextVisibility
+                    });
+                    if (!result.ok) {
+                        handled = true;
+                        if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🌐 设为公开"; }
+                        showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
+                    await loadFeed(true);
+                } catch (e) {
+                    handled = true;
+                    console.error("togglePostVisibility error:", e);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "🔒 设为私密";
+                    }
+                    showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
+                } finally {
+                    window.isTogglingPostVisibility = false;
+                    if (!handled && btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
+                }
+            };
+            // ============== Global click delegation ==============
+            document.addEventListener('click', function(e) {
+                var postToolTrigger = e.target.closest('.post-tools-trigger');
+                if (postToolTrigger) {
+                    e.preventDefault();
+                    openPostToolsMenu(postToolTrigger);
+                    return;
+                }
+                var postToolAction = e.target.closest('[data-post-tool]');
+                if (postToolAction) {
+                    e.preventDefault();
+                    if (!window.currentUser) { showToast('请先登录'); return; }
+                    var postTool = postToolAction.getAttribute('data-post-tool');
+                    var postToolPostId = postToolAction.getAttribute('data-post-id');
+                    closePostToolsMenu();
+                    if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
+                        window.requestPostTranslation(postToolPostId);
+                    } else if (postTool === 'ask-ai' && typeof window.openPostAiChat === 'function') {
+                        window.openPostAiChat(postToolPostId);
+                    } else if (postTool === 'report' && typeof window.openPostReport === 'function') {
+                        window.openPostReport(postToolPostId);
+                    }
+                    return;
+                }
+                if (activePostToolsMenu && !e.target.closest('.post-tools-menu')) closePostToolsMenu();
+                // Pin button: delegate only (no inline onclick)
+                var pinBtn = e.target.closest('.action-btn.pin');
+                if (pinBtn) {
+                    if (pinBtn.disabled) { return; }
+                    var pid = pinBtn.getAttribute('data-post-id');
+                    if (!pid) { return; }
+                    window.togglePostPin(pid, pinBtn);
+                    return;
+                }
+            });
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closePostToolsMenu();
+            });
+            // ── 帖子位置功能 ──
+            var postLocationData = null;
+            var postLocationRequesting = false;
+
+            window.requestPostLocation = function() {
+                if (postLocationRequesting) return;
+                var btn = document.getElementById('postLocationAddBtn');
+                if (!btn) return;
+                if (!navigator.geolocation) {
+                    showToast('您的浏览器不支持定位功能');
+                    return;
+                }
+                postLocationRequesting = true;
+                btn.disabled = true;
+                btn.textContent = '正在获取位置...';
+                function requestPostLocationFix(options, onError) {
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+                    }, onError, options);
+                }
+                function finishLocationRequest(error) {
+                    postLocationRequesting = false;
+                    btn.disabled = false;
+                    btn.textContent = '添加位置';
+                    showToast(error && error.code === 1 ? '位置权限被拒绝，请在浏览器设置中允许定位' : '定位失败，请重试');
+                }
+                requestPostLocationFix({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }, function(error) {
+                    if (error && error.code !== 1) {
+                        // A timeout or unavailable GPS fix gets one bounded fallback request.
+                        btn.textContent = '正在尝试备用定位...';
+                        requestPostLocationFix({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }, function(fallbackError) {
+                            postLocationRequesting = false;
+                            btn.disabled = false;
+                            btn.textContent = '📍 添加位置';
+                            showToast('定位失败，请重试');
+                        });
+                        return;
+                    }
+                    finishLocationRequest(error);
+                    return;
+                });
+            };
+
+            async function reverseGeocodePostLocation(lat, lng, accuracy) {
+                var btn = document.getElementById('postLocationAddBtn');
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/location/reverse', {
+                        method: 'POST',
+                        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy: Number(accuracy) || null })
+                    });
+                    var data = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || !data.ok) {
+                        showToast('地址解析失败: ' + (data.error || '请重试'));
+                        postLocationRequesting = false;
+                        if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                        return;
+                    }
+                    data.accuracy = Number(accuracy) || null;
+                    showPostLocationOptions(data);
+                } catch (e) {
+                    showToast('地址解析失败，请检查网络');
+                    postLocationRequesting = false;
+                    if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                }
+            }
+
+            function showPostLocationOptions(geoData) {
+                var panel = document.getElementById('postLocationPanel');
+                var optionsEl = document.getElementById('postLocationOptions');
+                if (!panel || !optionsEl) return;
+                optionsEl.innerHTML = '';
+                var options = geoData.options || [];
+                if (options.length === 0) {
+                    if (geoData.province && geoData.city) {
+                        options.push({ level: 'city', name: geoData.province + geoData.city, province: geoData.province, city: geoData.city });
+                    }
+                    if (geoData.city && geoData.district) {
+                        options.push({ level: 'district', name: geoData.city + geoData.district, province: geoData.province, city: geoData.city, district: geoData.district });
+                    }
+                }
+                for (var i = 0; i < options.length; i++) {
+                    var opt = options[i];
+                    var optEl = document.createElement('div');
+                    optEl.className = 'post-location-option';
+                    optEl.textContent = opt.name;
+                    optEl.setAttribute('role', 'button');
+                    optEl.setAttribute('tabindex', '0');
+                    (function(option) {
+                        optEl.addEventListener('click', function() { selectPostLocationOption(option); });
+                        optEl.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectPostLocationOption(option); }
+                        });
+                    })(opt);
+                    optionsEl.appendChild(optEl);
+                }
+                panel.style.display = 'block';
+                var addRow = document.getElementById('postLocationAddRow');
+                if (addRow) addRow.style.display = 'none';
+                postLocationRequesting = false;
+                var btn = document.getElementById('postLocationAddBtn');
+                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+            }
+
+            window.selectPostLocationOption = function(option) {
+                var panel = document.getElementById('postLocationPanel');
+                var addRow = document.getElementById('postLocationAddRow');
+                var preview = document.getElementById('postLocationPreview');
+                var nameEl = document.getElementById('postLocationName');
+                if (panel) panel.style.display = 'none';
+                if (option && option.name) {
+                    postLocationData = {
+                        name: option.name,
+                        province: option.province || '',
+                        city: option.city || '',
+                        district: option.district || '',
+                        level: option.level || ''
+                    };
+                    if (nameEl) nameEl.textContent = option.name;
+                    if (preview) preview.style.display = 'flex';
+                    if (addRow) addRow.style.display = 'none';
+                } else {
+                    postLocationData = null;
+                    if (preview) preview.style.display = 'none';
+                    if (addRow) addRow.style.display = 'block';
+                }
+            };
+
+            window.removePostLocation = function() {
+                postLocationData = null;
+                var preview = document.getElementById('postLocationPreview');
+                var addRow = document.getElementById('postLocationAddRow');
+                if (preview) preview.style.display = 'none';
+                if (addRow) addRow.style.display = 'block';
+            };
+
+            function resetPostLocation() {
+                postLocationData = null;
+                postLocationRequesting = false;
+                var panel = document.getElementById('postLocationPanel');
+                var preview = document.getElementById('postLocationPreview');
+                var addRow = document.getElementById('postLocationAddRow');
+                var btn = document.getElementById('postLocationAddBtn');
+                if (panel) panel.style.display = 'none';
+                if (preview) preview.style.display = 'none';
+                if (addRow) addRow.style.display = 'block';
+                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+            }
+
+            window.doPublish = async function () {
+                if (!currentUser) { showToast("请先登录"); return; }
+                var btn = document.getElementById("pubBtn");
+                if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
+                if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
+                var content = document.getElementById("postInp").value.trim();
+                var file = document.getElementById("fileInp").files[0];
+                var visibilityEl = document.getElementById("postVisibility");
+                var visibility = visibilityEl ? visibilityEl.value : "public";
+                if (!content && !file) { showToast("请输入帖子内容"); return; }
+                if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
+                var maxFileSize = 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
+                if (file) {
+                    var allowedTypes = ['image/','video/','audio/'];
+                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
+                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
+                }
+                btn.disabled = true;
+                btn.classList.add('is-loading');
+                btn.setAttribute('aria-busy', 'true');
+                btn.dataset.originalText = btn.textContent;
+                btn.innerHTML = '<span>发布中</span>';
+                var uploadedPath = '';
+                try {
+                    var media_url = "";
+                    var media_type = "";
+                    if (file) {
+                        var path = buildStorageUploadPath('posts', file.name);
+                        var uploadRes = await sb.storage.from("uploads").upload(path, file);
+                        if (uploadRes.error) throw uploadRes.error;
+                        uploadedPath = path;
+                        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+                        media_type = file.type.startsWith("image/") ? "image" : (file.type.startsWith("audio/") ? "audio" : "video");
+                    }
+                    var plainText = content.slice(0, 2000);
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: postLocationData || null }) : { visibility: visibility || "public" };
+                    var contentPayload = buildPostContentPayload(plainText, metadata);
+                    var payload = {
+                        user_name: currentUser,
+                        content: contentPayload,
+                        media_url: media_url,
+                        media_type: media_type || null,
+                        actor_key: deviceId,
+                        visibility: metadata.visibility,
+                        is_pinned: false,
+                        pinned_at: null,
+                        updated_at: null,
+                        location: postLocationData || null
+                    };
+                    var insertRes = await insertPostRecord(payload, contentPayload);
+                    if (!insertRes.ok) {
+                        if (uploadedPath) {
+                            try {
+                                var cleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
+                                if (cleanupResult && cleanupResult.error) console.warn('[post-publish] orphan cleanup failed', cleanupResult.error);
+                            } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
+                            uploadedPath = '';
+                        }
+                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
+                        return;
+                    }
+                    uploadedPath = '';
+                    touchUserSession(false);
+                    resetPostComposer();
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
+                    showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
+                    if (!insertPublishedPostIntoFeed(insertRes.data)) {
+                        clearFeedCache();
+                        await loadFeed(true);
+                    } else {
+                        writeFeedCacheSnapshot();
+                    }
+                    if (insertRes.data && insertRes.data.id) {
+                        schedulePublishedPostIpRefresh(insertRes.data.id);
+                    }
+                    loadProfileActivity(true);
+                } catch (e) {
+                    if (uploadedPath) {
+                        try {
+                            var catchCleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
+                            if (catchCleanupResult && catchCleanupResult.error) console.warn('[post-publish] orphan cleanup failed', catchCleanupResult.error);
+                        } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
+                    }
+                    showToast("发布失败: " + (e.message || "网络错误"));
+                } finally {
+                    btn.disabled = false;
+                    btn.classList.remove('is-loading');
+                    btn.setAttribute('aria-busy', 'false');
+                    btn.textContent = btn.dataset.originalText || "发布动态";
+                    delete btn.dataset.originalText;
+                }
+            };
+
+            loadFeed = async function(forceRefresh) {
+                // ★ 修复：loadFeed 语义为"重新加载 feed"——所有路径（缓存快路径/
+                //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
+                //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
+                //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
+                feedPage = 1;
+                var now = Date.now();
+                var requestId = ++feedLoadRequestId;
+                var stateVersionAtRequest = feedStateVersion;
+                var hadLiveFeed = Array.isArray(feedAllPosts) && feedAllPosts.length > 0;
+                if (forceRefresh) {
+                    // Keep the rendered feed intact until a replacement page succeeds.
+                    // A transient empty response must not turn a populated page into an empty one.
+                    feedPageFetchPending = false;
+                }
+                bindPostFilterEvents();
+                if (!forceRefresh) {
+                    try {
+                        var cached = window.safeStorage.get(CACHE_KEY);
+                        if (cached) {
+                            var parsed = JSON.parse(cached);
+                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
+                                if (requestId !== feedLoadRequestId) return;
+                                await renderFeedFromMemoryState();
+                                setupFeedInfiniteScroll();
+                                ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId).then(function() {
+                                    if (requestId !== feedLoadRequestId) return;
+                                    return renderFeedFromMemoryState();
+                                }).catch(function(error) {
+                                    console.warn('[feed] cached coverage refresh failed:', error);
+                                });
+                                return;
+                            }
+                        }
+                    } catch (e) {}
+                }
+                var feed = document.getElementById("feed");
+                if (!forceRefresh && feed) {
+                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                }
+                try {
+                    feedPageFetchPending = true;
+                    var chunk = await fetchFeedPageChunk(0, requestId, true);
+                    if (!chunk) return;
+                    if (requestId !== feedLoadRequestId) return;
+                    // A publish may finish while this request is in flight.
+                    // Preserve current state and merge this page when that happens.
+                    if (stateVersionAtRequest === feedStateVersion) {
+                        if (!chunk.posts.length && hadLiveFeed) {
+                            console.warn('[feed] ignored empty refresh response while posts are visible');
+                            return;
+                        }
+                        feedAllPosts = [];
+                        feedAllComments = [];
+                        feedAllLikes = [];
+                        feedLoadedPages = [];
+                        feedNextOffset = 0;
+                        feedEndReached = false;
+                        markFeedStateChanged();
+                    }
+                    if (chunk.posts.length) mergeFeedPageIntoState(chunk);
+                    else feedEndReached = true;
+                    writeFeedCacheSnapshot();
+                    // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
+                    try {
+                        if (typeof window.__xtjBatchLoadVipHistory === 'function') {
+                            var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
+                            var vipLoadPromise = window.__xtjBatchLoadVipHistory(userNames);
+                            // 5s 兜底：超过就放行，不阻塞 renderFeed
+                            var vipLoadTimeout = new Promise(function(resolve) { setTimeout(resolve, 5000); });
+                            Promise.race([vipLoadPromise, vipLoadTimeout]).then(function() {
+                                // VIP 历史加载完后，强制 reRender 让 Pro 标志显示出来
+                                if (window.__xtjVipHistoryCache) {
+                                    try {
+                                        if (typeof renderFeed === 'function') {
+                                            renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                        }
+                                    } catch(e) {}
+                                }
+                            }).catch(function() {});
+                        }
+                    } catch (e) { console.warn('[VIP history preload]', e); }
+                    await renderFeedFromMemoryState();
+                    setupFeedInfiniteScroll();
+                    hydrateDeferredFeedRelations(chunk, requestId).then(function() {
+                        if (requestId !== feedLoadRequestId) return;
+                        return ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
+                    }).then(function() {
+                        if (requestId !== feedLoadRequestId) return;
+                        writeFeedCacheSnapshot();
+                    }).catch(function(error) {
+                        console.warn('[feed] background hydration failed:', error);
+                    });
+                } catch (e) {
+                    console.error(e);
+                    var cacheFallbackShown = false;
+                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
+                    try {
+                        var fallbackRaw = window.safeStorage.get(CACHE_KEY);
+                        if (fallbackRaw) {
+                            var fallbackParsed = JSON.parse(fallbackRaw);
+                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
+                                await renderFeedFromMemoryState();
+                                setupFeedInfiniteScroll();
+                                cacheFallbackShown = true;
+                            }
+                        }
+                    } catch (fbErr) {
+                        console.error('[loadFeed] cache fallback failed:', fbErr);
+                    }
+                    // ★ 修复：缓存回退显示时必须给用户可感知反馈（数据可能过期），
+                    // 并提供点击重试入口。此前静默显示旧缓存，用户无法感知加载失败。
+                    if (cacheFallbackShown && feed) {
+                        var staleNotice = document.getElementById('feedStaleNotice');
+                        if (!staleNotice) {
+                            staleNotice = document.createElement('div');
+                            staleNotice.id = 'feedStaleNotice';
+                            staleNotice.className = 'loading feed-load-more-error';
+                            staleNotice.setAttribute('role', 'button');
+                            staleNotice.setAttribute('tabindex', '0');
+                            staleNotice.textContent = '网络加载失败，当前显示缓存内容，点击重试';
+                            staleNotice.addEventListener('click', function() {
+                                var el = document.getElementById('feedStaleNotice');
+                                if (el && el.parentNode) el.parentNode.removeChild(el);
+                                loadFeed(true);
+                            });
+                            feed.appendChild(staleNotice);
+                        }
+                    }
+                } finally {
+                    feedPageFetchPending = false;
+                }
+            };
+            window.loadFeed = loadFeed;
+
+            loadMoreFeedPosts = async function() {
+                if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
+                var feed = document.getElementById("feed");
+                var pageLoading = document.createElement("div");
+                pageLoading.className = "feed-page-loading";
+                pageLoading.setAttribute("role", "status");
+                pageLoading.setAttribute("aria-live", "polite");
+                pageLoading.textContent = "正在加载更多帖子";
+                var sentinel = document.getElementById("feedSentinel");
+                feed.insertBefore(pageLoading, sentinel || null);
+                var startIdx = feedPage * FEED_PAGE_SIZE;
+                var endIdx = startIdx + FEED_PAGE_SIZE;
+                var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                var fetchFailed = false;
+                if (filteredPosts.length < endIdx && !feedEndReached) {
+                    try {
+                        feedPageFetchPending = true;
+                        // ★ 修复：ensureFeedCoverageForVisibleSlice 内部以 feedNextOffset（服务端游标）拉取，
+                        // 不再依赖 feedPage 推算 offset，避免并发发帖/删除导致 offset 漂移时帖子重复或永久跳过。
+                        // 拉取成功后以当前内存过滤结果重新计算切片。
+                        await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
+                        writeFeedCacheSnapshot();
+                    } catch (e) {
+                        fetchFailed = true;
+                        console.error('[feed] loadMore ensure coverage failed:', e);
+                    } finally {
+                        feedPageFetchPending = false;
+                    }
+                    filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                }
+                pageLoading.remove();
+                if (fetchFailed) {
+                    // ★ 修复：加载更多失败必须给用户可感知反馈 + 可点击重试入口。
+                    // 此前静默失败且 feedEndReached 不置位，哨兵每次进入视口都会
+                    // 无限重复触发请求。失败后置位 feedLoadMoreFailed 暂停自动触发，
+                    // 用户点击"重试"后清除并重新加载。
+                    feedLoadMoreFailed = true;
+                    var failEl = document.getElementById('feedLoadMoreError');
+                    if (!failEl) {
+                        failEl = document.createElement('div');
+                        failEl.id = 'feedLoadMoreError';
+                        failEl.className = 'loading feed-load-more-error';
+                        failEl.setAttribute('role', 'button');
+                        failEl.setAttribute('tabindex', '0');
+                        failEl.textContent = '加载更多失败，点击重试';
+                        failEl.addEventListener('click', function() {
+                            feedLoadMoreFailed = false;
+                            var errEl = document.getElementById('feedLoadMoreError');
+                            if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
+                            loadMoreFeedPosts();
+                        });
+                        feed.appendChild(failEl);
+                    }
+                    return;
+                }
+                if (startIdx >= filteredPosts.length && !fetchFailed) {
+                    feedEndReached = true;
+                    var noMore = document.getElementById("feedNoMore");
+                    if (!noMore) {
+                        noMore = document.createElement("div");
+                        noMore.id = "feedNoMore";
+                        noMore.className = "loading";
+                        noMore.textContent = "没有更多帖子";
+                        noMore.style.padding = "30px";
+                        noMore.style.textAlign = "center";
+                        feed.appendChild(noMore);
+                    }
+                    return;
+                }
+                var filteredPostIds = new Set();
+                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                feedPage++;
+            };
+
+            appendMorePosts = function(posts, comments, likes) {
+                var feed = document.getElementById("feed");
+                var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
+                var postsHtml = posts.map(function(post) {
+                    return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                }).join("");
+                var sentinel = document.getElementById("feedSentinel");
+                var tempContainer = document.createElement("div");
+                tempContainer.innerHTML = postsHtml;
+                while (tempContainer.firstChild) {
+                    feed.insertBefore(tempContainer.firstChild, sentinel);
+                }
+                var newPosts = feed.querySelectorAll(".post:not(.visible)");
+                primePostReveal(newPosts);
+                observePostViewportState(newPosts);
+                updateFeedStats();
+            };
+
+            renderFeedWithAvatars = function(visiblePosts, comments, likes) {
+                var feed = document.getElementById("feed");
+                var scopedComments = getRenderableComments(comments, visiblePosts);
+                var maps = buildPostMaps(scopedComments, likes);
+                var state = getPostSearchState();
+                var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+                if (visiblePosts.length) {
+                    feed.innerHTML = visiblePosts.map(function(post) {
+                        return renderPostCardSafely(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                    }).join("");
+                } else {
+                    feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
+                }
+                initPostScrollAnimation();
+            };
+
+            renderFeed = async function(payload) {
+                bindPostFilterEvents();
+                var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
+                var visibleComments = getRenderableComments(payload.comments, filteredPosts);
+                var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
+                var sPostsEl = document.getElementById("sPosts");
+                if (sPostsEl) sPostsEl.textContent = totalPosts;
+                var sViewsEl = document.getElementById("sViews");
+                if (sViewsEl) sViewsEl.textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
+                var visiblePostIds = new Set();
+                filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
+                var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
+                var sLikesEl = document.getElementById("sLikes");
+                if (sLikesEl) sLikesEl.textContent = scopedLikes.length + visibleComments.length;
+                filteredPosts.forEach(function(post) {
+                    postInfoCache[post.id] = {
+                        content: post.content,
+                        user_name: post.user_name,
+                        media_url: post.media_url || '',
+                        media_type: post.media_type || '',
+                        created_at: post.created_at || '',
+                        views: Number(post.views || 0)
+                    };
+                });
+                var allUsers = new Set();
+                filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
+                visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
+                // Render local avatar cache before the first paint; remote lookup stays background-only.
+                hydrateCachedAvatarsForUsers(Array.from(allUsers));
+                var visibleCount = feedPage * FEED_PAGE_SIZE;
+                var currentPages = filteredPosts.slice(0, Math.max(FEED_PAGE_SIZE, visibleCount));
+                // 不在 renderFeed 中重置 feedPage，避免后台渲染破坏滚动状态
+                // ★ 修复：不再用 `currentPages.length >= filteredPosts.length` 反向置 feedEndReached。
+                // 缓存 hydrate 或帖数恰为 20 的倍数时会把 endReached 误置 true，导致无限滚动提前终止。
+                // feedEndReached 只由服务端 endReached / 空 chunk / 游标越界判定。
+                renderFeedWithAvatars(currentPages, visibleComments, scopedLikes);
+                refreshPendingFeedIpPosts(currentPages);
+                renderFilterSummary(filteredPosts.length);
+                if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
+
+                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
+                    var feedEl = document.getElementById('feed');
+                    if (!feedEl) return;
+                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
+                    avatars.forEach(function(avatarEl) {
+                        if (avatarEl.querySelector('img')) return;
+                        var username = avatarEl.getAttribute('data-user-name') ||
+                            avatarEl.parentElement && avatarEl.parentElement.getAttribute('data-user-name') ||
+                            avatarEl.closest && avatarEl.closest('[data-user-name]') && avatarEl.closest('[data-user-name]').getAttribute('data-user-name');
+                        if (!username) {
+                            // 兼容旧版 onclick 解析
+                            var onclick = avatarEl.getAttribute('onclick') || '';
+                            username = onclick.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
+                            if (!username || username === onclick) username = '';
+                        }
+                        if (!username) return;
+                        var avatarUrl = getAvatarUrl(username);
+                        if (avatarUrl) {
+                            avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
+                        }
+                    });
+                });
+                setTimeout(function() { prefetchStatData(); }, 1000);
+            };
+            window.renderFeed = renderFeed;
+
+            // ★ 关键修复：删除此重复的 delBtn.onclick 赋值！
+            // 原因：此 handler 没有 __xtjDeleteInProgress 锁、没有 Promise.race 超时、
+            //      finally 没重置状态、await loadFeed(true) 会阻塞整个事件循环。
+            //      JS 中 .onclick 重复赋值会**覆盖**前面的 handler（line 2602 区域的完整保护版失效），
+            //      导致删除卡死、连续删除卡死。
+            // 真正生效的 handler 在 line 2602 区域（带锁 + 超时 + 乐观删除 + 入口强制解锁）。
+
             // 统计预加载（使用后端快照接口，避免全量读取）
 
 /**
