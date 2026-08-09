@@ -40,7 +40,7 @@
     align-items: start;
   }
 
-  /* 左侧主栏：同一宽度，视觉上连成一块 */
+  /* 左侧三块（publish / filter / feed锛夋暣浣撳眳涓?720px */
   #panelPosts .wrap > #publishBox,
   #panelPosts .wrap > #postFilterBar,
   #panelPosts .wrap > #feed {
@@ -48,10 +48,6 @@
     width: 100%;
     margin-left: auto;
     margin-right: auto;
-  }
-
-  #panelPosts .wrap {
-    row-gap: 0 !important;
   }
 
   /* publish / filter / feed 鍗犲乏鍒楀悇鑷竴琛?*/
@@ -78,16 +74,17 @@
     z-index: 2;
   }
 
+  /* feed 内部单列（不强制 grid，让帖子块自然堆叠） */
   #panelPosts .wrap > #feed {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    display: block;
   }
 
+  /* 甯栧瓙涔嬮棿淇濇寔璺濈锛岄伩鍏嶈瑙夐粡杩?*/
   #panelPosts .wrap > #feed > .post {
+    margin-bottom: 18px;
+  }
+  #panelPosts .wrap > #feed > .post:last-child {
     margin-bottom: 0;
-    border: 0 !important;
-    box-shadow: none !important;
   }
 
   /* 2.1 PC 绔寜閽鏍硷細鏂硅銆佷笉閫忔槑銆佺函鑹茶儗鏅?鈥?璺熸墜鏈哄渾褰㈣兌鍥婂舰鎴愬尯鍒?*/
@@ -110,33 +107,21 @@
     z-index: 5;
   }
   #panelPosts .post > .actions .action-btn {
-    border-radius: 10px;
-    background: rgba(241, 245, 243, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.04);
+    border-radius: 6px;
+    background: var(--btn-soft, #f1f3f5);
+    border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06));
     color: var(--text-muted, #555);
-    box-shadow: none !important;
+    box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     font-size: 12px;
     padding: 6px 12px;
     min-height: 32px;
   }
-  #panelPosts .post > .actions .action-btn:active,
-  #panelPosts .post > .actions .action-btn.xtj-pressing {
-    transform: scale(0.98);
-    box-shadow: none !important;
-    background: rgba(220, 232, 226, 0.95) !important;
-    filter: none !important;
-  }
-  #panelPosts .post > .actions .action-btn::after {
-    content: none !important;
-    display: none !important;
-  }
   @media (hover: hover) and (pointer: fine) {
     #panelPosts .post > .actions .action-btn:hover {
-      background: rgba(230, 238, 234, 0.98);
-      border-color: rgba(0, 0, 0, 0.06);
-      box-shadow: none !important;
+      background: var(--btn-soft-hover, #e6e9ec);
+      border-color: var(--border-soft-hover, rgba(0, 0, 0, 0.12));
     }
   }
   /* 宸茬偣璧炵姸鎬?鈥?鐢ㄦ煍鍜岀殑绾㈣壊锛屼笉鍒虹溂 */
@@ -149,7 +134,7 @@
   #panelPosts .post > .actions .action-btn.del,
   #panelPosts .post > .actions .action-btn.pin,
   #panelPosts .post > .actions .action-btn.edit {
-    background: rgba(241, 245, 243, 0.9);
+    background: transparent;
   }
   /* 暗色主题按钮 */
   [data-theme="dark"] #panelPosts .post > .actions .action-btn {
@@ -172,11 +157,10 @@
     background: transparent;
   }
 
+  /* 甯栧瓙鍗＄墖锛氱揣鍑戝竷灞€ */
   #panelPosts .post {
-    padding: 18px 20px;
-    border-radius: 0;
-    border: 0;
-    box-shadow: none;
+    padding: 18px;
+    border-radius: 14px;
   }
 
   /* 甯栧瓙澶撮儴锛氬ご鍍?+ 鐢ㄦ埛鍚?+ 鏃堕棿 */
