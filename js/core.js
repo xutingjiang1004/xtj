@@ -380,8 +380,9 @@ const ADMIN_NAME = "xxz";
                         if (typeof window.__xtjRememberBehaviorToken === 'function') {
                             window.__xtjRememberBehaviorToken(token);
                         } else {
-                            // H-38: 跨脚本只通过 window 共享 token，避免依赖另一个文件的闭包作用域。
-                            window.behaviorLastKnownToken = String(token);
+                            // H-38: 回退分支只记录"已观察到 token"的存在性标志，
+                            // 不再把明文 access token 挂到 window（任何脚本都可读）。
+                            window.__xtjBehaviorTokenKnown = true;
                         }
                     } catch(e) {}
                     // 通知其他模块用户认证已就绪（用于自动定位等）
@@ -988,6 +989,9 @@ const ADMIN_NAME = "xxz";
         }
 
         function touchUserSession(force) {
+            // ★ 幽灵会话防护：当前认证状态已是登出（显式登出/启动时身份不匹配/会话过期清理后），
+            // 直接 return，绝不把残留的 xtj_user 重新写回 storage，避免"UI 未登录但 storage 显示已登录"。
+            if (window._xtjAuthState === 'unauthenticated') return;
             var userName = String(window.currentUser || window._lastKnownUser || "").trim();
             if (!userName) return;
             var now = Date.now();
@@ -4227,12 +4231,15 @@ function renderProfileActivityList(kind) {
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
                         (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) return;
-                    // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
-                    if (document.hidden) {
-                        if (!pausedAt) pausedAt = Date.now();
-                        window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
-                        return;
-                    }
+                    // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
+                    if (document.hidden) {
+                        if (!pausedAt) pausedAt = Date.now();
+                        // ★ 修复：先清掉旧 timer 再设新 timer，避免隐藏期间重复进入
+                        // 本分支时多个 setTimeout 并存造成双链轮询/定时器堆积
+                        if (window.__catAiPollTimers[commentIdStr]) clearTimeout(window.__catAiPollTimers[commentIdStr]);
+                        window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
+                        return;
+                    }
                     // ★ 恢复可见时，清空暂停标记，不把隐藏时间加入运行时间
                     if (pausedAt) {
                         pausedAt = 0;
@@ -6121,45 +6128,6 @@ function renderProfileActivityList(kind) {
                     // 只保留最近 500 条
                     if (history.length > 500) history.length = 500;
                     window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
-                }
-            }
-
-            function trackView(postId) {
-                const key = `xtj_v_${postId}`;
-                if (!window.safeStorage.get(key) && !viewTracked.has(postId)) {
-                    viewTracked.add(postId);
-                    window.safeStorage.set(key, "1");
-                    var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
-                    if (postEl) {
-                        var statsEl = postEl.querySelector('.post-stats-text');
-                        if (statsEl) {
-                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
-                            if (vm) {
-                                var newVal = parseInt(vm[1]) + 1;
-                                statsEl.textContent = statsEl.textContent.replace(/浏览 \d+/, '浏览 ' + newVal);
-                            }
-                        }
-                    }
-                    if (currentUser && postInfoCache[postId]) {
-                        var rawContent = postInfoCache[postId].content || '';
-                        var displayContent = rawContent;
-                        try { var pc = JSON.parse(rawContent); if (pc && pc.__type && pc.text !== undefined) { displayContent = pc.text; } } catch(e) {}
-                        saveViewHistory({
-                            user_name: currentUser,
-                            post_id: postId,
-                            post_content: displayContent.length > 200 ? displayContent.slice(0, 200) + '...' : (displayContent || '(图片/视频)'),
-                            post_author: postInfoCache[postId].user_name || '未知',
-                            media_url: postInfoCache[postId].media_url || '',
-                            media_type: postInfoCache[postId].media_type || '',
-                            viewed_at: new Date().toISOString()
-                        });
-                    }
-                    setTimeout(async () => { 
-                        try { 
-                            await sb.rpc("increment_post_views", { p_post_id: postId }); 
-                        } catch(e){ console.error(e); } 
-                    }, 1000);
-                    updateFeedStats();
                 }
             }
 
@@ -8814,7 +8782,14 @@ function renderProfileActivityList(kind) {
                 pageLoading.textContent = "正在加载更多帖子";
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(pageLoading, sentinel || null);
-                var startIdx = feedPage * FEED_PAGE_SIZE;
+                // ★ 修复：切片起点统一以"已渲染条数"计算，不再用 feedPage（显示计数）
+                // 推算。feedPage 仅作显示计数，由 applyPostFilters/clearPostFilters 重置为 1，
+                // 但 feedNextOffset（服务端游标）不随之重置；若用 feedPage 推算切片，
+                // 筛选开启时 filteredPosts 远小于 feedAllPosts 会提前判定"没有更多"，
+                // 或 20 页后游标与切片错位导致循环不满足。是否还有更多只由 feedNextOffset/
+                // feedEndReached 判定，切片长度只受当前内存过滤结果约束。
+                var renderedCount = feed.querySelectorAll(".post").length;
+                var startIdx = Math.max(renderedCount, 0);
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
@@ -8859,8 +8834,11 @@ function renderProfileActivityList(kind) {
                     }
                     return;
                 }
-                if (startIdx >= filteredPosts.length && !fetchFailed) {
-                    feedEndReached = true;
+                // ★ 修复：只有"服务端已到末尾"才置 feedEndReached 并显示"没有更多"。
+                // 筛选开启时 filteredPosts 可能远小于已拉取总量（feedNextOffset 尚未到末尾），
+                // 此时不能因为切片末尾超过 filteredPosts 就提前终止无限滚动——继续滚动应
+                // 继续用 feedNextOffset 拉取，让更多可匹配筛选的帖子进入内存后再渲染。
+                if (feedEndReached && startIdx >= filteredPosts.length) {
                     var noMore = document.getElementById("feedNoMore");
                     if (!noMore) {
                         noMore = document.createElement("div");
@@ -8873,11 +8851,13 @@ function renderProfileActivityList(kind) {
                     }
                     return;
                 }
-                var filteredPostIds = new Set();
-                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
-                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
-                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
-                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                if (startIdx < filteredPosts.length) {
+                    var filteredPostIds = new Set();
+                    filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                    var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                    var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                    appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                }
                 feedPage++;
             };
 
@@ -9967,14 +9947,20 @@ function renderProfileActivityList(kind) {
                         isRefreshing[tab] = true;
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
-                        if (tab === 'ai') {
-                            if (!window.currentUser) {
-                                renderPhotoWallLockedState();
-                                isRefreshing[tab] = false;
-                                window.showToast('请先登录');
-                                return;
-                            }
-                            window.showToast('正在刷新...');
+                        if (tab === 'ai') {
+                            if (!window.currentUser) {
+                                // ★ 修复：双击刷新在未登录时不再调用 renderPhotoWallLockedState()
+                                // 把整个 photoGrid 替换成"登录提示"锁定页（破坏照片墙网格且无恢复入口）。
+                                // 改为与单击分支一致的 ensurePhotoWallVisibleContent()（未登录时它只做
+                                // 加载/兜底渲染，不替换网格），并复位刷新锁，保留网格不被破坏。
+                                isRefreshing[tab] = false;
+                                window.showToast('请先登录');
+                                ensurePhotoWallVisibleContent().catch(function(err) {
+                                    console.warn('[photo-wall] double-tap refresh visibility check failed', err);
+                                });
+                                return;
+                            }
+                            window.showToast('正在刷新...');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
                                     return window.loadPhotoWallData(true).then(function() {

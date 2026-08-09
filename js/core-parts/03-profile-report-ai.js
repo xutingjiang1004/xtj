@@ -1404,12 +1404,15 @@ function renderProfileActivityList(kind) {
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
                         (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) return;
-                    // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
-                    if (document.hidden) {
-                        if (!pausedAt) pausedAt = Date.now();
-                        window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
-                        return;
-                    }
+                    // ★ 页面隐藏时记录暂停时间，不删除任务，不消耗运行时间
+                    if (document.hidden) {
+                        if (!pausedAt) pausedAt = Date.now();
+                        // ★ 修复：先清掉旧 timer 再设新 timer，避免隐藏期间重复进入
+                        // 本分支时多个 setTimeout 并存造成双链轮询/定时器堆积
+                        if (window.__catAiPollTimers[commentIdStr]) clearTimeout(window.__catAiPollTimers[commentIdStr]);
+                        window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
+                        return;
+                    }
                     // ★ 恢复可见时，清空暂停标记，不把隐藏时间加入运行时间
                     if (pausedAt) {
                         pausedAt = 0;

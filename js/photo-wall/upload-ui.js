@@ -422,8 +422,14 @@
       console.warn('[PhotoWall] recheckLowFreqPhotoQueue failed', e);
     }
   };
-  // 每 30 分钟执行一次低频率重试
-  setInterval(function() { window.recheckLowFreqPhotoQueue(); }, 30 * 60 * 1000);
+  // 每 30 分钟执行一次低频率重试；登出（无登录态）后停止轮询，避免以失效 token 空转
+  var _lowFreqIntervalId = setInterval(function() {
+    if (!getCurrentUser()) {
+      clearInterval(_lowFreqIntervalId);
+      return;
+    }
+    window.recheckLowFreqPhotoQueue();
+  }, 30 * 60 * 1000);
 
   // ★ 绑定 reconcile 触发时机
   (function() {
