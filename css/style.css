@@ -150,14 +150,19 @@
 [data-theme="dark"] .post-location-panel { background: var(--bg-card); border-color: var(--border-color); }
 [data-theme="dark"] .post-location-option { border-bottom-color: var(--border-color); }
         [data-theme="dark"] .action-btn {
-            background: rgba(18,39,44,0.48);
-            border-color: rgba(181,225,217,0.08);
-            color: var(--text-muted);
+            background: rgba(28, 42, 38, 0.92);
+            border-color: rgba(181,225,217,0.12);
+            color: #c4cfc7;
+            box-shadow: none;
         }
-        [data-theme="dark"] .action-btn:hover { background: rgba(24,48,54,0.62); }
+        [data-theme="dark"] .action-btn:hover {
+            background: rgba(36, 52, 48, 0.96);
+            box-shadow: none;
+        }
         [data-theme="dark"] .action-btn.liked {
-            background: rgba(255,59,96,0.2);
-            border-color: rgba(255,59,96,0.3);
+            background: rgba(255,59,96,0.16);
+            border-color: rgba(255,59,96,0.24);
+            box-shadow: none;
         }
         [data-theme="dark"] .comment-item {
             background: linear-gradient(180deg, rgba(17, 35, 40, 0.66), rgba(13, 27, 31, 0.56));
@@ -940,24 +945,37 @@
         .chat-msg.sent .msg-read-status { color: rgba(255,255,255,0.7); }
         .chat-msg.received .msg-read-status { color: var(--text-muted); }
 
-        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px; }
+        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 0; }
         .post {
-            padding: 18px 18px 14px; border-radius: 14px;
+            padding: 18px 18px 14px; border-radius: 0;
             --post-enter-delay: 0ms;
             opacity: 0;
             transform: translateY(10px) scale(0.995);
             transition:
                 opacity 0.16s ease var(--post-enter-delay);
-            background: rgba(255,255,255,0.86);
-            border: 1px solid rgba(140, 196, 158, 0.16);
+            background: transparent;
+            border: 0;
+            border-bottom: 1px solid rgba(60, 90, 80, 0.08);
             box-shadow: none;
+            outline: none;
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
         }
-        [data-theme="dark"] .post {
-            background: rgba(30, 30, 40, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+        .post.glass {
+            background: transparent !important;
+            border: 0 !important;
+            border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
+            box-shadow: none !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
+        [data-theme="dark"] .post,
+        [data-theme="dark"] .post.glass {
+            background: transparent !important;
+            border: 0 !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: none !important;
         }
         .post.visible { 
             opacity: 1; 
@@ -1211,25 +1229,31 @@
             align-items: stretch;
         }
         .action-btn {
-            background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.7);
-            padding: 0 10px; border-radius: 99px; font-size: 12px; color: var(--text-muted);
-            cursor: pointer; transition: var(--trans-smooth); font-weight: 600;
+            background: rgba(246, 249, 247, 0.98);
+            border: 1px solid rgba(60, 90, 80, 0.08);
+            padding: 0 10px; border-radius: 12px; font-size: 12px; color: #4a5d56;
+            cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+            font-weight: 600;
             position: relative; overflow: visible !important;
-            min-width: 0; min-height: 40px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.02);
+            min-width: 0; min-height: 36px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
+            box-shadow: none;
             white-space: nowrap;
         }
-        .action-btn:hover { background: rgba(255,255,255,0.7); }
+        .action-btn:hover {
+            background: rgba(236, 242, 239, 1);
+            color: #2f403a;
+            box-shadow: none;
+        }
 
         .action-btn.liked {
-            background: linear-gradient(135deg, rgba(255, 59, 96, 0.15), rgba(255, 105, 135, 0.15));
+            background: rgba(255, 59, 96, 0.1);
             color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.4);
-            box-shadow: 0 4px 12px rgba(255, 59, 96, 0.12);
+            border-color: rgba(255, 59, 96, 0.18);
+            box-shadow: none;
         }
         .action-btn.liked:hover {
-            background: linear-gradient(135deg, rgba(255, 59, 96, 0.2), rgba(255, 105, 135, 0.2));
-            box-shadow: 0 4px 16px rgba(255, 59, 96, 0.2);
+            background: rgba(255, 59, 96, 0.14);
+            box-shadow: none;
         }
 
         .actions .like-blossom {
@@ -7449,25 +7473,23 @@
                 var(--button-glass-bg);
         }
         .action-btn {
-            min-width: 72px;
+            min-width: 0;
             padding: 6px 10px;
             font-weight: 600;
-            color: var(--text-muted);
-            /* 去掉 glass inset 高光，按下时不会在中间显脏斑 */
-            background: rgba(255, 255, 255, 0.55);
+            color: #4a5d56;
+            background: rgba(246, 249, 247, 0.98);
+            border: 1px solid rgba(60, 90, 80, 0.08);
             box-shadow: none;
         }
         .action-btn:hover {
-            color: var(--text-main);
-            background: rgba(255, 255, 255, 0.72);
+            color: #2f403a;
+            background: rgba(236, 242, 239, 1);
             box-shadow: none;
         }
         .action-btn.liked {
             color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.26);
-            background:
-                linear-gradient(135deg, rgba(255, 59, 96, 0.16), rgba(255, 255, 255, 0.04) 62%, rgba(255, 255, 255, 0.02) 100%),
-                rgba(255, 255, 255, 0.16);
+            border-color: rgba(255, 59, 96, 0.18);
+            background: rgba(255, 59, 96, 0.1);
         }
         .pp-delete-btn,
         .announcement-delete-btn,
@@ -15296,14 +15318,17 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-/* 帖子卡片玻璃化（保留原有阴影，但圆角统一 + 背景统一） */
-.post {
-  background: var(--xtj-bg-card);
-  border: 1px solid var(--xtj-border-soft);
-  border-radius: var(--xtj-radius-md);
-  box-shadow: var(--xtj-shadow-soft-2);
-  backdrop-filter: blur(16px) saturate(142%);
-  -webkit-backdrop-filter: blur(16px) saturate(142%);
+/* 帖子：默认无独立卡片黑框；桌面一体表面由 ui-shell 接管 */
+#panelPosts .post,
+#panelPosts .post.glass {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* 发布按钮：浅蓝薄荷体系（替代突兀紫） */
@@ -15488,22 +15513,25 @@ button.post-publish:hover {
     background: linear-gradient(180deg, rgba(252, 255, 254, 0.90), rgba(245, 251, 248, 0.86)) !important;
   }
 
-  /* 发帖：唯一稍抬高的主输入面 */
-  #panelPosts .publish-box {
-    border: 1px solid rgba(127, 191, 168, 0.18) !important;
-    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 252, 250, 0.86)) !important;
-    padding: 18px 18px 14px !important;
-    border-radius: 16px !important;
-  }
-
-  /* 筛选：默认非卡片工具行 */
-  #panelPosts .post-filter-bar {
+  /* 一体表面：发帖/筛选/列表同一白底，帖子无独立黑框 */
+  #panelPosts .publish-box,
+  #panelPosts .publish-box.glass {
     border: 0 !important;
     box-shadow: none !important;
-    background: transparent !important;
-    padding: 6px 2px !important;
-    margin-bottom: 4px !important;
+    background: rgba(255, 255, 255, 0.94) !important;
+    padding: 18px 20px 14px !important;
+    border-radius: 20px 20px 0 0 !important;
+  }
+
+  #panelPosts .post-filter-bar,
+  #panelPosts .post-filter-bar.glass {
+    border: 0 !important;
+    border-top: 1px solid rgba(60, 90, 80, 0.08) !important;
+    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
+    box-shadow: none !important;
+    background: rgba(255, 255, 255, 0.94) !important;
+    padding: 8px 16px !important;
+    margin: 0 !important;
     border-radius: 0 !important;
   }
 
@@ -15512,31 +15540,55 @@ button.post-publish:hover {
   #panelProfile .profile-activity-card,
   #panelProfile .profile-settings,
   #panelProfile .profile-totals-bar {
-    border: 1px solid rgba(127, 191, 168, 0.16) !important;
-    box-shadow: 0 6px 16px rgba(79, 130, 118, 0.05) !important;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 251, 249, 0.8)) !important;
+    border: 1px solid rgba(127, 191, 168, 0.12) !important;
+    box-shadow: 0 4px 14px rgba(79, 130, 118, 0.04) !important;
+    background: rgba(255, 255, 255, 0.9) !important;
   }
 
-  /* 帖子：轻边框、无重阴影 */
-  #panelPosts .post {
-    border: 1px solid rgba(127, 191, 168, 0.14) !important;
+  #panelPosts #feed {
+    background: rgba(255, 255, 255, 0.94) !important;
+    border-radius: 0 0 20px 20px !important;
+    box-shadow: 0 10px 40px rgba(20, 50, 40, 0.06) !important;
+    gap: 0 !important;
+    overflow: hidden !important;
+  }
+
+  #panelPosts .post,
+  #panelPosts .post.glass {
+    border: 0 !important;
+    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
     box-shadow: none !important;
-    background: rgba(255, 255, 255, 0.82) !important;
-    padding: 18px 18px 14px !important;
-    border-radius: 14px !important;
+    background: transparent !important;
+    padding: 18px 20px !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    outline: none !important;
+  }
+
+  #panelPosts .post:last-child {
+    border-bottom: 0 !important;
+  }
+
+  #panelPosts .action-btn {
+    background: rgba(246, 249, 247, 0.98) !important;
+    border: 1px solid rgba(60, 90, 80, 0.08) !important;
+    color: #4a5d56 !important;
+    box-shadow: none !important;
+    border-radius: 12px !important;
+  }
+
+  #panelPosts .action-btn.liked {
+    background: rgba(255, 59, 96, 0.1) !important;
+    border-color: rgba(255, 59, 96, 0.18) !important;
+    color: #ff3b60 !important;
   }
 
   #panelPosts .publish-box,
-  #panelPosts .post,
   #panelProfile .profile-user-card,
   #panelProfile .profile-activity-card,
   #panelProfile .profile-settings {
     overflow: clip;
-  }
-
-  #panelPosts .post {
-    max-width: none;
-    margin-bottom: 18px;
   }
 
   #panelPosts .post-header,

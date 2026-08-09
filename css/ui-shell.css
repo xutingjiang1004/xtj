@@ -317,19 +317,11 @@
     grid-column: 1;
   }
 
-  #panelPosts.active .post-filter-bar {
-    border: 0 !important;
+  /* 一体表面细节由下方 workbench 区块接管；此处只清黑框/脏阴影 */
+  #panelPosts.active .post,
+  #panelPosts.active .post.glass {
     box-shadow: none !important;
-    background: transparent !important;
-    padding: 4px 2px !important;
-  }
-
-  #panelPosts.active .publish-box {
-    box-shadow: 0 8px 22px rgba(79, 130, 118, 0.06) !important;
-  }
-
-  #panelPosts.active .post {
-    box-shadow: none !important;
+    outline: none !important;
   }
 
   #panelPosts.active .stats {
@@ -771,11 +763,18 @@
   #panelPosts.active .ai-tools-menu { inset-inline-start: -44px; }
 }
 
-#panelPosts.active .posts-nav-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
+#panelPosts.active .posts-nav-tools,
+#panelPosts .posts-nav-tools {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin-left: auto !important;
+  flex: 0 0 auto !important;
+  max-height: 48px !important;
+}
+#panelPosts .posts-nav-tools > * {
+  flex: 0 0 auto !important;
+  max-height: 44px !important;
 }
 
 #panelPosts.active .posts-nav .posts-nav-icon-btn {
@@ -1797,27 +1796,43 @@ html.xtj-ios-viewport .dock-panel {
   #panelPosts.active #postFilterBar { grid-row: 2; }
   #panelPosts.active #feed { grid-row: 3; }
 
-  /* 视觉统一：同一平面分区，避免发帖/筛选/帖子三层同权「千层蛋糕」 */
+  /*
+   * Apple 一体主栏：发帖 + 筛选 + 列表 = 同一白底圆角表面
+   * 帖子用细分隔线，不要每个帖子再套黑框/独立卡片
+   */
   #panelPosts.active .wrap {
-    gap: 10px 24px !important;
-    padding-top: 18px !important;
+    gap: 0 24px !important;
+    padding-top: 20px !important;
+    padding-bottom: 120px !important;
   }
 
-  #panelPosts.active .publish-box {
-    border: 1px solid var(--wb-border) !important;
-    border-radius: 16px !important;
-    background: var(--wb-pane-raised) !important;
-    box-shadow: 0 8px 24px rgba(14, 55, 43, 0.04) !important;
-    padding: 18px 18px 14px !important;
-  }
-
-  /* 筛选：降级为工具条，不再占一整张重卡片 */
-  #panelPosts.active .post-filter-bar {
+  #panelPosts.active #publishBox,
+  #panelPosts.active #postFilterBar,
+  #panelPosts.active #feed {
     border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
     box-shadow: none !important;
-    padding: 4px 2px 2px !important;
+    outline: none !important;
+  }
+
+  #panelPosts.active .publish-box,
+  #panelPosts.active .publish-box.glass {
+    border: 0 !important;
+    border-radius: 20px 20px 0 0 !important;
+    background: rgba(255, 255, 255, 0.94) !important;
+    box-shadow: none !important;
+    padding: 18px 20px 14px !important;
+    margin: 0 !important;
+  }
+
+  #panelPosts.active .post-filter-bar,
+  #panelPosts.active .post-filter-bar.glass {
+    border: 0 !important;
+    border-top: 1px solid rgba(60, 90, 80, 0.08) !important;
+    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
+    border-radius: 0 !important;
+    background: rgba(255, 255, 255, 0.94) !important;
+    box-shadow: none !important;
+    padding: 8px 16px !important;
     margin: 0 !important;
   }
 
@@ -1826,32 +1841,110 @@ html.xtj-ios-viewport .dock-panel {
     align-items: center;
     gap: 10px;
     min-height: 36px;
-    padding: 0 2px;
+    padding: 0;
   }
 
   #panelPosts.active .post-filter-bar .filter-toggle-btn,
   #panelPosts.active .post-filter-bar .post-filter-clear {
     border-radius: 999px !important;
     box-shadow: none !important;
-  }
-
-  /* 帖子列表：轻边框、几乎无阴影，用间距分区 */
-  #panelPosts.active .post {
-    border: 1px solid color-mix(in srgb, var(--wb-border) 70%, transparent) !important;
-    border-radius: 14px !important;
-    background: color-mix(in srgb, var(--wb-pane-raised) 88%, transparent) !important;
-    box-shadow: none !important;
-    margin-bottom: 10px !important;
+    border: 1px solid rgba(60, 90, 80, 0.08) !important;
+    background: rgba(246, 249, 247, 0.96) !important;
   }
 
   #panelPosts.active #feed {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 0 20px 20px !important;
+    background: rgba(255, 255, 255, 0.94) !important;
+    box-shadow: 0 10px 40px rgba(20, 50, 40, 0.06) !important;
+    overflow: hidden !important;
   }
 
-  #panelPosts.active #feed > .post {
-    margin-bottom: 0 !important;
+  /* 帖子：无描边卡片，仅底部分隔线 */
+  #panelPosts.active #feed > .post,
+  #panelPosts.active #feed > .post.glass {
+    border: 0 !important;
+    border-bottom: 1px solid rgba(60, 90, 80, 0.08) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    margin: 0 !important;
+    padding: 18px 20px !important;
+  }
+
+  #panelPosts.active #feed > .post:last-child {
+    border-bottom: 0 !important;
+  }
+
+  /* 操作按钮：全部统一浅底，不再灰白混搭 */
+  #panelPosts.active .post > .actions {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 8px !important;
+    margin-top: 12px !important;
+  }
+
+  #panelPosts.active .post > .actions .action-btn {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    min-height: 36px !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(60, 90, 80, 0.08) !important;
+    background: rgba(246, 249, 247, 0.98) !important;
+    color: #4a5d56 !important;
+    box-shadow: none !important;
+    font-weight: 600 !important;
+  }
+
+  #panelPosts.active .post > .actions .action-btn:hover {
+    background: rgba(236, 242, 239, 1) !important;
+    color: #2f403a !important;
+    box-shadow: none !important;
+  }
+
+  #panelPosts.active .post > .actions .action-btn:active,
+  #panelPosts.active .post > .actions .action-btn.xtj-pressing {
+    background: rgba(228, 236, 232, 1) !important;
+    box-shadow: none !important;
+    transform: scale(0.98);
+  }
+
+  #panelPosts.active .post > .actions .action-btn.liked {
+    background: rgba(255, 59, 96, 0.1) !important;
+    border-color: rgba(255, 59, 96, 0.18) !important;
+    color: #ff3b60 !important;
+  }
+
+  #panelPosts.active .post > .actions .action-btn.del {
+    background: rgba(246, 249, 247, 0.98) !important;
+    color: #e11d48 !important;
+  }
+
+  #panelPosts.active .post > .actions .action-btn.pin,
+  #panelPosts.active .post > .actions .action-btn.edit {
+    background: rgba(246, 249, 247, 0.98) !important;
+  }
+
+  /* 顶栏工具组：靠右成组 */
+  #panelPosts.active .posts-nav-tools {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-left: auto !important;
+    margin-right: 10px !important;
+  }
+
+  #panelPosts.active .posts-nav > .nav-auth {
+    margin-inline-start: 0 !important;
+  }
+
+  #panelPosts.active .posts-nav-brand {
+    flex: 0 0 auto !important;
   }
 
   .desktop-right-rail {
