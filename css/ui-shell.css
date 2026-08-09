@@ -263,22 +263,23 @@
     position: sticky;
     top: 0;
     z-index: 8;
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: center;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
     justify-content: space-between;
     gap: 12px;
-    min-height: 64px;
-    max-height: 72px;
-    height: auto;
-    padding: 12px 20px;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    height: 56px !important;
+    padding: 0 20px !important;
     margin: -26px -28px 16px;
     border-bottom: 1px solid var(--xtj-line-soft);
-    background: rgba(250, 253, 252, 0.84);
+    border-radius: 0 !important;
+    background: rgba(250, 253, 252, 0.92);
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
-    box-shadow: none;
+    box-shadow: none !important;
     overflow: visible;
   }
 
@@ -611,14 +612,15 @@
 
 /* Posts navigation and profile layout: final component-level rules. */
 #panelPosts.active .posts-nav {
-  display: flex;
-  flex-direction: row;
+  display: flex !important;
+  flex-direction: row !important;
   flex-wrap: nowrap !important;
-  align-items: center;
+  align-items: center !important;
   justify-content: flex-start;
   gap: 10px;
-  min-height: 56px;
-  max-height: 80px;
+  min-height: 56px !important;
+  max-height: 56px !important;
+  height: 56px !important;
   box-sizing: border-box;
   overflow: visible;
 }
@@ -782,10 +784,19 @@
   block-size: 44px;
   min-inline-size: 44px;
   min-block-size: 44px;
+  max-inline-size: 44px;
+  max-block-size: 44px;
   padding: 0 !important;
   flex: 0 0 44px;
   border-radius: 14px;
-  overflow: visible;
+  overflow: hidden;
+  font-size: 0;
+  line-height: 0;
+}
+#panelPosts.active .posts-nav .ai-tools-trigger.posts-nav-icon-btn {
+  overflow: hidden !important;
+  font-size: 0 !important;
+  color: rgba(50, 120, 95, 0.92);
 }
 
 #panelPosts.active .posts-nav .posts-nav-icon-btn svg {
@@ -1725,18 +1736,18 @@ html.xtj-ios-viewport .dock-panel {
 
   #panelPosts.active {
     display: grid !important;
-    grid-template-rows: 72px minmax(0, 1fr);
+    grid-template-rows: 56px minmax(0, 1fr);
     padding: 0 !important;
     overflow: hidden !important;
   }
 
   #panelPosts.active .posts-nav {
     width: 100% !important;
-    min-height: 72px !important;
-    max-height: 72px !important;
-    height: 72px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    height: 56px !important;
     margin: 0 !important;
-    padding: 0 28px !important;
+    padding: 0 24px !important;
     border: 0 !important;
     border-bottom: 1px solid var(--wb-border) !important;
     border-radius: 0 !important;
