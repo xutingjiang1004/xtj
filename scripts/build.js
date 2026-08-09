@@ -105,6 +105,7 @@ function validateHtmlMinifiedRefs(htmlFile) {
 }
 
 const JS_FILES = [
+  'js/core-utils.js',
   'js/core.js',
   'js/performance.js',
   'js/features.js',
@@ -318,6 +319,16 @@ module.exports = {
 if (require.main === module) {
   console.log('=== xtj Build Script ===\n');
   console.log(`Source: ${ROOT}\n`);
+
+  // Assemble core.js from js/core-parts before minify (source-of-truth split).
+  try {
+    const { assemble } = require('./assemble-core');
+    console.log('--- Assembling core.js ---');
+    assemble();
+  } catch (e) {
+    console.error('[assemble-core] failed:', e && e.message);
+    process.exitCode = 1;
+  }
 
   // Minify JS
   console.log('--- Minifying JS ---');

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "utils": "js/core-utils.js",
+  "parts": [
+    "js/core-parts/01-bootstrap.js",
+    "js/core-parts/02-auth-restrictions.js",
+    "js/core-parts/03-profile-report-ai.js",
+    "js/core-parts/04-posts-interactions.js",
+    "js/core-parts/05-feed-stats.js",
+    "js/core-parts/06-chat-and-nav.js",
+    "js/core-parts/07-final-overrides.js"
+  ],
+  "note": "Assemble with node scripts/assemble-core.js (also run by npm run build)"
+}
