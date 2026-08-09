@@ -361,7 +361,8 @@
     modules: {
       'code-fs':      { status: 'idle', url: '', startTime: 0 },
       'code-workspace': { status: 'idle', url: '', startTime: 0 },
-      'code-css':     { status: 'idle', url: '', startTime: 0 }
+      'code-css':     { status: 'idle', url: '', startTime: 0 },
+      'code-claude-css': { status: 'idle', url: '', startTime: 0 }
     },
     // P0: 当前 active tab 用于可靠的可见性判断
     currentTab: 'posts',
@@ -400,6 +401,7 @@
       if (msg.indexOf('code-fs') !== -1 ||
           msg.indexOf('code-workspace') !== -1 ||
           msg.indexOf('code-css') !== -1 ||
+          msg.indexOf('code-claude') !== -1 ||
           /^Code\b/.test(msg)) {
         console.error('[CODE-LOADER] Unhandled rejection:');
         console.error('  Message: ' + msg);
@@ -524,6 +526,9 @@
       }),
       loadModuleWithTimeout('code-css', 'xtj-module-code-style', function () {
         return loadModuleStyle('code-css', 'xtj-module-code-style');
+      }),
+      loadModuleWithTimeout('code-claude-css', 'xtj-module-code-claude-style', function () {
+        return loadModuleStyle('code-claude-css', 'xtj-module-code-claude-style');
       })
     ]);
 
@@ -671,6 +676,7 @@
     if (!verifyModule('code-fs')) failedModules.push('code-fs');
     if (!verifyModule('code-workspace')) failedModules.push('code-workspace');
     if (!verifyModule('code-css')) failedModules.push('code-css');
+    if (!verifyModule('code-claude-css')) failedModules.push('code-claude-css');
 
     // 如果所有模块都成功了，只需要恢复 init 别名并调用 init
     if (failedModules.length === 0) {
@@ -858,10 +864,10 @@
     if (id === 'code-workspace') {
       return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
     }
-    if (id === 'code-css') {
+    if (id === 'code-css' || id === 'code-claude-css') {
       // P0: 多维度验证 CSS 加载
       // 1. 检查 link 元素
-      var links = document.querySelectorAll('link[data-xtj-code-module="code-css"]');
+      var links = document.querySelectorAll('link[data-xtj-code-module="' + id + '"]');
       for (var i = 0; i < links.length; i++) {
         if (links[i].sheet) return true;
         if (links[i].getAttribute('data-xtj-loaded') === 'true') return true;
@@ -869,19 +875,22 @@
       // 2. 检查 document.styleSheets 中的 Code 样式 (跨浏览器兼容)
       try {
         var sheets = document.styleSheets;
+        var needle = id === 'code-claude-css' ? 'code-claude-style' : 'code-workspace';
         for (var j = 0; j < sheets.length; j++) {
           var href = sheets[j].href || '';
-          if (href.indexOf('code-workspace') !== -1) return true;
+          if (href.indexOf(needle) !== -1) return true;
         }
       } catch (e) {}
-      // 3. 检查 CSS 探针 — 特定 Code 样式是否生效
-      try {
-        var probe = document.querySelector('.code-welcome');
-        if (probe) {
-          var style = window.getComputedStyle(probe);
-          if (style && style.display !== 'none') return true;
-        }
-      } catch (e) {}
+      // 3. 检查 CSS 探针 — 特定 Code 样式是否生效（主 workspace CSS）
+      if (id === 'code-css') {
+        try {
+          var probe = document.querySelector('.code-welcome');
+          if (probe) {
+            var style = window.getComputedStyle(probe);
+            if (style && style.display !== 'none') return true;
+          }
+        } catch (e) {}
+      }
       return _loadedModules[id] === true;
     }
     return !!_loadedModules[id];

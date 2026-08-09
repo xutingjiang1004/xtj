@@ -15,6 +15,33 @@ const { applySecurityHeaders } = require('./security-headers');
 const registerCodeAgentRoutes = require('./code-agent');
 const registerCodeGitHubRoutes = require('./code-github');
 const registerProviderRegistryRoutes = require('./provider-registry');
+const {
+  REPORT_MARKER,
+  DM_MARKER,
+  AUTH_MARKER,
+  VISIT_MARKER,
+  ATTACK_MARKER,
+  ADMIN_AUTH_MARKER,
+  ADMIN_META_MARKER,
+  USER_INFO_MARKER,
+  USER_VISIT_MARKER,
+  POST_VIEW_MARKER,
+  LOGIN_EVENT_MARKER,
+  USER_BEHAVIOR_MARKER,
+  SECURITY_ALERT_MARKER,
+  AUDIT_LOG_MARKER,
+  CLIENT_ERROR_MARKER,
+  ANN_READ_MARKER,
+  EMAIL_SENT_MARKER,
+  EMAIL_RECIPIENT_MARKER,
+  AI_AGENT_PROFILE_MARKER,
+  AI_AGENT_MESSAGE_MARKER,
+  AI_AGENT_CONFIG_MARKER,
+  AI_AGENT_CONV_SUMMARY_MARKER,
+  AI_ENGLISH_LEARNING_MARKER,
+  REVOKED_TOKEN_MARKER
+} = require('./post-markers');
+const { sanitizeAssistantVisibleText } = require('./ai-sanitize');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -1471,68 +1498,7 @@ async function searchWeb(query, maxResults) {
   return finalResult;
 }
 
-// 清洗 AI 最终回复正文，删除括号舞台动作/心理动作/环境描写
-// 策略：
-//   1. 删除所有独立成行的括号内容（（...）、(...)、【...】）
-//   2. 删除以明显动作描述词开头的行
-// sanitizeAssistantVisibleText — 过滤 AI 回复中的舞台动作描述，保留合法括号内容。
-// 注意：此函数约 50 行，包含大量中文动作正则。修改时注意正则性能（ReDoS），
-// 新增动作描述请在 actionSets 数组中追加，避免增加正则复杂度。
-//   3. 删除正文中内联的括号舞台动作
-//   保留合法的括号内容：API 说明、价格、编号、技术术语、英文缩写
-function sanitizeAssistantVisibleText(text, options) {
-  var s = String(text || '');
-  if (!s) return s;
-  // ★ 修复：角色扮演开启时跳过"括号动作描写"清洗（用户诉求：后端不干预扮演）。
-  // 仅当 roleplay 关闭/未配置时才执行动作行清洗。
-  options = options || {};
-  if (options.skipActionCleanup) return s;
-
-  // 1. 删除所有独立成行的括号内容（允许全角/半角/方括号，至少 3 个字符）
-  //    G12 修复：加白名单豁免——含 API/价格/版本号/术语/链接等合法信息的括号行保留，
-  //    避免误删"（注：API 文档）"这类内容。
-  s = s.split(/\r?\n/).map(function(line) {
-    var m = line.match(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/);
-    if (!m) return line;
-    var inner = m[0].replace(/[（(【）)】\s]/g, '');
-    if (/^(?:api|v\d|http|https|www|价格|元|美元|欧元|港元|台币|万|亿|GB|MB|KB|版|号|年|月|日|周)/i.test(inner) || /[0-9]/.test(inner)) return line;
-    return '';
-  }).join('\n');
-
-  // 2-3. 拆分清洗正则避免单次超长表达式导致的 ReDoS
-  var actionSets = [
-    '屏幕[上中前里]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]',
-    '低声[说笑]|笑了笑|轻轻一笑|轻笑[着]?[道说]?|苦笑[着]?[道说]?|沉默[了半片]|叹了[口]?气|叹道|叹了口气',
-    '抬起头|低下头|偏了偏头|歪了歪头|侧了侧头|扭了扭头|转过头|转过身|伸出手|伸出爪|缩回[了手成]|抖了抖|晃了晃',
-    '点了点头|摇了摇头|摆了摆手|挥了挥手|站起[身来]?|坐[了下]?下|趴[了下]?下|蹲[了下]?下',
-    '走[向到进过]|退了[几步回]|眯起眼|瞪[大了]|睁[大了]|眨了眨眼|抿了抿嘴|舔了舔|吞了吞|咽了咽',
-    '摇了摇[头尾]|甩了甩[头尾]|敲了敲|靠在[了]?[床头墙椅]?|抱着[了]?[手臂胸]?|搂着[了]?',
-    '发出[一]?[阵阵声]|传来[一]?[阵阵声]|响起[一]?[阵阵声]|回荡[着在]|充满[了]?|浮现[出在]',
-    '感到[一]?[阵阵]?|仿佛[一]?[股阵道]|猛[地然]|瞬间[间]?|顿[了]?[顿]?|愣[了]?[愣]?|怔[了]?[怔]?|呆[了]?[呆]?',
-    '张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|按下[了]?|周[围的环境]|四[周环]|窗[外口]|门[外口]',
-    '不再[说言语]|再也[不没]|终于[还]|仍然[还]|依然[还]|瞥[了]?[一]?眼|盯[着]?[了]?',
-    '扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?',
-    '呼出[一]?[口气]?|深吸[一]?[口气]?|爪子[轻挠挠]|猫耳[竖抖]|毛茸茸[的尾巴脑袋]?|尾巴[轻晃摇]'
-  ];
-
-  for (var ai = 0; ai < actionSets.length; ai++) {
-    var pattern = '^\\s*(' + actionSets[ai] + ')[^。！？\\n]{0,100}[。！？]?\\s*$';
-    s = s.replace(new RegExp(pattern, 'gmi'), '');
-  }
-
-  for (var ai2 = 0; ai2 < actionSets.length; ai2++) {
-    var pattern2 = '[（(【][^）)】]{0,60}(' + actionSets[ai2] + ')[^）)】]{0,80}[）)】]';
-    s = s.replace(new RegExp(pattern2, 'gmi'), '');
-  }
-
-  // 4. 清理多余空行
-  s = s.replace(/\n{3,}/g, '\n\n').trim();
-
-  // 5. 如果清洗后为空，返回标记字符串
-  if (!s) return '我刚刚生成了不合规的动作描写，已自动删除。请重新问一次。';
-
-  return s;
-}
+// AI visible-text sanitizer: see ./ai-sanitize.js (imported above as sanitizeAssistantVisibleText)
 
 // Open-Meteo 免费天气查询（无需 API Key）
 // 城市坐标映射 — 用于天气查询。如需扩展，可考虑迁移到外部配置文件或数据库。
@@ -1883,38 +1849,7 @@ const MAX_REASON_LEN = 500;
 const MAX_TITLE_LEN = 200;
 const MAX_CONTENT_LEN = 5000;
 
-// ===================== 系统 marker 常量（集中定义，避免 TDZ 问题） =====================
-// 所有 media_type 字符串集中在文件前面定义，下方 helper / 路由可直接引用
-const REPORT_MARKER = '__report__';
-const DM_MARKER = '__dm__';
-const AUTH_MARKER = '__auth__';
-const VISIT_MARKER = '__visit__';
-const ATTACK_MARKER = '__attack__';
-const ADMIN_AUTH_MARKER = '__admin_auth__';
-const ADMIN_META_MARKER = '__admin_meta__';
-const USER_INFO_MARKER = '__user_info__';
-const USER_VISIT_MARKER = '__user_visit__';
-const POST_VIEW_MARKER = '__post_view__';
-const LOGIN_EVENT_MARKER = '__login_event__';
-const USER_BEHAVIOR_MARKER = '__user_behavior__';
-const SECURITY_ALERT_MARKER = '__security_alert__';
-const AUDIT_LOG_MARKER = '__admin_audit__';
-const CLIENT_ERROR_MARKER = '__client_error__';
-// 公告已读（跨设备同步用户已读公告）
-const ANN_READ_MARKER = '__ann_read__';
-// 邮件 / 历史邮箱
-const EMAIL_SENT_MARKER = '__email_sent__';
-const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
-
-// ===================== AI 智能体 marker =====================
-// 所有 AI 相关数据使用 posts 表 + marker 集中存储（与现有 Pro Gift / VIP / 公告同模式）
-// ★ 必须加入 applyPublicPostExclusions() 避免出现在普通帖子 feed、统计、后台列表
-const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
-const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
-const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
-const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
-const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';  // 退役模块，保留过滤防止旧数据泄漏
-const REVOKED_TOKEN_MARKER = '__revoked_token__';
+// System media_type markers: see ./post-markers.js (imported above)
 
 // Merge private per-user metadata atomically when migration 014 is deployed.
 // The checked fallback keeps older deployments functional until the migration is applied.
