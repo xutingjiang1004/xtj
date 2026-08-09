@@ -481,7 +481,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   transform: scale(0.98) !important;
   box-shadow: none !important;
   filter: none !important;
+  /* 禁止额外 inset/中心阴影类反馈 */
+  background-image: none !important;
   transition: transform .12s ease, background .12s ease !important;
+}
+.action-btn.xtj-pressing {
+  background: rgba(140, 196, 158, 0.12) !important;
 }
 
 .xtj-img-soft { transition: opacity .28s ease; }
